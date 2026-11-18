@@ -1,0 +1,24 @@
+apps/bcsfuse/requirements-unified.txt
+  s_9e428ec8192673::t_3c4057312dcb93 3-5
+apps/bcsfuse/tests/alipay/test_catalog_retrieval.py
+  s_9e428ec8192673::t_1f69aad566dd6c 222,227-228
+  s_9e428ec8192673::t_cbe2021819fb9b 223-225
+  s_9e428ec8192673::t_3c4057312dcb93 220-221,229,233-234
+  s_9e428ec8192673::t_00d92e5b0cd3b8 226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "097941e1f0077c788307e367e495359a36bebd06",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

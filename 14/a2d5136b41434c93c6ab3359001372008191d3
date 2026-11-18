@@ -1,0 +1,43 @@
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/identity.rs
+  s_d2bf2069ff97fe::t_da328635bed426 3-7,17-32
+  s_83a624b3301ddd::t_cf95268aec1d1d 33-34
+apps/bcs-internal/docs/channels/dingtalk-caller.md
+  s_d2bf2069ff97fe::t_4b52df4b1dacc0 3-12,58-59
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/lib.rs
+  s_d2bf2069ff97fe::t_da328635bed426 68,74,146,173,232-235
+  s_d2bf2069ff97fe::t_4b52df4b1dacc0 1363,1534
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/tests/caller_tests.rs
+  s_d2bf2069ff97fe::t_4b52df4b1dacc0 32,46-52
+apps/bcs-internal/docs/channels/dingtalk-identity.md
+  s_d2bf2069ff97fe::t_4b52df4b1dacc0 11-14
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/inbound.rs
+  s_d2bf2069ff97fe::t_da328635bed426 141
+apps/bcs-internal/Cargo.lock
+  s_d2bf2069ff97fe::t_87cc25ba8aaecb 531,682,856-866
+submodules/avernet
+  s_d2bf2069ff97fe::t_d74e540b37b51b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "14a2d5136b41434c93c6ab3359001372008191d3",
+  "prompts": {},
+  "sessions": {
+    "s_83a624b3301ddd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e45d-5111-7891-a6fd-1154755a372f",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    },
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

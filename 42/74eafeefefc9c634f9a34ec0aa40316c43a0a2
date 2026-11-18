@@ -1,0 +1,372 @@
+apps/baas/docs/deployment-image-overrides.md
+  h_059e888e5e4e82 1-43
+apps/baas/src/secbaas/community/api/device_manage/_deploy_config.py
+  h_059e888e5e4e82 417
+apps/baas/src/secbaas/community/core/service/bot_manage/_bot_management_service.py
+  h_059e888e5e4e82 110-111,114-116,118-119,124,126-128,1027-1031,1299-1303,1345-1347
+apps/baas/src/secbaas/community/core/service/publish_manage/_publish_service.py
+  h_059e888e5e4e82 746-760,813-822,828,2883-2894,2927,2946,2953-2964,3010-3012
+apps/baas/tests/e2e/asgi/baseline/test_request_image_override.py
+  h_059e888e5e4e82 1-431
+apps/baas/tests/unit/core/service/publish_manage/test_publish_service.py
+  h_059e888e5e4e82 11-12,176-181,248-252
+apps/baas/tests/unit/core/service/publish_manage/test_request_image_execution.py
+  h_059e888e5e4e82 1-167
+apps/baas/tests/unit/core/service/test_request_image_override.py
+  h_059e888e5e4e82 1-378
+apps/backend/docs/openapi-v1/bbs-api-reference.zh-CN.md
+  h_059e888e5e4e82 1,53-54,316-317,494-505,521-527,612-672
+apps/backend/docs/openapi-v1/bbs-feedback-openapi-spec.zh-CN.md
+  h_059e888e5e4e82 3,204-205,214,318,350-401,648,652,666,686-687,693-694
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_task_routes.py
+  h_059e888e5e4e82 31-35
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py
+  h_059e888e5e4e82 51-56
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/router.py
+  h_059e888e5e4e82 69-70,82,285-331
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/schemas.py
+  h_059e888e5e4e82 158-160,283-285,317-345,370-376
+apps/backend/src/agentclaw/community/adapters/http/task/bbs/router.py
+  h_059e888e5e4e82 19-20,33,280-322
+apps/backend/src/agentclaw/community/core/cron/README.md
+  h_059e888e5e4e82 59-76
+apps/backend/src/agentclaw/community/core/cron/cron_relay_service_protocol.py
+  h_059e888e5e4e82 11-17
+apps/backend/src/agentclaw/community/core/cron/services/cron_relay.py
+  h_059e888e5e4e82 25,123-124,161-199,217-227
+apps/backend/src/agentclaw/community/core/cron/services/cron_targeted_operations.py
+  h_059e888e5e4e82 198,221-234
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_service.py
+  h_059e888e5e4e82 741,743-744,754
+apps/backend/src/agentclaw/community/core/devices/services/device_service.py
+  h_059e888e5e4e82 849-854,858
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/forum_repository.py
+  h_059e888e5e4e82 15,816-888
+apps/backend/src/agentclaw/community/core/repository/protocols/task/forum.py
+  h_059e888e5e4e82 132-134,185-208
+apps/backend/src/agentclaw/community/core/session_resources/service.py
+  h_059e888e5e4e82 14,22,83-92
+apps/backend/src/agentclaw/community/core/task/forum/service_protocol.py
+  h_059e888e5e4e82 128-160
+apps/backend/src/agentclaw/community/core/task/forum/services/forum_service.py
+  h_059e888e5e4e82 40-41,290,294-295,331-416
+apps/backend/tests/community/adapters/http/openapi_v1/task/bbs/test_bbs_unified_write_endpoints.py
+  h_059e888e5e4e82 4,13,15,20,28,549-621
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  h_059e888e5e4e82 372-373,616-618
+apps/backend/tests/community/adapters/http/task/bbs/test_bbs_internal_endpoints.py
+  h_059e888e5e4e82 13,20,25,31,99-100,527-599
+apps/backend/tests/community/core/cron/services/test_cron_targeted_operations.py
+  h_059e888e5e4e82 492-665
+apps/backend/tests/community/core/devices/services/test_baas_device_service.py
+  h_059e888e5e4e82 1278-1350
+apps/backend/tests/community/core/devices/services/test_device_service.py
+  h_059e888e5e4e82 421-431
+apps/backend/tests/community/core/session_resources/test_service.py
+  h_059e888e5e4e82 10,23-26,264-284
+apps/backend/tests/community/core/task/forum/test_forum_reply_service.py
+  h_059e888e5e4e82 1-280
+apps/backend/tests/community/core/task/forum/test_forum_topic_content_service.py
+  h_059e888e5e4e82 1-193
+apps/backend/tests/community/endpoints/test_bbs_helpful_endpoints.py
+  h_059e888e5e4e82 1-183
+apps/backend/tests/community/endpoints/test_bbs_topic_content_endpoints.py
+  h_059e888e5e4e82 1-235
+apps/backend/tests/community/repository/task/forum/test_forum_write_repository.py
+  h_059e888e5e4e82 15,22,572-670
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  h_059e888e5e4e82 20-23,104-106
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  h_059e888e5e4e82 11,188,241
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/agent-service.test.ts
+  h_059e888e5e4e82 40-59
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/notification.test.ts
+  h_059e888e5e4e82 29,207-291
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/session-pagination.test.ts
+  h_059e888e5e4e82 1-31
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/session-read-coverage.test.ts
+  h_059e888e5e4e82 1-33
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  h_059e888e5e4e82 205-208
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  h_059e888e5e4e82 22,253,257,285-286
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/notification.ts
+  h_059e888e5e4e82 132-133,144-151
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/session-read-coverage.ts
+  h_059e888e5e4e82 1-45
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/session-reader.ts
+  h_059e888e5e4e82 49,51,54,57,78,80,93,101
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  h_059e888e5e4e82 98-99
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  h_059e888e5e4e82 458-460
+apps/frontend-nextgen/config/a2aBuildDefault.ts
+  h_059e888e5e4e82 15
+apps/frontend-nextgen/docs/architecture/platform-ui-extensions.md
+  h_059e888e5e4e82 1-40
+apps/frontend-nextgen/src/capabilities/conversationComposer.ts
+  h_059e888e5e4e82 1-5,7-8,10-11,13-20
+apps/frontend-nextgen/src/capabilities/defaultCapabilities.ts
+  h_059e888e5e4e82 17,253-254,350-354
+apps/frontend-nextgen/src/capabilities/index.ts
+  h_059e888e5e4e82 6-7,13-19,71-72,78-84
+apps/frontend-nextgen/src/capabilities/types.ts
+  h_059e888e5e4e82 7-18,359-443,589-592,701-705
+apps/frontend-nextgen/src/components/CollaborationSquare/BotCard/index.tsx
+  h_059e888e5e4e82 32-33,38,66-72
+apps/frontend-nextgen/src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx
+  h_059e888e5e4e82 12,48-49,56-63,146,153
+apps/frontend-nextgen/src/components/CollaborationSquare/SquarePageShell/index.tsx
+  h_059e888e5e4e82 53
+apps/frontend-nextgen/src/components/Community/CommunityPage/index.tsx
+  h_059e888e5e4e82 12,16-18,20,30,55,59-60,64-65,74-85,100-102,116-121,123,126-127,129-133,135-136,141,146,148,150,154,157-158,162-164,168-169,176
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/EditTopicModal.tsx
+  h_059e888e5e4e82 1-101
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/Floor.tsx
+  h_059e888e5e4e82 3-5,8,12,34-36,41,63-65,67,71-76,113-124,154-155,172-183
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/ReplyComposer.tsx
+  h_059e888e5e4e82 1-122
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/ThreadReply.tsx
+  h_059e888e5e4e82 5,18-19,33-34,65-78
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/TopicDetailHeader.tsx
+  h_059e888e5e4e82 11,17-18,25,31-32,82-107
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/index.tsx
+  h_059e888e5e4e82 4,40,54-55,60-61,74,88-89,93-94,151,157-158,184,237,258-260,281-288
+apps/frontend-nextgen/src/components/Community/CommunityTopicList/index.tsx
+  h_059e888e5e4e82 5-6,15-22,70,72,83,110-114,119-128
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/chatPanelContracts.ts
+  h_059e888e5e4e82 38
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/index.tsx
+  h_059e888e5e4e82 53,255
+apps/frontend-nextgen/src/components/Workspace/ConversationComposerHost.tsx
+  h_059e888e5e4e82 1-30
+apps/frontend-nextgen/src/domain/chatEngineVersionTarget.ts
+  h_059e888e5e4e82 22-23
+apps/frontend-nextgen/src/domain/collaborationSquare/mapper.ts
+  h_059e888e5e4e82 77-80,168-171,182,354-358
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  h_059e888e5e4e82 135-140,255-256
+apps/frontend-nextgen/src/domain/community/mapper.ts
+  h_059e888e5e4e82 76,282,287-288
+apps/frontend-nextgen/src/domain/community/ownership.ts
+  h_059e888e5e4e82 4,10-12
+apps/frontend-nextgen/src/domain/community/types.ts
+  h_059e888e5e4e82 71,76-77,154-160,165,171-175
+apps/frontend-nextgen/src/hooks/useBotWorkshopNavigation.ts
+  h_059e888e5e4e82 4
+apps/frontend-nextgen/src/hooks/useCollaborationSquare.ts
+  h_059e888e5e4e82 74
+apps/frontend-nextgen/src/hooks/useCollaborationSquareClipboardActions.ts
+  h_059e888e5e4e82 16,18
+apps/frontend-nextgen/src/hooks/useCommunity.ts
+  h_059e888e5e4e82 38,46-47,89-134,166-167,171-172
+apps/frontend-nextgen/src/hooks/useCommunityResolutionActions.ts
+  h_059e888e5e4e82 1-75
+apps/frontend-nextgen/src/hooks/useCommunityTopicActions.ts
+  h_059e888e5e4e82 1-163
+apps/frontend-nextgen/src/hooks/useCommunityTopicDetail.ts
+  h_059e888e5e4e82 3,11,15,20,28,43,140-148,158
+apps/frontend-nextgen/src/hooks/useSquareDeepLink.ts
+  h_059e888e5e4e82 1,3,5-7,16-32,35-37,39,43-45,47-51,54,58-60,65-70,73-117,121-122,125-134,137-139,146-147
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/BotEditorExtensionContent.tsx
+  h_059e888e5e4e82 1-23
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/detailTabs.tsx
+  h_059e888e5e4e82 15
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/index.tsx
+  h_059e888e5e4e82 1-3,35,65,72-73,75,204-207
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/useBotEditorAddress.ts
+  h_059e888e5e4e82 1-16
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/useBotEditorPanels.ts
+  h_059e888e5e4e82 1-27
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/useHostingTabs.ts
+  h_059e888e5e4e82 5,14-15,22,34,37-39
+apps/frontend-nextgen/src/pages/Workspace/Chat/CodingBotStageBoundary.tsx
+  h_059e888e5e4e82 1-62
+apps/frontend-nextgen/src/pages/Workspace/Chat/ConversationInteractiveStage.tsx
+  h_059e888e5e4e82 3,5-7,49-123
+apps/frontend-nextgen/src/pages/Workspace/Chat/ConversationPage.tsx
+  h_059e888e5e4e82 4,8-10,13,18-19,24,28,40,76-77,80-90,92-100,128-129,137-144,177-215
+apps/frontend-nextgen/src/pages/Workspace/Chat/StandardConversationStageContainer.tsx
+  h_059e888e5e4e82 1-162
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotItem.tsx
+  h_059e888e5e4e82 94-95
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationCollapsedRail.tsx
+  h_059e888e5e4e82 7-8,162
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionActions.tsx
+  h_059e888e5e4e82 5,22,25-59,61-101,103-117,157-158,160-164
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionList.tsx
+  h_059e888e5e4e82 58-94,99
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionRow.tsx
+  h_059e888e5e4e82 168-169,177
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSidebar.tsx
+  h_059e888e5e4e82 37
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSidebarItems.tsx
+  h_059e888e5e4e82 1,17-30,34,73,105,115
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/conversationSessionPageRequest.ts
+  h_059e888e5e4e82 59
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationBotExpansion.ts
+  h_059e888e5e4e82 20
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationFavorites.ts
+  h_059e888e5e4e82 5,88-118,120,129,134
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionActions.ts
+  h_059e888e5e4e82 3,7,10,13-14,18,32-39,73-141
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionCreation.ts
+  h_059e888e5e4e82 4,27,36-76,79-80
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionMenu.ts
+  h_059e888e5e4e82 1-4,10
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  h_059e888e5e4e82 46,48-50
+apps/frontend-nextgen/src/services/backendApi/bots/botController.ts
+  h_059e888e5e4e82 215
+apps/frontend-nextgen/src/services/backendApi/collaboration/publicBotController.ts
+  h_059e888e5e4e82 20-23
+apps/frontend-nextgen/src/services/backendApi/community/communityController.ts
+  h_059e888e5e4e82 12,43-47,175,185,217-239
+apps/frontend-nextgen/src/services/backendApi/httpClient.ts
+  h_059e888e5e4e82 1,21-27,160-163,179-212,219,224,230,233,247,257-258,272,278,282
+apps/frontend-nextgen/src/services/backendApi/privateChat/iamTokenController.ts
+  h_059e888e5e4e82 30,39
+apps/frontend-nextgen/src/services/backendApi/readLimitedResponse.ts
+  h_059e888e5e4e82 1-47
+apps/frontend-nextgen/src/services/community/communityApiGateway.ts
+  h_059e888e5e4e82 14,28,33,81-89
+apps/frontend-nextgen/src/services/community/communityGateway.ts
+  h_059e888e5e4e82 9,38-39
+apps/frontend-nextgen/src/services/community/communityService.ts
+  h_059e888e5e4e82 8,64,87-99
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  h_059e888e5e4e82 175-181,219,255,367
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  h_059e888e5e4e82 57,119,124-129,131-132,268,281
+apps/frontend-nextgen/src/services/workspace/conversationSessionActionService.ts
+  h_059e888e5e4e82 8-19,49
+apps/frontend-nextgen/src/services/workspace/managedBotConversationService.ts
+  h_059e888e5e4e82 24,136,183
+apps/frontend-nextgen/src/shell/navigation.tsx
+  h_059e888e5e4e82 22-23,115-118
+apps/frontend-nextgen/src/stores/communityStore.ts
+  h_059e888e5e4e82 34-35,70-81
+apps/frontend-nextgen/src/stores/squareHighlightStore.ts
+  h_059e888e5e4e82 1-12
+apps/frontend-nextgen/src/utils/collaborationSquare.ts
+  h_059e888e5e4e82 41,47-48,59
+apps/frontend-nextgen/test/capabilities/botEditorPanels.test.tsx
+  h_059e888e5e4e82 1-57
+apps/frontend-nextgen/test/capabilities/conversationComposer.test.tsx
+  h_059e888e5e4e82 1-71
+apps/frontend-nextgen/test/capabilities/defaultCapabilities.test.ts
+  h_059e888e5e4e82 59-62
+apps/frontend-nextgen/test/components/Community/CommunityPage.test.tsx
+  h_059e888e5e4e82 17-18,89,95-99
+apps/frontend-nextgen/test/components/Community/CommunityTopicDetail.test.tsx
+  h_059e888e5e4e82 20-21,43,47-48,76-79,81-88,91-152,178-179,185-225,240-241
+apps/frontend-nextgen/test/components/Community/CommunityTopicList.test.tsx
+  h_059e888e5e4e82 16,21-22,54,58-60,70,76,79,99-100,104-105
+apps/frontend-nextgen/test/config/a2aBuildDefault.test.ts
+  h_059e888e5e4e82 22-36
+apps/frontend-nextgen/test/domain/chatEngineVersionTarget.test.ts
+  h_059e888e5e4e82 66
+apps/frontend-nextgen/test/domain/collaborationSquare/publicBotMapper.test.ts
+  h_059e888e5e4e82 1-46
+apps/frontend-nextgen/test/domain/community/mapper.test.ts
+  h_059e888e5e4e82 2,13,28,33-34,39-46,177
+apps/frontend-nextgen/test/hooks/useBotWorkshop.test.tsx
+  h_059e888e5e4e82 316,319-322,336
+apps/frontend-nextgen/test/hooks/useCollaborationSquare.test.tsx
+  h_059e888e5e4e82 14,77,184-206,212-219,231,233-261,263,267,271,279-308,313-332,334-346,348-358,360-389,393-475,487-508,510-533,538-555,567-609,611-708,710-753,1424,1447
+apps/frontend-nextgen/test/hooks/useCommunity.test.tsx
+  h_059e888e5e4e82 19-20,50-51,90-92,267,277-295,299-300,384-385,455-456
+apps/frontend-nextgen/test/pages/Workspace/Chat/CodingBotStageBoundary.test.tsx
+  h_059e888e5e4e82 1-104
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationInteractiveStage.test.tsx
+  h_059e888e5e4e82 261,384-385,387-388
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationPage.test.tsx
+  h_059e888e5e4e82 9,11,121-127,219-222,247,261-263,304-310,317-391,533-534
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationBotItem.test.tsx
+  h_059e888e5e4e82 225,233-272,308,328-331,534
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationCollapsedRail.test.tsx
+  h_059e888e5e4e82 59,68-69
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionList.test.tsx
+  h_059e888e5e4e82 5,66-102
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionRow.test.tsx
+  h_059e888e5e4e82 4,156,268,270,277,285,307
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSidebar.test.tsx
+  h_059e888e5e4e82 479,512-514
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationFavorites.test.tsx
+  h_059e888e5e4e82 3,49-52,69-96
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessionActions.test.tsx
+  h_059e888e5e4e82 3,39-42,60-96
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessions.test.tsx
+  h_059e888e5e4e82 3,124-194
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFilesFeature.test.tsx
+  h_059e888e5e4e82 109-110,112
+apps/frontend-nextgen/test/services/backendApi/bots/botController.test.ts
+  h_059e888e5e4e82 98,104,109,114,116,123,128
+apps/frontend-nextgen/test/services/backendApi/bots/iamTokenController.test.ts
+  h_059e888e5e4e82 32-43
+apps/frontend-nextgen/test/services/backendApi/community/communityController.test.ts
+  h_059e888e5e4e82 5,10,117-136,237-270
+apps/frontend-nextgen/test/services/backendApi/httpClient.boundedText.test.ts
+  h_059e888e5e4e82 1-93
+apps/frontend-nextgen/test/services/backendApi/readLimitedResponse.test.ts
+  h_059e888e5e4e82 1-64
+apps/frontend-nextgen/test/services/community/communityService.test.ts
+  h_059e888e5e4e82 19-20,36-37,40-55,106-107,121-122,169-170,184-185,199-200,230-231,245-246,282-303,317-318,353-354,386-442,479-480
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  h_059e888e5e4e82 61,208,471-488
+apps/frontend-nextgen/test/services/workspace/botChatRuntimeStage.test.ts
+  h_059e888e5e4e82 57,63
+apps/frontend-nextgen/test/services/workspace/botConversationRuntimeStage.test.ts
+  h_059e888e5e4e82 28-29,45-47,69-71,95,97,99-153
+apps/frontend-nextgen/test/services/workspace/botSessionService.test.ts
+  h_059e888e5e4e82 147,183,293,319,427,445,577
+apps/frontend-nextgen/test/services/workspace/managedBotConversationService.test.ts
+  h_059e888e5e4e82 320-344
+apps/frontend-nextgen/test/services/workspace/teamBotSessionRequests.test.ts
+  h_059e888e5e4e82 54
+apps/frontend-nextgen/test/shell/navigationPlacement.test.ts
+  h_059e888e5e4e82 1-24
+apps/frontend-nextgen/test/stores/communityStore.test.ts
+  h_059e888e5e4e82 15-16
+docs/arch/waivers/2026-10-27-baas-update-image-scope.md
+  h_059e888e5e4e82 1-50
+docs/specs/2026-10-27-bbs-v4-topic-types/spec.md
+  h_059e888e5e4e82 21-43
+singlebox/skills/infra/bbs-browse/SKILL.md
+  h_059e888e5e4e82 5,12,14,75,77-78,108,115,119,135,138,161,177,185-190,209
+singlebox/skills/infra/bbs-browse/agents/openai.yaml
+  h_059e888e5e4e82 3-4
+singlebox/skills/infra/bbs-browse/references/bbs-api.md
+  h_059e888e5e4e82 58,70,114-115,118,161,171,177
+singlebox/skills/infra/bbs-browse/references/openclaw-session.md
+  h_059e888e5e4e82 15,20-21,24,39,47,56-57
+singlebox/skills/infra/bbs-browse/references/topic-selection.md
+  h_059e888e5e4e82 7,12,28
+singlebox/skills/infra/bbs-create-topic/SKILL.md
+  h_059e888e5e4e82 3,5,12,14,20-24,37-38,44-47,77-78,82-83,118
+singlebox/skills/infra/bbs-create-topic/agents/openai.yaml
+  h_059e888e5e4e82 4
+singlebox/skills/infra/bbs-create-topic/references/bbs-create-topic-api.md
+  h_059e888e5e4e82 28-29,44-86
+singlebox/skills/infra/bbs-topic-handler/SKILL.md
+  h_059e888e5e4e82 3,5,15-18,20-21,27-29,37,39-41,55,96,101-107,109,115-120,124,201,203,221,225,227-238,242,252,259-268,299-300,306,311,319-320
+singlebox/skills/infra/bbs-topic-handler/agents/openai.yaml
+  h_059e888e5e4e82 3-4
+singlebox/skills/infra/bbs-topic-handler/references/bbs-topic-api.md
+  h_059e888e5e4e82 35-36,45,51-53,56,86-89,115-117,122,143-161,171-190,226-228
+singlebox/skills/infra/bbs-topic-handler/references/reply-decision.md
+  h_059e888e5e4e82 5,7-8,12,14,27,44,47,66
+singlebox/skills/infra/bbs-topic-handler/references/topic-policy.md
+  h_059e888e5e4e82 1-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4274eafeefefc9c634f9a34ec0aa40316c43a0a2",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+submodules/avernet
+  h_5f06d4d8b4bdd5 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52ccef135c6f04e2f6b839ea17dbf7b2458d887c",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

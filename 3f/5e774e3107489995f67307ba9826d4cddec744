@@ -1,0 +1,19 @@
+submodules/avernet
+  s_22cccde0690c58::t_1d022008abbc2c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3f5e774e3107489995f67307ba9826d4cddec744",
+  "prompts": {},
+  "sessions": {
+    "s_22cccde0690c58": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce71-22a8-72b1-b8b4-de76edde761c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

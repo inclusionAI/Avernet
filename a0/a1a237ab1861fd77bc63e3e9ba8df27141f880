@@ -1,0 +1,33 @@
+apps/frontend-nextgen/src/pages/Workspace/GroupWorkspaceArea.tsx
+  s_7d8e6acd12a072::t_e721eb98d0cd61 12,176,289
+apps/frontend-nextgen/src/pages/Workspace/components/GroupWorkspaceConversation.tsx
+  s_7d8e6acd12a072::t_07f9b3615b2447 1-29
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupWorkspace.ts
+  s_7d8e6acd12a072::t_49e4eb32f8df8f 44,55,165,171-172,176,178-179,190,219-221
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupWorkspace.types.ts
+  s_7d8e6acd12a072::t_44ccd5fc89a92c 13-15
+apps/frontend-nextgen/src/pages/Workspace/hooks/useSelectedGroupDetail.ts
+  s_7d8e6acd12a072::t_d7b182399f191b 2,4,6-13,21-29,32-34,37-64
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupWorkspace.test.ts
+  s_7d8e6acd12a072::t_a412721f3cbe5d 27,219,239,277,282-283,286,288-291
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSelectedGroupDetail.test.ts
+  s_7d8e6acd12a072::t_19f84204997aed 4,6-10,13-14,17-22,25-26,30-36,39-42,46-52,54-125,127-138
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSelectedGroupDetail.warmMount.test.ts
+  s_7d8e6acd12a072::t_2932707f9e6eb1 55,59,73,78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a0a1a237ab1861fd77bc63e3e9ba8df27141f880",
+  "prompts": {},
+  "sessions": {
+    "s_7d8e6acd12a072": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c366-c232-7251-9d07-f4d478bdc6f0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  s_fc1557df5d7924::t_5879b1c16ff875 9,193,200
+apps/backend/src/agentclaw/corp/di/token_exchange.py
+  s_fc1557df5d7924::t_a6332235e85ec5 7,9-13,54,60,63-71,85-128,130,132-134,142-147,149-153,155-156,158
+apps/backend/src/agentclaw/corp/plugins/prod/README.md
+  s_fc1557df5d7924::t_fd3c7129f7afbc 146-154
+apps/backend/tests/corp/di/test_jit_runtime_selection.py
+  s_fc1557df5d7924::t_f214bd7145e244 1-146
+apps/backend/tests/corp/di/test_jit_teclaw_eligibility.py
+  s_fc1557df5d7924::t_dab80dc7227186 10,32,49,107,176-177,246,249-250,252-254,266-332
+apps/backend/tests/corp/di/test_jit_token_injection.py
+  s_fc1557df5d7924::t_bdda39eea7d013 16,53-54,175-176
+apps/backend/tests/corp/di/test_token_exchange_adapters.py
+  s_fc1557df5d7924::t_63204baf204515 21,41,174,218,224,228-229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "930530e77db38bd5aa01466e394667d0d134a19c",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

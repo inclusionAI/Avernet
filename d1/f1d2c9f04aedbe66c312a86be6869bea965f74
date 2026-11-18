@@ -1,0 +1,19 @@
+apps/backend/tests/corp/di/test_local_k8s_column.py
+  s_f36fcedc3198c1::t_6e661795c1b058 60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d1f1d2c9f04aedbe66c312a86be6869bea965f74",
+  "prompts": {},
+  "sessions": {
+    "s_f36fcedc3198c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d079-3ec6-7013-84e1-6010bbec8f40",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

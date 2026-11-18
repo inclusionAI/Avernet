@@ -1,0 +1,22 @@
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  h_b601d8706f5d44 264,269
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  h_b601d8706f5d44 240-278,284-285
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  h_b601d8706f5d44 497-499,515-516,519,682-686
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/contracts.ts
+  h_b601d8706f5d44 46
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  h_b601d8706f5d44 318,331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4d33964eac33f20d553266c3231d3b33495e1bda",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

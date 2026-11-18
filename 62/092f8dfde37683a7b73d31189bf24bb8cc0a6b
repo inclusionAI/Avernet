@@ -1,0 +1,25 @@
+apps/bcs/crates/adapters/ws/bcs-ws/src/bot/handler.rs
+  s_ead46742bc768c::t_12d365fa7e0baf 15,228,425,429,452
+apps/bcs/crates/adapters/ws/bcs-ws/src/shared/mod.rs
+  s_ead46742bc768c::t_1feaf051d5af95 6,12
+apps/bcs/crates/adapters/ws/bcs-ws/src/shared/transport_error.rs
+  s_ead46742bc768c::t_e7cdc64a572d2b 1-53
+apps/bcs/crates/adapters/ws/bcs-ws/src/web/handler.rs
+  s_ead46742bc768c::t_e0dd2ec63b96ef 15,238-251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "62092f8dfde37683a7b73d31189bf24bb8cc0a6b",
+  "prompts": {},
+  "sessions": {
+    "s_ead46742bc768c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfdd-290e-7832-a83f-801ba2a0dcf5",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

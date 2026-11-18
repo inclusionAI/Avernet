@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/task/context_collab/test_event_schema.py
+  s_e0cb98366a65ad::t_408c07851cbe42 1-91
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/schema.py
+  s_e0cb98366a65ad::t_caa44e13a468c9 1-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "50d6e795d5153d638948b491dd72fb2bb470c49a",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

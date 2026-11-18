@@ -1,0 +1,31 @@
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/lib.rs
+  s_d2bf2069ff97fe::t_ad044fe6ad601d 19
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/outbound.rs
+  s_d2bf2069ff97fe::t_ed16305f89282d 23-25,3264-3267,3288-3289,3291-3300,3302-3307,3311-3312,3326-3327,3334-3337,3342-3351,3353-3361,3364-3367,3370-3378,3381-3385,3392-3394,3416-3417,3419-3422,3428-3429,3449-3454
+  s_d2bf2069ff97fe::t_e062de1fd47396 3406-3415,3418,3423-3427,3430-3441
+  s_d2bf2069ff97fe::t_ad044fe6ad601d 22,1268,1435,1490,1525,1637-1639,1740-1741,1850-1856,1900,1912,1916
+  s_d2bf2069ff97fe::t_44489551a40ebf 3268-3287,3290,3301,3308-3310,3313-3325,3328-3333,3338-3341,3352,3362-3363,3368-3369,3379-3380,3386-3391,3395-3405,3442-3448,3455-3459
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/caller_notice.rs
+  s_d2bf2069ff97fe::t_ed16305f89282d 38-39,56-60,63-65
+  s_d2bf2069ff97fe::t_f7b5714d8db636 1-37,40-55,61-62,66-77
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/README.md
+  s_d2bf2069ff97fe::t_44489551a40ebf 85-106
+apps/bcs-internal/README.md
+  s_d2bf2069ff97fe::t_b6014fef32195b 104-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "79e4ec628cc468aad6e9d05f725a1c659ce10cc3",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

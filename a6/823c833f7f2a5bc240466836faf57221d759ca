@@ -1,0 +1,19 @@
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/config_fail_closed.rs
+  s_52eb14167a1c75::t_81da469c2f214a 1-4,71-74,90,92,94,208-217,272,280,317
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a6823c833f7f2a5bc240466836faf57221d759ca",
+  "prompts": {},
+  "sessions": {
+    "s_52eb14167a1c75": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c8ad-e328-7763-b29a-c85e4b2a6582",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

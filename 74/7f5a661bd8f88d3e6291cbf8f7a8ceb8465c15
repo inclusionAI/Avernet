@@ -1,0 +1,45 @@
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_filesystem.py
+  s_b0e8371e1adacb::t_c26dddc33eb4fa 214-215
+apps/backend/src/agentclaw/community/core/devices/services/device_filesystem.py
+  s_b0e8371e1adacb::t_5b74b8c3656312 90-91,98-100
+apps/backend/src/agentclaw/community/core/devices/services/local_device_filesystem.py
+  s_b0e8371e1adacb::t_3f71e301ae6930 129-130
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_filesystem.py
+  s_f23ce8f90c044a::t_ed6659e91a9097 179-180,198-210,213-214
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/teclaw_file_promotion.py
+  s_fec70fd8bb5588::t_42e37029958bfc 158-174,223
+apps/backend/tests/community/core/service_bot/services/deploy/test_teclaw_file_promotion.py
+  s_fec70fd8bb5588::t_1ab2f59d513da5 36,279,316-363
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "747f5a661bd8f88d3e6291cbf8f7a8ceb8465c15",
+  "prompts": {},
+  "sessions": {
+    "s_b0e8371e1adacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a21f-5610-7990-9a3d-cb5f73a648fd",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_f23ce8f90c044a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a21f-f566-7b31-b30a-bbf0a90e2e75",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_fec70fd8bb5588": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a21e-bdd5-7eb1-a388-f113be12869f",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

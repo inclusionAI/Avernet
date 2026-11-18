@@ -1,0 +1,37 @@
+apps/frontend-nextgen/config/config.local.ts
+  s_fc1557df5d7924::t_6ad3703ef9713f 251-252
+apps/frontend-nextgen/config/config.ts
+  s_fc1557df5d7924::t_6297487392cb4c 39-42,59-62
+apps/frontend-nextgen/config/internal/mergeRoutes.ts
+  s_fc1557df5d7924::t_5c9be8189aa811 1-50
+apps/frontend-nextgen/docs/local-integration/2026-11-02-teamclaw-aixcoding-local-qiankun.md
+  s_fc1557df5d7924::t_46529af07b8a21 30-31,34-37,49-50,53-55,229-230,239-240,247-249,253
+apps/frontend-nextgen/docs/local-integration/2026-11-12-teamclaw-agentcoding-route-qiankun-shell.md
+  s_fc1557df5d7924::t_beac855fff0533 1-46
+apps/frontend-nextgen/test/routes.test.ts
+  s_fc1557df5d7924::t_e8f4eabd49b961 1,67-95
+simulator/modules/mock-services/README.md
+  s_fc1557df5d7924::t_70d7c047f11e89 114-123
+simulator/modules/mock-services/mock_services/services/skillcenter_publication.py
+  s_fc1557df5d7924::t_0a79bee5d49a83 61,68,86-96,117,177-178
+simulator/modules/mock-services/tests/unit/test_skillcenter_publication.py
+  s_fc1557df5d7924::t_9f2346079a9a54 58,63,113-153
+submodules/avernet
+  s_fc1557df5d7924::t_5ad91e22c27cb4 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f69bfbd409e705712d94ed84e84015687cdc7024",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

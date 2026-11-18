@@ -1,0 +1,28 @@
+apps/evolverun/clawweb/internal/modules/tclog/server/routes/openapi.ts
+  s_c1c3b383e07265::t_ca428b2910b3fb 319
+apps/evolverun/clawweb/internal/modules/tclog/server/routes/__tests__/openapi-trace-detail.test.ts
+  s_c1c3b383e07265::t_d8204166e85423 21,24,31,93-103
+  s_c1c3b383e07265::t_57af899434b04f 104
+apps/evolverun/clawweb/internal/modules/tclog/server/routes/__tests__/tclog.test.ts
+  s_c1c3b383e07265::t_d8204166e85423 1,3-4,6,554-607,609-627
+  s_c1c3b383e07265::t_824471212710ad 608
+  s_c1c3b383e07265::t_7ea08681426fdd 628
+apps/evolverun/clawweb/internal/modules/tclog/server/routes/tclog.ts
+  s_c1c3b383e07265::t_ca428b2910b3fb 29-32,217-231,243,297,337-339,342-354,357,372,414,420,716,722,752,756,792,803,1022,1024,1056
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8e12413e5f2af32846e772927a232fc5de5d07ba",
+  "prompts": {},
+  "sessions": {
+    "s_c1c3b383e07265": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d465-5126-72c1-8669-c1bfa31d01dc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

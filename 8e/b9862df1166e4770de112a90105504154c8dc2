@@ -1,0 +1,31 @@
+autocoding/skills/teamclaw-clarify/SKILL.md
+  s_c9c22d6ab6d0c7::t_b5d4fd9cf517f7 56-57,75,77
+autocoding/skills/teamclaw-clarify/references/gate-a-delivery.md
+  s_c9c22d6ab6d0c7::t_7520b39e5eaa1a 82-83
+autocoding/skills/teamclaw-clarify/references/hitl-handoff.md
+  s_c9c22d6ab6d0c7::t_173ec0456770e8 1-56
+autocoding/skills/teamclaw-plan/SKILL.md
+  s_c9c22d6ab6d0c7::t_d6a6295bc55f77 11,39,72-73
+autocoding/skills/teamclaw-plan/references/delivery.md
+  s_c9c22d6ab6d0c7::t_087f6c4c546789 68-69
+autocoding/skills/teamclaw-plan/references/grilling.md
+  s_c9c22d6ab6d0c7::t_5d3b35511b96f8 19
+autocoding/skills/teamclaw-plan/references/hitl-handoff.md
+  s_c9c22d6ab6d0c7::t_71d4c855a7d77e 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8eb9862df1166e4770de112a90105504154c8dc2",
+  "prompts": {},
+  "sessions": {
+    "s_c9c22d6ab6d0c7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1de48-2ae0-7de2-a2a7-b07f71ae8ab0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

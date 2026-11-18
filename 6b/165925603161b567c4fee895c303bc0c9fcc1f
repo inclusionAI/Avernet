@@ -1,0 +1,87 @@
+apps/bcs-internal/.aci.yml
+  s_e1407634c93708::t_c3c79299eae0de 42
+apps/bcs-internal/Cargo.lock
+  s_e1407634c93708::t_217389f59a7be8 1835,1848,1853-1854,1856,1858-1859
+apps/bcs-internal/Cargo.toml
+  s_e1407634c93708::t_b95c60b10e6011 96
+apps/bcs-internal/configs/bcs-config.toml
+  s_e1407634c93708::t_1829774c012c1e 191,262-272
+apps/bcs-internal/configs/demo/sofa-tr-demo.example.toml
+  s_e1407634c93708::t_80df3d2a564729 9-11,42-45
+apps/bcs-internal/configs/sofa-tr-demo-pre.toml
+  s_e1407634c93708::t_2d29dbe06987d1 1-47
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  s_e1407634c93708::t_affd841d2650b0 21-22,26-27,29-31
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_e1407634c93708::t_f17f7288f947e7 1-2,4,7-11,52-80,86-222,232-286,315-328
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/rpc.rs
+  s_e1407634c93708::t_2fde8706efbfd3 1-260
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/README.md
+  s_e1407634c93708::t_d863d5b03cabd6 3,11-21,37,39,42-95,98-110
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/java-contract/README.md
+  s_e1407634c93708::t_54a46b257923e3 1-26
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/java-contract/pom.xml
+  s_e1407634c93708::t_ff0633409480fc 1-131
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/proto/bcs_sofa_tr_demo.proto
+  s_e1407634c93708::t_a8ead9765f0131 8-9,41-44
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/app.rs
+  s_e1407634c93708::t_8e51bd77f5e1fe 9,12-13,73,81,87,94-97,108-112,123,128-136,148-156,166-174,180-201,206-217,227-239
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/config.rs
+  s_e1407634c93708::t_83a4766c6a2491 78-85,92-95,117-149,243-252,373-388,437-446
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/diagnostic.rs
+  s_73957c2e434331::t_da400c2a58c465 15,68-72,76-82,105-118
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/grpc.rs
+  s_e1407634c93708::t_c321b394d45f3c 4,8-9,23,28-35,45-50,75-90,98-106,109-125,138,143,158-162,168-177
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/http.rs
+  s_e1407634c93708::t_6f7280503090cc 13,17,66-72,97-110,147,179-187
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/lib.rs
+  s_e1407634c93708::t_a6cd4d66cee2b6 13
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/logging.rs
+  s_e1407634c93708::t_bbb4bb1bae6a76 85-210
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/main.rs
+  s_e1407634c93708::t_f7efde6779f88b 5,8,12,62-63,134
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/mapping.rs
+  s_e1407634c93708::t_57f5193cfee906 50-78
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/outbound/client.rs
+  s_e1407634c93708::t_265647128755f9 13,72-78,82-88,92-99,124-131,141,153-154,164-170,177-189,222-229,240,253-254,263-269,278-285,314,316-328,343-349,395-403,411,445-460,483-497
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/runtime.rs
+  s_e1407634c93708::t_b0181bd1e6ff38 1-391
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/tests/contracts.rs
+  s_e1407634c93708::t_2993a13a0bf778 79
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/tests/inbound_receipt.rs
+  s_e1407634c93708::t_465603120c21b5 60,73,103-105
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/tests/outbound_wire.rs
+  s_e1407634c93708::t_bf5a7ed900e1ae 142-148,200-212
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/tests/weak_runtime.rs
+  s_e1407634c93708::t_891e5c74a94a7e 1-74
+apps/bcs-internal/docs/plans/2026-11-03-sofa-tr-demo-preprod-examples.md
+  s_e1407634c93708::t_0a4958a7a5a193 3,5,26-27,41,51,55,59,67-68,104-107,119-129,131-137,141,153-156,179,181-184,193-194,203-204,208,249,260,277-278,310,318,342,347,349,356-359
+apps/bcs-internal/docs/plans/2026-11-03-sofa-tr-interoperability-demo.md
+  s_e1407634c93708::t_63e22ba592135e 3,7,15,17,19,24,28-29,36-38,46,54,64,75-78,88-89,97-105,110,117-121,189-211,553,560,613-633,638-649,665-666,686,688-693,700-701,703-704,710,723,728,730,732,734,751,753-754,756
+apps/bcs-internal/scripts/check-sofa-tr-demo.sh
+  s_e1407634c93708::t_3eb27d31f78f69 7-30,41-45,47-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6b165925603161b567c4fee895c303bc0c9fcc1f",
+  "prompts": {},
+  "sessions": {
+    "s_73957c2e434331": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0ad-50a7-77b3-9ca1-f57176f0e968",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    },
+    "s_e1407634c93708": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19f78-4083-78d1-a904-3ffbcadfbafc",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
