@@ -226,6 +226,22 @@ use bcs_user_directory_api::{UserDirectoryLookupContext, UserDirectoryPlugin};
         }
     }
 
+    #[derive(Clone, Default)]
+    struct FailingCancellationNotificationPort;
+
+    #[async_trait]
+    impl FriendConnectNotificationPort for FailingCancellationNotificationPort {
+        async fn notify(&self, _command: FriendConnectNotificationCommand) -> ServiceResult<()> {
+            Ok(())
+        }
+
+        async fn cancel(&self, _command: FriendConnectCancellationCommand) -> ServiceResult<()> {
+            Err(ServiceError::InternalError(
+                "work-order cancel unavailable".to_string(),
+            ))
+        }
+    }
+
     #[derive(Default)]
     struct RecordingWriteback {
         calls: std::sync::Mutex<Vec<String>>,

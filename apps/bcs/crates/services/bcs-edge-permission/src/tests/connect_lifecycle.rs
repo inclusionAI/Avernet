@@ -584,13 +584,20 @@ use super::*;
         let rid = pending.request_ids[0].clone();
 
         svc.cancel(&rid, None).await.expect("cancel ok");
+        svc.cancel(&rid, None)
+            .await
+            .expect("idempotent cancel retries invalidation");
 
         assert_eq!(
             rq.get(&rid, "dev").await.expect("request row").status,
             RequestStatus::Cancelled
         );
         let cancellations = cancellations.lock().await;
-        assert_eq!(cancellations.len(), 1, "one owner work order invalidated");
+        assert_eq!(
+            cancellations.len(),
+            2,
+            "the idempotent retry re-attempts the best-effort invalidation"
+        );
         assert_eq!(cancellations[0].request_ids, vec![rid]);
         assert_eq!(cancellations[0].applicant_actor_id, "human_1");
         assert_eq!(cancellations[0].target_bot_id, "x:cancel_notify");
@@ -628,4 +635,58 @@ use super::*;
         let cancellations = cancellations.lock().await;
         assert_eq!(cancellations.len(), 1);
         assert_eq!(cancellations[0].request_ids, vec![rid]);
+    }
+
+    #[tokio::test]
+    async fn cancel_succeeds_when_work_order_invalidation_fails() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:cancel_fail", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service_with_notification(
+            &eg,
+            &pp,
+            &rq,
+            &bc,
+            Arc::new(FailingCancellationNotificationPort),
+        );
+        let pending = svc
+            .create_connect("human_1", "x:cancel_fail", None, None)
+            .await
+            .expect("manual pending");
+        let rid = pending.request_ids[0].clone();
+
+        svc.cancel(&rid, None)
+            .await
+            .expect("a backend invalidation failure must not fail the cancel");
+
+        assert_eq!(
+            rq.get(&rid, "dev").await.expect("request row").status,
+            RequestStatus::Cancelled
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_friend_succeeds_when_work_order_invalidation_fails() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:revoke_fail", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service_with_notification(
+            &eg,
+            &pp,
+            &rq,
+            &bc,
+            Arc::new(FailingCancellationNotificationPort),
+        );
+        let pending = svc
+            .create_connect("human_1", "x:revoke_fail", None, None)
+            .await
+            .expect("manual pending");
+        let rid = pending.request_ids[0].clone();
+
+        svc.revoke_friend("human_1", "x:revoke_fail", None)
+            .await
+            .expect("a backend invalidation failure must not fail the unfriend");
+
+        assert_eq!(
+            rq.get(&rid, "dev").await.expect("request row").status,
+            RequestStatus::Cancelled
+        );
     }

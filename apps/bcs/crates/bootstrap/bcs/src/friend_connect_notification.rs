@@ -464,6 +464,36 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn serve_one_http_response(
+        response: &'static str,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let address = listener.local_addr().expect("local address");
+        let handle = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept request");
+            let mut request = vec![0u8; 8192];
+            let _ = stream.read(&mut request).await;
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("write response");
+        });
+        (format!("http://{address}"), handle)
+    }
+
+    fn cancellation_command(request_ids: Vec<String>) -> FriendConnectCancellationCommand {
+        FriendConnectCancellationCommand {
+            env: "dev".to_string(),
+            request_ids,
+            applicant_actor_id: "human_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            request_auth: None,
+        }
+    }
 
     #[test]
     fn constructor_rejects_blank_and_non_http_base_urls() {
@@ -571,6 +601,73 @@ mod tests {
             request.headers().get("x-request-id").and_then(|value| value.to_str().ok()),
             Some("rid-1")
         );
+    }
+
+    #[tokio::test]
+    async fn cancel_returns_ok_on_backend_success() {
+        let (base_url, server) = serve_one_http_response(
+            "HTTP/1.1 201 Created\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+        )
+        .await;
+        let adapter = HttpFriendConnectNotificationPort::new(&base_url).expect("valid url");
+
+        adapter
+            .cancel(cancellation_command(vec!["1".to_string()]))
+            .await
+            .expect("successful backend cancel");
+
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn cancel_returns_internal_error_on_backend_rejection() {
+        let (base_url, server) = serve_one_http_response(
+            "HTTP/1.1 409 Conflict\r\nContent-Length: 7\r\nConnection: close\r\n\r\nreject!",
+        )
+        .await;
+        let adapter = HttpFriendConnectNotificationPort::new(&base_url).expect("valid url");
+
+        let result = adapter
+            .cancel(cancellation_command(vec!["1".to_string()]))
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(ServiceError::InternalError(message))
+                if message.contains("friend work-order cancel request returned 409")
+        ));
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn cancel_skips_when_request_ids_are_empty() {
+        let adapter =
+            HttpFriendConnectNotificationPort::new("http://127.0.0.1:9").expect("valid url");
+        adapter
+            .cancel(cancellation_command(Vec::new()))
+            .await
+            .expect("empty request ids short-circuit");
+    }
+
+    #[tokio::test]
+    async fn cancel_returns_internal_error_when_backend_is_unavailable() {
+        let mut adapter =
+            HttpFriendConnectNotificationPort::new("http://127.0.0.1:9").expect("valid url");
+        adapter.client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_millis(100))
+            .build()
+            .expect("build test client");
+
+        let result = adapter
+            .cancel(cancellation_command(vec!["1".to_string()]))
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(ServiceError::InternalError(message))
+                if message.contains("friend work-order cancel request failed")
+        ));
     }
 
     #[tokio::test]
