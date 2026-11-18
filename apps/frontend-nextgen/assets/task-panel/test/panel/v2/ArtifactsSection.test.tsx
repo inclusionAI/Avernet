@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
 // 产物卡列表时间必须显示北京时间;代码/链接产物仅保留外链跳转入口。
-import { ArtifactsSection } from '../../../src/panel/v2/ArtifactsSection';
-import type { TaskArtifactView } from '../../../src/panel/types';
-import { describe, expect, it } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import type { TaskArtifactView } from '../../../src/panel/types';
+import { ArtifactsSection } from '../../../src/panel/v2/ArtifactsSection';
 
 const artifact: TaskArtifactView = {
   id: 'artifact-utc',
@@ -52,7 +52,7 @@ describe('ArtifactsSection 最终产物标识', () => {
     isFinalArtifact: false,
   };
 
-  it('仅 is_final_artifact=true 的产物高亮,不按最后一棒推断', () => {
+  it('仅后端标记的最终产物显示标识，普通产物使用真实节点来源而非边框高亮', () => {
     render(
       <ArtifactsSection
         artifacts={[finalArtifact, normalArtifact]}
@@ -65,9 +65,11 @@ describe('ArtifactsSection 最终产物标识', () => {
     const normalRow = screen.getByText('第二棒普通产物').closest('li')!;
     expect(finalRow).toHaveTextContent('最终产物');
     expect(finalRow).not.toHaveTextContent('第1棒产物');
-    expect(normalRow).toHaveTextContent('第2棒产物');
-    expect(finalRow.style.border).toBe('1px solid rgb(37, 99, 235)');
-    expect(normalRow.style.border).toBe('1px solid rgb(229, 230, 235)');
+    expect(normalRow).toHaveTextContent('节点 n-1');
+    expect(finalRow).toHaveAttribute('data-final-artifact', 'true');
+    expect(finalRow).toHaveClass('task-artifact-row');
+    expect(normalRow).not.toHaveAttribute('data-final-artifact');
+    expect(normalRow).toHaveClass('task-artifact-row');
   });
 });
 
