@@ -25,6 +25,12 @@ from agentclaw.community.core.task.task_experience.services.acceptance_expander_
 from agentclaw.community.core.task.task_experience.services.task_plan_service import (
     TaskPlanService,
 )
+from agentclaw.community.di.modules.task_experience_module import (
+    _DisabledMethodA,
+    _DisabledMethodB,
+    _DisabledMethodC,
+    _DisabledMethodD,
+)
 
 from .conformance._stubs import (
     _DisabledLLM,
@@ -88,6 +94,10 @@ def _make_plan_service():
         llm=_DisabledLLM(),
         policy=_make_policy_port(),
         bot_tags=_make_bot_tags(),
+        method_a=_DisabledMethodA(),
+        method_b=_DisabledMethodB(),
+        method_c=_DisabledMethodC(),
+        method_d=_DisabledMethodD(),
     )
 
 

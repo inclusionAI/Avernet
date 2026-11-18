@@ -15,6 +15,7 @@ from typing import Protocol, runtime_checkable
 from agentclaw.community.core.task.task_experience.types import (
     AcceptanceReport,
     KGBasePolicy,
+    Plan,
     PlanReport,
 )
 
@@ -116,4 +117,86 @@ __all__ = [
     "BotTagsPort",
     "TaskPlanServiceProtocol",
     "AcceptanceExpanderServiceProtocol",
+    "MethodAWorkflowPort",
+    "MethodBDecomposePort",
+    "MethodCIncrementalPort",
+    "MethodDSelfPlanPort",
 ]
+
+
+@runtime_checkable
+class MethodAWorkflowPort(Protocol):
+    """Method A: multibot_workflow direct reuse from KGBase experience.
+
+    Corp-owned algorithm; community provides a disabled placeholder that
+    returns an empty plan with ``reason='method_implemented_in_corp'``.
+    """
+
+    @abstractmethod
+    async def generate(
+        self,
+        *,
+        question: str,
+        bot_id: str,
+        policy: "PolicyRetrievalPort",
+        bot_tags: "BotTagsPort",
+    ) -> Plan:
+        """Generate a plan from multibot_workflow experience policies."""
+
+
+@runtime_checkable
+class MethodBDecomposePort(Protocol):
+    """Method B: LLM decompose + KGBase success_pattern backfill.
+
+    Corp-owned algorithm; community provides a disabled placeholder.
+    """
+
+    @abstractmethod
+    async def generate(
+        self,
+        *,
+        question: str,
+        bot_id: str,
+        llm: "TaskExperienceLLMProtocol",
+        policy: "PolicyRetrievalPort",
+        bot_tags: "BotTagsPort",
+    ) -> Plan:
+        """Generate a plan by LLM-decomposing steps and backfilling policies."""
+
+
+@runtime_checkable
+class MethodCIncrementalPort(Protocol):
+    """Method C: incremental rewrite + full-policy retrieval from KGBase.
+
+    Corp-owned algorithm; community provides a disabled placeholder.
+    """
+
+    @abstractmethod
+    async def generate(
+        self,
+        *,
+        question: str,
+        bot_id: str,
+        policy: "PolicyRetrievalPort",
+        bot_tags: "BotTagsPort",
+    ) -> Plan:
+        """Generate a plan by incrementally rewriting + retrieving policies."""
+
+
+@runtime_checkable
+class MethodDSelfPlanPort(Protocol):
+    """Method D: LLM self-plan (no policy lookup).
+
+    Corp-owned algorithm; community provides a disabled placeholder.
+    """
+
+    @abstractmethod
+    async def generate(
+        self,
+        *,
+        question: str,
+        bot_id: str,
+        llm: "TaskExperienceLLMProtocol",
+        bot_tags: "BotTagsPort",
+    ) -> Plan:
+        """Generate a plan by asking the LLM to self-plan."""

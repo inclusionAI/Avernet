@@ -1,27 +1,23 @@
 """Community-default DI wiring for the task_experience module.
 
-Wires the four ports and both services:
+Wires the shared ports, the four method Ports (disabled placeholders), and
+both services:
 
 - ``TaskExperienceLLMProtocol`` → ``OpenAICompatibleTaskExperienceLLM``
-  configured from :class:`TaskExperienceLLMConfig` (the ``task_experience.llm``
-  user_config block, parsed by :class:`TaskExperienceConfigModule`).
-  Community default leaves the block unset, so the ``OpenAICompatibleTask…LLM``
-  sentinel kicks in (``base_url=""`` ⇒ ``_resolve_token`` short-circuits,
-  ``chat()`` returns ``TASK_EXPERIENCE_LLM_DISABLED`` without HTTP) and
-  community tests never touch the network.
-- ``PolicyRetrievalPort`` → ``_NoopPolicyRetrieval`` returning ``[]``; KGBase
-  is a corp-owned upstream and Community mode must not require it (arch rule
-  20 / single-box dev first).
+  configured from :class:`TaskExperienceLLMConfig`.
+- ``PolicyRetrievalPort`` → ``_NoopPolicyRetrieval`` returning ``[]``.
 - ``BotTagsPort`` → ``_IdentityBotTags`` (``bot_name(i) == i``).
-- ``TaskPlanServiceProtocol`` → ``TaskPlanService`` (LLM disabled + KGBase
-  no-op ⇒ ``generate_task_plans`` emits four empty plans and recommends A).
-- ``AcceptanceExpanderServiceProtocol`` → ``AcceptanceExpanderService`` (KGBase
-  no-op ⇒ ``expand_acceptance_criteria`` returns ``note='kgbase_disabled'``).
+- ``MethodAWorkflowPort`` / ``MethodBDecomposePort`` /
+  ``MethodCIncrementalPort`` / ``MethodDSelfPlanPort`` → disabled
+  placeholders returning empty plans with ``reason='method_implemented_in_corp'``.
+  Real algorithm implementations live in the corp composition root.
+- ``TaskPlanServiceProtocol`` → ``TaskPlanService`` (injects the 4 method
+  Ports + shared ports; all-disabled ⇒ 4 empty plans, recommends A).
+- ``AcceptanceExpanderServiceProtocol`` → ``AcceptanceExpanderService``.
 
-Real configuration / credential / HTTP bindings for PROD / prepub / corp_test
-profiles come from the corp composition root ``CorpTaskExperienceIntegration``
-in the OCB repository; the corp module reaches the same Protocol bindings
-through the standard injector override mechanism.
+The corp composition root ``CorpTaskExperienceIntegration`` in OCB replaces
+the method Port bindings with real algorithm implementations and the
+shared-Port bindings with corp-owned KGBase / LLM / bot-tag providers.
 """
 
 from __future__ import annotations
@@ -36,6 +32,10 @@ from agentclaw.community.core.task.task_experience.adapters.llm import (
 from agentclaw.community.core.task.task_experience.protocols import (
     AcceptanceExpanderServiceProtocol,
     BotTagsPort,
+    MethodAWorkflowPort,
+    MethodBDecomposePort,
+    MethodCIncrementalPort,
+    MethodDSelfPlanPort,
     PolicyRetrievalPort,
     TaskExperienceLLMProtocol,
     TaskPlanServiceProtocol,
@@ -46,7 +46,10 @@ from agentclaw.community.core.task.task_experience.services.acceptance_expander_
 from agentclaw.community.core.task.task_experience.services.task_plan_service import (
     TaskPlanService,
 )
-from agentclaw.community.core.task.task_experience.types import KGBasePolicy
+from agentclaw.community.core.task.task_experience.types import (
+    KGBasePolicy,
+    Plan,
+)
 from agentclaw.community.di.task_experience_config import (
     TaskExperienceLLMConfig,
 )
@@ -59,14 +62,20 @@ from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 __all__ = ["TaskExperienceModule"]
 
 
+def _disabled_plan(method: str) -> Plan:
+    """Empty plan with ``reason='method_implemented_in_corp'`` placeholder."""
+    return Plan(
+        method=method,
+        tasks=tuple(),
+        total_duration=0.0,
+        gain=0.0,
+        has_policy_support=False,
+        links={},
+        reason="method_implemented_in_corp",
+    )
+
+
 class _NoopPolicyRetrieval(PolicyRetrievalPort):
-    """Community default: ``retrieve`` always returns ``[]``.
-
-    KGBase is a corp-owned upstream; community / local / test mode never
-    reaches it. Service-level callers treat empty results as the same path
-    as "disabled upstream", so no caller needs to special-case this no-op.
-    """
-
     async def retrieve(
         self,
         query: str,
@@ -83,10 +92,28 @@ class _NoopPolicyRetrieval(PolicyRetrievalPort):
 
 
 class _IdentityBotTags(BotTagsPort):
-    """Community default: ``bot_name`` is identity (``bot_id`` unchanged)."""
-
     def bot_name(self, bot_id: str) -> str:
         return bot_id
+
+
+class _DisabledMethodA(MethodAWorkflowPort):
+    async def generate(self, *, question, bot_id, policy, bot_tags) -> Plan:
+        return _disabled_plan("A")
+
+
+class _DisabledMethodB(MethodBDecomposePort):
+    async def generate(self, *, question, bot_id, llm, policy, bot_tags) -> Plan:
+        return _disabled_plan("B")
+
+
+class _DisabledMethodC(MethodCIncrementalPort):
+    async def generate(self, *, question, bot_id, policy, bot_tags) -> Plan:
+        return _disabled_plan("C")
+
+
+class _DisabledMethodD(MethodDSelfPlanPort):
+    async def generate(self, *, question, bot_id, llm, bot_tags) -> Plan:
+        return _disabled_plan("D")
 
 
 class TaskExperienceModule(Module):
@@ -101,12 +128,6 @@ class TaskExperienceModule(Module):
         secret_resolver: SecretResolver,
         general_http: Annotated[HttpClient, QUALIFIER_GENERAL],
     ) -> TaskExperienceLLMProtocol:
-        # base_url/secret_name are read from the TaskExperienceLLMConfig block.
-        # When the block is unset (community default), the OpenAI-compatible
-        # adapter short-circuits at _resolve_token / chat time and returns
-        # the disabled sentinel without any HTTP. A configured block wires
-        # the same adapter with prod values via Bcom-compatible DI overrides
-        # upstream from the corp composition root.
         return OpenAICompatibleTaskExperienceLLM(
             base_url=config.base_url,
             secret_name=config.secret_name,
@@ -128,14 +149,42 @@ class TaskExperienceModule(Module):
 
     @singleton
     @provider
+    def method_a_workflow(self) -> MethodAWorkflowPort:
+        return _DisabledMethodA()
+
+    @singleton
+    @provider
+    def method_b_decompose(self) -> MethodBDecomposePort:
+        return _DisabledMethodB()
+
+    @singleton
+    @provider
+    def method_c_incremental(self) -> MethodCIncrementalPort:
+        return _DisabledMethodC()
+
+    @singleton
+    @provider
+    def method_d_self_plan(self) -> MethodDSelfPlanPort:
+        return _DisabledMethodD()
+
+    @singleton
+    @provider
     @inject
     def task_plan_service(
         self,
         llm: TaskExperienceLLMProtocol,
         policy: PolicyRetrievalPort,
         bot_tags: BotTagsPort,
+        method_a: MethodAWorkflowPort,
+        method_b: MethodBDecomposePort,
+        method_c: MethodCIncrementalPort,
+        method_d: MethodDSelfPlanPort,
     ) -> TaskPlanServiceProtocol:
-        return TaskPlanService(llm=llm, policy=policy, bot_tags=bot_tags)
+        return TaskPlanService(
+            llm=llm, policy=policy, bot_tags=bot_tags,
+            method_a=method_a, method_b=method_b,
+            method_c=method_c, method_d=method_d,
+        )
 
     @singleton
     @provider
