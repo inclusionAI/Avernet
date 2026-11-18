@@ -193,7 +193,14 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     # 2. 使用L4层操作创建Collet
     collet = _create_commission_collet(l4_context_operate)
 
-    # 3. Instantiate同时建立Collet和 资源、参与者和Method的绑定。
+    # 3. 在已有Collet上实例化产品,不是创建 Collet和产品。Collet中并没有Profile信息，所以这里是将精确版本的 Profile 应用于该 Collet,生成记录本次协作配置/绑定引用的 ProductInstance:
+    # - 资源:绑定产品传入的需求文档、代码仓库版本引用(INPUT_RESOURCES),不上传内容或授予访问权限。
+    # - 参与者/角色:helper 传入发布者 HUMAN 和工作 Bot,建立实际 Participant / RoleBinding。
+    #   Bot 必须在 Profile 允许范围内;允许列表中的另一个 Agent 不会自动成为本实例的参与者。
+    # - 方法:创建 Open@0.2、Single@0.2 的 MethodBinding,并建立 Single --support--> Open 组合关系。
+    # ProductInstance 关联已有 Collet、Profile 版本及上述绑定证据,不是另一份 Collet 或 Task。
+    # 初始参与者绑定不等于 Open 录取或 Single 执行者选择;这些由后续步骤完成。
+    # 此时仍没有 Task(root_task_ref 为 None);第 8 步调用 L4 start 时才创建并启动根 Task。
     instance = _instantiate_product_instance(
         injector,
         collet,
