@@ -73,7 +73,16 @@ class _Tokens:
         return self.token
 
 
-def _request(*, owner_id: str | None = "another_user") -> ContextCollabRunRequest:
+RUNNER_PATH = (
+    "/home/admin/.openclaw/workspace/skills/skills-repo/infra/todo-runner/SKILL.md"
+)
+
+
+def _request(
+    *,
+    owner_id: str | None = "another_user",
+    todo_runner_skill_md_path: str = RUNNER_PATH,
+) -> ContextCollabRunRequest:
     return ContextCollabRunRequest(
         collab_context_id="context_1",
         executor_id="bot_1",
@@ -83,10 +92,15 @@ def _request(*, owner_id: str | None = "another_user") -> ContextCollabRunReques
         todo_id="todo_1",
         todo_execution_id="todoexec_1",
         todo_execution_token="todo-token-1",
+        todo_runner_skill_md_path=todo_runner_skill_md_path,
     )
 
 
-def _resume_request(*, group_id: str | None = "group_1") -> ContextCollabResumeRequest:
+def _resume_request(
+    *,
+    group_id: str | None = "group_1",
+    todo_runner_skill_md_path: str = RUNNER_PATH,
+) -> ContextCollabResumeRequest:
     return ContextCollabResumeRequest(
         collab_context_id="context_1",
         executor_id="bot_1",
@@ -99,6 +113,7 @@ def _resume_request(*, group_id: str | None = "group_1") -> ContextCollabResumeR
         executor_owner_id="another_user",
         todo_execution_id="todoexec_2",
         todo_execution_token="todo-token-2",
+        todo_runner_skill_md_path=todo_runner_skill_md_path,
     )
 
 
@@ -165,10 +180,7 @@ async def test_run_context_loads_todo_runner_from_infra_without_symlink() -> Non
     assert "todo_execution_token=todo-token-1" in context
     assert "backend_url=https://backend.example" in context
     assert "todo-runner Skill" in context
-    assert (
-        "/home/admin/.openclaw/workspace/skills/skills-repo/infra/"
-        "todo-runner/SKILL.md"
-    ) in context
+    assert RUNNER_PATH in context
     assert "每次收到 [todo-execute] 或 [todo-resume] 都必须" in context
     assert "不要为 todo-runner 创建软链接" in context
     assert "workspace/skills 顶层激活" in context
@@ -178,6 +190,51 @@ async def test_run_context_loads_todo_runner_from_infra_without_symlink() -> Non
     assert "/artifacts/object-file" not in context
     assert "/complete" not in context
     assert "X-Todo-Execution-Token:" not in context
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "todo_runner_skill_md_path, expected_root",
+    [
+        (
+            "/home/admin/.aicoding/workspace/skills/skills-repo/infra/"
+            "todo-runner/SKILL.md",
+            "/home/admin/.aicoding/workspace",
+        ),
+        (
+            "/home/admin/.harness/workspace/skills/skills-repo/infra/"
+            "todo-runner/SKILL.md",
+            "/home/admin/.harness/workspace",
+        ),
+    ],
+)
+async def test_run_uses_executor_supplied_runner_skill_path(
+    todo_runner_skill_md_path: str,
+    expected_root: str,
+) -> None:
+    bcs = _RecordingBcs()
+    executor = _executor(bcs, tokens=_Tokens())
+
+    await executor.run(_request(todo_runner_skill_md_path=todo_runner_skill_md_path))
+
+    context = bcs.create_calls[0].context
+    assert context.count(todo_runner_skill_md_path) == 1
+    assert expected_root in context
+    assert "/home/admin/.openclaw/workspace" not in context
+
+
+@pytest.mark.asyncio
+async def test_run_fails_closed_when_execution_has_no_runner_skill_path() -> None:
+    bcs = _RecordingBcs()
+    executor = _executor(bcs, tokens=_Tokens())
+
+    with pytest.raises(
+        ContextCollabExecutorError,
+        match="runner Skill path is required",
+    ):
+        await executor.run(_request(todo_runner_skill_md_path=""))
+
+    assert bcs.create_calls == []
 
 
 @pytest.mark.asyncio
@@ -253,6 +310,7 @@ async def test_resume_uses_same_session_bot_bearer_and_event_id() -> None:
     assert call["caller_bearer"] == "session-token"
     assert call["idempotency_key"] == "interaction_1"
     assert "[todo-resume]" in call["message"]
+    assert RUNNER_PATH in call["message"]
     assert "本轮修订要求：Please revise the implementation" in call["message"]
     assert "todo_execution_id=todoexec_2" in call["message"]
 

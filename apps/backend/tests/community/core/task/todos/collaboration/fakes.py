@@ -78,6 +78,7 @@ class FakeTodoCollaborationPort(TodoCollaborationPort):
         actor_id: str,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str = "",
     ) -> TodoCollaborationContext:
         return self._run_context(collab_context_id)
 
@@ -131,6 +132,7 @@ class FakeTodoCollaborationPort(TodoCollaborationPort):
         triggered_by_event_id: str,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str = "",
     ) -> TodoCollaborationContext:
         local = self._require_context(collab_context_id)
         if local.status != "done":

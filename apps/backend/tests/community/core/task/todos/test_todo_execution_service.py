@@ -245,9 +245,9 @@ class _Collaboration:
         self.refreshed_context = refreshed_context
         self.create_calls: list[Any] = []
         self.get_calls: list[tuple[str, str]] = []
-        self.run_calls: list[tuple[str, str, str | None, str | None]] = []
+        self.run_calls: list[tuple[str, str, str | None, str | None, str]] = []
         self.refresh_calls: list[tuple[str, str]] = []
-        self.resume_calls: list[tuple[str, str, str, str | None, str | None]] = []
+        self.resume_calls: list[tuple[str, str, str, str | None, str | None, str]] = []
 
     def create_context(self, request):
         self.create_calls.append(request)
@@ -265,6 +265,7 @@ class _Collaboration:
         actor_id: str,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str = "",
     ):
         self.run_calls.append(
             (
@@ -272,6 +273,7 @@ class _Collaboration:
                 actor_id,
                 todo_execution_id,
                 todo_execution_token,
+                todo_runner_skill_md_path,
             )
         )
         context = replace(self.contexts[collab_context_id], status="in_progress")
@@ -292,6 +294,7 @@ class _Collaboration:
         triggered_by_event_id: str,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str = "",
     ):
         self.resume_calls.append(
             (
@@ -300,6 +303,7 @@ class _Collaboration:
                 triggered_by_event_id,
                 todo_execution_id,
                 todo_execution_token,
+                todo_runner_skill_md_path,
             )
         )
         context = replace(self.contexts[collab_context_id], status="in_progress")
@@ -363,6 +367,7 @@ def _service(
                 "bot_name": "Bot One",
                 "space_id": 7,
                 "owner_id": "bot_owner_1",
+                "active_engine": "openclaw",
             }
         ]
     )
@@ -414,7 +419,13 @@ async def test_dispatch_creates_binds_runs_and_transitions_with_creator_identity
     assert request.objective == "Detailed objective"
     assert request.todo_id == "todo_1"
     assert collaboration.run_calls == [
-        ("context_created", "creator_1", "todoexec_1", "token_1")
+        (
+            "context_created",
+            "creator_1",
+            "todoexec_1",
+            "token_1",
+            "/home/admin/.openclaw/workspace/skills/skills-repo/infra/todo-runner/SKILL.md",
+        )
     ]
     assert service._artifacts.issue_calls == [
         {"todo_id": "todo_1", "executor_id": "bot_1"}
@@ -425,6 +436,43 @@ async def test_dispatch_creates_binds_runs_and_transitions_with_creator_identity
         TodoStatus.PENDING,
         TodoStatus.IN_PROGRESS,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("active_engine", "expected_path"),
+    [
+        (
+            "aicoding",
+            "/home/admin/.aicoding/workspace/skills/skills-repo/infra/"
+            "todo-runner/SKILL.md",
+        ),
+        (
+            "hermes",
+            "/home/admin/.harness/workspace/skills/skills-repo/infra/"
+            "todo-runner/SKILL.md",
+        ),
+    ],
+)
+async def test_dispatch_resolves_runner_skill_path_from_bot_runtime(
+    active_engine: str,
+    expected_path: str,
+):
+    service, _, _, _, collaboration = _service(
+        rows=[
+            {
+                "bot_id": "bot_1",
+                "bot_name": "Bot One",
+                "space_id": 7,
+                "owner_id": "bot_owner_1",
+                "active_engine": active_engine,
+            }
+        ],
+    )
+
+    await service.dispatch_pending(todo_id="todo_1")
+
+    assert [call[4] for call in collaboration.run_calls] == [expected_path]
 
 
 @pytest.mark.asyncio
@@ -480,6 +528,7 @@ async def test_resume_claimed_interaction_resumes_latest_durable_event():
             "event_interaction",
             "todoexec_1",
             "token_1",
+            "/home/admin/.openclaw/workspace/skills/skills-repo/infra/todo-runner/SKILL.md",
         )
     ]
     assert service._artifacts.issue_calls == [

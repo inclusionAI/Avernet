@@ -420,6 +420,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         *,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str | None = None,
     ) -> ContextCollabRunResultDTO:
         """Start the bound executor, then append the authoritative start event.
 
@@ -469,6 +470,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 executor_owner_id=collet.context_spec.executor_owner_id,
                 todo_execution_id=todo_execution_id,
                 todo_execution_token=todo_execution_token,
+                todo_runner_skill_md_path=todo_runner_skill_md_path,
             )
         )
         if bool(runtime_result.run_id) == bool(runtime_result.group_id):
@@ -519,6 +521,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         context: ActorContext,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str | None = None,
     ) -> ContextCollabRunResultDTO:
         """Continue the previous executor session from durable Human work.
 
@@ -610,6 +613,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 executor_owner_id=collet.context_spec.executor_owner_id,
                 todo_execution_id=todo_execution_id,
                 todo_execution_token=todo_execution_token,
+                todo_runner_skill_md_path=todo_runner_skill_md_path,
                 group_id=group_id,
             )
         )

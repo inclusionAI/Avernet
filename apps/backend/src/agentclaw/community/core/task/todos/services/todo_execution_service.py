@@ -20,6 +20,7 @@ from agentclaw.community.core.task.todos.bot_scope import (
     resolve_todo_bot,
 )
 from agentclaw.community.core.task.todos.errors import (
+    TodoBotScopeError,
     TodoNotFoundError,
     TodoStateConflictError,
 )
@@ -37,6 +38,12 @@ from agentclaw.community.core.task.todos.models import (
     TodoAcceptanceTargetKind,
     TodoRecord,
     TodoStatus,
+)
+from agentclaw.community.core.task.todos.todo_execution_prompt import (
+    todo_runner_skill_md_path,
+)
+from agentclaw.community.core.workspace.skill_layout import (
+    runtime_layout_engine_for_bot,
 )
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationContext,
@@ -204,6 +211,7 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             bot_id=todo.bot_id,
         )
         owner_id = require_todo_bot_owner_id(bot)
+        runner_path = self._todo_runner_skill_md_path(bot)
 
         context = await self._bound_context(
             todo=todo,
@@ -220,6 +228,7 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
                 actor_id=todo.created_by,
                 todo_execution_id=credential.execution_id,
                 todo_execution_token=credential.token,
+                todo_runner_skill_md_path=runner_path,
             )
             if context.run_id:
                 self._artifacts.bind_run_id(
@@ -277,13 +286,14 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             space_id=todo.space_id,
             user_id=todo.created_by,
         )
-        resolve_todo_bot(
+        bot = resolve_todo_bot(
             bot_repository=self._bot_repository,
             catalog_metadata=self._catalog_metadata,
             space=space,
             actor_id=todo.created_by,
             bot_id=todo.bot_id,
         )
+        runner_path = self._todo_runner_skill_md_path(bot)
         credential = self._artifacts.issue_execution(
             todo_id=todo.todo_id,
             executor_id=todo.bot_id,
@@ -294,6 +304,7 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             triggered_by_event_id=trigger.event_id,
             todo_execution_id=credential.execution_id,
             todo_execution_token=credential.token,
+            todo_runner_skill_md_path=runner_path,
         )
         if context.run_id:
             self._artifacts.bind_run_id(
@@ -420,6 +431,16 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
                 actor_id=winner.created_by,
             )
         return created
+
+    def _todo_runner_skill_md_path(self, bot: dict[str, object]) -> str:
+        """Resolve the runner source from the Bot's physical runtime identity."""
+
+        try:
+            return todo_runner_skill_md_path(
+                runtime_layout_engine_for_bot(bot),
+            )
+        except ValueError as exc:
+            raise TodoBotScopeError(str(exc)) from exc
 
     def _mark_pending_acceptance(self, todo: TodoRecord) -> TodoRecord:
         if not todo.collab_context_id:
