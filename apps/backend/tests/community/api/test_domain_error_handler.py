@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from agentclaw.community.core.errors import (
@@ -23,6 +22,7 @@ from agentclaw.community.core.errors import (
     InternalError,
     LoginRedirectRequired,
     NotFound,
+    TopicClosedConflict,
     Unauthorized,
     ValidationError,
 )
@@ -69,6 +69,7 @@ _ROUTE_MAP = {
     "forbidden": Forbidden,
     "notfound": NotFound,
     "conflict": Conflict,
+    "topic-not-open": TopicClosedConflict,
     "internal": InternalError,
 }
 
@@ -175,6 +176,28 @@ def test_4xx_domain_error_logs_a_warning_with_its_traceback(client, monkeypatch)
     assert all(k.get("exc_info") is not None for _, k in calls), \
         "a 4xx must carry its raise site"
 
+
+def test_expected_topic_conflict_logs_a_plain_warning(client, monkeypatch):
+    """A closed-Topic race is business input, not a stack-worthy fault.
+
+    Company log collectors can render a warning that carries an exception as an
+    error. Keep the response at 409 and the level at warning, but do not attach
+    the traceback for this expected BBS rejection.
+    """
+    from agentclaw.community.adapters.http import app as app_mod
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, "warning", lambda *a, **k: calls.append((a, k))
+    )
+    client.get("/raise/conflict")
+    client.get("/raise/topic-not-open")
+
+    assert len(calls) == 2
+    conflict, topic = calls
+    assert conflict[1]["exc_info"] is not None
+    assert topic[1]["exc_info"] is None
+    assert "TopicClosedConflict" in str(topic[0])
 
 def test_3xx_domain_error_logs_at_info_not_warning(client, monkeypatch):
     """``LoginRedirectRequired`` is a step in the login flow, not a fault.
