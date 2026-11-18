@@ -28,6 +28,7 @@ export type BotScope = 'mine' | 'monitored' | 'all';
 export type BotOption = {
   configuration?: { diagnosisEnabled: boolean; recoveryEnabled: boolean; version: number };
   botRef: string; botName: string; botId: string; ownerId: string; env: string;
+  activeEngine?: string; botType?: string | null;
   isServiceBot?: boolean;
   configurationDisabledReason?: string;
   enrollmentState: 'ENROLLED' | 'NOT_ENROLLED';
