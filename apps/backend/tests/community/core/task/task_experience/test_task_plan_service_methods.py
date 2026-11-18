@@ -268,13 +268,15 @@ async def test_generate_task_plans_recommends_lowest_duration_when_policy_tied()
     assert plan_c.has_policy_support is True
     assert plan_a.total_duration > plan_c.total_duration
     assert report.recommendation == "C"
-    # method B/D placeholders are empty-not-implemented
+    # method B/D depend on the LLM, which is disabled in this test fixture
+    # (stub LLM returns the disabled sentinel) → both return llm_disabled
+    # empty plans.
     plan_b = report.plans[1]
     assert plan_b.has_policy_support is False
-    assert plan_b.reason.startswith("not_implemented")
+    assert plan_b.reason == "llm_disabled"
     plan_d = report.plans[3]
     assert plan_d.has_policy_support is False
-    assert plan_d.reason.startswith("not_implemented")
+    assert plan_d.reason == "llm_disabled"
 
 
 @pytest.mark.asyncio
@@ -297,12 +299,14 @@ async def test_generate_task_plans_no_retrieval_falls_back_and_keeps_recommendat
     # method C falls back to a single non-policy placeholder
     assert plan_c.tasks  # at least one
     assert all(t.policy_type is None for t in plan_c.tasks)
+    # A5 method B/D both depend on the LLM; stub returns the disabled sentinel,
+    # so they emit empty plans with reason="llm_disabled".
     plan_b = report.plans[1]
     assert plan_b.tasks == ()
-    assert plan_b.reason == "not_implemented_in_a4"
+    assert plan_b.reason == "llm_disabled"
     plan_d = report.plans[3]
     assert plan_d.tasks == ()
-    assert plan_d.reason == "not_implemented_in_a4"
+    assert plan_d.reason == "llm_disabled"
     # All zero gain / zero duration → stable sort, ranked[0] is A
     assert report.recommendation == "A"
 

@@ -17,6 +17,7 @@ from agentclaw.community.core.task.task_experience.protocols import (
 from agentclaw.community.core.task.task_experience.services._methods._common import (
     _build_plan,
     _empty_plan,
+    _retrieve_for,
     _safe_chain,
     _safe_float,
 )
@@ -25,28 +26,6 @@ from agentclaw.community.core.task.task_experience.types import Plan
 __all__ = ["method_c_incremental"]
 
 _MAX_ROUNDS_DEFAULT = 5
-
-
-async def _retrieve_for(
-    policy: PolicyRetrievalPort,
-    *,
-    action_text: str,
-    bot_id: str,
-    experience_type: str,
-) -> list:
-    try:
-        return await policy.retrieve(
-            action_text,
-            bot_id=bot_id,
-            entity_type="Policy",
-            property_name="trigger",
-            top_k=3,
-            min_score=0.3,
-            experience_type=experience_type,
-            active_only=True,
-        )
-    except Exception:
-        return []
 
 
 async def method_c_incremental(

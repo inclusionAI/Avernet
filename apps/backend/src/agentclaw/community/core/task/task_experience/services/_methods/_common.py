@@ -5,6 +5,11 @@ dicts (kept close to the prototype shape to ease review) into the immutable
 ``Plan`` value type declared in :mod:`task_experience.types`. ``_safe_float``
 defends against malformed KGBase property numbers; ``_safe_chain`` parses the
 ``collaboration_chain`` JSON string with a safe fallback to an empty list.
+``_retrieve_for`` is the shared KGBase retrieve wrapper used by methods B and
+C — it casts transport exceptions into an empty list so service-level callers
+can treat "upstream disabled" and "no match" with the same code path.
+``parse_json_steps`` strips fenced / trailing noise from a model chat reply
+and returns the parsed JSON list, or ``None`` when unparseable.
 """
 
 from __future__ import annotations
@@ -12,13 +17,22 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agentclaw.community.core.task.task_experience.types import Plan, PlanTask
+from agentclaw.community.core.task.task_experience.protocols import (
+    PolicyRetrievalPort,
+)
+from agentclaw.community.core.task.task_experience.types import (
+    KGBasePolicy,
+    Plan,
+    PlanTask,
+)
 
 __all__ = [
     "_build_plan",
     "_empty_plan",
     "_safe_float",
     "_safe_chain",
+    "_retrieve_for",
+    "parse_json_steps",
 ]
 
 
@@ -99,8 +113,10 @@ def _empty_plan(method: str, *, reason: str = "") -> Plan:
     """Return an empty :class:`Plan` carrying a skip ``reason``.
 
     Used when KGBase retrieve returns no match (``method_a_no_experience``),
-    the retrieve upstream is disabled (``kgbase_disabled``), or the method is
-    not yet implemented in this commit (``not_implemented_in_a4``).
+    the retrieve upstream is disabled (``kgbase_disabled``), the method is
+    not yet implemented in this commit (``not_implemented_in_a4``), or the LLM
+    upstream is disabled / returns unparseable JSON (``llm_disabled`` /
+    ``invalid_model_output``).
     """
     return Plan(
         method=method,
@@ -111,3 +127,68 @@ def _empty_plan(method: str, *, reason: str = "") -> Plan:
         links={},
         reason=reason,
     )
+
+
+async def _retrieve_for(
+    policy: PolicyRetrievalPort,
+    *,
+    action_text: str,
+    bot_id: str,
+    experience_type: str,
+) -> list[KGBasePolicy]:
+    """Retrieve KGBase policies for one (action, bot_id, experience_type).
+
+    Returns an empty list when the policy port is ``None`` or the upstream
+    raises — methods B / C treat disabled upstream and "no match"
+    identically and emit a fallback (no-policy) plan task.
+    """
+    if policy is None:
+        return []
+    try:
+        return await policy.retrieve(
+            action_text,
+            bot_id=bot_id,
+            entity_type="Policy",
+            property_name="trigger",
+            top_k=3,
+            min_score=0.3,
+            experience_type=experience_type,
+            active_only=True,
+        )
+    except Exception:
+        return []
+
+
+def parse_json_steps(raw: str) -> list | None:
+    """Parse a model chat-completion reply into a JSON list, defensively.
+
+    Strips surrounding whitespace, leading English fenced blocks
+    (` ``` ` or ` ```json `), and trailing commentary; returns the parsed
+    list when ``json.loads`` succeeds and yields a ``list``, otherwise
+    ``None``. Mirrors the prototype's `.strip('`').strip()` shape with the
+    addition that any text-only trailing comments are not tolerated — the
+    prompt's ``只输出JSON字符串数组/对象, 不要解释。`` line is expected to
+    keep trailing text out of the reply.
+    """
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if text.startswith("```"):
+        # Strip one fenced block prefix; tolerate ```json / ```lang variants
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            text = text[first_newline + 1:]
+        else:
+            text = text.lstrip("`").lstrip()
+        if text.endswith("```"):
+            text = text[: -len("```")]
+        text = text.strip()
+    else:
+        text = text.strip("`").strip()
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, list):
+        return None
+    return parsed
