@@ -1,0 +1,27 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/card-configuration.test.ts
+  s_71ecc0368356a8::t_1b24cc4a3f44d7 1-84,86-92,95-116
+  s_71ecc0368356a8::t_accc1597d569a1 85
+  s_71ecc0368356a8::t_eebbdfd9d62ee4 93-94
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_71ecc0368356a8::t_f0797f03189cb0 196-203
+apps/evolverun/clawweb/public/modules/clawinsight/docs/bot-diagnosis-recovery-config.md
+  s_71ecc0368356a8::t_f0797f03189cb0 50-65,76-80,175-199,305-307
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_71ecc0368356a8::t_f0797f03189cb0 360,363,366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f7829116173d4f811ef1f84f0460d0fa13da034a",
+  "prompts": {},
+  "sessions": {
+    "s_71ecc0368356a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e8b5-d1c5-7392-983a-301586384ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+apps/backend/src/agentclaw/community/core/bot_inventory/services/bot_inventory_service.py
+  s_02f79795f3d37a::t_41aaf6139b945f 169-172,527
+apps/backend/src/agentclaw/community/core/bot_inventory/types.py
+  s_02f79795f3d37a::t_41aaf6139b945f 133-134
+apps/backend/src/agentclaw/community/core/bot_inventory/adapters/service_lifecycle.py
+  s_02f79795f3d37a::t_41aaf6139b945f 208-211
+apps/backend/src/agentclaw/community/core/bot_inventory/README.md
+  s_02f79795f3d37a::t_41aaf6139b945f 49-54
+apps/backend/tests/community/core/bot_inventory/services/test_inventory_creation_order.py
+  s_02f79795f3d37a::t_b8a320c5774ad3 1-10,24-28,32-36,41-45,49-51,63-73,81-84,92-97
+  s_02f79795f3d37a::t_f35279b0dbf090 11-23,29-31,37-40,46-48,52-62,74-80,85-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ae8a38cc601f9140b5f2eba4efc39cb8b79a94dc",
+  "prompts": {},
+  "sessions": {
+    "s_02f79795f3d37a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05bec-667c-7102-9d27-cc8ec88f9217",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
