@@ -4,6 +4,8 @@
 - Worktree: `/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/baas-caller-status-20261118`
 - Source repository / push remote: `inclusionAI/Avernet` / `github`; never the internal mirror `origin`.
 - Initial topic / base: `feat/baas-caller-status-20261118` / `dev` at `d24f0e1ed2d240a54fe475d7acb03465948dbada`.
+- Final rebase result / latest base: `rebase/baas-caller-status-on-dev-20261118` / GitHub `dev` at `b535af5d77115191ec94b51a1590d8d81db50b20`. All eight task commits replayed without conflict.
+- Rebase-specific complete OpenAPI/framework plus new BaaS and changed session-listing domain verification: 2804 passed, 2 skipped, zero failed (92.27 seconds; `/tmp/baas-caller-status-rebase.xml`).
 - PR: NOT_CREATED.
 - Human comments: auto.
 - Prerequisite: [Caller status PR #3914](https://github.com/inclusionAI/Avernet/pull/3914) is OPEN and not merged. The new complete branch carries its seven commits, rebased onto current dev; the previous PR is left unchanged.
@@ -42,4 +44,4 @@ No PR exists yet; feedback not evaluated. Independent local review inspected the
 - Automated comments: PENDING
 - ACI/CI: PENDING
 - Human comments: PENDING
-- Next: complete implementation and local gates; create a fresh rebase result branch on verified latest GitHub dev, push and open an English PR.
+- Next: publish the verified rebase result branch and open an English PR; observe all final-head remote checks and comments.
