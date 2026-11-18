@@ -161,10 +161,10 @@ describe("runtime manifest compatibility and gitlinks", () => {
     expect(readFileSync(path.join(work, "workflow.pack.yaml"), "utf8")).toBe(content);
   });
   it.each([
-    ["save", "workflows", false], ["deploy", "workflows", false],
-    ["save", "packs/pack", false], ["deploy", "packs/pack", false],
-    ["save", "workflows", true], ["deploy", "workflows", true],
-  ])("rejects submodule on %s at %s (index removed=%s) without publishing", async (operation, location, removeIndex) => {
+    ["workflows", false],
+    ["packs/pack", false],
+    ["workflows", true],
+  ])("rejects submodule at %s (index removed=%s) without publishing", async (location, removeIndex) => {
     const sub = path.join(root, "sub"); mkdirSync(sub);
     runGit(sub, ["init"]); runGit(sub, ["config", "user.name", "Test"]); runGit(sub, ["config", "user.email", author.email]);
     writeFileSync(path.join(sub, "kept"), "keep"); runGit(sub, ["add", "."]); runGit(sub, ["commit", "-m", "submodule"]);
@@ -597,10 +597,10 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
   const rootSpec = "id: flow\ntitle: Original\nnodes: []\n";
   function seed() { runGit(repo, ["add", "."]); runGit(repo, ["commit", "-m", "pack fixtures"]); runGit(repo, ["push", bare, "HEAD:refs/heads/wf/flow"]); }
   it.each([
-    ["save", "other"], ["deploy", "other"],
-    ["save", "packs/other"], ["deploy", "packs/other"],
-    ["save", "packs"], ["deploy", "packs"],
-  ])("checks duplicate workflow ID during %s when another manifest is in %s", async (operation, directory) => {
+    ["other"],
+    ["packs/other"],
+    ["packs"],
+  ])("checks duplicate workflow ID when another manifest is in %s", async (directory) => {
     const otherId = path.basename(directory);
     const otherManifest = `id: ${otherId}\nversion: '1.0.0'\nworkflows: [{id: flow, file: workflows/flow.yaml}]\n`;
     put("workflow.pack.yaml", rootManifest); put("workflows/flow.yaml", rootSpec);
@@ -626,9 +626,9 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
     expect(runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname)", "refs/heads/saved/flow", "refs/tags/deploy/flow/"])).toBe("");
   });
   it.each([
-    ["save", "other", "action"], ["deploy", "other", "action"], ["save", "packs/other", "action"], ["deploy", "packs/other", "action"],
-    ["save", "other", "workflow"], ["deploy", "other", "workflow"], ["save", "packs/other", "workflow"], ["deploy", "packs/other", "workflow"],
-  ])("checks the %s target owned by an unrelated Pack at %s (%s)", async (operation, directory, kind) => {
+    ["other", "action"], ["packs/other", "action"],
+    ["other", "workflow"], ["packs/other", "workflow"],
+  ])("checks the target owned by an unrelated Pack at %s (%s)", async (directory, kind) => {
     const otherId = path.basename(directory); const target = `${directory}/shared/flow.yaml`;
     const targetManifest = `id: pack\nversion: '1.0.0'\nworkflows: [{id: flow, file: ${target}}]\n`;
     const otherManifest = kind === "workflow"
@@ -654,9 +654,9 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
     expect(runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname)", "refs/heads/saved/flow", "refs/tags/deploy/flow/"])).toBe("");
   });
   it.each([
-    ["save", "other", false], ["deploy", "other", false], ["save", "packs/other", false], ["deploy", "packs/other", false],
-    ["save", "other", true], ["deploy", "other", true], ["save", "packs/other", true], ["deploy", "packs/other", true],
-  ])("checks %s when the workflow is another Pack manifest at %s (alias=%s)", async (operation, directory, useAlias) => {
+    ["other", false], ["packs/other", false],
+    ["other", true], ["packs/other", true],
+  ])("checks when the workflow is another Pack manifest at %s (alias=%s)", async (directory, useAlias) => {
     // This is both a valid Pack manifest and a workflow with id flow.
     const otherManifest = "id: flow\nversion: '1.0.0'\nworkflows: [{id: other-flow, file: workflows/other.yaml}]\nnodes: []\n";
     put(`${directory}/workflow.pack.yaml`, otherManifest);
