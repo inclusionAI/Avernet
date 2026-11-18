@@ -18,7 +18,7 @@ export async function createPreviewApp() {
   await botDiagnosisRecoveryMigrations[0].migrate!(db);
   await db.exec(`CREATE TABLE ac_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, entity_id TEXT, env TEXT,
     active_engine TEXT DEFAULT 'teclaw', bot_name TEXT, owner_id TEXT, owner_name TEXT, avernet_tenant TEXT, bot_type TEXT, is_delete INTEGER DEFAULT 0)`);
-  const scope = { tenant: 'teamclaw', allowedTargetEnvs: ['dev', 'prod'] };
+  const scope = { tenant: 'teamclaw', allowedTargetEnvs: ['dev', 'pre', 'prod'] };
   const repo = new MonitoringRepository(db);
   const now = Date.now();
   const fixture = JSON.parse(readFileSync(new URL('../server/fixtures/monitoring/alert.json', import.meta.url), 'utf8'));
@@ -45,7 +45,7 @@ export async function createPreviewApp() {
   await bot('default', '009876', '陈雨的默认助手', 'HEALTHY', 9);
   await bot('research-new', '009876', '陈雨的研究助手', null, 0);
   await bot('research-new', '001234', '研究助手', null, 0);
-  await bot('weekly-report', '001234', '周报助手', 'PAUSED', 8, 'dev', 'service');
+  await bot('weekly-report', '001234', '周报助手', 'PAUSED', 8, 'prod', 'service');
   await bot('default', '001234', '我的默认助手', 'HEALTHY', 163);
   const app = express();
   const role = (cookie = '') => /(?:^|;\s*)monitoring_preview_role=(admin|member)(?:;|$)/.exec(cookie)?.[1];

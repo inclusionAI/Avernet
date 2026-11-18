@@ -14,10 +14,11 @@ export const monitoringApi = {
     fetchJson<{ updated: number; failed: string[] }>(`${BASE}/configurations`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     }),
-  options: (scope: BotScope, q: string, dates: Pick<MonitoringQuery, 'startDate' | 'endDate'>, cursor: string | null, signal?: AbortSignal) => {
+  options: (scope: BotScope, q: string, dates: Pick<MonitoringQuery, 'startDate' | 'endDate'>, cursor: string | null, signal?: AbortSignal, env?: string) => {
     const params = monitoringWindow(dates);
     params.set('scope', scope); params.set('q', q); params.set('limit', '20');
     if (cursor) params.set('cursor', cursor);
+    if (env) params.set('env', env);
     return fetchJson<BotOptionsPage>(`${BASE}/bot-options?${params}`, { signal });
   },
   targetStatus: (ref: string, dates: Pick<MonitoringQuery, 'startDate' | 'endDate'>, signal?: AbortSignal) =>
