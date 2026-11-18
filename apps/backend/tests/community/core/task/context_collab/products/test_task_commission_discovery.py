@@ -41,7 +41,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
-from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
@@ -51,7 +51,8 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.reposi
     ContextCollabRepositoryProtocol,
     ContextStatusRecord,
 )
-from agentclaw.community.core.task.context_collab.l6_products.publication import (
+from agentclaw.community.core.task.context_collab.l5_methods.publication import (
+    BotSelfApplicationAdmission,
     OpenPublicationProfile,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
@@ -59,9 +60,6 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
-)
-from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
-    BotSelfApplicationAdmission,
 )
 from agentclaw.community.di.modules.task_commission_self_application import (
     TaskCommissionSelfApplicationAdapter,

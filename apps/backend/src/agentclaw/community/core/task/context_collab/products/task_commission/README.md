@@ -47,19 +47,26 @@ stored events are not rewritten. Owner review/cancellation remains governed by
 G1 and machine guards; start/progress/submit require the executor. The Bot ingress
 permits only those three executor actions.
 
-## Method-specific product policy
+## L5 Method policy selection
 
-Commission's Open publication/admission policy is declared in
+Commission selects L5-owned Open publication/admission values in
 `profile.composition.policies` as `OpenMethodPolicy(publication=OpenPublicationProfile(...))`.
-It is L6 product configuration scoped to the required Open Method, not a universal
-`ProductProfile.publication` field or a new L5 contract. The product service and
-DI adapters resolve `composition.require_policy("Open").publication`; creation
-and catalog installation reject duplicate, untyped or unbound Method policies.
-Other Methods do not need an Open policy or a null placeholder. See the
-[L6 authoring example and migration](../../l6_products/README.md#create-a-product-profile).
-Moving policy into `composition.policies` is a Python configuration relocation,
-not a change to the L5 Open contract. The explicit @2 product definition adds
-Single selection without rewriting @1 or introducing a new HTTP/ACCS operation.
+`OpenMethodPolicy` lives in `l5_methods.method_policies`; `OpenPublicationProfile`,
+`OpenAdmissionPolicy` and `BotSelfApplicationAdmission` live in
+[`l5_methods.publication`](../../l5_methods/publication.py). L6 composes those
+contracts rather than defining a product-owned copy. The commission-specific
+`DesignatedOpenAdmission` @1 compatibility strategy remains in [publication.py](publication.py);
+that module reexports the L5 Bot strategy for old imports.
+
+The product service and DI adapters resolve
+`composition.require_policy("Open").publication`; creation and catalog installation
+reject duplicate, untyped or unbound Method policies. Other Methods do not need
+an Open policy or a null placeholder. See the [L5 boundary](../../l5_methods/README.md)
+and [L6 authoring example](../../l6_products/README.md#create-a-product-profile).
+This ownership correction preserves role validation, capacity, admission, dispatch
+and failure behavior; it changes no installed version, ProductInstance storage or
+HTTP/ACCS wire shape. The explicit @2 product definition still adds Single
+selection without rewriting @1.
 
 ## Autonomous products without domain/workflow boilerplate
 

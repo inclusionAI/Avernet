@@ -13,7 +13,8 @@ It implements bounded local contracts, not full ACCS conformance.
   storage/policy ports live beside it in `service_ports.py`. `l6_products/service_api.py`
   extends L4 with legacy combined creation; root `service_api.py` only reexports
   the canonical L4/L6 types. Method contracts live in
-  `l5_methods/operations/contracts.py`, and product contracts in
+  `l5_methods/operations/contracts.py`; [L5 Method policies](l5_methods/README.md)
+  own Open publication/admission values, and product contracts live in
   `products/*/service_api.py`. [G3 acquisition](g3_observe_evaluate_evolve/README.md)
   exposes `TelemetryServiceProtocol` for generic Observation, MetricDefinition/
   MetricSample and Outcome, separate from Work. Root API imports remain compatible.
@@ -63,13 +64,16 @@ l4_context_primitives/
     task_storage.py        # Task identity/evidence checks and legacy import
     records.py             # lower records/repository contract and read decoder port
     creation.py / row_codec.py # primitive construction and row conversion
-l5_methods/operations/
-  contracts.py           # Method commands, results and public protocols
-  initialization.py      # top-level Method/roster from resolved Method facts
-  lifecycle.py           # binding lifecycle, inspect, compose and detach
-  single.py / group.py   # separate operations; single_group.py preserves combined API
-  open/                  # opportunity query/application/admission operations
-  swarm/                 # execution profile/plan/stage operations
+l5_methods/
+  method_policies.py        # MethodPolicy / OpenMethodPolicy; L6 selects these values
+  publication.py            # Open admission/publication and Bot self-application contracts
+  operations/               # layer-owned Method operations
+    contracts.py            # Method commands, results and public protocols
+    initialization.py       # top-level Method/roster from resolved Method facts
+    lifecycle.py            # binding lifecycle, inspect, compose and detach
+    single.py / group.py     # separate operations; single_group.py preserves combined API
+    open/                   # opportunity query/application/admission operations
+    swarm/                  # execution profile/plan/stage operations
 l6_products/
   service_api.py            # legacy combined creation command/extended Protocol
   task_contracts.py         # standard_task@1: fixed Task contract, not a Bot plan
@@ -92,7 +96,7 @@ products/
 
 - L6 [profile creation](l6_products/README.md#create-a-product-profile) is a pure
   `create_product_profile` operation returning `ProductProfileDefinition`.
-  Method-specific product policies live in `composition.policies` (for example,
+  L5-owned Method policies are selected in `composition.policies` (for example,
   `OpenMethodPolicy(publication=...)`), not top-level Profile fields; see the
   [L6 authoring contract](l6_products/README.md#create-a-product-profile). Creation
   and catalog installation share validation but remain separate; neither profile

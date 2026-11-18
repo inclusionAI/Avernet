@@ -28,6 +28,10 @@ def test_legacy_entrypoints_only_reexport_layer_owners():
     assert paths, "compatibility services directory must exist"
     paths.append(_COLLAB / "service_api.py")
     paths.extend(
+        _COLLAB / "l6_products" / name
+        for name in ("method_policies.py", "publication.py")
+    )
+    paths.extend(
         _COLLAB / "persistence" / name
         for name in (
             "repository.py",

@@ -27,7 +27,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
     WorkflowProfile,
 )
-from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
@@ -37,11 +37,11 @@ from agentclaw.community.core.task.context_collab.l6_products.operations import 
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     STANDARD_TASK_CONTRACT,
 )
-from agentclaw.community.core.task.context_collab.l6_products.publication import (
+from agentclaw.community.core.task.context_collab.l5_methods.publication import (
+    BotSelfApplicationAdmission,
     OpenPublicationProfile,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
-    BotSelfApplicationAdmission,
     DesignatedOpenAdmission,
 )
 
