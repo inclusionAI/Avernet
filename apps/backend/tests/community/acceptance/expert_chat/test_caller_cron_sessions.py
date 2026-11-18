@@ -28,7 +28,13 @@ def _runtime_data(response: httpx.Response) -> dict:
 @pytest.mark.parametrize("session_kind", ["ordinary", "cron", "subagent"])
 def test_existing_caller_discovers_runtime_sessions_without_owned_index(live_backend, session_kind):
     """Runtime-created sessions support every Caller operation without an owned row."""
-    subject = fresh_id("caller_cron_owner")
+    from tests.community.acceptance.bot_collaborator.test_manager_sync_bcs_projection import (
+        _BCS_BASE_URL, _ensure_human, _ensure_projection_target,
+        _fresh_staff_id, _initialize_fixture_ownership,
+    )
+
+    # BCN's human registration requires a nonempty ASCII alphanumeric staff ID.
+    subject = _fresh_staff_id("callercronowner")
     with httpx.Client(base_url=live_backend, headers={"x-user-id": subject}, timeout=90) as client:
         bot = create_live_personal_bot(client, user_id=subject, bot_name_prefix="Caller Cron")
         bot_id = bot["bot_id"]
@@ -87,10 +93,6 @@ def test_existing_caller_discovers_runtime_sessions_without_owned_index(live_bac
         assert owned == [], owned
         # Bootstrap this fresh fixture's real BCN ownership; no authorization
         # service is mocked. f_user_id then selects the ExpertChat HTTP backend.
-        from tests.community.acceptance.bot_collaborator.test_manager_sync_bcs_projection import (
-            _BCS_BASE_URL, _ensure_human, _ensure_projection_target,
-            _initialize_fixture_ownership,
-        )
         with httpx.Client(base_url=_BCS_BASE_URL, timeout=30) as bcs:
             _ensure_human(bcs, subject)
             _ensure_projection_target(bcs, bcs_bot_id=f"{bot_id}:{subject}", owner_id=subject)
