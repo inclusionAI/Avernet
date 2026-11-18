@@ -1,5 +1,3 @@
-import { PageHeader } from '@/components/Common/PageHeader';
-import { Button } from '@/components/ui/Button';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import type { UserTaskOwnerBotOption } from '@/pages/MyTask/components/userTaskFilters';
 import { UserTaskTab } from '@/pages/MyTask/components/UserTaskTab';
@@ -7,8 +5,8 @@ import { useMyTaskTasks } from '@/pages/MyTask/hooks/useMyTaskTasks';
 import type { UserTaskStatusFilter } from '@/pages/MyTask/userTaskUtils';
 import { useConversationTeamDirectory } from '@/pages/Workspace/Chat/hooks/useConversationTeamDirectory';
 import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
-import { history } from '@umijs/max';
 import { useMemo, useState } from 'react';
+import { LabTasksHeader } from './LabTasksHeader';
 import { TaskArtifactsDrawer } from './TaskArtifactsDrawer';
 
 const DEFAULT_PAGE = 1;
@@ -43,10 +41,17 @@ export default function LabTasksPage() {
   );
   const { chatBots, isLoading: ownedBotsLoading } = useOwnedBots(ownerUserId || null, Boolean(ownerUserId));
   const { teamBots, teamLoading: teamBotsLoading } = useConversationTeamDirectory(ownerUserId || null);
-  const conversationBots = useMemo(() => [
-    ...chatBots,
-    ...teamBots.map((item) => item.bot),
-  ], [chatBots, teamBots]);
+  const conversationBots = useMemo(() => [...chatBots, ...teamBots.map((item) => item.bot)], [chatBots, teamBots]);
+  const ownerBotMetaMap = useMemo(() => {
+    const map: Record<string, { botId: string; avatarUrl?: string }> = {};
+    conversationBots.forEach((bot) => {
+      const meta = { botId: bot.realBotId || bot.botId, avatarUrl: bot.avatarUrl };
+      [bot.botId, bot.realBotId].forEach((id) => {
+        if (id?.trim()) map[id.trim().toLowerCase()] = meta;
+      });
+    });
+    return map;
+  }, [conversationBots]);
   const botNameMap = useMemo(() => {
     const map: Record<string, string> = {};
     conversationBots.forEach((bot) => {
@@ -90,30 +95,7 @@ export default function LabTasksPage() {
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
-        <PageHeader
-          title="任务"
-          description={
-            <span>
-              查看跨Bot、跨群的协同任务，可在
-              <Button
-                variant="link"
-                className="h-auto px-1 py-0 text-[13px] leading-5"
-                onClick={() => history.push('/workspace/chat')}
-              >
-                对话
-              </Button>
-              或
-              <Button
-                variant="link"
-                className="h-auto px-1 py-0 text-[13px] leading-5"
-                onClick={() => history.push('/workspace/collaboration')}
-              >
-                协作群
-              </Button>
-              中发起此类任务
-            </span>
-          }
-        />
+        <LabTasksHeader />
         <UserTaskTab
           taskRecords={taskRecords}
           total={total}
@@ -136,6 +118,7 @@ export default function LabTasksPage() {
           }}
           botNameMap={botNameMap}
           ownerBotUserIdMap={ownerBotUserIdMap}
+          ownerBotMetaMap={ownerBotMetaMap}
           ownerBotOptions={ownerBotOptions}
           displayVariant="lab"
         />

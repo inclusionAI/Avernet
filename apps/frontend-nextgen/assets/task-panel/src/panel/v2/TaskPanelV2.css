@@ -1,3 +1,8 @@
+[data-task-panel-root] {
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
 /*
  * TaskPanel 标题行高度必须按“真实渲染出来的切换入口”判断：
  * adapter 恒注入 switcher 节点，但加载失败/空任务时其实际渲染为 null。
@@ -8,4 +13,80 @@
 }
 [data-task-panel-root]:has([data-task-switcher-control='true']) > header {
   height: 48px;
+}
+
+.task-artifact-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.task-artifact-row:hover,
+.task-artifact-row:focus-within {
+  background: var(--task-panel-hover);
+}
+.task-artifact-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+  opacity: 0;
+}
+.task-artifact-row:hover .task-artifact-actions,
+.task-artifact-row:focus-within .task-artifact-actions {
+  opacity: 1;
+}
+.task-artifact-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--task-panel-text);
+  cursor: pointer;
+}
+.task-artifact-icon:focus-visible,
+.task-artifact-row button:focus-visible,
+.task-artifact-row a:focus-visible {
+  outline: 2px solid var(--task-panel-primary);
+  outline-offset: 2px;
+}
+.task-artifact-icon:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+@media (hover: none) {
+  .task-artifact-actions {
+    opacity: 1;
+  }
+}
+.task-node-row {
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.task-node-row:hover,
+.task-node-row:focus-visible {
+  background: var(--task-panel-muted);
+  outline: none;
+}
+.task-node-row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--task-panel-primary);
+}
+
+.task-node-state-running {
+  animation: task-node-state-spin 1s linear infinite;
+  border-top-color: transparent !important;
+}
+@keyframes task-node-state-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

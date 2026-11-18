@@ -17,12 +17,21 @@ export const C = {
   surface: '#FFFFFF',
   surfaceRaised: '#FBFCFE',
   surfaceAlt: '#F5F7FA',
+  surfaceHover: '#F3F3F3',
   primary: '#2563EB',
   primaryBg: '#EAF0FD',
   success: '#00B42A',
   warning: '#FF7D00',
   danger: '#F53F3F',
   review: '#722ED1',
+} as const;
+
+/** Asset-owned CSS tokens, shared by full panels and standalone artifact lists. */
+export const PANEL_CSS_VARIABLES = {
+  '--task-panel-hover': C.surfaceHover,
+  '--task-panel-muted': C.surfaceAlt,
+  '--task-panel-primary': C.primary,
+  '--task-panel-text': C.textPrimary,
 } as const;
 
 /** 任务 7 态药丸配色（y5） */
@@ -51,7 +60,7 @@ export const NODE_STATUS_TONES: Record<string, NodeStatusTone> = {
   running: { stroke: C.warning, fill: '#FFF7E8' },
   failed: { stroke: C.danger, fill: '#FFECE8' },
   pending: { stroke: C.textMuted, fill: '#F2F3F5' },
-  hung: { stroke: C.primary, fill: C.primaryBg },
+  hung: { stroke: C.review, fill: '#F5E8FF' },
   cancelled: { stroke: C.border, fill: '#F7F8FA' },
 };
 
@@ -86,7 +95,7 @@ export const PRESENT_TONES: Record<string, { label: string; color: string }> = {
   done: { label: '已完成', color: C.success },
   merged: { label: '已合入', color: C.success },
   failed: { label: '执行失败', color: C.danger },
-  hung: { label: '任务挂起', color: C.primary },
+  hung: { label: '任务挂起', color: C.review },
   cancelled: { label: '已取消', color: C.textMuted },
 };
 

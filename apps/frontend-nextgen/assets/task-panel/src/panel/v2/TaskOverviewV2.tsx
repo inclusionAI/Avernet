@@ -2,7 +2,7 @@
 /**
  * TaskOverviewV2 —— Level1 任务总览,PRD 两区结构:步骤区仅展示节点视图 + 产物区。
  * 交互语义(PRD 方案A):点根节点恢复宿主会话，点其他节点联动会话；
- * 节点视图当前隐藏下钻入口，暂不提供节点副屏下钻展示。
+ * 独立下钻图标进入群/Bot 节点副屏，不同时触发会话联动。
  */
 import React from 'react';
 
@@ -24,10 +24,10 @@ export interface TaskOverviewV2Props {
 export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBaseUrl, onOpenSubTask }) => (
   <div data-testid="task-overview-v2" style={{ minHeight: '100%' }}>
     <section>
-      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px 0' }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>步骤</span>
-          <span style={{ fontSize: 11, color: C.textSecondary }}>点击查看会话</span>
+          <span style={{ fontSize: 14, fontWeight: 500, color: C.textPrimary }}>步骤</span>
+          <span style={{ fontSize: 12, color: C.textSecondary }}>点击查看会话</span>
         </div>
       </div>
       <NodeListViewV2 task={task} nav={nav} onOpenSubTask={onOpenSubTask} />

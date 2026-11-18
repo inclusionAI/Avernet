@@ -10,6 +10,8 @@ export interface UserTaskOwnerBotOption {
 interface FilterUserTaskRecordsOptions {
   taskRecords: TaskListItem[];
   keyword: string;
+  /** Lab searches only the displayed title; other task views retain broad matching. */
+  titleOnly?: boolean;
   ownerBotFilter: string;
   ownerBotOptions: UserTaskOwnerBotOption[];
 }
@@ -18,6 +20,7 @@ interface FilterUserTaskRecordsOptions {
 export function filterUserTaskRecords({
   taskRecords,
   keyword,
+  titleOnly = false,
   ownerBotFilter,
   ownerBotOptions,
 }: FilterUserTaskRecordsOptions): TaskListItem[] {
@@ -40,9 +43,10 @@ export function filterUserTaskRecords({
     const matchesKeyword =
       !normalizedKeyword ||
       title.includes(normalizedKeyword) ||
-      taskId.includes(normalizedKeyword) ||
-      botId.includes(normalizedKeyword) ||
-      sourceType.includes(normalizedKeyword);
+      (!titleOnly &&
+        (taskId.includes(normalizedKeyword) ||
+          botId.includes(normalizedKeyword) ||
+          sourceType.includes(normalizedKeyword)));
     const matchesOwnerBot = !selectedOwnerBotIds || selectedOwnerBotIds.has(botId);
     return matchesKeyword && matchesOwnerBot;
   });
