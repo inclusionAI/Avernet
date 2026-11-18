@@ -17,6 +17,7 @@ owner: BCS distributed Worker
 
 相关契约和导航：
 
+- [实现计划与进度](implementation-plan.md)：开发验证单独记录，不将 SPEC 送审等同于功能交付。
 - [分布式契约 SPEC](../2026-11-15-distributed-contracts/spec.md)及[任务划分](../2026-11-15-distributed-contracts/tasks.md)。
 - [业务存储端口](../../crates/service-api/bcs-service-api/src/port/repo/distributed/README.md)、[SessionStore](../../crates/service-api/bcs-service-api/src/port/repo/distributed/session.rs)、[Inbox 与调度](../../crates/service-api/bcs-service-api/src/port/repo/distributed/inbox.rs)。
 - [Runner](../../crates/service-api/bcs-service-api/src/core/dist_runner.rs)、[输出与任务模型](../../crates/contracts/bcs-dist-model/src/task.rs)、[TaskFeed](../../crates/service-api/bcs-service-api/src/port/repo/distributed/task_feed.rs)。
@@ -46,7 +47,7 @@ owner: BCS distributed Worker
 
 | 边界 | 变化 |
 | --- | --- |
-| 存储插件 | 新增受限的 `PersistentJsonCas` 能力及独立接口，提供持久文档读取、同版本路径投影、原子创建、精确版本条件下的 Replace／Patch |
+| 存储插件 | 扩展已有独立 `DocumentCas`／`DocumentStorePlugin` 子集，提供持久文档读取、同版本路径投影、原子创建、精确版本条件下的 Replace／Patch |
 | Inbox provider | 补齐持久受理意图、规范内容与位置、受理代次及在途登记、持久受理结论、受理修复、监听状态和调度；明确 Quarantined／OutcomeUnknown 及重试语义，保持生产、消费、调度端口分离 |
 | SessionStore | 增加精确 owner＋业务 head 保护的隔离状态、风险尝试结果及条件解除隔离；控制写不推进 `commit_seq` |
 | Runner／输出 | `Show` 增加稳定 artifact 身份和明确更新操作；输出事件、展示草稿及恢复读取共享确定性投影；增加冻结的输出额度、快照进度及独立的任务终结状态转换 |
@@ -54,7 +55,9 @@ owner: BCS distributed Worker
 
 ### 3.1 持久 JSON CAS 子集
 
-`PersistentJsonCas` 支持不存在时原子创建，以及读取到的精确文档版本下的一次更新；首次创建版本为 1，每次成功更新推进版本，失败不修改内容或版本，耗尽失败而不回绕。存在性和版本条件必须与写入原子核对，不能以先 GET 再普通覆盖实现。
+本节原提案名 `PersistentJsonCas` 在实际集成基线上对应已有的 [`DocumentCas`／`DocumentStorePlugin`](../../crates/plugin-api/bcs-store-api/src/document.rs)，不另建等价能力。支持不存在时原子创建，以及读取到的精确文档版本下的一次更新；首次创建版本为 1，每次成功更新推进版本，失败不修改内容或版本，耗尽失败而不回绕。存在性和版本条件必须与写入原子核对，不能以先 GET 再普通覆盖实现。
+
+路径读取可从一次一致文档读取中投影；Patch 可先在内存中完成全部编辑，再以原 expected version 做一次原子 Replace，期间并发更新必须使该次写入拒绝。此实现最多一次读取和一次 EQ 写入，无隐藏重试，不降低失败原子性；读取和写入仍计完整文档字节，不能宣称为原生局部更新。配置 provider 可提供通过相同 conformance 的原生实现。
 
 逻辑 Replace 必须删除旧值中不再存在的字段；Patch 沿用现有 JSON 指针和有序编辑语义，真实 null 与字段缺失可区分，多处编辑全部成功或全部失败。元数据与业务 JSON 隔离，业务 `rev`、`_store` 等名字不被禁用。适配器可以使用可逆私有编码，但不能要求所有后端都存字符串。
 
