@@ -2,10 +2,15 @@
 import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
 import { WorkflowEditorPage } from '@/pages/TaskEscort/parity/editor/WorkflowEditorPage';
 import { backendRequest } from '@/services/backendApi/httpClient';
+import { workflowAuthoringService } from '@/services/taskEscortParity/workflowAuthoringService';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
+jest.mock('@umijs/max', () => ({ history: jest.requireActual('history').createMemoryHistory() }));
+jest.mock('@/services/taskEscortParity/workflowAuthoringService', () => ({
+  workflowAuthoringService: { readBaseline: jest.fn() },
+}));
 const request = backendRequest as jest.Mock;
 const spec = {
   id: 'wf',
@@ -72,11 +77,23 @@ function respond(url: string, options: { params: Record<string, unknown> }) {
   return Promise.resolve(spec);
 }
 beforeEach(() => {
+  jest.mocked(workflowAuthoringService.readBaseline).mockResolvedValue({
+    workflowId: 'wf',
+    userId: 'alice',
+    spec,
+    packId: 'pack',
+    rawPackId: 'pack',
+    draftToken: 'baseline',
+    specJson: JSON.stringify(spec),
+    sourceVersion: 'current',
+    sourceCommit: 'a'.repeat(40),
+    expectedSavedHead: 'a'.repeat(40),
+  });
   request.mockReset().mockImplementation(respond);
   jest.mocked(context.navigate).mockClear();
 });
 
-it('renders real graph, node selections and preserved advanced/raw fields; all mutations are disabled', async () => {
+it('renders real graph, node selections and preserved advanced/raw fields with permission-gated authoring', async () => {
   render(<WorkflowEditorPage context={context} />);
   fireEvent.click(await screen.findByRole('button', { name: /准备数据.*cli-script/ }));
   const inspector = screen.getByRole('complementary', { name: '节点属性' });
@@ -89,11 +106,12 @@ it('renders real graph, node selections and preserved advanced/raw fields; all m
   expect(context.navigate).toHaveBeenCalledWith('editor', expect.objectContaining({ nodeId: 'a' }));
   fireEvent.click(screen.getByRole('button', { name: /结果审核.*approval/ }));
   expect(inspector).toHaveTextContent('结果审核');
-  for (const name of ['保存工作流', '发布工作流', '添加节点'])
-    expect(screen.getByRole('button', { name })).toBeDisabled();
-  expect(screen.getByText(/未接入.*写入/)).toBeInTheDocument();
+  for (const name of ['保存工作流', '发布工作流', 'AI 修改'])
+    expect(screen.getByRole('button', { name })).toBeEnabled();
+  expect(screen.getByRole('button', { name: '添加节点' })).toBeDisabled();
+  expect(screen.queryByText(/本轮只读|本轮未接入保存/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
-  expect(screen.getByLabelText('工作流 YAML')).toHaveTextContent('vendorExtension:');
+  expect((screen.getByLabelText('工作流 YAML') as HTMLTextAreaElement).value).toContain('vendorExtension:');
   fireEvent.click(screen.getByRole('button', { name: '对照' }));
   expect(screen.getByLabelText('工作流画布')).toBeInTheDocument();
   expect(screen.getByLabelText('工作流 YAML')).toBeInTheDocument();
@@ -142,6 +160,11 @@ it('preserves 403/malformed states, prevents scripts reads without edit access, 
   );
   render(<WorkflowEditorPage context={context} />);
   await screen.findByRole('button', { name: /准备数据.*cli-script/ });
+  for (const name of ['保存工作流', '发布工作流', 'AI 修改'])
+    expect(screen.getByRole('button', { name })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
+  expect(screen.queryByRole('textbox', { name: '工作流 YAML' })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('工作流 YAML')).toHaveTextContent('vendorExtension');
   fireEvent.click(screen.getByRole('button', { name: '脚本文件' }));
   expect(await screen.findByText(/脚本读取需要工作流编辑权限和 Pack/)).toBeInTheDocument();
   expect(request.mock.calls.some(([url]) => url.endsWith('/pack-scripts'))).toBe(false);
