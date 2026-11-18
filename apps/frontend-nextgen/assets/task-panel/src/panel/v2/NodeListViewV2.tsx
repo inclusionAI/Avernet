@@ -64,10 +64,9 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
         // 下钻必须有节点自身的会话与映射身份，不能借用会话导航的任务级 fallback。
         const canDrill = Boolean(node.sessionId?.trim() && (node.drillable === true || node.assignee?.trim()));
         const drillReason = '节点缺少会话或执行者信息，无法下钻';
-        const isRootNode = node.id === rootNodeId;
         const stageName = `第${stageIndex + 1}棒 ${node.name}`;
         const selectForConversation = () => {
-          if (isRootNode) nav.selectRootNode(node.id);
+          if (node.id === rootNodeId && !target) nav.selectRootNode(node.id);
           else nav.selectNode(node.id, target);
         };
         return (
