@@ -119,7 +119,13 @@ impl A2aBotRepoPort for DbA2aBotStore {
         params.push(i64::try_from(record.revision).map_err(error)?.into());
         let result=self.db.execute(DbStatement::with_params(format!(
             "UPDATE bcs_bots SET name=?,{bot_info_assignment},gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision=?"),params)).await.map_err(error)?;
-        if result.affected_rows==0 {return Err(ServiceError::Conflict("A2A Card configuration changed".into()));}
+        // MySQL reports zero affected rows when the UPDATE matched the row but
+        // every written value equalled the stored value (no CLIENT_FOUND_ROWS).
+        // A matched-but-unchanged synchronize is a success, not a conflict:
+        // re-check the fence before signalling a revision conflict.
+        if result.affected_rows==0 && !card_projection_unchanged(self.db.as_ref(),self.env.as_str(),record).await? {
+            return Err(ServiceError::Conflict("A2A Card configuration changed".into()));
+        }
         if let Some(registry)=self.registry.as_ref().and_then(std::sync::Weak::upgrade) {
             registry.invalidate_registry_metadata(&self.env,&record.bot_uuid).await;
         }
@@ -153,6 +159,17 @@ fn decode(row:&bcs_db_api::DbRow)->ServiceResult<A2aBotRecord> {
     Ok(A2aBotRecord {bot_uuid:required("bot_uuid")?,provider_id:required("provider_id")?,provider_bot_ref:required("provider_bot_ref")?,
         agent_card_url:row.get_string("agent_card_url").map_err(error)?,agent_card:parse_card(&required("agent_card")?)?,
         revision:u64::try_from(row.get_i64("agent_card_revision").map_err(error)?.ok_or_else(||error("missing revision"))?).map_err(error)?})
+}
+/// Whether the Card binding still satisfies the synchronize fence: the row is
+/// present, not deleted, gateway-bound to this Provider Bot and still at the
+/// expected revision. MySQL (without CLIENT_FOUND_ROWS) reports zero affected
+/// rows for an UPDATE that matched a row whose values were all unchanged, so a
+/// passing fence check distinguishes a no-op synchronize from a real conflict.
+async fn card_projection_unchanged(db:&dyn DbPlugin,env:&str,record:&A2aBotRecord)->ServiceResult<bool> {
+    let rows=db.query(DbStatement::with_params(
+        "SELECT bot_uuid FROM bcs_bots WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision=?",
+        vec![env.into(),record.bot_uuid.clone().into(),record.provider_id.clone().into(),record.provider_bot_ref.clone().into(),i64::try_from(record.revision).map_err(error)?.into()])).await.map_err(error)?;
+    Ok(!rows.is_empty())
 }
 pub(crate) fn validate_registration_card(bot:&bcs_service_api::bot_provider::BotProviderRecord, card:&A2aBotRecord)->ServiceResult<()> {
     if card.bot_uuid!=bot.bot_uuid || card.provider_id!=bot.provider_id || card.provider_bot_ref!=bot.provider_bot_ref || bot.is_deleted
