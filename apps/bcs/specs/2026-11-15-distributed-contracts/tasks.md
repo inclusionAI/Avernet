@@ -46,6 +46,19 @@ run the same suite. Backend guarantees must be verified before rollout.
 
 ## Gateway work
 
+**2026-11-18 scoped handoff:** For the first-phase distributed Group A2A path,
+the [Group implementation plan](../2026-11-18-distributed-group-as-agent/plan.md#2-分拆与依赖)
+owns execution of the overlapping Gateway work: G1 maps to G01/G02, G2 to
+G02, G3 to G03, G4 to G03/G06, G5 to G03, and G6 to G04–G06. One Gateway
+owner maintains the shared application and adapter files. Its sole Core home
+is `crates/services/bcs-dist-gateway/`; do not also implement the historical
+`bcs-dist-kernel/src/gateway/` paths below. TaskFeed providers remain S2/S3
+deliverables, not a second G3 implementation. The same scoped plan supplies
+W3's first-phase FSM subset through R01–R03 (optional Judge in R04).
+This is a planning handoff, not implementation evidence; broader queued-task
+and HumanInput requirements remain pending, and the original task tables are
+retained for that scope and history.
+
 | ID | Files / deliverable | Depends on | Acceptance |
 | --- | --- | --- | --- |
 | G1 | `crates/application/bcs-app-dist-gateway/src/{identity,routing}.rs` | D0 | Deterministic sid/tid/input identity; frozen spec read through SessionStorePort; tenant/principal authorization; target and interaction checks; repeat request selects same task |

@@ -10,6 +10,8 @@ When a change yields verified reusable knowledge, update its owning documentatio
 
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.
 
+- [2026-11-18 Distributed Group as Agent](2026-11-18-distributed-group-as-agent/spec.md) — review revision pending D0 freeze: Gateway A2A Server and FSM-group integration; parallel development contracts, acceptance criteria, [implementation plans](2026-11-18-distributed-group-as-agent/plan.md) and [research](2026-11-18-distributed-group-as-agent/research.md); no runtime implementation.
+
 - [2026-11-15-distributed-contracts](2026-11-15-distributed-contracts/spec.md) — declarations and ordered tasks; no runtime implementation
 
 - [2026-08-20-bot-task-modes](2026-08-20-bot-task-modes/)
