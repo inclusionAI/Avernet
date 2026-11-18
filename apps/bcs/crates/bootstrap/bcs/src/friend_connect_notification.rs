@@ -4,8 +4,8 @@
 use bcs_network_tracing::RequestBuilderExt;
 use async_trait::async_trait;
 use bcs_service_api::port::{
-    FriendConnectNotificationCommand, FriendConnectNotificationKind,
-    FriendConnectNotificationPort,
+    FriendConnectCancellationCommand, FriendConnectNotificationCommand,
+    FriendConnectNotificationKind, FriendConnectNotificationPort,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
 use serde::Serialize;
@@ -15,6 +15,9 @@ use tracing::{debug, info, warn};
 /// forwarded gateway principal (`x-avernet-principal`) and derives the
 /// acting user from it, so no `user_id` query param is sent.
 const WORK_ORDER_PATH: &str = "/api/v1/work-orders/events";
+/// Internal endpoint that closes a pending friend-approval work order when the
+/// applicant withdraws the underlying request.
+const WORK_ORDER_CANCEL_PATH: &str = "/api/v1/work-orders/events/cancel";
 
 #[derive(Debug, Clone)]
 pub struct HttpFriendConnectNotificationPort {
@@ -55,6 +58,17 @@ impl HttpFriendConnectNotificationPort {
         })
     }
 
+    fn work_order_cancel_url(&self) -> Result<reqwest::Url, ServiceError> {
+        self.base_url
+            .join(WORK_ORDER_CANCEL_PATH)
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "failed to build friend work-order cancel url from '{}': {error}",
+                    self.base_url
+                ))
+            })
+    }
+
     fn request_parts(
         &self,
         command: &FriendConnectNotificationCommand,
@@ -64,18 +78,18 @@ impl HttpFriendConnectNotificationPort {
         Ok((url, payload))
     }
 
-    fn build_request_with_payload(
+    fn build_request_with_payload<T: Serialize + ?Sized>(
         &self,
-        command: &FriendConnectNotificationCommand,
+        request_auth: Option<&bcs_service_api::RequestAuthHeaders>,
         url: reqwest::Url,
-        payload: &FriendWorkOrderEventRequest,
+        payload: &T,
     ) -> reqwest::RequestBuilder {
         let mut request = self.client.post(url);
         // The backend internal endpoint authenticates BCS via the forwarded
         // gateway principal (`x-avernet-principal`) and derives the acting
         // user from it. Propagate request-id/trace-id for diagnostics.
         // Openapi Authorization/Cookie identity is intentionally NOT sent.
-        if let Some(auth) = command.request_auth.as_ref() {
+        if let Some(auth) = request_auth {
             for (name, value) in &auth.forwarded_headers {
                 let lower = name.to_ascii_lowercase();
                 if lower == "x-avernet-principal" || lower == "x-request-id" || lower == "x-trace-id" {
@@ -95,7 +109,7 @@ impl HttpFriendConnectNotificationPort {
         payload: &FriendWorkOrderEventRequest,
     ) -> Result<reqwest::RequestBuilder, ServiceError> {
         let url = self.work_order_url()?;
-        Ok(self.build_request_with_payload(command, url, payload))
+        Ok(self.build_request_with_payload(command.request_auth.as_ref(), url, payload))
     }
 }
 
@@ -128,6 +142,33 @@ struct FriendWorkOrderBizData {
     notification_kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FriendWorkOrderCancelRequest {
+    biz_type: String,
+    biz_id: String,
+    event_type: String,
+    reason: String,
+}
+
+impl FriendWorkOrderCancelRequest {
+    fn from_command(command: &FriendConnectCancellationCommand) -> Self {
+        Self {
+            biz_type: "BOT_FRIEND".to_string(),
+            biz_id: command
+                .request_ids
+                .first()
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            event_type: if is_human_actor(&command.applicant_actor_id) {
+                "HUMAN2BOT_FRIEND_APPLIED".to_string()
+            } else {
+                "BOT2BOT_FRIEND_APPLIED".to_string()
+            },
+            reason: "friend request cancelled by applicant".to_string(),
+        }
+    }
 }
 
 fn is_human_actor(actor_id: &str) -> bool {
@@ -322,7 +363,7 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
         let (url, payload) = self.request_parts(&command)?;
         let request_payload = friend_work_order_payload_for_log(&payload);
         let response = self
-            .build_request_with_payload(&command, url.clone(), &payload)
+            .build_request_with_payload(command.request_auth.as_ref(), url.clone(), &payload)
             .send_traced()
             .await
             .map_err(|error| {
@@ -359,6 +400,64 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
             &command,
         ))
             }).await
+    }
+
+    async fn cancel(&self, command: FriendConnectCancellationCommand) -> ServiceResult<()> {
+        bcs_observability::observe_result("callback.friend_work_order_cancel", async {
+            if command.request_ids.is_empty() {
+                debug!(
+                    target_bot_id = %command.target_bot_id,
+                    "friend-connect work-order cancel skipped: no request ids"
+                );
+                return Ok(());
+            }
+            let url = self.work_order_cancel_url()?;
+            let payload = FriendWorkOrderCancelRequest::from_command(&command);
+            let request_payload = serde_json::to_string(&payload).unwrap_or_else(|error| {
+                format!("<failed to serialize friend work-order cancel payload: {error}>")
+            });
+            let response = self
+                .build_request_with_payload(command.request_auth.as_ref(), url.clone(), &payload)
+                .send_traced()
+                .await
+                .map_err(|error| {
+                    warn!(
+                        request_ids = ?command.request_ids,
+                        target_bot_id = %command.target_bot_id,
+                        url = %url,
+                        request_payload = %request_payload,
+                        error = %error,
+                        "friend-connect work-order cancel request failed"
+                    );
+                    ServiceError::InternalError(format!(
+                        "friend work-order cancel request failed: {error}"
+                    ))
+                })?;
+            if response.status().is_success() {
+                info!(
+                    request_ids = ?command.request_ids,
+                    target_bot_id = %command.target_bot_id,
+                    status = %response.status(),
+                    "friend-connect work-order cancelled"
+                );
+                return Ok(());
+            }
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            warn!(
+                request_ids = ?command.request_ids,
+                target_bot_id = %command.target_bot_id,
+                status = %status,
+                url = %url,
+                response_body = %body,
+                request_payload = %request_payload,
+                "friend-connect work-order cancel failed"
+            );
+            Err(ServiceError::InternalError(format!(
+                "friend work-order cancel request returned {status}: {body}"
+            )))
+        })
+        .await
     }
 }
 
@@ -431,6 +530,47 @@ mod tests {
         assert!(request.headers().get(reqwest::header::COOKIE).is_none(), "openapi Cookie is not forwarded to the internal endpoint");
         assert_eq!(request.headers().get("x-avernet-principal").and_then(|value| value.to_str().ok()), Some("jwt-payload"));
         assert_eq!(request.headers().get("x-request-id").and_then(|value| value.to_str().ok()), Some("rid-1"));
+    }
+
+    #[test]
+    fn builds_cancel_request_for_the_event_cancel_endpoint() {
+        let adapter = HttpFriendConnectNotificationPort::new("https://backend.example.com/api/")
+            .expect("valid url");
+        let request_auth = bcs_service_api::RequestAuthHeaders {
+            authorization: Some("Bearer user-token".to_string()),
+            cookie: Some("session=abc".to_string()),
+            forwarded_headers: vec![
+                ("x-avernet-principal".to_string(), "jwt-payload".to_string()),
+                ("x-request-id".to_string(), "rid-1".to_string()),
+            ],
+        };
+        let command = FriendConnectCancellationCommand {
+            env: "dev".to_string(),
+            request_ids: vec!["1".to_string()],
+            applicant_actor_id: "human_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            request_auth: Some(request_auth.clone()),
+        };
+        let payload = FriendWorkOrderCancelRequest::from_command(&command);
+        assert_eq!(payload.biz_type, "BOT_FRIEND");
+        assert_eq!(payload.biz_id, "1");
+        assert_eq!(payload.event_type, "HUMAN2BOT_FRIEND_APPLIED");
+        let request = adapter
+            .build_request_with_payload(Some(&request_auth), adapter.work_order_cancel_url().unwrap(), &payload)
+            .build()
+            .expect("materialize request");
+        assert_eq!(
+            request.url().as_str(),
+            "https://backend.example.com/api/v1/work-orders/events/cancel"
+        );
+        assert_eq!(
+            request.headers().get("x-avernet-principal").and_then(|value| value.to_str().ok()),
+            Some("jwt-payload")
+        );
+        assert_eq!(
+            request.headers().get("x-request-id").and_then(|value| value.to_str().ok()),
+            Some("rid-1")
+        );
     }
 
     #[tokio::test]

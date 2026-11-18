@@ -33,6 +33,10 @@ class WorkOrderAlreadyProcessedError(WorkOrderError):
     pass
 
 
+class WorkOrderAlreadyCancelledError(WorkOrderError):
+    """The applicant withdrew the underlying request before this decision."""
+
+
 class WorkOrderApplicantAlreadyMemberError(WorkOrderError):
     pass
 

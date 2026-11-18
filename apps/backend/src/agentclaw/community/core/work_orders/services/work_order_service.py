@@ -31,6 +31,7 @@ from agentclaw.community.core.spaces.services.space_access_service import (
 )
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
+    WorkOrderAlreadyCancelledError,
     WorkOrderAlreadyProcessedError,
     WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
@@ -485,6 +486,16 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderInvalidRemarkError("review remark is required")
         detail = self.get_detail(work_order_id=work_order_id, actor_id=actor_id)
         if (
+            detail.work_order.status is WorkOrderStatus.CANCELLED
+            and detail.work_order.biz_type == WorkOrderBizType.BOT_FRIEND.value
+        ):
+            # The applicant withdrew the request; the owner is acting on a
+            # stale notification. Report that explicitly instead of the
+            # generic "already processed" outcome.
+            raise WorkOrderAlreadyCancelledError(
+                "the friend request was cancelled by the applicant"
+            )
+        if (
             detail.work_order.approval_mode is WorkOrderApprovalMode.AUTO
             or detail.work_order.status is not WorkOrderStatus.PENDING
         ):
@@ -578,6 +589,39 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 },
             )
             raise WorkOrderLocalFinalizeError(work_order_id) from exc
+
+    def cancel_pending_friend_event(
+        self,
+        *,
+        biz_type: str,
+        biz_id: str,
+        actor_id: str,
+        reason: str,
+    ) -> int:
+        """Withdraw a pending friend approval when its request is cancelled."""
+        normalized_biz_type = self._required_text(
+            biz_type, limit=64, error=WorkOrderInvalidEventError
+        )
+        if normalized_biz_type != WorkOrderBizType.BOT_FRIEND.value:
+            raise WorkOrderInvalidEventError(
+                "only BOT_FRIEND work orders can be cancelled by an applicant"
+            )
+        normalized_biz_id = self._required_text(
+            biz_id, limit=128, error=WorkOrderInvalidEventError
+        )
+        normalized_actor = self._required_text(
+            actor_id, limit=256, error=WorkOrderAccessDeniedError
+        )
+        normalized_reason = self._required_text(
+            reason, limit=512, error=WorkOrderInvalidReasonError
+        )
+        return self._repository.cancel_pending_by_biz(
+            biz_type=normalized_biz_type,
+            biz_id=normalized_biz_id,
+            applicant_user_id=normalized_actor,
+            reason=normalized_reason,
+            env=get_current_env(),
+        )
 
     def get_bot_editor_request_policy(
         self,

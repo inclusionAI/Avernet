@@ -114,6 +114,48 @@ class _WorkOrderCreationRepository:
                     )
                 for bot in query.with_for_update().all():
                     assert_bot_mutable({"ext": bot.ext})
+            # BCS retries the owner notification when an idempotent create
+            # hits its dedup branch. A friend approval is keyed by the BCS
+            # request id, so a retry must reuse the existing pending work order
+            # instead of giving the owner a second identical approval item.
+            if (
+                event_category is NotificationCategory.APPROVAL
+                and approval_mode is WorkOrderApprovalMode.MANUAL
+                and biz_type == WorkOrderBizType.BOT_FRIEND.value
+            ):
+                existing = (
+                    db.query(self._WorkOrder)
+                    .filter(
+                        self._WorkOrder.biz_type == biz_type,
+                        self._WorkOrder.biz_id == biz_id,
+                        self._WorkOrder.env == env,
+                        self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                        self._WorkOrder.approval_mode
+                        == WorkOrderApprovalMode.MANUAL.value,
+                    )
+                    .with_for_update()
+                    .first()
+                )
+                if existing is not None:
+                    notification_ids = [
+                        notification.id
+                        for notification in db.query(self._Notification)
+                        .filter(
+                            self._Notification.work_order_id == existing.id,
+                            self._Notification.notification_category
+                            == NotificationCategory.APPROVAL.value,
+                            self._Notification.env == env,
+                        )
+                        .order_by(self._Notification.id.asc())
+                        .all()
+                    ]
+                    return WorkOrderEventCreatedResult(
+                        event_category=NotificationCategory.APPROVAL,
+                        work_order_id=existing.id,
+                        work_order_no=existing.work_order_no,
+                        notification_ids=notification_ids,
+                        status=WorkOrderEventStatus.PENDING,
+                    )
             if (
                 event_category is NotificationCategory.APPROVAL
                 and approval_mode is WorkOrderApprovalMode.AUTO

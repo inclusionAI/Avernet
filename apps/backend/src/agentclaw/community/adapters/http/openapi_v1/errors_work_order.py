@@ -4,6 +4,7 @@ from enum import IntEnum, StrEnum
 
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
+    WorkOrderAlreadyCancelledError,
     WorkOrderAlreadyPendingError,
     WorkOrderAlreadyProcessedError,
     WorkOrderCallbackError,
@@ -31,6 +32,7 @@ class WorkOrderErrorCode(IntEnum):
     NOTIFICATION_NOT_FOUND = 404202
     ALREADY_PENDING = 409201
     ALREADY_PROCESSED = 409202
+    ALREADY_CANCELLED = 409210
     APPLICANT_ALREADY_MEMBER = 409203
     NO_REVIEWER = 409204
     JOIN_NOT_ALLOWED = 409205
@@ -49,6 +51,7 @@ class WorkOrderPublicErrorMessage(StrEnum):
     NOT_FOUND = "Not found"
     ALREADY_PENDING = "A pending application already exists"
     ALREADY_PROCESSED = "The work order has already been processed"
+    ALREADY_CANCELLED = "该好友申请已取消，请刷新后重试"
     APPLICANT_ALREADY_MEMBER = "Applicant is already a space member"
     NO_REVIEWER = "The space has no available approver"
     JOIN_NOT_ALLOWED = "The space does not accept join requests"
@@ -86,6 +89,10 @@ WORK_ORDER_ERROR_STATUS = {
     WorkOrderAlreadyProcessedError: (
         409,
         WorkOrderPublicErrorMessage.ALREADY_PROCESSED,
+    ),
+    WorkOrderAlreadyCancelledError: (
+        409,
+        WorkOrderPublicErrorMessage.ALREADY_CANCELLED,
     ),
     WorkOrderCallbackError: (502, WorkOrderPublicErrorMessage.CALLBACK_FAILED),
     WorkOrderApplicantAlreadyMemberError: (
@@ -131,6 +138,7 @@ WORK_ORDER_ERROR_CODES = {
     WorkOrderNotificationNotFoundError: WorkOrderErrorCode.NOTIFICATION_NOT_FOUND,
     WorkOrderAlreadyPendingError: WorkOrderErrorCode.ALREADY_PENDING,
     WorkOrderAlreadyProcessedError: WorkOrderErrorCode.ALREADY_PROCESSED,
+    WorkOrderAlreadyCancelledError: WorkOrderErrorCode.ALREADY_CANCELLED,
     WorkOrderCallbackError: WorkOrderErrorCode.CALLBACK_FAILED,
     WorkOrderApplicantAlreadyMemberError: WorkOrderErrorCode.APPLICANT_ALREADY_MEMBER,
     WorkOrderApplicantAlreadyEditorError: WorkOrderErrorCode.APPLICANT_ALREADY_EDITOR,

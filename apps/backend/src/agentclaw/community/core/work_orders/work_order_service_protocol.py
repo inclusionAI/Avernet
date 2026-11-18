@@ -92,6 +92,23 @@ class WorkOrderServiceProtocol(Protocol):
         ...
 
     @abstractmethod
+    def cancel_pending_friend_event(
+        self,
+        *,
+        biz_type: str,
+        biz_id: str,
+        actor_id: str,
+        reason: str,
+    ) -> int:
+        """Withdraw a pending friend-approval event owned by the caller.
+
+        Used when the applicant cancels the underlying friend request: the
+        owner's approval item must not remain pending. Returns the number of
+        cancelled work orders; terminal or missing orders are a no-op.
+        """
+        ...
+
+    @abstractmethod
     def create_space_join_request(
         self, *, space_id: int, applicant_user_id: str, reason: str | None
     ) -> WorkOrderRecord: ...

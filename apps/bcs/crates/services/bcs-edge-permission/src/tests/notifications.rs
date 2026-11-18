@@ -186,7 +186,7 @@ use super::*;
     }
 
     #[tokio::test]
-    async fn pending_notification_is_not_duplicated_on_idempotent_create() {
+    async fn pending_request_is_not_duplicated_but_notification_is_retried() {
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:pending_idem", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let recorder = RecordingFriendConnectNotificationPort::default();
@@ -201,7 +201,9 @@ use super::*;
             .await
             .expect("idempotent pending");
         assert_eq!(first.request_ids, second.request_ids);
-        assert_eq!(events.lock().await.len(), 1);
+        // The request row stays single, but each idempotent retry re-sends the
+        // approval notification so a transient first failure is recoverable.
+        assert_eq!(events.lock().await.len(), 2);
     }
 
     #[tokio::test]
@@ -281,4 +283,66 @@ use super::*;
         let events = events.lock().await;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].recipient_user_ids, vec!["85020".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn pending_connect_retry_resends_owner_notification() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:retry_notify", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+
+        let first = svc
+            .create_connect("human_1", "x:retry_notify", Some("hi".into()), None)
+            .await
+            .expect("first pending connect");
+        assert_eq!(first.status, ConnectStatus::Pending);
+        assert_eq!(events.lock().await.len(), 1, "first request notifies once");
+
+        // The retry hits the dedup branch: the pending row is reused, but the
+        // approval notification must be retried so a transient first failure
+        // does not become permanent.
+        let second = svc
+            .create_connect("human_1", "x:retry_notify", Some("hi".into()), None)
+            .await
+            .expect("idempotent retry");
+        assert_eq!(second.status, ConnectStatus::Pending);
+        assert_eq!(second.request_ids, first.request_ids, "same pending row");
+        let events = events.lock().await;
+        assert_eq!(events.len(), 2, "retry re-sends the owner notification");
+        assert_eq!(events[1].kind, FriendConnectNotificationKind::ApprovalRequested);
+        assert_eq!(events[1].request_ids, first.request_ids);
+        assert_eq!(events[1].recipient_user_ids, vec!["85020".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn opposite_direction_dedup_does_not_renotify_the_wrong_owner() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:mirror_a", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        seed_bot(&db, "x:mirror_b", "protected", "protected", "APPROVAL", "online", Some("85021")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+
+        let first = svc
+            .create_connect("x:mirror_a", "x:mirror_b", None, None)
+            .await
+            .expect("first pending Bot↔Bot");
+        let events_after_first = events.lock().await.clone();
+        assert_eq!(events_after_first.len(), 1);
+        assert_eq!(events_after_first[0].applicant_actor_id, "x:mirror_a");
+        assert_eq!(events_after_first[0].target_bot_id, "x:mirror_b");
+        assert_eq!(events_after_first[0].recipient_user_ids, vec!["85021".to_string()]);
+
+        // The peer calling the opposite direction finds the generated reverse
+        // mirror. It must get the original logical request back WITHOUT a new
+        // notification addressed from the wrong applicant to the wrong owner.
+        let second = svc
+            .create_connect("x:mirror_b", "x:mirror_a", None, None)
+            .await
+            .expect("opposite direction dedup");
+        assert_eq!(second.status, ConnectStatus::Pending);
+        assert_eq!(second.request_ids, vec![first.request_ids[0].clone()]);
+        assert_eq!(events.lock().await.len(), 1, "no wrong-owner re-notify");
     }

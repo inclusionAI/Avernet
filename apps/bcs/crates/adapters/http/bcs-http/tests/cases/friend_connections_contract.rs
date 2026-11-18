@@ -113,7 +113,11 @@ impl ConnectService for RecordingConnectService {
         Ok(())
     }
 
-    async fn cancel(&self, request_id: &str) -> ServiceResult<()> {
+    async fn cancel(
+        &self,
+        request_id: &str,
+        _request_auth: Option<bcs_service_api::RequestAuthHeaders>,
+    ) -> ServiceResult<()> {
         self.cancel_commands.lock().await.push(request_id.to_string());
         Ok(())
     }

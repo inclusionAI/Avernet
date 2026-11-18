@@ -50,6 +50,32 @@ pub struct FriendConnectNotificationCommand {
 #[async_trait]
 pub trait FriendConnectNotificationPort: Send + Sync {
     async fn notify(&self, command: FriendConnectNotificationCommand) -> ServiceResult<()>;
+
+    /// Best-effort invalidation of the owner work-order created for a friend
+    /// request that the applicant has now withdrawn.
+    ///
+    /// The default implementation is a no-op so existing ports (tests, local
+    /// wiring) keep compiling; the HTTP adapter forwards this to the backend
+    /// so stale "pending approval" entries disappear from the owner inbox.
+    async fn cancel(&self, _command: FriendConnectCancellationCommand) -> ServiceResult<()> {
+        Ok(())
+    }
+}
+
+/// Command used to invalidate the work-order/notification produced for a
+/// friend request that is no longer pending (cancelled by the applicant or
+/// cleaned up because the friendship was revoked).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FriendConnectCancellationCommand {
+    pub env: String,
+    pub request_ids: Vec<String>,
+    /// Applicant actor id (`human_<staff_no>` or a bot id). Determines whether
+    /// the affected work order is a human→bot or bot↔bot friend approval.
+    pub applicant_actor_id: String,
+    pub target_bot_id: String,
+    /// Forwarded gateway principal + trace headers so the backend can
+    /// authenticate the caller that withdrew the request.
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 /// No-op notification port for local tests and bootstrap wiring until a real

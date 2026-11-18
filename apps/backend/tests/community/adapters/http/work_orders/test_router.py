@@ -240,6 +240,31 @@ def test_create_notice_event_returns_created_status(
     }
 
 
+def test_cancel_event_withdraws_pending_work_orders_for_the_caller(
+    client: TestClient,
+    service: MagicMock,
+) -> None:
+    service.cancel_pending_friend_event.return_value = 1
+
+    response = client.post(
+        f"{_PATH}/cancel",
+        json={
+            "biz_type": "BOT_FRIEND",
+            "biz_id": "request-77",
+            "reason": "friend request cancelled by applicant",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"] == {"cancelled_count": 1}
+    service.cancel_pending_friend_event.assert_called_once_with(
+        biz_type="BOT_FRIEND",
+        biz_id="request-77",
+        actor_id=_USER_ID,
+        reason="friend request cancelled by applicant",
+    )
+
+
 def test_authenticated_user_can_submit_auto_approval(
     client: TestClient, service: MagicMock
 ) -> None:

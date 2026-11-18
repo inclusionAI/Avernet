@@ -14,8 +14,8 @@ use bcs_service_api::application::connect::{
     ConnectService, ConnectStatus, FriendListQuery, RequestDirection,
 };
 use bcs_service_api::port::{
-    FriendConnectNotificationCommand, FriendConnectNotificationKind,
-    FriendConnectNotificationPort,
+    FriendConnectCancellationCommand, FriendConnectNotificationCommand,
+    FriendConnectNotificationKind, FriendConnectNotificationPort,
 };
 use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::port::repo::{
@@ -210,12 +210,18 @@ use bcs_user_directory_api::{UserDirectoryLookupContext, UserDirectoryPlugin};
     #[derive(Clone, Default)]
     struct RecordingFriendConnectNotificationPort {
         events: Arc<tokio::sync::Mutex<Vec<FriendConnectNotificationCommand>>>,
+        cancellations: Arc<tokio::sync::Mutex<Vec<FriendConnectCancellationCommand>>>,
     }
 
     #[async_trait]
     impl FriendConnectNotificationPort for RecordingFriendConnectNotificationPort {
         async fn notify(&self, command: FriendConnectNotificationCommand) -> ServiceResult<()> {
             self.events.lock().await.push(command);
+            Ok(())
+        }
+
+        async fn cancel(&self, command: FriendConnectCancellationCommand) -> ServiceResult<()> {
+            self.cancellations.lock().await.push(command);
             Ok(())
         }
     }

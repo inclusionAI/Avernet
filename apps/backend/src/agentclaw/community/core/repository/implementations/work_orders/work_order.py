@@ -395,6 +395,89 @@ class WorkOrderRepository(
                 reviewed_at=now,
             )
 
+    def cancel_pending_by_biz(
+        self,
+        *,
+        biz_type: str,
+        biz_id: str,
+        applicant_user_id: str,
+        reason: str,
+        env: str,
+    ) -> int:
+        """Close pending approvals whose business request was withdrawn.
+
+        The applicant is the only actor allowed to withdraw their own request.
+        Lock the matched orders first so a concurrent reviewer decision either
+        wins or loses as a whole; the losing side then reads a terminal state.
+        Approval notifications are marked read in the same transaction so the
+        owner's badge does not keep counting a cancelled request.
+        """
+        with self._db.transactional_orm_session() as db:
+            now = db.execute(select(func.now())).scalar_one()
+            orders = (
+                db.query(self._WorkOrder)
+                .filter(
+                    self._WorkOrder.biz_type == biz_type,
+                    self._WorkOrder.biz_id == biz_id,
+                    self._WorkOrder.env == env,
+                    self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                    or_(
+                        self._WorkOrder.approval_mode.is_(None),
+                        self._WorkOrder.approval_mode
+                        == WorkOrderApprovalMode.MANUAL.value,
+                    ),
+                )
+                .with_for_update()
+                .all()
+            )
+            if not orders:
+                return 0
+            if any(order.applicant_user_id != applicant_user_id for order in orders):
+                raise WorkOrderAccessDeniedError(
+                    "only the applicant can cancel this work order"
+                )
+            work_order_ids = [order.id for order in orders]
+            db.query(self._WorkOrder).filter(
+                self._WorkOrder.id.in_(work_order_ids),
+                self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+            ).update(
+                {
+                    self._WorkOrder.status: WorkOrderStatus.CANCELLED.value,
+                    self._WorkOrder.reviewer_user_id: applicant_user_id,
+                    self._WorkOrder.review_remark: reason,
+                    self._WorkOrder.reviewed_at: now,
+                    self._WorkOrder.gmt_modified: now,
+                },
+                synchronize_session=False,
+            )
+            db.query(self._Approver).filter(
+                self._Approver.work_order_id.in_(work_order_ids),
+                self._Approver.status == WorkOrderApproverStatus.PENDING.value,
+                self._Approver.env == env,
+            ).update(
+                {
+                    self._Approver.status: WorkOrderApproverStatus.CANCELLED.value,
+                    self._Approver.review_remark: reason,
+                    self._Approver.reviewed_at: now,
+                    self._Approver.gmt_modified: now,
+                },
+                synchronize_session=False,
+            )
+            db.query(self._Notification).filter(
+                self._Notification.work_order_id.in_(work_order_ids),
+                self._Notification.notification_category
+                == NotificationCategory.APPROVAL.value,
+                self._Notification.env == env,
+            ).update(
+                {
+                    self._Notification.is_read: True,
+                    self._Notification.read_at: now,
+                    self._Notification.gmt_modified: now,
+                },
+                synchronize_session=False,
+            )
+            return len(work_order_ids)
+
     def create_space_join_request(
         self,
         *,

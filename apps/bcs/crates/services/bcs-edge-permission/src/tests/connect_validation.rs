@@ -87,7 +87,7 @@ use super::*;
         assert!(matches!(err, ServiceError::FriendRequestNotFound(_)), "got {err:?}");
 
         let err = svc
-            .cancel("missing-request-cancel")
+            .cancel("missing-request-cancel", None)
             .await
             .expect_err("cancel missing request should fail");
         assert!(matches!(err, ServiceError::FriendRequestNotFound(_)), "got {err:?}");
