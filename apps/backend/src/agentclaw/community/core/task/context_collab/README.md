@@ -79,9 +79,9 @@ l6_products/
   task_contracts.py         # standard_task@1: fixed Task contract, not a Bot plan
   operations/
     collaboration_policy.py # product-aware adapter for L4-owned G1/G4 policy ports
-    contracts.py            # ProductProfileCreateCommand, ProductInstantiateCommand/Protocol
+    contracts.py            # Profile authoring, new/existing-Collet Instantiate commands/Protocol
     product_profile.py      # create_product_profile: validate/return, no installation
-    product_instantiation.py # explicit pinned L6 selection on an existing L4 Collet
+    product_instantiation.py # one L6 new-Collet creation/binding or existing-Collet selection
     collaboration_creation.py # legacy combined Method/product creation over L4
     method_bootstrap.py     # L6 selection/identities -> L5 initialization/recovery
     method_lifecycle.py     # legacy product-aware constructor; operations inherited from L5
@@ -276,9 +276,16 @@ to an exact
 [`ContextCollabRepository`](l4_context_primitives/persistence/repository.py)
 instance in L4, not the L6 adapter or a subclass carrying product operations.
 `TaskModule` uses this binding for both the L4 service and the narrow
-`CollaborationReader` consumed by L4/L5 operations. The actual creation chain is:
+`CollaborationReader` consumed by L4/L5 operations.
+Product journeys call L6 once; independent primitive consumers may still use L4
+creation and existing-Collet installation separately:
 
 ```text
+L6 ProductInstantiationServiceProtocol.instantiate(ProductInstantiateNewCommand, actor)
+  → validate pinned Profile, participants, role sources, capabilities and G1
+  → injected L4 ContextServiceProtocol.create_collet (chain below)
+  → product installation + L5 initialization (chain below); no Task
+
 L4 ContextServiceProtocol.create_collet
   → L4 ContextService.create_collet (G1 creation authorization)
   → L4 ContextCollabRepository.create_l4_collet
@@ -334,7 +341,8 @@ collet = l4_collab_service.create_collet(
     ),
     actor_context,
 )
-# No Task/Event exists yet. Instantiate the product separately, then call start.
+# Standalone L4 example: no Task/Event exists yet. Bind via L6 before product Work.start.
+# New product journeys instead pass ColletCreateCommand into one L6 Instantiate call.
 ```
 
 Collet creation persists only the context and returns revision 1. It has no Task,
@@ -345,10 +353,21 @@ need existing unassigned Work; it is not a prerequisite for Instantiate and is
 not used by the commission journey. Creation failures propagate and SQL writes
 roll back. Objective/executors remain Task authority, not Collet fields.
 
-Product-specific installation is a separate L6 composition operation:
+Product-specific instantiation belongs to L6, not an L4 side effect:
 [`ProductInstantiationServiceProtocol.instantiate`](l6_products/operations/contracts.py)
-accepts `ProductInstantiateCommand(collet_id, profile_ref, expected_version,
-participant_refs=(bot_a,), executor_ref=bot_a, resource_refs=(input_resource,))`.
+accepts `ProductInstantiateNewCommand(collet=ColletCreateCommand(initiator_ref,
+title=..., description=...), profile_ref=profile.ref, participant_refs=(bot_a,),
+resource_refs=(input_resource,))` to create and initialize through one L6 call.
+The existing `ProductInstantiateCommand(collet_id, profile_ref, expected_version,
+participant_refs=(bot_a,), executor_ref=bot_a, resource_refs=(input_resource,))`
+remains available for binding an already-created untouched Collet.
+New creation prevalidates Profile/roles/eligibility/capabilities and product G1,
+then calls the injected public L4 creation port (including L4 G1 authorization).
+It returns ProductInstance with `collet_ref`; it does not invoke admission,
+selection or Work.start. Separate L4/SQL/MethodStore commits are preserved.
+A post-creation failure exposes the committed identity via
+`ProductInstantiationIncompleteError`; inspect and recover that Collet rather
+than retrying new creation. See the [new-creation and recovery contract](l6_products/README.md#instantiate-a-product-collaboration).
 Initial participants and typed L3 input resource references are supplied by the
 product caller, not by L4 creation or the reusable Profile. The exact Profile's
 typed [`ParticipantScope`](l6_products/participant_scope.py) declares `OPEN` eligibility

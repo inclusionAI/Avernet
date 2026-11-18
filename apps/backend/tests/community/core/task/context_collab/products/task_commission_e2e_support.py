@@ -132,7 +132,22 @@ def _instantiate_product_instance(
         ),
         context,
     )
-    record = repository.get_current_status(collet.collet_id)
+    return _assert_product_instance(
+        injector,
+        collet.collet_id,
+        profile,
+        instance,
+        participant_ref=participant_ref,
+        resource_refs=resource_refs,
+    )
+
+
+def _assert_product_instance(
+    injector, collet_id, profile, instance, *, participant_ref, resource_refs
+):
+    """Shared postconditions for new creation and existing-Collet binding."""
+    repository = injector.get(ContextCollabRepositoryProtocol)
+    record = repository.get_current_status(collet_id)
     assert record.product_instance == instance
     assert instance.participant_scope == profile.participant_scope
     # Profile 的允许列表不是本实例的实际参与者列表。
@@ -140,7 +155,7 @@ def _instantiate_product_instance(
         participant_ref
     }
     assert instance.instance_id != instance.collet_ref
-    assert instance.collet_ref == collet.collet_id
+    assert instance.collet_ref == collet_id
     assert instance.root_task_ref is None
     assert record.task is None and record.tasks == ()
     assert instance.profile_ref == instance.negotiation.selected_profile == profile.ref
@@ -163,7 +178,7 @@ def _instantiate_product_instance(
     assert record.events[0].event_kind == "collet.participants_bound"
     assert record.events[0].task_ref is None
     assert len(record.participants) == len(record.role_bindings) == 2
-    assert record.collet.version == unbound.collet.version + 1
+    assert record.collet.version == 2
     assert ProductInstance.from_dict(instance.to_dict()) == instance
 
     # 一次 Instantiate 创建两份独立 Profile 绑定,显式 Single --support--> Open。
@@ -174,14 +189,14 @@ def _instantiate_product_instance(
         (open_binding_id, "Open"),
         (single_binding_id, "Single"),
     ):
-        binding = store.get_binding(axes, binding_id, collet.collet_id)
+        binding = store.get_binding(axes, binding_id, collet_id)
         assert binding.state is BindingState.ACTIVE
         assert binding.collab_context_id == instance.collet_ref
         assert binding.method_kind == method
         assert binding.method_names == (method,)
         assert binding.profile_versions == {method: "0.2"}
         assert binding.role_binding_refs == instance.role_binding_refs
-    [edge] = store.list_composition_edges(axes, collet.collet_id)
+    [edge] = store.list_composition_edges(axes, collet_id)
     assert edge.parent_binding == single_binding_id
     assert edge.child_binding == open_binding_id
     assert edge.relation_kind is CompositionRelation.SUPPORT

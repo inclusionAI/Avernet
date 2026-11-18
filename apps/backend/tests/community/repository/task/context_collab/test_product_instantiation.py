@@ -23,6 +23,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     ResourceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
+    ContextService,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     AppendEventRecordRequest,
     ColletCreateCommand,
@@ -43,6 +46,9 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     create_product_profile,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
+    ProductCollaborationPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
     ProductInstantiateCommand,
@@ -88,7 +94,14 @@ def runtime(db):
     repo = ContextCollabRepository(db, product_catalog=catalog)
     store = InMemoryMethodStore()
     service = ProductInstantiationService(
-        repo, store, catalog, StructuralContextCollabAuthorizer()
+        repo,
+        store,
+        catalog,
+        StructuralContextCollabAuthorizer(),
+        ContextService(
+            repo,
+            ProductCollaborationPolicy(catalog, StructuralContextCollabAuthorizer()),
+        ),
     )
     created = repo.create_l4_collet(
         ColletCreateCommand(OWNER.actor),

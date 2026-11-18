@@ -126,16 +126,20 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    `create_product_profile` operation and explicitly install @2 through [DI installation](../../../../../di/modules/context_collab_products.py).
    “Online” means an immutable code-owned definition installed into the actual
    application catalog, not a mutable registry or a mocked registration call.
-2. Business staff first create only the L4 context with
-   `ColletCreateCommand(initiator_ref, title=..., description=...)`: no Space,
-   objective, executor, Task or Event is supplied/created. They then call
-   `ProductInstantiationServiceProtocol.instantiate(ProductInstantiateCommand(
-   collet_id, profile_ref, expected_version, participant_refs=(bot,),
+2. Business staff call L6 once:
+   `ProductInstantiationServiceProtocol.instantiate(ProductInstantiateNewCommand(
+   collet=ColletCreateCommand(initiator_ref, title=..., description=...),
+   profile_ref=profile.ref, participant_refs=(bot,),
    resource_refs=input_resources), context)`.
+   L6 prevalidates the product and invokes the public L4 creation service for the
+   context, then installs the product and initializes its Method topology.
+   No Space, objective, Task or start/dispatch command is supplied.
+   The returned `ProductInstance.collet_ref` identifies the new context.
+   Existing-Collet binding remains available via `ProductInstantiateCommand`.
    The sole initial participant defaults to the scalar assignee role source;
    multiple initial Agents require explicit executor designation. Every supplied
    Agent must satisfy the exact Profile's participant scope (`OPEN` or allowlist).
-   The journey's allowlist has two Agents, including the working Bot; only that
+   The journey's allowlist has three Agents, including the working Bot; only that
    Bot is initially bound. Eligibility is not admission. One SQL transaction
    installs ProductInstance, Collet-scoped Participants/RoleBindings and initial
    ResourceBindings. The journey supplies versioned requirements-document and
@@ -143,7 +147,11 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    persists them in that same transaction, and the L4 pure parser reconstructs
    the bindings immediately. Empty inputs still write `resource_refs: []`.
    These are instance inputs, not Profile fields, uploaded contents or Grants.
-   A failed SQL write rolls back selection and all bindings together.
+   A failed installation SQL write rolls back selection and all binding facts in
+   that transaction, not the separately committed Collet. Any post-creation
+   failure raises `ProductInstantiationIncompleteError` with the Collet identity;
+   inspect and recover in place, never blindly repeat new creation. MethodStore
+   writes are also separate and use pinned topology recovery after partial failure.
    The binding Event advances Collet from revision 1 to 2. Task still
    does not exist. Existing combined publishers retain their compatibility flow.
    One L6 Instantiate creates two ACTIVE MethodBindings: **Open@0.2**

@@ -92,7 +92,7 @@ def runtime(db):
         ColletCreateCommand(OWNER.actor, title="这是上下文标题，不是任务目标"), OWNER
     )
     ProductInstantiationService(
-        repo, InMemoryMethodStore(), catalog, authorizer
+        repo, InMemoryMethodStore(), catalog, authorizer, service
     ).instantiate(
         ProductInstantiateCommand(
             collet.collet_id, profile.ref, collet.version, (AgentRef("bot", "worker"),)

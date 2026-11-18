@@ -1,4 +1,4 @@
-"""ProductProfile → 创建 Collet → 实例化 ProductInstance → Open 申请/录取 → Single 选定 → L4 Work → 验收。
+"""ProductProfile → L6 Instantiate 创建产品协作 → Open 申请/录取 → Single 选定 → L4 Work → 验收。
 
 用户通过产品 Service API 操作和观察;模拟 Bot 以自身 ActorContext 调用注入的
 L5 Open 服务查询机会,再自己构造申请命令并提交申请。
@@ -99,6 +99,7 @@ from agentclaw.community.core.task.context_collab.l6_products.operations import 
     create_product_profile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
+    ProductInstantiateNewCommand,
     ProductInstantiationServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (
@@ -140,6 +141,7 @@ from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
     SimulatedAdmissionAgent,
     SimulatedWorkingBot,
+    _assert_product_instance,
     _simulate_ai_coding,
 )
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
@@ -190,31 +192,48 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     l4_context_operate = injector.get(ContextServiceProtocol)
     l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
-    # 2. 使用L4层操作创建Collet
-    collet = _create_commission_collet(l4_context_operate)
-
-    # 3. 在已有Collet上实例化产品,不是创建 Collet和产品。Collet中并没有Profile信息，所以这里是将精确版本的 Profile 应用于该 Collet,生成记录本次协作配置/绑定引用的 ProductInstance:
-    # - 资源:绑定产品传入的需求文档、代码仓库版本引用(INPUT_RESOURCES),不上传内容或授予访问权限。
-    # - 参与者/角色:helper 传入发布者 HUMAN 和工作 Bot,建立实际 Participant / RoleBinding。
-    #     录取审核 Agent 只由 Profile 精确配置,不是初始工作参与者,也没有执行者 RoleBinding。
-    # - 方法:创建 Open@0.2、Single@0.2 的 MethodBinding,并建立 Single --support--> Open 组合关系。
-    # ProductInstance 关联已有 Collet、Profile 版本及上述绑定证据,不是另一份 Collet 或 Task。
-    # 初始参与者绑定不等于 Open 录取或 Single 执行者选择;这些由后续步骤完成。
-    # 此时仍没有 Task(root_task_ref 为 None);第 8 步调用 L4 start 时才创建并启动根 Task。
-    instance = _instantiate_product_instance(
+    # 2. 一次 L6 Instantiate 创建产品协作;由内部 L4 创建 Collet,
+    # 同时建立 ProductInstance、初始参与者/角色、资源/策略引用和 L5 方法组合。
+    # Profile 定义/安装独立;实例化不代表 Open 录取、Single 选定或开始执行。
+    # 此时无 Task;后续 L4 Work.start 才创建并启动根 Task。
+    instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
+        ProductInstantiateNewCommand(
+            collet=ColletCreateCommand(
+                initiator_ref=HUMAN.actor,
+                title="XX代办任务",
+                description="Open 参与 + Single 选定执行者,成果由用户验收",
+            ),
+            profile_ref=profile.ref,
+            participant_refs=(AgentRef("bot", BOT_ASSIGNEE),),
+            resource_refs=INPUT_RESOURCES,
+        ),
+        HUMAN,
+    )
+    _assert_product_instance(
         injector,
-        collet,
+        instance.collet_ref,
         profile,
+        instance,
+        participant_ref=AgentRef("bot", BOT_ASSIGNEE),
         resource_refs=INPUT_RESOURCES,
     )
+    collet = (
+        injector.get(ContextCollabRepositoryProtocol)
+        .get_current_status(instance.collet_ref)
+        .collet
+    )
+    assert collet.title == "XX代办任务"
+    assert collet.created_by == collet.updated_by == HUMAN.actor
+    assert collet.created_at <= collet.updated_at
+    assert collet.schema_version is not None and collet.etag
 
-    # 4. 发布机会， "METHOD"方法
+    # 3. 发布机会， "METHOD"方法
     _publish_opportunity(l5_open_method, collet.collet_id)
 
-    # 5. Agent主动发现机会
+    # 4. Agent主动发现机会
     opportunity, submitted = _discover_opportunity(store, axes, collet, working_bot)
 
-    # 6. 由 Profile 配置的审核 Agent 按能力证据执行录取判断。
+    # 5. 由 Profile 配置的审核 Agent 按能力证据执行录取判断。
     decision = _admit_application_agent(
         injector,
         l5_open_method,
@@ -226,20 +245,20 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
         profile,
     )
 
-    # 7. 明确选择该次录取产生的参与者，进入"SINGLE:方法
+    # 6. 明确选择该次录取产生的参与者，进入"SINGLE:方法
     _select_admitted_agent(injector, store, axes, instance, decision)
 
-    # 8. 通知agent开始执行任务
+    # 7. 通知agent开始执行任务
     started, task_id = _notify_agent_work(
         injector, l4_context_operate, service, collet, working_bot.actor_context
     )
 
-    # 9. 模型Agent自主执行。
+    # 8. 模拟Agent自主执行。
     artifacts = _agent_run_simulate(
         service, collet, working_bot, started, tmp_path, task_id
     )
 
-    # 10. 查询和验证结果
+    # 9. 查询和验证结果
     _query_task_result(
         l4_context_operate,
         service,
@@ -573,7 +592,7 @@ def _notify_agent_work(injector, l4_context_operate, service, l4_collet, bot_con
 def _agent_run_simulate(service, l4_collet, working_bot, started, tmp_path, task_id):
     collet_id_1 = l4_collet.collet_id
 
-    # 9. 模拟Agent执行任务，过程中上报自定义的步骤及进度信息
+    # 8. 模拟Agent执行任务，过程中上报自定义的步骤及进度信息
     # G3:步骤用 Observation,百分比用 MetricDefinition/MetricSample,结果用 Outcome。
     created = TaskCommissionCreatedView(
         collet_id=l4_collet.collet_id,
@@ -732,7 +751,9 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
         ),
         (
             ProductInstantiationServiceProtocol,
-            {"instantiate": "L6 记录 ProductInstance 并初始化资源及 Method/Role 绑定"},
+            {
+                "instantiate": "L6 创建产品协作或绑定已有 Collet,初始化 ProductInstance 和资源/方法/角色"
+            },
         ),
         (
             GroupMethodOpsServiceProtocol,
