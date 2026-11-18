@@ -126,17 +126,13 @@ async fn discovery_prunes_expired_members_but_preserves_not_yet_registered_entri
 mod common;
 use bcs_service_api::port::repo::distributed::session::*;
 use common::Recorder;
-use serde_json::json;
 fn initial() -> Checkpoint {
     Checkpoint {
         format_version: 1,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),
-        runner_state: RunnerState {
-            format_version: 1,
-            value: json!({}),
-        },
+        runner_state: None,
         dispatch_seq: Default::default(),
         deadlines: vec![],
         view_drafts: Default::default(),

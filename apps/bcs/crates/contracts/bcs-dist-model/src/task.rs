@@ -1,4 +1,5 @@
 use crate::ids::*;
+use crate::{ArtifactUpdate, OutputLimits, OutputUsage};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +55,10 @@ pub struct TaskSnapshot {
     pub sid: Sid,
     pub tid: Tid,
     pub content: TaskContent,
+    pub output_limits: OutputLimits,
+    /// Usage at this published cut; readers fold later events without charging
+    /// this again. The checkpoint remains authoritative for admission of output.
+    pub output_usage: OutputUsage,
     pub snapshot_event_id: Option<EventId>,
     pub source_commit: CommitSeq,
     pub created_at: TimestampMillis,
@@ -87,8 +92,9 @@ pub enum OutputBody {
     },
     Artifact {
         node: NodeId,
+        artifact_id: ArtifactId,
         class: OutputClass,
-        content: Payload,
+        update: ArtifactUpdate,
     },
     Terminal {
         status: TerminalStatus,

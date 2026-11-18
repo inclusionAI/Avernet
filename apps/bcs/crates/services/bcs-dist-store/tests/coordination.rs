@@ -32,11 +32,16 @@ fn initial() -> Checkpoint {
         format_version: 1,
         commit_seq: CommitSeq(0),
         consumed: None,
-        tasks: Default::default(),
-        runner_state: RunnerState {
-            format_version: 1,
-            value: json!({"a":1,"b":2}),
-        },
+        tasks: vec![TaskProgress {
+            tid: Tid("s0042.session.task".into()), phase: TaskPhase::Running,
+            input: Payload::Inline(json!({})), result_ref: None,
+            output_limits: PHASE_ONE_OUTPUT_LIMITS, output_usage: OutputUsage::default(),
+            publication: SnapshotProgress::default(), finalization: None,
+        }].into(),
+        runner_state: Some(TaskRunnerState {
+            tid: Tid("s0042.session.task".into()),
+            state: RunnerState { format_version: 1, value: json!({"a":1,"b":2}) },
+        }),
         dispatch_seq: Default::default(),
         deadlines: vec![],
         view_drafts: Default::default(),

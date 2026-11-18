@@ -81,6 +81,13 @@ separately from public implementation status.
   quality. Nine new subset regressions, eleven coordination primitive tests and
   the existing store/worker/API suites pass. API strict Clippy passes. Existing
   test-support-wide lint debt prevents a clean strict Clippy result there; the
-  changed production source has no reported diagnostics. Host subset conformance
-  is pending; default projection/Patch still transfer the whole document.
-- Tasks 2–8 and full host composition validation: pending.
+  changed production source has no reported diagnostics. Host Proxy subset
+  conformance passes; default projection/Patch still transfer the whole document.
+- Task 2: output/lifecycle contracts and pure projection implemented; independent
+  SPEC and quality reviews pass. Twelve projection tests, eight model tests, one
+  model doc test, four API tests and 34 distributed harness tests pass, alongside
+  the store/worker regressions. Model/projection strict Clippy passes with
+  dependencies excluded; the full dependency graph has existing domain lint debt.
+  Worker integration, reference resolution and complete decision validation remain
+  tasks 4–7; these foundation checks do not claim runtime completion.
+- Tasks 3–8 and full host composition validation: pending.
