@@ -40,6 +40,16 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger("agentswarm")
 
+
+def _spawn_key(run_id: str, agent_id: str, attempt: int) -> str:
+    """The host's canonical spawn key, imported call-local to avoid the cycle
+    (``host`` imports this module for its chat bridge)."""
+    from agentclaw.community.plugins.community.agentswarm.host import (
+        spawn_idempotency_key,
+    )
+
+    return spawn_idempotency_key(run_id, agent_id, attempt)
+
 # Terminal authorization answers: a human rejection or an elapsed authorization window is the
 # authorization's own verdict — retrying would re-enter a fresh gate, so
 # they fail the attempt through the non-retryable marker, unlike the
@@ -135,13 +145,14 @@ class AvernetSubagent:
                         # inherits that passport and skips human approval.
                         identity_bot_id=self._spec.identity_bot_id or None,
                     ),
-                    # Platform identity follows the spawn's durable identity and
-                    # the attempt: agent_id is stable across D16 respawns (rebind
-                    # via adopt, not duplicate) and unique between two same-named
-                    # spawns; attempt fresh-mints retries. spec.name would collide
-                    # same-named spawns, so there is no name fallback.
+                    # Platform identity follows the spawn's durable identity and its
+                    # lifetime attempt ordinal: agent_id is stable across D16
+                    # respawns and unique between same-named spawns; the
+                    # ordinal fresh-mints retries. Built by the host's own
+                    # key builder so creation and teardown cannot drift.
                     idempotency_key=IdempotencyKey(
-                        f"{self._run.run_id}:{self._agent_id}:{self._attempt}"),
+                        _spawn_key(self._run.run_id, self._agent_id,
+                                   self._attempt)),
                     owner_id=self._run.owner_id,
                 ),
                 timeout=self._create_call_timeout,

@@ -9,6 +9,7 @@ from agentclaw.community.core.models.skill import (
     SkillSet,
     SkillSetSkill,
 )
+from agentclaw.community.core.models.space_skill import SkillVersion
 from agentclaw.community.core.models.mcp import (
     BotMCPConfig,
     BotMCPInstallation,
@@ -175,6 +176,11 @@ def test_center_skill_unexclusion_rejects_ordinary_membership_with_stale_row_id(
         session.add_all([default, ordinary, skill])
         session.flush()
         session.add_all([
+            SkillVersion(
+                skill_id=skill.id, version_ordinal=2, status="PUBLISHED",
+                sc_version_number="2", name="center", metadata_json='{"mcp_dependencies":[]}',
+                created_by="owner", env="dev",
+            ),
             SkillSetSkill(
                 skill_set_id=default.id, skill_id=skill.id,
                 skill_uuid="uuid-a", env="dev",

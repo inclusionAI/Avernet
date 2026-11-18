@@ -13,6 +13,7 @@ from .capabilities_types import (
     effective_sets,
     local_owned,
     membership_assets,
+    membership_pairs,
 )
 
 
@@ -118,7 +119,7 @@ def build_plan(resolved: Resolved) -> CapabilityPlan:
         for group in resolved.sets:
             current = existing.get(group.name)
             current_keys = (
-                {asset_key(asset) for asset in membership_assets(snapshot, current).values()}
+                {asset_key(asset) for _, asset in membership_pairs(snapshot, current)}
                 if current
                 else set()
             )

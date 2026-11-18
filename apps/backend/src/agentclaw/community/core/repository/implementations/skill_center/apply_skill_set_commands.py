@@ -15,6 +15,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 )
 from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
     center_membership_skill_uuid,
+    available_published_version_skill_ids,
     set_member_skill_ids,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
@@ -31,6 +32,8 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
+from agentclaw.community.core.skill_center.default_members import effective_default_members
+from agentclaw.community.log import get_logger
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
     require_can_join_set,
 )
@@ -44,6 +47,7 @@ from agentclaw.community.core.skill_center.skill_set_apply import (
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
+logger = get_logger()
 
 def require_apply_scope(scope: BotCapabilityScope) -> None:
     if scope.tenant != get_current_avernet_tenant() or scope.env != get_current_env():
@@ -115,6 +119,9 @@ class ApplySkillSetCommands:
                 .all()
             )
             skills = []
+            published_ids = available_published_version_skill_ids(
+                self._scope, session, {int(asset.id) for asset in assets}
+            )
             for asset in assets:
                 data = {
                     key: getattr(asset, key)
@@ -131,6 +138,7 @@ class ApplySkillSetCommands:
                     )
                 }
                 data["id"] = str(asset.id)
+                data["has_published_version"] = int(asset.id) in published_ids
                 try:
                     data["mcp_codes"] = tuple(
                         sorted(skill_projection_mcp_dependency_codes(session, asset))
@@ -140,6 +148,11 @@ class ApplySkillSetCommands:
                     data["mcp_codes"] = ()
                     data["resolution_error"] = "SKILL_MCP_METADATA_UNAVAILABLE"
                 skills.append(data)
+            for item in sets:
+                if item.is_default:
+                    _, skipped = effective_default_members(item.skill_references, skills)
+                    for raw_id, reason in skipped.items():
+                        logger.info("default_member_skipped set_id=%s raw_skill_id=%s reason=%s", item.id, raw_id, reason)
             references_by_id = {
                 int(asset.id): frozenset(
                     self._skill_referencing_set_ids(
@@ -182,6 +195,9 @@ class ApplySkillSetCommands:
                     for asset in assets
                     if str(asset.git_path or "").startswith("local://")
                 },
+                skill_installations.sources(
+                    session, bot_id=scope.bot_id, owner_id=scope.owner_id, env=scope.env
+                ),
             )
 
     def replace_apply_skill_sets(
@@ -202,9 +218,6 @@ class ApplySkillSetCommands:
             raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_CONFLICT")
         with self._db.transactional_orm_session() as session:
             lock_bot_capabilities(session, bot_id=scope.bot_id, entity_id=scope.owner_id, env=scope.env)
-            old = self._snapshot(
-                session, scope.bot_id, scope.owner_id, engine_type=scope.engine_type
-            )
             rows = self._bot_sets(
                 session,
                 bot_id=scope.bot_id,
@@ -212,6 +225,10 @@ class ApplySkillSetCommands:
                 engine_type=scope.engine_type,
                 default_engine_types=scope.default_engine_types,
                 locked=True,
+            )
+            self._lock_default_candidates(session, rows)
+            old = self._snapshot(
+                session, scope.bot_id, scope.owner_id, engine_type=scope.engine_type
             )
             facts = self._apply_facts(session, rows)
             defaults = {item.id for item in facts if item.is_default}
@@ -246,6 +263,13 @@ class ApplySkillSetCommands:
                 platform_default_codes,
                 allow_unavailable=True,
             )
+            # A Default membership alone cannot claim an existing Direct or
+            # unknown-source installation for later removal.
+            for skill_id, (kind, set_id) in list(before_skills.items()):
+                if kind == SkillInstallationSourceKind.DEFAULT and skill_id in old.installations:
+                    source = old.installation_sources.get(skill_id)
+                    if source != (SkillInstallationSourceKind.DEFAULT.value, set_id):
+                        del before_skills[skill_id]
             # Unavailable members may no longer resolve. Only recorded Set
             # ownership confirms that their installations belong to this scope.
             active_set_ids = {item.id for item in facts if item.is_active}
@@ -266,6 +290,16 @@ class ApplySkillSetCommands:
                 platform_default_codes,
             )
             desired_skill_identities: dict[int, str | int] = {}
+            default_ids: set[int] = set()
+            for item in facts:
+                if item.is_default:
+                    default_ids.update(set_member_skill_ids(
+                        self._scope, session, skill_set_id=item.id,
+                        excluded_raw_ids=frozenset(raw for sid, raw in skill_exclusions if sid == item.id),
+                    ))
+            default_uuids = {row[0] for row in self._scope(session.query(Skill.skill_uuid), Skill).filter(
+                Skill.id.in_(default_ids), Skill.git_path.like("center://%"), Skill.skill_uuid.isnot(None)
+            ).all()} if default_ids else set()
             # Check current ownership before deleting omitted Sets: Replace is not a transfer.
             for target in sets:
                 own_id = (
@@ -292,12 +326,20 @@ class ApplySkillSetCommands:
                     )
                     conflict = any(
                         item.id != own_id
-                        and self._apply_set_owns_skill(item, skill, skill_exclusions)
+                        and (
+                            skill_id in default_ids
+                            or (desired_skill_identities[skill_id] in default_uuids)
+                            if item.is_default
+                            else self._apply_set_owns_skill(item, skill, skill_exclusions)
+                        )
                         for item in facts
                     )
                     require_can_join_set(
-                        is_directly_active=skill_id in old.installations
-                        and skill_id not in before_skills,
+                        is_directly_active=(
+                            old.installation_sources.get(skill_id, (None, None))[0]
+                            == SkillInstallationSourceKind.DIRECT
+                            or (skill_id in old.installations and skill_id not in before_skills and not conflict)
+                        ),
                         is_in_another_set=conflict,
                     )
                 for code in target.mcp_codes:
@@ -321,6 +363,23 @@ class ApplySkillSetCommands:
                         and code not in before_mcps,
                         is_in_another_set=conflict,
                     )
+            direct_ids = {skill_id for skill_id, (kind, _) in old.installation_sources.items()
+                          if kind == SkillInstallationSourceKind.DIRECT}
+            if default_ids & direct_ids:
+                raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
+            if default_uuids and direct_ids and self._scope(session.query(Skill.id), Skill).filter(
+                Skill.id.in_(direct_ids), Skill.git_path.like("center://%"),
+                Skill.skill_uuid.in_(default_uuids),
+            ).first():
+                raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
+            default_assets = self._scope(session.query(Skill), Skill).filter(
+                Skill.id.in_(default_ids)
+            ).order_by(Skill.id).with_for_update().all()
+            if any(
+                self._apply_set_owns_skill(item, skill, skill_exclusions)
+                for item in facts if not item.is_default for skill in default_assets
+            ):
+                raise SkillSetControlPlaneConflictError("RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET")
             # Internal target duplicates have no old row to expose an ownership collision.
             for attr in ("skill_ids", "mcp_codes"):
                 members = [
@@ -477,6 +536,8 @@ class ApplySkillSetCommands:
             if fact.is_default and (fact.id, raw_id) in skill_exclusions:
                 continue
             uuid = references.get(raw_id)
+            if target_uuid is None and raw_id == int(skill.id):
+                return True
             if uuid:
                 if uuid == target_uuid:
                     return True
@@ -542,7 +603,7 @@ class ApplySkillSetCommands:
                         skill_projection_mcp_dependency_codes(session, skill)
                         resolved[skill_id] = skill
                     references = dict(item.skill_references)
-                    for raw_id in set(item.skill_ids) - excluded:
+                    for raw_id in (() if item.is_default else set(item.skill_ids) - excluded):
                         raw = resolved.get(raw_id)
                         if raw is not None and not str(raw.git_path or "").startswith(
                             "center://"
