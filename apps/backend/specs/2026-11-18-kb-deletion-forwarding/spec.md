@@ -46,3 +46,21 @@ superproject gitlink is changed by this public PR.
 - Adjacent knowledge-management, framework and architecture: 1005 passed.
 - This is adapter contract evidence, not provider cleanup, live identity,
   production deployment or end-to-end model/retrieval acceptance.
+
+
+## Management-list lifecycle follow-up
+
+The existing space knowledge-base list must also forward the provider fields
+`status`, `delete_at_ms` and `can_cancel_delete` through both `items` and
+`knowledge_bases`. Preserve `active` / `pending_delete`, the exact persisted
+millisecond deadline, explicit null/false and the original cursor. Do not infer
+capability from management permission or a local clock; native Owner/ACL/deadline
+policy remains upstream. Older provider responses that omit all three fields
+remain compatible and must not gain synthesized fields. The adapter keeps its
+private-field whitelist and makes one bounded catalog call with no preflight,
+per-item request, schema migration or lifecycle implementation.
+
+Verify at the remote transport boundary and through native DI/service/HTTP
+serialization, including current/legacy provider pages and cancellable and
+non-cancellable pending states. This follow-up does not claim a new live
+cross-service or Simulator run.

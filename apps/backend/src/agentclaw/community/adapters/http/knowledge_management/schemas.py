@@ -28,6 +28,18 @@ class CatalogItem(BaseModel):
     name: str = Field(description="Canonical provider KB name")
     kgbase_status: str = Field(description="provider provisioning status")
     can_manage: bool = Field(description="provider native KB manage permission")
+    status: str | None = Field(
+        None,
+        description="Provider lifecycle: active or pending_delete; older providers omit",
+    )
+    delete_at_ms: int | None = Field(
+        None,
+        description="Provider deletion deadline in epoch milliseconds; null when active",
+    )
+    can_cancel_delete: bool | None = Field(
+        None,
+        description="Provider-owned cancellation capability; never inferred from can_manage",
+    )
     description: str | None = Field(
         None, description="Stored description, never sample text"
     )
