@@ -18,6 +18,7 @@ fail-safe 拒绝(P1 无身份注册表)。
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from agentclaw.community.core.task.context_collab.errors import (
@@ -29,6 +30,12 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
     MethodOpsAuthorizerProtocol,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.method_state_machines import (
+    METHOD_MACHINE_REGISTRY,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
+    resolve_transition,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     CollaborationReader,
@@ -42,6 +49,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
     Stage,
+    StageState,
     SwarmPlan,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
@@ -165,3 +173,51 @@ class SwarmMethodServiceBase:
             )
             if stage.swarm_plan_ref == swarm_plan_id
         ]
+
+    def _ready_pending_stages(
+        self,
+        axes: StoreAxes,
+        collab_context_id: str,
+        method_binding_id: str,
+        swarm_plan_id: str,
+        context: ActorContext,
+        reason: str,
+    ) -> None:
+        """Project dependency satisfaction through G4, never a second stage machine.
+
+        Called only for RUNNING plans. A completed predecessor cannot wake a
+        stage in another plan, or one still waiting for any other predecessor.
+        """
+        stages = self._plan_stages(
+            axes, collab_context_id, method_binding_id, swarm_plan_id
+        )
+        succeeded = {
+            stage.stage_id for stage in stages if stage.state is StageState.SUCCEEDED
+        }
+        for stage in stages:
+            if (
+                stage.state is not StageState.PENDING
+                or not set(stage.dependency_stage_refs) <= succeeded
+            ):
+                continue
+            state = resolve_transition(
+                METHOD_MACHINE_REGISTRY["swarm_stage"],
+                stage.state.value,
+                "swarm.stage.ready",
+                {},
+            )
+            if state is None:
+                raise ContextCollabValidationError("G4 refused swarm.stage.ready")
+            self._store.update_stage_state(
+                axes,
+                method_binding_id,
+                replace(
+                    stage,
+                    state=StageState.from_wire(state),
+                    transitioned_from=stage.state.value,
+                    transition_reason=reason,
+                    transitioned_by=context.actor.principal_id,
+                    transitioned_at=_now(),
+                ),
+                collab_context_id,
+            )

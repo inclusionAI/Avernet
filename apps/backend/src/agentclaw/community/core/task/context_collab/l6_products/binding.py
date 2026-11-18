@@ -26,6 +26,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
+    ScenarioRole,
     VersionedProfileRef,
     negotiate,
 )
@@ -103,7 +104,9 @@ def validate_role_sources(
         profile.participant_scope.require(executor_ref)
     sources = {"principal_ref": principal_ref, "executor_ref": executor_ref}
     for role in profile.scenario_roles:
-        if role.required and sources.get(role.participant_source) is None:
+        if role.participant_source == "agent_ref":
+            profile.participant_scope.require(role.agent_ref)
+        elif role.required and sources.get(role.participant_source) is None:
             raise ContextCollabValidationError(
                 f"product role {role.name!r} requires {role.participant_source}"
             )
@@ -131,6 +134,28 @@ def prepare_product_profile(
     )
 
 
+def agent_participant_id(agent: AgentRef, executor: AgentRef | None) -> str:
+    """Use one stable identity for fixed role subjects and supplied participants."""
+    if agent == executor:
+        return "participant_executor_ref"
+    return (
+        "participant_"
+        + quote(agent.agent_type, safe="")
+        + ":"
+        + quote(agent.agent_id, safe="")
+    )
+
+
+def scenario_participant_id(role: ScenarioRole, executor: AgentRef | None) -> str:
+    if role.participant_source == "agent_ref":
+        if role.agent_ref is None:
+            raise ContextCollabValidationError(
+                "agent_ref role requires a typed AgentRef"
+            )
+        return agent_participant_id(role.agent_ref, executor)
+    return "participant_" + role.participant_source
+
+
 def role_binding_refs(
     collet_id: str,
     *,
@@ -142,7 +167,7 @@ def role_binding_refs(
     for role in profile.scenario_roles:
         if role.participant_source == "executor_ref" and executor_ref is None:
             continue
-        participant_id = f"participant_{role.participant_source}"
+        participant_id = scenario_participant_id(role, executor_ref)
         refs.append(
             "/".join(
                 (
@@ -182,6 +207,9 @@ def actor_has_role(
         (item for item in profile.scenario_roles if item.l4_role == role), None
     )
     if scenario_role is None:
+        return False
+    if scenario_role.participant_source == "agent_ref":
+        # A literal role is authoritative only with actual L4 participation.
         return False
     subject = (
         task.principal_ref

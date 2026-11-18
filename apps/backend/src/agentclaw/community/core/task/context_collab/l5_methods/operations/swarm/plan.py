@@ -65,7 +65,6 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 )
 
 _PLAN_MACHINE = METHOD_MACHINE_REGISTRY["swarm_plan"]
-_STAGE_MACHINE = METHOD_MACHINE_REGISTRY["swarm_stage"]
 
 # 幂等重放(§8.3)的"请求形态"白名单(排服务端时间/审计/状态机事实):
 # plan 重放比对计划结构 + Stage 集整体形态;profile 同款,排除 mode 之外
@@ -105,20 +104,6 @@ def _resolve_plan_state(from_state: str, event: str) -> str:
     if new_state is None:
         raise ContextCollabValidationError(
             f"swarm plan state {from_state!r} does not accept event {event!r}"
-        )
-    return new_state
-
-
-def _resolve_stage_ready(stage: Stage) -> str:
-    """swarm_stage 机器对 PENDING─swarm.stage.ready→READY 的裁决
-    (start_plan 的分批 READY 转换专用)。"""
-    new_state = resolve_transition(
-        _STAGE_MACHINE, stage.state.value, "swarm.stage.ready", {}
-    )
-    if new_state is None:
-        raise ContextCollabValidationError(
-            f"swarm stage state {stage.state.value!r} does not accept "
-            "event 'swarm.stage.ready'"
         )
     return new_state
 
@@ -496,31 +481,14 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
             command,
             "swarm.plan.start",
         )
-        plan_stages = self._plan_stages(
-            axes, collab_context_id, method_binding_id, swarm_plan_id
+        self._ready_pending_stages(
+            axes,
+            collab_context_id,
+            method_binding_id,
+            swarm_plan_id,
+            context,
+            command.reason or "swarm.plan.start",
         )
-        succeeded = {
-            stage.stage_id
-            for stage in plan_stages
-            if stage.state is StageState.SUCCEEDED
-        }
-        for stage in plan_stages:
-            if stage.state is not StageState.PENDING:
-                continue
-            if not all(ref in succeeded for ref in stage.dependency_stage_refs):
-                continue
-            new_state = _resolve_stage_ready(stage)
-            updated = replace(
-                stage,
-                state=StageState.from_wire(new_state),
-                transitioned_from=stage.state.value,
-                transition_reason=command.reason or "swarm.plan.start",
-                transitioned_by=context.actor.principal_id,
-                transitioned_at=_now(),
-            )
-            self._store.update_stage_state(
-                axes, method_binding_id, updated, collab_context_id
-            )
         return result
 
     def pause_plan(
@@ -555,7 +523,7 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
         """ResumePlan 用例(PAUSED→RUNNING,作者裁决补齐计划状态机
         可达性)。"""
         axes = self._gate("resume_plan", collab_context_id, method_binding_id, context)
-        return self._transition_plan(
+        result = self._transition_plan(
             "resume_plan",
             collab_context_id,
             method_binding_id,
@@ -565,6 +533,15 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
             command,
             "swarm.plan.resume",
         )
+        self._ready_pending_stages(
+            axes,
+            collab_context_id,
+            method_binding_id,
+            swarm_plan_id,
+            context,
+            command.reason or "swarm.plan.resume",
+        )
+        return result
 
     def terminate_plan(
         self,
