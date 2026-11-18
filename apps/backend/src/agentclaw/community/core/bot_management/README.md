@@ -43,7 +43,6 @@ provides:
   - "TeclawPublishTaskLifecycle"
   - "AicodingRestartLifecycle"
   - "AicodingRecycleMixin"
-  - "AicodingRecycleLifecycle"
   - "AicodingArtifactTransferStrategy"
   - "ArtifactTransferStrategy"
   - "DefaultArtifactTransferStrategy"
@@ -452,31 +451,30 @@ cannot change `SUCCEEDED`. This does not enable handoff initiation or establish
 real credential/device acceptance. See the
 [ownership boundary](ownership_sync/README.md) and its operations link.
 
-### Coding recycle strategy
+### Unified recycle and coding-only backup
 
-`EngineProvisioningStrategy.execute_recycle` mirrors `execute_restart`: default
-engines invoke the existing synchronous callback, while `AicodingRecycleMixin`
-admits durable work. `prepare_recycle` reuses `prepare_restart` inside AICoding,
-including its config reader, shared backup helper, receipts and timeout constants.
-The coding package owns `recycle_task`, `recycle_state` and `recycle_runtime`; it does not add methods to the shared DeviceService surface.
-ARCA SDK primitives are bound through `ArcaRecycleTransport` in composition roots,
-like `ArcaRestartTransport`; BaaS/local release uses existing BaaS capabilities.
-Generic lifecycle calls dispatch engine veto/release hooks and never interpret
-`ext.recycle` or fastdisk policy themselves. Persistence/atomic completion remains
-in the repository package, while transport and public schema remain in adapters.
+All supported personal managed-cloud Bots use the single durable recycle worker
+in `core/bot_dormant/recycle_task.py` and its pinned runtime beside the shared
+facade. Neutral state/contracts live in `engines/restart_contract.py`. Submission,
+operation queries, provider release confirmation, audit completion and activation
+are identical for fastdisk coding, non-fastdisk coding and non-coding Bots.
 
-BaaS recycle requires the additional `BaasRecycleRuntime` capabilities, checked
-at the coding boundary without widening restart-only consumers. Release
-observation uses the persisted `physical_targets`, including stopped/released
-inventory rows. Each exact provider ID (with its template/tenant suffix) must be
-confirmed absent by the existing PaaS device-info read. A successful publish,
-logical Bot deletion, empty inventory or stopped container is not proof of
-physical destruction. Missing targets or unconfirmed/error reads fail closed;
-the existing 600-second release budget leads to `NEEDS_CONFIRMATION`, without
-repeating destroy or freezing/unbinding the Bot.
+`EngineProvisioningStrategy.prepare_recycle` defaults to a no-op: non-coding Bots
+never run the fastdisk probe, backup helper or failure-switch reader.
+`AicodingRecycleMixin.prepare_recycle` alone reuses `prepare_restart`, lazily reading
+`fastdisk_fail_block` only after confirmed fastdisk. Non-fastdisk coding skips the
+helper and switch. Coding-specific backup vetoes are translated at this boundary
+for the shared worker; backup implementation never moves into generic lifecycle code.
 
-Coding `delete_bot` and `stop_bot` share the existing resource-release/admission
-lock. Deletion holds it across the locked lifecycle recheck, grant withdrawal,
-resource release, Passport destruction and soft deletion; an already admitted
-recycle vetoes deletion before side effects. Default engines retain their
-existing synchronous behavior.
+ARCA SDK primitives retain the existing `ArcaRecycleTransport` host import and DI
+seam. BaaS/local release uses the narrow `BaasRecycleRuntime` capability and persisted
+`physical_targets`, including stopped/released inventory rows. Every exact provider
+identity must be confirmed absent. Logical deletion, successful workflows, empty
+inventory or stopped containers cannot substitute for physical proof. The existing
+600-second observation budget ends unresolved release as `NEEDS_CONFIRMATION`,
+without repeating destroy or freezing/unbinding the Bot.
+
+All engines honor the same recycle journal and resource-release/admission lock.
+Deletion holds it across lifecycle recheck, grant withdrawal, release, Passport
+destruction and soft deletion. Already admitted recycle vetoes conflicting
+start/stop/delete/restart/activation; no extra lock type or state machine is added.

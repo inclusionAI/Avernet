@@ -7,9 +7,10 @@ whereas an unavailable pinned Arca transport blocks replacement.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol
 
 from .restart_arca import ArcaRestartTransport
+from ..restart_contract import BaasRecycleRuntime as BaasRecycleRuntime
 
 
 class BaasRestartRuntime(Protocol):
@@ -20,17 +21,6 @@ class BaasRestartRuntime(Protocol):
     def get_bot(self, *, bot_uuid: str) -> dict[str, Any]: ...
 
     def post_bots_api(self, *, path: str, payload: dict[str, Any], action: str) -> dict[str, Any]: ...
-
-
-@runtime_checkable
-class BaasRecycleRuntime(BaasRestartRuntime, Protocol):
-    """Additional BaaS capabilities required by coding recycle, not restart."""
-
-    def destroy_bot(self, bot_uuid: str, operator: str, request_id: str) -> dict[str, Any]: ...
-
-    def is_physical_device_destroyed(self, *, provider_device_id: str) -> bool:
-        """True only for a provider-confirmed absent physical target; errors propagate."""
-        ...
 
 
 def _unavailable_baas() -> BaasRestartRuntime:

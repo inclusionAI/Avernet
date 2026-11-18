@@ -204,7 +204,9 @@ def test_backup_failure_logs_identify_operation_and_warn_even_when_blocking(
 
     with patch.object(backup.time, "sleep"):
         if blocking:
-            with pytest.raises(backup.RestartBackupBlocked) as raised:
+            from agentclaw.community.core.bot_management.engines.restart_contract import RecycleBackupBlocked
+            expected_error = RecycleBackupBlocked if operation_type == "recycle" else backup.RestartBackupBlocked
+            with pytest.raises(expected_error) as raised:
                 prepare()()
             # The task summary runs after the recycle context has been reset.
             assert current_backup.get() is None
@@ -242,7 +244,12 @@ def test_recycle_config_warning_is_tagged_and_context_does_not_leak(caplog):
         record.update(changes)
         return dict(record)
 
-    strategy.prepare_recycle(ctx, record=record, save=save)()
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+    runtime = runtime_with(executor([committed()]))
+    strategy.prepare_recycle(
+        ctx, record=record, save=save, device_id="BOT-logical",
+        restart_dependencies=RestartBackupDependencies.for_instance(runtime),
+    )()
     config_log = next(r for r in caplog.records if "phase=config" in r.getMessage())
     assert config_log.levelno == logging.WARNING
     assert "operation_type=recycle" in config_log.getMessage()

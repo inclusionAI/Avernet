@@ -11,16 +11,16 @@ from agentclaw.community.core.bot_management.repository.models import BotRestart
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService, validate_activation
 from agentclaw.community.core.bot_dormant.sqlite_models import DormantCheckAudit
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
+from agentclaw.community.core.bot_management.engines.restart_contract import (
     RecycleUnavailable,
     journal,
 )
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_task import (
-    AicodingRecycleHandler,
-    AicodingRecycleOperations,
+from agentclaw.community.core.bot_dormant.recycle_task import (
+    RecycleHandler,
+    RecycleOperations,
 )
-from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import (
-    RestartBackupBlocked,
+from agentclaw.community.core.bot_management.engines.restart_contract import (
+    RecycleBackupBlocked,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
@@ -49,7 +49,7 @@ from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture
-def case(tmp_path):
+def case(tmp_path, request):
     engine = create_engine(
         f"sqlite:///{tmp_path / 'recycle.db'}",
         connect_args={"check_same_thread": False},
@@ -106,7 +106,7 @@ def case(tmp_path):
                 entity_id="u1",
                 entity_type="staff",
                 bot_type="personal",
-                active_engine="claude_code",
+                active_engine=getattr(request, "param", "claude_code"),
                 status="ACTIVE",
                 binding_id=binding.id,
                 device_id="d1",
@@ -141,7 +141,7 @@ def case(tmp_path):
     runtime.submit_release.return_value = {"request_id": "release-1"}
     runtime.observe_release.return_value = "RELEASED"
     clock = [time.time()]
-    service = AicodingRecycleOperations(
+    service = RecycleOperations(
         store=store,
         runtime=runtime,
         queue=queue,
@@ -152,7 +152,7 @@ def case(tmp_path):
         clock=lambda: clock[0],
     )
     passport = MagicMock()
-    handler = AicodingRecycleHandler(service, passport, clock=lambda: clock[0])
+    handler = RecycleHandler(service, passport, clock=lambda: clock[0])
     c = SimpleNamespace(
         db=db,
         store=store,
@@ -207,7 +207,7 @@ def test_complete_and_redeliver_commits_once(case):
 )
 def test_backup_veto_never_marks_bot_failed_or_releases(case, reason, code):
     _, payload = submit(case)
-    case.runtime.prepare.side_effect = RestartBackupBlocked(reason)
+    case.runtime.prepare.side_effect = RecycleBackupBlocked(reason)
     assert isinstance(case.handler.handle(payload), Fail)
     bot = case.store.read("b1", "u1")
     assert bot["status"] == "ACTIVE" and bot["binding_id"] == case.target["binding_id"]
@@ -456,7 +456,7 @@ def test_redelivery_cannot_reset_backup_policy_budget_or_target_evidence(case):
     assert second["backup_started_at"] == first["backup_started_at"] == 1
     assert second["fail_block"] is True
     assert second["fastdisk_targets"] == ["s1", "s2"]
-    from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
+    from agentclaw.community.core.bot_management.engines.restart_contract import (
         RecycleTargetChanged,
     )
 
@@ -539,7 +539,7 @@ def deletion(case):
         BotRestartLockRepository,
     )
     from agentclaw.community.di.config import TaskQueueWorkerConfig
-    from agentclaw.community.di.modules.aicoding_module import AICodingModule
+    from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
     from tests.community.core.bot_management.services.test_bot_service_misc import _make_service
 
     locks = BotRestartLockRepository(case.db)
@@ -559,7 +559,7 @@ def deletion(case):
         return True
 
     service._repository.soft_delete_by_owner.side_effect = delete_row
-    assembled = AICodingModule().recycle_operations(
+    assembled = BotDormantModule().recycle_operations(
         case.store, MagicMock(), case.queue, locks, MagicMock(),
         TaskQueueConfig(app="agentclaw"), TaskQueueWorkerConfig(enabled=True),
         MagicMock(), lambda: MagicMock(),
@@ -651,3 +651,18 @@ def test_activation_rechecks_domain_admission_on_locked_row(case, monkeypatch, c
     thread.assert_not_called()
     case.passport.unfreeze_agent_passport.assert_not_called()
     assert case.store.read("b1", "u1")["status"] != "REACTIVATING"
+
+
+@pytest.mark.parametrize("case", ["openclaw", "hermes", "aicoding", "claude_code"], indirect=True)
+def test_all_personal_engines_share_recycle_query_and_activation(case):
+    result, payload = submit(case)
+    assert result["phase"] == "QUEUED" and result["operation_id"]
+    assert isinstance(case.handler.handle(payload), Complete)
+    public = case.service.get_operation(bot_id="b1", owner_id="u1", operation_id=result["operation_id"])
+    assert public["phase"] == "SUCCEEDED" and public["bot_status"] == "RECYCLED"
+    assert case.store.claim_activation("b1", "u1") == ("REACTIVATING", True)
+    assert case.store.claim_activation("b1", "u1") == ("REACTIVATING", False)
+    assert isinstance(case.handler.handle(payload), Complete)
+    case.runtime.submit_release.assert_called_once()
+    with case.db.orm_session() as session:
+        assert session.query(DormantCheckAudit).count() == 1

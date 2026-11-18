@@ -7,10 +7,7 @@ import json
 import time
 import uuid
 
-from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
-    BackupPersistenceError,
-)
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
+from agentclaw.community.core.bot_management.engines.restart_contract import (
     BLOCKING,
     POLL_SECONDS,
     RELEASE_TIMEOUT,
@@ -24,12 +21,7 @@ from agentclaw.community.core.bot_management.engines.aicoding.recycle_state impo
     RecycleUnavailable,
     journal,
 )
-from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import (
-    RestartBackupTargetChanged,
-)
-from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import (
-    RestartBackupBlocked,
-)
+from agentclaw.community.core.bot_management.engines.restart_contract import RecycleBackupBlocked
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotNotFoundError,
@@ -52,7 +44,6 @@ from agentclaw.community.utils.avernet_tenant import (
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
-from .restart_state import supports
 
 
 def task_key(bot_id, owner_id):
@@ -64,7 +55,6 @@ def task_key(bot_id, owner_id):
 def ensure_supported(bot, is_teclaw):
     if (
         bot.get("bot_type") != "personal"
-        or not supports(bot)
         or is_teclaw(bot.get("active_engine"))
     ):
         raise BotOperationNotAllowedError(
@@ -85,7 +75,7 @@ def public_result(bot, record):
     }
 
 
-class AicodingRecycleOperations:
+class RecycleOperations:
     def __init__(
         self,
         *,
@@ -214,10 +204,10 @@ class AicodingRecycleOperations:
         return public_result(bot, record)
 
 
-class AicodingRecycleHandler:
+class RecycleHandler:
     task_type = TASK_TYPE
 
-    def __init__(self, service: AicodingRecycleOperations, passport, clock=time.time):
+    def __init__(self, service: RecycleOperations, passport, clock=time.time):
         self.service, self.passport, self.clock = service, passport, clock
 
     def handle(self, payload):
@@ -295,8 +285,7 @@ class AicodingRecycleHandler:
             bot = store.read(payload["bot_id"], payload["owner_id"])
             if (
                 bot.get("bot_type") != "personal"
-                or not supports(bot)
-                or service.is_teclaw(bot.get("active_engine"))
+                        or service.is_teclaw(bot.get("active_engine"))
                 or bot["status"] != "ACTIVE"
                 or bot["active_engine"] != record["engine"]
                 or service.runtime.target(bot) != record["target"]
@@ -320,12 +309,8 @@ class AicodingRecycleHandler:
                         release_started_at=self.clock(),
                         release=None,
                     )
-            except BackupPersistenceError:
-                raise
-            except RestartBackupBlocked as exc:
-                reason = (
-                    "BACKUP_TIMEOUT" if exc.reason == "timeout" else "BACKUP_FAILED"
-                )
+            except RecycleBackupBlocked as exc:
+                reason = exc.code
                 store.update(
                     payload,
                     {"BACKING_UP"},
@@ -334,8 +319,6 @@ class AicodingRecycleHandler:
                     message="备份失败或超时，本次回收已终止，未释放资源",
                 )
                 return Fail(reason)
-            except RestartBackupTargetChanged:
-                raise RecycleTargetChanged("Backup target changed") from None
             try:
                 release = service.runtime.submit_release(
                     record["target"], payload["operation_id"], payload["owner_id"]
@@ -430,7 +413,7 @@ class AicodingRecycleHandler:
                 )
 
 
-class AicodingRecycleLifecycle(LifecycleBase):
+class RecycleLifecycle(LifecycleBase):
     def __init__(self, registry, handler):
         self.registry, self.handler = registry, handler
 
