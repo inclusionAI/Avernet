@@ -8,6 +8,9 @@ import pytest
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     MethodPolicy,
     OpenMethodPolicy,
@@ -48,12 +51,14 @@ def roles():
 
 def test_l5_contracts_accept_structural_roles_without_l6_definitions(admission, roles):
     admission.validate_roles(roles)
-    assert get_type_hints(OpenAdmissionPolicy.validate_roles)["roles"] == tuple[
-        AdmissionRole, ...
-    ]
-    assert get_type_hints(BotSelfApplicationAdmission.validate_roles)["roles"] == tuple[
-        AdmissionRole, ...
-    ]
+    assert (
+        get_type_hints(OpenAdmissionPolicy.validate_roles)["roles"]
+        == tuple[AdmissionRole, ...]
+    )
+    assert (
+        get_type_hints(BotSelfApplicationAdmission.validate_roles)["roles"]
+        == tuple[AdmissionRole, ...]
+    )
     publication = OpenPublicationProfile(admission)
     policy = OpenMethodPolicy(publication)
     assert MethodPolicy is OpenMethodPolicy
@@ -115,7 +120,43 @@ def test_self_application_checks_required_roles_and_sources(admission, roles, me
         admission.validate_roles(roles)
 
 
-def test_publication_still_requires_admitted_delivery_and_propagates_failures(admission):
+def test_admission_strategy_configures_who_decides_and_how(admission, roles):
+    configured = replace(
+        admission,
+        decision_actor="configured_agent",
+        decision_agent_ref=AgentRef("bot", "bot_admission_judge_001"),
+        decision_rule="capability_evidence",
+    )
+    configured.validate_roles(roles)
+    assert configured.decision_actor == "configured_agent"
+    assert configured.decision_agent_ref == AgentRef("bot", "bot_admission_judge_001")
+    assert configured.decision_rule == "capability_evidence"
+
+    with pytest.raises(
+        ContextCollabValidationError, match="configured admission actor requires"
+    ):
+        replace(configured, decision_agent_ref=None)
+
+    with pytest.raises(
+        ContextCollabValidationError, match="unsupported admission decision actor"
+    ):
+        replace(configured, decision_actor="worker")
+
+    with pytest.raises(
+        ContextCollabValidationError,
+        match="accountable admission actor must omit",
+    ):
+        replace(admission, decision_agent_ref=AgentRef("bot", "invalid-owner"))
+
+    with pytest.raises(
+        ContextCollabValidationError, match="unsupported admission decision rule"
+    ):
+        replace(configured, decision_rule="unknown")
+
+
+def test_publication_still_requires_admitted_delivery_and_propagates_failures(
+    admission,
+):
     publication = OpenPublicationProfile(admission)
     publication.require_dispatch_ready(ApplicationState.ADMITTED.value)
     with pytest.raises(ContextCollabValidationError, match="requires an ADMITTED"):
@@ -124,7 +165,9 @@ def test_publication_still_requires_admitted_delivery_and_propagates_failures(ad
         {"dispatch_after": ApplicationState.SUBMITTED},
         {"partial_failure": "ignore"},
     ):
-        with pytest.raises(ContextCollabValidationError, match="failure/delivery policy"):
+        with pytest.raises(
+            ContextCollabValidationError, match="failure/delivery policy"
+        ):
             replace(publication, **overrides)
 
 

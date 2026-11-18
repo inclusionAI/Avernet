@@ -159,6 +159,10 @@ INPUT_RESOURCES = (
     ResourceRef("repository", "calculator", "baseline-v1"),
 )
 OTHER_ELIGIBLE_AGENT = AgentRef("bot", "bot_candidate_002")
+ADMISSION_AGENT = AgentRef("bot", "bot_admission_judge_001")
+ADMISSION_JUDGE = ActorContext(
+    PrincipalRef("bot", ADMISSION_AGENT.agent_id), source="agent_admission"
+)
 OUTSIDE_AGENT = AgentRef("bot", "bot_outside_scope")
 OBJECTIVE = (
     "为计算器增加求和能力:完成方案、编码和测试,生成待评审 PR,提交成果后由业务同学验收。"
@@ -168,9 +172,7 @@ OBJECTIVE = (
 """
 协议适配问题总结：
 - 语义不明
-  - [ ] L4层的DataRelationModel不明确。比如Collet和Participant、RoleBinding、Task的关系，如何建模没有明确语义
   - [ ] Collet语义明确性问题：这份 ACCS 协议没有给出 Collet 的完整成员变量定义
-  - [ ] 单 Agent 步骤详情通过 G3 Observation.extensions 上报,字段由本地 schema 声明
   - [ ] open模式下，任务执行到底是在录取之后，还是在录取之前，协议没有明确说明，还是说都可以？
   - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义
 - 能力缺少
@@ -178,6 +180,8 @@ OBJECTIVE = (
 - 问题  
   - [ ] open方法中的参与类型，协议中的枚举不在一个维度：participation_type: COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | SINGLE_CONTRIBUTION
 """
+
+
 def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     # 1. L6层产品定义是可复用合同,创建 Profile 本身不产生协作运行对象。
     profile = _create_product_profile()
@@ -194,7 +198,7 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     # 3. 在已有Collet上实例化产品,不是创建 Collet和产品。Collet中并没有Profile信息，所以这里是将精确版本的 Profile 应用于该 Collet,生成记录本次协作配置/绑定引用的 ProductInstance:
     # - 资源:绑定产品传入的需求文档、代码仓库版本引用(INPUT_RESOURCES),不上传内容或授予访问权限。
     # - 参与者/角色:helper 传入发布者 HUMAN 和工作 Bot,建立实际 Participant / RoleBinding。
-    #     Bot 必须在 Profile 允许范围内;允许列表中的另一个 Agent 不会自动成为本实例的参与者。
+    #     录取审核 Agent 只由 Profile 精确配置,不是初始工作参与者,也没有执行者 RoleBinding。
     # - 方法:创建 Open@0.2、Single@0.2 的 MethodBinding,并建立 Single --support--> Open 组合关系。
     # ProductInstance 关联已有 Collet、Profile 版本及上述绑定证据,不是另一份 Collet 或 Task。
     # 初始参与者绑定不等于 Open 录取或 Single 执行者选择;这些由后续步骤完成。
@@ -212,9 +216,16 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     # 5. Agent主动发现机会
     opportunity, submitted = _discover_opportunity(store, axes, collet, working_bot)
 
-    # 6. 录取判断
+    # 6. 由 Profile 配置的审核 Agent 按能力证据执行录取判断。
     decision = _admit_application_agent(
-        injector, l5_open_method, store, axes, collet.collet_id, opportunity, submitted
+        injector,
+        l5_open_method,
+        store,
+        axes,
+        collet.collet_id,
+        opportunity,
+        submitted,
+        profile,
     )
 
     # 7. 明确选择该次录取产生的参与者，进入"SINGLE:方法
@@ -264,15 +275,22 @@ def _create_product_profile():
                             accountable_role="owner",
                             participation_type=ParticipationType.COLLET_PARTICIPANT,
                             capacity=1,
+                            decision_actor="configured_agent",
+                            decision_agent_ref=ADMISSION_AGENT,
+                            decision_rule="capability_evidence",
                         ),
                     ),
                 ),
             ),
         ),
-        # 两个 Agent 有参与资格;只有 BOT_ASSIGNEE 在实例化时绑定为执行者。
+        # 三个 Agent 有参与资格;只有 BOT_ASSIGNEE 在实例化时绑定为执行者。
         participant_scope=ParticipantScope(
             ParticipantScopeKind.ALLOWLIST,
-            (AgentRef("bot", BOT_ASSIGNEE), OTHER_ELIGIBLE_AGENT),
+            (
+                AgentRef("bot", BOT_ASSIGNEE),
+                OTHER_ELIGIBLE_AGENT,
+                ADMISSION_AGENT,
+            ),
         ),
         # 角色信息
         scenario_roles=(
@@ -324,12 +342,17 @@ def _create_product_profile():
     assert profile.participant_scope.agent_refs == (
         AgentRef("bot", BOT_ASSIGNEE),
         OTHER_ELIGIBLE_AGENT,
+        ADMISSION_AGENT,
     )
     assert profile.composition.method_kind == "Open + Single"
     assert profile.composition.required_methods == (
         get_profile("Open", "0.2"),
         get_profile("Single", "0.2"),
     )
+    admission = profile.composition.require_policy("Open").publication.admission
+    assert admission.decision_actor == "configured_agent"
+    assert admission.decision_agent_ref == ADMISSION_AGENT
+    assert admission.decision_rule == "capability_evidence"
     return profile
 
 
@@ -401,7 +424,7 @@ def _publish_opportunity(l5_open_method, collet_id_1):
             collet_id=collet_id_1,  # collet
             participation_type=ParticipationType.COLLET_PARTICIPANT,  # 协议中明确规定的字段及取值
             admission_policy_refs=[
-                "task_commission.designated_bot_self_application/1"  # 录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
+                "task_commission.designated_bot_self_application/1"  # 兼容策略 ref;实际决策者/规则由 Profile 中的 admission 配置决定
             ],
             capacity=1,  # 表示这个机会最多允许多少个未终态申请占用名额
             reason="task_commission.owner_authorized_publish",  # 本次发布操作的审计原因
@@ -451,13 +474,23 @@ def _discover_opportunity(store, axes, l4_collet, working_bot):
     return opportunity, submitted
 
 
+def _configured_agent_decides(admission, application):
+    """模拟配置的审核Agent执行已声明的 capability_evidence 规则。"""
+    assert admission.decision_rule == "capability_evidence"
+    return "admit" if application.capability_evidence_refs else "reject"
+
+
 def _admit_application_agent(
-    injector, l5_open_method, store, axes, collet_id_1, opportunity, submitted
+    injector,
+    l5_open_method,
+    store,
+    axes,
+    collet_id_1,
+    opportunity,
+    submitted,
+    profile,
 ):
-    # Open 录取只建立 scoped Participant;执行者的选定另由 Single 完成。
-    policy_context = ActorContext(
-        HUMAN.actor, source="product_policy"
-    )  # 采用product profile中定义的录取策略
+    policy_context = ADMISSION_JUDGE
     [policy_ref] = opportunity.admission_policy_refs
     # TODO: 系统服务进行录用判断？      (fixed: l5_open_method本就是协议提供的操作)
     screened = l5_open_method.screen(

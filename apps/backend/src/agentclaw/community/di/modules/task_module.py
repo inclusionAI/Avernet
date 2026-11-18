@@ -87,7 +87,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
     MethodOpsAuthorizerProtocol,
-    StructuralMethodOpsAuthorizer,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
     ContextService,
@@ -159,6 +158,9 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.record
 )
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
+)
+from agentclaw.community.di.modules.task_commission_authorization import (
+    TaskMethodOpsAuthorizer,
 )
 from agentclaw.community.core.task.context_collab.products.service_api import (
     BbsPublicDiscussionServiceProtocol,
@@ -408,7 +410,7 @@ class TaskModule(Module):
         # TaskPersistenceModule 绑定(Collet/Event ORM 仓储)。
         binder.bind(
             MethodOpsAuthorizerProtocol,
-            to=StructuralMethodOpsAuthorizer,
+            to=TaskMethodOpsAuthorizer,
             scope=singleton,
         )
         binder.bind(

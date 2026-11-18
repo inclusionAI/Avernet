@@ -138,8 +138,16 @@ def admitted_runtime(instance_runtime):
     open_ops = injector.get(OpenMethodOpsServiceProtocol)
     _publish_opportunity(open_ops, collet.collet_id)
     opportunity, application = _discover_opportunity(store, axes, collet, bot)
+    profile = _create_product_profile()
     decision = _admit_application_agent(
-        injector, open_ops, store, axes, collet.collet_id, opportunity, application
+        injector,
+        open_ops,
+        store,
+        axes,
+        collet.collet_id,
+        opportunity,
+        application,
+        profile,
     )
     return service, bot, injector, collet, instance, decision
 

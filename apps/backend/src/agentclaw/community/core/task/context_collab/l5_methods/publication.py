@@ -8,10 +8,17 @@ from typing import Protocol
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ApplicationState,
     ParticipationType,
 )
+
+
+_DECISION_ACTORS = frozenset({"accountable_role", "configured_agent"})
+_DECISION_RULES = frozenset({"product_policy", "capability_evidence"})
 
 
 class AdmissionRole(Protocol):
@@ -35,6 +42,14 @@ class OpenAdmissionPolicy:
     accountable_role: str
     participation_type: ParticipationType
     capacity: int
+    # ``accountable_role`` is the compatibility selector. A configured Agent
+    # is selected with ``configured_agent`` and an exact AgentRef.
+    decision_actor: str = "accountable_role"
+    # Ref is intentionally absent for the accountable-role selector and exact
+    # for the configured-Agent selector.
+    decision_agent_ref: AgentRef | None = None
+    # The rule is a bounded strategy identifier, not an inline algorithm.
+    decision_rule: str = "product_policy"
 
     def __post_init__(self) -> None:
         if any(
@@ -46,6 +61,27 @@ class OpenAdmissionPolicy:
             raise ContextCollabValidationError("admission capacity must be positive")
         if not isinstance(self.participation_type, ParticipationType):
             raise ContextCollabValidationError("invalid Open participation type")
+        for name, value in (
+            ("decision_actor", self.decision_actor),
+            ("decision_rule", self.decision_rule),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ContextCollabValidationError(
+                    f"admission {name} must not be empty"
+                )
+        if self.decision_actor not in _DECISION_ACTORS:
+            raise ContextCollabValidationError("unsupported admission decision actor")
+        if self.decision_rule not in _DECISION_RULES:
+            raise ContextCollabValidationError("unsupported admission decision rule")
+        if self.decision_actor == "configured_agent":
+            if not isinstance(self.decision_agent_ref, AgentRef):
+                raise ContextCollabValidationError(
+                    "configured admission actor requires an AgentRef"
+                )
+        elif self.decision_agent_ref is not None:
+            raise ContextCollabValidationError(
+                "accountable admission actor must omit decision_agent_ref"
+            )
 
     def validate_roles(self, roles: tuple[AdmissionRole, ...]) -> None:
         role_map = {role.name: role for role in roles}
@@ -82,10 +118,12 @@ class OpenPublicationProfile:
 
 @dataclass(frozen=True)
 class BotSelfApplicationAdmission(OpenAdmissionPolicy):
-    """Designated Bot applies itself; owner policy automatically screens/admit.
+    """Designated Bot applies itself; the configured admission actor decides.
 
-    The accountable scenario role owns the publication policy; the application
-    itself is accountable to the authenticated Bot owner.
+    The default ``accountable_role`` actor preserves owner-policy screening and
+    admission. ``configured_agent`` delegates only that decision to an exact
+    AgentRef. The application itself is accountable to the authenticated Bot
+    owner.
     Participation belongs only to the task's Collet scope under Open. Neither
     designation nor discovery is admission or a Space/resource grant.
     """

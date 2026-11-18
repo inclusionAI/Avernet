@@ -58,6 +58,14 @@ contracts rather than defining a product-owned copy. The commission-specific
 `DesignatedOpenAdmission` @1 compatibility strategy remains in [publication.py](publication.py);
 that module reexports the L5 Bot strategy for old imports.
 
+A locally authored successor may select a different L5 admission
+decision policy, such as an exact configured Agent applying
+`capability_evidence`. The DI method-operation authorizer permits only that
+configured Agent's `screen`/`admit` calls; the Agent is a decision identity,
+not an initial task executor, and receives neither Work execution nor broader
+Method governance. The installed compatibility profiles retain their existing owner
+policies and are not migrated.
+
 The product service and DI adapters resolve
 `composition.require_policy("Open").publication`; creation and catalog installation
 reject duplicate, untyped or unbound Method policies. Other Methods do not need
