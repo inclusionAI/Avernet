@@ -27,8 +27,22 @@ pub async fn dist_gateway_core_service_contract_tests(
     scope: &TaskScope,
     request: AdmitTaskCommand,
 ) -> ContractResult {
+    let created = request.create_session.clone();
     let CoreAdmission(receipt) = core.admit(scope, request.clone()).await?;
-    assert_eq!(core.admit(scope, request).await?, CoreAdmission(receipt));
+    assert_eq!(core.admit(scope, request).await?, CoreAdmission(receipt.clone()));
+    if let Some(spec) = created {
+        // The session keeps the group it was created for, and is absent for
+        // another scope.
+        assert_eq!(core.session_group(scope, &receipt.sid).await?, spec.group);
+        let stranger = TaskScope {
+            tenant: scope.tenant.clone(),
+            principal: PrincipalId(format!("{}-another", scope.principal.0)),
+        };
+        assert_eq!(
+            core.session_group(&stranger, &receipt.sid).await,
+            Err(DistGatewayCoreError::NotFound)
+        );
+    }
     Ok(())
 }
 
@@ -49,6 +63,12 @@ pub async fn dist_gateway_service_contract_tests(
         gateway.get_task(unauthorized, &group, &receipt.tid).await,
         Err(GatewayError::AccessDenied | GatewayError::NotFound)
     ));
+    // A task is reached only through the group it was created for.
+    let another = GroupId(format!("{}-another", group.0));
+    assert_eq!(
+        gateway.get_task(caller, &another, &receipt.tid).await,
+        Err(GatewayError::NotFound)
+    );
     Ok(())
 }
 

@@ -104,15 +104,41 @@ pub(crate) async fn handle(
     }
 }
 
-/// `true` when a stream starts with a snapshot of a task that asks for input
-/// or authorization. A stream ends once the task asks for input; when it
-/// already does, nothing further would arrive until someone answers.
-fn waits_for_input(first: Option<&Result<TaskStreamItem, GatewayError>>) -> bool {
-    matches!(
-        first,
-        Some(Ok(TaskStreamItem::Snapshot { view, .. }))
-            if matches!(view.content.status, TaskStatus::InputRequired | TaskStatus::AuthRequired)
-    )
+/// Ends a stream after a snapshot that shows the task asking for input or
+/// authorization. A stream ends once the task asks for input; a snapshot can
+/// carry that state instead of an event, at the start or when it is re-sent
+/// after the task moved on, and then nothing further would arrive until
+/// someone answers.
+///
+/// `answered` is set for a stream started by a reply: the coverage the task
+/// showed before the reply was sent. A snapshot at that coverage still shows
+/// the question just answered and keeps the stream open; a newer one is the
+/// next question and ends it.
+fn end_on_waiting_snapshot(
+    items: TaskSubscription,
+    answered: Option<Option<EventId>>,
+) -> TaskSubscription {
+    // Checked before the next item is awaited: once ended, the stream closes
+    // without waiting for an item that would never come.
+    futures::stream::unfold((items, false), move |(mut items, ended)| async move {
+        if ended {
+            return None;
+        }
+        let item = items.next().await?;
+        let ended = match &item {
+            Ok(TaskStreamItem::Snapshot { view, .. }) => {
+                let waiting = matches!(
+                    view.content.status,
+                    TaskStatus::InputRequired | TaskStatus::AuthRequired
+                );
+                let old_question = answered.is_some_and(|before| view.covered_through <= before);
+                waiting && !old_question
+            }
+            _ => false,
+        };
+        Some((item, (items, ended)))
+    })
+    .boxed()
 }
 
 struct Call<'a> {
@@ -188,24 +214,29 @@ impl Call<'_> {
         let request: SendMessageRequest = params(request)?;
         let input = self.submit_input(&request)?;
         let gw = &self.state.gateway;
-        // A message to an existing task is the reply to its question: the task
-        // may still show that question, so its stream must stay open.
-        let is_reply = input.task.is_some();
+        // A message to an existing task is the reply to its question. Note what
+        // the task showed before: its stream stays open while a snapshot still
+        // shows that question, and ends on a newer one.
+        let answered = match &input.task {
+            Some(tid) => Some(
+                gw.get_task(self.caller, &self.group, tid)
+                    .await
+                    .map_err(gateway)?
+                    .covered_through,
+            ),
+            None => None,
+        };
         let receipt = gw.submit(self.caller, input).await.map_err(gateway)?;
         let subscribe = SubscribeTask {
             group: self.group.clone(),
             tid: receipt.tid,
             mode: SubscribeMode::Snapshot,
         };
-        let mut items = gw.subscribe(self.caller, subscribe).await.map_err(gateway)?;
-        let first = items.next().await;
-        if !is_reply && waits_for_input(first.as_ref()) {
-            items = futures::stream::empty().boxed();
-        }
+        let items = gw.subscribe(self.caller, subscribe).await.map_err(gateway)?;
         Ok(Answer::Stream(stream::response(
             self.id.clone(),
-            first.into_iter().collect(),
-            items,
+            Vec::new(),
+            end_on_waiting_snapshot(items, answered),
             &self.state.config,
         )))
     }
@@ -237,12 +268,13 @@ impl Call<'_> {
             tid,
             mode,
         };
-        let mut items = self
+        let items = self
             .state
             .gateway
             .subscribe(self.caller, subscribe)
             .await
             .map_err(gateway)?;
+        let mut items = end_on_waiting_snapshot(items, None);
         let first = items.next().await;
         // A2A 1.0: a task in a terminal state cannot be subscribed to; the
         // client reads its final state with GetTask.
@@ -252,10 +284,6 @@ impl Call<'_> {
             return Err(A2AError::unsupported_operation(
                 "task is in a terminal state; use GetTask",
             ));
-        }
-        // A task that already waits for input: the Task is the whole stream.
-        if waits_for_input(first.as_ref()) {
-            items = futures::stream::empty().boxed();
         }
         Ok(Answer::Stream(stream::response(
             self.id.clone(),
@@ -321,5 +349,81 @@ impl Call<'_> {
             // The index is not counted; only this page's size is known.
             total_size: count,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "test assertions")]
+    use super::*;
+    use std::num::NonZeroU32;
+
+    fn eid(commit: u64) -> EventId {
+        EventId {
+            commit: CommitSeq(commit),
+            index: NonZeroU32::MIN,
+        }
+    }
+
+    fn snapshot(status: TaskStatus, covered: u64) -> Result<TaskStreamItem, GatewayError> {
+        Ok(TaskStreamItem::Snapshot {
+            view: TaskView {
+                scope: TaskScope {
+                    tenant: TenantId("t".into()),
+                    principal: PrincipalId("p".into()),
+                },
+                sid: Sid("s0001.a".into()),
+                tid: Tid("s0001.a.b".into()),
+                content: TaskContent {
+                    status,
+                    interactions: Vec::new(),
+                    snapshot: Payload::Inline(Value::Null),
+                    result_ref: None,
+                },
+                covered_through: Some(eid(covered)),
+            },
+            cursor: None,
+        })
+    }
+
+    /// How many items get through, of a stream that would never end by itself.
+    async fn delivered(
+        items: Vec<Result<TaskStreamItem, GatewayError>>,
+        answered: Option<Option<EventId>>,
+    ) -> usize {
+        let endless = futures::stream::iter(items).chain(futures::stream::pending()).boxed();
+        let ended = end_on_waiting_snapshot(endless, answered).collect::<Vec<_>>();
+        tokio::time::timeout(std::time::Duration::from_secs(2), ended)
+            .await
+            .map(|items| items.len())
+            .unwrap_or(usize::MAX)
+    }
+
+    #[tokio::test]
+    async fn a_waiting_snapshot_ends_a_stream_wherever_it_comes() {
+        // First item.
+        assert_eq!(delivered(vec![snapshot(TaskStatus::InputRequired, 6)], None).await, 1);
+        // Re-sent after the task moved on (a gap): the question is in the
+        // snapshot, not in an event, and still ends the stream.
+        let resent = vec![
+            snapshot(TaskStatus::Working, 5),
+            snapshot(TaskStatus::AuthRequired, 6),
+            snapshot(TaskStatus::Working, 9),
+        ];
+        assert_eq!(delivered(resent, None).await, 2);
+    }
+
+    #[tokio::test]
+    async fn a_reply_stream_stays_open_on_the_question_it_answers_only() {
+        let answered = Some(Some(eid(7)));
+        // The task still shows the answered question, then goes on: stays open
+        // (never ends by itself here, so nothing is "delivered and closed").
+        let old = vec![snapshot(TaskStatus::InputRequired, 7), snapshot(TaskStatus::Working, 8)];
+        assert_eq!(delivered(old, answered).await, usize::MAX);
+        // The Worker was fast: the first snapshot already shows the next question.
+        assert_eq!(delivered(vec![snapshot(TaskStatus::InputRequired, 9)], answered).await, 1);
+        // The old question, then the next one in a re-sent snapshot.
+        let both = vec![snapshot(TaskStatus::InputRequired, 7), snapshot(TaskStatus::InputRequired, 9)];
+        assert_eq!(delivered(both, answered).await, 2);
     }
 }

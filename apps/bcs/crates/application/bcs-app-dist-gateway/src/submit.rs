@@ -94,6 +94,14 @@ async fn new_spec(
             code: "group_revision_invalid".to_owned(),
         },
     })?;
+    // The session is frozen for, and later only reached through, the group
+    // that was addressed. A directory that answers with another id (an alias
+    // or a canonical form) would create a session its own URL cannot reach.
+    if &frozen.group != group {
+        return Err(GatewayError::Unavailable {
+            code: "group_directory_mismatch".to_owned(),
+        });
+    }
     let shard = sid
         .0
         .split_once('.')

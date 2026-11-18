@@ -635,3 +635,41 @@ async fn another_groups_url_does_not_reach_the_session() {
     let listed = json_of(&app, rpc("ListTasks", json!({ "contextId": sid }))).await;
     assert_eq!(listed["result"]["tasks"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn a_question_that_arrives_in_a_resent_snapshot_ends_the_stream() {
+    let p = ports();
+    let app = app(&p);
+    let sent = json_of(&app, send("msg-1", "hello", None, None, true)).await;
+    let tid = sent["result"]["task"]["id"].as_str().unwrap().to_owned();
+    p.worker.append(&status_event(&tid, eid(5, 1), TaskStatus::Working)).await;
+    publish(&p, &tid, TaskStatus::Working, Some(eid(5, 1)), &[]).await;
+
+    let response = app.clone().oneshot(rpc("SubscribeToTask", json!({ "id": tid }))).await.unwrap();
+    let mut body = response.into_body().into_data_stream();
+    let mut text = String::new();
+    // The first frame: the task as stored, still working.
+    while parse_frames(&text).is_empty() {
+        let chunk = tokio::time::timeout(Duration::from_secs(5), body.next()).await.unwrap().unwrap().unwrap();
+        text.push_str(std::str::from_utf8(&chunk).unwrap());
+    }
+    assert_eq!(parse_frames(&text)[0].data["result"]["task"]["status"]["state"], "TASK_STATE_WORKING");
+
+    // Before the stream follows, the Worker asks a question and publishes a
+    // snapshot that already covers it: the old position is a gap.
+    p.worker.append(&status_event(&tid, eid(6, 1), TaskStatus::InputRequired)).await;
+    publish(&p, &tid, TaskStatus::InputRequired, Some(eid(6, 1)), &["i-1"]).await;
+
+    // The stream re-sends the task with the question and ends; it must not
+    // stay open on keep-alives.
+    loop {
+        match tokio::time::timeout(Duration::from_secs(5), body.next()).await {
+            Ok(Some(Ok(chunk))) => text.push_str(std::str::from_utf8(&chunk).unwrap()),
+            Ok(_) => break,
+            Err(_) => panic!("the stream stayed open: {:?}", parse_frames(&text)),
+        }
+    }
+    let frames = parse_frames(&text);
+    assert_eq!(frames.len(), 2, "{frames:?}");
+    assert_eq!(frames[1].data["result"]["task"]["status"]["state"], "TASK_STATE_INPUT_REQUIRED");
+}

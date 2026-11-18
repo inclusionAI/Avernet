@@ -30,7 +30,8 @@ impl DistGroupDirectoryPort for Groups {
             return Err(GroupDirectoryError::NotFound);
         }
         Ok(FrozenGroupDefinition {
-            group: group.clone(),
+            // A directory that answers an alias with its canonical id.
+            group: GroupId(group.0.to_lowercase()),
             workflow: WorkflowRef {
                 definition_id: "wf-research".into(),
                 revision: "7".into(),
@@ -675,4 +676,19 @@ async fn a_session_is_reached_only_through_the_group_it_was_created_for() {
     };
     assert_eq!(g.list_tasks(&me(), listed).await.unwrap().tasks.len(), 1);
     assert_eq!(g.get_task(&me(), &grp(), &tid).await.unwrap().content.status, TaskStatus::InputRequired);
+}
+
+#[tokio::test]
+async fn a_directory_answer_for_another_group_id_creates_nothing() {
+    let p = ports();
+    let g = gateway(&p);
+    let mut aliased = message("msg-1", "hello");
+    aliased.group = GroupId("Grp-Research-01".into());
+    assert_eq!(
+        g.submit(&me(), aliased).await,
+        Err(GatewayError::Unavailable { code: "group_directory_mismatch".into() })
+    );
+    // The group's own id still works, and creates the session.
+    let canonical = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
+    assert_eq!(g.get_task(&me(), &grp(), &canonical.tid).await.unwrap().content.status, TaskStatus::Submitted);
 }

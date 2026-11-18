@@ -573,9 +573,18 @@ Changed after the PR reviews (2026-11-17):
 - **A stream ends after a gap only when the gap follows a snapshot that was
   itself sent because of a gap**; an ordinary advance or finish right after
   the first snapshot gets a fresh snapshot.
-- **A stream that starts on a task already waiting for input is the Task and
-  ends**, unless the stream was started by the reply to that question
-  (adapter rule, like the finished-task rule).
+- **A stream ends after any snapshot that shows the task waiting for input**,
+  at its start or when a snapshot is re-sent after the task moved on (the
+  question is then in the snapshot, not in an event). A stream started by a
+  reply stays open only while a snapshot still shows the question it answered
+  (same coverage as before the reply); a newer question ends it. Adapter rule,
+  like the finished-task rule.
+- **A group directory answer for another group id is refused** before
+  anything is written: the session would be frozen for an id its own URL does
+  not carry and could never be reached.
+- **The shared harnesses test the group rule**: `get_task` through another
+  group is NotFound, and `session_group` returns the created group and
+  NotFound for another scope.
 - **Admission:** a repairing index insert counts as a write of the call, and
   a repaired entry is scored with the stored task's creation time.
 - **A malformed page token is invalid input** (-32602), not a retryable error.
