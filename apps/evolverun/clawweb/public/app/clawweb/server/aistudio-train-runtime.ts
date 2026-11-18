@@ -14,6 +14,8 @@ export type { AIStudioTrainPublicAuth } from '@avernet/workflow/server/routes/ai
  * configured Ed25519 service key, even when running in a dev profile. */
 export function createAIStudioTrainRuntime(db: IDatabase, options: AIStudioTrainPublicAuth & {
   publicKeyB64: string; publicOrigin?: string;
+  /** Host-owned canonical detail URL projection, independent of authorization. */
+  resolveDetailUrl?: (recordId: string) => string | null;
 }) {
   const store = new AIStudioTrainWatchRepository(db);
   const resolveVerifiedService = createAIStudioServiceAuthenticator({publicKeyB64:options.publicKeyB64});

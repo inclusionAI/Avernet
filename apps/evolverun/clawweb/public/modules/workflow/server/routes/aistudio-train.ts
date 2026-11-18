@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { isIdentity, isOwnerBotId, isPositiveInteger, toWatchDto, MANUAL_POLL_COOLDOWN_SECONDS,
+import { isIdentity, isOwnerBotId, isPositiveInteger, safeDetailUrl, toWatchDto, MANUAL_POLL_COOLDOWN_SECONDS,
   type WatchRecord } from '../contracts/aistudio-train.js';
 import type { AIStudioRunTarget, AIStudioNodeTarget } from '../repositories/aistudio-train-watch-repository.js';
 
@@ -23,6 +23,8 @@ type Dependencies = AIStudioTrainPublicAuth & {
   findNodeTarget(flowId: string,nodeId: string): Promise<AIStudioNodeTarget | null>;
   /** Configured external origin, not an untrusted Host/X-Forwarded-Host header. Required for POST. */
   publicOrigin?: string;
+  /** Authoritative host presentation URL; sanitized and projected only, never stored. */
+  resolveDetailUrl?: (recordId: string) => string | null;
   now?: () => number;
 };
 const path = '/:flowId/nodes/:nodeId/aistudio-train';
@@ -82,7 +84,9 @@ export function createAIStudioTrainRouter(deps: Dependencies): Router {
         fail(res,403,'Watch target forbidden'); return;
       }
       const now=deps.now?.() ?? Math.floor(Date.now()/1000);
-      const dto=toWatchDto(watch,now);
+      const detailUrl=safeDetailUrl(deps.resolveDetailUrl ? deps.resolveDetailUrl(watch.recordId) : watch.detailUrl);
+      const responseWatch=(record: WatchRecord) => ({...toWatchDto(record,now),detailUrl});
+      const dto=responseWatch(watch);
       const activeTarget = ['running','waiting'].includes(run.status) && node.status === 'waiting';
       if (!manual) {
         dto.manualPollAllowed = dto.manualPollAllowed && activeTarget && await canOperate();
@@ -99,7 +103,7 @@ export function createAIStudioTrainRouter(deps: Dependencies): Router {
       const next={...watch,manualRequestedAt:now,manualRequestedBy:principal.actorId,lastManualRequestedAt:now,version:watch.version+1};
       // CAS prevents lost watcher updates; repository also atomically fences newer attempts.
       if (!await deps.store.requestManualPoll(watch.version,next)) { fail(res,409,'Watch changed; refresh before retrying'); return; }
-      res.status(202).json({ok:true,resolved:false,watch:toWatchDto(next,now)});
+      res.status(202).json({ok:true,resolved:false,watch:responseWatch(next)});
     } catch { fail(res,503,'AIStudio watch service unavailable'); }
   }
   router.get(path,(req,res) => handle(req,res,false));

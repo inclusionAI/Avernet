@@ -260,7 +260,6 @@ function NodeRow({
                 nodeId={node.node_id}
                 attempt={node.attempt}
                 nodeStatus={node.status}
-                readOnly={readOnly}
                 compact
               />
             )}
@@ -486,7 +485,6 @@ function NodeDetailPanel({
           nodeId={node.node_id}
           attempt={node.attempt}
           nodeStatus={node.status}
-          readOnly={readOnly}
         />
       ) : (
         <RenderedNodeHero node={node} workflowSpec={workflowSpec} nodes={nodes} />
