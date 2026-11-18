@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
-// 实验室落地页：社区、待办、任务是三个独立入口；待办为新增能力，任务保持原路由与行为。
+jest.mock('@/pages/Lab/assets/community.svg', () => 'community.svg');
+// 实验室暂不展示待办入口，社区和任务保持原路由。
 import LabLandingPage from '@/pages/Lab';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -16,26 +17,21 @@ describe('LabLandingPage(实验室落地页)', () => {
     pushMock.mockClear();
   });
 
-  it('按原型顺序渲染社区、待办、任务三张功能卡，并为描述保留两行高度', () => {
+  it('按原型展示社区和任务，并为描述保留两行高度', () => {
     render(<LabLandingPage />);
     const cards = screen.getAllByRole('article');
-    expect(cards).toHaveLength(3);
-    expect(cards.map((card) => within(card).getByRole('heading').textContent)).toEqual(['社区', '待办', '任务']);
+    expect(cards).toHaveLength(2);
+    expect(cards.map((card) => within(card).getByRole('heading').textContent)).toEqual(['社区', '任务']);
     for (const card of cards) {
       const descriptions = within(card).getAllByText(/./, { selector: 'p' });
       expect(descriptions).toHaveLength(1);
-      expect(descriptions[0].className).toContain('min-h-12');
+      expect(descriptions[0].className).toContain('min-h-[46px]');
     }
   });
 
-  it('待办卡：使用独立文案并进入新增待办页', () => {
+  it('暂不展示待办入口', () => {
     render(<LabLandingPage />);
-    const todoCard = within(screen.getByRole('article', { name: '待办' }));
-    expect(todoCard.getByText(/让 Bot 服务团队、帮助完成团队工作/)).toBeTruthy();
-    expect(todoCard.queryByText(/团队知识库/)).toBeNull();
-
-    fireEvent.click(todoCard.getByRole('button', { name: /开始体验/ }));
-    expect(pushMock).toHaveBeenCalledWith('/lab/todos');
+    expect(screen.queryByRole('article', { name: '待办' })).toBeNull();
   });
 
   it('任务卡:描述对齐 PRD 文案;开始体验跳任务列表页(任务类别)', () => {
