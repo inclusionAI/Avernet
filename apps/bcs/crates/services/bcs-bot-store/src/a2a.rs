@@ -193,14 +193,20 @@ pub(crate) fn registration_card_steps(card:&A2aBotRecord,env:&str)->ServiceResul
         params),expected_affected_rows:1}])
 }
 
+/// Rebuild the Card-owned `bot_info` keys from the committed AgentCard.
+/// Every Card write (registration, replace/CAS, no-op synchronize) overwrites
+/// the same five keys unconditionally — a Card that drops a field clears its
+/// stored value instead of preserving a previous one. Keys owned by other
+/// write paths (`agent_code`, `agent_token`, …) are left untouched.
 pub(crate) fn card_bot_info_updates(name:&str,card:&serde_json::Value)->ServiceResult<Vec<(&'static str,serde_json::Value)>> {
     let projection=project_agent_card_capabilities(Some(card))?;
-    let mut updates=vec![("$.name",json!(name))];
-    if let Some(summary)=projection.summary {updates.push(("$.summary",json!(summary)));}
-    if let Some(domains)=projection.domains {updates.push(("$.domains",json!(domains)));}
-    if let Some(skills)=projection.skills {updates.push(("$.skills",json!(skills)));}
-    if let Some(scopes)=projection.scopes {updates.push(("$.scopes",json!(scopes)));}
-    Ok(updates)
+    Ok(vec![
+        ("$.name",json!(name)),
+        ("$.summary",json!(projection.summary.unwrap_or_default())),
+        ("$.domains",json!(projection.domains.unwrap_or_default())),
+        ("$.skills",json!(projection.skills.unwrap_or_default())),
+        ("$.scopes",json!(projection.scopes.unwrap_or_default())),
+    ])
 }
 
 impl DbA2aBotStore {

@@ -28,12 +28,14 @@ access. Core repeats Provider/credential/admission checks before atomic creation
 A2A Bot names always equal Card.name, including the legacy registration entry.
 Names contain 2..64 Unicode characters, without surrounding whitespace or control
 characters; comparisons are exact and case-sensitive. There is no independent
-local display alias. Card `description` projects to the generic Bot summary and
-Card `skills` projects to the generic Bot skills; `domains` and scopes use the
-same explicit-or-derived Card projection. Explicit updates and URL refreshes
-atomically synchronize the Bot name, generic `bot_info` capability fields, Card,
-source and revision. Empty Card arrays clear the corresponding generic fields;
-unknown fields remain in the full Card. Card provider/owners/name never grant BCS
+local display alias. Card `description`, `skills`, `domains` and `scopes` project
+verbatim to the corresponding generic `bot_info` capability fields — nothing is
+derived from other Card sections. Every Card write (registration, update,
+replace, URL refresh) rebuilds all four fields from the committed Card: a Card
+that drops a field clears its stored value instead of preserving a previous one.
+Explicit updates and URL refreshes atomically synchronize the Bot name, generic
+`bot_info` capability fields, Card, source and revision. Unknown fields remain
+in the full Card. Card provider/owners/name never grant BCS
 ownership, visibility or permissions.
 
 Text search matches the synchronized BCS name or Bot ID as well as Card

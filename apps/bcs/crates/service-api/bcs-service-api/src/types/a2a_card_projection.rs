@@ -1,7 +1,8 @@
 //! AgentCard to generic Bot capability projection.
 //!
 //! The projection is shared by persistence and catalog publication so both
-//! surfaces derive the same generic fields from the committed Card.
+//! surfaces derive the same generic fields from the committed Card. Card
+//! fields are used verbatim — nothing is derived from other Card sections.
 
 use std::collections::HashSet;
 
@@ -10,11 +11,10 @@ use serde_json::Value;
 
 use crate::{ServiceError, ServiceResult};
 
-/// AgentCard fields that can replace the corresponding generic Bot fields.
+/// AgentCard fields that replace the corresponding generic Bot fields.
 ///
-/// `None` means the Card does not carry the source field and the stored Bot
-/// value must be used. `Some(Vec::new())` means the field exists and therefore
-/// clears the generic Bot field.
+/// `Some(Vec::new())` means the field is absent on the Card and the stored
+/// generic value is cleared; a present field is used exactly as given.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProjectedAgentCardCapabilities {
     pub summary: Option<String>,
@@ -43,28 +43,26 @@ pub fn project_agent_card_capabilities(
     };
     let domains = match card.get("domains") {
         Some(value) => Some(string_values(value, "agent_card.domains")?),
-        None => skills.as_ref().map(|(_, tags)| tag_domains(tags)),
+        None => None,
     };
-    let scopes = if let Some(value) = card.get("scopes") {
-        Some(string_values(value, "agent_card.scopes")?)
-    } else {
-        security_scopes(card)?
+    let scopes = match card.get("scopes") {
+        Some(value) => Some(string_values(value, "agent_card.scopes")?),
+        None => None,
     };
 
     Ok(ProjectedAgentCardCapabilities {
         summary,
         domains,
         scopes,
-        skills: skills.map(|(skills, _)| skills),
+        skills,
     })
 }
 
-fn card_skills(value: &Value) -> ServiceResult<(Vec<Skill>, Vec<Vec<String>>)> {
+fn card_skills(value: &Value) -> ServiceResult<Vec<Skill>> {
     let items = value
         .as_array()
         .ok_or_else(|| invalid("agent_card.skills"))?;
     let mut skills = Vec::with_capacity(items.len());
-    let mut tags = Vec::with_capacity(items.len());
     for skill in items {
         let name = skill
             .get("id")
@@ -75,85 +73,12 @@ fn card_skills(value: &Value) -> ServiceResult<(Vec<Skill>, Vec<Vec<String>>)> {
             Some(value) => Some(nonempty_string(value, "agent_card.skills[].description")?),
             None => None,
         };
-        let skill_tags = match skill.get("tags") {
-            Some(value) => string_values(value, "agent_card.skills[].tags")?,
-            None => Vec::new(),
-        };
         skills.push(Skill {
             name: name.to_owned(),
             description,
         });
-        tags.push(skill_tags);
     }
-    Ok((skills, tags))
-}
-
-fn tag_domains(tags: &[Vec<String>]) -> Vec<String> {
-    let mut domains = Vec::new();
-    let mut seen = HashSet::new();
-    for values in tags {
-        for value in values {
-            if seen.insert(value.clone()) {
-                domains.push(value.clone());
-            }
-        }
-    }
-    domains
-}
-
-fn security_scopes(card: &Value) -> ServiceResult<Option<Vec<String>>> {
-    let root_requirements = card.get("securityRequirements");
-    let mut skill_requirements = Vec::new();
-    if let Some(values) = card.get("skills").and_then(Value::as_array) {
-        for skill in values {
-            if let Some(value) = skill.get("securityRequirements") {
-                skill_requirements
-                    .push(("agent_card.skills[].securityRequirements", value));
-            }
-        }
-    }
-    if root_requirements.is_none() && skill_requirements.is_empty() {
-        return Ok(None);
-    }
-
-    let mut scopes = Vec::new();
-    let mut seen = HashSet::new();
-    for (field, requirements) in root_requirements
-        .into_iter()
-        .map(|value| ("agent_card.securityRequirements", value))
-        .chain(skill_requirements)
-    {
-        let requirements = requirements
-            .as_array()
-            .ok_or_else(|| invalid(field))?;
-        for requirement in requirements {
-            let requirement = requirement
-                .as_object()
-                .ok_or_else(|| invalid("agent_card.securityRequirements[].schemes"))?;
-            // An empty alternative (`{}`) is the protocol's anonymous channel
-            // (see `validate_anonymous_security`) and contributes no scopes.
-            let Some(schemes) = requirement.get("schemes") else {
-                if !requirement.is_empty() {
-                    return Err(invalid("agent_card.securityRequirements[].schemes"));
-                }
-                continue;
-            };
-            let schemes = schemes
-                .as_object()
-                .ok_or_else(|| invalid("agent_card.securityRequirements[].schemes"))?;
-            for scheme in schemes.values() {
-                if let Some(values) = scheme.get("list") {
-                    push_string_values(
-                        values,
-                        "agent_card.securityRequirements[].schemes.list",
-                        &mut scopes,
-                        &mut seen,
-                    )?;
-                }
-            }
-        }
-    }
-    Ok(Some(scopes))
+    Ok(skills)
 }
 
 fn string_values(value: &Value, field: &'static str) -> ServiceResult<Vec<String>> {
@@ -169,24 +94,6 @@ fn string_values(value: &Value, field: &'static str) -> ServiceResult<Vec<String
         }
     }
     Ok(values)
-}
-
-fn push_string_values(
-    value: &Value,
-    field: &'static str,
-    target: &mut Vec<String>,
-    seen: &mut HashSet<String>,
-) -> ServiceResult<()> {
-    let items = value
-        .as_array()
-        .ok_or_else(|| invalid(field))?;
-    for item in items {
-        let value = nonempty_string(item, field)?;
-        if seen.insert(value.clone()) {
-            target.push(value);
-        }
-    }
-    Ok(())
 }
 
 fn nonempty_string(value: &Value, field: &'static str) -> ServiceResult<String> {
@@ -237,7 +144,9 @@ mod tests {
     }
 
     #[test]
-    fn missing_optional_sources_project_none_or_derive_card_data() {
+    fn card_fields_are_used_verbatim_without_cross_derivation() {
+        // Skill tags and securityRequirements never feed domains or scopes:
+        // absent source fields clear the generic fields instead.
         let card = json!({
             "description": "Updated",
             "skills": [{
@@ -247,10 +156,14 @@ mod tests {
                 "securityRequirements": [{
                     "schemes": {"oauth": {"list": ["orders:read"]}}
                 }]
-            }]
+            }],
+            "domains": ["billing"],
+            "scopes": ["orders:read"]
         });
         let projected = project_agent_card_capabilities(Some(&card)).unwrap();
-        assert_eq!(projected.domains, Some(vec!["orders".into(), "billing".into()]));
+        assert_eq!(projected.summary, Some("Updated".into()));
+        assert_eq!(projected.domains, Some(vec!["billing".into()]));
+        assert_eq!(projected.scopes, Some(vec!["orders:read".into()]));
         assert_eq!(
             projected.skills,
             Some(vec![Skill {
@@ -258,72 +171,30 @@ mod tests {
                 description: Some("Queries".into()),
             }])
         );
-        assert_eq!(projected.scopes, Some(vec!["orders:read".into()]));
     }
 
     #[test]
-    fn security_requirements_clear_scopes_when_top_level_scope_is_absent() {
-        let card = json!({"description":"Updated","skills":[],"securityRequirements":[]});
-        let projected = project_agent_card_capabilities(Some(&card)).unwrap();
-        assert_eq!(projected.scopes, Some(Vec::new()));
-    }
-
-    #[test]
-    fn top_level_real_field_takes_precedence_over_derived_fields() {
-        let card = json!({
-            "description":"Updated",
-            "domains":["top"],
-            "scopes":["top:read"],
-            "securityRequirements":[{"schemes":{"oauth":{"list":["derived:read"]}}}],
-            "skills":[{
-                "id":"query",
-                "tags":["skill-domain"],
-                "securityRequirements":[{"schemes":{"oauth":{"list":["skill:read"]}}}]
-            }]
-        });
-        let projected = project_agent_card_capabilities(Some(&card)).unwrap();
-        assert_eq!(projected.domains, Some(vec!["top".into()]));
-        assert_eq!(projected.scopes, Some(vec!["top:read".into()]));
-    }
-
-    #[test]
-    fn anonymous_empty_security_alternative_projects_no_scopes() {
-        // `{}` and `{"schemes":{}}` are the protocol's anonymous alternatives and
-        // must both project the same as an absent anonymous entry: no scopes.
-        for requirements in [json!([{}]), json!([{"schemes": {}}])] {
-            let card = json!({
-                "description": "Updated",
-                "skills": [{
-                    "id": "query",
-                    "securityRequirements": [{}]
-                }],
-                "securityRequirements": requirements
-            });
-            let projected = project_agent_card_capabilities(Some(&card)).unwrap();
-            assert_eq!(
-                projected.scopes,
-                Some(Vec::new()),
-                "unexpected scopes for {requirements}"
-            );
-        }
-        // An anonymous alternative mixes with a scoped one: only the scoped
-        // entry contributes scopes, the anonymous one is skipped.
+    fn absent_card_fields_project_none_and_derive_nothing() {
         let card = json!({
             "description": "Updated",
             "skills": [{
                 "id": "query",
-                "securityRequirements": [{}]
+                "tags": ["skill-domain"],
+                "securityRequirements": [{"schemes": {"oauth": {"list": ["skill:read"]}}}]
             }],
-            "securityRequirements": [{}, {"schemes": {"oauth": {"list": ["orders:read"]}}}]
+            "securityRequirements": [{"schemes": {"oauth": {"list": ["derived:read"]}}}]
         });
         let projected = project_agent_card_capabilities(Some(&card)).unwrap();
-        assert_eq!(projected.scopes, Some(vec!["orders:read".into()]));
+        assert_eq!(projected.domains, None);
+        assert_eq!(projected.scopes, None);
     }
 
     #[test]
-    fn non_empty_requirement_without_schemes_is_rejected() {
-        let card = json!({"securityRequirements": [{"unknown": 1}]});
-        assert!(project_agent_card_capabilities(Some(&card)).is_err());
+    fn duplicate_values_are_deduplicated_per_field() {
+        let card = json!({"domains":["orders","orders","billing"]});
+        let projected = project_agent_card_capabilities(Some(&card)).unwrap();
+        assert_eq!(projected.domains, Some(vec!["orders".into(), "billing".into()]));
+        assert_eq!(projected.scopes, None);
     }
 
     #[test]
