@@ -149,6 +149,7 @@ async def test_get_ws_info_response_fields_complete(mock_dispatcher):
         "expires_at",
         "device_id",
         "a2a_base_url",
+        "a2a_auth",
     }
     assert isinstance(data["ws_url"], str)
     assert isinstance(data["token"], str)
@@ -160,10 +161,12 @@ async def test_get_ws_info_response_fields_complete(mock_dispatcher):
     # publishes the empty string, and the key is present either way — the
     # additive contract old callers can ignore and new callers can rely on.
     assert data["a2a_base_url"] == ""
+    assert data["a2a_auth"] == ""
 
 
 @pytest.mark.asyncio
-async def test_get_ws_info_publishes_a2a_base_url_verbatim(mock_dispatcher):
+@pytest.mark.parametrize("a2a_auth", ["", "proxypass"])
+async def test_get_ws_info_publishes_a2a_base_url_verbatim(mock_dispatcher, a2a_auth):
     """The A2A address a sandbox platform issued answers unchanged: the router
     owns no second opinion about where a browser can reach the engine's A2A
     face."""
@@ -174,6 +177,7 @@ async def test_get_ws_info_publishes_a2a_base_url_verbatim(mock_dispatcher):
         target="T:1",
         expires_at=now,
         a2a_base_url="http://bot-a1b2-vc.stable.alipay.net:32196",
+        a2a_auth=a2a_auth,
     )
 
     transport = ASGITransport(app=app)
@@ -185,6 +189,7 @@ async def test_get_ws_info_publishes_a2a_base_url_verbatim(mock_dispatcher):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["a2a_base_url"] == "http://bot-a1b2-vc.stable.alipay.net:32196"
+    assert data["a2a_auth"] == a2a_auth
 
 
 @pytest.mark.asyncio

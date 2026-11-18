@@ -1026,7 +1026,8 @@ async def _subscribe_context(params: dict[str, Any], req_id: Any,
         finally:
             _kernel.unsubscribe_context(ctx, q)
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"X-Accel-Buffering": "no"})
 
 _HANDLERS["SubscribeToContext"] = _subscribe_context
 
@@ -1054,4 +1055,5 @@ def _stream_response(req_id: Any, rid: str, backlog: list, q: Any) -> Response:
         finally:
             _kernel.unsubscribe(rid, q)
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"X-Accel-Buffering": "no"})

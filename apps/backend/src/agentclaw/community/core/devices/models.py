@@ -6,7 +6,7 @@ from services/device/models.py but are self-contained in the new
 architecture.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -182,6 +182,10 @@ class DeviceConnectionInfo:
     与空串是两个语义：空串而非 withheld 是"旧服务端/该设备没有地址"
     （客户端仍可走 ws url 直连推导兜底）；withheld=True 是"明确拒绝"——
     客户端必须禁用推导与探测，稳定回落 v3，不得绕开用户灰度控制。
+    """
+    a2a_proxy_token: str = field(default="", repr=False)
+    """Optional A2A HTTP proxy credential, sharing ``expires_at`` with token.
+    Issued only together with an authorized A2A base; never an IAM substitute.
     """
 
 

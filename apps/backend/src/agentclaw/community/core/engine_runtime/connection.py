@@ -362,10 +362,12 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         # the A2A bootstrap on the floor.
         a2a_base_url = str(getattr(info, "a2a_base_url", "") or "")
         if a2a_base_url:
-            sockets.append(SocketInfo(kind="a2a", url=a2a_base_url))
-        # No expiry of its own: the A2A face is uncredentialed HTTP, so the
-        # ``expires_at`` on the result describes the chat socket's credential
-        # and bounds this socket's *availability* the same way.
+            proxy_token = getattr(info, "a2a_proxy_token", "")
+            sockets.append(SocketInfo(
+                kind="a2a", url=a2a_base_url,
+                headers={"X-PROXYPASS-TOKEN": proxy_token} if proxy_token else {},
+            ))
+        # A credentialed A2A face reuses the provider's WS token and expiry.
         return ConnectionResult(
             engine=engine,
             expires_at=self._expires_at(info),

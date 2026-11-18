@@ -1,3 +1,4 @@
+import { createBotA2aFetch, type A2aProxyConnection } from './botA2aFetch';
 import {
   isSendBannedForSession,
   revertA2AChoice,
@@ -144,6 +145,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private a2aBaseUrl: string | null = null;
   /** 用户灰度负结果（服务端 a2a_withheld）——bootstrap 拦截推导/探测/构造 */
   private a2aWithheld = false;
+  private a2aFetchImpl: typeof fetch | undefined;
   /** R6 禁令作用域：bot+owner+stage 键前缀——registry 是 app 级单例而
    * sessionKey 跨 bot 不唯一（不同 OpenClaw 实例的同名会话），scope 把
    * 挂禁/查询/核销限定在本 bot/runtime 域内，杜绝跨 bot 串联误封。 */
@@ -279,9 +281,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     );
   }
 
-  private async getChatUrl(): Promise<{
-    url: string; a2aBaseUrl: string | null; a2aWithheld: boolean;
-  }> {
+  private async getChatUrl(): Promise<A2aProxyConnection & { url: string }> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
       withFriendBotRequestParams(this.options.bot, this.options.userId, {
@@ -306,7 +306,8 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     this.directDesktop = resp.data?.transport_mode === 'direct';
     // B17：服务端签发的 A2A base 原样收下（签发方承诺浏览器可达）；
     // 缺席 = null = 既有 ws 推导兜底，不做任何本地代填。
-    const a2aBase = resp.data?.sockets?.find((s) => s.kind === 'a2a')?.url;
+    const a2aSocket = resp.data?.sockets?.find((s) => s.kind === 'a2a');
+    const a2aBase = a2aSocket?.url;
     // 用户灰度负结果（服务端治理后明确拒绝）：与"没有地址"是两个语义——
     // 明确拒绝禁止推导/探测/缓存命中构造，见 A2aBootstrapConfig.a2aWithheld。
     const a2aWithheld = resp.data?.a2a_withheld === true;
@@ -314,6 +315,8 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       url: socketUrl,
       a2aBaseUrl: a2aBase ? String(a2aBase) : null,
       a2aWithheld,
+      a2aHeaders: a2aSocket?.headers,
+      expiresAt: resp.data?.expires_at ?? '',
     };
   }
 
@@ -330,10 +333,12 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private async initialize(): Promise<OpenClawProvider> {
     this.setState({ phase: 'preparing', error: null });
     this.setConnectionRuntime({ resolved: false, engine: null });
-    const { url, a2aBaseUrl, a2aWithheld } = await this.getChatUrl();
+    const connection = await this.getChatUrl();
+    const { url, a2aBaseUrl, a2aWithheld } = connection;
     this.wsUrl = url;
     this.a2aBaseUrl = a2aBaseUrl;
     this.a2aWithheld = a2aWithheld;
+    this.a2aFetchImpl = createBotA2aFetch(connection, () => this.getChatUrl());
     // 连接凭证(URL query token,管 WS 握手)与请求身份凭证(x-iam-token,管 chat.send 帧)是两套:
     // URL 已内含握手凭证;此处须单独拉取 IAM token 并注入 SDK,否则发送会被服务端拒(身份不明)。
     this.iamToken = this.directDesktop
@@ -345,7 +350,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     // v3 构造行 `new OpenClawProvider(cfg)` 保持逐字不变（零改动红线，钉板
     // test/services/workspace/botChatProvider.a2a.seam.test.ts）。
     const factory = this.options.createSdkProvider ?? ((cfg) => {
-      const a2aProvider = takeCachedA2AProvider(cfg as A2aBootstrapConfig);
+      const a2aProvider = takeCachedA2AProvider(
+        cfg as A2aBootstrapConfig, this.a2aFetchImpl ? { fetchImpl: this.a2aFetchImpl } : undefined,
+      );
       if (a2aProvider) {
         // B12 取消四态播报转发（宿主 toast 消费面在 useBotChat；文案单源 CANCEL_UI_TEXT）。
         // IAM 凭证刷新沿用本类既有通道：request() 的 updateProviderIamToken 直写
@@ -551,7 +558,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       ...(this.sendBanScopeId ? { sendBanScopeId: this.sendBanScopeId } : {}),
       sessionKey: this.options.sessionId,
     } as A2aBootstrapConfig;
-    if (takeCachedA2AProvider(probeCfg)) return;    // 当下选择仍 A2A——复用
+    if (takeCachedA2AProvider(
+      probeCfg, this.a2aFetchImpl ? { fetchImpl: this.a2aFetchImpl } : undefined,
+    )) return;    // 当下选择仍 A2A——复用
     const retired = this.inner as OpenClawProvider;
     this.parkOrDisposeRetiredA2a(retired);
     this.inner = null;

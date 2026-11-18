@@ -15,7 +15,7 @@
  * test/adapters/a2a/bootstrap.test.ts 与 provider.test.ts 全覆盖。
  */
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const PROVIDER_SOURCE = readFileSync(
   join(__dirname, '..', '..', '..', 'src', 'services', 'workspace', 'botChatProvider.ts'),
@@ -33,11 +33,11 @@ const BOOTSTRAP_SOURCE = readFileSync(
   'utf8',
 );
 const CANCEL_OUTCOMES_SOURCE = readFileSync(
-  join(__dirname, '..', '..', '..', '..', '..', 'packages', 'a2a-chat-client', 'src', 'cancelOutcomes.ts'),
+  join(dirname(require.resolve('@avernet/a2a-chat-client')), 'cancelOutcomes.ts'),
   'utf8',
 );
 const POLICY_SOURCE = readFileSync(
-  join(__dirname, '..', '..', '..', '..', '..', 'packages', 'a2a-chat-client', 'src', 'policy.ts'),
+  join(dirname(require.resolve('@avernet/a2a-chat-client')), 'policy.ts'),
   'utf8',
 );
 
@@ -70,7 +70,7 @@ describe('botChatProvider A2A bootstrap 接缝钉板（B16 static guard）', () 
 
   it('工厂接缝：缓存命中同步换入 A2AProvider；未决/落 v3 时本轮走 v3（B13 两段式）', () => {
     expect(PROVIDER_SOURCE).toContain(
-      'const a2aProvider = takeCachedA2AProvider(cfg as A2aBootstrapConfig);',
+      'cfg as A2aBootstrapConfig, this.a2aFetchImpl ? { fetchImpl: this.a2aFetchImpl } : undefined,',
     );
     expect(PROVIDER_SOURCE).toContain(
       'return a2aProvider as unknown as OpenClawProvider;',
