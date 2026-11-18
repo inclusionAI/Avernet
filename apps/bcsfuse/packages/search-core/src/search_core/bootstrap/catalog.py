@@ -103,7 +103,6 @@ def create_catalog_search_app(
             "keyword": settings.keyword_timeout,
             "reranker": settings.reranker_timeout,
             "probe": 2 * settings.index_timeout,
-            "card_metadata": settings.index_timeout,
             "default_candidates": settings.index_timeout,
         }.items()
     }
@@ -166,6 +165,11 @@ def create_catalog_search_app(
         result_cache, embedding_cache, metadata_cache = (
             caches.configure(policy.cache) if cache_views is None else cache_views
         )
+        metadata_execution = DeadlineExecutor(
+            executor,
+            name="card_metadata",
+            timeout_seconds=policy.card_metadata_timeout_ms / 1000,
+        )
         if not policy.retrieval.keyword_enabled and not policy.retrieval.vector_enabled:
             return metadata_factory(
                 DefaultCandidates(
@@ -180,7 +184,7 @@ def create_catalog_search_app(
                 repository,
                 metadata_cache,
                 caches,
-                calls["card_metadata"],
+                metadata_execution,
             )
         online_embedding = query_embedding if query_embedding is not None else embedding
         if embedding_cache.enabled or policy.embedding_singleflight_enabled:
@@ -224,7 +228,7 @@ def create_catalog_search_app(
                 namespace=tuple(policy.retrieval.model_dump().values()),
             )
         return metadata_factory(
-            retrieval, repository, metadata_cache, caches, calls["card_metadata"]
+            retrieval, repository, metadata_cache, caches, metadata_execution
         )
 
     def build_variants(policy):
@@ -260,6 +264,7 @@ def create_catalog_search_app(
                 "rerank_enabled": True,
             },
             keyword_timeout_ms=settings.keyword_timeout * 1000,
+            card_metadata_timeout_ms=settings.card_metadata_timeout * 1000,
             embedding_timeout_ms=settings.embedding_timeout * 1000,
             reranker_timeout_ms=settings.reranker_timeout * 1000,
         ),

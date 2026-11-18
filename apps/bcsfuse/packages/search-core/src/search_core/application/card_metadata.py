@@ -33,11 +33,13 @@ class CardMetadataRetrieval:
         *,
         project_card=card_metadata,
         project_item=search_item,
+        project_timeout=None,
         metadata_dependencies=lambda metadata: (),
     ):
         self.retrieval, self.repository = retrieval, repository
         self.cache, self.state, self.execution = cache, state, execution
         self.project_card, self.project_item = project_card, project_item
+        self.project_timeout = project_timeout
         self.metadata_dependencies = metadata_dependencies
 
     async def retrieve(self, request):
@@ -56,7 +58,7 @@ class CardMetadataRetrieval:
         if not result.items:
             return result
         revision = self.state.metadata_revision()
-        cards, missing = {}, []
+        cards, missing, timed_out = {}, [], set()
         stale_hits = 0
         for item in result.items:
             cached, stale = self.cache.get_with_stale(item.item_id)
@@ -76,7 +78,9 @@ class CardMetadataRetrieval:
         try:
             if missing:
                 with stage_timing("card_fetch"):
-                    await self._fetch_missing(cards, missing, revision, stage)
+                    await self._fetch_missing(
+                        cards, missing, revision, stage, timed_out
+                    )
         except Exception as error:  # noqa: BLE001 -- preserve valid cached Cards
             events.record(
                 "search_stage_failure",
@@ -84,20 +88,23 @@ class CardMetadataRetrieval:
                 "unavailable",
                 error_type=type(error).__name__,
             )
-            # A callable Card is required now; never return bare IDs as if
-            # they contained valid invocation data after an enrichment failure.
+            reasons = (*result.reasons, "card_metadata_unavailable")
+            if timed_out:
+                reasons += ("card_metadata_timeout",)
             result = replace(
                 result,
                 status="degraded",
-                reasons=tuple(
-                    dict.fromkeys((*result.reasons, "card_metadata_unavailable"))
-                ),
+                reasons=tuple(dict.fromkeys(reasons)),
             )
-        items = tuple(
-            self.project_item(item, cards[item.item_id])
-            for item in result.items
-            if item.item_id in cards and not cards[item.item_id]["deleted"]
-        )
+        items = []
+        for item in result.items:
+            if item.item_id in cards:
+                if not cards[item.item_id]["deleted"]:
+                    items.append(self.project_item(item, cards[item.item_id]))
+            elif item.item_id in timed_out and self.project_timeout is not None:
+                # Host projection defines a summary, never invented invocation data.
+                items.append(self.project_timeout(item))
+        items = tuple(items)
         if "card_metadata_unavailable" not in result.reasons and any(
             item.item_id not in cards for item in result.items
         ):
@@ -127,9 +134,13 @@ class CardMetadataRetrieval:
             self.state.discard_metadata(self.cache, revision, key)
         return cards
 
-    async def _fetch_missing(self, cards, missing, revision, stage):
+    async def _fetch_missing(self, cards, missing, revision, stage, timed_out):
         if revision is None or not self.cache.enabled:
-            cards.update(await self._load_batch(missing, revision))
+            try:
+                cards.update(await self._load_batch(missing, revision))
+            except TimeoutError:
+                timed_out.update(missing)
+                raise
             return
 
         pending = self.state.pending_card_metadata
@@ -160,6 +171,8 @@ class CardMetadataRetrieval:
             batch = loaded[task]
             if isinstance(batch, BaseException):
                 error = batch
+                if isinstance(batch, TimeoutError):
+                    timed_out.add(key)
             elif key in batch:
                 cards[key] = deepcopy(batch[key])
         if error is not None:
