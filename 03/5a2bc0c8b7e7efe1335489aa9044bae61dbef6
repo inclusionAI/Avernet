@@ -1,0 +1,31 @@
+apps/baas/tests/unit/plugins/sandbox/arca/local_k8s/test_sandbox_plugin.py
+  s_45f5dc83f7ac50::t_1af3f5ea698766 325-327,570-582
+apps/baas/src/secbaas/community/core/service/device_manage/_device_storage_lifecycle.py
+  s_45f5dc83f7ac50::t_79cbae91ec8295 85-88
+apps/baas/src/secbaas/community/plugins/sandbox/arca/local_k8s/_sandbox_plugin.py
+  s_45f5dc83f7ac50::t_b0ff8c02a4b3b9 101,624-626,628-633,659-660
+apps/baas/src/secbaas/community/plugins/sandbox/arca/local_k8s/_storage_inspection.py
+  s_45f5dc83f7ac50::t_b0ff8c02a4b3b9 1-56
+apps/baas/src/secbaas/community/core/service/device_manage/_provider_receipt.py
+  s_45f5dc83f7ac50::t_19c3aff4d72370 72-77
+apps/baas/tests/integration/core/service/test_arca_storage_lifecycle_regression.py
+  s_45f5dc83f7ac50::t_1a43e543bf7615 924-938
+  s_45f5dc83f7ac50::t_2feb93ef6c7339 84,146-149,897-923
+  s_45f5dc83f7ac50::t_19c3aff4d72370 772,774,788-791
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "035a2bc0c8b7e7efe1335489aa9044bae61dbef6",
+  "prompts": {},
+  "sessions": {
+    "s_45f5dc83f7ac50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea50-1141-7730-93e2-7477d4e77f5a",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
