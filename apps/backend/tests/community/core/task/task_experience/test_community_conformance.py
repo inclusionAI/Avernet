@@ -55,9 +55,9 @@ from .conformance.task_plan_service_protocol_conformance import (
 
 def _make_llm(
     *,
-    base_url: str = "https://antchat.example/v1",
-    secret_name: str = "task_experience_antllm_key",
-    secret_token: str | None = "tok",
+    base_url: str = "https://example",
+    secret_name: str = "ax_key",
+    secret_token_value: str | None = "tok",
     response_content: str = "hello world   ",
     timeout_ms: int = 1_000,
 ):
@@ -67,7 +67,7 @@ def _make_llm(
         secret_name=secret_name,
         model="DeepSeek-V4-Flash",
         timeout_ms=timeout_ms,
-        secret_resolver=_FakeSecretResolver(secret_token),
+        secret_resolver=_FakeSecretResolver(secret_token_value),
         http_client=_FakeHttpClient(payload),
     )
 
