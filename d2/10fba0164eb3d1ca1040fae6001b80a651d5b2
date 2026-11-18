@@ -1,0 +1,47 @@
+apps/backend/tests/community/adapters/http/task/test_relay_report_trajectory_e2e.py
+  s_b6f36ed162c9bd::t_99b2f0e0a15fdf 770-775
+  s_b6f36ed162c9bd::t_bd328fdb8917c1 739-769,776-829
+apps/backend/src/agentclaw/community/core/task/task_runner/client/relay_prompt.py
+  s_b6f36ed162c9bd::t_37425aae84cc3e 68-73,94,128-134
+  s_b6f36ed162c9bd::t_24abd147bfb743 95-96
+  s_b6f36ed162c9bd::t_144dc82c1f8636 115-117
+apps/backend/specs/2026-09-23-task-cli/end-to-end-relay-design.md
+  s_b6f36ed162c9bd::t_24abd147bfb743 588-594
+  s_b6f36ed162c9bd::t_d231dc89bb9159 149,260
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
+  s_b6f36ed162c9bd::t_37425aae84cc3e 104,106-110,112-113,115
+apps/backend/src/agentclaw/community/core/task/task_context/task_graph_support.py
+  s_b6f36ed162c9bd::t_37425aae84cc3e 56,58-60,65,67-76,80,84
+apps/backend/src/agentclaw/community/core/task/task_context/relay_report.py
+  s_b6f36ed162c9bd::t_37425aae84cc3e 37,182-183,185-191,193-203,211-215,600
+  s_b6f36ed162c9bd::t_c198c2635c7a5d 26,184,192,204-210
+apps/backend/tests/community/core/task/task_runner/test_relay_prompt.py
+  s_b6f36ed162c9bd::t_3db55a77c06881 117-119
+  s_b6f36ed162c9bd::t_144dc82c1f8636 165,176-190,211-213
+apps/backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md
+  s_b6f36ed162c9bd::t_1c57885abbc328 712,1348
+apps/backend/src/agentclaw/community/core/task/README.md
+  s_b6f36ed162c9bd::t_c1c6df3f65a41d 241-244
+apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
+  s_b6f36ed162c9bd::t_96dd824232ec94 315-355
+apps/backend/tests/community/core/task/task_context/test_relay_dynamic_coop_group.py
+  s_b6f36ed162c9bd::t_700e2ea77012b7 629-659
+apps/backend/tests/community/core/task/task_context/test_relay_report.py
+  s_b6f36ed162c9bd::t_a80ea9ebb5f646 704-808
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d210fba0164eb3d1ca1040fae6001b80a651d5b2",
+  "prompts": {},
+  "sessions": {
+    "s_b6f36ed162c9bd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1da46-fbad-7ba2-9c7e-ab42a36547d5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

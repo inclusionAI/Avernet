@@ -1,0 +1,92 @@
+apps/frontend-nextgen/docs/task-escort-authoring.md
+  h_bb3ca6fb13c5df 1-95
+apps/frontend-nextgen/src/domain/taskEscortParity/types.ts
+  h_bb3ca6fb13c5df 12,16-17,26-27
+apps/frontend-nextgen/src/domain/taskEscortParity/workflowAuthoring.ts
+  h_bb3ca6fb13c5df 1-133
+apps/frontend-nextgen/src/domain/taskEscortParity/workflowAuthoringPack.ts
+  h_bb3ca6fb13c5df 1-81
+apps/frontend-nextgen/src/domain/taskEscortParity/workflowAuthoringTypes.ts
+  h_bb3ca6fb13c5df 1-148
+apps/frontend-nextgen/src/domain/taskEscortParity/workflowAuthoringYaml.d.ts
+  h_bb3ca6fb13c5df 1-6
+apps/frontend-nextgen/src/hooks/taskEscortParity/useEditorAiCapability.ts
+  h_bb3ca6fb13c5df 1-26
+apps/frontend-nextgen/src/hooks/taskEscortParity/useEditorAiDraft.ts
+  h_bb3ca6fb13c5df 1-250
+apps/frontend-nextgen/src/hooks/taskEscortParity/useEditorAuthoring.ts
+  h_bb3ca6fb13c5df 1-171
+apps/frontend-nextgen/src/hooks/taskEscortParity/useEditorAuthoringBaseline.ts
+  h_bb3ca6fb13c5df 1-40
+apps/frontend-nextgen/src/hooks/taskEscortParity/useEditorAuthoringNavigation.ts
+  h_bb3ca6fb13c5df 1-82
+apps/frontend-nextgen/src/hooks/taskEscortParity/useEditorAuthoringPublish.ts
+  h_bb3ca6fb13c5df 1-120
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortWorkspaceContext.ts
+  h_bb3ca6fb13c5df 10,60-64,66,71-90,103,112
+apps/frontend-nextgen/src/hooks/taskEscortParity/useWorkflowCloneSource.ts
+  h_bb3ca6fb13c5df 1-33
+apps/frontend-nextgen/src/hooks/taskEscortParity/useWorkflowCreation.ts
+  h_bb3ca6fb13c5df 1-152
+apps/frontend-nextgen/src/hooks/taskEscortParity/useWorkflowCreationAi.ts
+  h_bb3ca6fb13c5df 1-204
+apps/frontend-nextgen/src/hooks/taskEscortParity/useWorkflowCreationAiContext.ts
+  h_bb3ca6fb13c5df 1-22
+apps/frontend-nextgen/src/pages/TaskEscort/WorkspaceHeader.tsx
+  h_bb3ca6fb13c5df 6,8,22-25,55-60,71-78
+apps/frontend-nextgen/src/pages/TaskEscort/parity/WorkflowCloneSource.tsx
+  h_bb3ca6fb13c5df 1-121
+apps/frontend-nextgen/src/pages/TaskEscort/parity/WorkflowCreationAiPreview.tsx
+  h_bb3ca6fb13c5df 1-148
+apps/frontend-nextgen/src/pages/TaskEscort/parity/WorkflowCreationDialog.tsx
+  h_bb3ca6fb13c5df 1-165
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorAiPanel.tsx
+  h_bb3ca6fb13c5df 1-184
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorAiPreview.tsx
+  h_bb3ca6fb13c5df 1-108
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorAuthoringDialogs.tsx
+  h_bb3ca6fb13c5df 1-142
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorAuthoringYaml.tsx
+  h_bb3ca6fb13c5df 1-55
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorPrimitives.tsx
+  h_bb3ca6fb13c5df 60,65,72
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/WorkflowEditorPage.tsx
+  h_bb3ca6fb13c5df 2,4-6,8-11,15,21-35,38,47-49,51,63-66,76-78,82-84,86,88-95,97-102,108,111-114,116-162,187-209,212-222,224,229-247,252-283
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/workflowAuthoringController.ts
+  h_bb3ca6fb13c5df 1-58
+apps/frontend-nextgen/src/services/taskEscortParity/workflowAuthoringPersistence.ts
+  h_bb3ca6fb13c5df 1-184
+apps/frontend-nextgen/src/services/taskEscortParity/workflowAuthoringService.ts
+  h_bb3ca6fb13c5df 1-404
+apps/frontend-nextgen/test/taskEscortParity/editorAuthoring.test.tsx
+  h_bb3ca6fb13c5df 1-375
+apps/frontend-nextgen/test/taskEscortParity/editorAuthoringHooks.test.tsx
+  h_bb3ca6fb13c5df 1-233
+apps/frontend-nextgen/test/taskEscortParity/editorAuthoringRecovery.test.tsx
+  h_bb3ca6fb13c5df 1-314
+apps/frontend-nextgen/test/taskEscortParity/editorPage.test.tsx
+  h_bb3ca6fb13c5df 5,10-13,80-91,96,109-112,114,163-167
+apps/frontend-nextgen/test/taskEscortParity/workflowAuthoringDomain.test.ts
+  h_bb3ca6fb13c5df 1-85
+apps/frontend-nextgen/test/taskEscortParity/workflowAuthoringService.test.ts
+  h_bb3ca6fb13c5df 1-461
+apps/frontend-nextgen/test/taskEscortParity/workflowCreation.test.tsx
+  h_bb3ca6fb13c5df 1-335
+apps/frontend-nextgen/test/taskEscortParity/workflowCreationAi.test.tsx
+  h_bb3ca6fb13c5df 1-424
+apps/frontend-nextgen/test/taskEscortParity/workspaceContext.test.tsx
+  h_bb3ca6fb13c5df 146-193
+apps/frontend-nextgen/test/taskEscortWorkspace/page.test.tsx
+  h_bb3ca6fb13c5df 124-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1e22e25e89d748de4a18226923befb460c1f322a",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
