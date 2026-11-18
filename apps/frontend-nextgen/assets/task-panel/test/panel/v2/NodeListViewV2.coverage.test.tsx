@@ -153,14 +153,13 @@ describe('NodeListViewV2 覆盖补齐', () => {
     expect(rootLi.textContent).not.toContain('人工处理');
   });
 
-  it('点击和键盘操作定位节点目标，第一棒不恢复副屏打开位置', () => {
+  it('点击和键盘操作定位节点目标，第一棒恢复宿主会话', () => {
     render(<NodeListViewV2 task={task} nav={recorded.nav} />);
 
-    // 根节点有主会话目标时也走节点联动
+    // 根节点统一恢复宿主会话，不因节点目标存在而改走联动
     fireEvent.click(screen.getByRole('button', { name: '选中节点 第1棒 根节点' }));
-    expect(recorded.calls.root).toHaveLength(0);
-    expect(recorded.calls.select).toHaveLength(1);
-    expect(recorded.calls.select[0][0]).toBe('n-root');
+    expect(recorded.calls.root).toEqual(['n-root']);
+    expect(recorded.calls.select).toHaveLength(0);
 
     // 其他节点:选中 + 会话联动(coop_group 派生会话唯一 → 群会话目标)
     fireEvent.click(screen.getByRole('button', { name: '选中节点 第2棒 群协作节点' }));
@@ -168,7 +167,7 @@ describe('NodeListViewV2 覆盖补齐', () => {
     const [, groupTarget] = recorded.calls.select[1];
     expect(groupTarget).toMatchObject({ sessionId: 'bcs_grp_x', kind: 'group' });
 
-    // 空格键同样触发选择;Enter 对第一棒也走节点联动
+    // 空格键同样触发选择
     fireEvent.keyDown(screen.getByRole('button', { name: '选中节点 第3棒 未知态节点' }), { key: ' ' });
     expect(recorded.calls.select).toHaveLength(3);
     expect(recorded.calls.select[2][0]).toBe('n-mystery');
