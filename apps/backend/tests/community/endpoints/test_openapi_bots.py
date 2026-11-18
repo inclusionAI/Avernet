@@ -30,12 +30,10 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantRecycleOperationProtocol,
-    BotDormantRecycleServiceProtocol,
 )
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotNotFoundError,
@@ -473,24 +471,23 @@ def _seed_recycle_result(world, *, error: bool) -> None:
         active_engine=_ENGINE,
     )
 
-    def recycle(_self, **_kwargs):
+    def submit(_self, **_kwargs):
         if error:
             raise BotInvalidLifecycleStateError(
                 bot_id=_BOT_ID,
                 current_status="PENDING",
             )
-        return BotLifecycleResult(
-            bot_id=_BOT_ID,
-            owner_id=_OWNER,
-            status="RECYCLED",
-            changed=True,
-        )
+        return {
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER,
+            "status": "ACTIVE",
+            "changed": True,
+            "operation_id": "a" * 32,
+            "phase": "QUEUED",
+        }
 
     bind_overrides(
-        world,
-        BotDormantRecycleServiceProtocol,
-        {"recycle": recycle},
-        also_bind=(BotDormantRecycleOperationProtocol,),
+        world, BotDormantRecycleOperationProtocol, {"submit": submit}
     )
 
 
@@ -501,13 +498,17 @@ def _seed_recycle_result(world, *, error: bool) -> None:
     input=CaseInput(path_params=_PATH_PARAMS, query_params=_QUERY, headers=_HEADERS),
     seed=lambda world: _seed_recycle_result(world, error=False),
     expect=ExpectSuccess(
-        status=200,
+        status=202,
         json_contains={
+            "code": 202000,
+            "message": "Accepted",
             "data": {
                 "bot_id": _BOT_ID,
                 "owner_id": _OWNER,
-                "status": "RECYCLED",
+                "status": "ACTIVE",
                 "changed": True,
+                "operation_id": "a" * 32,
+                "phase": "QUEUED",
             }
         },
     ),

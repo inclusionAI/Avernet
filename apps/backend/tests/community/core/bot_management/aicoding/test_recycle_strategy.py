@@ -21,9 +21,6 @@ from agentclaw.community.core.bot_management.engines.restart_contract import (
 from agentclaw.community.core.bot_management.engines.registry import (
     assert_lifecycle_mutable,
 )
-from agentclaw.community.core.bot_management.services.bot_service import (
-    BotNotFoundError,
-)
 
 
 def facade(engine):
@@ -46,34 +43,15 @@ def facade(engine):
         bots,
         passport,
         recycle_services=RecycleServices(operations=factory),
-        audit_service=audit,
     )
     return bot, service, bots, passport, audit, factory, operations
 
 
-@pytest.mark.parametrize("engine", ["openclaw", "hermes", "unregistered"])
-def test_default_engines_keep_synchronous_recycle_and_never_resolve_queue(engine):
-    bot, service, bots, passport, audit, factory, _ = facade(engine)
-    result = service.submit(bot_id="b", owner_id="u", request_id="r")
-    assert result["status"] == "RECYCLED" and result["changed"] is True
-    assert "operation_id" not in result
-    assert service.submit(bot_id="b", owner_id="u")["changed"] is False
-    factory.assert_not_called()
-    bots.stop_bot.assert_called_once()
-    passport.freeze_agent_passport.assert_called_once()
-    audit.record_openapi_recycle.assert_called_once_with(
-        request_id="r", bot_id="b", owner_id="u"
-    )
-
-
-@pytest.mark.parametrize("engine", ["aicoding", "claude_code"])
-def test_coding_strategy_owns_async_admission_without_calling_sync_release(engine):
+@pytest.mark.parametrize("engine", ["openclaw", "hermes", "unregistered", "aicoding", "claude_code"])
+def test_all_personal_engines_use_the_same_async_recycle(engine):
     _, service, bots, passport, audit, factory, operations = facade(engine)
     operations.submit.return_value = {
-        "status": "ACTIVE",
-        "changed": True,
-        "operation_id": "op",
-        "phase": "QUEUED",
+        "status": "ACTIVE", "changed": True, "operation_id": "op", "phase": "QUEUED",
     }
     assert service.submit(bot_id="b", owner_id="u")["operation_id"] == "op"
     factory.assert_called_once()
@@ -82,32 +60,21 @@ def test_coding_strategy_owns_async_admission_without_calling_sync_release(engin
     audit.record_openapi_recycle.assert_not_called()
 
 
-def test_default_operation_query_is_not_found_without_constructing_coding_runtime():
-    _, service, _, _, _, factory, _ = facade("openclaw")
-    with pytest.raises(BotNotFoundError):
-        service.get_operation(bot_id="b", owner_id="u", operation_id="op")
-    factory.assert_not_called()
-
-
-def test_coding_operation_query_delegates_to_engine_and_does_not_release():
-    _, service, bots, _, _, _, operations = facade("claude_code")
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code"])
+def test_all_personal_engines_share_the_operation_query(engine):
+    _, service, bots, _, _, _, operations = facade(engine)
     operations.get_operation.return_value = {"operation_id": "op", "phase": "FAILED"}
-    assert (
-        service.get_operation(bot_id="b", owner_id="u", operation_id="op")["phase"]
-        == "FAILED"
-    )
-    operations.get_operation.assert_called_once_with(
-        bot_id="b", owner_id="u", operation_id="op"
-    )
+    assert service.get_operation(bot_id="b", owner_id="u", operation_id="op")["phase"] == "FAILED"
+    operations.get_operation.assert_called_once_with(bot_id="b", owner_id="u", operation_id="op")
     bots.stop_bot.assert_not_called()
 
 
-def test_default_strategy_has_no_coding_state_policy():
-    bot, *_ = facade("openclaw")
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code"])
+def test_all_personal_engines_reject_lifecycle_changes_during_recycle(engine):
+    bot, *_ = facade(engine)
     bot["ext"]["recycle"] = {"phase": "BACKING_UP"}
-    assert_lifecycle_mutable(
-        bot
-    )  # No global engine switch or coding journal interpretation.
+    with pytest.raises(BotInvalidLifecycleStateError):
+        assert_lifecycle_mutable(bot)
 
 
 def test_shared_recycle_sources_do_not_depend_on_coding_implementation():
@@ -140,7 +107,7 @@ def test_shared_device_service_surface_has_no_recycle_specific_methods():
 
 class Service:
     def __init__(self):
-        self.bot = {"bot_id": "b", "owner_id": "u", "entity_id": "u", "active_engine": "claude_code", "ext": {}}
+        self.bot = {"bot_type": "personal", "bot_id": "b", "owner_id": "u", "entity_id": "u", "active_engine": "claude_code", "ext": {}}
         self._repository = SimpleNamespace(
             get_by_id_and_owner=Mock(side_effect=lambda *_: self.bot)
         )
@@ -152,7 +119,7 @@ class Service:
 
     @serialize_resource_release
     def release(self, bot_id, user_id):
-        from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
+        from agentclaw.community.core.bot_management.engines.restart_contract import (
             assert_not_recycling,
         )
 
@@ -207,10 +174,56 @@ def test_busy_release_has_no_side_effect():
     service.effect.assert_not_called()
 
 
-def test_default_engine_release_does_not_acquire_coding_lock():
+def test_default_engine_release_uses_shared_recycle_admission_lock():
     service = Service()
     service.bot["active_engine"] = "openclaw"
     service.release("b", "u")
     service.effect.assert_called_once()
+    service._try_acquire_restart_lock.assert_called_once()
+    service._restart_lock_repo.release.assert_called_once()
+
+
+@pytest.mark.parametrize("ext,blocked", [
+    ("{", False), ("null", False), ("[]", False), (None, False),
+    ('{"recycle":{"phase":"RELEASING"}}', True),
+    ({"recycle": {"phase": "NEEDS_CONFIRMATION"}}, True),
+])
+def test_shared_recycle_guard_accepts_legacy_ext_without_hiding_valid_operations(ext, blocked):
+    bot, *_ = facade("openclaw")
+    bot["ext"] = ext
+    if blocked:
+        with pytest.raises(BotInvalidLifecycleStateError):
+            assert_lifecycle_mutable(bot)
+    else:
+        assert_lifecycle_mutable(bot)
+
+
+def test_shared_recycle_guard_does_not_hide_non_syntax_decode_errors(monkeypatch):
+    from agentclaw.community.core.bot_management.engines import restart_contract
+
+    bot, *_ = facade("openclaw")
+    bot["ext"] = '{"recycle":{"phase":"RELEASING"}}'
+    monkeypatch.setattr(
+        restart_contract.json, "loads", Mock(side_effect=ValueError("decode limit"))
+    )
+    with pytest.raises(ValueError, match="decode limit"):
+        assert_lifecycle_mutable(bot)
+
+
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code"])
+@pytest.mark.parametrize("bot_type", ["service", "desktop"])
+def test_non_personal_release_does_not_acquire_recycle_lock(engine, bot_type):
+    service = Service()
+    service.bot.update(active_engine=engine, bot_type=bot_type)
+    service.release("b", "u")
+    service.effect.assert_called_once()
     service._try_acquire_restart_lock.assert_not_called()
     service._restart_lock_repo.release.assert_not_called()
+
+
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code"])
+@pytest.mark.parametrize("bot_type", ["service", "desktop"])
+def test_non_personal_lifecycle_does_not_read_personal_recycle_state(engine, bot_type):
+    bot, *_ = facade(engine)
+    bot.update(bot_type=bot_type, ext={"recycle": {"phase": "QUEUED"}})
+    assert_lifecycle_mutable(bot)

@@ -46,7 +46,7 @@ router = APIRouter(
     summary="Recycle a personal managed-cloud Bot",
     responses={
         200: {
-            "description": "Synchronous completion or an already-recycled idempotent result.",
+            "description": "An already-recycled idempotent result; no new operation was started.",
             "content": {
                 "application/json": {
                     "example": {
@@ -88,10 +88,6 @@ router = APIRouter(
             **ERROR_RESPONSES[409],
             "description": "Incompatible Bot state or busy lifecycle.",
         },
-        502: {
-            **ERROR_RESPONSES[502],
-            "description": "Synchronous resource release failed: Bot resource release failed.",
-        },
         503: {
             **ERROR_RESPONSES[503],
             "description": "Worker unavailable or durable admission unconfirmed.",
@@ -117,15 +113,18 @@ async def recycle_dormant_bot(
     422. Missing/inaccessible Bots return 404. Teclaw, desktop and service Bots
     are unsupported; incompatible state or a busy lifecycle returns 409.
 
-    - `aicoding` / `claude_code`: HTTP 202 admits a background operation.
+    - All supported personal managed-cloud Bots use HTTP 202 to admit a background operation.
       `data.status` is the current Bot state, not completion. `changed=true`
       means new admission; a duplicate unresolved operation returns the same
       `operation_id` with `changed=false`. Poll
       `GET /openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}`.
-    - Other engines complete synchronously with HTTP 200. An already RECYCLED
-      Bot without an unresolved operation returns `changed=false`, without
-      another backup, release or audit.
+    - An already RECYCLED Bot without an unresolved operation returns HTTP 200
+      with `changed=false`, without another backup, release or audit.
 
+    Only `aicoding` / `claude_code` runs the existing fastdisk probe in the worker.
+    Non-coding Bots skip all backup probing, configuration and helper execution.
+    Non-fastdisk coding Bots skip the helper and backup failure switch; all three
+    types share the same recycle operation, status query and activation interface.
     AICoding reuses the restart backup policy. Confirmed fastdisk backup has a
     1500-second worker budget. Only enabled boolean `aicoding/fastdisk_fail_block=true`
     blocks on failure; non-fastdisk or an unsuccessful initial probe skips the
@@ -138,8 +137,8 @@ async def recycle_dormant_bot(
     then sets RECYCLED and writes one audit with `source=openapi`. No recycle
     DingTalk notification is enqueued. Unconfirmed release/finalization becomes
     NEEDS_CONFIRMATION and blocks conflicting lifecycle requests; do not blindly
-    resubmit destruction. HTTP 502 means synchronous resource release failed;
-    503 means the worker is unavailable or durable admission is unconfirmed.
+    resubmit destruction. Release errors after HTTP 202 are read from the operation;
+    HTTP 503 means the worker is unavailable or durable admission is unconfirmed.
     """
     result = await run_in_threadpool(  # allow-run-in-threadpool: synchronous Protocol method
         service.submit,
@@ -197,7 +196,7 @@ async def get_recycle_operation(
         BotDormantRecycleOperationProtocol
     ),
 ) -> Envelope[BotRecycleOperation]:
-    """Read-only query of the current/latest AICoding recycle operation.
+    """Read-only query of the current/latest personal Bot recycle operation.
 
     HTTP 200 means the read succeeded, even for phase FAILED or
     NEEDS_CONFIRMATION. `bot_status` is independent of the operation phase:
@@ -209,7 +208,7 @@ async def get_recycle_operation(
 
     This GET never advances, retries or repairs work. Only the current/latest
     handle is retained; an older replaced handle, mismatched scope, unsupported
-    engine or missing/inaccessible Bot returns 404. Uses the same OWNER check,
+    Bot type or missing/inaccessible Bot returns 404. Uses the same OWNER check,
     optional `entity_id` and deprecated `owner_id` alias as POST /recycle;
     conflicting owner parameters return 422. This is separate from Bot /status.
     """

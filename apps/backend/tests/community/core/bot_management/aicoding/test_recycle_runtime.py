@@ -2,8 +2,8 @@
 
 import time
 
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import (
-    ArcaRecycleTransport,
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import ArcaRecycleTransport
+from agentclaw.community.core.bot_dormant.recycle_service import (
     observe_baas_release,
     submit_baas_release,
     submit_release,
@@ -24,10 +24,10 @@ from agentclaw.community.core.bot_management.engines.aicoding.restart_state impo
     BackupPersistenceError,
     current_backup,
 )
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import (
-    AicodingRecycleRuntime,
+from agentclaw.community.core.bot_dormant.recycle_service import (
+    ManagedRecycleRuntime,
 )
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
+from agentclaw.community.core.bot_management.engines.restart_contract import (
     RecycleTargetChanged,
 )
 
@@ -81,7 +81,7 @@ def test_baas_new_physical_device_with_same_binding_blocks_release():
     devices, bots, deps = MagicMock(), MagicMock(), MagicMock()
     binding = SimpleNamespace(device_id="d1", device_provider="baas", device_props={})
     devices.get_device.return_value = binding
-    runtime = AicodingRecycleRuntime(lambda: devices, bots, deps, MagicMock())
+    runtime = ManagedRecycleRuntime(lambda: devices, bots, deps, MagicMock())
     target = {
         "binding_id": 1,
         "provider": "baas",
@@ -107,7 +107,6 @@ def test_recycle_uses_durable_policy_and_backup_context_without_restart_mutation
 ):
     from agentclaw.community.core.bot_management.engines import registry
     from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
-    from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import RestartBackupBlocked
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_restart
     from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection
     from tests.community.core.bot_management.aicoding.test_restart_backup import response
@@ -136,7 +135,7 @@ def test_recycle_uses_durable_policy_and_backup_context_without_restart_mutation
 
     command = MagicMock(side_effect=execute)
     deps = RestartBackupDependencies(arca_transport=lambda: ArcaRestartTransport(command))
-    runtime = AicodingRecycleRuntime(lambda: devices, bots, deps, MagicMock())
+    runtime = ManagedRecycleRuntime(lambda: devices, bots, deps, MagicMock())
     record["target"] = runtime.target(bot)
 
     def save(**changes):
@@ -146,7 +145,8 @@ def test_recycle_uses_durable_policy_and_backup_context_without_restart_mutation
         return dict(record)
 
     if failed:
-        with pytest.raises(RestartBackupBlocked):
+        from agentclaw.community.core.bot_management.engines.restart_contract import RecycleBackupBlocked
+        with pytest.raises(RecycleBackupBlocked):
             runtime.prepare(bot, record, save)
     else:
         verify = runtime.prepare(bot, record, save)
@@ -162,7 +162,7 @@ def test_recycle_uses_durable_policy_and_backup_context_without_restart_mutation
 
 @pytest.fixture
 def baas():
-    service = create_autospec(BaasRecycleRuntime, instance=True)
+    service = create_autospec(BaasService, instance=True)
     service.is_physical_device_destroyed.return_value = False
     service.list_devices_by_bot_uuid.return_value = []
     return service
@@ -288,7 +288,7 @@ def test_all_pinned_targets_must_be_physically_absent(baas):
 
 def test_restart_only_runtime_cannot_silently_supply_recycle_capabilities():
     deps = RestartBackupDependencies.for_instance(create_autospec(BaasRestartRuntime, instance=True))
-    runtime = AicodingRecycleRuntime(MagicMock(), MagicMock(), deps, MagicMock())
+    runtime = ManagedRecycleRuntime(MagicMock(), MagicMock(), deps, MagicMock())
     with pytest.raises(RuntimeError, match="capabilities unavailable"):
         runtime.submit_release({"binding_id": 1, "provider": "baas", "bot_uuid": "b1"}, "op1", "u1")
 
@@ -299,7 +299,7 @@ def test_real_baas_service_supplies_declared_recycle_capabilities():
 
 def test_runtime_observes_persisted_physical_targets_through_declared_capability(baas):
     baas.is_physical_device_destroyed.return_value = True
-    runtime = AicodingRecycleRuntime(
+    runtime = ManagedRecycleRuntime(
         MagicMock(), MagicMock(), RestartBackupDependencies.for_instance(baas), MagicMock(),
     )
     assert runtime.observe_release(
@@ -323,7 +323,7 @@ def test_prepare_pins_terminal_inventory_rows_instead_of_forgetting_physical_ids
     )
     bot = {"bot_id": "b1", "owner_id": "u1", "bot_type": "personal", "active_engine": "claude_code", "binding_id": 1}
     bots.get_by_id_and_owner.return_value = bot
-    runtime = AicodingRecycleRuntime(lambda: devices, bots, RestartBackupDependencies.for_instance(baas), MagicMock())
+    runtime = ManagedRecycleRuntime(lambda: devices, bots, RestartBackupDependencies.for_instance(baas), MagicMock())
     record = {"target": runtime.target(bot), "operation_id": "a" * 32, "backup_started_at": time.time(), "fail_block": False}
 
     def save(**changes):
@@ -338,7 +338,7 @@ def test_prepare_pins_terminal_inventory_rows_instead_of_forgetting_physical_ids
 def test_bound_bot_without_physical_inventory_cannot_begin_release(baas):
     devices = MagicMock()
     devices.get_device.return_value = SimpleNamespace(device_id="d1", device_provider="baas", device_props={})
-    runtime = AicodingRecycleRuntime(lambda: devices, MagicMock(), RestartBackupDependencies.for_instance(baas), MagicMock())
+    runtime = ManagedRecycleRuntime(lambda: devices, MagicMock(), RestartBackupDependencies.for_instance(baas), MagicMock())
     bot = {"binding_id": 1}
     with pytest.raises(RecycleTargetChanged, match="Physical targets missing"):
         runtime.prepare(bot, {"target": runtime.target(bot)}, MagicMock())
@@ -347,5 +347,67 @@ def test_bound_bot_without_physical_inventory_cannot_begin_release(baas):
 
 def test_unbound_bot_does_not_require_a_physical_probe():
     deps = RestartBackupDependencies(baas_runtime=MagicMock(side_effect=AssertionError("must stay lazy")))
-    runtime = AicodingRecycleRuntime(MagicMock(), MagicMock(), deps, MagicMock())
+    runtime = ManagedRecycleRuntime(MagicMock(), MagicMock(), deps, MagicMock())
     assert runtime.observe_release({"binding_id": None}, None, None) == "RELEASED"
+
+
+@pytest.mark.parametrize("engine,mounted", [("openclaw", False), ("hermes", False), ("claude_code", False), ("claude_code", True), ("aicoding", True)])
+def test_shared_recycle_only_backs_up_confirmed_fastdisk_coding(engine, mounted, monkeypatch):
+    from agentclaw.community.core.bot_management.engines import registry
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+    from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection
+    from tests.community.core.bot_management.aicoding.test_restart_backup import response
+
+    config = MagicMock()
+    config.get_value.return_value = True
+    monkeypatch.setattr(registry, "_restart_common_config_provider", lambda: config)
+    devices, bots, execute = MagicMock(), MagicMock(), MagicMock()
+    devices.get_device.return_value = SimpleNamespace(device_id="d1", device_provider="arca", status="ACTIVE", device_props={"sandbox_id": "s1"})
+    op = "a" * 32
+    execute.side_effect = [detection("run" if mounted else "skip_no_fastdisk"), response("committed", backup={"status": "success", "generation_id": "g1", "operation_id": op})]
+    deps = RestartBackupDependencies(arca_transport=lambda: ArcaRestartTransport(execute))
+    runtime = ManagedRecycleRuntime(lambda: devices, bots, deps, MagicMock())
+    bot = {"bot_id": "b1", "owner_id": "u1", "bot_type": "personal", "active_engine": engine, "status": "ACTIVE", "binding_id": 1}
+    bots.get_by_id_and_owner.return_value = bot
+    record = {"target": runtime.target(bot), "operation_id": op, "backup_started_at": time.time()}
+
+    def save(**changes):
+        record.update(changes)
+        return dict(record)
+
+    runtime.prepare(bot, record, save)()
+    coding = engine in {"aicoding", "claude_code"}
+    assert execute.call_count == (2 if coding and mounted else 1 if coding else 0)
+    if coding and mounted:
+        config.get_value.assert_called_once()
+        assert record["fastdisk_targets"] == ["s1"] and record["fail_block"] is True
+    else:
+        config.get_value.assert_not_called()
+        assert "fastdisk_targets" not in record and "fail_block" not in record
+
+
+def test_fastdisk_policy_write_failure_escapes_baas_compatibility_fallback(baas, monkeypatch):
+    from agentclaw.community.core.bot_management.engines import registry
+    from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection
+
+    config = MagicMock()
+    config.get_value.return_value = True
+    monkeypatch.setattr(registry, "_restart_common_config_provider", lambda: config)
+    devices, bots = MagicMock(), MagicMock()
+    devices.get_device.return_value = SimpleNamespace(device_id="d1", device_provider="baas", status="ACTIVE", device_props={})
+    baas.list_devices_by_bot_uuid.return_value = [{"provider_device_id": "s1@42", "status": "ACTIVE"}]
+    baas.post_bots_api.return_value = detection()
+    runtime = ManagedRecycleRuntime(lambda: devices, bots, RestartBackupDependencies.for_instance(baas), MagicMock())
+    bot = {"bot_id": "b1", "owner_id": "u1", "bot_type": "personal", "active_engine": "claude_code", "binding_id": 1}
+    record = {"target": runtime.target(bot), "operation_id": "a" * 32, "backup_started_at": time.time()}
+
+    def save(**changes):
+        if "fail_block" in changes:
+            raise RuntimeError("database unavailable")
+        record.update(changes)
+        return dict(record)
+
+    with pytest.raises(BackupPersistenceError):
+        runtime.prepare(bot, record, save)
+    assert baas.post_bots_api.call_count == 1  # Only the read-only mount probe.
+    baas.destroy_bot.assert_not_called()

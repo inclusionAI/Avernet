@@ -8,7 +8,7 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Callable
 
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
+from agentclaw.community.core.bot_management.engines.restart_contract import (
     BLOCKING,
     RecycleSuperseded,
     RecycleTargetChanged,

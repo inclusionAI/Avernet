@@ -247,20 +247,48 @@ class EngineProvisioningStrategy(ABC):
         ``apps/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
         """
 
-    def execute_recycle(self, ctx: BotProvisioningContext, recycle, *, services=None, **kwargs):
-        """Default engines retain synchronous recycling; engines may own durable work."""
-        return recycle(**kwargs)
-
-    def get_recycle_operation(self, ctx: BotProvisioningContext, *, services=None, **kwargs):
-        """Return an engine-owned operation result, or None when no operation exists."""
+    def prepare_recycle(self, ctx: BotProvisioningContext, **kwargs):
+        """Default engines have no backup policy, probe, helper or configuration read."""
         return None
 
     def assert_lifecycle_mutable(self, ctx: BotProvisioningContext, bot: dict) -> None:
-        """Engine-owned in-flight work may veto a conflicting lifecycle mutation."""
+        """Personal Bots honor the same in-flight recycle operation across engines."""
+        if ctx.bot_type != "personal":
+            return
+        from .restart_contract import assert_not_recycling
+        assert_not_recycling(bot)
 
-    def execute_resource_release(self, ctx: BotProvisioningContext, bot: dict, release, *, lifecycle):
-        """Default engines add no release lock or journal checks."""
-        return release()
+    def execute_resource_release(self, ctx, bot, release, *, lifecycle):
+        if ctx.bot_type != "personal":
+            return release()
+        from agentclaw.community.core.bot_management.engines.restart_contract import assert_not_recycling
+        from agentclaw.community.utils.env_utils import get_current_env
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotInvalidLifecycleStateError,
+        )
+
+        assert_not_recycling(bot)
+        entity = bot.get("entity_id")
+        if not entity:
+            return release()
+        key = (get_current_env(), entity, ctx.bot_id, ctx.owner_id)
+        if held_resource_lock.get() == key:
+            return release()
+        lock = lifecycle._try_acquire_restart_lock(*key)
+        if lock is None:
+            raise BotInvalidLifecycleStateError(
+                bot_id=ctx.bot_id, current_status="BUSY"
+            )
+        reset_handle = held_resource_lock.set(key)
+        try:
+            assert_not_recycling(
+                lifecycle._repository.get_by_id_and_owner(ctx.bot_id, ctx.owner_id)
+                or bot
+            )
+            return release()
+        finally:
+            held_resource_lock.reset(reset_handle)
+            lifecycle._restart_lock_repo.release(*key[:3], lock.lock_token)
 
     def prepare_restart(
         self, ctx: BotProvisioningContext, **kwargs

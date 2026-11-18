@@ -51,11 +51,11 @@ class BotDormantAuditServiceProtocol(Protocol):
 
 @runtime_checkable
 class BotDormantRecycleOperationProtocol(Protocol):
-    """Engine-dispatched recycle and OWNER-scoped read-only latest operation.
+    """Uniform async recycle and OWNER-scoped read-only latest operation.
 
-    Coding submit returns an operation handle; default engines finish synchronously.
-    get_operation
-    returns only the current/latest matching handle, hiding others as not-found.
+    All supported personal managed-cloud Bots return the same operation handle.
+    An already RECYCLED Bot without an unresolved operation is idempotent.
+    get_operation returns only the current/latest matching handle, hiding others as not-found.
     Backup/release errors after acceptance are reported in the operation result.
     """
     def submit(self, *, bot_id: str, owner_id: str, owner_name: str | None = None,

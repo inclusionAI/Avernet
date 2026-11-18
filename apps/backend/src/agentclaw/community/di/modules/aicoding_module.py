@@ -10,8 +10,6 @@ from the injector — no module-specific construction logic, so a
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import Callable
 
 from agentclaw.community.api.aicoding.architect_rebind_service import (
     ArchitectRebindServiceProtocol,
@@ -42,26 +40,7 @@ from agentclaw.community.core.aicoding.services.workspace_hosting_workitem_servi
 from agentclaw.community.core.aicoding.services.workspace_service import (
     WorkspaceService,
 )
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import (
-    ArcaRecycleTransport,
-)
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import (
-    AicodingRecycleRuntime,
-)
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
-    RecycleUnavailable,
-)
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_task import (
-    AicodingRecycleHandler,
-    AicodingRecycleLifecycle,
-    AicodingRecycleOperations,
-)
-from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import (
-    RestartBackupDependencies,
-)
-from agentclaw.community.core.bot_management.engines.restart_contract import (
-    RecycleServices,
-)
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import ArcaRecycleTransport
 from agentclaw.community.core.bot_management.engines.registry import (
     configure_restart_common_config,
 )
@@ -71,24 +50,9 @@ from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting
 from agentclaw.community.core.bot_management.services.template_service import (
     TemplateService,
 )
-from agentclaw.community.core.bot_startup_script.protocols import (
-    TeclawEngineTestProtocol,
-)
-from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
-    BotRestartLockRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot.recycle import (
-    BotRecycleRepositoryProtocol,
-)
-from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.core.task_queue.services.task_queue_service import (
-    TaskQueueService,
-)
-from agentclaw.community.di.config import TaskQueueConfig, TaskQueueWorkerConfig
-from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.utils.env_utils import get_current_env
 from injector import (
     Binder,
     CallError,
@@ -194,89 +158,6 @@ class AICodingModule(Module):
         self, svc: AicodingHostedWorkspaceService
     ) -> AicodingHostedWorkspaceServiceProtocol:
         return svc
-
-    @singleton
-    @provider
-    @inject
-    def recycle_operations(
-        self,
-        store: BotRecycleRepositoryProtocol,
-        bots: BotRepository,
-        queue: TaskQueueService,
-        locks: BotRestartLockRepositoryProtocol,
-        dependencies: RestartBackupDependencies,
-        config: TaskQueueConfig,
-        worker: TaskQueueWorkerConfig,
-        injector: Injector,
-        engine_test: Callable[[], TeclawEngineTestProtocol],
-    ) -> AicodingRecycleOperations:
-        @contextmanager
-        def guard(bot):
-            env, entity = get_current_env(), bot.get("entity_id")
-            if not entity:
-                raise RecycleUnavailable("Bot lock identity unavailable")
-            lock = locks.acquire(
-                env, entity, bot["bot_id"], "recycle:" + bot["owner_id"]
-            )
-            if lock is None:
-                # Admission/receipt verification only: the durable journal, not
-                # this short TTL, protects a long-running operation.
-                stale = locks.get_if_stale(env, entity, bot["bot_id"], 120)
-                # Never reap a legacy release/restart lock: provider calls may
-                # outlive 120s without a durable recycle journal protecting them.
-                if stale is not None and stale.holder_user_id.startswith("recycle:"):
-                    locks.release(env, entity, bot["bot_id"], stale.lock_token)
-                    lock = locks.acquire(
-                        env, entity, bot["bot_id"], "recycle:" + bot["owner_id"]
-                    )
-            if lock is None:
-                from agentclaw.community.core.bot_management.services.bot_service import (
-                    BotInvalidLifecycleStateError,
-                )
-
-                raise BotInvalidLifecycleStateError(
-                    bot_id=bot["bot_id"], current_status="BUSY"
-                )
-            try:
-                yield
-            finally:
-                locks.release(env, entity, bot["bot_id"], lock.lock_token)
-
-        return AicodingRecycleOperations(
-            store=store,
-            queue=queue,
-            guard=guard,
-            app=config.app,
-            worker_enabled=worker.enabled,
-            is_teclaw=lambda engine: engine_test().is_teclaw(engine),
-            runtime=AicodingRecycleRuntime(
-                lambda: injector.get(DeviceService),
-                bots,
-                dependencies,
-                lambda: injector.get(ArcaRecycleTransport),
-            ),
-        )
-
-    @singleton
-    @provider
-    @inject
-    def recycle_task_lifecycle(
-        self,
-        service: AicodingRecycleOperations,
-        registry: HandlerRegistry,
-        passport: PassportPlugin,
-    ) -> AicodingRecycleLifecycle:
-        return AicodingRecycleLifecycle(
-            registry, AicodingRecycleHandler(service, passport)
-        )
-
-    @singleton
-    @provider
-    @inject
-    def recycle_services(self, injector: Injector) -> RecycleServices:
-        return RecycleServices(
-            operations=lambda: injector.get(AicodingRecycleOperations)
-        )
 
     @singleton
     @provider

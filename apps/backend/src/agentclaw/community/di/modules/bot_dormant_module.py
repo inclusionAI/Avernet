@@ -19,6 +19,20 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from contextlib import contextmanager
+from injector import Injector
+from agentclaw.community.core.bot_dormant.recycle_service import ManagedRecycleRuntime
+from agentclaw.community.core.bot_dormant.recycle_task import RecycleOperations, RecycleHandler, RecycleLifecycle
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import ArcaRecycleTransport
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+from agentclaw.community.core.bot_management.engines.restart_contract import RecycleUnavailable
+from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.repository.protocols.bot import BotRepository, BotRestartLockRepositoryProtocol
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
+from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.di.config import TaskQueueWorkerConfig
+from agentclaw.community.utils.env_utils import get_current_env
+
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
     BotDormantAuditServiceProtocol,
@@ -198,10 +212,92 @@ class BotDormantModule(Module):
         bot_service: _DormantBotServiceProtocol,
         passport: PassportPlugin,
         services: RecycleServices,
-        audit: DormantAuditService,
     ) -> RecycleBotService:
         return RecycleBotService(
-            bot_service, passport, recycle_services=services, audit_service=audit
+            bot_service, passport, recycle_services=services
+        )
+
+    @singleton
+    @provider
+    @inject
+    def recycle_operations(
+        self,
+        store: BotRecycleRepositoryProtocol,
+        bots: BotRepository,
+        queue: TaskQueueService,
+        locks: BotRestartLockRepositoryProtocol,
+        dependencies: RestartBackupDependencies,
+        config: TaskQueueConfig,
+        worker: TaskQueueWorkerConfig,
+        injector: Injector,
+        engine_test: Callable[[], TeclawEngineTestProtocol],
+    ) -> RecycleOperations:
+        @contextmanager
+        def guard(bot):
+            env, entity = get_current_env(), bot.get("entity_id")
+            if not entity:
+                raise RecycleUnavailable("Bot lock identity unavailable")
+            lock = locks.acquire(
+                env, entity, bot["bot_id"], "recycle:" + bot["owner_id"]
+            )
+            if lock is None:
+                # Admission/receipt verification only: the durable journal, not
+                # this short TTL, protects a long-running operation.
+                stale = locks.get_if_stale(env, entity, bot["bot_id"], 120)
+                # Never reap a legacy release/restart lock: provider calls may
+                # outlive 120s without a durable recycle journal protecting them.
+                if stale is not None and stale.holder_user_id.startswith("recycle:"):
+                    locks.release(env, entity, bot["bot_id"], stale.lock_token)
+                    lock = locks.acquire(
+                        env, entity, bot["bot_id"], "recycle:" + bot["owner_id"]
+                    )
+            if lock is None:
+                from agentclaw.community.core.bot_management.services.bot_service import (
+                    BotInvalidLifecycleStateError,
+                )
+
+                raise BotInvalidLifecycleStateError(
+                    bot_id=bot["bot_id"], current_status="BUSY"
+                )
+            try:
+                yield
+            finally:
+                locks.release(env, entity, bot["bot_id"], lock.lock_token)
+
+        return RecycleOperations(
+            store=store,
+            queue=queue,
+            guard=guard,
+            app=config.app,
+            worker_enabled=worker.enabled,
+            is_teclaw=lambda engine: engine_test().is_teclaw(engine),
+            runtime=ManagedRecycleRuntime(
+                lambda: injector.get(DeviceService),
+                bots,
+                dependencies,
+                lambda: injector.get(ArcaRecycleTransport),
+            ),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def recycle_task_lifecycle(
+        self,
+        service: RecycleOperations,
+        registry: HandlerRegistry,
+        passport: PassportPlugin,
+    ) -> RecycleLifecycle:
+        return RecycleLifecycle(
+            registry, RecycleHandler(service, passport)
+        )
+
+    @singleton
+    @provider
+    @inject
+    def recycle_services(self, injector: Injector) -> RecycleServices:
+        return RecycleServices(
+            operations=lambda: injector.get(RecycleOperations)
         )
 
     @singleton

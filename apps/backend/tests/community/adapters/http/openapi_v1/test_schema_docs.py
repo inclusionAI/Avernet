@@ -239,8 +239,9 @@ def test_recycle_documents_admission_backup_policy_and_idempotency():
         "fastdisk_fail_block",
         "1500",
         "NEEDS_CONFIRMATION",
-        "502",
         "503",
+        "All supported personal",
+        "Non-coding Bots skip",
     ):
         assert term in description
     assert "requestBody" not in operation

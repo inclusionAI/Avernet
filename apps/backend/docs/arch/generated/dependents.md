@@ -320,6 +320,7 @@ _No dependents in the boundary-significant set._
 - `agentclaw.community.api`
 - `agentclaw.community.core.acli_clis`
 - `agentclaw.community.core.aicoding`
+- `agentclaw.community.core.bot_dormant`
 - `agentclaw.community.core.bot_knowledge`
 - `agentclaw.community.core.bot_management`
 - `agentclaw.community.core.cron`
@@ -364,6 +365,7 @@ _No dependents in the boundary-significant set._
 - `agentclaw.community.core.acli_clis`
 - `agentclaw.community.core.apply_engine`
 - `agentclaw.community.core.bot_config_manifest`
+- `agentclaw.community.core.bot_dormant`
 - `agentclaw.community.core.bot_management`
 - `agentclaw.community.core.devices`
 - `agentclaw.community.core.repository`
