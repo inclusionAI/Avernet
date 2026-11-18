@@ -29,7 +29,7 @@ def _orchestrated_service():
     provider.exchange_dingtalk.return_value = token
     bindings.resolve.side_effect = None
     bindings.resolve.return_value = ResolvedRuntimeBinding(41, RuntimeBindingSource.CALLER_INSTANCE)
-    orchestrator = TokenExchangeOrchestrator(caller_service=caller, token_pipeline=NoopTokenPluginPipeline(), bot_repository=MagicMock())
+    orchestrator = TokenExchangeOrchestrator(caller_service=caller, token_pipeline=NoopTokenPluginPipeline(), bot_repository=MagicMock(), auth_plugin=auth)
     return orchestrator, provider, updater, bindings, auth, token
 
 
@@ -66,7 +66,7 @@ async def test_http_dingtalk_reaches_exchange_and_exact_runtime_update(state, ca
 @pytest.mark.asyncio
 @pytest.mark.parametrize("service_class", [CommunityCallerIamTokenService, SingleboxCallerIamTokenService])
 async def test_unsupported_profiles_fail_closed_for_dingtalk(service_class):
-    orchestrator = TokenExchangeOrchestrator(caller_service=service_class(), token_pipeline=NoopTokenPluginPipeline(), bot_repository=MagicMock())
+    orchestrator = TokenExchangeOrchestrator(caller_service=service_class(), token_pipeline=NoopTokenPluginPipeline(), bot_repository=MagicMock(), auth_plugin=MagicMock())
     async with AsyncClient(transport=ASGITransport(app=_app(orchestrator)), base_url="http://test") as client:
         response = await client.get("/api/v1/token/iam", params={"token_type": "dingtalk", "bot_id": "bot-1"}, headers={"Cookie": "IAM_TOKEN=device-secret"})
         default = await client.get("/api/v1/token/iam")
@@ -84,7 +84,7 @@ async def test_default_iam_compatible_with_legacy_signature():
         async def get_iam_token(self, *, iam_token, auth_request, bot_id, stage, publish_id, entity_id, is_test_exchange, session_key=None):
             return CallerIamTokenOutcome(iam_token=iam_token)
 
-    orchestrator = TokenExchangeOrchestrator(caller_service=LegacyCaller(), token_pipeline=NoopTokenPluginPipeline(), bot_repository=MagicMock())
+    orchestrator = TokenExchangeOrchestrator(caller_service=LegacyCaller(), token_pipeline=NoopTokenPluginPipeline(), bot_repository=MagicMock(), auth_plugin=MagicMock())
     async with AsyncClient(transport=ASGITransport(app=_app(orchestrator)), base_url="http://test") as client:
         response = await client.get("/api/v1/token/iam", headers={"Cookie": "IAM_TOKEN=iam-secret"})
     assert response.status_code == 200

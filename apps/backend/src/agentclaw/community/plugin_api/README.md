@@ -222,3 +222,16 @@ ownership.
 V2 removes caller configuration repair; the normal caller configuration APIs
 are unchanged. Empty/blank summaries retain BCS Keep semantics but a valid
 onboard acknowledgement is successful profile delivery, not an unknown result.
+
+For IAM-triggered outbound token plugins, the orchestrator authenticates the
+requester separately from the Bot owner and the rollout-list entity. The optional
+`caller_runtime_target` selects the stage service binding or the requester's
+independent instance. The optional `device_uuid` identifies an active replica
+within the selected binding. The target resolver verifies authority and
+membership before converting either selector to a physical injection target.
+OpenAPI supplies the verified gateway human principal, including for a friend
+session. The public principal takes precedence over a delegated query user ID.
+The legacy IAM route uses its authentication plugin. Device identifiers are
+opaque and compared verbatim; an explicitly empty selector cannot choose a
+default device. The Bot entity determines the existing rollout scope.
+The Caller refresh runs before selector validation and retains its own result.
