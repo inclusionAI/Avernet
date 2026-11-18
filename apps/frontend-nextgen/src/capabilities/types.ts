@@ -867,6 +867,13 @@ export interface AppCapabilities {
    */
   getPublicBotBackendEnabled: () => boolean;
   /**
+   * 实验室落地页的「待办」功能卡是否展示。默认展示，保持 PRE/开发环境可进入；
+   * 生产部署可通过运行时 `window.AVERNET_RUNTIME_CONFIG.TODO_PRODUCT_ENTRY_ENABLED=false`
+   * 或编译常量 TEAMCLAW_TODO_PRODUCT_ENTRY_ENABLED=false 关闭，运行时显式设置优先。
+   * 仅控制 /lab 落地页入口，不隐藏 /lab/todos 深链路由。
+   */
+  getTodoProductEntryVisible: () => boolean;
+  /**
    * 壳层入口可见性（空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`
    * （defaultCapabilities：展示通知中心，不展示侧栏空间切换器）；

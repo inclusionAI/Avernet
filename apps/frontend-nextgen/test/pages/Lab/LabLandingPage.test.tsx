@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 // 实验室落地页：社区、待办、任务是三个独立入口；待办为新增能力，任务保持原路由与行为。
 import LabLandingPage from '@/pages/Lab';
-import { beforeEach, describe, expect, it } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { history } from '@umijs/max';
 
@@ -14,6 +14,10 @@ const pushMock = history.push as unknown as jest.Mock;
 describe('LabLandingPage(实验室落地页)', () => {
   beforeEach(() => {
     pushMock.mockClear();
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'AVERNET_RUNTIME_CONFIG');
   });
 
   it('按原型顺序渲染社区、待办、任务三张功能卡，并为描述保留两行高度', () => {
@@ -36,6 +40,19 @@ describe('LabLandingPage(实验室落地页)', () => {
 
     fireEvent.click(todoCard.getByRole('button', { name: /开始体验/ }));
     expect(pushMock).toHaveBeenCalledWith('/lab/todos');
+  });
+
+  it('运行时关闭待办入口时,仅渲染社区与任务卡;待办深链路由本身不受影响', () => {
+    Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+      value: { TODO_PRODUCT_ENTRY_ENABLED: false },
+      configurable: true,
+    });
+    render(<LabLandingPage />);
+
+    const cards = screen.getAllByRole('article');
+    expect(cards).toHaveLength(2);
+    expect(cards.map((card) => within(card).getByRole('heading').textContent)).toEqual(['社区', '任务']);
+    expect(screen.queryByRole('article', { name: '待办' })).toBeNull();
   });
 
   it('任务卡:描述对齐 PRD 文案;开始体验跳任务列表页(任务类别)', () => {

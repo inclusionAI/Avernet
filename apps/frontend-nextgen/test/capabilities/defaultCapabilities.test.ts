@@ -386,3 +386,37 @@ describe('getPublicBotBackendEnabled / getShellVisibility 可选 Backend 决策'
     expect(defaultCapabilities.getShellVisibility().value.notificationBell).toBe(false);
   });
 });
+
+// ── 实验室「待办」入口开关：默认展示，生产部署运行时/编译常量均可关闭。──
+describe('getTodoProductEntryVisible 实验室待办入口决策', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'AVERNET_RUNTIME_CONFIG');
+    Reflect.deleteProperty(globalThis, 'TEAMCLAW_TODO_PRODUCT_ENTRY_ENABLED');
+  });
+
+  test('无运行时/编译覆盖时默认展示', () => {
+    expect(defaultCapabilities.getTodoProductEntryVisible()).toBe(true);
+  });
+
+  test('运行时 TODO_PRODUCT_ENTRY_ENABLED=false → 关闭', () => {
+    Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+      value: { TODO_PRODUCT_ENTRY_ENABLED: false },
+      configurable: true,
+    });
+    expect(defaultCapabilities.getTodoProductEntryVisible()).toBe(false);
+  });
+
+  test('运行时 true 覆盖编译 false', () => {
+    Object.defineProperty(globalThis, 'TEAMCLAW_TODO_PRODUCT_ENTRY_ENABLED', { value: false, configurable: true });
+    Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+      value: { TODO_PRODUCT_ENTRY_ENABLED: true },
+      configurable: true,
+    });
+    expect(defaultCapabilities.getTodoProductEntryVisible()).toBe(true);
+  });
+
+  test('编译常量 TEAMCLAW_TODO_PRODUCT_ENTRY_ENABLED=false → 关闭', () => {
+    Object.defineProperty(globalThis, 'TEAMCLAW_TODO_PRODUCT_ENTRY_ENABLED', { value: false, configurable: true });
+    expect(defaultCapabilities.getTodoProductEntryVisible()).toBe(false);
+  });
+});

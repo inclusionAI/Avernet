@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { PageHeader } from '@/components/Common/PageHeader';
 import { BotBrowseConfigButton } from '@/components/Community/BotBrowseConfigButton';
 import { FeedbackModal } from '@/components/Community/FeedbackModal';
@@ -101,9 +102,12 @@ function LabFeatureCard({
  * 一级导航「实验室」(/lab) 进入此落地页；点卡片的「开始体验」进入对应功能页。
  * 社区卡的「Bot 访问社区配置」齿轮置于进入社区前的此页右上角，避免进入社区后才可配置。
  * 待办卡进入 /lab/todos；任务卡继续进入 /lab/tasks，两个能力相互独立。
+ * 生产部署可关闭待办卡入口；/lab/todos 深链路由保持可访问，便于预发验证与定向兜底。
  */
 export default function LabLandingPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const todoProductEntryVisible = getCapabilities().getTodoProductEntryVisible();
+  const visibleFeatures = FEATURES.filter((feature) => feature.id !== 'todos' || todoProductEntryVisible);
   return (
     <div className="flex h-full flex-col bg-background">
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
@@ -117,7 +121,7 @@ export default function LabLandingPage() {
             className="grid grid-cols-1 gap-4 xl:grid-cols-[repeat(auto-fill,minmax(420px,1fr))]"
           >
             <TrackExpo point={Points.lab.cardsExpo} />
-            {FEATURES.map((feature) => (
+            {visibleFeatures.map((feature) => (
               <LabFeatureCard key={feature.id} feature={feature} setFeedbackOpen={setFeedbackOpen} />
             ))}
           </section>

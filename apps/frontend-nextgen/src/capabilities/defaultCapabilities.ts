@@ -58,6 +58,22 @@ function publicBotBackendEnabled(): boolean {
   return true;
 }
 
+/**
+ * 实验室「待办」功能卡入口开关：默认展示，生产部署可通过运行时变量或编译常量显式关闭。
+ * 运行时 `window.AVERNET_RUNTIME_CONFIG.TODO_PRODUCT_ENTRY_ENABLED` 优先，未显式关闭时保持
+ * PRE/开发/测试入口可见；仅影响 /lab 落地页卡片，不改变 /lab/todos 深链。
+ */
+function todoProductEntryVisible(): boolean {
+  const runtime =
+    typeof window === 'undefined'
+      ? undefined
+      : (window as { AVERNET_RUNTIME_CONFIG?: { TODO_PRODUCT_ENTRY_ENABLED?: unknown } }).AVERNET_RUNTIME_CONFIG;
+  // 运行时（部署 profile 写入）只认布尔值；字符串 false 不当作关闭。
+  if (typeof runtime?.TODO_PRODUCT_ENTRY_ENABLED === 'boolean') return runtime.TODO_PRODUCT_ENTRY_ENABLED;
+  if (typeof TEAMCLAW_TODO_PRODUCT_ENTRY_ENABLED === 'boolean') return TEAMCLAW_TODO_PRODUCT_ENTRY_ENABLED;
+  return true;
+}
+
 function configuredTaskApiBase(): string {
   return typeof TEAMCLAW_TASK_API_BASE !== 'undefined' && TEAMCLAW_TASK_API_BASE
     ? TEAMCLAW_TASK_API_BASE
@@ -364,6 +380,7 @@ export const defaultCapabilities: AppCapabilities = {
   // 铃铛不挂载，未读轮询随 AppSidebar 条件挂载自然停止（不在 notification service 捕获 404 伪装禁用）。
   // 注：原 adminEntry 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages）。
   getPublicBotBackendEnabled: publicBotBackendEnabled,
+  getTodoProductEntryVisible: todoProductEntryVisible,
   getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
     status: 'available',
     value: { spaceSwitcher: false, notificationBell: publicBotBackendEnabled() },

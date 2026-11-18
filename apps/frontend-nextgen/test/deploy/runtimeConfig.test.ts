@@ -31,6 +31,7 @@ it.each(['local', ''])('writes provider opt-in %s into deployed runtime configur
         ...Object.fromEntries(keys.map((key) => [key, 'https://example.com/bcn'])),
         QWENWORK_PROVIDER_SLUG: slug,
         DSH_REGISTRATION_GUIDE_URL: slug ? 'https://docs.example.com/releases/0.2.0/dsh' : '',
+        TODO_PRODUCT_ENTRY_ENABLED: 'false',
       },
     });
     const context = {
@@ -39,6 +40,7 @@ it.each(['local', ''])('writes provider opt-in %s into deployed runtime configur
           QWENWORK_PROVIDER_SLUG: string;
           BCS_ENDPOINT_PRE: string;
           DSH_REGISTRATION_GUIDE_URL: string;
+          TODO_PRODUCT_ENTRY_ENABLED: boolean;
         };
       },
     };
@@ -48,6 +50,7 @@ it.each(['local', ''])('writes provider opt-in %s into deployed runtime configur
     expect(context.window.AVERNET_RUNTIME_CONFIG?.DSH_REGISTRATION_GUIDE_URL).toBe(
       slug ? 'https://docs.example.com/releases/0.2.0/dsh' : '',
     );
+    expect(context.window.AVERNET_RUNTIME_CONFIG?.TODO_PRODUCT_ENTRY_ENABLED).toBe(false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -45,3 +45,10 @@ declare const QWENWORK_PROVIDER_SLUG: string;
  * 运行时显式设置优先于本编译常量；变量缺失（jest/SSR）按全栈默认开启。
  */
 declare const TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED: boolean | undefined;
+
+/**
+ * 实验室「待办」功能卡入口开关（define 注入）：默认展示；生产部署经
+ * TEAMCLAW_TODO_PRODUCT_ENTRY_ENABLED=false 关闭。部署态运行时
+ * window.AVERNET_RUNTIME_CONFIG.TODO_PRODUCT_ENTRY_ENABLED（布尔值）优先。
+ */
+declare const TEAMCLAW_TODO_PRODUCT_ENTRY_ENABLED: boolean | undefined;
