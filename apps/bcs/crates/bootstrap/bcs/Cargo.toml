@@ -30,6 +30,7 @@ test = false
 [features]
 default = ["prometheus-metrics"]
 metrics = ["prometheus-metrics"]
+a2a-http-e2e = []
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 test-utils = ["dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e", "dep:a2a-pb-e2e", "dep:tonic-e2e"]
 
