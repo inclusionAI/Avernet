@@ -555,6 +555,7 @@ class BaasService:  # pragma: no cover
         params: Optional[Dict[str, Any]] = None,
         *,
         log_response: bool = True,
+        timeout: float = 30.0,
     ) -> Dict[str, Any]:
         """发送 GET 请求到 BaaS Bot API，处理响应和错误码（内部实现）。
 
@@ -567,7 +568,7 @@ class BaasService:  # pragma: no cover
         response = self._http.get(
             path,
             params=merged_params,
-            timeout=30.0,
+            timeout=timeout,
         )
         response.raise_for_status()
 
@@ -3330,8 +3331,43 @@ class BaasService:  # pragma: no cover
         )
         return True
 
+    def _active_token_replica_devices(self, bot_uuid: str) -> list[dict[str, Any]]:
+        # The grouped /devices endpoint includes historical bot records. Resolve
+        # the live bot row before inspecting devices, even if a stale row still
+        # has a device marked ACTIVE.
+        def read(path: str) -> dict[str, Any]:
+            started = time.monotonic()
+            fields = {"system": "baas", "operation": "token_replica_inventory",
+                      "operation_id": uuid.uuid4().hex, "method": "GET", "route": path,
+                      "tenant": self._tenant, "bot_uuid": bot_uuid}
+            logger.info("token_replica_inventory_started fields=%s", fields)
+            try:
+                data = self._get_bots_api(path, "token_replica_inventory", log_response=False, timeout=3.0)
+            except Exception as exc:
+                logger.warning(
+                    "token_replica_inventory_failed fields=%s error_type=%s duration_ms=%.1f",
+                    fields, type(exc).__name__, (time.monotonic() - started) * 1000,
+                )
+                raise
+            logger.info(
+                "token_replica_inventory_succeeded fields=%s status=%s duration_ms=%.1f",
+                fields, data.get("bot_status") or data.get("status"), (time.monotonic() - started) * 1000,
+            )
+            return data
+
+        status = read(f"/api/v1/bots/{bot_uuid}/device-status")
+        bot_id = status.get("bot_id")
+        if (status.get("bot_uuid") != bot_uuid or status.get("bot_status") != "ACTIVE"
+                or type(bot_id) is not int or bot_id <= 0):
+            raise BaasOutboundTargetError("target_not_found")
+        detail = read(f"/api/v1/bots/{bot_id}/detail-by-id")
+        if (detail.get("bot_uuid") != bot_uuid or detail.get("id") != bot_id
+                or detail.get("status") != "ACTIVE"):
+            raise BaasOutboundTargetError("target_not_found")
+        return detail.get("devices") or []
+
     def resolve_token_outbound_device_id(
-        self, binding: DeviceBindingRecord | None,
+        self, binding: DeviceBindingRecord | None, *, device_uuid: str | None = None,
     ) -> str:
         """Resolve an authorized runtime binding to its token append target.
 
@@ -3361,7 +3397,16 @@ class BaasService:  # pragma: no cover
                     r"[A-Za-z0-9._~-]+", bot_uuid,
                 ):
                     raise BaasOutboundTargetError("invalid_target")
-                devices = self.list_devices_by_bot_uuid(bot_uuid, timeout=3.0)
+                if device_uuid is None:
+                    devices = self.list_devices_by_bot_uuid(bot_uuid, timeout=3.0)
+                else:
+                    devices = self._active_token_replica_devices(bot_uuid)
+                    # Only the authorized logical bot's current devices can be selected.
+                    devices = [
+                        device for device in devices
+                        if device.get("device_uuid") == device_uuid
+                        and device.get("status") == "ACTIVE"
+                    ]
                 if not devices:
                     raise BaasOutboundTargetError("target_not_found")
                 if len(devices) != 1:
@@ -3369,6 +3414,10 @@ class BaasService:  # pragma: no cover
                 target = devices[0].get("provider_device_id")
             else:
                 props = getattr(binding, "device_props", None)
+                if device_uuid is not None and (
+                    not isinstance(props, dict) or props.get("device_uuid") != device_uuid
+                ):
+                    raise BaasOutboundTargetError("target_not_found")
                 target = props.get("sandbox_id") if isinstance(props, dict) else None
                 if target is None or target == "":
                     raise BaasOutboundTargetError("target_not_found")
@@ -3393,8 +3442,8 @@ class BaasService:  # pragma: no cover
             raise
         logger.info(
             "token_outbound_target_resolution_succeeded binding_id=%s provider=%s "
-            "reason=resolved error_type=none duration_ms=%.1f",
-            binding_id, provider, (time.monotonic() - started_at) * 1000,
+            "explicit_device=%s reason=resolved error_type=none duration_ms=%.1f",
+            binding_id, provider, device_uuid is not None, (time.monotonic() - started_at) * 1000,
         )
         return target
 
