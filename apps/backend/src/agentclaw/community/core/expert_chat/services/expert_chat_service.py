@@ -420,7 +420,8 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
                 bot, session_key, user_id, connection=connection
             )
             if exists:
-                self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
+                if not self._is_independent_caller(bot):
+                    self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
                 logger.info(
                     f"[ExpertChatService] Reusing session: user={user_id}, bot={bot_id}, session={session_key}"
                 )
@@ -431,13 +432,15 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
                 }
             else:
                 # Session 已失效，删除旧记录
-                self._repo.delete_owned_session(user_id, bot_id, owner_id, session_key)
+                if not self._is_independent_caller(bot):
+                    self._repo.delete_owned_session(user_id, bot_id, owner_id, session_key)
                 self._repo.delete_session(user_id, bot_id, owner_id)
 
         # 7. 没有或无效则创建新 session
         session_key = await self._create_session(bot, user_id, connection=connection)
         self._repo.save_session(user_id, bot_id, owner_id, session_key)
-        self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
+        if not self._is_independent_caller(bot):
+            self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
 
         logger.info(
             f"[ExpertChatService] Created new session: user={user_id}, bot={bot_id}, session={session_key}"
@@ -465,9 +468,8 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
     ) -> Dict[str, Any]:
         """List one user's sessions for one expert Bot.
 
-        The Backend-owned index is authoritative for ownership. Adapter data is
-        used to enrich authorized keys. Independent Caller runtime sessions are
-        discovered in the subject instance and registered before enrichment.
+        Independent Caller sessions are authorized by the subject's container.
+        Shared runtimes use the Backend-owned index and Adapter enrichment.
         """
         bot = self._get_authorized_chat_bot(
             user_id,
@@ -475,6 +477,10 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
             owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
+        if self._is_independent_caller(bot):
+            return await self._list_caller_sessions(bot, user_id, owner_id, session_key,
+                favorite_only, limit, offset, bcn_friend_authorized=bcn_friend_authorized,
+                actor_user_id=actor_user_id)
         legacy_session_key = self._repo.get_session(user_id, bot_id, owner_id)
         if legacy_session_key:
             self._repo.add_owned_session(user_id, bot_id, owner_id, legacy_session_key)
@@ -485,24 +491,12 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
             owner_id=owner_id,
             session_key=session_key,
         )
-        if not rows and not (bot.get("bot_type") == "service" and bot.get("call_type") == "caller"):
+        if not rows:
             return {"total": 0, "items": []}
-
-        if not rows and bot.get("bot_type") == "service" and bot.get("call_type") == "caller":
-            connection, need_poll = self._prepare_existing_caller_connection(
-                bot, user_id, owner_id,
-                bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id,
-            )
-        else:
-            connection, need_poll = await self._prepare_chat_connection(
-                bot, user_id, owner_id, iam_token,
-                bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id,
-            )
-        caller_items = {}
-        if not need_poll and connection is not None:
-            caller_items = await self._discover_caller_runtime_sessions(
-                bot, connection, user_id, owner_id, rows, session_key,
-            )
+        connection, need_poll = await self._prepare_chat_connection(
+            bot, user_id, owner_id, iam_token,
+            bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id,
+        )
         if favorite_only and need_poll:
             return {"total": 0, "items": [], "need_poll": True}
 
@@ -531,11 +525,10 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
         if not need_poll and connection is not None:
             adapter_items = await self._list_owned_adapter_sessions(
                 connection=connection,
-                rows=[row for row in rows if row["session_key"] not in caller_items],
+                rows=rows,
                 user_id=user_id,
             )
 
-        adapter_items.update(caller_items)
         items = []
         for row in rows:
             item = adapter_items.get(row["session_key"])
@@ -556,8 +549,6 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
             )
             stable_modified = (
                 last_message_at
-                or (item.get("gmt_modified") or item.get("gmt_created")
-                    if row["session_key"] in caller_items else None)
                 or row.get("gmt_create")
             )
             if stable_modified:
@@ -608,7 +599,8 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
             user_id,
             connection=connection,
         )
-        self._repo.add_owned_session(user_id, bot_id, owner_id, created_session_key)
+        if not self._is_independent_caller(bot):
+            self._repo.add_owned_session(user_id, bot_id, owner_id, created_session_key)
         # Legacy clients resume the latest session created by the new UI.
         self._repo.save_session(user_id, bot_id, owner_id, created_session_key)
         return {
@@ -634,16 +626,8 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
             owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
-        # 以下为安全注释COSEC：会话归属必须在建立容器连接前由登录用户维度校验。
-        owned = self._repo.get_owned_session(user_id, bot_id, owner_id, session_key)
-        if not owned:
-            raise BotNotFoundError("Session不存在或不属于当前用户")
-
-        connection, need_poll = await self._prepare_chat_connection(
-            bot,
-            user_id,
-            owner_id,
-            iam_token,
+        connection, need_poll = await self._prepare_authorized_session_connection(
+            bot, user_id, owner_id, session_key, iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
         )
         if not need_poll:
@@ -671,16 +655,8 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
             owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
-        # 以下为安全注释COSEC：禁止仅凭前端提供的 session_key 删除会话。
-        owned = self._repo.get_owned_session(user_id, bot_id, owner_id, session_key)
-        if not owned:
-            raise BotNotFoundError("Session不存在或不属于当前用户")
-
-        connection, need_poll = await self._prepare_chat_connection(
-            bot,
-            user_id,
-            owner_id,
-            None,
+        connection, need_poll = await self._prepare_authorized_session_connection(
+            bot, user_id, owner_id, session_key, None,
             bcn_friend_authorized=bcn_friend_authorized,
         )
         if need_poll or connection is None:
@@ -689,11 +665,17 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
                 error_code="5001",
             )
 
-        # Keep the ownership row until runtime deletion is confirmed. Otherwise
-        # a transient Adapter failure would make the session impossible to retry.
-        await self._delete_adapter_session(
-            bot, session_key, user_id, connection=connection
-        )
+        if self._is_independent_caller(bot):
+            await self._invoke_caller_session(bot, connection, user_id, "DELETE", f"/api/sessions/{quote(session_key, safe='')}")
+            try:
+                await self._invoke_caller_session(bot, connection, user_id, "DELETE", f"/api/session-favorites/{quote(session_key, safe='')}", params={"user_id": user_id})
+            except (ConnectionError, BotNotFoundError):
+                pass  # Favorite cleanup remains best effort after confirmed deletion.
+            if self._repo.get_session(user_id, bot_id, owner_id) == session_key:
+                self._repo.delete_session(user_id, bot_id, owner_id)
+            return True
+        # Shared-runtime ownership remains until deletion is confirmed.
+        await self._delete_adapter_session(bot, session_key, user_id, connection=connection)
         await self._remove_session_favorite(connection, session_key, user_id)
         self._repo.delete_owned_session(user_id, bot_id, owner_id, session_key)
 

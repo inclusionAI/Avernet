@@ -10,9 +10,13 @@ from agentclaw.community.core.expert_chat.services.expert_chat_owned_session imp
 )
 
 
-class Harness(ExpertChatOwnedSessionMixin):
+from agentclaw.community.core.expert_chat.services.expert_chat_caller_sessions import ExpertChatCallerSessionsMixin
+
+
+class Harness(ExpertChatOwnedSessionMixin, ExpertChatCallerSessionsMixin):
     def __init__(self) -> None:
         self.bot = {"bot_id": "b1"}
+        self._is_independent_caller = lambda bot: False
         self._repo = Mock()
         self._repo.get_owned_session.return_value = {"session_key": "s/1"}
         self._transport = Mock()
@@ -73,12 +77,13 @@ async def test_owned_session_operations_reuse_existing_runtime_transport():
     assert calls[-1].args[1] == "DELETE"
 
 
-def test_owned_session_guard_rejects_a_session_not_owned_by_the_user():
+@pytest.mark.asyncio
+async def test_owned_session_guard_rejects_a_session_not_owned_by_the_user():
     service = Harness()
     service._repo.get_owned_session.return_value = None
 
     with pytest.raises(BotNotFoundError):
-        service._require_owned_session("u", "b", "o", "other")
+        await service.list_owned_chat_session_messages("u", "b", "o", "other", 20)
 
 
 @pytest.mark.asyncio

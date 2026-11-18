@@ -30,7 +30,7 @@ def caller_service(mock_repository, mock_bot_repo, mock_device_provider):
 
 
 @pytest.mark.asyncio
-async def test_empty_ownership_discovers_cron_and_registers_for_connect(caller_service):
+async def test_empty_ownership_discovers_cron_without_registration(caller_service):
     service, transport, repo = caller_service
     key = "agent:bot1:cron:job1"
     transport.invoke.return_value = {"data": [{"id": key, "title": "Scheduled task",
@@ -38,8 +38,8 @@ async def test_empty_ownership_discovers_cron_and_registers_for_connect(caller_s
     result = await service.list_chat_sessions("user1", "bot1", "owner1")
     assert result["total"] == 1
     assert result["items"][0]["id"] == key
-    repo.add_owned_session.assert_called_once_with("user1", "bot1", "owner1", key)
-    repo.get_owned_session.return_value = {"session_key": key}
+    repo.add_owned_session.assert_not_called()
+    transport.invoke.return_value = {"data": {"id": key}}
     connected = await service.connect_chat_session("user1", "bot1", "owner1", key)
     assert connected["session_key"] == key
 
@@ -54,26 +54,22 @@ async def test_pages_deduplicate_and_filter_before_client_pagination(caller_serv
     result = await service.list_chat_sessions("user1", "bot1", "owner1", limit=1, offset=1)
     assert result["total"] == 2
     assert [item["id"] for item in result["items"]] == [first["id"]]
-    assert repo.add_owned_session.call_count == 2
+    repo.add_owned_session.assert_not_called()
     assert [call.kwargs["params"]["offset"] for call in transport.invoke.await_args_list] == [0, 2]
     assert all("user_id" not in call.kwargs["params"] for call in transport.invoke.await_args_list)
 
 
 @pytest.mark.asyncio
-async def test_exact_key_registers_only_requested_actual_cron(caller_service):
+async def test_exact_key_reads_requested_runtime_session(caller_service):
     service, transport, repo = caller_service
     key = "ordinary-session"
-    transport.invoke.return_value = {"data": [
-        {"id": "agent:main:cron:other"}, {"id": key}, None,
-        {"id": "agent:main:cron:job:run:actual:extra"}, {"id": 1},
-    ]}
+    transport.invoke.return_value = {"data": {"id": key}}
     result = await service.list_chat_sessions("user1", "bot1", "owner1", session_key=key)
     assert [item["id"] for item in result["items"]] == [key]
-    repo.add_owned_session.assert_called_once_with("user1", "bot1", "owner1", key)
+    repo.add_owned_session.assert_not_called()
     detail = await service.get_owned_chat_session("user1", "bot1", "owner1", key)
     assert detail["id"] == key
-    repo.get_owned_session.return_value = {"session_key": key}
-    transport.invoke.return_value = {"data": [{"content": "cron result"}], "total": 1}
+    transport.invoke.side_effect = [{"data": {"id": key}}, {"data": [{"content": "cron result"}], "total": 1}]
     messages = await service.list_owned_chat_session_messages("user1", "bot1", "owner1", key, 20)
     assert messages == {"items": [{"content": "cron result"}], "total": 1}
 
@@ -90,12 +86,12 @@ async def test_shared_runtime_does_not_discover(caller_service, field, value):
 
 
 @pytest.mark.asyncio
-async def test_other_engine_does_not_discover(caller_service):
+async def test_trusted_engine_overrides_connection_fallback(caller_service):
     service, transport, repo = caller_service
     service._resolver.resolve_for_binding.return_value.conn_info["engine_type"] = "teclaw"
     result = await service.list_chat_sessions("user1", "bot1", "owner1")
     assert result == {"total": 0, "items": []}
-    transport.invoke.assert_not_awaited()
+    assert transport.invoke.await_args.args[0]["engine_type"] == "openclaw"
     repo.add_owned_session.assert_not_called()
 
 
@@ -178,18 +174,18 @@ async def test_discovery_requires_actual_caller_binding_marker(caller_service):
     service, transport, repo = caller_service
     for bot in [dict(ACTIVE_BOT, bot_type="service", call_type="caller"),
                 dict(ACTIVE_BOT, bot_type="service", call_type="caller", _caller_instance_binding_id="other-binding")]:
-        assert await service._discover_caller_runtime_sessions(bot, {"engine_type": "openclaw"}, "user1", "owner1", [], None) == {}
+        assert await service._discover_caller_runtime_sessions(bot, {"engine_type": "openclaw"}, "user1", "owner1", None) == {}
     transport.invoke.assert_not_awaited()
     repo.add_owned_session.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_ownership_write_failure_propagates(caller_service):
+async def test_ownership_repository_failure_is_irrelevant(caller_service):
     service, transport, repo = caller_service
     transport.invoke.return_value = {"data": [{"id": "agent:main:cron:job"}]}
     repo.add_owned_session.side_effect = RuntimeError("database unavailable")
-    with pytest.raises(RuntimeError, match="database unavailable"):
-        await service.list_chat_sessions("user1", "bot1", "owner1")
+    assert (await service.list_chat_sessions("user1", "bot1", "owner1"))["total"] == 1
+    repo.add_owned_session.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -218,7 +214,7 @@ async def test_authoritative_teclaw_metadata_overrides_caller_fallback(caller_se
 
 
 @pytest.mark.asyncio
-async def test_two_subjects_discover_only_their_instance_and_persist_real_ownership(caller_service, tmp_path):
+async def test_two_subjects_access_only_their_instance_without_ownership(caller_service, tmp_path):
     from agentclaw.community.core.repository.implementations.chat.expert_chat import ExpertChatRepository
     from agentclaw.community.core.expert_chat.errors import BotNotFoundError
     from tests.community.repository.chat.test_expert_chat_unified import _make_db
@@ -241,8 +237,11 @@ async def test_two_subjects_discover_only_their_instance_and_persist_real_owners
         key = f"agent:main:subagent:{subject}"
         if path == "/api/sessions":
             return {"data": [{"id": key}] if kwargs["params"]["offset"] == 0 else []}
-        assert path == f"/api/sessions/agent%3Amain%3Asubagent%3A{subject}/messages"
-        return {"data": [{"content": f"result for {subject}"}], "total": 1}
+        if path == f"/api/sessions/agent%3Amain%3Asubagent%3A{subject}":
+            return {"data": {"id": key}}
+        if path == f"/api/sessions/agent%3Amain%3Asubagent%3A{subject}/messages":
+            return {"data": [{"content": f"result for {subject}"}], "total": 1}
+        return {"data": None}
 
     service._instance_service.get_caller_connection.side_effect = caller_connection
     service._instance_service.get_existing_caller_instance.side_effect = lambda user_id, bot_id, owner_id: {
@@ -254,7 +253,7 @@ async def test_two_subjects_discover_only_their_instance_and_persist_real_owners
         key = f"agent:main:subagent:{user}"
         result = await service.list_chat_sessions(user, "bot1", "owner1")
         assert [item["id"] for item in result["items"]] == [key]
-        assert repo.get_owned_session(user, "bot1", "owner1", key) is not None
+        assert repo.get_owned_session(user, "bot1", "owner1", key) is None
         connected = await service.connect_chat_session(user, "bot1", "owner1", key)
         assert connected["connection"]["instance"] == f"caller-{user}"
         messages = await service.list_owned_chat_session_messages(user, "bot1", "owner1", key, 20)
@@ -297,15 +296,6 @@ def test_existing_caller_lookup_only_reads_repository():
     service._instance_repo.update_instance.assert_not_called()
 
 
-@pytest.mark.parametrize("engine,expected", [("openclaw", True), ("teclaw", False), ("hermes", False), ("claude_code", False), ("aicoding", False)])
-def test_registered_strategy_declares_cron_discovery(engine, expected):
-    from agentclaw.community.core.bot_management.engines import BotProvisioningContext, resolve_provisioning
-
-    ctx = BotProvisioningContext(active_engine=engine, template_type=None, bot_id="bot1", owner_id="owner1", bot_type="service", template_config=None)
-    ctx, strategy = resolve_provisioning(bot_id="bot1", owner_id="owner1", bot_type="service", active_engine=engine, template_type="", template_config={})
-    assert strategy.supports_caller_session_discovery(ctx) is expected
-
-
 @pytest.mark.asyncio
 async def test_discovers_all_real_runtime_ids_and_ignores_invalid_duplicates(caller_service):
     service, transport, repo = caller_service
@@ -317,7 +307,7 @@ async def test_discovers_all_real_runtime_ids_and_ignores_invalid_duplicates(cal
     result = await service.list_chat_sessions("user1", "bot1", "owner1")
     assert {item["id"] for item in result["items"]} == set(keys)
     assert result["total"] == 3
-    assert repo.add_owned_session.call_count == 3
+    repo.add_owned_session.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -328,3 +318,193 @@ async def test_empty_teclaw_shared_runtime_never_reads_caller_ledger(caller_serv
     assert await service.list_chat_sessions("user1", "bot1", "owner1") == {"total": 0, "items": []}
     service._instance_service.get_caller_connection.assert_not_awaited()
     transport.invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "hermes", "claude_code", "aicoding"])
+@pytest.mark.parametrize("operation", ["list", "detail", "messages", "connect", "favorite", "rename", "delete", "clear"])
+async def test_container_authorized_operations_never_touch_owned_table(caller_service, tmp_path, operation, engine):
+    from agentclaw.community.core.repository.implementations.chat.expert_chat import ExpertChatRepository
+    from tests.community.repository.chat.test_expert_chat_unified import _make_db
+
+    service, transport, _ = caller_service
+    repo = ExpertChatRepository(_make_db(tmp_path))
+    repo.add_chat_bot("user1", "bot1", "owner1")
+    service._repo = repo
+    def forbidden(*args, **kwargs):
+        raise AssertionError("independent Caller must not access owned session table")
+    for name in ("get_owned_session", "list_owned_sessions", "add_owned_session", "delete_owned_session", "delete_all_owned_sessions"):
+        setattr(repo, name, forbidden)
+    service._bot_repo.get_by_id_and_owner.return_value["active_engine"] = engine
+    key = "runtime-only"
+    async def invoke(connection, method, path, **kwargs):
+        assert connection["engine_type"] == engine
+        if path == "/api/sessions":
+            return {"data": [{"id": key}] if kwargs["params"]["offset"] == 0 else []}
+        if path.endswith("/messages") and method == "GET":
+            return {"data": [{"content": "real history"}], "total": 1}
+        return {"data": {"id": key, "title": "renamed"}, "success": True}
+    transport.invoke.side_effect = invoke
+    if operation == "list":
+        assert (await service.list_chat_sessions("user1", "bot1", "owner1"))["items"][0]["id"] == key
+    elif operation == "detail":
+        assert (await service.get_owned_chat_session("user1", "bot1", "owner1", key))["id"] == key
+    elif operation == "messages":
+        assert (await service.list_owned_chat_session_messages("user1", "bot1", "owner1", key, 20))["total"] == 1
+    elif operation == "connect":
+        assert (await service.connect_chat_session("user1", "bot1", "owner1", key))["session_key"] == key
+        assert repo.get_session("user1", "bot1", "owner1") == key
+    elif operation == "favorite":
+        assert await service.set_owned_chat_session_favorite("user1", "bot1", "owner1", key, True)
+    elif operation == "rename":
+        assert (await service.update_owned_chat_session("user1", "bot1", "owner1", key, {"title": "renamed"}))["title"] == "renamed"
+    elif operation == "delete":
+        assert await service.delete_owned_chat_session("user1", "bot1", "owner1", key)
+    else:
+        assert await service.clear_owned_chat_session_messages("user1", "bot1", "owner1", key)
+    service._instance_service.get_caller_connection.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [None, "init", "failed"])
+@pytest.mark.parametrize("operation", ["connect", "messages", "favorite", "rename", "delete", "clear"])
+async def test_exact_operations_do_not_provision_missing_or_pending_caller(caller_service, status, operation):
+    from agentclaw.community.core.expert_chat.errors import BotNotFoundError, ConnectionError
+    service, transport, repo = caller_service
+    service._instance_service.get_existing_caller_instance.return_value = None if status is None else {"status": status}
+    calls = {
+        "connect": lambda: service.connect_chat_session("user1", "bot1", "owner1", "runtime-only"),
+        "messages": lambda: service.list_owned_chat_session_messages("user1", "bot1", "owner1", "runtime-only", 20),
+        "favorite": lambda: service.set_owned_chat_session_favorite("user1", "bot1", "owner1", "runtime-only", True),
+        "rename": lambda: service.update_owned_chat_session("user1", "bot1", "owner1", "runtime-only", {"title": "T"}),
+        "delete": lambda: service.delete_owned_chat_session("user1", "bot1", "owner1", "runtime-only"),
+        "clear": lambda: service.clear_owned_chat_session_messages("user1", "bot1", "owner1", "runtime-only"),
+    }
+    with pytest.raises(BotNotFoundError if status is None else ConnectionError):
+        await calls[operation]()
+    service._instance_service.get_caller_connection.assert_not_awaited()
+    transport.invoke.assert_not_awaited()
+    repo.get_owned_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["forged-other-container", "   "])
+async def test_unrecognized_session_fails_before_mutation(caller_service, key):
+    from agentclaw.community.core.expert_chat.errors import BotNotFoundError
+    service, transport, repo = caller_service
+    transport.invoke.return_value = {"data": {"id": "different-session"}}
+    with pytest.raises(BotNotFoundError):
+        await service.update_owned_chat_session("user1", "bot1", "owner1", key, {"title": "unsafe"})
+    assert all(call.args[1] == "GET" for call in transport.invoke.await_args_list)
+    assert all(call.args[0]["engine_type"] == "openclaw" for call in transport.invoke.await_args_list)
+    repo.get_owned_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["messages", "favorite", "rename", "delete", "clear"])
+async def test_runtime_operation_failures_are_sanitized(caller_service, caplog, operation):
+    from agentclaw.community.core.expert_chat.errors import ConnectionError
+    service, transport, repo = caller_service
+    transport.invoke.side_effect = [{"data": {"id": "runtime-only"}}, RuntimeError("private-upstream-credential")]
+    calls = {
+        "messages": lambda: service.list_owned_chat_session_messages("user1", "bot1", "owner1", "runtime-only", 20),
+        "favorite": lambda: service.set_owned_chat_session_favorite("user1", "bot1", "owner1", "runtime-only", True),
+        "rename": lambda: service.update_owned_chat_session("user1", "bot1", "owner1", "runtime-only", {"title": "T"}),
+        "delete": lambda: service.delete_owned_chat_session("user1", "bot1", "owner1", "runtime-only"),
+        "clear": lambda: service.clear_owned_chat_session_messages("user1", "bot1", "owner1", "runtime-only"),
+    }
+    with caplog.at_level("INFO"), pytest.raises(ConnectionError) as caught:
+        await calls[operation]()
+    assert "private-upstream-credential" not in str(caught.value) + caplog.text
+    assert "caller_runtime_session_failed" in caplog.text
+    assert "duration_ms=" in caplog.text
+    repo.get_owned_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_operation_boundary_excludes_nested_credentials_and_preserves_business_fields(caller_service, caplog):
+    service, transport, repo = caller_service
+    transport.invoke.side_effect = [{"data": {"id": "runtime-only"}}, {
+        "data": {"id": "runtime-only", "title": "visible", "nested": [{"token": "private-response"}, {"Cookie": "private-cookie"}]},
+    }]
+    with caplog.at_level("INFO"):
+        result = await service.update_owned_chat_session("user1", "bot1", "owner1", "runtime-only", {
+            "title": "visible", "nested": [{"Authorization": "private-request"}, {"session": "private-session"}, {"password": "private-password"}],
+        })
+    assert result["title"] == "visible"
+    assert "visible" in caplog.text
+    assert "nested" not in caplog.text
+    assert not any(secret in caplog.text for secret in ("private-request", "private-response", "private-cookie", "private-session", "private-password"))
+
+
+@pytest.mark.asyncio
+async def test_runtime_404_is_not_found_without_owned_or_pointer_write(caller_service):
+    from agentclaw.community.core.expert_chat.errors import BotNotFoundError
+    service, transport, repo = caller_service
+    transport.invoke.side_effect = RuntimeError("Adapter returned 404 secret-message")
+    with pytest.raises(BotNotFoundError):
+        await service.connect_chat_session("user1", "bot1", "owner1", "missing")
+    repo.get_owned_session.assert_not_called()
+    repo.save_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_teclaw_shared_sessions_still_require_owned_record(caller_service):
+    from agentclaw.community.core.expert_chat.errors import BotNotFoundError
+    service, transport, repo = caller_service
+    service._bot_repo.get_by_id_and_owner.return_value["active_engine"] = "teclaw"
+    repo.get_owned_session.return_value = None
+    with pytest.raises(BotNotFoundError):
+        await service.list_owned_chat_session_messages("user1", "bot1", "owner1", "runtime-only", 20)
+    repo.get_owned_session.assert_called_once_with("user1", "bot1", "owner1", "runtime-only")
+    service._instance_service.get_existing_caller_instance.assert_not_called()
+    transport.invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_owner_reads_friend_caller_without_changing_subject(caller_service):
+    service, transport, repo = caller_service
+    transport.invoke.side_effect = [{"data": {"id": "friend-session"}}, {"data": [], "total": 0}]
+    await service.list_owned_chat_session_messages("user1", "bot1", "owner1", "friend-session", 20,
+        bcn_friend_authorized=True, actor_user_id="owner1")
+    service._instance_service.get_existing_caller_instance.assert_called_once_with("user1", "bot1", "owner1")
+    service._resolver.resolve_for_binding.assert_called_once_with("caller-binding", "user1", bot_id="bot1")
+    repo.get_owned_session.assert_not_called()
+    repo.list_owned_sessions.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("actor,friend_authorized", [("stranger", True), ("owner1", False)])
+async def test_other_actor_cannot_read_subject_caller(caller_service, actor, friend_authorized):
+    from agentclaw.community.core.expert_chat.errors import ChatPermissionError
+    service, transport, repo = caller_service
+    with pytest.raises(ChatPermissionError):
+        await service.list_owned_chat_session_messages("user1", "bot1", "owner1", "friend-session", 20,
+            bcn_friend_authorized=friend_authorized, actor_user_id=actor)
+    service._instance_service.get_existing_caller_instance.assert_not_called()
+    transport.invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pending_caller_detail_is_not_ready(caller_service):
+    from agentclaw.community.core.expert_chat.errors import ConnectionError
+    service, transport, repo = caller_service
+    service._instance_service.get_existing_caller_instance.return_value = {"status": "init"}
+    with pytest.raises(ConnectionError):
+        await service.get_owned_chat_session("user1", "bot1", "owner1", "runtime-only")
+    transport.invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["get", "create"])
+async def test_default_session_entrypoints_keep_pointer_without_owned_registration(caller_service, entrypoint):
+    service, transport, repo = caller_service
+    repo.add_owned_session.side_effect = AssertionError("no owned registration")
+    repo.delete_owned_session.side_effect = AssertionError("no owned deletion")
+    service._create_session = AsyncMock(return_value="created-session")
+    if entrypoint == "get":
+        result = await service.get_chat_session("user1", "bot1", "owner1")
+    else:
+        result = await service.create_chat_session("user1", "bot1", "owner1")
+    assert result["session_key"] == "created-session"
+    repo.save_session.assert_called_once_with("user1", "bot1", "owner1", "created-session")
