@@ -24,7 +24,14 @@ logger = logging.getLogger("task.harness.relay")
 RELAY_HARNESS_RESUME_PROMPT = (
     "继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、"
     "不要重新提交 execute。请从当前会话历史中获取 S1 到断点前已形成的"
-    "上下文和结果，不要重做已完成步骤；从第一个未完成步骤继续执行，"
+    "上下文和结果。必须先读取 task-loop 的 relay-execution-ledger.md，"
+    "真实重读当前节点 S1，再用当前受控 task_id/node_id/relay_token 调用 "
+    "relay_ledger_runtime.py 的 resume 操作，在原 Runtime 内读取本节点账本与 checkpoint。"
+    "后端已接纳状态优先；锚点只是范围提示，不是重做业务的指令。"
+    "按账本 decision 从未完成动作继续：wait 回收在途结果，reconcile 先对账，"
+    "stop_method 停止当前方法并选择其它可行方法，retry_original_report 保持原请求与 event_id；"
+    "账本缺失或损坏时先核验历史操作与后端状态，禁止直接重放结果未知的业务写操作。"
+    "不要重做已完成步骤；从第一个未完成步骤继续执行，"
     "直到流程执行完为止。当前步骤无法完成时，请输出明确失败原因并按协议收口。"
 )
 

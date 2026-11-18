@@ -226,3 +226,12 @@ class RuntimeProbeMessageCursorTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_resume_instructions_use_runtime_local_ledger_not_backend_projection():
+    for step in (None, "S1-S4a", "S5", "S6"):
+        prompt = relay_harness_resume_prompt(step)
+        assert "relay_ledger_runtime.py" in prompt
+        assert "真实重读当前节点 S1" in prompt
+        assert "retry_original_report" in prompt
+        assert "禁止直接重放" in prompt
