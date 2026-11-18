@@ -1,0 +1,19 @@
+src/backend/specs/rel20261117-on-dev/009-pr-report.md
+  s_7e2b32e8bf8305::t_ede89e637b5e33 1-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23e34dd1d186592f93ffa2266303d9f47d83a584",
+  "prompts": {},
+  "sessions": {
+    "s_7e2b32e8bf8305": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e9f7-3ee6-7642-9ee1-6a5e7213ac36",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

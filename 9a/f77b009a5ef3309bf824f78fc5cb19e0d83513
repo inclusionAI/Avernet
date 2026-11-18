@@ -1,0 +1,27 @@
+apps/backend/tests/corp/di/test_jit_teclaw_eligibility.py
+  s_fc1557df5d7924::t_3bda31579eb819 270-277,279-281,289,310-311,338-339,343-344
+apps/gateway-cli/src/api/operations.rs
+  s_fc1557df5d7924::t_8baf58b990300e 334-343
+apps/gateway-cli/teamclawgw-apigw-verified.openapi.json
+  s_fc1557df5d7924::t_495d294c335bd4 30263-30298
+apps/gateway-cli/tests/bot_iam_token.rs
+  s_fc1557df5d7924::t_5960b57864854e 11-20
+apps/gateway/configs/schemas/bots.openapi.json
+  s_fc1557df5d7924::t_adcdee632c75c1 83617-83652
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9af77b009a5ef3309bf824f78fc5cb19e0d83513",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
