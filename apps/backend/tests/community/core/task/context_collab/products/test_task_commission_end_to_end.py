@@ -191,9 +191,8 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     l4_context_operate = injector.get(ContextServiceProtocol)
     l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
-    # 2. 一次 L6 Instantiate 创建产品协作;由内部 L4 创建 Collet,
-    # 同时建立 ProductInstance、初始参与者/角色、资源/策略引用和 L5 方法组合。
-    # 此时无 Task;后续 L4 Work.start 才创建并启动根 Task。
+    # 2. 协议要求Instantiate：创建 ProductInstance，并实例化 Collet、MethodBinding、RoleBinding 与策略引用
+    # 此时无 Task;后续 L4 Work.start 才创建并启动Task。
     instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
         ProductInstantiateNewCommand(
             collet=ColletCreateCommand(
@@ -395,6 +394,8 @@ def _instantiate_product_instance(
 def _select_admitted_agent(injector, store, axes, instance, decision):
     open_binding_id, binding_id = instance.method_binding_refs
     [participant_ref] = decision.resulting_binding_refs
+
+    # 底层调用L5层SINGLE方法的select操作
     selected = injector.get(GroupMethodOpsServiceProtocol).select(
         instance.collet_ref,
         binding_id,
@@ -487,6 +488,8 @@ def _admit_application_agent(
     submitted,
     profile,
 ):
+    # 在当前case中，演示的是由一个指定的agent来执行录取判断
+
     admission_agent = SimulatedAdmissionAgent(
         l5_open_method, store, axes, opportunity, profile
     )
