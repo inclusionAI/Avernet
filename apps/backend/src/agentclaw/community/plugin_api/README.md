@@ -53,6 +53,16 @@ trigger; an enterprise composition supplies the real evaluator instead of
 importing private providers or tables into community. Its Rule 25 conformance
 test drives an upper-layer consumer through the `world` fixture.
 
+`save_standard_result`, `create_standard_environment`,
+`get_standard_environment_status` and `destroy_standard_environment` extend the
+same seam for standard evaluation. `save_standard_result` accepts a finished
+orchestration result and persists or skips it; the environment methods return
+`build_status`/`destroy_status`/`supported` mappings. Community and local
+implementations return `SKIPPED`/`not_supported`; an enterprise composition can
+persist the result and manage the server-side environment. The service-eval
+router and service layer stay in community, while provider-specific tables and
+SecurityAC semantics remain enterprise-owned.
+
 Passport create, metadata-update, and credential-reissue operations may carry
 the optional TeamClaw `bot_type`. Enterprise adapters use it together with the
 existing owner work number to synchronize Agent Portal ownership metadata;
