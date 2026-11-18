@@ -7,15 +7,20 @@ Service APIs, not a new HTTP/ACCS operation family or product-specific wire prot
 
 ## Provides and consumes
 
+Instantiation consumes the injected public L4 `ContextServiceProtocol` for new
+Collet creation, the product repository for pinned selection and L5 MethodStore
+for binding initialization. L6 never allocates or writes L4 Collet identities
+itself; the L4 service/repository do not acquire a dependency on L6.
+
 | Contract | Owner/source | Meaning |
 | --- | --- | --- |
 | ProductProfileCreateCommand / create_product_profile | [operations/](operations/) | Typed, pure creation operation: validate and return an immutable definition without installation, instances or runtime writes. |
-| ProductInstantiateCommand / ProductInstantiationServiceProtocol | [operations/contracts.py](operations/contracts.py), [implementation](operations/product_instantiation.py) | Explicit pinned selection on an untouched L4 Collet (Task optional), then invoke L5 initialization. |
+| ProductInstantiateNewCommand / ProductInstantiateCommand / ProductInstantiationServiceProtocol | [operations/contracts.py](operations/contracts.py), [implementation](operations/product_instantiation.py) | One L6 operation creates a new Collet through L4 and binds the pinned product, or selects on an existing untouched Collet (Task optional), then invokes L5 initialization. |
 | CollaborationCreateCommand / ContextCollabServiceProtocol | [service_api.py](service_api.py), [implementation](operations/collaboration_creation.py) | Legacy combined Method/product creation extension over L4; root API is an identity reexport. |
 | ProductCollaborationPolicy | [operations/collaboration_policy.py](operations/collaboration_policy.py) | Product-aware adapter to L4-owned policy ports; interprets selected L6 evidence without owning Work or query execution. |
 | ProductMethodBindingRecovery | [operations/method_bootstrap.py](operations/method_bootstrap.py) | Translates pinned product/identity facts into L5 initialization/recovery inputs through L5-owned operations and ports. |
 | ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
-| MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional L5 `MethodProfile` contracts and typed method-specific product policies; instantiation always targets an existing Collet, with no caller-configurable `scope`. Explicit relations instantiate independent Collet-scoped Method bindings and L5 composition edges; empty relations preserve legacy topology. |
+| MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional L5 `MethodProfile` contracts and typed method-specific product policies; instantiation binds the new or existing Collet, with no caller-configurable `scope`. Explicit relations instantiate independent Collet-scoped Method bindings and L5 composition edges; empty relations preserve legacy topology. |
 | ParticipantScope | [participant_scope.py](participant_scope.py) | Local typed Profile eligibility contract: OPEN or an explicit AgentRef allowlist. Not membership, admission, selection or permission authority. |
 | ScenarioRole | [binding.py](binding.py) | Maps owner/assignee to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
 | DomainProfile | [contracts.py](contracts.py) | Maps product vocabulary to L3 Resource and L4 Collet/Task/Message/Artifact authority, not duplicate product-owned entities. |
@@ -362,6 +367,51 @@ not invoke that decoder or query a catalog. A standalone L4 repository instead
 uses the lower-only decoder with no product dependency. The existing metadata
 column/table names and tenant/env isolation remain unchanged.
 
+### Instantiate a product collaboration
+
+The L6 [`ProductInstantiationServiceProtocol`](operations/contracts.py) owns the
+complete semantic Instantiate operation: create the Collet through the public
+L4 service, pin ProductInstance and actual role/resource facts, and initialize
+L5 Method bindings and composition edges. New collaboration callers make one call:
+
+```python
+instance = product_instantiation.instantiate(
+    ProductInstantiateNewCommand(
+        collet=ColletCreateCommand(
+            initiator_ref=actor_context.actor,
+            title="Commission",
+            description="A bounded product collaboration",
+        ),
+        profile_ref=profile.ref,
+        participant_refs=(worker,),
+        resource_refs=(ResourceRef("document", "requirements", "v1"),),
+    ),
+    actor_context,
+)
+collet_id = instance.collet_ref
+assert instance.root_task_ref is None
+```
+
+The authenticated caller must be the new Collet's initiator. Before asking L4 to
+write, L6 validates the exact installed Profile, every initial Agent's eligibility,
+required role sources, local capability negotiation and product creation policy.
+L4 still owns Collet creation authorization, identity, description, audit and
+persistence. Neither layer creates a Task, admits an applicant, selects an executor
+or dispatches a Bot as part of this operation; those remain later explicit steps.
+
+This is one semantic operation, **not one cross-store transaction**. L4 creation,
+SQL product installation and MethodStore writes remain separate commits.
+Preflight or L4 creation errors propagate without attempting product installation.
+After L4 returns a committed Collet, any binding failure raises
+[`ProductInstantiationIncompleteError`](../errors.py), carrying `collet_id`, the
+creation `expected_version` and the chained original cause. The current revision
+may already have advanced: inspect that Collet before recovering. If no product
+selection committed, resume with `ProductInstantiateCommand` and the current
+revision; if selection committed, recover the pinned L5 topology through
+`ProductMethodBindingRecovery`. Do not retry new creation: it has no idempotency
+key, and each call creates a distinct collaboration. Automatic rollback or
+compensation across the stores is not implemented.
+
 ### Explicit installation on an existing Collet
 
 `MethodCompositionTemplate` has no `scope` field. Profile creation declares only
@@ -446,7 +496,9 @@ including after a partial write. It preserves existing lifecycle/audit facts and
 never reactivates terminated bindings or detached edges. Retrying installation cannot replace selection.
 A method-independent Collet cannot be healed into an invented default Method.
 [SQLite tests](../../../../../../../tests/community/repository/task/context_collab/test_product_instantiation.py)
-cover these boundaries and the [commission journey](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
+cover existing-Collet boundaries; [new-creation SQLite tests](../../../../../../../tests/community/repository/task/context_collab/test_product_creation.py)
+cover preflight, both authorization layers, SQL/partial MethodStore failures and
+in-place recovery. The [commission journey](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 uses the injected operation before calling Open.
 
 ### Existing combined application/product flows
@@ -627,7 +679,7 @@ this minimum contract increment. Do not describe it as full ACCS conformance.
 The [commission user-journey test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 uses the actual `TaskModule` / `TaskPersistenceModule`, isolated SQLite and the
 real catalog seam. It authors and deploys `task_commission@2` (Open + Single),
-then creates only one L4 Collet before a separate L6 Instantiate call creates
+then makes one L6 Instantiate call that creates the L4 Collet,
 one ProductInstance and actual initial bindings, including the product-supplied
 requirements document and repository references, still without a Task. The test
 parses those initial ResourceBindings immediately and checks their unchanged

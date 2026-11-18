@@ -1,8 +1,9 @@
-"""L6-owned explicit product instantiation on an existing L4 Collet.
+"""L6-owned creation of product collaborations and existing-Collet binding.
 
-L4 creation is already committed. SQL selection and the in-memory MethodStore
-are not a shared transaction; errors propagate and binding recovery can repair
-an installed selection. No retry may replace that immutable product selection.
+L6 orchestrates the public L4 creation port before selecting the product. L4
+creation, SQL selection and MethodStore writes are separate transactions; failures
+after creation expose the committed Collet for recovery, never a silent retry.
+No recovery may replace the immutable product selection.
 """
 
 from uuid import uuid4
@@ -12,6 +13,7 @@ from injector import inject
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
+    ProductInstantiationIncompleteError,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
@@ -22,9 +24,15 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
 from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
     ensure_expected_version,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     _now,
     current_axes,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    prepare_product_profile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -38,6 +46,7 @@ from agentclaw.community.core.task.context_collab.l6_products.instance import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
     ProductInstantiateCommand,
+    ProductInstantiateNewCommand,
     ProductInstantiationServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
@@ -62,13 +71,79 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
         method_store: MethodStoreProtocol,
         product_catalog: ProductCatalog,
         authorizer: ContextCollabAuthorizerProtocol,
+        context_service: ContextServiceProtocol,
     ) -> None:
         self._repository = repository
         self._store = method_store
         self._catalog = product_catalog
         self._authorizer = authorizer
+        self._context_service = context_service
 
     def instantiate(
+        self,
+        command: ProductInstantiateNewCommand | ProductInstantiateCommand,
+        context: ActorContext,
+    ) -> ProductInstance:
+        if isinstance(command, ProductInstantiateNewCommand):
+            return self._instantiate_new(command, context)
+        return self._instantiate_existing(command, context)
+
+    def _instantiate_new(
+        self, command: ProductInstantiateNewCommand, context: ActorContext
+    ) -> ProductInstance:
+        # Fail invalid product inputs before L4 commits a context. L4 remains
+        # responsible for creation authorization, identity and persistence.
+        if context.actor != command.collet.initiator_ref:
+            raise ContextCollabValidationError(
+                "only the Collet initiator may instantiate a new product collaboration"
+            )
+        profile = self._catalog.get(
+            command.profile_ref.profile_id, command.profile_ref.version
+        )
+        executor_ref = command.executor_ref
+        if executor_ref is None and len(command.participant_refs) == 1:
+            executor_ref = command.participant_refs[0]
+        product_participation(
+            profile,
+            command.collet.initiator_ref,
+            command.participant_refs,
+            executor_ref,
+        )
+        prepare_product_profile(
+            product_kind=profile.ref.profile_id,
+            workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
+            method_kind=profile.composition.method_kind,
+            profile_ref=profile.ref,
+            principal_ref=command.collet.initiator_ref,
+            executor_ref=executor_ref,
+            catalog=self._catalog,
+        )
+        self._authorizer.check_create(
+            method_kind=profile.composition.method_kind,
+            executor_ref=executor_ref,
+            actor=context,
+        )
+        collet = self._context_service.create_collet(command.collet, context)
+        try:
+            return self._instantiate_existing(
+                ProductInstantiateCommand(
+                    collet_id=collet.collet_id,
+                    profile_ref=command.profile_ref,
+                    expected_version=collet.version,
+                    participant_refs=command.participant_refs,
+                    executor_ref=command.executor_ref,
+                    resource_refs=command.resource_refs,
+                ),
+                context,
+            )
+        except Exception as error:
+            # SQL and MethodStore are separate authorities. Preserve the actual
+            # cause and the committed identity so callers can recover in place.
+            raise ProductInstantiationIncompleteError(
+                collet.collet_id, collet.version
+            ) from error
+
+    def _instantiate_existing(
         self, command: ProductInstantiateCommand, context: ActorContext
     ) -> ProductInstance:
         record = self._repository.get_current_status(command.collet_id)

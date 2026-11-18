@@ -17,6 +17,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
+    ContextService,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     EventAppendCommand,
     WorkStartCommand,
@@ -43,6 +46,9 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     create_product_profile,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
+    ProductCollaborationPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
     ProductInstantiateCommand,
@@ -163,7 +169,14 @@ def test_all_initial_agents_must_be_eligible_before_any_write(scoped_runtime, re
     before = repo.get_current_status(collet.collet_id)
     # Explicitly designate the first agent: extra non-executors must also be checked.
     service = ProductInstantiationService(
-        repo, store, catalog, StructuralContextCollabAuthorizer()
+        repo,
+        store,
+        catalog,
+        StructuralContextCollabAuthorizer(),
+        ContextService(
+            repo,
+            ProductCollaborationPolicy(catalog, StructuralContextCollabAuthorizer()),
+        ),
     )
     with pytest.raises(ContextCollabValidationError, match="participant scope"):
         service.instantiate(
@@ -413,7 +426,14 @@ def test_instantiate_empty_initial_agents_when_executor_role_is_optional(db):
     repo, store, _, _ = _services(db, catalog=catalog)
     collet = _create_collet(repo)
     instance = ProductInstantiationService(
-        repo, store, catalog, StructuralContextCollabAuthorizer()
+        repo,
+        store,
+        catalog,
+        StructuralContextCollabAuthorizer(),
+        ContextService(
+            repo,
+            ProductCollaborationPolicy(catalog, StructuralContextCollabAuthorizer()),
+        ),
     ).instantiate(
         ProductInstantiateCommand(collet.collet_id, profile.ref, collet.version),
         _actor(),

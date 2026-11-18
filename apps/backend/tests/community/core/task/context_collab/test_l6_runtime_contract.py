@@ -21,6 +21,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
+    ContextService,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     ColletCreateCommand,
     TaskCreateCommand,
@@ -41,6 +44,9 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
+    ProductCollaborationPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
     ProductInstantiateCommand,
@@ -162,7 +168,14 @@ def _instantiate(
     profile_ref=VersionedProfileRef("task_commission", 1),
 ):
     return ProductInstantiationService(
-        repo, store, catalog, StructuralContextCollabAuthorizer()
+        repo,
+        store,
+        catalog,
+        StructuralContextCollabAuthorizer(),
+        ContextService(
+            repo,
+            ProductCollaborationPolicy(catalog, StructuralContextCollabAuthorizer()),
+        ),
     ).instantiate(
         ProductInstantiateCommand(
             collet_id=collet.collet_id,
