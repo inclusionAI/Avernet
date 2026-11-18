@@ -38,6 +38,17 @@ updated; workspace path consumers rebuild together.
 
 ## Version 6.1.0: Distributed coordination contracts
 
+The phase-one refinement adds the pure
+[`OutputProjectionCoreService`](src/core/dist_projection.rs), stable artifact
+operations and frozen task output profiles. Candidate projection charges only
+newly committed output; read-side folding applies the same transform and safety
+checks without charging again. The implementation is
+[bcs-dist-projection](../../services/bcs-dist-projection/README.md).
+Checkpoint Runner state is optional and bound to one task; finalization retains
+the frozen archive record and terminal publication progress independently of it.
+These unpublished v1 declarations require a fresh phase-one namespace and rebuild
+of workspace consumers; no legacy records are migrated or HTTP endpoints changed.
+
 Add opt-in Gateway, Worker and Connector service/port declarations plus
 `bcs-dist-model` shared data. No existing trait method, wire endpoint, runtime
 registration or stored record changes. All workspace path consumers rebuild;

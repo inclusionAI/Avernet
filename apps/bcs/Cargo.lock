@@ -1549,6 +1549,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-projection"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-dist-model",
+ "bcs-service-api",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bcs-dist-store"
 version = "0.1.4-beta.3"
 dependencies = [
