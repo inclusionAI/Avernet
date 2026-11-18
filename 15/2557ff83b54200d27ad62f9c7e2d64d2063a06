@@ -1,0 +1,20 @@
+apps/bcs/specs/2026-11-17-worker-coordination/spec.md
+  s_a9c87caa3de52e::t_34a55aa33963c9 19,42,50,52,54-73,100,104,110,156-162,184,194-197,219,233,239,247-249,251,253,259-260,271,282,294-304,306-308,310,327-332,343-346,349,357,359
+  s_a9c87caa3de52e::t_850e1a925fc81e 234,241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "152557ff83b54200d27ad62f9c7e2d64d2063a06",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
