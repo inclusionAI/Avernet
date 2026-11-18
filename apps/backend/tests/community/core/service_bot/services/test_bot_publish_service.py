@@ -1646,6 +1646,47 @@ class TestUpgradeBotToService:
         # restart_bot 未被调用
         mock_bot_service.restart_bot.assert_not_called()
 
+    def test_upgrade_bot_to_service_database_failure_attempts_compensation(
+        self, caplog
+    ):
+        """A failed local update keeps its error even if remote compensation fails."""
+        mock_bot_repo = Mock()
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_name": "Test Bot",
+            "bot_type": "personal",
+            "active_engine": "openclaw",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
+        mock_bot_repo.update_by_owner.return_value = None
+        mock_bcn_service = Mock()
+        mock_bcn_service.switch_bot.return_value = {}
+        mock_passport = Mock()
+        mock_passport.update_passport.side_effect = [
+            None,
+            RuntimeError("compensation unavailable"),
+        ]
+        service = _make_service(
+            bot_publish_repo=Mock(),
+            bot_repo=mock_bot_repo,
+            bcn_service=mock_bcn_service,
+            passport_plugin=mock_passport,
+        )
+
+        with caplog.at_level("ERROR"), pytest.raises(
+            BotNotFoundError, match="Failed to update bot"
+        ):
+            service.upgrade_bot_to_service("bot_001", "user_001")
+
+        assert mock_passport.update_passport.call_args_list == [
+            call(bot_id="bot_001", user_id="user_001", bot_type="service"),
+            call(bot_id="bot_001", user_id="user_001", bot_type="personal"),
+        ]
+        assert "Failed to restore Passport metadata" in caplog.text
+
 
 class TestUpdateBotType:
     """update_bot_type 方法测试。"""
@@ -1762,6 +1803,32 @@ class TestUpdateBotType:
             service.update_bot_type("bot_001", "user_001", "service")
 
         mock_bot_repo.update_by_owner.assert_not_called()
+
+    def test_update_bot_type_database_failure_restores_previous_remote_type(self):
+        mock_bot_repo = Mock()
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_type": "personal",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
+        mock_bot_repo.update_by_owner.return_value = None
+        mock_passport = Mock()
+        service = _make_service(
+            bot_publish_repo=Mock(),
+            bot_repo=mock_bot_repo,
+            passport_plugin=mock_passport,
+        )
+
+        with pytest.raises(BotNotFoundError, match="Bot not found"):
+            service.update_bot_type("bot_001", "user_001", "service")
+
+        assert mock_passport.update_passport.call_args_list == [
+            call(bot_id="bot_001", user_id="user_001", bot_type="service"),
+            call(bot_id="bot_001", user_id="user_001", bot_type="personal"),
+        ]
 
     def test_update_bot_type_invalid_type(self):
         """无效的 bot_type 应该报错。"""
