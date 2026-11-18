@@ -26,12 +26,14 @@ const task = {
   mainSessionId: 'main-session', sourceGroupId: null, ownerBotId: 'owner-bot',
 } as unknown as TaskView;
 
-it('restores the host origin when the root node is selected', () => {
+it('uses the first node execution session instead of restoring the panel entry session', () => {
   const record = nav();
   render(<NodeListViewV2 task={task} nav={record} />);
   fireEvent.click(screen.getByRole('button', { name: '选中节点 第1棒 第一棒' }));
-  expect(record.selectRootNode).toHaveBeenCalledWith('first');
-  expect(record.selectNode).not.toHaveBeenCalled();
+  expect(record.selectNode).toHaveBeenCalledWith('first', expect.objectContaining({
+    sessionId: 'first-session', kind: 'bot', botId: 'first-bot',
+  }));
+  expect(record.selectRootNode).not.toHaveBeenCalled();
 });
 
 it('keeps the original-session fallback when the first node has no resolvable target', () => {
@@ -43,7 +45,7 @@ it('keeps the original-session fallback when the first node has no resolvable ta
   expect(record.selectNode).not.toHaveBeenCalled();
 });
 
-it.each(['first-session', 'bcs_grp_third:s3'])('first-node navigation restores the host origin %s', async entry => {
+it.each(['first-session', 'bcs_grp_third:s3'])('first-node navigation does not depend on panel entry session %s', async entry => {
   const host = makeHost();
   host.getConversation = () => ({ sessionId: entry, kind: entry.startsWith('bcs_grp_') ? 'group' : 'bot' });
   host.captureOrigin = () => ({ sessionId: entry });
@@ -53,8 +55,8 @@ it.each(['first-session', 'bcs_grp_third:s3'])('first-node navigation restores t
     render(<NodeListViewV2 task={task} nav={controller.nav('t1')} />);
     fireEvent.click(screen.getByRole('button', { name: '选中节点 第1棒 第一棒' }));
     await Promise.resolve();
-    expect(host.restoreOrigin).toHaveBeenCalledWith(entry, expect.anything());
-    expect(host.navigate).not.toHaveBeenCalled();
+    expect(host.navigate).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'first-session', botId: 'first-bot', kind: 'bot' }), expect.anything());
+    expect(host.restoreOrigin).not.toHaveBeenCalled();
     expect(controller.getSnapshot().activeTaskId).toBe('t1');
     expect(controller.nav('t1').selectedNodeId).toBe('first');
     expect(host.recordInteraction).not.toHaveBeenCalled();
