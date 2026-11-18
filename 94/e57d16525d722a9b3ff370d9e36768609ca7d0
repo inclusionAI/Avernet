@@ -1,0 +1,19 @@
+submodules/avernet
+  s_fc1557df5d7924::t_c966d060a83fba 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "94e57d16525d722a9b3ff370d9e36768609ca7d0",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
