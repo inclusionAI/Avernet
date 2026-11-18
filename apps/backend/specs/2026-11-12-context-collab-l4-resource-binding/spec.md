@@ -73,3 +73,39 @@ def resource_bindings_from_initial_event(event: EventRecord) -> tuple[ResourceBi
 2. 解析函数对 key 缺失 / NULL payload / 非法项一律响亮失败，存量行回退属 P2 自愈缝职责;
 3. 初始事件 payload 是 DB 内部形状而非 wire 合同；新行恒带 `resource_refs` key（空即 `[]`）,与存量行（无 key）判别有据;
 4. order:先本演进、后执行 BBS 公开讨论产品计划——该计划读源（title←context_spec.objective）不受本轮影响,payload 扩容对它是白送的普适行为,计划无需改动。
+
+## 6. Follow-up delivery: explicit instance-time inputs (2026-11-18)
+
+The explicit L6 Instantiate path now accepts typed `resource_refs` from the
+product caller. The same SQL transaction installs the ProductInstance and writes
+those references into `collet.participants_bound` (or `task.participants_bound`
+for existing untouched Work). The existing L4 pure parser reconstructs the
+ResourceBindings before any Task exists on the bare-Collet path. Empty inputs
+remain compatible; failures roll back the SQL installation. This retains the
+accepted event-backed model: no resource upload, independent binding store or
+Grant is introduced. L5 MethodStore initialization remains a separate transaction.
+
+Current contracts and journey evidence:
+
+- [L6 instantiation contract](../../src/agentclaw/community/core/task/context_collab/l6_products/README.md#explicit-installation-on-an-existing-collet).
+- [Commission journey](../../src/agentclaw/community/core/task/context_collab/products/task_commission/README.md).
+- [Instance installation tests](../../tests/community/repository/task/context_collab/test_product_instantiation.py)
+  cover empty/nonempty inputs, bare Collets/existing Work, invalid inputs and SQL
+  rollback. The commission end-to-end test checks resources immediately after
+  Instantiate and preserves their evidence through acceptance.
+
+Verification on the working tree based on `bcb10b7f4c`:
+
+- Product journeys, collaboration repository, ResourceBinding parser and L4 DI
+  suites: **444 passed**.
+- Community architecture suite: **434 passed**.
+- Expanded collaboration core/repository/DI suites: **1,612 passed, 176 failed**.
+  The same command on clean baseline `bcb10b7f4c` produced **1,598 passed,
+  176 failed**, with identical failing test IDs; no new failures were observed.
+- Ruff checks (including import ordering and formatting), source-file line limits
+  and `git diff --check` passed.
+
+This records local implementation and verification only; no commit, merge, host
+integration or deployment is claimed. Earlier sections retain the original
+proposal and its historical creation-path assumptions; use the linked current
+contracts for the explicit L6 path.

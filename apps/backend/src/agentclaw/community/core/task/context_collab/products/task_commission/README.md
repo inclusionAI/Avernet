@@ -115,14 +115,21 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    `ColletCreateCommand(initiator_ref, title=..., description=...)`: no Space,
    objective, executor, Task or Event is supplied/created. They then call
    `ProductInstantiationServiceProtocol.instantiate(ProductInstantiateCommand(
-   collet_id, profile_ref, expected_version, participant_refs=(bot,)), context)`.
+   collet_id, profile_ref, expected_version, participant_refs=(bot,),
+   resource_refs=input_resources), context)`.
    The sole initial participant defaults to the scalar assignee role source;
    multiple initial Agents require explicit executor designation. Every supplied
    Agent must satisfy the exact Profile's participant scope (`OPEN` or allowlist).
    The journey's allowlist has two Agents, including the working Bot; only that
    Bot is initially bound. Eligibility is not admission. One SQL transaction
-   installs ProductInstance, Collet-scoped Participants/RoleBindings and
-   `collet.participants_bound`, advancing Collet from revision 1 to 2. Task still
+   installs ProductInstance, Collet-scoped Participants/RoleBindings and initial
+   ResourceBindings. The journey supplies versioned requirements-document and
+   repository `ResourceRef`s; `collet.participants_bound.payload.resource_refs`
+   persists them in that same transaction, and the L4 pure parser reconstructs
+   the bindings immediately. Empty inputs still write `resource_refs: []`.
+   These are instance inputs, not Profile fields, uploaded contents or Grants.
+   A failed SQL write rolls back selection and all bindings together.
+   The binding Event advances Collet from revision 1 to 2. Task still
    does not exist. Existing combined publishers retain their compatibility flow.
    One L6 Instantiate creates two ACTIVE MethodBindings: **Open@0.2**
    (`open_binding_id`) and **Single@0.2** (`single_binding_id`), plus the explicit
@@ -615,8 +622,11 @@ also boot the real application/service graph; the
 [product journey](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 deploys `task_commission@2` (Open + Single, omitting domain/workflow) through
 the real catalog seam. Its main case creates one Collet, separately instantiates
-one ProductInstance with initial bindings, then creates/starts root Task at L4
-start after admission/selection. The product service handles owner commands.
+one ProductInstance with initial participant/role and input resource bindings,
+then creates/starts root Task at L4 start after admission/selection. It checks
+that ResourceBindings exist before any Task, and that the original input
+references survive unchanged in the Event stream through acceptance. The product
+service handles owner commands.
 The authored Profile allowlists two Agents, including the working Bot; only that
 Bot is initially bound. On the same instance, real L4 Work.start/G1 rejects an
 out-of-scope Agent and an eligible but unbound candidate without writes, then

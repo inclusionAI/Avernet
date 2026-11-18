@@ -1,4 +1,4 @@
-"""Atomic initial L4 bind-role/Task assignment on an already locked Collet.
+"""Atomic initial L4 participant/resource binding on an already locked Collet.
 
 The caller owns the SQL transaction. This operation knows no Product/Profile or
 Method state; an upper-layer caller must authorize and validate eligibility first.
@@ -15,6 +15,9 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
     PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    ResourceRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -46,6 +49,7 @@ def bind_initial_participants(
     actor: PrincipalRef,
     *,
     binding_event_id: str | None = None,
+    resource_refs: tuple[ResourceRef, ...] = (),
 ) -> None:
     if task is not None and (task.executor_refs or task.version != 1):
         raise ContextCollabValidationError(
@@ -70,6 +74,7 @@ def bind_initial_participants(
         payload={
             "participation": facts.to_dict(),
             "executor_refs": [r.to_dict() for r in executor_refs],
+            "resource_refs": [ref.to_dict() for ref in resource_refs],
         },
         context_version_after=previous_version + 1,
         occurred_at=now,
