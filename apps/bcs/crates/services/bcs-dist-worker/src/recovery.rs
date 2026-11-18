@@ -223,11 +223,13 @@ impl WorkerRuntime {
                 .await
                 {
                     Ok(Ok(AcquireOutcome::Acquired(acquired))) => {
-                        self.state()?
+                        let mut state = self.state()?;
+                        state
                             .acquisitions
                             .get_mut(sid)
                             .ok_or_else(|| err("acquisition_missing"))?
                             .stage = AcquisitionStage::Observe(Box::new(acquired));
+                        state.made_progress();
                     }
                     Ok(Ok(AcquireOutcome::Deferred { check_after })) if !uncertain => {
                         self.state()?.acquisitions.remove(sid);
@@ -241,7 +243,9 @@ impl WorkerRuntime {
                     Ok(Ok(AcquireOutcome::Fenced)) => {
                         // Fenced is durable evidence that this exact claim may
                         // no longer acquire; its late write cannot regain rights.
-                        self.state()?.acquisitions.remove(sid);
+                        let mut state = self.state()?;
+                        state.acquisitions.remove(sid);
+                        state.made_progress();
                         return Ok(());
                     }
                     Ok(Ok(AcquireOutcome::Deferred { .. })) => {
@@ -282,17 +286,21 @@ impl WorkerRuntime {
                             phase: Phase::Recovering,
                             pending_effects: pending,
                             pending_schedule: false,
+                            drain_retry_at: Instant::now(),
                         },
                     );
                     state.acquisitions.remove(sid);
+                    state.made_progress();
                     return Ok(());
                 }
                 Ok(ScheduleObservation::Fenced) => {
-                    self.state()?
+                    let mut state = self.state()?;
+                    state
                         .acquisitions
                         .get_mut(sid)
                         .ok_or_else(|| err("acquisition_missing"))?
                         .stage = AcquisitionStage::Release(acquired.ownership);
+                    state.made_progress();
                 }
                 Err(error) => return Err(error),
             }
@@ -307,7 +315,9 @@ impl WorkerRuntime {
             });
         if let Some(owner) = release {
             self.bounded(self.sessions.release_local(&owner)).await?;
-            self.state()?.acquisitions.remove(sid);
+            let mut state = self.state()?;
+            state.acquisitions.remove(sid);
+            state.made_progress();
         }
         Ok(())
     }

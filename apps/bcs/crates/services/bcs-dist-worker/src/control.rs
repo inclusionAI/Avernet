@@ -66,6 +66,7 @@ impl DistRuntimeControlPort for WorkerRuntime {
                         request: request.clone(),
                         uncertain: false,
                         gate: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+                        retry_at: Instant::now(),
                     },
                 );
                 false
@@ -134,15 +135,16 @@ impl DistRuntimeControlPort for WorkerRuntime {
             self.membership.set_draining(&self.lease),
         )
         .await;
+        let mut heartbeat = tokio::time::interval(self.config.heartbeat_interval);
         while Instant::now() < deadline {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining <= self.config.exit_margin {
                 break;
             }
             let work_until = deadline - self.config.exit_margin;
+            let progress_before = self.state()?.drain_progress;
             let step = self.drain_round(work_until);
             tokio::pin!(step);
-            let mut heartbeat = tokio::time::interval(self.config.heartbeat_interval);
             loop {
                 tokio::select! {
                     result = &mut step => {
@@ -175,6 +177,15 @@ impl DistRuntimeControlPort for WorkerRuntime {
                     Ok(Ok(())) => return Ok(DrainOutcome::Drained),
                     _ => return Ok(DrainOutcome::DeadlineReached { remaining: 1 }),
                 }
+            }
+            let progressed = self.state()?.drain_progress != progress_before;
+            if progressed || !self.ready_drain_shards()?.is_empty() {
+                // Confirmed stage changes can make more work immediately ready.
+                // Also continue a bounded scan when unvisited ready shards
+                // remain; cursor movement itself is never recorded as progress.
+                // Yield without imposing the periodic recovery scan interval.
+                tokio::task::yield_now().await;
+                continue;
             }
             sleep(
                 self.config
@@ -284,8 +295,15 @@ impl WorkerRuntime {
             }
             return Err(err("handoff_unknown"));
         }
-        if let Some(pending) = self.state()?.incoming.get_mut(&id) {
-            pending.uncertain = true;
+        {
+            let mut state = self.state()?;
+            if state.draining && state.incoming.get(&id).is_some_and(|p| p.retry_at > Instant::now()) {
+                return Err(err("handoff_confirmation_backoff"));
+            }
+            if let Some(pending) = state.incoming.get_mut(&id) {
+                pending.uncertain = true;
+                pending.retry_at = Instant::now() + self.config.check_interval;
+            }
         }
         let outcome = match timeout(self.config.request_timeout, self.owners.handoff(effective))
             .await
@@ -317,6 +335,7 @@ impl WorkerRuntime {
                 state.shards.insert(current.claim.shard, current.claim);
             }
             state.incoming.remove(&id);
+            state.made_progress();
             return Ok(HandoffOutcome::Fenced);
         }
         let mut state = self.state()?;
@@ -333,6 +352,9 @@ impl WorkerRuntime {
             }
         }
         state.incoming.remove(&id);
+        if matches!(outcome, HandoffOutcome::Accepted(_) | HandoffOutcome::Fenced) {
+            state.made_progress();
+        }
         Ok(outcome)
     }
     fn remaining(&self) -> Result<u64, RuntimeError> {

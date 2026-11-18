@@ -81,9 +81,22 @@ pending scan as fallback. Neither hint grants processing rights.
 Drain uses a monotonic overall deadline and a separate timeout for each I/O.
 Session transfers run with bounded concurrency (default 8), within the global
 per-round operation budget, and retain exact per-session authorization checks.
-Heartbeat continues while a batch runs. Shard iteration rotates; a blocked shard
-does not indefinitely hide the next page. One candidate view serves each round.
-A definitely rejected target is skipped for this drain; an unknown request keeps
+Heartbeat continues while a batch runs. Confirmed ownership/transfer/cleanup
+progress continues to the next round after yielding, without the periodic scan
+sleep. Bounded scans also continue when unvisited ready shards remain; cursor
+movement and unknown outcomes do not count as progress. Otherwise the loop waits
+`check_interval`. Claims, incoming confirmations, outgoing requests and session
+transfer/cleanup each retain a retry deadline, including cancellation, so healthy
+work cannot accelerate unrelated failed requests. Cooling shards are filtered
+before the scan budget, and accepted shards without due local work need no owner
+read. The per-round budget and concurrency limits remain unchanged.
+
+One candidate view serves each round that needs discovery. A definitely rejected
+target cools down for `candidate_backoff`, keyed by shard and full instance.
+Untried candidates precede previously rejected ones; retries prefer the oldest
+eligible rejection, retaining HRW ordering for ties. Eligibility is checked again
+on retry. No candidate bypasses its cooldown merely because it is the only one.
+An unknown request keeps
 its original ID, payload and target. A subsequent read-only rejection is not
 proof that the earlier request was cancelled. The receiver likewise retains an
 uncertain incoming handoff through a later rejection, until durable owner
@@ -100,6 +113,9 @@ responsibility. Feeds close once neither ownership nor local work needs them.
 using checked arithmetic. `exit_margin` reserves final confirmation/retirement
 time; no new handoff starts without a remaining request budget. `drain(0)` is
 valid and returns `DeadlineReached` when a graceful drain cannot be confirmed.
+With no eligible recipient, drain keeps checking until the work budget approaches
+exhaustion (normally `grace - exit_margin`) and returns `DeadlineReached`; the
+shutdown hook must allow for this wait and use the lease/fencing fallback.
 
 Tests exercise stable HRW, warmup, subscriptions after recovery, graceful transfer,
 unknown RPC outcomes, pending scheduling fences, delayed claim/shutdown races,

@@ -32,6 +32,7 @@ pub(crate) struct Session {
     pub phase: Phase,
     pub pending_effects: u64,
     pub pending_schedule: bool,
+    pub drain_retry_at: Instant,
 }
 #[derive(Default)]
 pub(crate) struct Scan {
@@ -58,6 +59,7 @@ pub(crate) struct Incoming {
     pub request: HandoffRequest,
     pub uncertain: bool,
     pub gate: Arc<AsyncMutex<()>>,
+    pub retry_at: Instant,
 }
 #[derive(Clone)]
 pub(crate) struct Outgoing {
@@ -83,16 +85,23 @@ pub(crate) struct State {
     pub recovery_priority: VecDeque<ShardId>,
     pub recovery_turn: bool,
     pub member_cursor: Option<PageToken>,
-    pub rejected_targets: BTreeMap<ShardId, Vec<Instance>>,
+    pub rejected_targets: BTreeMap<ShardId, Vec<(Instance, Instant)>>,
     pub acquisition_cursor: Option<Sid>,
     pub retry_turn: bool,
     pub incoming: BTreeMap<String, Incoming>,
-    pub claims: BTreeMap<ShardId, (ClaimShard, bool)>,
+    pub claims: BTreeMap<ShardId, (ClaimShard, bool, Instant)>,
     pub outgoing: BTreeMap<ShardId, Outgoing>,
     pub candidates_since: BTreeMap<ShardId, Instant>,
     pub shard_cursor: usize,
     pub drain_cursor: Option<ShardId>,
     pub transfer_cursors: BTreeMap<ShardId, Sid>,
+    pub drain_progress: u64,
+    pub drain_retries: BTreeMap<ShardId, Instant>,
+}
+impl State {
+    pub fn made_progress(&mut self) {
+        self.drain_progress = self.drain_progress.wrapping_add(1);
+    }
 }
 pub type CheckpointInitializer =
     dyn Fn(&SessionSpec) -> Result<Checkpoint, RuntimeError> + Send + Sync;
@@ -204,6 +213,8 @@ impl WorkerRuntime {
                 shard_cursor: 0,
                 drain_cursor: None,
                 transfer_cursors: BTreeMap::new(),
+                drain_progress: 0,
+                drain_retries: BTreeMap::new(),
             }),
             tick_guard: AsyncMutex::new(()),
             feeds: Mutex::new(BTreeMap::new()),
@@ -408,7 +419,7 @@ impl WorkerRuntime {
                 state
                     .claims
                     .entry(shard)
-                    .or_insert((request.clone(), false));
+                    .or_insert((request.clone(), false, Instant::now()));
             }
             if let Err(error) = self.issue_claim(request).await {
                 failure.get_or_insert(error);
@@ -437,25 +448,33 @@ impl WorkerRuntime {
     }
     pub(crate) async fn issue_claim(&self, request: ClaimShard) -> Result<(), RuntimeError> {
         let shard = request.shard;
-        let prior_unknown = self
-            .state()?
-            .claims
-            .get(&shard)
-            .is_some_and(|(_, unknown)| *unknown);
-        if let Some((_, unknown)) = self.state()?.claims.get_mut(&shard) {
-            *unknown = true;
-        }
+        let prior_unknown = {
+            let mut state = self.state()?;
+            if state.draining && state.claims.get(&shard).is_some_and(|(_, _, at)| *at > Instant::now()) {
+                return Ok(());
+            }
+            let prior = state.claims.get(&shard).is_some_and(|(_, unknown, _)| *unknown);
+            if let Some((_, unknown, retry_at)) = state.claims.get_mut(&shard) {
+                *unknown = true;
+                // Record before I/O so cancellation also respects backoff.
+                *retry_at = Instant::now() + self.config.check_interval;
+            }
+            prior
+        };
         match self.bounded(self.owners.claim(request.clone())).await {
             Ok(LeaseClaim::Claimed(claim)) | Ok(LeaseClaim::AlreadyClaimed(claim)) => {
                 tracing::info!(shard=shard.0, epoch=claim.owner.epoch.0, node=%self.instance.node, incarnation=%self.instance.incarnation, request_id=%request.request_id.0, "Worker shard claim confirmed");
                 let mut state = self.state()?;
                 state.shards.insert(shard, claim);
                 state.claims.remove(&shard);
+                state.made_progress();
             }
             Ok(LeaseClaim::Conflict) => {
                 tracing::debug!(shard=shard.0, request_id=%request.request_id.0, "Worker shard claim conflicted");
                 if !prior_unknown {
-                    self.state()?.claims.remove(&shard);
+                    let mut state = self.state()?;
+                    state.claims.remove(&shard);
+                    state.made_progress();
                 } else if let Some(record) = self.bounded(self.owners.current(shard)).await?
                     && record.claim.owner.epoch.0 > request.expected_epoch.map_or(0, |e| e.0)
                 {
@@ -464,11 +483,12 @@ impl WorkerRuntime {
                         state.shards.insert(shard, record.claim);
                     }
                     state.claims.remove(&shard);
+                    state.made_progress();
                 }
             }
             Err(error) => {
                 tracing::warn!(shard=shard.0, request_id=%request.request_id.0, code=%error.code, "Worker shard claim awaits confirmation");
-                if let Some((_, unknown)) = self.state()?.claims.get_mut(&shard) {
+                if let Some((_, unknown, _)) = self.state()?.claims.get_mut(&shard) {
                     *unknown = true;
                 }
                 return Err(error);
@@ -477,16 +497,19 @@ impl WorkerRuntime {
         Ok(())
     }
     pub(crate) async fn resolve_claims(&self) -> Result<(), RuntimeError> {
-        let claims = self
-            .state()?
-            .claims
-            .values()
-            .map(|(request, _)| request.clone())
-            .collect::<Vec<_>>();
+        let claims = {
+            let state = self.state()?;
+            state.claims.values()
+                .filter(|(_, _, at)| !state.draining || *at <= Instant::now())
+                .map(|(request, _, _)| request.clone()).collect::<Vec<_>>()
+        };
+        let mut failure = None;
         for request in claims.into_iter().take(self.config.max_shards_per_tick) {
-            self.issue_claim(request).await?;
+            if let Err(error) = self.issue_claim(request).await {
+                failure.get_or_insert(error);
+            }
         }
-        Ok(())
+        failure.map_or(Ok(()), Err)
     }
     pub async fn heartbeat(&self) -> Result<(), RuntimeError> {
         if self.state()?.stopped {
@@ -748,6 +771,7 @@ impl WorkerRuntime {
                 return Err(err("session_not_quiescent"));
             }
             s.phase = Phase::Releasing;
+            s.drain_retry_at = Instant::now() + self.config.check_interval;
         }
         let feed = self
             .feeds
@@ -759,6 +783,11 @@ impl WorkerRuntime {
             self.bounded(async { feed.lock().await.unwatch(&owner.sid).await })
                 .await?;
         }
+        // Cleanup follows transfer/unwatch I/O; its own retry interval starts
+        // here, not at the earlier batch-selection or transfer timestamp.
+        if let Some(session) = self.state()?.sessions.get_mut(&owner.sid) {
+            session.drain_retry_at = Instant::now() + self.config.check_interval;
+        }
         self.bounded(self.sessions.release_local(owner)).await?;
         let mut state = self.state()?;
         if state
@@ -767,6 +796,7 @@ impl WorkerRuntime {
             .is_some_and(|s| s.acquired.ownership == *owner && s.phase == Phase::Releasing)
         {
             state.sessions.remove(&owner.sid);
+            state.made_progress();
         }
         drop(state);
         self.close_unused_feeds()?;

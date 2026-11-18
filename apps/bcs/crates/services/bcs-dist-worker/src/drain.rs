@@ -8,6 +8,30 @@ use futures::{StreamExt, stream};
 use tokio::time::{Instant, timeout};
 
 impl WorkerRuntime {
+    pub(crate) fn ready_drain_shards(&self) -> Result<std::collections::BTreeSet<ShardId>, RuntimeError> {
+        let state = self.state()?;
+        let now = Instant::now();
+        // One bounded local pass, rather than rereading owners for cooling or
+        // busy sessions on every fast round of an unrelated healthy shard.
+        let mut local = std::collections::BTreeMap::<ShardId, bool>::new();
+        for session in state.sessions.values() {
+            let shard = session.acquired.ownership.shard;
+            let ready = matches!(session.phase, Phase::Idle | Phase::Releasing)
+                || (session.phase == Phase::Transferring && state.outgoing.contains_key(&shard));
+            *local.entry(shard).or_default() |= ready && !session.pending_schedule
+                && session.pending_effects == 0 && session.drain_retry_at <= now;
+        }
+        let acquiring = state.acquisitions.values().map(|a| a.claim.shard)
+            .collect::<std::collections::BTreeSet<_>>();
+        Ok(state.shards.keys().chain(state.outgoing.keys()).chain(local.keys())
+            .chain(acquiring.iter()).copied()
+            .filter(|shard| {
+                state.drain_retries.get(shard).is_none_or(|at| *at <= now)
+                    && (state.shards.contains_key(shard)
+                        || local.get(shard).copied().unwrap_or(!acquiring.contains(shard)))
+            }).collect())
+    }
+
     pub(crate) async fn drain_round(&self, deadline: Instant) -> Result<(), RuntimeError> {
         for result in [
             tokio::time::timeout_at(deadline, self.resolve_claims()).await,
@@ -21,6 +45,7 @@ impl WorkerRuntime {
             .state()?
             .incoming
             .values()
+            .filter(|p| p.retry_at <= Instant::now())
             .map(|p| p.request.clone())
             .collect::<Vec<_>>();
         for request in incoming.into_iter().take(self.config.max_shards_per_tick) {
@@ -41,17 +66,7 @@ impl WorkerRuntime {
 
     pub(crate) async fn drain_step(&self, deadline: Instant) -> Result<(), RuntimeError> {
         let mut budget = self.config.max_acquires_per_tick;
-        let shards = {
-            let state = self.state()?;
-            state
-                .shards
-                .keys()
-                .chain(state.outgoing.keys())
-                .copied()
-                .chain(state.sessions.values().map(|s| s.acquired.ownership.shard))
-                .chain(state.acquisitions.values().map(|a| a.claim.shard))
-                .collect::<std::collections::BTreeSet<_>>()
-        };
+        let shards = self.ready_drain_shards()?;
         let cursor = self.state()?.drain_cursor;
         let ordered = shards
             .iter()
@@ -64,30 +79,29 @@ impl WorkerRuntime {
             .copied()
             .take(self.config.max_shards_per_tick)
             .collect::<Vec<_>>();
-        let (known, new): (Vec<_>, Vec<_>) = {
-            let state = self.state()?;
-            ordered.into_iter().partition(|shard| {
-                state.outgoing.contains_key(shard) || !state.shards.contains_key(shard)
-            })
-        };
-        for shard in known {
-            self.progress_drain_shard(shard, &[], deadline, &mut budget)
-                .await?;
-        }
-        // No discovery is necessary to finish accepted transfers or local
-        // cleanup. Load one view only when opening new handoffs is possible.
-        if !new.is_empty() && Instant::now() < deadline {
-            let candidates = match self.candidates().await {
-                Ok(candidates) => candidates,
-                Err(error) => {
-                    tracing::warn!(code=%error.code, "Worker candidate discovery deferred");
-                    vec![]
+        let mut candidates = None;
+        for shard in ordered {
+            if budget == 0 || Instant::now() >= deadline { break; }
+            let known = {
+                let state = self.state()?;
+                if state.drain_retries.get(&shard).is_some_and(|at| *at > Instant::now()) {
+                    continue;
                 }
+                state.outgoing.contains_key(&shard) || !state.shards.contains_key(&shard)
             };
-            for shard in new {
-                self.progress_drain_shard(shard, &candidates, deadline, &mut budget)
-                    .await?;
+            // Preserve the rotation across both new and accepted handoffs.
+            // A busy accepted shard must not consume every new shard's budget.
+            // Discovery failure still leaves accepted transfers free to proceed.
+            if !known && candidates.is_none() {
+                candidates = Some(match self.candidates().await {
+                    Ok(candidates) => candidates,
+                    Err(error) => {
+                        tracing::warn!(code=%error.code, "Worker candidate discovery deferred");
+                        vec![]
+                    }
+                });
             }
+            self.progress_drain_shard(shard, candidates.as_deref().unwrap_or_default(), deadline, &mut budget).await?;
         }
         Ok(())
     }
@@ -99,7 +113,14 @@ impl WorkerRuntime {
         budget: &mut usize,
     ) -> Result<(), RuntimeError> {
         if Instant::now() < deadline {
-            self.state()?.drain_cursor = Some(shard);
+            {
+                let mut state = self.state()?;
+                state.drain_cursor = Some(shard);
+                if state.drain_retries.get(&shard).is_some_and(|at| *at > Instant::now()) {
+                    return Ok(());
+                }
+                state.drain_retries.insert(shard, Instant::now() + self.config.check_interval);
+            }
             if let Err(error) = self.drain_shard(shard, candidates, deadline, budget).await {
                 tracing::warn!(shard=shard.0, code=%error.code, "Worker shard drain will retry");
             }
@@ -123,13 +144,25 @@ impl WorkerRuntime {
             // A successor (possibly beyond the original target) is durable
             // proof of lost shard rights. The session port checks whether
             // transfer still applies or is now fenced, independently.
-            self.state()?.shards.remove(&shard);
+            {
+                let mut state = self.state()?;
+                if state.shards.remove(&shard).is_some() {
+                    state.made_progress();
+                }
+                state.drain_retries.remove(&shard);
+            }
             return self
                 .transfer_quiescent(&pending.request, &record.claim, &pending.target, budget)
                 .await;
         }
         if record.claim.owner.instance != self.instance {
-            self.state()?.shards.remove(&shard);
+            {
+                let mut state = self.state()?;
+                if state.shards.remove(&shard).is_some() {
+                    state.made_progress();
+                }
+                state.drain_retries.remove(&shard);
+            }
             return self.release_quiescent_shard(shard, budget).await;
         }
         let claim = record.claim;
@@ -165,10 +198,13 @@ impl WorkerRuntime {
                 .unwrap_or_default();
             let instances = candidates
                 .iter()
-                .filter(|m| m.instance != self.instance && !rejected.contains(&m.instance))
+                .filter(|m| m.instance != self.instance && !rejected.iter().any(|(i, until)| *i == m.instance && *until > Instant::now()))
                 .map(|m| m.instance.clone())
                 .collect::<Vec<_>>();
-            let ranked = crate::rank_candidates(shard, &instances, self.config.identity);
+            let mut ranked = crate::rank_candidates(shard, &instances, self.config.identity);
+            // Untried candidates first, then the oldest rejection. Stable sort
+            // keeps HRW ordering for equal history; expiry must not starve peers.
+            ranked.sort_by_key(|i| rejected.iter().find(|(prior, _)| prior == i).map(|(_, until)| *until));
             let Some(first) = ranked.first() else {
                 return Ok(());
             };
@@ -192,6 +228,7 @@ impl WorkerRuntime {
         if let Some(outgoing) = self.state()?.outgoing.get_mut(&shard) {
             outgoing.uncertain = true;
         }
+        self.state()?.drain_retries.insert(shard, Instant::now() + self.config.check_interval);
         let outcome = timeout(
             self.config.request_timeout,
             self.peers.handoff(&pending.target, pending.request.clone()),
@@ -208,14 +245,19 @@ impl WorkerRuntime {
                     return Err(err("peer_handoff_response"));
                 }
                 self.state()?.shards.remove(&shard);
+                self.state()?.made_progress();
+                self.state()?.drain_retries.remove(&shard);
                 self.transfer_quiescent(&pending.request, &record.claim, &pending.target, budget)
                     .await?;
             }
             Ok(Ok(HandoffOutcome::Rejected)) if !pending.uncertain => {
                 let mut state = self.state()?;
                 let rejected = state.rejected_targets.entry(shard).or_default();
-                if !rejected.contains(&pending.target.instance) {
-                    rejected.push(pending.target.instance);
+                let until = Instant::now() + self.config.candidate_backoff;
+                if let Some((_, retry_at)) = rejected.iter_mut().find(|(i, _)| *i == pending.target.instance) {
+                    *retry_at = until;
+                } else {
+                    rejected.push((pending.target.instance, until));
                 }
                 state.outgoing.remove(&shard);
                 tracing::info!(shard=shard.0, handoff_id=%pending.request.request_id.0, "Worker target rejected handoff; try another eligible target");
@@ -267,6 +309,7 @@ impl WorkerRuntime {
                     || (owner.is_some() && s.phase == Phase::Transferring))
                 && !s.pending_schedule
                 && s.pending_effects == 0
+                && s.drain_retry_at <= Instant::now()
         };
         let owners = state
             .sessions
@@ -283,6 +326,11 @@ impl WorkerRuntime {
             .collect::<Vec<_>>();
         if let Some(last) = owners.last() {
             state.transfer_cursors.insert(shard, last.sid.clone());
+        }
+        for owner in &owners {
+            if let Some(session) = state.sessions.get_mut(&owner.sid) {
+                session.drain_retry_at = Instant::now() + self.config.check_interval;
+            }
         }
         Ok(owners)
     }
@@ -301,6 +349,7 @@ impl WorkerRuntime {
                 let mut state = self.state()?;
                 let session = state.sessions.get_mut(&source.sid).ok_or_else(|| err("session_not_active"))?;
                 if session.acquired.ownership != source || session.pending_schedule || session.pending_effects != 0 { return Err(err("session_not_quiescent")); }
+                session.drain_retry_at = Instant::now() + self.config.check_interval;
                 match session.phase {
                     Phase::Releasing => true,
                     Phase::Idle | Phase::Transferring => { session.phase = Phase::Transferring; false },
@@ -314,6 +363,7 @@ impl WorkerRuntime {
                 let session = state.sessions.get_mut(&source.sid).ok_or_else(|| err("session_not_active"))?;
                 if session.acquired.ownership != source || session.phase != Phase::Transferring { return Err(err("session_transfer_state")); }
                 session.phase = Phase::Releasing;
+                state.made_progress();
             }
             self.release_session(&source).await
         }).buffer_unordered(self.config.handoff_concurrency);
@@ -357,6 +407,8 @@ impl WorkerRuntime {
             state.outgoing.remove(&request.from.shard);
             state.rejected_targets.remove(&request.from.shard);
             state.transfer_cursors.remove(&request.from.shard);
+            state.drain_retries.remove(&request.from.shard);
+            state.made_progress();
         }
         Ok(())
     }
