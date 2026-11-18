@@ -29,8 +29,8 @@ async def authorize_file_list(
         friend_user_id=friend_user_id, friendships=friendships, expert=expert, stage=stage.value,
     )
     try:
-        # The Backend-owned session index, not a user-id suffix in the key,
-        # is authoritative. Never read resource metadata before this check.
+        # The subject's independent Caller container or shared-runtime session
+        # index authorizes access before resource metadata is read.
         await expert.get_owned_chat_session(
             friend_user_id, bot_id, owner_id, session_id,
             request.cookies.get("IAM_TOKEN") or None,
