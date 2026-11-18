@@ -24,6 +24,7 @@ from agentclaw.community.api.tc_resource_ready_observer import (
 )
 from agentclaw.community.api.session_resource_service import SessionResourceServiceProtocol
 from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingTarget
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.core.session_resources.types import SessionResourceStatus
 from tests.community.adapters.http.openapi_v1.conftest import (
@@ -86,6 +87,7 @@ class _Upstream:
 class _Resources:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
+        self.binding_requests = []
         self.upstream = _Upstream()
         self.ready_records = [self._record(status=SessionResourceStatus.READY)]
         self.failures: dict[str, Exception] = {}
@@ -164,6 +166,7 @@ class _EngineFiles:
         self.resources = resources
 
     async def list_files(self, target, session_key, *, session_user_id=None):
+        self.resources.binding_requests.append(target)
         self.resources.calls.append(("list", {
             "owner_id": target.owner_id, "bot_id": target.bot_id,
             "session_key": session_key, "actor_user_id": target.actor_user_id,
@@ -175,12 +178,14 @@ class _EngineFiles:
                 for record in self.resources.ready_records]
 
     async def open_content(self, target, session_key, resource_id, disposition, *, session_user_id=None):
+        self.resources.binding_requests.append(target)
         _, upstream = await self.resources.open_session_file_content(
             target=target, session_key=session_key, resource_id=resource_id, disposition=disposition,
         )
         return upstream
 
     async def delete_file(self, target, session_key, resource_id):
+        self.resources.binding_requests.append(target)
         self.resources.calls.append(("delete", {
             "target": target, "session_key": session_key, "resource_id": resource_id,
         }))
@@ -786,3 +791,54 @@ def test_ready_session_files_do_not_publish_knowledge_events(
     assert response.json()["data"]["status"] == "ready"
     assert resources.calls[-1][0] == operation
     assert observer.records == []
+
+@pytest.fixture(params=[
+    pytest.param(("GET", "", None, 200), id="list"),
+    pytest.param(("GET", "/sr_1/content", None, 200), id="content"),
+    pytest.param(("DELETE", "/sr_1", None, 200), id="delete"),
+    pytest.param(("POST", "/upload-intents", {"files": [{"filename": "a.txt"}]}, 201), id="upload"),
+])
+def session_file_route(request):
+    return request.param
+
+
+@pytest.mark.parametrize(("selector", "expected"), [
+    (None, RuntimeBindingTarget.AUTO),
+    ("service", RuntimeBindingTarget.CALLER_SERVICE),
+    ("caller_instance", RuntimeBindingTarget.CALLER_INSTANCE),
+])
+def test_caller_runtime_target_reaches_binding_request(
+    client, resources, runtime_bindings, session_file_route, selector, expected,
+):
+    method, suffix, body, status = session_file_route
+    params = {} if selector is None else {"caller_runtime_target": selector}
+    response = client.request(method, _base() + suffix, params=params, json=body)
+
+    assert response.status_code == status, response.text
+    binding_request, = runtime_bindings.requests + resources.binding_requests
+    assert binding_request.target is expected
+    assert binding_request.actor_user_id == OWNER
+
+
+def test_invalid_caller_runtime_target_is_rejected(
+    client, resources, runtime_bindings, session_file_route,
+):
+    method, suffix, body, _ = session_file_route
+    response = client.request(
+        method, _base() + suffix, params={"caller_runtime_target": "unknown"}, json=body,
+    )
+
+    assert response.status_code == 422, response.text
+    assert resources.calls == []
+    assert runtime_bindings.requests == []
+
+
+@pytest.mark.parametrize("suffix", ["", "/sr_1/content"])
+def test_friend_session_masks_service_caller_runtime_target(client, friendships, resources, suffix):
+    friendships.allowed = True
+    response = client.get(_base() + suffix, params={
+        "f_user_id": "friend-1", "caller_runtime_target": "service",
+    })
+
+    assert fails(response, 404)["message"] == "Not found"
+    assert resources.calls == []
