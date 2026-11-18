@@ -3,7 +3,7 @@
 // Task 4 会话 Hook(目录/会话/他人只读/URL 同步)+ Task 6 对话侧栏 +
 // 只读面板 + 普通/Coding Bot 两个互斥的 Runtime 边界。
 import { getCapabilities } from '@/capabilities';
-import { ConfirmDialog } from '@/components/ui';
+import { ConfirmDialog, InlineCode } from '@/components/ui';
 import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/FriendRequestConfirmModal';
 import { ConversationTargetPlaceholder } from './components/ConversationTargetPlaceholder';
 import type { ConversationBotSection } from '@/domain/conversation/types';
@@ -299,13 +299,25 @@ export default function ConversationPage(): JSX.Element {
           onConfirm={legacyShareLinkGuard.onConfirm}
         />
       )}
-      {/* 移除好友确认弹窗(移除好友 PRD R5/R7):危险操作二次确认;后果完整告知——
-          需重新发起添加好友申请 + 历史单聊会话从会话列表隐藏(重新添加好友后恢复)。 */}
+      {/* 移除好友确认弹窗(移除好友 PRD R5/R7):危险操作二次确认;疑问句独立成行,
+          两项后果分行列示(2026-11-18 验收反馈:文案精简、关键信息分行)——
+          ①移除后如需继续协作，须重新发起添加好友申请；
+          ②历史单聊会话将从会话列表隐藏，重新添加好友后恢复。 */}
       {friendRemoval.target && (
         <ConfirmDialog
           open
           title="移除好友"
-          description={`确定移除好友“${friendRemoval.target.displayName}”吗？移除后该 Bot 将从「好友 Bot」分组消失，历史单聊会话将从会话列表隐藏且不可发起新会话，重新添加好友后恢复；如需继续协作，须重新发起添加好友申请。`}
+          description={
+            <>
+              <span className="block">
+                确定移除好友
+                <InlineCode className="mx-1">{friendRemoval.target.displayName}</InlineCode>
+                吗？
+              </span>
+              <span className="mt-2 block">· 移除后如需继续协作，须重新发起添加好友申请</span>
+              <span className="mt-1 block">· 历史单聊会话将从会话列表隐藏，重新添加好友后恢复</span>
+            </>
+          }
           confirmText="确认移除"
           confirmVariant="destructive"
           loading={friendRemoval.busy}
