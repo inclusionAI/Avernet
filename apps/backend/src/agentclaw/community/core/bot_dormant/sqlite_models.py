@@ -60,3 +60,22 @@ class DormantCheckAudit(Base):
     error_msg = Column(Text)            # populated when check_result='error'
     dry_run = Column(SmallInteger, default=0)
     gmt_create = Column(DateTime, default=func.now())
+
+
+class DormantAutoReactivate(Base):
+    """Whitelist of bots eligible for automatic reactivation after dormant recycle.
+
+    Only bots whose (bot_id, owner_id) pair appears in this table are
+    considered for auto-reactivation.  Operators add entries via the
+    AutoReactivateWhitelistService.
+    """
+
+    __tablename__ = "ac_bot_dormant_auto_reactivate"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bot_id = Column(String(64), nullable=False)
+    owner_id = Column(String(64), nullable=False)
+    gmt_create = Column(DateTime, default=func.now())
+    __table_args__ = (
+        UniqueConstraint("bot_id", "owner_id",
+                         name="uk_auto_reactivate_bot_owner"),
+    )
