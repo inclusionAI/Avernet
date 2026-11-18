@@ -23,6 +23,7 @@ apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_insta
 apps/backend/src/agentclaw/community/core/expert_chat/README.md
   s_7bf7edeb41f354::t_1acea629e3a030 159,161,167,170,172
   s_7bf7edeb41f354::t_e7200d7b87e882 160,162-166,168-169,171
+  s_7bf7edeb41f354::t_96ceda3dbca32d 158
 apps/backend/specs/caller-runtime-sessions/002-code-report.md
   s_7bf7edeb41f354::t_7437c35d055cc6 1-41
 apps/backend/tests/community/core/expert_chat/services/test_caller_cron_sessions.py
