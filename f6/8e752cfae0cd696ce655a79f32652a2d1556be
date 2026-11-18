@@ -1,0 +1,114 @@
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_resolve.py
+  s_e059e30c850fff::t_ef5f563a89ada1 60,63,66,80,143,155,194
+  s_e059e30c850fff::t_c24b9bfd9559ff 8,62,64-65,69-71
+  s_e059e30c850fff::t_23e276d013288e 85-87
+  s_e059e30c850fff::t_e8bb5a2ad59a7f 72,141
+apps/backend/tests/community/core/skill_center/test_default_members.py
+  s_e059e30c850fff::t_9d6cf1ea292375 11-18,43-50
+  s_e059e30c850fff::t_ae8c40c88ee737 8,22,52,63-64
+  s_e059e30c850fff::t_7900327e006ac1 53,56,65
+  s_e059e30c850fff::t_9a496581372973 3-5,28-42,51,55,57,59-62,66
+  s_e059e30c850fff::t_261d171082a299 1-2,6-7,9-10,19-21,23-27,54,58
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/skill_mcp_dependencies.py
+  s_e059e30c850fff::t_a55f9e6548b74b 96-99
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/apply_skill_set_commands.py
+  s_e059e30c850fff::t_d1097e3bc05fd7 141
+  s_e059e30c850fff::t_dbecf6e0ca9dd8 328,331-333
+  s_e059e30c850fff::t_2c744074e9aafc 292,299-301,329-330
+  s_e059e30c850fff::t_e8bb5a2ad59a7f 595
+  s_e059e30c850fff::t_ce79e99d7126d9 35-36,50,151-155
+  s_e059e30c850fff::t_cfff95f1783813 198-200
+  s_e059e30c850fff::t_8c37d35caa5052 365-373
+  s_e059e30c850fff::t_a55f9e6548b74b 18,122-124
+  s_e059e30c850fff::t_5c0575a3602a5e 337-341
+  s_e059e30c850fff::t_91ddff2d67cf20 265-271
+  s_e059e30c850fff::t_8f8a47f59f3de2 293-298
+apps/backend/tests/community/repository/skill_center/test_apply_center_membership_identity.py
+  s_e059e30c850fff::t_1ad2d188a7c03d 143-147,150,152,157,161,163-164
+  s_e059e30c850fff::t_3917d6afa7d550 166,168,174
+  s_e059e30c850fff::t_0bbecc20e1a7d7 153
+  s_e059e30c850fff::t_7919c706465cf8 149,151,154-156,158-160,162
+  s_e059e30c850fff::t_edc8e575fe030b 148
+  s_e059e30c850fff::t_357d3c7fd0729a 227-231
+apps/backend/src/agentclaw/community/core/skill_center/default_members.py
+  s_e059e30c850fff::t_c24b9bfd9559ff 36
+  s_e059e30c850fff::t_a46335dbeb08fe 55-57
+  s_e059e30c850fff::t_9d6cf1ea292375 58-60
+  s_e059e30c850fff::t_cfff95f1783813 18-19
+  s_e059e30c850fff::t_ef5f563a89ada1 17,20-21,37
+  s_e059e30c850fff::t_9a496581372973 25-32,34-35,43-49
+  s_e059e30c850fff::t_91571d8bb16971 1-16,22-24,38,50-54,61-64
+  s_e059e30c850fff::t_d02fe29e2e9816 33
+  s_e059e30c850fff::t_593d9ccea94599 39-42
+apps/backend/tests/community/repository/skill_center/test_apply_skill_set_retired_sources.py
+  s_e059e30c850fff::t_ae8c40c88ee737 5,18
+  s_e059e30c850fff::t_7a9301911a8670 37-52
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_e059e30c850fff::t_a66f4a3fe3e083 19-20
+apps/backend/tests/community/repository/skill_center/test_default_historical_members.py
+  s_e059e30c850fff::t_cf8dcde0b2062a 3-6,8,13,64-65,69-73,75,80,87-90
+  s_e059e30c850fff::t_9d6cf1ea292375 66-68
+  s_e059e30c850fff::t_92e091778faabb 100-105
+  s_e059e30c850fff::t_edc8e575fe030b 74,76-79,93-94,97
+  s_e059e30c850fff::t_9a496581372973 23-33,36-48,53-60
+  s_e059e30c850fff::t_c953b239a0eced 81-86
+  s_e059e30c850fff::t_58e51f8ecb58be 1-2,7,9-12,14-22,34-35,49-52,61-63
+  s_e059e30c850fff::t_bd4f6781f17d81 91-92,95-96,98-99,106-107
+apps/backend/src/agentclaw/community/core/apply_engine/README.md
+  s_e059e30c850fff::t_a66f4a3fe3e083 71-74
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/bot_skillset_installations.py
+  s_e059e30c850fff::t_cf7c802bd20463 32,81-91,95-96,99-100,105
+  s_e059e30c850fff::t_c24b9bfd9559ff 101-102
+  s_e059e30c850fff::t_d1097e3bc05fd7 17,97
+  s_e059e30c850fff::t_3917d6afa7d550 34,40,98,103-104
+  s_e059e30c850fff::t_5c0575a3602a5e 33,45-48,50-56,372
+  s_45f5dc83f7ac50::t_a2a5a671828cf9 41-42
+  s_e059e30c850fff::t_48f7b8a5ef2a7e 339-342,371,373-374,407-426
+  s_e059e30c850fff::t_a55f9e6548b74b 43-44,49,92-94
+  s_e059e30c850fff::t_8f0669ed484aaf 482,544-545,615-616
+  s_e059e30c850fff::t_df640e2548f71c 427
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_types.py
+  s_e059e30c850fff::t_cfff95f1783813 170,185
+  s_e059e30c850fff::t_e8bb5a2ad59a7f 14,75-81
+  s_e059e30c850fff::t_1ecd9daccb92a7 174-184
+apps/backend/tests/community/core/apply_engine/test_default_historical_members.py
+  s_e059e30c850fff::t_74efdc3b31cd09 1-3,5-6,10-11,19-27,36-41,47,51-58,68-76
+  s_e059e30c850fff::t_a66f4a3fe3e083 80-87
+  s_e059e30c850fff::t_de3bae1638d800 88-104,154-185
+  s_e059e30c850fff::t_92e091778faabb 59-64
+  s_e059e30c850fff::t_aae5f6cc39d3da 195-202,205-224,226-228
+  s_e059e30c850fff::t_28991f19750d22 143-145
+  s_e059e30c850fff::t_9d6cf1ea292375 13-18,109-111,115-122,126-134
+  s_e059e30c850fff::t_2ec3db022f0778 12,186-194,203-204,225,229
+  s_e059e30c850fff::t_b22af8e720d181 108,138,140-142
+  s_e059e30c850fff::t_bcb300611614c5 4,105-107,112-114,123-125,135-137,139,146-153
+  s_e059e30c850fff::t_9a496581372973 7-9,28-35,42-46,48-50,65-67,77-79
+apps/backend/src/agentclaw/community/core/skill_center/skill_set_apply.py
+  s_e059e30c850fff::t_cfff95f1783813 62
+apps/backend/tests/community/repository/skill_center/test_apply_raw_default_ownership.py
+  s_e059e30c850fff::t_5c0575a3602a5e 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f68e752cfae0cd696ce655a79f32652a2d1556be",
+  "prompts": {},
+  "sessions": {
+    "s_45f5dc83f7ac50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea50-1141-7730-93e2-7477d4e77f5a",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_e059e30c850fff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed70-3a8f-7e41-9d8f-50f66965b96d",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": null
+    }
+  }
+}

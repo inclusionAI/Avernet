@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/ordinary-run-request-migration.integration.test.ts
+  s_4e7e3f8993b73f::t_79c79de82e4bed 1
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/pack-operation-migration.test.ts
+  s_4e7e3f8993b73f::t_79c79de82e4bed 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bb797a5e549b4205603c847b33d0fbbc8c54ea13",
+  "prompts": {},
+  "sessions": {
+    "s_4e7e3f8993b73f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e375-c4b3-7d70-8077-b0b19e04c803",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

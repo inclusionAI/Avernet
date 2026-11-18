@@ -1,0 +1,45 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-service.ts
+  s_c5125da3cacb9c::t_48fc05a08565ff 41,57-58,62,69
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/__tests__/monitoring.test.ts
+  s_c5125da3cacb9c::t_55e3ccdac2c46b 52-53,358,360,364,375,379
+apps/evolverun/clawweb/public/modules/clawinsight/web/api/monitoring.ts
+  s_c5125da3cacb9c::t_48fc05a08565ff 17,21
+apps/evolverun/clawweb/public/modules/clawinsight/preview/__tests__/http.test.ts
+  s_c5125da3cacb9c::t_55e3ccdac2c46b 62,66-82
+  s_c5125da3cacb9c::t_a09b71e91556a9 83
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/directory-browser.test.ts
+  s_c5125da3cacb9c::t_118a2ac28571bd 20,113-131
+  s_c5125da3cacb9c::t_7ffcaa1b1580ff 132
+apps/evolverun/clawweb/public/modules/clawinsight/preview/server.ts
+  s_c5125da3cacb9c::t_55e3ccdac2c46b 21,48
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/bot-config.test.ts
+  s_c5125da3cacb9c::t_118a2ac28571bd 75-85,94-95,101,107-113
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-browser-service.ts
+  s_c5125da3cacb9c::t_48fc05a08565ff 52,57,80,86-87,94,98,100
+  s_c5125da3cacb9c::t_d7bee80e55a91c 84-85,88
+apps/evolverun/clawweb/public/modules/clawinsight/web/api/__tests__/monitoring.test.ts
+  s_c5125da3cacb9c::t_118a2ac28571bd 37-40
+apps/evolverun/clawweb/public/modules/clawinsight/docs/bot-diagnosis-recovery-config.md
+  s_c5125da3cacb9c::t_55e3ccdac2c46b 98-99,112-113,133
+  s_c5125da3cacb9c::t_257a36a5d2310a 134-135
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/__tests__/MonitoringSettings.test.tsx
+  s_c5125da3cacb9c::t_118a2ac28571bd 44
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/MonitoringSettings.tsx
+  s_c5125da3cacb9c::t_48fc05a08565ff 23,59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4eafbf880a52829cc7b51870bbd6951de3beb165",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
