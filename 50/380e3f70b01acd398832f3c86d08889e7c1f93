@@ -1,0 +1,14 @@
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationPage.test.tsx
+  h_5b2ec9c12c4d18 106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "50380e3f70b01acd398832f3c86d08889e7c1f93",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

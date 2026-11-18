@@ -1,0 +1,40 @@
+apps/bcs/docs/bcsfuse-catalog.md
+  s_3390a382ab8b6f::t_b642823dbbade9 46,48-54
+docs/bcn-a2a-api-reference.zh-CN.md
+  s_3390a382ab8b6f::t_657a7fa818abe7 207-208
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_catalog_sync.rs
+  s_3390a382ab8b6f::t_9ddf1ff83eae78 22-23,69,78-81
+apps/bcs/crates/services/bcs-fusion/src/core/card_sync.rs
+  s_3390a382ab8b6f::t_06defd04345a47 111
+  s_3390a382ab8b6f::t_b6d41b975a5bf6 10,13,17,81,85-86,136,146-147,149,157-158,161-168,183-184,196,236,241,246,253,284-317
+apps/bcs/crates/bootstrap/bcs/src/server/a2a_wiring.rs
+  s_3390a382ab8b6f::t_0a0636ec36e9a2 10,18-22,26,30-34
+apps/bcs/crates/bootstrap/bcs/src/server/lifecycle_wiring.rs
+  s_3390a382ab8b6f::t_e369a8381fd2cf 132,146
+apps/bcs/crates/bootstrap/bcs/src/server/server_construct.rs
+  s_3390a382ab8b6f::t_6199cfabc07a4d 726
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_3390a382ab8b6f::t_58370b0f0c2a42 164,169-170
+apps/bcs/crates/services/bcs-fusion/src/core/a2a_card_capabilities.rs
+  s_3390a382ab8b6f::t_5125064066cf87 1-179
+apps/bcs/crates/services/bcs-fusion/src/core/mod.rs
+  s_3390a382ab8b6f::t_dae8f078951e41 1
+apps/bcs/crates/test-support/bcs-test-support/src/contract/a2a_catalog_stack.rs
+  s_3390a382ab8b6f::t_c4358e8341c0b1 21,32-33,56,70,78,89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e1885260f56e8033f35a5e796af4ca5d05a831ea",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

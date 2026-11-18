@@ -1,0 +1,66 @@
+apps/backend/src/agentclaw/community/core/bot_management/engines/default.py
+  s_7bf7edeb41f354::t_1acea629e3a030 99
+  s_7bf7edeb41f354::t_e7200d7b87e882 100
+  s_7bf7edeb41f354::t_252226037823e5 101
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_caller_sessions.py
+  s_7bf7edeb41f354::t_1acea629e3a030 1-121
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py
+  s_7bf7edeb41f354::t_6f142092cb69ee 455
+  s_7bf7edeb41f354::t_e7200d7b87e882 456,474,477-486,488,490-491,543-545,547-548
+  s_7bf7edeb41f354::t_1acea629e3a030 50,114,487,489,520,524,546
+apps/backend/src/agentclaw/community/core/bot_management/engines/provisioning.py
+  s_7bf7edeb41f354::t_e7200d7b87e882 227
+  s_7bf7edeb41f354::t_6f142092cb69ee 226
+  s_7bf7edeb41f354::t_1acea629e3a030 225
+  s_7bf7edeb41f354::t_7c3112845dbe19 228
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_session_runtime.py
+  s_7bf7edeb41f354::t_e7200d7b87e882 62,97
+apps/backend/specs/caller-runtime-sessions/implementation-plan.md
+  s_7bf7edeb41f354::t_7437c35d055cc6 11
+  s_7bf7edeb41f354::t_6f142092cb69ee 1-10,12-13
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py
+  s_7bf7edeb41f354::t_e7200d7b87e882 253-258
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_7bf7edeb41f354::t_1acea629e3a030 113,115,121,124,126
+  s_7bf7edeb41f354::t_e7200d7b87e882 114,116-120,122-123,125
+apps/backend/specs/caller-runtime-sessions/002-code-report.md
+  s_7bf7edeb41f354::t_7437c35d055cc6 1-41
+apps/backend/tests/community/core/expert_chat/services/test_caller_cron_sessions.py
+  s_7bf7edeb41f354::t_1acea629e3a030 50,53,65,122-123,136-137,154,181,205,241,244,254,262,264,306
+  s_7bf7edeb41f354::t_ccbbc424256c95 307-330
+  s_7bf7edeb41f354::t_971b6aa904d200 58,143,145
+  s_7bf7edeb41f354::t_e7200d7b87e882 1-49,51-52,54-57,59-64,66-121,124-135,138-142,144,146-153,155-180,182-204,206-240,242-243,245-253,255-261,263,265-305
+apps/backend/tests/community/acceptance/expert_chat/test_caller_cron_sessions.py
+  s_7bf7edeb41f354::t_86007917b5b422 2-27,31-36,38-39,41-91
+  s_7bf7edeb41f354::t_971b6aa904d200 1,28-30,37,40
+  s_7bf7edeb41f354::t_77cac29d8b12c9 2-27,31-36,38-39,41,45-47,49-71,73-83,85-87,89,91
+  s_7bf7edeb41f354::t_6bb3bbeb6eecda 84
+  s_7bf7edeb41f354::t_3eef5682fa9f3a 48,72
+  s_7bf7edeb41f354::t_b49360b56e7759 42-44,88,90
+apps/backend/src/agentclaw/community/core/expert_chat/expert_chat_instance_service_protocol.py
+  s_7bf7edeb41f354::t_e7200d7b87e882 51-56
+apps/backend/specs/caller-cron-sessions/001-spec-output.md
+  s_7bf7edeb41f354::t_e7200d7b87e882 1-17
+  s_7bf7edeb41f354::t_86007917b5b422 18-19
+  s_7bf7edeb41f354::t_66643c1a0b4513 18-19
+apps/backend/specs/caller-runtime-sessions/001-spec-output.md
+  s_7bf7edeb41f354::t_e7200d7b87e882 1-28
+apps/backend/specs/caller-cron-sessions/002-code-report.md
+  s_7bf7edeb41f354::t_e7200d7b87e882 1-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e1ecf6f8e60daf48226d7f154cbd5bc0cfecae6c",
+  "prompts": {},
+  "sessions": {
+    "s_7bf7edeb41f354": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda2-fe95-7ee3-8d2f-a9fa07b666f5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

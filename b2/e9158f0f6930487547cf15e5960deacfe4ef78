@@ -1,0 +1,19 @@
+apps/backend/tests/community/acceptance/expert_chat/test_caller_cron_sessions.py
+  s_7bf7edeb41f354::t_fd34bd5746094e 31-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b2e9158f0f6930487547cf15e5960deacfe4ef78",
+  "prompts": {},
+  "sessions": {
+    "s_7bf7edeb41f354": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda2-fe95-7ee3-8d2f-a9fa07b666f5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

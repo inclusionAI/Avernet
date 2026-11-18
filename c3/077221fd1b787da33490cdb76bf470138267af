@@ -1,0 +1,40 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/README.md
+  h_059e888e5e4e82 23-24,95-129
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/base.py
+  h_059e888e5e4e82 21,34-39,52,176-223
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/matching.py
+  h_059e888e5e4e82 1-36
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/plan.py
+  h_059e888e5e4e82 484-490,526,536-544
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/stage.py
+  h_059e888e5e4e82 46-48,61-63,66,225-228,234-253,435-446
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 822-863
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/binding.py
+  h_059e888e5e4e82 29,107-109,137-158,170,211-213
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/contracts.py
+  h_059e888e5e4e82 10-12,81,84-86
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/participation.py
+  h_059e888e5e4e82 3-5,18-19,36-42,45-46,49,51
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/validation.py
+  h_059e888e5e4e82 6-8,69-73,77-86
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 178
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py
+  h_059e888e5e4e82 1-486
+apps/backend/tests/community/core/task/context_collab/test_l6_fixed_agent_roles.py
+  h_059e888e5e4e82 1-153
+apps/backend/tests/community/core/task/context_collab/test_swarm_stage_dependencies.py
+  h_059e888e5e4e82 1-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c3077221fd1b787da33490cdb76bf470138267af",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

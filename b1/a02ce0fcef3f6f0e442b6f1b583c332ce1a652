@@ -1,0 +1,20 @@
+apps/backend/tests/community/repository/skill_center/test_capability_desired_state_apply_claims.py
+  s_e059e30c850fff::t_1e648813462f0c 11,189-193
+  s_e059e30c850fff::t_06d33a7327e2d2 202-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b1a02ce0fcef3f6f0e442b6f1b583c332ce1a652",
+  "prompts": {},
+  "sessions": {
+    "s_e059e30c850fff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed70-3a8f-7e41-9d8f-50f66965b96d",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

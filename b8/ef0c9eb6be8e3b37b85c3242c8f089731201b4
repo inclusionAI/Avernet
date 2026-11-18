@@ -1,0 +1,162 @@
+apps/frontend-nextgen/test/services/backendApi/bots/iamTokenController.test.ts
+  s_5e0eab15b95f7c::t_eb0141419e2e2a 64-76,78-92
+  s_5e0eab15b95f7c::t_fb1e34f62a9cc2 77
+  s_5e0eab15b95f7c::t_d8abd7136d542a 93-156
+apps/frontend-nextgen/src/shell/GlobalSearch/useGlobalSearchModel.ts
+  s_6da3b0147a4283::t_154dd645d16847 8
+  s_6da3b0147a4283::t_4ff404c67c465a 3
+  s_6da3b0147a4283::t_655a7ea6b2b882 87-90
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  s_5e0eab15b95f7c::t_e08b17570ffa07 66-76,84-94
+  s_5e0eab15b95f7c::t_d20171f100fc7f 186
+  s_5e0eab15b95f7c::t_f9ee8640d95d00 63-65
+  s_5e0eab15b95f7c::t_354e188d70807b 185
+  s_a6177132cea47b::t_d46748820aeaf3 11,60-62
+apps/frontend-nextgen/src/services/workspace/teamBotConversationService.ts
+  s_5e0eab15b95f7c::t_c97508dbb54571 96-97
+apps/frontend-nextgen/src/domain/conversation/botAvailability.ts
+  s_6da3b0147a4283::t_50afd268582218 1-33
+apps/frontend-nextgen/src/services/backendApi/bots/botSessionFileController.ts
+  s_5e0eab15b95f7c::t_7cdaae4712fef8 89-95
+  s_5e0eab15b95f7c::t_867a2c97501474 83-88
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_5e0eab15b95f7c::t_25baceda269d0c 353-406,409-415,417-418,420-421,423-424,427-429,433,436,438-441,443-444,447-455,458-467,471-475,477-478,482-487,491,493-494,498,500-501,505-512,514,516-619,621-698
+  s_5e0eab15b95f7c::t_00eb968266fa92 620
+  s_5e0eab15b95f7c::t_2d3493e879debf 351-352
+  s_5e0eab15b95f7c::t_edef9553122ee0 407-408
+  s_5e0eab15b95f7c::t_6ed620ffb76c06 416
+  s_5e0eab15b95f7c::t_7c3376c77c03e0 419
+  s_5e0eab15b95f7c::t_b4eb1470275b22 422
+  s_5e0eab15b95f7c::t_6499c3617174de 425-426
+  s_5e0eab15b95f7c::t_b4441cfb7c1c76 430-432
+  s_5e0eab15b95f7c::t_261b89c5f5b4bc 434-435
+  s_5e0eab15b95f7c::t_b2188bae811b19 437
+  s_5e0eab15b95f7c::t_fc596f9de7d879 442
+  s_5e0eab15b95f7c::t_7a249564e7f24b 445-446
+  s_5e0eab15b95f7c::t_ea89eeb1109cff 456-457
+  s_5e0eab15b95f7c::t_977a83572d76aa 468-470
+  s_5e0eab15b95f7c::t_db2098217ace51 476
+  s_5e0eab15b95f7c::t_de1171f78dc0b6 479-481
+  s_5e0eab15b95f7c::t_5ae4eb61bf4c30 488-490
+  s_5e0eab15b95f7c::t_35669efd4f6060 492
+  s_5e0eab15b95f7c::t_b2f62b43996d26 495-497
+  s_5e0eab15b95f7c::t_f5d4a93e733d95 499
+  s_5e0eab15b95f7c::t_1b00e233d0cb1b 502-504
+  s_5e0eab15b95f7c::t_307c7d4707192b 513
+  s_5e0eab15b95f7c::t_40818fe5eaf993 515
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_5e0eab15b95f7c::t_fc5d1b0ecf0283 311-312
+  s_5e0eab15b95f7c::t_06e7bc4588af14 70-73
+apps/frontend-nextgen/src/services/workspace/collaborationCandidateService.ts
+  s_5e0eab15b95f7c::t_6ad9e71b8e353e 83-84
+  s_5e0eab15b95f7c::t_62152368c358ec 38-40
+  s_5e0eab15b95f7c::t_be5eaa5a7f1ad3 133-134
+apps/frontend-nextgen/src/services/backendApi/bots/botController.ts
+  s_5e0eab15b95f7c::t_0bb41dc77f440b 107-108
+  s_5e0eab15b95f7c::t_6b05c0ba4d9fa4 74-75
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFileUpload.ts
+  s_5e0eab15b95f7c::t_7b63347884ff3d 130
+  s_5e0eab15b95f7c::t_2ea82ab7dbe2aa 32-33
+  s_5e0eab15b95f7c::t_cc8f4a4c03dd4b 92-93
+  s_5e0eab15b95f7c::t_dad6885659723b 30-31
+  s_5e0eab15b95f7c::t_8129b93fe6e593 90-91
+apps/frontend-nextgen/src/domain/conversation/index.ts
+  s_6da3b0147a4283::t_ec4a37c322aa6e 1
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFiles.ts
+  s_5e0eab15b95f7c::t_32c09da3adbc9d 163-164
+  s_5e0eab15b95f7c::t_b424e9aba1fcd7 116-117,127-128
+  s_5e0eab15b95f7c::t_6e7bb424590123 28-29
+  s_5e0eab15b95f7c::t_aff34baa64ac0d 87-88,98
+  s_5e0eab15b95f7c::t_bbd150be4c5958 172
+  s_5e0eab15b95f7c::t_03b88b2da6ae98 56-57,63,73
+  s_5e0eab15b95f7c::t_1e1864054afd5d 145
+  s_5e0eab15b95f7c::t_f641ce5af17fd3 26-27
+  s_5e0eab15b95f7c::t_fb6727ce12eac6 54-55
+  s_5e0eab15b95f7c::t_251925eb6ea379 85-86
+  s_5e0eab15b95f7c::t_c3fc28bd0d149b 114-115
+  s_5e0eab15b95f7c::t_239da1f5bde845 161-162
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotUnavailableTooltip.tsx
+  s_6da3b0147a4283::t_55d3482cbeaae5 3,7-10
+apps/frontend-nextgen/test/shell/GlobalSearch.test.tsx
+  s_6da3b0147a4283::t_c16d935038f33e 151-166,168-170
+  s_6da3b0147a4283::t_ae87e859b3c263 167
+apps/frontend-nextgen/src/services/backendApi/privateChat/iamTokenController.ts
+  s_5e0eab15b95f7c::t_c0a5ab0726ab6c 55
+  s_5e0eab15b95f7c::t_b6d2cf488b87de 17-19
+  s_5e0eab15b95f7c::t_5e6a7e472663de 20-23
+  s_5e0eab15b95f7c::t_9aebeb568c574e 56-58
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_5e0eab15b95f7c::t_0c2743e5e811a7 267-277
+  s_5e0eab15b95f7c::t_e7c4702ebde3e3 260-266
+apps/frontend-nextgen/src/services/backendApi/collaboration/collaborationBotController.ts
+  s_5e0eab15b95f7c::t_c80a5ebf19e787 41-43
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_5e0eab15b95f7c::t_8e8348ac01ed6a 194-221,223-229,231-239
+  s_5e0eab15b95f7c::t_4bb83666280740 274-276
+  s_5e0eab15b95f7c::t_26df2e59627407 240-273,277-300
+  s_5e0eab15b95f7c::t_1e6806a9a359f4 222,230
+apps/frontend-nextgen/src/services/workspace/conversationService.ts
+  s_5e0eab15b95f7c::t_5ca4aac173f9b9 53-54
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  s_5e0eab15b95f7c::t_afb94f0f4a22f6 308-309,312
+  s_5e0eab15b95f7c::t_119559398d4526 243-244,250
+  s_5e0eab15b95f7c::t_64bb694a4bfadc 136-141
+  s_5e0eab15b95f7c::t_f0293dc8b60807 85-86,94
+  s_5e0eab15b95f7c::t_9072cee43dc4ce 142-147
+  s_5e0eab15b95f7c::t_3949dc570cd3b6 153
+  s_5e0eab15b95f7c::t_a74d00cf48df1c 216-217,242,265,287,307
+  s_5e0eab15b95f7c::t_41efae9f79f44c 80-84,87,92-93
+  s_5e0eab15b95f7c::t_d4ea379dbe0334 266-267,273
+  s_5e0eab15b95f7c::t_56f1166b6e8bb9 218-219,223
+  s_5e0eab15b95f7c::t_8cb712ee9acddf 288-289,292
+  s_5e0eab15b95f7c::t_86670481cf278a 286
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilePreview.ts
+  s_5e0eab15b95f7c::t_3d052c954bc7f9 43-44
+  s_5e0eab15b95f7c::t_ad128520950cc7 76-77
+  s_5e0eab15b95f7c::t_e9df69baeec340 54
+  s_5e0eab15b95f7c::t_c5394621610587 93
+  s_5e0eab15b95f7c::t_f5187df633b7c2 120
+  s_5e0eab15b95f7c::t_42a825d22fcab0 41-42
+  s_5e0eab15b95f7c::t_44b0e207b33694 74-75
+  s_5e0eab15b95f7c::t_93ff342fa2dd27 90-92
+  s_5e0eab15b95f7c::t_08053f7cb59a12 94
+  s_a6177132cea47b::t_45d9d45b6aedd2 84-89
+apps/frontend-nextgen/src/services/backendApi/bots/collaboratingBotController.ts
+  s_5e0eab15b95f7c::t_6415abc8e7f3ec 23-24
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays.tsx
+  s_5e0eab15b95f7c::t_7efa8780ea215d 17-20,40,72-73
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.tsx
+  s_5e0eab15b95f7c::t_f9c54428b69be4 25-28,64-65,119-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b8ef0c9eb6be8e3b37b85c3242c8f089731201b4",
+  "prompts": {},
+  "sessions": {
+    "s_5e0eab15b95f7c": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "44b19073-2adc-4fd7-9499-390aad0a5473",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_6da3b0147a4283": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a3228a24-f266-4241-b93c-3cafbdec836a",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_a6177132cea47b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_a6177132cea47b",
+        "model": "unknown"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

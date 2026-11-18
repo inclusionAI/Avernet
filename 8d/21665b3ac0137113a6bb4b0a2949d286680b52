@@ -1,0 +1,81 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py
+  s_d23d2dd74fff18::t_0ae4e213e6bf1b 93
+apps/backend/src/agentclaw/community/adapters/http/system_config/router.py
+  s_d23d2dd74fff18::t_0cd8be7c75f87d 33,179-187,196-197
+apps/backend/src/agentclaw/community/api/task/task_manifest_service.py
+  s_d23d2dd74fff18::t_69b17e45a27b7a 4,8
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/nas_bot_file_sync.py
+  s_d23d2dd74fff18::t_0965095daf5e26 108-109
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_d23d2dd74fff18::t_d7841f0b67d78c 123-124,184-186,6112-6138
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_d23d2dd74fff18::t_8d607735bd5882 154-172,193
+apps/backend/src/agentclaw/community/core/caller_identity/scheduled_refresh.py
+  s_d23d2dd74fff18::t_f679de10ed1220 1,8,13-14
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
+  s_d23d2dd74fff18::t_04f468ed10d2c2 27,31-35,206-210,212-213
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest_contract.py
+  s_d23d2dd74fff18::t_fd8ddc7b66f983 6,14-23
+apps/backend/tests/community/core/bot_management/services/test_scheduled_caller_refresh.py
+  s_d23d2dd74fff18::t_2a220c6a8a8d74 1,10-16,38,44-47,49-51,55,62-63,65-81,121-122,127-134,136-137,139-151,155,157,170,172
+apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
+  s_d23d2dd74fff18::t_d6cdc9490923aa 80-83,105-108,127-147
+apps/backend/tests/community/core/task/task_panel/test_manifest.py
+  s_d23d2dd74fff18::t_d61d2899a20e76 10,57-62
+apps/backend/tests/community/di/test_scheduled_caller_refresh.py
+  s_d23d2dd74fff18::t_922f1e94ab0226 7
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/plan.md
+  s_d23d2dd74fff18::t_b0a3dff6154903 54,256
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/spec.md
+  s_d23d2dd74fff18::t_dd5cbc6351eea4 36
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/tasks.md
+  s_d23d2dd74fff18::t_50522d57e4a53d 251
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration.ts
+  s_d23d2dd74fff18::t_7d2b257b7daf97 6-13,15,27-76,108,142,144-154,164-176,187-191,193-199,215-216
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotChat.ts
+  s_d23d2dd74fff18::t_e84258c33db371 5,7,36-42,55-56
+apps/frontend-nextgen/src/services/backendApi/bots/privateBotSessionController.ts
+  s_d23d2dd74fff18::t_ba70c5b4c22721 67
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_d23d2dd74fff18::t_d91fc9e799c4df 14,78-79,273,632,660
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_d23d2dd74fff18::t_ca90af613ee9ac 125-141,404,410-413,513,523-526
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration.test.tsx
+  s_d23d2dd74fff18::t_3e8125f746c16b 5,11-16,20,50-65,140,305-349
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotChat.test.ts
+  s_d23d2dd74fff18::t_a5f7e2c2066a86 5,59,97-113
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_d23d2dd74fff18::t_98f3c4260ab070 459-460,472,547
+apps/frontend-nextgen/test/services/workspace/botConversationRuntimeStage.test.ts
+  s_d23d2dd74fff18::t_2a7ca35050dbb2 5,7,156-194
+docs/specs/2026-11-11-task-panel-shared-asset/migration-map.json
+  s_d23d2dd74fff18::t_5597f243e2fd68 1-176
+docs/specs/2026-11-11-task-panel-shared-asset/plan.md
+  s_d23d2dd74fff18::t_35f3a9b1670110 1-397
+docs/specs/2026-11-11-task-panel-shared-asset/research.md
+  s_d23d2dd74fff18::t_54eec075609407 1-81
+docs/specs/2026-11-11-task-panel-shared-asset/spec.md
+  s_d23d2dd74fff18::t_50425381cde8bb 1-50
+docs/specs/2026-11-11-task-panel-shared-asset/tasks.md
+  s_d23d2dd74fff18::t_19272003fae607 1-256
+docs/specs/2026-11-11-task-panel-shared-asset/test-migration-map.json
+  s_d23d2dd74fff18::t_e76df10f962a9b 1-325
+docs/specs/2026-11-11-task-panel-shared-asset/verification.md
+  s_d23d2dd74fff18::t_44e73c4d15ddd5 1-215
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8d21665b3ac0137113a6bb4b0a2949d286680b52",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
