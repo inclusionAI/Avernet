@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/monitoring-runtime.test.ts
+  s_c5125da3cacb9c::t_ec3bdc33791385 53-54,58-61,68-69,74-75,106-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e6e0a9928a58594ebb5d21b6292381de457fda60",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": null
+    }
+  }
+}
