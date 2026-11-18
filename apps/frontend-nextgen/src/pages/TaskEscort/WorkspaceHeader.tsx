@@ -3,7 +3,9 @@ import { Button } from '@/components/ui/Button';
 import type { TaskEscortParityContext, TaskEscortWorkflowSummary } from '@/domain/taskEscortParity/types';
 import type { PageId } from '@/domain/taskEscortWorkspace/types';
 import { Plus, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { pages } from './Navigation';
+import { WorkflowCreationDialog } from './parity/WorkflowCreationDialog';
 import { WorkspaceWorkflowPicker } from './parity/WorkspaceWorkflowPicker';
 
 interface WorkspaceHeaderProps {
@@ -17,6 +19,10 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
   const { page, context, workflows, selectWorkflow } = props;
   const info = pages.find((item) => item.id === (page === 'workbench' ? 'issues' : page))!;
   const workflow = context.workflow;
+  const creationScope = JSON.stringify([context.scopeKey, context.userId]);
+  const creationReady = (context.creationReady ?? context.ready) && !!context.userId?.trim();
+  const [openScope, setOpenScope] = useState<string | null>(null);
+  useEffect(() => setOpenScope(null), [creationScope, creationReady]);
   return (
     <div className="workspace-context-header">
       <PageHeader
@@ -46,7 +52,12 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
               onSelect={selectWorkflow}
               loading={context.loading}
             />
-            <Button size="sm" disabled aria-describedby="workspace-create-unavailable">
+            <Button
+              size="sm"
+              disabled={!creationReady}
+              onClick={() => setOpenScope(creationScope)}
+              aria-describedby={!creationReady ? 'workspace-create-unavailable' : undefined}
+            >
               <Plus size={14} aria-hidden />
               新建工作流
             </Button>
@@ -57,9 +68,14 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
           </div>
         }
       />
-      <p id="workspace-create-unavailable" className="mt-2 text-xs text-muted-foreground">
-        新建工作流尚未接入已确认的安全创建契约。
-      </p>
+      {!creationReady && (
+        <p id="workspace-create-unavailable" className="mt-2 text-xs text-muted-foreground">
+          请先加载当前用户身份后再新建工作流。
+        </p>
+      )}
+      {creationReady && openScope === creationScope && (
+        <WorkflowCreationDialog key={creationScope} context={context} onClose={() => setOpenScope(null)} />
+      )}
     </div>
   );
 }

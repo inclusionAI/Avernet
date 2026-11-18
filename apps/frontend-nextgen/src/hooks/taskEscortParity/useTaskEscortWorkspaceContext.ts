@@ -7,7 +7,7 @@ import {
 } from '@/services/taskEscortParity/workspaceNavigation';
 import { readTaskEscortWorkflows } from '@/services/taskEscortParity/workspaceService';
 import { history, useLocation } from '@umijs/max';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTaskEscortRead } from './useTaskEscortRead';
 
 interface WorkspaceScope {
@@ -57,14 +57,37 @@ export function useTaskEscortWorkspaceContext(scope: WorkspaceScope) {
       const currentId = new URLSearchParams(current.search).get('workflowId');
       const selected =
         currentId && workflows.some((row) => row.id === currentId) ? {} : workflow ? { workflowId: workflow.id } : {};
+      const nextId = params?.workflowId;
+      const search =
+        nextId !== undefined
+          ? workspaceSelectionSearch(current.search, nextId, currentId ?? workflow?.id ?? '')
+          : current.search;
       history.push(
-        `${current.pathname}${workspaceNavigationSearch(current.search, target, { ...selected, ...params })}${
-          current.hash
-        }`,
+        `${current.pathname}${workspaceNavigationSearch(search, target, { ...selected, ...params })}${current.hash}`,
       );
     },
     [workflows, workflow?.id],
   );
+  const pendingCreated = useRef<{ scopeKey: string; userId: string | undefined; id: string } | null>(null);
+  const openCreatedWorkflow = useCallback(
+    (id: string) => {
+      pendingCreated.current = { scopeKey: scope.key, userId: scope.userId, id };
+      navigate('editor', { workflowId: id });
+    },
+    [scope.key, scope.userId, navigate],
+  );
+  useEffect(() => {
+    const pending = pendingCreated.current;
+    if (!pending) return;
+    if (pending.scopeKey !== scope.key || pending.userId !== scope.userId) {
+      pendingCreated.current = null;
+      return;
+    }
+    if (scope.ready && page === 'editor' && query.workflowId === pending.id) {
+      pendingCreated.current = null;
+      resource.refresh();
+    }
+  }, [scope.key, scope.userId, scope.ready, page, query.workflowId, resource.refresh]);
   const selectWorkflow = useCallback(
     (id: string) => {
       if (!workflows.some((row) => row.id === id)) return;
@@ -77,6 +100,7 @@ export function useTaskEscortWorkspaceContext(scope: WorkspaceScope) {
   const context: TaskEscortParityContext = {
     scopeKey: scope.key,
     ready: scope.ready && !resource.loading && !resource.error && !!workflow,
+    creationReady: scope.ready && !!scope.userId?.trim(),
     loading: (!scope.ready && !!scope.loading) || resource.loading,
     error: !scope.ready ? scope.error : resource.error ?? selectionError,
     userId: scope.userId,
@@ -85,6 +109,7 @@ export function useTaskEscortWorkspaceContext(scope: WorkspaceScope) {
     query,
     navigate,
     refreshWorkflows,
+    openCreatedWorkflow,
   };
   return { context, page, workflows, selectWorkflow };
 }

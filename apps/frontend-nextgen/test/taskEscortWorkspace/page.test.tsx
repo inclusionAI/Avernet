@@ -121,8 +121,12 @@ it.each(items.slice(1))('%s receives a real workflow context and truthful metada
   expect(screen.getByText('0 次运行')).toBeInTheDocument();
   expect(screen.getByText('owner-a')).toBeInTheDocument();
   expect(screen.getByRole('combobox', { name: /切换工作流/ })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '新建工作流' })).toBeDisabled();
-  expect(screen.getByText(/新建工作流尚未接入/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '新建工作流' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: '新建工作流' }));
+  expect(screen.getByRole('dialog', { name: '新建工作流' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '空白工作流' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
 it('missing metadata stays unknown instead of becoming fabricated totals, owners or statuses', async () => {
