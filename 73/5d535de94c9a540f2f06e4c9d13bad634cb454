@@ -1,0 +1,34 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/dependencies_session_files.py
+  s_f364df1c07a1e6::t_a257f1ddbc4959 5,7,22,28-43,85,95
+  s_f364df1c07a1e6::t_d3d2f384a5e1ca 24-27
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/file_access.py
+  s_f364df1c07a1e6::t_a257f1ddbc4959 13,21,29-31
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_session_files.py
+  s_f364df1c07a1e6::t_055715a5620408 27,90,169,181,188,794-844
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_f364df1c07a1e6::t_a257f1ddbc4959 53-57,554,571,678,688,694,725,736,742,782,794
+apps/backend/src/agentclaw/community/core/session_resources/engine_files.py
+  s_f364df1c07a1e6::t_9a706d74a8de9f 21,52-55,67-68
+apps/backend/tests/community/core/session_resources/test_engine_files.py
+  s_f364df1c07a1e6::t_b06fe1a2417179 13,249-267
+apps/gateway/configs/schemas/bots.openapi.json
+  s_f364df1c07a1e6::t_eb92022895d244 99689-99710,100267-100288,100585-100606,100906-100927
+docs/session-files.md
+  s_f364df1c07a1e6::t_ec92d273139dca 96-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "735d535de94c9a540f2f06e4c9d13bad634cb454",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
