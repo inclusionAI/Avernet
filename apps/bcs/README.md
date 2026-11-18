@@ -17,6 +17,7 @@ Public BCS owns coordination contracts, services, adapters and reusable plugins;
 - [Configured catalog labels](docs/catalog-labels.md): policy, Agent/Group omission, persistence, full publication and compatibility gates.
 - [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — declarations; implementation pending
 - [Runtime store plugin API](crates/plugin-api/bcs-store-api/README.md) — capability contracts and provider harnesses
+- [Distributed immutable archive](crates/services/bcs-dist-store/src/archive/README.md) — public Result/Blob persistence and committed-effect evidence
 - [Distributed output projection](crates/services/bcs-dist-projection/README.md) — pure display transform, frozen quotas and replay accounting
 - [Session deletion protocol](docs/session-delete-protocol.md)
 - [Flow navigation](docs/flows/README.md)

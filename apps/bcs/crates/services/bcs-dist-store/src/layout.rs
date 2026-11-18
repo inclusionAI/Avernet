@@ -144,6 +144,11 @@ impl KeyLayout {
         ))
     }
 
+    /// Stable unambiguous namespace identity for public durable providers.
+    pub fn namespace_identity(&self) -> String {
+        format!("{PREFIX}:{}:{}", self.cluster, self.namespace)
+    }
+
     fn shard_prefix(&self, shard: ShardId) -> String {
         format!(
             "{PREFIX}:{}:{}:{}",

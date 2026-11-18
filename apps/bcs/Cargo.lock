@@ -1602,6 +1602,9 @@ name = "bcs-dist-store"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-dist-model",
  "bcs-service-api",
  "bcs-store-api",
@@ -1610,6 +1613,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
 ]
