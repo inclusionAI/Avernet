@@ -1,0 +1,34 @@
+singlebox/singlebox.sh
+  s_83a624b3301ddd::t_5f8708cd55b449 783
+apps/bcs/crates/bootstrap/bcs/src/main.rs
+  s_83a624b3301ddd::t_5f8708cd55b449 13-16
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_83a624b3301ddd::t_5f8708cd55b449 33
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_83a624b3301ddd::t_5f8708cd55b449 12,41-42,66-73,81-83,647-648
+singlebox/ci/singlebox_coverage.sh
+  s_83a624b3301ddd::t_5f8708cd55b449 332,567
+singlebox/modules/bcs_runtime_config.sh
+  s_83a624b3301ddd::t_16f0e422c96d87 189
+  s_83a624b3301ddd::t_5f8708cd55b449 190-191
+singlebox/verity/test_singlebox_bcs_runtime_config.sh
+  s_83a624b3301ddd::t_16f0e422c96d87 215-217,228-230
+apps/bcs/crates/bootstrap/bcs/tests/a2a_http_identity/plugin.rs
+  s_83a624b3301ddd::t_5f8708cd55b449 1-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "04607dc75ba2c749b6541878ffeaefe57f7d944a",
+  "prompts": {},
+  "sessions": {
+    "s_83a624b3301ddd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e45d-5111-7891-a6fd-1154755a372f",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
