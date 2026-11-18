@@ -544,6 +544,16 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       }
     }
     return this.tool(task, body, "runtime_inspect", false, async () => {
+      if (task.request.target.engine === "TE" && body.operation === "engine_read") {
+        const request = body.request as EngineOperation | undefined;
+        const cronAlias = /^agent:[^:]+:cron:(c_[A-Za-z0-9_-]+)(?=:|$)/u.exec(task.request.session_key)?.[1];
+        if (cronAlias && request?.method === "GET") {
+          const detailPath = `/api/v1/bot/cron/${cronAlias}`;
+          if (request.path === detailPath || request.path === detailPath + "/runs") {
+            throw new SessionRecoveryError(422, "invalid_teclaw_cron_task_id", "TeClaw 会话键中的 Cron 标识不能用作任务 ID。先用 GET /api/v1/bot/cron 查询列表（不带参数），确认任务 ID 后再查详情或执行历史。");
+          }
+        }
+      }
       const context = this.context(task, task.simulation ? await this.currentTarget(task) : task.runtimeTarget!.target);
       const result = await this.runtimeTool.inspect(context, body as AgentRuntimeInspectInput, { allowSessionHistory: !task.simulation });
       return task.simulation ? { ...result, temporal_context: "current_environment", observed_at_ms: this.now() } : result;

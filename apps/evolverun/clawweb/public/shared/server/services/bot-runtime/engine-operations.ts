@@ -7,7 +7,7 @@ export class BotEngineOperations {
   constructor(private readonly runtime: Pick<BotRuntime, "request">) {}
   static capabilities(engine: string | undefined) {
     return engine === "teclaw" ? {
-      reads: ["POST /api/v1/file/read", "POST /api/v1/file/list", "GET /api/v1/bot/cron[/{id}[/runs]]"],
+      reads: ["POST /api/v1/file/read", "POST /api/v1/file/list", "GET /api/v1/bot/cron", "GET /api/v1/bot/cron/{id}", "GET /api/v1/bot/cron/{id}/runs"],
       writes: ["POST /api/v1/file/upload (multipart)", "POST /api/v1/file/remove", "POST /api/v1/bot/cron", "PUT|DELETE /api/v1/bot/cron/{id}", "POST /api/v1/bot/cron/{id}/run", "POST /api/v1/bot/cron/{id}/enable|disable"],
       shell: false,
     } : {
@@ -29,6 +29,9 @@ export class BotEngineOperations {
     if (typeof input.path !== "string" || !input.path.startsWith("/") || /[\\\s\0#%]/u.test(input.path) || input.path.includes("..") || input.path.includes("?")) throw new BotRuntimeError(422, "invalid_engine_path", "Use a declared Engine path without query, traversal or credentials");
     const te = engine === "teclaw", prefix = te ? "/api/v1" : "/api", leaf = "[A-Za-z0-9_.:-]+";
     const cron = new RegExp(`^${prefix}/${te ? "bot/" : ""}cron(?:/${leaf}(?:/runs)?)?$`);
+    if (!write && te && input.method === "GET" && /^\/api\/v1\/bot\/cron\/running(?:\/runs)?$/.test(input.path)) {
+      throw new BotRuntimeError(403, "engine_operation_not_allowed", "TeClaw Cron does not expose /running. Use GET /api/v1/bot/cron without query parameters to list tasks");
+    }
     const fileRead = input.method === "POST" && [prefix + "/file/read", prefix + "/file/list"].includes(input.path);
     const read = fileRead || input.method === "GET" && (cron.test(input.path) || !te && (new RegExp(`^/api/mcp(?:/${leaf})?$`).test(input.path) || input.path === "/api/engine/status"));
     const mutation = !read && (input.method === "POST" && [prefix + "/file/upload", prefix + "/file/remove", ...(te ? [] : ["/api/engine/restart"])].includes(input.path)
@@ -40,7 +43,7 @@ export class BotEngineOperations {
       const query = input.query;
       if (!query || typeof query !== "object" || Array.isArray(query) || Object.keys(query).some(key => !["limit", "force"].includes(key))
         || query.limit !== undefined && (input.method !== "GET" || !new RegExp(`^${prefix}/${te ? "bot/" : ""}cron/${leaf}/runs$`).test(input.path) || !Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 1000)
-        || query.force !== undefined && (input.method !== "POST" || !input.path.endsWith("/run") || typeof query.force !== "boolean")) throw new BotRuntimeError(422, "invalid_engine_query", "Only cron runs.limit and run.force are supported");
+        || query.force !== undefined && (input.method !== "POST" || !input.path.endsWith("/run") || typeof query.force !== "boolean")) throw new BotRuntimeError(422, "invalid_engine_query", "Use no query parameters when listing Cron tasks. Only cron runs.limit and run.force are supported");
     }
     if (["POST", "PUT"].includes(input.method) && new RegExp(`^${prefix}/${te ? "bot/" : ""}cron(?:/${leaf})?$`).test(input.path)) {
       const body = input.body as Record<string, unknown> | undefined;
