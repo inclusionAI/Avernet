@@ -1,10 +1,12 @@
 """Stage vocabulary + re-stamp for the artifact's ``engine_ext`` payload.
 
-The external-container publish path enriches ``engine_ext`` with four
-backend-owned keys (``bot_id`` / ``owner_id`` / ``bot_name`` / ``stage``).
-``bot_id``, ``owner_id`` and ``bot_name`` are constant for an artifact; ``stage``
-is re-stamped as the version is promoted across environments
-(draft → canary → release).
+The external-container publish path enriches ``engine_ext`` with a small set of
+backend-owned identity/stage keys (``bot_id`` / ``owner_id`` / ``bot_name`` /
+``stage``). The builder-created identity keys are constant for an artifact;
+``stage`` is re-stamped for the final delivery as the version is promoted across
+environments (default: draft → canary → release / eval). A delivery-specific
+promotion may also carry the backend-owned ``default_tag`` alongside the TeClaw
+evaluation runtime subtype ``eval-default``.
 
 This module is the single source of truth for those key names and for the
 ``PublishStage`` → engine-facing stage-string mapping, and exposes a pure
@@ -24,6 +26,7 @@ KEY_BOT_ID = "bot_id"
 KEY_OWNER_ID = "owner_id"
 KEY_BOT_NAME = "bot_name"
 KEY_STAGE = "stage"
+KEY_DEFAULT_TAG = "default_tag"
 
 #: ``PublishStage`` → the engine-facing ``engine_ext.stage`` string. The engine
 #: expects ``draft`` / ``canary`` / ``release`` / ``eval`` — NOT the raw enum values
@@ -34,6 +37,25 @@ STAGE_VALUE: dict[PublishStage, str] = {
     PublishStage.ONLINE: "release",
     PublishStage.EVAL: "eval",
 }
+
+
+@dataclass(frozen=True)
+class EngineStageStamp:
+    """Backend-owned final engine-facing stage for one delivery composition.
+
+    This is deliberately **not** named ``RuntimeStage``: Avernet already has a
+    public/runtime concept named ``runtime_stage`` with the
+    ``draft/verify/online`` vocabulary. Here ``stage`` is only the TeClaw
+    engine-facing lifecycle value written to ``engine_ext.stage``.
+    ``default_tag`` is the optional business identifier written alongside it.
+
+    ``eval-default`` is not a :class:`PublishStage`; it is a TeClaw evaluation
+    runtime subtype used to let a Default evaluation environment and an Eval
+    environment coexist under the same logical Bot.
+    """
+
+    stage: str
+    default_tag: str | None = None
 
 
 def enrich_engine_ext(
@@ -62,9 +84,20 @@ def enrich_engine_ext(
 
 
 def restamp_stage(
-    config_artifact: dict[str, Any] | None, stage: PublishStage
+    config_artifact: dict[str, Any] | None,
+    stage: PublishStage,
+    *,
+    stage_stamp: EngineStageStamp | None = None,
 ) -> dict[str, Any] | None:
     """Return a copy of ``config_artifact`` with ``engine_ext.stage`` set for ``stage``.
+
+    ``stage_stamp`` lets a promotion-time flow override the default
+    ``PublishStage -> engine stage`` mapping with a delivery-specific engine
+    subtype. It is used only by the TeClaw evaluation flow to write
+    ``eval`` / ``eval-default``.
+
+    ``default_tag`` on the stamp is a backend-owned business identifier and is
+    also written to the final delivery artifact.
 
     No-op (returns the input unchanged) when there is no composed artifact — the
     ARCA mount path pins ``migration_path`` instead of ``config_artifact`` — or when
@@ -76,8 +109,15 @@ def restamp_stage(
         # build — nothing to re-stamp. (The build injection always seeds ``stage``,
         # so a missing ``stage`` means this isn't an enriched external artifact.)
         return config_artifact
+    engine_stage = STAGE_VALUE[stage] if stage_stamp is None else stage_stamp.stage
+    stamped = {
+        **config_artifact["engine_ext"],
+        KEY_STAGE: engine_stage,
+    }
+    if stage_stamp is not None and stage_stamp.default_tag is not None:
+        stamped[KEY_DEFAULT_TAG] = stage_stamp.default_tag
     restamped = dict(config_artifact)
-    restamped["engine_ext"] = {**config_artifact["engine_ext"], KEY_STAGE: STAGE_VALUE[stage]}
+    restamped["engine_ext"] = stamped
     return restamped
 
 
@@ -148,12 +188,23 @@ class DeliveryArtifact:
         config_artifact: dict[str, Any] | None,
         stage: PublishStage,
         overrides: dict[str, Any] | None,
+        *,
+        stage_stamp: EngineStageStamp | None = None,
     ) -> "DeliveryArtifact":
-        """Compose the delivery payload for ``stage``: restamp ``engine_ext.stage``
-        and overlay ``overrides``' channel config onto ``config_artifact``.
+        """Compose the final delivery payload for ``stage``.
+
+        Restamp ``engine_ext.stage`` — to the stage mapping by default, or to
+        ``stage_stamp.stage`` when a delivery-specific engine subtype is supplied —
+        then overlay ``overrides``' channel config onto ``config_artifact``.
+        ``BotBuildService`` receives the result as final and must not post-process it.
 
         The single combiner of :func:`restamp_stage` and :func:`apply_engine_overrides`.
         No-ops (payload stays ``config_artifact``) when there is no artifact (ARCA) or
         no ``overrides`` (pre-feature record); ``config_artifact=None`` in → out.
         """
-        return cls(apply_engine_overrides(restamp_stage(config_artifact, stage), overrides))
+        return cls(
+            apply_engine_overrides(
+                restamp_stage(config_artifact, stage, stage_stamp=stage_stamp),
+                overrides,
+            )
+        )

@@ -13,6 +13,7 @@ import pytest
 
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     DeliveryArtifact,
+    EngineStageStamp,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
     PublishExtState,
@@ -58,6 +59,31 @@ def test_compose_live_overlays_live_channels_and_returns_overrides():
     assert delivery.config_artifact["engine_overrides"] == _CH  # live channels overlaid
     assert overrides == _CH  # handed back for the release path to persist
     reader.overrides_for_stage.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "default_tag,expected_stage",
+    [
+        ("eval", "eval"),
+        ("default", "eval-default"),
+    ],
+)
+def test_compose_live_stage_stamp_finalizes_teclaw_eval_delivery(default_tag, expected_stage):
+    seam, reader = _ext_state(reader_result=_CH)
+    record = _record({"config_artifact": _artifact("draft")})
+
+    delivery, overrides = seam.compose_live(
+        record,
+        PublishStage.EVAL,
+        stage_stamp=EngineStageStamp(stage=expected_stage, default_tag=default_tag),
+    )
+
+    engine_ext = delivery.config_artifact["engine_ext"]
+    assert engine_ext["stage"] == expected_stage
+    assert engine_ext["default_tag"] == default_tag
+    assert delivery.config_artifact["engine_overrides"] == _CH
+    assert overrides == _CH
 
 
 @pytest.mark.unit

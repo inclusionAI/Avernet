@@ -13,6 +13,12 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
 from agentclaw.community.core.service_bot.baas_service_errors import BaasBotNotFoundError
+from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
+    EngineStageStamp,
+)
+from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
+    TECLAW_DEVICE_PROVIDER,
+)
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
     service_publish_extra_envs,
     service_publish_template_config,
@@ -125,15 +131,26 @@ class EvalPublishMixin:
         if device_count < 1:
             raise PublishFlowServiceError("device_count must be at least 1")
 
+        # Resolve the provider once. It selects the TeClaw delivery-specific engine
+        # stage below and is reused by image-pin resolution so the two layers cannot
+        # disagree about the target runtime.
+        provider = self.device_provider(bot)
+        stage_stamp = self._teclaw_eval_stage_stamp(
+            device_provider=provider, default_tag=default_tag
+        )
+
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # config_artifact read above is only the build-artifact presence guard. Eval
-        # does not persist, so the applied overrides are discarded.
-        delivery, _ = self._ext_state.compose_live(publish_record, publish_stage)
+        # does not persist, so the applied overrides and TeClaw stage stamp are
+        # discarded with this final delivery artifact.
+        delivery, _ = self._ext_state.compose_live(
+            publish_record, publish_stage, stage_stamp=stage_stamp
+        )
         if docker_image:
             image_pin_docker_image = docker_image
         else:
             image_pin = self.resolve_publish_image_pin(
-                publish_record, device_provider=self.device_provider(bot)
+                publish_record, device_provider=provider
             )
             image_pin_docker_image = image_pin.docker_image
 
@@ -179,6 +196,7 @@ class EvalPublishMixin:
                 publish_stage=publish_stage,
                 version=str(publish_record.version or 1),
                 delivery=delivery,
+                runtime_kind=provider,
                 ext_info=ext_info,
                 extra_envs=eval_envs,
                 docker_image=image_pin_docker_image,
@@ -232,6 +250,29 @@ class EvalPublishMixin:
             f"[PublishFlowService.eval_publish] Release success: {result}"
         )
         return result
+
+    @staticmethod
+    def _teclaw_eval_stage_stamp(
+        *, device_provider: str, default_tag: str
+    ) -> EngineStageStamp | None:
+        """Return the TeClaw delivery-specific stage stamp for an eval release.
+
+        ``default_tag`` remains the business identifier, while the TeClaw-facing
+        ``engine_ext.stage`` distinguishes the two evaluation runtimes. ``eval-default``
+        is only a TeClaw runtime subtype; it is not a new ``PublishStage`` and must not
+        enter the main promotion state machine.
+        """
+        if device_provider != TECLAW_DEVICE_PROVIDER:
+            return None
+
+        if default_tag == "eval":
+            return EngineStageStamp(stage="eval", default_tag="eval")
+        if default_tag == "default":
+            return EngineStageStamp(stage="eval-default", default_tag="default")
+
+        raise PublishFlowServiceError(
+            f"unsupported evaluation default_tag for TeClaw: {default_tag!r}"
+        )
 
     def eval_teardown(
         self,

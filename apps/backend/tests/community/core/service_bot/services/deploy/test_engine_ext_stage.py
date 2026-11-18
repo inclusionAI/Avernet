@@ -6,6 +6,7 @@ import pytest
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     STAGE_VALUE,
     DeliveryArtifact,
+    EngineStageStamp,
     apply_engine_overrides,
     enrich_engine_ext,
     restamp_stage,
@@ -148,6 +149,56 @@ def test_restamp_engine_ext_without_stage_is_noop() -> None:
     assert restamp_stage(artifact, PublishStage.VERIFY) is artifact
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "default_tag,expected_stage",
+    [
+        ("eval", "eval"),
+        ("default", "eval-default"),
+    ],
+)
+def test_restamp_stage_stamp_overrides_engine_stage_and_keeps_tag(default_tag, expected_stage) -> None:
+    base = {
+        "engine_ext": {
+            "bot_id": "b",
+            "stage": "draft",
+            "memory_ref": "nas://ws/MEMORY.md",
+        }
+    }
+    out = restamp_stage(
+        base,
+        PublishStage.EVAL,
+        stage_stamp=EngineStageStamp(stage=expected_stage, default_tag=default_tag),
+    )
+    assert out["engine_ext"] == {
+        "bot_id": "b",
+        "stage": expected_stage,
+        "memory_ref": "nas://ws/MEMORY.md",
+        "default_tag": default_tag,
+    }
+    assert base["engine_ext"]["stage"] == "draft"
+
+
+@pytest.mark.unit
+def test_stage_stamp_does_not_mutate_input_or_write_tag_when_absent() -> None:
+    base = {"engine_ext": {"stage": "draft", "memory_ref": "nas://memory"}}
+    out = restamp_stage(
+        base,
+        PublishStage.EVAL,
+        stage_stamp=EngineStageStamp(stage="eval-default"),
+    )
+    assert out["engine_ext"] == {"stage": "eval-default", "memory_ref": "nas://memory"}
+    assert base["engine_ext"] == {"stage": "draft", "memory_ref": "nas://memory"}
+
+
+@pytest.mark.unit
+def test_stage_stamp_on_arca_or_non_enriched_artifact_is_noop() -> None:
+    stamp = EngineStageStamp(stage="eval-default", default_tag="default")
+    no_stage = {"engine_ext": {"memory_ref": "nas://memory"}}
+    assert restamp_stage(None, PublishStage.EVAL, stage_stamp=stamp) is None
+    assert restamp_stage(no_stage, PublishStage.EVAL, stage_stamp=stamp) is no_stage
+
+
 # ── apply_engine_overrides ──────────────────────────────────────────────
 
 _VERIFY_CHANNELS = {"channels": {"dingding": {"enabled": True, "accounts": [{"client_id": "v"}]}}}
@@ -249,6 +300,36 @@ def test_compose_none_overrides_restamps_only() -> None:
     out = DeliveryArtifact.compose(base, PublishStage.ONLINE, None)
     assert out.config_artifact["engine_ext"]["stage"] == "release"
     assert out.config_artifact["engine_overrides"] == base_channels  # unchanged
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "default_tag,expected_stage",
+    [
+        ("eval", "eval"),
+        ("default", "eval-default"),
+    ],
+)
+def test_compose_with_stage_stamp_produces_final_teclaw_eval_artifact(
+    default_tag, expected_stage
+) -> None:
+    base = {
+        "engine_ext": {"bot_id": "b", "stage": "draft", "keep": "me"},
+        "engine_overrides": {"channels": {"dingding": {"enabled": True}}},
+    }
+    out = DeliveryArtifact.compose(
+        base,
+        PublishStage.EVAL,
+        None,
+        stage_stamp=EngineStageStamp(stage=expected_stage, default_tag=default_tag),
+    )
+    assert out.config_artifact["engine_ext"] == {
+        "bot_id": "b",
+        "stage": expected_stage,
+        "keep": "me",
+        "default_tag": default_tag,
+    }
+    assert base["engine_ext"]["stage"] == "draft"
 
 
 @pytest.mark.unit

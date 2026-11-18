@@ -20,6 +20,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 )
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     DeliveryArtifact,
+    EngineStageStamp,
     restamp_stage,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
@@ -175,10 +176,18 @@ class PublishExtState:
     # only in *where the stage overrides come from* — the one legitimate per-path
     # choice, made explicit here instead of re-derived at each call site.
     def compose_live(
-        self, publish_record: BotPublishRecord, stage: PublishStage
+        self,
+        publish_record: BotPublishRecord,
+        stage: PublishStage,
+        *,
+        stage_stamp: EngineStageStamp | None = None,
     ) -> tuple[DeliveryArtifact, dict | None]:
-        """Compose the delivery artifact for ``stage`` using a LIVE re-fetch of that
-        stage's channel ``engine_overrides`` from the channel reader.
+        """Compose the final delivery artifact for ``stage`` using a LIVE re-fetch.
+
+        The channel reader supplies that stage's currently-active
+        ``engine_overrides``. ``stage_stamp`` is optional and only needed by a
+        delivery-specific engine subtype (currently TeClaw Default/Eval evaluation);
+        when omitted, the default ``PublishStage -> engine stage`` mapping is used.
 
         Used by the release (first/upgrade) and eval paths, which run *at promotion
         time* and want the stage's currently-active channels. Returns the composed
@@ -188,7 +197,10 @@ class PublishExtState:
         no-op for the ARCA mount path (``config_artifact=None``, ``overrides=None``)."""
         overrides = self.stage_overrides(publish_record, stage)
         base = (publish_record.ext or {}).get("config_artifact")
-        return DeliveryArtifact.compose(base, stage, overrides), overrides
+        return (
+            DeliveryArtifact.compose(base, stage, overrides, stage_stamp=stage_stamp),
+            overrides,
+        )
 
     def compose_stored(self, ext: dict, stage: PublishStage) -> DeliveryArtifact:
         """Compose the delivery artifact for ``stage`` from the STORED per-stage

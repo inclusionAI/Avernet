@@ -14,6 +14,9 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
+from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
+    EngineStageStamp,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mixin import (
     EvalPublishMixin,
 )
@@ -207,6 +210,74 @@ async def test_eval_publish_resource_override_is_deployment_local(with_template,
     assert kwargs["template_config"] == expected
     assert kwargs["docker_image"] == "registry/image:tag"
     assert bot == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "default_tag,expected_stamp",
+    [
+        ("eval", EngineStageStamp(stage="eval", default_tag="eval")),
+        ("default", EngineStageStamp(stage="eval-default", default_tag="default")),
+    ],
+)
+async def test_eval_publish_composes_teclaw_delivery_stage_stamp(
+    default_tag, expected_stamp
+) -> None:
+    """TeClaw eval delivery carries its final engine stage into compose_live."""
+    record = _record(ext={"migration_path": "/arca/snapshot"})
+    svc = _FakeEvalPublishService(publish_record=record)
+    svc.device_provider = Mock(return_value="teclaw")
+    release_async = _capture_release(svc)
+
+    with patch(_TEARDOWN_PATCH):
+        result = await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+            default_tag=default_tag,
+            docker_image="registry/image:tag",
+        )
+
+    assert result["success"] is True
+    call = svc._ext_state.compose_live.call_args
+    assert call.args[1] == PublishStage.EVAL
+    assert call.kwargs["stage_stamp"] == expected_stamp
+    assert release_async.await_args.kwargs["runtime_kind"] == "teclaw"
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_non_teclaw_uses_default_eval_stage_stamp() -> None:
+    """Non-TeClaw providers keep PublishStage.EVAL's default engine stage."""
+    svc = _FakeEvalPublishService()
+    release_async = _capture_release(svc)
+
+    with patch(_TEARDOWN_PATCH):
+        result = await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+            default_tag="eval",
+            docker_image="registry/image:tag",
+        )
+
+    assert result["success"] is True
+    assert svc._ext_state.compose_live.call_args.kwargs["stage_stamp"] is None
+    assert release_async.await_args.kwargs["runtime_kind"] == "baas"
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_rejects_unknown_teclaw_default_tag() -> None:
+    """Unknown TeClaw business tags must fail before delivery composition."""
+    svc = _FakeEvalPublishService()
+    svc.device_provider = Mock(return_value="teclaw")
+
+    with pytest.raises(PublishFlowServiceError, match="unsupported evaluation default_tag"):
+        await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+            default_tag="defualt",
+            docker_image="registry/image:tag",
+        )
+
+    svc._ext_state.compose_live.assert_not_called()
 
 
 @pytest.mark.asyncio
