@@ -169,6 +169,7 @@ that fixed runtime; supplied keys cannot select another user's container.
 Runtime lists accept all nonempty session IDs, including ordinary, cron and
 subagent sessions, without a user filter. Results are deduplicated, sorted by
 runtime timestamps with an ID tie break, then paginated. Favorites intersect that
-runtime result. Default-session get/create retain the current-session pointer
-without registering independent sessions in the ownership index. Shared runtimes,
+runtime result. Default-session get/create retain their original lifecycle, current-session pointer
+and ownership registration; independent Caller queries and operations do not
+consume that index. Shared runtimes,
 including Teclaw, retain existing ownership and lifecycle rules.
