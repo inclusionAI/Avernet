@@ -38,6 +38,56 @@ _RULES = RouteSecurity.from_table({"/**": {"user": "optional", "app": "optional"
 _SHIPPED_RULES = RouteSecurity.from_yaml(_SHIPPED_CONFIG)
 
 
+def test_conflicting_domain_schemas_keep_their_own_references() -> None:
+    def description(domain: str, field: str) -> dict[str, Any]:
+        return {
+            "paths": {
+                f"/openapi/v1/{domain}": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "$ref": "#/components/schemas/Parent"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "components": {
+                "schemas": {
+                    "Parent": {
+                        "properties": {"child": {"$ref": "#/components/schemas/Child"}}
+                    },
+                    "Child": {"properties": {field: {"type": "string"}}},
+                }
+            },
+        }
+
+    source = {"one": description("one", "first"), "two": description("two", "second")}
+    doc = build_served_openapi(
+        source, source.__getitem__, _RULES, title="gateway", version="1"
+    )
+    schemas = doc["components"]["schemas"]
+    assert "first" in schemas["Child"]["properties"]
+    assert "second" in schemas["two__Child"]["properties"]
+    assert (
+        schemas["two__Parent"]["properties"]["child"]["$ref"]
+        == "#/components/schemas/two__Child"
+    )
+    assert (
+        doc["paths"]["/openapi/v1/two"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        == "#/components/schemas/two__Parent"
+    )
+    assert "Parent" in source["two"]["components"]["schemas"]
+
+
 def _served() -> dict[str, Any]:
     description = json.loads(_FIXTURE.read_text())
     return build_served_openapi(
