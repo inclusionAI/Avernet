@@ -31,12 +31,14 @@ ports directly: it need not emulate these data structures.
 
 ## Capabilities and operation traits
 
-`StorePlugin::supports` declares support for this configured instance. Five
+`StorePlugin::supports` declares support for this configured instance. The
 operation traits are independently injectable; no all-capabilities adapter,
 factory registry or business wrapper is required.
 
 | Capability | Trait and surface | Guarantee |
 | --- | --- | --- |
+| DocumentCas | `DocumentStorePlugin`: read_document, read_document_paths, create_document, replace_document, patch_document | Persistent whole-document version; atomic create and exact-version replacement/ordered patch; consistent projections |
+| StrictLease | `LeaseStorePlugin`: register_lease, read_lease, update_lease, retire_lease | Provider-timed expiry and version checks; stable termination prevents revival |
 | Kv | `KvStorePlugin`: get, mget, set, put_if_absent, delete, expire, ttl | Byte values; atomic single-key writes/NX; explicit expiry |
 | VersionedKv | `VersionedKvStorePlugin`: create_versioned, get_versioned, delete, ttl | Atomic creation, consistent value/version read, unconditional deletion and TTL query; Persistent expiry is always supported |
 | ConditionalKv | Same trait: compare_and_set | Exact-version update of a live value; never recreate a missing/expired key |
@@ -236,6 +238,9 @@ streams require keys within the provider's supported routing scope. Call:
 - `kv_expiry_contract_tests` for VersionedKvTtl with a clock/wait callback exceeding TTL rounding; retained-history assertions run only when MonotonicKv is advertised;
 - `kv_unknown_outcome_contract_tests` for VersionedKv with provider/proxy response-loss injection;
 - `json_store_plugin_contract_tests`;
+- `document_store_contract_tests` for persistent create/read/replace, projection, patch and competing writes;
+- `document_version_exhaustion_contract_tests` with a provider-seeded document at its final usable version;
+- `document_unknown_outcome_contract_tests` with provider/proxy response-loss injection for create, replace and patch;
 - `z_set_store_plugin_contract_tests` and `versioned_zset_contract_tests`;
 - `stream_store_plugin_contract_tests`, `stream_group_contract_tests` and
   `stream_blocking_contract_tests`.
@@ -252,6 +257,7 @@ From `apps/bcs`:
 ```sh
 cargo test -p bcs-store-api
 cargo test -p bcs-test-support --test conformance_store
+cargo test -p bcs-test-support --test coordination_primitives --test document_subset
 cargo clippy -p bcs-store-api --all-targets -- -D warnings
 cargo doc -p bcs-store-api --no-deps
 ```
@@ -290,8 +296,10 @@ stream. Service-owned snapshot/checkpoint and retention protocols remain require
 ## Persistent documents and strict leases
 
 `DocumentStorePlugin` / `DocumentCas` is an independent, smaller contract than
-`AtomicJson`: consistent whole-document reads, create-if-absent and exact-version
-whole-document replacement. It does not imply deletion, TTL editing, `Newer` or
+`AtomicJson`: consistent whole-document reads and path projections,
+create-if-absent at version 1, and exact-version replacement or ordered patch.
+Every accepted update advances the version, including identical content.
+It does not imply deletion, TTL editing, `Newer` or
 retained version history after external deletion. All writers in its namespace
 must use the same format and CAS discipline. Persistent coordination records
 must not expire, be evicted, be deleted or be restored to an earlier version.
@@ -300,6 +308,29 @@ metadata-like field names. Provider-private storage metadata is never exposed as
 a reserved business field. Unsupported old formats fail rather than being
 silently reinterpreted. The reusable suite is
 `contract::plugin::store::document::document_store_contract_tests`.
+
+`read_document_paths` shares `JsonProjection` and RFC 6901 semantics with
+`AtomicJson`. Paths and version come from one document; a real null and a missing
+path remain distinct. `patch_document` accepts nonempty ordered `JsonEdit`s and
+compares the whole-document version. Request shape is validated before reading;
+document-dependent errors are checked only after the condition matches. Parents
+must exist, Remove requires a target, and array Set replaces an existing element
+using a canonical nonnegative index. Root replacement uses `replace_document`.
+Any failed edit leaves the complete document and version unchanged.
+
+The portable defaults keep existing DocumentCas providers compatible without
+requiring full AtomicJson or additional backend commands. Projection performs
+one consistent full-document read. Patch performs at most one full-document read
+and one atomic `replace_document` with the original expected version, computing
+all edits before submitting the write. An intervening writer rejects the entire
+candidate. These are bounds per call, with no retry loop; services own bounded
+conflict retries and backpressure. Projection does not reduce bytes fetched,
+and patch writes the full replacement under the provider's document-size limit.
+An optimized native override must pass the same harness. Neither implementation
+may turn an unknown replacement into a retry or infer AlreadyApplied from a
+version mismatch. The default implementation rejects unsupported providers
+before I/O. The model's path/patch methods use these same portable defaults;
+forced interleavings and response-loss tests validate their CAS composition.
 
 `LeaseStorePlugin` / `StrictLease` adds a separate provider-timed registration
 lifetime. Expiry/version checks, optional deadline extension and payload changes
