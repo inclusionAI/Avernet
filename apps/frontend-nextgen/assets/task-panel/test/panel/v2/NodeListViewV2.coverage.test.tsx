@@ -167,20 +167,19 @@ describe('NodeListViewV2 覆盖补齐', () => {
     const [, groupTarget] = recorded.calls.select[0];
     expect(groupTarget).toMatchObject({ sessionId: 'bcs_grp_x', kind: 'group' });
 
-    // 空格键同样触发选择;Enter 对第一棒也走节点联动
+    // 空格键同样触发选择;根节点 Enter 仍恢复宿主会话
     fireEvent.keyDown(screen.getByRole('button', { name: '选中节点 第3棒 未知态节点' }), { key: ' ' });
-    expect(recorded.calls.select).toHaveLength(3);
-    expect(recorded.calls.select[2][0]).toBe('n-mystery');
+    expect(recorded.calls.select).toHaveLength(2);
+    expect(recorded.calls.select[1][0]).toBe('n-mystery');
 
     fireEvent.keyDown(screen.getByRole('button', { name: '选中节点 第1棒 根节点' }), { key: 'Enter' });
-    expect(recorded.calls.root).toHaveLength(0);
-    expect(recorded.calls.select).toHaveLength(4);
-    expect(recorded.calls.select[3][0]).toBe('n-root');
+    expect(recorded.calls.root).toHaveLength(2);
+    expect(recorded.calls.select).toHaveLength(2);
 
     // 其它按键不触发选择
     fireEvent.keyDown(screen.getByRole('button', { name: '选中节点 第4棒 带子任务节点' }), { key: 'Tab' });
-    expect(recorded.calls.select).toHaveLength(4);
-    expect(recorded.calls.root).toHaveLength(0);
+    expect(recorded.calls.select).toHaveLength(2);
+    expect(recorded.calls.root).toHaveLength(2);
   });
 
   it('子任务按钮:独立点击 stopPropagation,不触发节点选择', () => {
