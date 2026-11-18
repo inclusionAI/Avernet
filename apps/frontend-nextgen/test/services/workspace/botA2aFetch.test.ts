@@ -116,7 +116,7 @@ describe('browser-direct A2A proxy transport', () => {
     expect(h.network).not.toHaveBeenCalled();
   });
 
-  it.each([
+  it.each<Record<string, string>>([
     { Authorization: 'anything' }, { 'X-PROXYPASS-TOKEN': '' },
     { 'X-PROXYPASS-TOKEN': 'token\r\nCookie: secret' },
     { 'X-PROXYPASS-TOKEN': 'token', Cookie: 'secret' },
