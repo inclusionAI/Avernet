@@ -1,10 +1,12 @@
 """Dormant recycle, notification, activation, and whitelist lifecycle."""
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
 import httpx
+import jwt
 import pytest
 
 from tests.community.acceptance._fixtures.live_personal_bot import (
@@ -139,3 +141,112 @@ def test_dormant_whitelist_is_idempotent_live(live_backend):
         second = client.post("/api/bots/dormant-whitelist/batch", json=payload)
         assert second.status_code == 200, second.text
         assert second.json()["data"] == {"inserted": 0, "skipped": 1}
+
+
+def _principal_headers(owner_id: str) -> dict[str, str]:
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "iss": "gateway",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + 60,
+            "principals": [
+                {
+                    "type": "user",
+                    "subject": {"id": owner_id, "username": "dormant@example.test"},
+                }
+            ],
+        },
+        os.environ.get(
+            "SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY",
+            "singlebox-gateway-principal-key-not-for-production",
+        ),
+        algorithm="HS256",
+    )
+    return {"X-Avernet-Principal": token}
+
+
+@pytest.mark.acceptance
+def test_openapi_async_recycle_and_reactivate_live(live_backend):
+    """The public owner recycles via the real queue, observes it, then restores."""
+    owner_id = fresh_id("recycle_owner")
+    query = {"user_id": owner_id}
+    with httpx.Client(
+        base_url=live_backend, headers={"x-user-id": owner_id}, timeout=60.0,
+    ) as client:
+        bot = create_live_personal_bot(
+            client, user_id=owner_id, bot_name_prefix="Recycle API",
+        )
+        bot_id = bot["bot_id"]
+        path = f"/openapi/v1/bots/{bot_id}"
+        submitted = client.post(
+            f"{path}/recycle", params=query, headers=_principal_headers(owner_id),
+        )
+        assert submitted.status_code == 202, submitted.text
+        admission = submitted.json()["data"]
+        assert admission["changed"] is True, admission
+        operation_id = admission["operation_id"]
+        assert operation_id, admission
+        operation_path = f"{path}/recycle-operations/{operation_id}"
+
+        missing = client.get(
+            f"{path}/recycle-operations/missing", params=query,
+            headers=_principal_headers(owner_id),
+        )
+        assert missing.status_code == 404, missing.text
+
+        deadline = time.monotonic() + 180
+        while True:
+            observed = client.get(
+                operation_path, params=query, headers=_principal_headers(owner_id),
+            )
+            assert observed.status_code == 200, observed.text
+            result = observed.json()["data"]
+            assert result["operation_id"] == operation_id, result
+            assert result["phase"] not in {"FAILED", "NEEDS_CONFIRMATION"}, result
+            if result["phase"] == "SUCCEEDED":
+                break
+            assert time.monotonic() < deadline, result
+            time.sleep(1)
+        assert result["bot_status"] == "RECYCLED", result
+        assert result["error_code"] is None, result
+
+        repeated = client.post(
+            f"{path}/recycle", params=query, headers=_principal_headers(owner_id),
+        )
+        assert repeated.status_code == 200, repeated.text
+        assert repeated.json()["data"]["changed"] is False, repeated.text
+        assert repeated.json()["data"]["operation_id"] is None, repeated.text
+        unchanged = client.get(
+            operation_path, params=query, headers=_principal_headers(owner_id),
+        )
+        assert unchanged.status_code == 200, unchanged.text
+        assert unchanged.json()["data"] == result, unchanged.text
+
+        pending = client.get(
+            "/api/internal/dormant/pending-notifications", headers=INTERNAL_HEADERS,
+        )
+        assert pending.status_code == 200, pending.text
+        assert not any(row["bot_id"] == bot_id for row in pending.json()["data"])
+
+        activated = client.post(
+            f"{path}/activate", params=query, headers=_principal_headers(owner_id),
+        )
+        assert activated.status_code == 202, activated.text
+        assert activated.json()["data"]["status"] == "REACTIVATING", activated.text
+        assert activated.json()["data"]["changed"] is True, activated.text
+        _wait_reactivated_bot_ready(client, bot_id)
+
+        active = client.post(
+            f"{path}/activate", params=query, headers=_principal_headers(owner_id),
+        )
+        assert active.status_code == 200, active.text
+        assert active.json()["data"]["status"] == "ACTIVE", active.text
+        assert active.json()["data"]["changed"] is False, active.text
+        retained = client.get(
+            operation_path, params=query, headers=_principal_headers(owner_id),
+        )
+        assert retained.status_code == 200, retained.text
+        assert retained.json()["data"]["phase"] == "SUCCEEDED", retained.text
+        assert retained.json()["data"]["bot_status"] == "ACTIVE", retained.text
