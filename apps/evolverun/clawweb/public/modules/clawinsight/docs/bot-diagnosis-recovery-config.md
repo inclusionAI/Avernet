@@ -62,6 +62,9 @@ without fallback. Permission cards additionally require `callback_route_key`;
 noninteractive handoff cards only require the template. Markdown plan notices
 do not depend on card resources. Owner enablement still comes from Bot policy;
 old `enabled`/`bot_overrides` apply only to Bots without a new-table record.
+The legacy row must have `enabled = 1` before either Owner overrides or legacy
+card resources can be used. Setting it to `0` disables the entire legacy row;
+it does not disable independent new Bot policy or `session_recovery_cards`.
 Existing paused ordinary Owner notices remain paused.
 
 ## Behavior and HTTP contracts
@@ -151,8 +154,8 @@ chooses which switches to save.
    are reported and skipped. New rows start with diagnosis disabled and recovery
    enabled. This migration does not configure upstream diagnosis.
 4. For those candidates only, materialize exact Bot/Owner/environment overrides
-   before the old Owner default, including a true override under a disabled
-   default. Group overrides precede the old default. Identical webhook/timeout
+   only when the legacy Owner row is enabled. A disabled row always migrates
+   Owner notifications as off, including true Bot overrides. Group overrides precede the old default. Identical webhook/timeout
    pairs share a deterministic route ID. Invalid settings stay off and are
    reported. Existing new-table rows, including explicit disabled rows, are skipped.
 5. Apply the reviewed plan with `{updatedBy, apply: true}`. Source versions are
@@ -309,3 +312,25 @@ config outside archives; cleanup also runs after failure.
 No new configuration page, migration marker, dual-write mechanism or upstream
 diagnosis integration is introduced. Deployment and production migration remain
 separate operations from installing this change.
+
+## Configuration source logs
+
+The existing `clawweb-session-recovery.log` records metadata-only
+`job=session_recovery_configuration`, `event=resolution` events at the shared
+configuration boundary. `configuration` identifies `admission`, `notifications`,
+`cards`, `execution`, or `model_credentials`. `source=new|legacy` records the
+selected policy/resource path, including a selected but unusable new config;
+it does not imply a notification was sent. `none|unresolved` identifies a missing
+target/store or a failed read before source selection. Admission/execution carry
+`eventId`; notification/card resolution carries `taskId`, Bot/Owner and target
+environment. Card `environment` is the control-plane environment.
+
+Notification logs include effective channel flags and `routeSource=bot|team|legacy|none`.
+Card logs include availability and a bounded reason such as `disabled`,
+`environment_unconfigured`, or `read_or_parse_failed`; no raw exception is logged.
+`model_credentials` records `source=default` when the frozen task has no override.
+For a specified MIST reference it records the `mistKey` name and `status=resolved`
+only after a nonempty credential is obtained, or `status=unavailable` on failure.
+This proves credential resolution, not completion of the later model invocation.
+API key values, webhook URLs, template/callback values and config bodies are never
+logged. Use the existing notification audit to confirm actual delivery.

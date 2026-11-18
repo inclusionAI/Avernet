@@ -394,11 +394,11 @@ it("reads the explicit Bot Owner switch for each send and ignores the legacy glo
   expect(sender.sendCard).toHaveBeenCalledOnce();
 });
 
-it.each([0, 1])('migrates exact Owner overrides before the old default %s', enabled => {
+it.each([0, 1])('honors the legacy row switch before Owner overrides during migration: %s', enabled => {
   const input = { ownerId: 'owner', botId: 'bot', targetEnvironment: 'prod' as const, taskId: '', sessionKey: '', kind: 'plan' as const, summary: '' };
   expect(legacyOwnerNotificationEnabled('{}', enabled, input)).toBe(enabled === 1);
   for (const value of [true, false]) {
-    expect(legacyOwnerNotificationEnabled(JSON.stringify({ bot_overrides: [{ bot_id: 'bot', entity_id: 'owner', env: 'prod', enabled: value }] }), enabled, input)).toBe(value);
+    expect(legacyOwnerNotificationEnabled(JSON.stringify({ bot_overrides: [{ bot_id: 'bot', entity_id: 'owner', env: 'prod', enabled: value }] }), enabled, input)).toBe(enabled === 1 && value);
   }
 });
 
