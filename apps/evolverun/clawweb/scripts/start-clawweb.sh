@@ -158,4 +158,10 @@ export CLAWWEB_INTERNAL_CONFIG_ROOT="$ocb_clawweb/internal/configs"
 args=(--bootstrap @ocb/clawweb-internal)
 [ -z "$machine_env" ] || args+=(--env "$machine_env")
 [ -z "$config_path" ] || args+=(--config "$config_path")
+# Match the internal Docker host when its console preload is available.
+# Scope it to the service process, not npm/build subprocesses via NODE_OPTIONS.
+console_preload="$ocb_clawweb/internal/docker/scripts/admin/bin/clawweb-console-log.mjs"
+if [ -f "$console_preload" ]; then
+  exec node --import "$console_preload" node_modules/@avernet/clawweb/dist/server/cli.js "${args[@]}"
+fi
 exec node node_modules/@avernet/clawweb/dist/server/cli.js "${args[@]}"
