@@ -62,7 +62,6 @@ def command():
         ref=VersionedProfileRef("custom_product", 3),
         composition=MethodCompositionTemplate(
             method_kind="Open",
-            scope="collet",
             required_methods=(get_profile("Open", "0.2"),),
         ),
         scenario_roles=(
@@ -204,10 +203,6 @@ def test_creation_keeps_the_authored_product_admission_strategy(command, policy)
             "disagree",
         ),
         (
-            lambda c: replace(c, composition=replace(c.composition, scope="space")),
-            "collet-scoped",
-        ),
-        (
             lambda c: replace(
                 c, compatibility=replace(c.compatibility, downgrade_policy="allow")
             ),
@@ -265,7 +260,6 @@ def test_creation_keeps_the_authored_product_admission_strategy(command, policy)
                 c,
                 composition=MethodCompositionTemplate(
                     "Single",
-                    "collet",
                     (get_profile("Single", "0.2"),),
                     policies=(OpenMethodPolicy(_publication()),),
                 ),
@@ -393,11 +387,22 @@ def test_explicit_standard_task_contract_matches_the_fixed_default(command):
     assert ProductCatalog((explicit,)).get("custom_product", 3) is explicit
 
 
+def test_method_composition_has_no_caller_configurable_scope(command):
+    composition = command.composition
+    assert "scope" not in {field.name for field in fields(composition)}
+    assert create_product_profile(command).composition is composition
+    with pytest.raises(TypeError, match="scope"):
+        MethodCompositionTemplate(
+            method_kind=composition.method_kind,
+            required_methods=composition.required_methods,
+            scope="collet",
+        )
+
+
 @pytest.mark.parametrize("method", ["Single", "Group", "Swarm", "Open"])
 def test_method_composition_does_not_require_open_product_policy(command, method):
     composition = MethodCompositionTemplate(
         method_kind=method,
-        scope="collet",
         required_methods=(get_profile(method, "0.2"),),
     )
     profile = create_product_profile(replace(command, composition=composition))
@@ -411,7 +416,6 @@ def test_composite_method_keeps_open_policy_scoped_to_open(command):
     policy = OpenMethodPolicy(_publication())
     composition = MethodCompositionTemplate(
         method_kind="Open + Group",
-        scope="collet",
         required_methods=(
             get_profile("Open", "0.2"),
             get_profile("Group", "0.2"),
@@ -460,7 +464,6 @@ def test_composite_method_keeps_open_policy_scoped_to_open(command):
         (
             lambda c: MethodCompositionTemplate(
                 method_kind="Single",
-                scope="collet",
                 required_methods=(get_profile("Single", "0.2"),),
                 optional_methods=(get_profile("Open", "0.2"),),
                 policies=(OpenMethodPolicy(_publication()),),

@@ -416,12 +416,9 @@ class OpenOpportunityRequest(BaseModel):
     closes_at: str | None = Field(None, description="窗口终点(ISO)")
     reason: str = Field("", description="发布原因;落审计")
 
-    def to_domain(
-        self, collet_id: str, actor_context: ActorContext
-    ) -> OpenOpportunityCommand:
+    def to_domain(self, collet_id: str) -> OpenOpportunityCommand:
         return OpenOpportunityCommand(
             collet_id=collet_id,
-            actor_context=actor_context,
             participation_type=self.participation_type,
             opportunity_id=self.opportunity_id,
             requirement_refs=self.requirement_refs,

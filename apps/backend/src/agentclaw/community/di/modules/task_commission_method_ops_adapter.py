@@ -86,11 +86,11 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
         published = self._open_ops.publish_opportunity(
             OpenOpportunityCommand(
                 collet_id=command.collab_context_id,
-                actor_context=context,
                 participation_type=policy.participation_type,
                 capacity=policy.capacity,
                 reason="task_commission.publish",
             ),
+            context=context,
         )
         submitted = self._open_ops.submit_application(
             OpenApplicationCommand(

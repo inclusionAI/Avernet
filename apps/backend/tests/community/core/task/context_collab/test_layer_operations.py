@@ -163,7 +163,6 @@ def test_method_operations_use_lower_reader_and_resolved_facts(kind):
         result = service.publish_opportunity(
             OpenOpportunityCommand(
                 collet_id=COLLET_ID,
-                actor_context=OWNER,
                 participation_type=ParticipationType.SINGLE_CONTRIBUTION,
             ),
         )

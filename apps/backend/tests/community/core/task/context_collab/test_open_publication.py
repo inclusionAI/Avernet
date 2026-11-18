@@ -12,8 +12,18 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
+    MethodOpsAuthorizerProtocol,
     StructuralMethodOpsAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    CollaborationReader,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
@@ -55,20 +65,23 @@ def publication():
     return store, repo, store.get_binding(AXES, binding_id, COLLET_ID), service
 
 
-def test_protocol_and_implementation_accept_only_a_complete_command():
+def test_publish_command_shape_and_optional_delivery_context():
     for owner in (OpenMethodOpsServiceProtocol, OpenMethodService):
         assert tuple(inspect.signature(owner.publish_opportunity).parameters) == (
-            "self", "command",
+            "self", "command", "context",
         )
+        context = inspect.signature(owner.publish_opportunity).parameters["context"]
+        assert context.kind is inspect.Parameter.KEYWORD_ONLY
+        assert context.default is None
     command = opportunity_command()
     field_names = tuple(field.name for field in fields(OpenOpportunityCommand))
-    assert field_names[:2] == ("collet_id", "actor_context")
+    assert field_names[:2] == ("collet_id", "participation_type")
     names = set(field_names)
     assert not names & {
         "binding_id", "method_binding_id", "collab_context_id", "context",
-        "scope_ref", "opens_at",
+        "scope_ref", "opens_at", "actor_context",
     }
-    for required in ("collet_id", "actor_context", "participation_type"):
+    for required in ("collet_id", "participation_type"):
         kwargs = {name: getattr(command, name) for name in names - {required}}
         with pytest.raises(TypeError, match=required):
             OpenOpportunityCommand(**kwargs)
@@ -100,7 +113,7 @@ def test_publish_preserves_participation_enum_and_string_wire_shape(
 def test_publish_resolves_unique_open_binding_and_preserves_audit(
     publication, method_kind, top_level
 ):
-    store, _, original, service = publication
+    store, repo, original, service = publication
     binding = replace(
         original,
         method_kind=method_kind,
@@ -113,12 +126,67 @@ def test_publish_resolves_unique_open_binding_and_preserves_audit(
     result = service.publish_opportunity(command)
     assert result.method_binding_id == binding.method_binding_id
     row = store.get_opportunity(AXES, result.object_id, result.method_binding_id, COLLET_ID)
-    assert row.transitioned_by == command.actor_context.actor.principal_id
+    initiator = repo.get_current_status(COLLET_ID).collet.initiator_ref
+    assert row.transitioned_by == initiator.principal_id
     assert row.transition_reason == command.reason
     # Participation scope is deliberately not the binding's parent scope.
     assert row.scope_ref == command.collet_id != binding.parent_scope_ref
     assert service.publish_opportunity(command) == result
     assert len(store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID)) == 1
+
+
+@pytest.mark.parametrize("principal_type", ["human", "bot"])
+def test_publication_derives_g1_and_audit_identity_from_collet_without_task(
+    publication, principal_type
+):
+    store, repo, binding, _ = publication
+    record = repo.get_current_status(COLLET_ID)
+    initiator = PrincipalRef(principal_type, "persisted_initiator")
+    repo._records[COLLET_ID] = replace(
+        record, collet=replace(record.collet, initiator_ref=initiator),
+        creation_facts={**record.creation_facts, "executor_ref": None},
+        task=None, tasks=(),
+    )
+    authorizer = Mock(
+        spec=MethodOpsAuthorizerProtocol, wraps=StructuralMethodOpsAuthorizer()
+    )
+    service = OpenMethodService(store, authorizer, repo)
+    result = service.publish_opportunity(opportunity_command())
+    authorizer.check_open_op.assert_called_once_with(
+        "publish_opportunity", binding, ActorContext(initiator, "collet"),
+        application=None, principal_id=initiator.principal_id, executor_id=None,
+    )
+    row = store.get_opportunity(AXES, result.object_id, binding.method_binding_id, COLLET_ID)
+    assert row.transitioned_by == initiator.principal_id
+
+
+def test_publication_requires_persisted_collet_even_with_an_active_binding(publication):
+    store, repo, binding, service = publication
+    repo._records.clear()
+    with pytest.raises(ContextCollabNotFoundError, match="Collet.*not found"):
+        service.publish_opportunity(opportunity_command())
+    assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == []
+
+
+def test_publication_propagates_collet_read_failure(publication):
+    store, _, binding, _ = publication
+    reader = Mock(spec=CollaborationReader)
+    reader.get_current_status.side_effect = RuntimeError("Collet read failed")
+    service = OpenMethodService(store, StructuralMethodOpsAuthorizer(), reader)
+    with pytest.raises(RuntimeError, match="Collet read failed"):
+        service.publish_opportunity(opportunity_command())
+    assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == []
+
+
+def test_derived_collet_identity_still_passes_through_g1(publication):
+    store, repo, binding, _ = publication
+    authorizer = Mock(spec=MethodOpsAuthorizerProtocol)
+    authorizer.check_open_op.side_effect = ContextCollabValidationError("policy denied")
+    service = OpenMethodService(store, authorizer, repo)
+    with pytest.raises(ContextCollabValidationError, match="policy denied"):
+        service.publish_opportunity(opportunity_command())
+    authorizer.check_open_op.assert_called_once()
+    assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == []
 
 
 def test_multiple_active_open_bindings_fail_without_top_level_preference(publication):
@@ -178,7 +246,7 @@ def test_resolution_never_reads_or_writes_another_partition(publication, axes, c
         service.publish_opportunity(opportunity_command(opportunity_id="opp_missing"))
 
 
-def test_command_actor_is_authorized_even_for_an_idempotent_replay(publication):
+def test_delivery_actor_is_authorized_even_for_an_idempotent_replay(publication):
     store, _, binding, service = publication
     command = opportunity_command()
     for published in (False, True):
@@ -186,7 +254,7 @@ def test_command_actor_is_authorized_even_for_an_idempotent_replay(publication):
             service.publish_opportunity(command)
         with pytest.raises(ContextCollabValidationError, match="stranger"):
             service.publish_opportunity(
-                replace(command, actor_context=make_actor("stranger"))
+                command, context=make_actor("stranger")
             )
         rows = store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID)
         assert len(rows) == int(published)
@@ -213,7 +281,7 @@ def test_publish_propagates_storage_write_failure(publication):
 
 @pytest.mark.parametrize("removed", [
     "collab_context_id", "context", "scope_ref", "opens_at",
-    "binding_id", "method_binding_id",
+    "binding_id", "method_binding_id", "actor_context",
 ])
 def test_publish_command_rejects_removed_parameters(removed):
     command = opportunity_command()

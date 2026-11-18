@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
     ContextCollabValidationError,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
@@ -211,6 +212,8 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
     def publish_opportunity(
         self,
         command: OpenOpportunityCommand,
+        *,
+        context: ActorContext | None = None,
     ) -> ProfileOpAcceptedResult:
         """PublishOpportunity 用例:建机会并一步发布(DRAFT──publish→
         OPEN,落终态一次写);窗口形态校验见模块 docstring;幂等键
@@ -219,8 +222,15 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
         ``COLLET_PARTICIPANT`` is bounded to this Collet's exact scope;
         admission creates a scoped identity binding, not Group membership.
         """
-        collab_context_id, context = command.collet_id, command.actor_context
+        collab_context_id = command.collet_id
         method_binding_id = self._resolve_publish_binding(collab_context_id)
+        record = self._collab_repo.get_current_status(collab_context_id)
+        if record is None:
+            raise ContextCollabNotFoundError(
+                f"Collet {collab_context_id!r} not found"
+            )
+        if context is None:
+            context = ActorContext(actor=record.collet.initiator_ref, source="collet")
         axes = self._gate(
             "publish_opportunity",
             collab_context_id,

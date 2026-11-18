@@ -225,7 +225,6 @@ class TestL5MethodObjectsE2E:
         published = services.open.publish_opportunity(
             OpenOpportunityCommand(
                 collet_id=collab_id,
-                actor_context=_actor(OWNER),
                 participation_type=ParticipationType.GROUP_MEMBER,
                 opportunity_id="opp_e2e",
             ),

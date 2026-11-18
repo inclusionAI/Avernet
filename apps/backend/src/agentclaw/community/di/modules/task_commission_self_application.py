@@ -173,12 +173,12 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         return self._open_ops.publish_opportunity(
             OpenOpportunityCommand(
                 collet_id=command.collab_context_id,
-                actor_context=context,
                 participation_type=policy.participation_type,
                 capacity=policy.capacity,
                 admission_policy_refs=[_POLICY_REF],
                 reason="task_commission.owner_authorized_auto_admission",
             ),
+            context=context,
         ).object_id
 
     @staticmethod
