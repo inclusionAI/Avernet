@@ -1,0 +1,22 @@
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  s_5650c32f31ba9f::t_17d91d37cc5977 711-713,715,717-718,720
+  s_5650c32f31ba9f::t_2695b59610d759 716,719
+  s_5650c32f31ba9f::t_aee925642dfee3 153-158
+  s_5650c32f31ba9f::t_474ce42f543e9c 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f09f3796109aa53dc0135d7e9856922f9faf417d",
+  "prompts": {},
+  "sessions": {
+    "s_5650c32f31ba9f": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "d9134238-17b1-49f7-8029-0ed26315a5ee",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
