@@ -3,13 +3,13 @@ import type { BotOption, BotScope, DirectoryBot, DirectoryScope, MonitoringBotDi
   MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
 import { browserDiagnosisQuery, parseWindow, queryKeys } from './browser-validation.js';
 import type { BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
-import { configureBots, isServiceBot, replaceBotConfiguration } from './bot-config-service.js';
+import { configureBots, isServiceBot, replaceBotConfiguration, type BotEnabledNotifier } from './bot-config-service.js';
 import { recoveryConfigurations } from '../repair/session-recovery/bot-configuration.js';
 import type { RecoveryAppConfigStore } from '../repair/session-recovery/configuration-contracts.js';
 
 export function createMonitoringBrowserService(store: MonitoringStore, directory: MonitoringBotDirectory,
   references: MonitoringReferences, storageScope: DirectoryScope, now: () => number = Date.now,
-  configurations?: BotDiagnosisRecoveryConfigStore, legacyConfig?: RecoveryAppConfigStore): MonitoringBrowserApi {
+  configurations?: BotDiagnosisRecoveryConfigStore, legacyConfig?: RecoveryAppConfigStore, onBotEnabled?: BotEnabledNotifier): MonitoringBrowserApi {
   function authorize(p: MonitoringPrincipal) {
     if (!p.isAuthenticated || !p.staffId?.trim()) throw new MonitoringError('UNAUTHENTICATED', '请先登录。');
     if (!p.tenant || p.tenant !== storageScope.tenant || !p.allowedTargetEnvs.length
@@ -65,7 +65,7 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
   return {
     async configure(p, input) {
       authorize(p);
-      return configureBots(configurations, directory, references, p, input);
+      return configureBots(configurations, directory, references, p, input, onBotEnabled);
     },
     async readConfiguration(p, ref) {
       const { bot, store } = await configurationTarget(p, ref);
@@ -73,7 +73,7 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
     },
     async replaceConfiguration(p, ref, input) {
       const { bot, store } = await configurationTarget(p, ref);
-      return replaceBotConfiguration(store, bot, p.staffId, input, legacyConfig);
+      return replaceBotConfiguration(store, bot, p.staffId, input, legacyConfig, onBotEnabled);
     },
     async options(p, query) {
       authorize(p);
