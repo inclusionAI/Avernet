@@ -149,6 +149,33 @@ impl KeyLayout {
         format!("{PREFIX}:{}:{}", self.cluster, self.namespace)
     }
 
+    /// Stable task listing, ordered lexicographically by immutable tid.
+    pub fn tasks(&self, scope: &bcs_dist_model::TaskScope) -> Result<String, StoreError> {
+        segment(&scope.tenant.0)?;
+        segment(&scope.principal.0)?;
+        let digest = crate::identity::digest_fields(&[scope.tenant.0.as_bytes(), scope.principal.0.as_bytes()]);
+        Ok(format!("{}:tasks:{}", self.namespace_identity(), crate::identity::hex_of(&digest)))
+    }
+    pub fn session_tasks(&self, sid: &Sid) -> Result<String, StoreError> {
+        self.by_session("tasks", sid)
+    }
+
+    pub fn task_display_ev(&self, tid: &Tid) -> Result<String, StoreError> {
+        self.by_prefixed_id("task-display-ev", &tid.0)
+    }
+    pub fn output_head(&self, sid: &Sid) -> Result<String, StoreError> {
+        self.by_session("output-head", sid)
+    }
+    pub fn task_retention(&self, tid: &Tid) -> Result<String, StoreError> {
+        self.by_prefixed_id("task-retention", &tid.0)
+    }
+    pub fn effect_completion(&self, effect: &bcs_dist_model::EffectId) -> Result<String, StoreError> {
+        Ok(format!("{}:{}:{}", self.by_session("effect-completion", &effect.sid)?, effect.commit.0, effect.index))
+    }
+    pub fn output_trim(&self, sid: &Sid) -> Result<String, StoreError> {
+        self.by_session("output-trim", sid)
+    }
+
     fn shard_prefix(&self, shard: ShardId) -> String {
         format!(
             "{PREFIX}:{}:{}:{}",
