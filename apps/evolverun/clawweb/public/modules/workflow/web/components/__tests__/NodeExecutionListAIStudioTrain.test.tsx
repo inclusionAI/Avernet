@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NodeExecution } from '@avernet/clawweb-shared/web/types'
 import NodeExecutionList from '../NodeExecutionList'
@@ -41,14 +41,20 @@ describe('AIStudio training inline run integration', () => {
     expect(screen.getByText('运行元数据')).toBeInTheDocument()
     expect(screen.getByText('执行步骤')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'AIStudio 训练观测' }).closest('td')).toHaveAttribute('colspan', '9')
+    const card = screen.getByRole('region', { name: 'AIStudio 训练观测' })
+    const copy = await within(card).findByRole('button', { name: '复制 recordId' })
+    expect(copy.nextElementSibling).toBe(within(card).getByRole('link', { name: '打开 AIStudio 任务' }))
+    expect(screen.queryByRole('button', { name: '手工查询' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
-  it('keeps row task/query actions from selecting the node', async () => {
+  it('keeps the compact task link from selecting the node without exposing manual controls', async () => {
     const select = show(node, '')
     const link = await screen.findByRole('link', { name: '打开 AIStudio 任务' })
     fireEvent.click(link)
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true, resolved: false, watch: { ...trainWatch, version: 2, manualPollPending: true, manualPollAllowed: false } })))
-    fireEvent.click(screen.getByRole('button', { name: '手工查询' }))
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(screen.queryByRole('button', { name: '手工查询' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(select).not.toHaveBeenCalled()
   })
   it('preserves read-only child-run observation without exposing manual operations', async () => {

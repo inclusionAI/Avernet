@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { dialectFor, mysqlDialect } from '@avernet/clawweb-shared/server/db/dialect';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
-import { createAIStudioStateFixture, patchWatchFixture } from './aistudio-train-state.fixture.js';
+import { createAIStudioStateFixture } from './aistudio-train-state.fixture.js';
 import { AIStudioTrainWatchRepository } from '../aistudio-train-watch-repository.js';
 import { watchFixture } from '../../contracts/__tests__/aistudio-train.fixture.js';
 
@@ -62,21 +62,22 @@ describe('durable watch SQL contract', () => {
     await expect(repo.findDue('bot:owner',700,0)).rejects.toThrow();
   });
   it('checks expected lease owner and the database clock atomically, including lease expiry at actual UPDATE execution', async () => {
-    const {repo,raw,db}=fixture(); const future=Math.floor(Date.now()/1000)+3600;
-    const w=await repo.create(watchFixture({leaseOwner:'worker-A',leaseExpiresAt:future}));
+    const {repo,raw,db}=fixture(); let databaseNow=1000; raw.function('unixepoch',() => databaseNow);
+    const w=await repo.create(watchFixture({leaseOwner:'worker-A',leaseExpiresAt:1001}));
     expect(await repo.compareAndSwap(1,{...w,version:2,lastStatus:'running'},'worker-a')).toBe(false);
     expect(await repo.compareAndSwap(1,{...w,version:2,lastStatus:'running'},'worker-A')).toBe(true);
     const current=(await repo.find(w.flowId,w.nodeId,1))!;
     const transaction=db.transaction.bind(db);
-    vi.spyOn(db,'transaction').mockImplementation(fn => transaction(tx => {
+    vi.spyOn(db,'transaction').mockImplementationOnce(fn => transaction(tx => {
       const exec=tx.exec.bind(tx);
-      vi.spyOn(tx,'exec').mockImplementation(async (sql,params) => {
-        patchWatchFixture(raw,{leaseExpiresAt:Math.floor(Date.now()/1000)-1}); return exec(sql,params);
+      vi.spyOn(tx,'exec').mockImplementationOnce((sql,params) => {
+        databaseNow=1001; return exec(sql,params);
       });
       return fn(tx);
     }));
     expect(await repo.compareAndSwap(2,{...current,version:3,phase:'resolving'},'worker-A')).toBe(false);
-    expect((await repo.find(w.flowId,w.nodeId,1))!.version).toBe(2);
+    expect(databaseNow).toBe(current.leaseExpiresAt);
+    expect(await repo.find(w.flowId,w.nodeId,1)).toEqual(current);
     // Normal release/claim CAS remains backward compatible and does not require a live lease.
     expect(await repo.compareAndSwap(2,{...current,version:3,leaseOwner:null,leaseExpiresAt:null})).toBe(true);
   });
