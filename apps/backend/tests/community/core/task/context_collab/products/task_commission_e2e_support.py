@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from fastapi.testclient import TestClient
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
@@ -39,6 +41,19 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    ResourceRef,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.resource_binding import (
+    ResourceBinding,
+    resource_bindings_from_initial_event,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    BindingState,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
+    CompositionRelation,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     OpenOpportunity,
 )
@@ -58,6 +73,14 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
+    VersionedProfileRef,
+)
+from agentclaw.community.core.task.context_collab.l6_products.instance import (
+    ProductInstance,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
+    ProductInstantiateCommand,
+    ProductInstantiationServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepositoryProtocol,
@@ -73,9 +96,91 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskCommissionCreatedView,
     TaskCommissionServiceProtocol,
 )
-from fastapi.testclient import TestClient
-
 from tests.community.factories.task_commission import commission_report_request
+
+
+def _instantiate_product_instance(
+    injector,
+    collet,
+    profile,
+    *,
+    context: ActorContext,
+    participant_ref: AgentRef,
+    resource_refs: tuple[ResourceRef, ...],
+):
+    repository = injector.get(ContextCollabRepositoryProtocol)
+    unbound = repository.get_current_status(collet.collet_id)
+    assert unbound.task is None and unbound.product_instance is None
+    assert unbound.tasks == () and unbound.events == []
+    assert unbound.participants == unbound.role_bindings == ()
+    assert unbound.creation_facts == {} and collet.version == 1
+    assert not hasattr(collet, "current_event_id")
+
+    # L6 将输入资源与参与者/角色同时绑定到 Collet;此时没有任何 Task。
+    instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
+        ProductInstantiateCommand(
+            collet.collet_id,
+            profile.ref,
+            unbound.collet.version,
+            participant_refs=(participant_ref,),
+            resource_refs=resource_refs,
+        ),
+        context,
+    )
+    record = repository.get_current_status(collet.collet_id)
+    assert record.product_instance == instance
+    assert instance.participant_scope == profile.participant_scope
+    # Profile 的允许列表不是本实例的实际参与者列表。
+    assert {p.agent_ref for p in record.participants if p.agent_ref} == {
+        participant_ref
+    }
+    assert instance.instance_id != instance.collet_ref
+    assert instance.collet_ref == collet.collet_id
+    assert instance.root_task_ref is None
+    assert record.task is None and record.tasks == ()
+    assert instance.profile_ref == instance.negotiation.selected_profile == profile.ref
+    assert instance.negotiation.accepted
+    assert instance.workflow_ref is instance.domain_ref is None
+    assert instance.task_contract_ref == VersionedProfileRef("standard_task", 1)
+    assert instance.method_profiles == tuple(
+        item.ref for item in profile.composition.required_methods
+    )
+    assert instance.governance == profile.governance
+    assert len(instance.role_binding_refs) == 2
+    assert instance.creation_event_ref == record.events[0].event_id
+    assert len(record.events) == 1
+    assert record.creation_facts["resource_refs"] == [
+        ref.to_dict() for ref in resource_refs
+    ]
+    assert resource_bindings_from_initial_event(record.events[0]) == tuple(
+        ResourceBinding(resource_ref=ref) for ref in resource_refs
+    )
+    assert record.events[0].event_kind == "collet.participants_bound"
+    assert record.events[0].task_ref is None
+    assert len(record.participants) == len(record.role_bindings) == 2
+    assert record.collet.version == unbound.collet.version + 1
+    assert ProductInstance.from_dict(instance.to_dict()) == instance
+
+    # 一次 Instantiate 创建两份独立 Profile 绑定,显式 Single --support--> Open。
+    open_binding_id, single_binding_id = instance.method_binding_refs
+    assert open_binding_id != single_binding_id
+    store, axes = injector.get(MethodStoreProtocol), current_axes()
+    for binding_id, method in (
+        (open_binding_id, "Open"),
+        (single_binding_id, "Single"),
+    ):
+        binding = store.get_binding(axes, binding_id, collet.collet_id)
+        assert binding.state is BindingState.ACTIVE
+        assert binding.collab_context_id == instance.collet_ref
+        assert binding.method_kind == method
+        assert binding.method_names == (method,)
+        assert binding.profile_versions == {method: "0.2"}
+        assert binding.role_binding_refs == instance.role_binding_refs
+    [edge] = store.list_composition_edges(axes, collet.collet_id)
+    assert edge.parent_binding == single_binding_id
+    assert edge.child_binding == open_binding_id
+    assert edge.relation_kind is CompositionRelation.SUPPORT
+    return instance
 
 
 def opportunities_query_request(bot: Any) -> dict:

@@ -338,20 +338,27 @@ roll back. Objective/executors remain Task authority, not Collet fields.
 Product-specific installation is a separate L6 composition operation:
 [`ProductInstantiationServiceProtocol.instantiate`](l6_products/operations/contracts.py)
 accepts `ProductInstantiateCommand(collet_id, profile_ref, expected_version,
-participant_refs=(bot_a,), executor_ref=bot_a)`. Initial participants are supplied
-by the product caller, not by L4 creation. The exact Profile's typed
-[`ParticipantScope`](l6_products/participant_scope.py) declares `OPEN` eligibility
+participant_refs=(bot_a,), executor_ref=bot_a, resource_refs=(input_resource,))`.
+Initial participants and typed L3 input resource references are supplied by the
+product caller, not by L4 creation or the reusable Profile. The exact Profile's
+typed [`ParticipantScope`](l6_products/participant_scope.py) declares `OPEN` eligibility
 or an Agent allowlist; every supplied Agent must be eligible before any write.
 Eligibility is not participation, Open admission, Single selection or a grant.
 
 Instantiation authorizes the initiator/responsible principal and pins the exact
 Profile on an untouched Collet. One SQL transaction writes ProductInstance and
 actual scoped L4 Participants/RoleBindings plus `collet.participants_bound`.
-Collet advances from revision 1 to 2; there is still **no Task**, and the stored
-instance's `root_task_ref` is `None`. Its creation evidence references this
+That Event carries `resource_refs` (including `[]` for no inputs), the authoritative
+facts parsed into L4 [ResourceBindings](l4_context_primitives/resource_binding.py).
+Selection metadata retains the same references; no resource body, independent
+binding store or resource Grant is created. Collet advances from revision 1 to 2;
+there is still **no Task**, and the stored instance's `root_task_ref` is `None`.
+Its creation evidence references this
 binding Event. L5 initialization follows separately. Existing untouched Work is
 also supported for compatibility: assignment preserves its creation Event and
-advances its Task revision with `task.participants_bound`.
+advances its Task revision with `task.participants_bound`, which carries the
+input resource references rather than rewriting the original creation Event.
+A SQL failure rolls back selection and all initial binding evidence together.
 Collet itself has no current-event pointer. G1 checks the pinned eligibility
 scope against the **authenticated actual Agent** on generic and product execution
 paths; eligibility, claimed actors and requested roles do not grant execution.

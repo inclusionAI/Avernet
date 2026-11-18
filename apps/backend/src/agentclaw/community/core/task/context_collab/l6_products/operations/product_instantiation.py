@@ -7,6 +7,8 @@ an installed selection. No retry may replace that immutable product selection.
 
 from uuid import uuid4
 
+from injector import inject
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -50,7 +52,6 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.reposi
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
-from injector import inject
 
 
 class ProductInstantiationService(ProductInstantiationServiceProtocol):
@@ -116,7 +117,7 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
             method_kind=profile.composition.method_kind,
             executor_ref=executor_ref,
             objective=task.objective if task is not None else None,
-            resource_refs=(),
+            resource_refs=command.resource_refs,
             product_kind=profile.ref.profile_id,
             workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
             product_profile_ref=profile.ref,

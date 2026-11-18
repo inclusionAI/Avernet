@@ -13,6 +13,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Protocol, Sequence, runtime_checkable
 
+from injector import inject
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -24,6 +26,9 @@ from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliabil
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
     PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    ResourceRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
@@ -101,7 +106,6 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.record
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-from injector import inject
 
 _logger = logging.getLogger(__name__)
 
@@ -137,8 +141,9 @@ class ContextCollabRepositoryProtocol(Protocol):
     ) -> None:
         """CAS-install L6 selection on an untouched, method-independent Collet.
 
-        Atomically binds participants/roles at Collet scope and writes binding
-        evidence without creating a Task. Existing untouched Work retains its
+        Atomically binds participants/roles and input resource references at
+        Collet scope and writes binding evidence without creating a Task or
+        granting resource access. Existing untouched Work retains its
         creation evidence and receives assignment. Selection is immutable;
         repeats/conflicting selections fail closed.
         """
@@ -428,6 +433,9 @@ class ContextCollabRepository:
                 (executor,) if executor else (),
                 actor_ref,
                 binding_event_id=instance.creation_event_ref if task is None else None,
+                resource_refs=tuple(
+                    ResourceRef.from_dict(ref) for ref in stored["resource_refs"]
+                ),
             )
             db.flush()
 

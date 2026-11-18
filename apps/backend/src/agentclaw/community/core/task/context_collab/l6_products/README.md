@@ -360,8 +360,8 @@ Pure L4 `create_collet(ColletCreateCommand, context)` creates only a Collet;
 it does not select a Profile, Method, participants or bindings. Its required
 input is an initiator reference (optional context description is keyword-only).
 No Task or Event is created by Collet creation. Pass initial Agent identities
-from the product caller directly to the separate L6-owned
-[`ProductInstantiationServiceProtocol`](operations/contracts.py):
+and input resource references from the product caller directly to the separate
+L6-owned [`ProductInstantiationServiceProtocol`](operations/contracts.py):
 
 ```python
 instance = product_instantiation.instantiate(
@@ -371,6 +371,7 @@ instance = product_instantiation.instantiate(
         expected_version=collet.version,
         participant_refs=(worker, reviewer),
         executor_ref=worker,
+        resource_refs=(ResourceRef("document", "requirements", "v1"),),
     ),
     actor_context,
 )
@@ -385,18 +386,29 @@ the Profile's participant scope before writes. The repository CAS revalidates
 scope, role subjects and untouched Collet state; stale/repeated/conflicting
 selection fails closed.
 
+`resource_refs` defaults to `()`. Each entry must be a typed, valid L3
+`ResourceRef`; supplied lists are copied into an immutable tuple. Resources
+belong to this runtime instance's Collet, not to the reusable ProductProfile.
+Only references are persisted, not uploads or resource contents. A ResourceBinding
+is **not a Grant**; resource access still requires the owning Space's policy.
+
 The **same SQL transaction** persists ProductInstance, actual Collet-scoped L4
-Participants/RoleBindings and `collet.participants_bound` evidence. Collet advances
-from revision 1 to 2; no Task is written. The instance's creation_event_ref points
-to that binding Event. At Work.start, actual initial executor bindings initialize
+Participants/RoleBindings and `collet.participants_bound` evidence. The Event
+always carries serialized `resource_refs` (empty inputs yield `[]`), alongside
+participation facts. These are the authoritative initial ResourceBinding facts,
+parsed by the [L4 pure reader](../l4_context_primitives/resource_binding.py);
+selection metadata retains the same references without a new binding store.
+Collet advances from revision 1 to 2; no Task is written. The instance's
+creation_event_ref points to that binding Event. At Work.start, actual initial executor bindings initialize
 the Task alongside the objective/completion conditions in WorkStartCommand.
 All G1/G4 checks precede the atomic creation/start write. Root Task is revision 2
 and Collet revision 4 after a successful first start, absent intervening Events.
 
 For compatibility, installation also accepts untouched, unassigned existing Work
 (Task revision 1, only its creation Event). That path preserves `task.created`,
-assigns the Task and appends `task.participants_bound`, advancing Task/Collet once.
-It is not the commission journey's creation sequence.
+assigns the Task and appends `task.participants_bound` with the input resource
+references, advancing Task/Collet once. It does not rewrite `task.created` to
+retroactively add resources. It is not the commission journey's creation sequence.
 Role references resolve to actual L4 evidence, not generated strings alone;
 G4 checks those bindings, with a fallback only for historical rows without them.
 New scoped instances missing binding evidence fail closed when read. No new
@@ -412,8 +424,8 @@ permit it. This is distinct from L4 Task's existing multi-executor storage model
 general multi-subject product role mapping is not added here.
 
 SQL selection and MethodStore writes are separate transactions. A SQL error
-rolls back selection, participation, roles, assignment and the binding Event; no
-Method binding is created. A MethodStore error propagates;
+rolls back selection, participation, roles, resource bindings, assignment and the
+binding Event; no Method binding is created. A MethodStore error propagates;
 SQL selection may already be committed. The recovery adapter validates the requested
 reference against the pinned topology, then fills all missing bindings and edges,
 including after a partial write. It preserves existing lifecycle/audit facts and
@@ -602,8 +614,11 @@ The [commission user-journey test](../../../../../../../tests/community/core/tas
 uses the actual `TaskModule` / `TaskPersistenceModule`, isolated SQLite and the
 real catalog seam. It authors and deploys `task_commission@2` (Open + Single),
 then creates only one L4 Collet before a separate L6 Instantiate call creates
-one ProductInstance and actual initial bindings, still without a Task. Only
-Work.start creates and starts the root Task, after Open admission and Single
+one ProductInstance and actual initial bindings, including the product-supplied
+requirements document and repository references, still without a Task. The test
+parses those initial ResourceBindings immediately and checks their unchanged
+Event payload after acceptance. Only Work.start creates and starts the root
+Task, after Open admission and Single
 selection. The journey does not test multi-instance reuse or isolation. The
 ProductInstance pins its Profile/Method/standard Task versions, eventual root Task,
 MethodBinding/RoleBinding refs, governance, negotiation and creation evidence.

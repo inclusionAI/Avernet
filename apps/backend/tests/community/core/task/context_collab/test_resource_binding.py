@@ -14,6 +14,9 @@ import pytest
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    PrincipalRef,
+)
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     ResourceRef,
 )
@@ -23,9 +26,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 from agentclaw.community.core.task.context_collab.l4_context_primitives.resource_binding import (
     ResourceBinding,
     resource_bindings_from_initial_event,
-)
-from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
-    PrincipalRef,
 )
 
 COLLET_ID = "collet_binding_001"
@@ -37,14 +37,16 @@ def _resource_ref(resource_id: str = "res_001") -> ResourceRef:
     return ResourceRef(resource_type="document", resource_id=resource_id, revision=None)
 
 
-def _initial_event(payload) -> EventRecord:
-    """构造初始事件(task.created);payload 由用例控制。"""
+def _initial_event(
+    payload, *, event_kind="task.created", primitive_type="Task"
+) -> EventRecord:
+    """构造创建或实例化时的初始资源绑定证据;payload 由用例控制。"""
     return EventRecord(
         collab_context_id=COLLET_ID,
         event_id=EVENT_ID,
         parent_event=None,
-        event_kind="task.created",
-        primitive_type="Task",
+        event_kind=event_kind,
+        primitive_type=primitive_type,
         actor_ref=ACTOR,
         visibility="public",
         payload=payload,
@@ -67,7 +69,15 @@ class TestResourceBindingValueObject:
 
 
 class TestParseInitialEvent:
-    def test_parses_resource_refs_payload(self):
+    @pytest.mark.parametrize(
+        "event_kind, primitive_type",
+        [
+            ("task.created", "Task"),
+            ("collet.participants_bound", "Collet"),
+            ("task.participants_bound", "Task"),
+        ],
+    )
+    def test_parses_resource_refs_payload(self, event_kind, primitive_type):
         event = _initial_event(
             {
                 "objective": "整理评审结论",
@@ -75,7 +85,9 @@ class TestParseInitialEvent:
                     _resource_ref("res_001").to_dict(),
                     _resource_ref("res_002").to_dict(),
                 ],
-            }
+            },
+            event_kind=event_kind,
+            primitive_type=primitive_type,
         )
         bindings = resource_bindings_from_initial_event(event)
         assert bindings == (

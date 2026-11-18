@@ -4,6 +4,8 @@ import json
 from dataclasses import replace
 
 import pytest
+from sqlalchemy import event as sql_event
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
     ContextCollabVersionConflict,
@@ -18,10 +20,17 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    ResourceRef,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     AppendEventRecordRequest,
     ColletCreateCommand,
     TaskCreateCommand,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.resource_binding import (
+    ResourceBinding,
+    resource_bindings_from_initial_event,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
@@ -49,6 +58,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 )
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
+    ContextCollabEventModel,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
@@ -56,10 +66,13 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
 )
-from sqlalchemy import event as sql_event
 
 OWNER = ActorContext(PrincipalRef("human", "owner"), "api")
 BOT = AgentRef("bot", "worker")
+INPUT_RESOURCES = (
+    ResourceRef("document", "requirements", "v1"),
+    ResourceRef("repository", "calculator", "baseline-v1"),
+)
 
 
 @pytest.fixture
@@ -87,7 +100,11 @@ def runtime(db):
         OWNER.actor,
     )
     command = ProductInstantiateCommand(
-        created.collet.collet_id, profile.ref, created.collet.version, (BOT,)
+        created.collet.collet_id,
+        profile.ref,
+        created.collet.version,
+        (BOT,),
+        resource_refs=INPUT_RESOURCES,
     )
     return service, repo, store, catalog, command
 
@@ -303,6 +320,11 @@ def test_method_store_failure_is_not_success_and_selection_can_be_recovered(
         {"profile_ref": "task_commission"},
         {"expected_version": True},
         {"expected_version": 0},
+        {"resource_refs": None},
+        {"resource_refs": "requirements"},
+        {"resource_refs": ({"resource_id": "requirements"},)},
+        {"resource_refs": (ResourceRef("document", "", "v1"),)},
+        {"resource_refs": (ResourceRef("document", "requirements", 1),)},
     ],
 )
 def test_product_instantiation_command_rejects_invalid_input(runtime, change):
@@ -383,3 +405,83 @@ def test_existing_work_instance_cannot_masquerade_as_pre_start_installation(
         session.commit()
     with pytest.raises(ContextCollabValidationError, match="missing its root Task"):
         repo.get_current_status(command.collet_id)
+
+
+@pytest.mark.parametrize("bare_collet", [False, True])
+@pytest.mark.parametrize("resource_refs", [(), INPUT_RESOURCES])
+def test_instantiation_atomically_binds_input_resources(
+    runtime, bare_collet, resource_refs
+):
+    service, repo, _, _, command = runtime
+    if bare_collet:
+        collet = repo.create_l4_collet(
+            ColletCreateCommand(OWNER.actor), OWNER.actor
+        ).collet
+        command = replace(
+            command, collet_id=collet.collet_id, expected_version=collet.version
+        )
+    command = replace(command, resource_refs=resource_refs)
+    before = repo.get_current_status(command.collet_id)
+    instance = service.instantiate(command, OWNER)
+    after = repo.get_current_status(command.collet_id)
+    assert after.product_instance == instance
+    assert after.creation_facts["resource_refs"] == [
+        ref.to_dict() for ref in resource_refs
+    ]
+    assert after.events[:-1] == before.events
+    evidence = after.events[-1]
+    assert evidence.collab_context_id == instance.collet_ref
+    assert evidence.payload["resource_refs"] == [ref.to_dict() for ref in resource_refs]
+    assert resource_bindings_from_initial_event(evidence) == tuple(
+        ResourceBinding(resource_ref=ref) for ref in resource_refs
+    )
+    assert evidence.actor_ref == OWNER.actor
+    assert after.collet.version == before.collet.version + 1
+    if bare_collet:
+        assert after.task is None and after.tasks == ()
+        assert instance.root_task_ref is None
+        assert evidence.event_id == instance.creation_event_ref
+    else:
+        assert after.task.task_id == before.task.task_id
+        assert after.task.version == before.task.version + 1
+
+
+@pytest.mark.parametrize("bare_collet", [False, True])
+def test_resource_binding_event_failure_rolls_back_entire_installation(
+    runtime, engine, bare_collet
+):
+    service, repo, store, _, command = runtime
+    if bare_collet:
+        collet = repo.create_l4_collet(
+            ColletCreateCommand(OWNER.actor), OWNER.actor
+        ).collet
+        command = replace(
+            command, collet_id=collet.collet_id, expected_version=collet.version
+        )
+    before = repo.get_current_status(command.collet_id)
+
+    def fail_event_insert(conn, cursor, statement, parameters, context, executemany):
+        if (
+            statement.lstrip()
+            .upper()
+            .startswith(f"INSERT INTO {ContextCollabEventModel.__tablename__.upper()}")
+        ):
+            raise RuntimeError("resource binding event write failed")
+
+    sql_event.listen(engine, "before_cursor_execute", fail_event_insert)
+    try:
+        with pytest.raises(RuntimeError, match="resource binding event write failed"):
+            service.instantiate(command, OWNER)
+    finally:
+        sql_event.remove(engine, "before_cursor_execute", fail_event_insert)
+    assert repo.get_current_status(command.collet_id) == before
+    assert store.list_bindings(current_axes(), command.collet_id) == []
+
+
+def test_resource_input_list_is_normalized_without_retaining_mutable_input(runtime):
+    *_, command = runtime
+    inputs = list(INPUT_RESOURCES)
+    supplied = replace(command, resource_refs=inputs)
+    inputs.clear()
+    assert isinstance(supplied.resource_refs, tuple)
+    assert supplied.resource_refs == INPUT_RESOURCES
