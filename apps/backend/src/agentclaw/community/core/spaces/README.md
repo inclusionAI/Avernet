@@ -62,6 +62,21 @@ Space-scoped feature, not only member management. The tenant column, tenant
 guard registration, and tenant-leading unique keys are one isolation mechanism
 and must change together.
 
+## Team-space deletion
+
+`DELETE /openapi/v1/bots/spaces/{space_id}` soft-deletes a Team Space only
+when it is empty.
+`SpaceDeletionService` rejects a personal space before touching storage, then
+`SpaceRepositoryProtocol.delete_team_space` performs the final-state checks in
+one transaction: lock the Space row, require a `TEAM` space, require the actor's
+current effective membership to be canonical `ADMIN`, and reject the delete
+while the Space still owns any non-deleted Bot or any Skill binding. It then
+writes `deleted_at`/`deleted_by` and disables the member rows; it does not
+delete Bot, Skill, knowledge or remote Skill Center state. After commit the
+service sends a best-effort `BotManagerSync` Space-change hint; a delivery
+failure is logged and never changes the committed result. Callers must treat
+success as a local soft delete, not as cleanup of dependent resources.
+
 ## Script maintenance exception
 
 The ordinary HTTP `/api/spaces` surface uses `SpaceManagementServiceProtocol`.
