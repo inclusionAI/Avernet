@@ -13,8 +13,15 @@ pub struct LeaseSnapshot {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeaseState {
+    /// No registration or termination has ever been established for this key.
+    /// It is not evidence that an earlier instance died: registration may still
+    /// be in flight. Expired and retired lifetimes must not read as Absent.
     Absent,
     Alive(LeaseSnapshot),
+    /// Stable terminal evidence after expiry or successful retirement, including
+    /// retire-before-register. It survives later reads and delayed mutations.
+    /// A provider may use any durable representation; ordinary TTL deletion
+    /// without retained termination evidence does not satisfy StrictLease.
     Terminated,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]

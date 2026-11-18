@@ -151,3 +151,29 @@ impl LeaseStorePlugin for Model {
         self.finish(())
     }
 }
+
+impl Model {
+    /// Test fixture injection only: expose the provider's final usable version
+    /// without adding a version setter to the production DocumentCas contract.
+    pub fn exhaust_document_version(&self, key: &str) {
+        let mut state = self.state.lock().unwrap();
+        assert!(state.json.contains_key(key), "seed document before exhausting its version");
+        state.versions.insert(key.into(), Version(u64::MAX));
+    }
+    /// Test fixture injection for StrictLease failure atomicity.
+    pub fn exhaust_lease_version(&self, key: &str) {
+        self.state.lock().unwrap().leases.get_mut(key)
+            .expect("seed lease before exhausting its version").version = Version(u64::MAX);
+    }
+}
+
+impl Model {
+    /// Fault injection for negative lease conformance fixtures. Does not change
+    /// the version or payload, so the suite must check actual expiry behavior.
+    pub fn shorten_lease_deadline(&self, key: &str, remaining: Duration) {
+        let end = self.time().checked_add(remaining.as_millis() as u64).unwrap();
+        let mut state = self.state.lock().unwrap();
+        let lease = state.leases.get_mut(key).expect("seed lease before shortening it");
+        lease.deadline = lease.deadline.min(end);
+    }
+}

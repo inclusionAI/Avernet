@@ -7,3 +7,5 @@ mod recovery;
 mod runtime;
 pub use config::{HrwIdentity, WorkerConfig, rank_candidates};
 pub use runtime::{CheckpointInitializer, WorkerRuntime};
+
+mod drain;

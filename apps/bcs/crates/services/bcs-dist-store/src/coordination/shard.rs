@@ -19,7 +19,7 @@ impl ShardLeasePort for CoordinationStore {
             .map(|x| x.value.record))
     }
     async fn claim(&self, request: ClaimShard) -> Result<LeaseClaim, StoreError> {
-        if self.liveness(&request.me).await? != Liveness::Alive {
+        if !self.confirmed_alive(&request.me, &request.request_id.0).await? {
             return Ok(LeaseClaim::Conflict);
         }
         let key = self.layout.owner(request.shard);
@@ -38,10 +38,8 @@ impl ShardLeasePort for CoordinationStore {
                 return Ok(LeaseClaim::AlreadyClaimed(old.value.record.claim.clone()));
             }
             if request.expected_epoch != Some(old.value.record.claim.owner.epoch)
-                || self
-                    .liveness(&old.value.record.claim.owner.instance)
-                    .await?
-                    != Liveness::Dead
+                || self.confirmed_alive(&old.value.record.claim.owner.instance,
+                    &request.request_id.0).await?
             {
                 return Ok(LeaseClaim::Conflict);
             }
@@ -127,8 +125,8 @@ impl ShardLeasePort for CoordinationStore {
             if old.value.record.handoff.is_some() {
                 return Ok(HandoffOutcome::Rejected);
             }
-            if self.liveness(&request.from.owner.instance).await? != Liveness::Alive
-                || self.liveness(&request.target).await? != Liveness::Alive
+            if !self.confirmed_alive(&request.from.owner.instance, &request.request_id.0).await?
+                || !self.confirmed_alive(&request.target, &request.request_id.0).await?
             {
                 return Ok(HandoffOutcome::Rejected);
             }
@@ -149,7 +147,7 @@ impl ShardLeasePort for CoordinationStore {
                     .get(&timer_key)
                     .is_some_and(|(prior, _)| prior == &request)
                 {
-                    if !timers.contains_key(&timer_key) && timers.len() >= 4096 {
+                    if !timers.contains_key(&timer_key) && timers.len() >= self.config.max_handoff_timers {
                         return Err(not_applied("handoff_capacity"));
                     }
                     timers.insert(
@@ -241,6 +239,7 @@ impl CoordinationStore {
                 value.record.handoff = None;
             } else {
                 if handoff.source_done {
+                    self.release_handoff_timer(target.shard, id)?;
                     return Ok(true);
                 }
                 if let Some(handoff) = value.record.handoff.as_mut() {
@@ -252,12 +251,10 @@ impl CoordinationStore {
                 .await?
                 .is_some()
             {
-                if clear {
-                    self.timers
-                        .lock()
-                        .map_err(|_| not_applied("timer_poisoned"))?
-                        .remove(&target.shard.0);
-                }
+                // Both source_done and clearing end source protection. Remove
+                // only this exact request; a concurrent later handoff may have
+                // already installed the next timer for the same shard.
+                self.release_handoff_timer(target.shard, id)?;
                 return Ok(true);
             }
         }

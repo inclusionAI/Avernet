@@ -303,6 +303,7 @@ async fn unknown_acquire_at_capacity_recovers_during_normal_ticks() {
     // The outstanding acquire fills the entire capacity. A normal tick must
     // resolve it rather than waiting forever for an unused free slot or shutdown.
     world.scheduling.unknown.store(false, Ordering::SeqCst);
+    tokio::time::advance(Duration::from_millis(500)).await;
     a.tick().await.unwrap();
     let recovered = a.acquired_sessions().unwrap();
     assert_eq!(recovered.len(), 1);
@@ -338,6 +339,7 @@ async fn fenced_scheduling_retries_local_release_before_forgetting_acquisition()
         .sessions
         .release_unavailable
         .store(false, Ordering::SeqCst);
+    tokio::time::advance(Duration::from_millis(500)).await;
     a.tick().await.unwrap();
     let released = world.sessions.released.lock().unwrap();
     assert_eq!(released.len(), 1);

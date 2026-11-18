@@ -19,15 +19,25 @@ Unsupported checkpoint formats fail before sealing. No initialization marker is
 introduced.
 
 Discovery registers the role index before the lease; orphan index records are
-ignored. The index has stable member-key continuation and bounded pages. The
-strict lease implementation supplies stable termination; a missing or failed
-read is Unknown, never evidence for fault takeover.
+ignored and retained while registration may be in flight. Retire removes its
+member from the three role indexes after stable termination; a failed cleanup
+is retried by discovery. Each discovery page batches removal of Terminated
+members only, never Absent or Unknown. The index has stable member-key
+continuation and bounded pages. The strict lease implementation supplies stable termination; a missing or failed
+read is Unknown, never evidence for fault takeover. Claim and handoff mutation
+checks propagate Unknown as an uncertain result; it cannot become Fenced or
+Rejected and release an earlier unknown operation's responsibility.
 
 Handoff timers start at receiver method entry before storage I/O, use local
 monotonic time and retain at most one request per shard
-with a 4096-shard ceiling. Retries do not restart them. A lost timer means expired
-protection, not permission to skip a session seal. The confirmed checkpoint
-cache has a 4096-session ceiling; reserve precedes creation. Definite
+with a configurable shard ceiling (`max_handoff_timers`, default 4096).
+Retries do not restart them. Confirmed source completion or handoff clearing
+reclaims the exact request's timer; elapsed time alone does not forget an
+uncertain write and permit a retry to restart protection. A lost timer means
+expired protection, not permission to skip a session seal. The confirmed
+checkpoint cache has a configurable session ceiling (`max_cached_sessions`,
+default 10000); reserve precedes creation. `local_session_capacity()` advertises
+this bound for runtime wiring validation. Session and shard limits are separate. Definite
 Fenced/Deferred observations release their slots. The local holder is separate
 from an observed document owner so successful transfer can release the source
 without a late release deleting the new holder. Unknown writes and known
@@ -48,3 +58,8 @@ automatically migrate live data or enable the Worker in existing bootstrap.
 The provider's lease implementation must pass the strict contract before this
 store can start. A document-CAS-only backend is insufficient. The test-only model
 is a fault-injection fixture, never a production fallback.
+
+A successful source session handoff reads the current shard once before the EQ
+write and once afterward, plus a lease check at each point and checkpoint reads
+before/after the write. The pre-write shard read supplies both claim and handoff
+validation; checks are not shared across sessions or skipped after a write.

@@ -16,7 +16,11 @@ pub struct WorkerConfig {
     pub check_interval: Duration,
     pub candidate_backoff: Duration,
     pub request_timeout: Duration,
+    /// Reserve for final confirmation/retirement. No new handoff starts within
+    /// this margin; drain(0) remains a valid immediate shutdown deadline.
     pub exit_margin: Duration,
+    /// Concurrent session transfers per drain round, within the global budget.
+    pub handoff_concurrency: usize,
     pub identity: HrwIdentity,
     pub page_size: u32,
     pub max_acquires_per_tick: usize,
@@ -35,6 +39,7 @@ impl Default for WorkerConfig {
             candidate_backoff: Duration::from_millis(500),
             request_timeout: Duration::from_millis(500),
             exit_margin: Duration::from_secs(1),
+            handoff_concurrency: 8,
             identity: HrwIdentity::Node,
             page_size: 200,
             max_acquires_per_tick: 32,
@@ -49,7 +54,10 @@ impl Default for WorkerConfig {
 impl WorkerConfig {
     pub fn validate(&self) -> Result<(), RuntimeError> {
         if self.heartbeat_interval.is_zero()
-            || self.lease_ttl <= self.heartbeat_interval
+            || self
+                .heartbeat_interval
+                .checked_add(self.request_timeout)
+                .is_none_or(|budget| budget >= self.lease_ttl)
             || self.request_timeout.is_zero()
             || self.request_timeout >= self.lease_ttl
             || self.check_interval.is_zero()
@@ -61,6 +69,7 @@ impl WorkerConfig {
             || self.max_member_pages == 0
             || self.max_active_sessions == 0
             || self.max_inflight_handoffs == 0
+            || self.handoff_concurrency == 0
         {
             return Err(RuntimeError {
                 code: "invalid_worker_config".into(),

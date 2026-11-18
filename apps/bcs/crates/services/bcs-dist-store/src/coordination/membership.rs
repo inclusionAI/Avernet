@@ -93,7 +93,14 @@ impl MembershipPort for CoordinationStore {
         {
             LeaseRegistration::Active(_) => Ok(MembershipLease { instance }),
             LeaseRegistration::ContentConflict => Err(invalid("registration_content_conflict")),
-            LeaseRegistration::Terminated => Err(not_applied("registration_terminated")),
+            LeaseRegistration::Terminated => {
+                // A delayed register may have restored an index entry after a
+                // retire. Its stable terminal evidence makes removal safe.
+                self.index.remove(&self.layout.members(role_name(role))?,
+                    &[serde_json::to_string(&instance).map_err(|_| invalid("member_encode"))?])
+                    .await.map_err(|e| error::from_write(&e, &instance.incarnation))?;
+                Err(not_applied("registration_terminated"))
+            },
         }
     }
     async fn renew(&self, lease: &MembershipLease, ttl: Duration) -> Result<Renewal, StoreError> {
@@ -106,7 +113,20 @@ impl MembershipPort for CoordinationStore {
         self.leases
             .retire_lease(&self.lease_key(&lease.instance)?)
             .await
-            .map_err(|e| error::from_write(&e, &lease.instance.incarnation))
+            .map_err(|e| error::from_write(&e, &lease.instance.incarnation))?;
+        let member = serde_json::to_string(&lease.instance).map_err(|_| invalid("member_encode"))?;
+        // A MembershipLease deliberately has no role. Remove this terminated
+        // lifetime from each of the three bounded role indexes. Cleanup failure
+        // does not undo confirmed retirement; discovery retries it later.
+        for role in [RuntimeRole::Worker, RuntimeRole::Gateway, RuntimeRole::Connector] {
+            if self.index.remove(&self.layout.members(role_name(role))?,
+                std::slice::from_ref(&member)).await.is_err()
+            {
+                tracing::warn!(code = "member_index_cleanup_failed",
+                    "Worker membership index cleanup deferred after retirement");
+            }
+        }
+        Ok(())
     }
     async fn liveness(&self, instance: &Instance) -> Result<Liveness, StoreError> {
         match self.leases.read_lease(&self.lease_key(instance)?).await {
@@ -142,15 +162,19 @@ impl MembershipPort for CoordinationStore {
             None
         };
         let mut items = Vec::new();
+        let mut terminated = Vec::new();
         for entry in entries {
             let instance: Instance =
                 serde_json::from_str(&entry.member).map_err(|_| invalid("member_index"))?;
-            if let LeaseState::Alive(value) = self
-                .leases
-                .read_lease(&self.lease_key(&instance)?)
-                .await
-                .map_err(|e| error::from_read(&e))?
-            {
+            let state = self.leases.read_lease(&self.lease_key(&instance)?)
+                .await.map_err(|e| error::from_read(&e))?;
+            if state == LeaseState::Terminated {
+                terminated.push(entry.member);
+                continue;
+            }
+            // Absent may be between discovery insertion and registration. It
+            // is neither proof of death nor permission to remove discovery.
+            if let LeaseState::Alive(value) = state {
                 let record: MemberRecord =
                     serde_json::from_slice(&value.value).map_err(|_| invalid("member_format"))?;
                 if record.instance != instance {
@@ -163,6 +187,10 @@ impl MembershipPort for CoordinationStore {
                     items.push(record)
                 }
             }
+        }
+        if !terminated.is_empty() {
+            self.index.remove(&self.layout.members(role_name(role))?, &terminated)
+                .await.map_err(|e| error::from_write(&e, "member_prune"))?;
         }
         Ok(Page { items, next })
     }

@@ -190,3 +190,37 @@ async fn document_unknown_response_can_be_resolved_by_reading_content() {
         value
     );
 }
+
+#[tokio::test]
+async fn lease_provider_conformance() {
+    use bcs_test_support::contract::plugin::store::lease::*;
+    let model = Model::default();
+    lease_store_contract_tests(&model, "contract-lease").await;
+    lease_expiry_contract_tests(&model, "contract-lease", |duration| {
+        model.advance(duration);
+        std::future::ready(())
+    }).await;
+}
+
+#[tokio::test]
+#[should_panic(expected = "same-version replacements have exactly one winner")]
+async fn document_contract_rejects_read_then_write_cas() {
+    let mut model = Model::default();
+    model.broken_json_cas = true;
+    bcs_test_support::contract::plugin::store::document::document_concurrency_contract_tests(&model, "broken-document").await;
+}
+
+#[tokio::test]
+async fn final_document_and_lease_versions_reject_without_mutation() {
+    use bcs_test_support::contract::plugin::store::{document::*, lease::*};
+    let model = Model::default();
+    model.create_document("exhausted-document", &json!({"preserved":null})).await.unwrap();
+    model.exhaust_document_version("exhausted-document");
+    document_version_exhaustion_contract_tests(&model, "exhausted-document").await;
+    model.register_lease("exhausted-lease", b"preserved", Duration::from_secs(3)).await.unwrap();
+    model.exhaust_lease_version("exhausted-lease");
+    lease_version_exhaustion_contract_tests(&model, "exhausted-lease", |duration| {
+        model.advance(duration);
+        std::future::ready(())
+    }).await;
+}
