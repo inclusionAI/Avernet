@@ -1,0 +1,24 @@
+apps/backend/tests/corp/plugins/prod/test_scheduled_caller.py
+  h_3141242c39a938 192-193,211,310,325,430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "586dfed5dbb645c61bb8666fc2faf7f2598af9b2",
+  "prompts": {},
+  "humans": {
+    "h_3141242c39a938": {
+      "author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  },
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

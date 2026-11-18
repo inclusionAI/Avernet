@@ -1,0 +1,75 @@
+apps/backend/src/agentclaw/corp/configs/application-dev.yaml
+  s_2d37bb4e89d220::t_819430581ff3dc 432
+apps/backend/src/agentclaw/corp/configs/application-prepub.yaml
+  s_2d37bb4e89d220::t_3881930809ba71 575
+apps/backend/src/agentclaw/corp/configs/application-prod.yaml
+  s_2d37bb4e89d220::t_1d86da76340a98 575
+apps/backend/src/agentclaw/corp/core/default_env_bot/default_env_bot_service.py
+  s_2d37bb4e89d220::t_9997831df907f6 278
+apps/backend/tests/corp/core/config/test_corp_overlay_merge.py
+  s_2d37bb4e89d220::t_8c78b65764ad0c 44,274
+apps/backend/tests/corp/core/default_env_bot/test_default_env_bot_service.py
+  s_2d37bb4e89d220::t_4ad78344fe4461 648
+apps/frontend-nextgen/config/internal/runtime/config.ts
+  s_2d37bb4e89d220::t_23a8ae97a4c0e7 35-41,210-212,216-217,222-228,242-243
+apps/frontend-nextgen/config/internal/runtime/qiankun.ts
+  s_2d37bb4e89d220::t_d5ae820564b3d5 4-7,9-17,22,25-27,35
+apps/frontend-nextgen/scripts/public-tests.list
+  s_2d37bb4e89d220::t_b4d1f7225eaa9c 27,41-44,200-201
+apps/frontend-nextgen/src/extensions/internal.ts
+  s_2d37bb4e89d220::t_9ce7434f437dca 33,37-40,171-179,580,583-588
+apps/frontend-nextgen/src/internal/agentCoding/CodingBotEmbeddedStage.tsx
+  s_2d37bb4e89d220::t_808179f62f6752 9,16,19,30,33,163,166,168-169,172-174,177-180
+apps/frontend-nextgen/src/internal/agentCoding/agentcodingMicroAppMetadata.ts
+  s_2d37bb4e89d220::t_57a09cf43d39a7 2,5-7,9-12,14-35,38
+apps/frontend-nextgen/src/internal/agentCoding/aixcodingSessionActionRegistry.ts
+  s_2d37bb4e89d220::t_619b5277cb118c 5-12,18-21,52,153-203
+apps/frontend-nextgen/src/internal/agentCoding/preloadAgentcodingMicroApp.ts
+  s_2d37bb4e89d220::t_e87d9c211b10d9 1-12,16-52,54-57,59-60,63-66,68,70
+apps/frontend-nextgen/test/domain/conversation/types.test.ts
+  s_2d37bb4e89d220::t_3542714a0600b6 40-41,55
+apps/frontend-nextgen/test/internal/agentCoding/aixcodingSessionActionRegistry.test.ts
+  s_2d37bb4e89d220::t_8cc9e0b32b566b 73-83
+apps/frontend-nextgen/test/internal/agentCoding/internalRouteMetas.test.ts
+  s_2d37bb4e89d220::t_c25babcd28d014 1-30
+apps/frontend-nextgen/test/internal/agentCoding/preloadAgentcodingMicroApp.test.ts
+  s_2d37bb4e89d220::t_929e9845437657 5-14,17-28,30-33,39-42,45-139,142-163
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/CodingBotEmbeddedStage.localDevelopment.test.tsx
+  s_2d37bb4e89d220::t_71726a6d0f8bf5 7-8,32,34,36-38,41-97
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationOriginFilter.test.tsx
+  s_2d37bb4e89d220::t_80c2b74a5d7b6f 48-91,165,167,169,171,173
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSidebarSessionFilters.test.tsx
+  s_2d37bb4e89d220::t_2b93910c61c1f3 89,311-335
+apps/gateway/configs/application-prepub.yaml
+  s_2d37bb4e89d220::t_23a890908c4afe 24
+apps/gateway/configs/application-prod.yaml
+  s_2d37bb4e89d220::t_b4473c505ae9d3 25
+apps/gateway/tests/test_gateway_cors_config.py
+  s_2d37bb4e89d220::t_0c5995108d43fa 59-62,116-131
+submodules/avernet
+  s_14f5c8a6a8abfe::t_aee5556e11dc8b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7bd7430c30de551bc2cf6699fd64afad3f552582",
+  "prompts": {},
+  "sessions": {
+    "s_14f5c8a6a8abfe": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "2901da25-4c78-4388-91df-d5cca9be2d41",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_2d37bb4e89d220": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "071ccc63-21bf-420f-bd47-9f4fb3b232f2",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
