@@ -142,6 +142,7 @@ def test_git_diff_uses_argument_list_and_propagates_failure(monkeypatch, returnc
     else:
         assert scanner._git_diff("base", "head") == "diff"
     assert calls[0][0][-3:] == ["base", "head", "--"]
+    assert "--unified=3" in calls[0][0]
     assert not calls[0][1].get("shell", False)
 
 
