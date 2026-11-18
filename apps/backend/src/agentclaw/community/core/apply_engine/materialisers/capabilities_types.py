@@ -11,6 +11,7 @@ from agentclaw.community.core.apply_engine.registry import CategoryPlan
 from agentclaw.community.core.skill_center.skill_reference_contract import (
     PublicSkillPreview,
 )
+from agentclaw.community.core.skill_center.default_members import effective_default_members
 from agentclaw.community.core.skill_center.skill_set_apply import (
     DefaultExclusionChange,
     SkillSetApplySnapshot,
@@ -87,25 +88,61 @@ def membership_assets(
 ) -> dict[int, dict[str, Any]]:
     """Map this Set's raw member keys without shadowing real asset IDs."""
     catalog = assets(snapshot)
-    by_uuid = {
-        item["skill_uuid"]: item for item in snapshot.skills if item.get("skill_uuid")
-    }
+    if group.is_default:
+        references = dict(group.skill_references)
+        resolved, _ = effective_default_members(
+            ((raw_id, references.get(raw_id)) for raw_id in group.skill_ids),
+            snapshot.skills,
+        )
+        return dict(resolved)
+    by_uuid = {}
+    for item in snapshot.skills:
+        uuid = item.get("skill_uuid")
+        if (not uuid or not str(item.get("git_path") or "").startswith("center://")
+                or item.get("status") != "PUBLISHED"):
+            continue
+        current = by_uuid.get(uuid)
+        if current is None or (int(item.get("version") or 0), int(item["id"])) > (
+            int(current.get("version") or 0), int(current["id"])
+        ):
+            by_uuid[uuid] = item
     references = dict(group.skill_references)
     result = {}
     for raw_id in group.skill_ids:
         uuid = references.get(raw_id)
-        asset = by_uuid.get(uuid) if uuid else catalog.get(raw_id)
+        raw = catalog.get(raw_id)
+        asset = by_uuid.get(uuid) if uuid else raw
+        if (asset is None and raw is not None
+                and not str(raw.get("git_path") or "").startswith("center://")):
+            asset = raw
         if asset is not None:
             result[raw_id] = asset
     return result
 
 
-def membership_key(snapshot: SkillSetApplySnapshot, group: SkillSetSnapshot, raw_id: int) -> str:
+def membership_key(snapshot: SkillSetApplySnapshot, group: SkillSetSnapshot, raw_id: int,
+                   member_assets: dict[int, dict[str, Any]]) -> str:
+    asset = member_assets.get(raw_id)
+    if asset is not None:
+        return asset_key(asset)
     uuid = dict(group.skill_references).get(raw_id)
     if uuid:
         return center_key(uuid)
     asset = assets(snapshot).get(raw_id)
     return asset_key(asset) if asset is not None else "id:" + str(raw_id)
+
+
+def membership_pairs(snapshot: SkillSetApplySnapshot, group: SkillSetSnapshot):
+    """Keep both legacy raw Repo and UUID Center hits for ordinary Sets."""
+    primary = membership_assets(snapshot, group)
+    catalog = assets(snapshot)
+    for raw_id, asset in primary.items():
+        yield raw_id, asset
+        raw = catalog.get(raw_id)
+        if (not group.is_default and raw is not None
+                and int(raw["id"]) != int(asset["id"])
+                and not str(raw.get("git_path") or "").startswith("center://")):
+            yield raw_id, raw
 
 
 def existing_member(snapshot: SkillSetApplySnapshot, group: SkillSetSnapshot, raw_id: int) -> Skill:
@@ -155,7 +192,7 @@ def effective_sets(snapshot: SkillSetApplySnapshot) -> tuple[set[int], set[str]]
             continue
         skill_ids.update(
             int(asset["id"])
-            for raw_id, asset in membership_assets(snapshot, item).items()
+            for raw_id, asset in membership_pairs(snapshot, item)
             if not item.is_default or (item.id, raw_id) not in snapshot.skill_exclusions
         )
         codes.update(
@@ -175,11 +212,22 @@ def direct_ids(snapshot: SkillSetApplySnapshot) -> set[int]:
     supplied, _ = effective_sets(snapshot)
     catalog = assets(snapshot)
     supplied_keys = {asset_key(a) for i, a in catalog.items() if i in supplied}
+    default_ids = {item.id for item in snapshot.sets if item.is_default}
     return {
         i
         for i in snapshot.installed_skill_ids
-        if i not in supplied
-        and (i not in catalog or asset_key(catalog[i]) not in supplied_keys)
+        if (
+            snapshot.installation_sources.get(i, (None, None))[0] == "DIRECT"
+            or (
+                i not in supplied
+                and (i not in catalog or asset_key(catalog[i]) not in supplied_keys)
+                and not (
+                    (source := snapshot.installation_sources.get(i)) is not None
+                    and source[0] == "DEFAULT"
+                    and source[1] in default_ids
+                )
+            )
+        )
     }
 
 
