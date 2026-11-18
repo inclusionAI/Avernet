@@ -240,6 +240,10 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
   assignee 或协作群成员必须来自该次候选响应；单 Bot 使用外部权威身份形态，由 Backend
   落图时拆分为产品 `bot_id` 与 `assignee_owner_id`；
   `PLAN_RESULT` 原子地持久化唯一后继节点，`/dispatch` 执行实际投递。
+- Relay 同实例 Harness resume 在原会话要求 task-loop 真实重读 S1，再调用
+  Skill 的 `relay_ledger_runtime.py` 读取当前节点本地账本。后端已接纳状态优先；
+  本地账本负责方法止损、在途等待/对账及细粒度阶段续跑，不上传完整账本，
+  不从节点扩展属性消费第二份恢复投影，不保证跨容器恢复。
 - Relay 报告仅有 `EXECUTION_RESULT` 与 `PLAN_RESULT`。`event_id` 用于同一请求重试的幂等回放；
   `relay_token` 是当前节点执行代次的服务端围栏，不写入任务轨迹。
   通用接口长期保留可选 `trace` 的结构校验、步骤轨迹写入和内容指纹能力；分布式接力

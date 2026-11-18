@@ -455,7 +455,7 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert h._runtime_seen[("t1", "c1")]["no_progress"] == 0
         assert rec.patches == []
 
-    def test_relay_resume_uses_recovery_projection_when_graph_has_no_accepted_phase(
+    def test_relay_resume_ignores_unpublished_projection_when_graph_has_no_accepted_phase(
         self, svc, graph
     ):
         graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
@@ -465,7 +465,7 @@ class TestHarnessOnlyPollsExecutionLeaves:
             "schema_version": 1, "recovery_anchor": "S4A_RECONCILE"
         }
 
-        assert resolve_relay_resume_step("t1", node, svc) == "S4a-reconcile"
+        assert resolve_relay_resume_step("t1", node, svc) == "S1-S4a"
 
     def test_relay_resume_is_step_aware_after_accepted_execution(
         self, svc, graph
