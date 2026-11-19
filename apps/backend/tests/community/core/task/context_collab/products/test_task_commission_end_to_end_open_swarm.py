@@ -223,7 +223,12 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
     instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
         ProductInstantiateNewCommand(
             collet=ColletCreateCommand(
-                OWNER.actor, title="AI coding", description=OBJECTIVE
+                initiator_ref=OWNER.actor,
+                title="AI coding",
+                description="AI coding",
+                objective=OBJECTIVE,
+                acceptance_criteria="",
+                resources=()
             ),
             profile_ref=profile.ref,
         ),
