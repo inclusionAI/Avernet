@@ -1,6 +1,6 @@
 """OPEN 广域招募 → 五 Bot 录取 → SWARM 五阶段 → 子 Task / 根 Task 成果验收。
 
-真实 DI、SQLite、L4/L5/G4；复用 Swarm case 的五个 Bot 和执行替身。
+真实 DI、SQLite、L4/L5/G4；本文件显式声明五个 Bot，复用 Swarm 执行替身。
 候选 Bot 自己发现/申请，发布人按本地能力证据筛选；仅模拟身份与计算，
 不验证远端认证、LLM、真实 PR 或持久化调度。角色预绑定不等于 OPEN 录取；
 本 case 显式编排录取后启动，不声称通用 SwarmDriver 会自动执行 OPEN 准入检查。
@@ -118,13 +118,24 @@ from tests.community.core.task.context_collab.products.swarm_coding_support impo
     LocalCodingPlanService,
 )
 from tests.community.core.task.context_collab.products.swarm_execution_support import (
-    AGENTS,
     LocalStageExecutionService,
 )
 
 OWNER = ActorContext(PrincipalRef("human", "coding_owner"), source="api")
 OBJECTIVE = "实现计算器求和并测试后提交 PR 草稿"
-OTHER_AGENTS = (AgentRef("bot", "copywriter"), AgentRef("bot", "unqualified_coder"))
+# 五阶段协作 Agent：按需求分析 → 方案设计 → 编码 → 测试验证 → PR 提交排列。
+AGENTS = (
+    AgentRef("bot", "coding_requirements"),   # 需求分析
+    AgentRef("bot", "coding_design"),         # 方案设计
+    AgentRef("bot", "coding_coding"),         # 编写代码
+    AgentRef("bot", "coding_verification"),   # 测试验证
+    AgentRef("bot", "coding_pr_submission"),  # 提交 PR 草稿
+)
+# 同样参与 OPEN 申请、但因角色或能力证据不匹配而被拒绝的候选 Agent。
+OTHER_AGENTS = (
+    AgentRef("bot", "copywriter"),
+    AgentRef("bot", "unqualified_coder"),
+)
 CANDIDATE_COUNT = len(AGENTS) + len(OTHER_AGENTS)
 
 
