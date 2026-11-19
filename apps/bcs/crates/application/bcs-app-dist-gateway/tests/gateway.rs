@@ -22,10 +22,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-struct Groups;
+#[derive(Default)]
+struct Groups {
+    /// The directory cannot answer: every resolve fails as unavailable.
+    down: AtomicBool,
+}
 #[async_trait]
 impl DistGroupDirectoryPort for Groups {
     async fn resolve(&self, _scope: &TaskScope, group: &GroupId) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
+        if self.down.load(Ordering::SeqCst) {
+            return Err(GroupDirectoryError::Unavailable);
+        }
         if group.0 == "grp-missing" {
             return Err(GroupDirectoryError::NotFound);
         }
@@ -76,11 +83,15 @@ fn me() -> GatewayCaller {
 }
 
 fn gateway_over(p: &Ports, inbox: Arc<dyn InboxProducerPort>) -> DistGateway {
+    gateway_with(p, inbox, Arc::new(Groups::default()))
+}
+
+fn gateway_with(p: &Ports, inbox: Arc<dyn InboxProducerPort>, groups: Arc<Groups>) -> DistGateway {
     let core = DistGatewayCore::new(inbox, p.tasks.clone(), p.sessions.clone(), p.blobs.clone());
     let mut config = DistGatewayConfig::new(64);
     config.snapshot_cover_retry = Duration::from_millis(10);
     config.snapshot_cover_limit = Duration::from_millis(300);
-    DistGateway::new(Arc::new(core), Arc::new(Groups), Arc::new(TestClock), config).unwrap()
+    DistGateway::new(Arc::new(core), groups, Arc::new(TestClock), config).unwrap()
 }
 
 fn gateway(p: &Ports) -> DistGateway {
@@ -691,4 +702,29 @@ async fn a_directory_answer_for_another_group_id_creates_nothing() {
     // The group's own id still works, and creates the session.
     let canonical = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
     assert_eq!(g.get_task(&me(), &grp(), &canonical.tid).await.unwrap().content.status, TaskStatus::Submitted);
+}
+
+#[tokio::test]
+async fn a_retried_first_message_needs_no_directory_once_its_session_is_frozen() {
+    let p = ports();
+    let groups = Arc::new(Groups::default());
+    // The first attempt is admitted, but its response is lost.
+    let inbox = Arc::new(LosesFirstResponse {
+        inner: p.inbox.clone(),
+        lost: AtomicBool::new(false),
+    });
+    let g = gateway_with(&p, inbox, groups.clone());
+    assert!(matches!(
+        g.submit(&me(), message("msg-1", "hello")).await,
+        Err(GatewayError::OutcomeUnknown { .. })
+    ));
+    // The directory is down when the client retries: the frozen session answers.
+    groups.down.store(true, Ordering::SeqCst);
+    let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
+    assert_eq!(g.get_task(&me(), &grp(), &receipt.tid).await.unwrap().content.status, TaskStatus::Submitted);
+    // A genuinely new session still needs the directory.
+    assert_eq!(
+        g.submit(&me(), message("msg-2", "hello")).await,
+        Err(GatewayError::Unavailable { code: "group_directory_unavailable".into() })
+    );
 }

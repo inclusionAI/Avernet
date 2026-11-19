@@ -30,8 +30,18 @@ pub(crate) async fn submit(
         }
         (None, None) => {
             let sid = session_id(&scope, &request.group, &request.message_id, gateway.config.shard_count);
-            let spec = new_spec(gateway, &scope, &request.group, &sid).await?;
-            new_task(gateway, &scope, &request, sid, Some(spec))
+            let spec = match new_spec(gateway, &scope, &request.group, &sid).await {
+                Ok(spec) => Some(spec),
+                // A retry of a first message whose session is already frozen
+                // needs no directory: when the directory cannot answer now,
+                // the stored session is used and the admission is completed
+                // or answered from its record.
+                Err(error) => match gateway.core.session_group(&scope, &sid).await {
+                    Ok(frozen) if frozen == request.group => None,
+                    _ => return Err(error),
+                },
+            };
+            new_task(gateway, &scope, &request, sid, spec)
         }
     };
     let CoreAdmission(receipt) = gateway
