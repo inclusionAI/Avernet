@@ -3,8 +3,8 @@ import type {
   BotHealthCheckTarget,
   BotHealthHistoryItem,
   BotHealthPatch,
+  BotHealthPatchPreview,
 } from '@/domain/botHealthCheck';
-import type { HarnessPreviewResponseDto } from '@/services/backendApi';
 import { botHealthCheckService } from '@/services/botHealthCheck';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 /** 待确认的修复请求：补丁 + 预览接口渲染出的 diff。preview 在预览失败时为空，仅提示错误。 */
 export interface BotHealthPatchFixRequest {
   patch: BotHealthPatch;
-  preview: HarnessPreviewResponseDto | undefined;
+  preview: BotHealthPatchPreview | undefined;
 }
 
 // 对齐老前端 useHarness 的轮询节奏：3s 一次，最长 11 分钟
