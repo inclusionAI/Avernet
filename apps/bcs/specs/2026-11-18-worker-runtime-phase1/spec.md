@@ -282,6 +282,8 @@ Worker 只写 dispatch 意图，不直接调用 Agent，也不把远端恢复算
 
 运行时保持 opt-in。新输出动作和持久内容采用显式格式版本；旧 `Show` 不能默认解释为 AppendText。新协议使用独立 namespace，不与旧 GT 写入方混写。现有存量若需迁移，须另行授权并停写、核对版本和证据；本批不承诺透明在线迁移。
 
+实施兼容性说明：#4145 协调原型的 checkpoint 同样使用数字版本 1，但 `runner_state` 是无 task 归属的 `{format_version,value}`；本批采用 `null | {tid,state}` 及 task 生命周期状态。原型 namespace 不支持直接复用，不能因为数字版本相同而推断布局兼容，也不自动推断 tid 或丢弃旧数据。普通读取先核版本头，并把已知原型布局报告为 `UnsupportedFormat { format: 1 }`，不改写或 seal 该 checkpoint；新启用仍须使用全新 namespace。旧证据保留和离线迁移另行授权。
+
 owner、spec、checkpoint、受理及 effect 证据在首批不自动过期、淘汰或回收。持续运行的历史扫描成本和容量上限必须披露；这不是第三批保留治理已完成的证明。
 
 ## 9. 实施切片与验收

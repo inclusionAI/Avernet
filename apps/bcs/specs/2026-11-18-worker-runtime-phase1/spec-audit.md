@@ -2,7 +2,7 @@
 
 本稿用于复审定位，不是全部验收完成声明。基线固定为 Avernet `8811efbc9751004747451d00c5ea1e6a30a6b224` 中 `apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md`，即 #4144 原文；没有用实施分支后来修改的 SPEC 替换要求。原始三个审计分片检查的实现为 `657e324b1184bad5b5d15e72cb1a1c6c1198b5a2`；本稿另行纳入随后 rebase 后的启动容量和连接池压力补丁及其验证。随后生命周期新增五个target的13项公共组合测试（四target12项并集+quota1项）通过，SPEC/质量审查与五target严格Clippy通过；质量修正后的snapshot race另行1/1通过。第三轮真实PROXY指定控制/输出/监督场景通过，不将其外推为13项全部L3。
 
-截至本稿快照：主要生产逻辑、确定性故障测试和指定的真实 PROXY 组合已存在；启动最大候选证明、实际 provider 封装预算契约、大 AppendText 外置回归和持续连接池压力准入已补齐。G1–G5公共模型主链与quota精确场景均已补并审查通过。第三轮真实PROXY正常回复/重复、70000字节AppendText、独立Cancel、实际SendingUnknown监督回合及晚到确定证据消费通过，取得该场景真实命令/字节观测并清理64个owned keys。没有将全部模型故障断点升级为L3。Singlebox opt-in内存Store+SQLite最终12个instrumented实际进程场景通过，独立SPEC/质量审查通过；按仓库原工具与同ignore配置从merge-base测得changed-line9118/11983=76.091129%，超过未修改的65%门槛。完整远端CI仍待后续结果，不能称全CI绿。OB 实例验证继续 defer。
+截至本稿快照：主要生产逻辑、确定性故障测试和指定的真实 PROXY 组合已存在；启动最大候选证明、实际 provider 封装预算契约、大 AppendText 外置回归和持续连接池压力准入已补齐。G1–G5公共模型主链与quota精确场景均已补并审查通过。第三轮真实PROXY正常回复/重复、70000字节AppendText、独立Cancel、实际SendingUnknown监督回合及晚到确定证据消费通过，取得该场景真实命令/字节观测并清理64个owned keys。没有将全部模型故障断点升级为L3。Singlebox opt-in内存Store+SQLite最终12个instrumented实际进程场景通过，独立SPEC/质量审查通过；按仓库原工具与同ignore配置从merge-base测得changed-line9118/11983=76.091129%，超过未修改的65%门槛。发布候选 `decdab6ea7` 的完整远端 CI 已通过；后续 Review 增量以其自身 PR head 检查为准。OB 实例验证继续 defer。
 
 ## 口径与本轮边界
 
@@ -12,7 +12,7 @@
 - 存储 HA、节点切换时版本/持久写/租约不回退，按用户确认的平台前提记录；本轮没有独立执行真实存储节点故障切换，不以 Worker 接管或客户端断连代替。它不是待实现的 Worker 功能。
 - 真实归档组合目前是公共 `DbPlugin` + SQLite。OB 实例验收按用户授权 defer。Singlebox 内存 Store 被明确授权用于实际 opt-in 进程的功能验收；它不证明 Store 持久重启或节点切换，也不替代既有真实 PROXY 组合。
 - 主逻辑仍归 Avernet。宿主仅拥有存储传输/编码适配、通用资源和命令观测、私有组合与验证。无 SDK 验证替代 PROXY。本稿不含私有 endpoint、租户、凭据或工作树路径。
-- #4144 是原 SPEC PR；实施、验证、生产启用分别报告。原评论应逐条回复章节与证据，讨论保持打开。
+- #4144 是原 SPEC PR；实施、验证、生产启用分别报告。原评论已逐条回复章节与证据，本任务没有改变 resolved 状态；#4144 合入后读取到六条均已 resolved，不能继续称它们仍然打开。
 
 路径简写均相对公共仓库 `apps/bcs/crates/`：`A`=`plugin-api/bcs-store-api`；`C`=`service-api/bcs-service-api`；`M`=`contracts/bcs-dist-model`；`P`=`services/bcs-dist-projection`；`S`=`services/bcs-dist-store`；`W`=`services/bcs-dist-worker`；`T`=`test-support/bcs-test-support`。`W/processor/*` 表示 `W/src/processor/*`，`S/inbox/*` 表示 `S/src/inbox/*`，其他 `src` 同理。测试函数省略 `()`。
 
@@ -141,7 +141,7 @@
 | 6-4 | archive unavailable 保留可恢复 AwaitingResult，不提前 Completed；drive/replay/effects | L2 Archive provider 的 Unknown 测试；Worker failed-outbox parking 测试 L2 L-G3实际Worker archive unavailable→恢复，首次结果不可见且第二task无Runner调用。 | 公共缺口已闭合。 |
 | 6-5 | SaveResult 丢回复按原 ID核完整内容/ref；同 ID改内容冲突；`S/archive/{mod,sql}.rs` | L2 `ambiguous_insert_resolves_exact_content_without_repeating_write`、`unresolved_write_is_unknown_and_retry_is_same_identity`、`concurrent_same_identity_has_one_immutable_winner`、`absent_row_after_unclassified_failure_is_not_definite_nonapplication` L2 L-G3实际SQLite成功后丢回复、完整source+record重试一致。 | 公共Worker故障链已补；不是OB实例验证或跨进程crash测试。 |
 | 6-6 | archive后、第二commit前crash恢复同ref；隔离不改 frozen结果 | L2 `takeover_after_archive_replays_the_frozen_result_without_running_the_reducer`、`quarantine_and_takeover_after_archive_preserve_the_first_frozen_completed_result` | 旧 L3 主要是 checkpoint 成功丢回包；不是这个特定 archive→second commit cut 的证据 |
-| 6-7 | 默认 DbPlugin；scope+tid唯一、Blob ID/digest；orphan留存；新增迁移 | L2 `blobs_verify_bytes_and_preserve_identity_after_provider_restart`、`archive_is_scope_and_namespace_isolated_and_rejects_dangling_refs`、`result_requires_persisted_exact_effect_and_replays_after_head_advances`；L3 PROXY+SQLite reopen Singlebox12个最终instrumented实际进程场景已通过（memoryStore+existingSQLite，见SB-L2）。 | OB实例defer；Singlebox本地changed-line门槛已通过；完整远端CI待结果。公共archive单测不代表所有DB验收。 |
+| 6-7 | 默认 DbPlugin；scope+tid唯一、Blob ID/digest；orphan留存；新增迁移 | L2 `blobs_verify_bytes_and_preserve_identity_after_provider_restart`、`archive_is_scope_and_namespace_isolated_and_rejects_dangling_refs`、`result_requires_persisted_exact_effect_and_replays_after_head_advances`；L3 PROXY+SQLite reopen Singlebox12个最终instrumented实际进程场景已通过（memoryStore+existingSQLite，见SB-L2）。 | OB实例defer；Singlebox本地changed-line门槛已通过；远端 `decdab6ea7` CI 已通过，后续 Review 增量需独立检查。公共archive单测不代表所有DB验收。 |
 
 ## §7.1 控制输入与远端监督
 
@@ -223,7 +223,7 @@
 
 | 编号 | 原要求；生产实现 | 已验证 | 尚缺或限制 |
 | --- | --- | --- | --- |
-| 8.3-1 | runtime opt-in，显式format，旧Show不默转AppendText | L0新模型/Processorports；L1projection/modeltests；L3显式测试fixture | Singlebox实际opt-in host的12个instrumented进程场景与本地changed-line门槛通过；完整远端CI待结果；不得称生产默认已切换 |
+| 8.3-1 | runtime opt-in，显式format，旧Show不默转AppendText | L0新模型/Processorports；L1projection/modeltests；L3显式测试fixture | Singlebox实际opt-in host的12个instrumented进程场景与本地changed-line门槛通过；远端 `decdab6ea7` CI 已通过，后续 Review 增量需独立检查；不得称生产默认已切换 |
 | 8.3-2 | 独立namespace、不与旧GT混写 | KeyLayout新protocolprefix；L3每次owned namespace+exact-key清理 | 不做tenant-wide扫描/删除；本稿不公开私有namespace |
 | 8.3-3 | 存量迁移另授权，停写核证，不承诺透明在线迁移 | L0未引入旧协议透明迁移 | 正确排除，非本期缺口；新增DB schema迁移与存量协议迁移不可混称 |
 | 8.3-4 | owner/spec/checkpoint/admission/effect首批不自动TTL/evict/GC | L0protocol；L3persistent strictlease、lost disposablehint恢复 | lease逻辑expiry不等于删除tombstone；平台保留前提独立记录 |
@@ -235,7 +235,7 @@
 | --- | --- | --- | --- |
 | 9.1-1A | 受理/修复/调度/reader/processor/committer/Document CAS，故障不丢逻辑输入、不重复推进 | 生产实现与大量L1/L2存在；L3Document conformance、两Worker指定unknown/takeover已通过 公共补丁和指定L3证据保持。 L3 P-L3新增指定功能运行与实际成本观测。 | 不能由此升级为全部受理故障cut均L3；完整CI仍未绿。 |
 | 9.1-1B | effects/Dispatch/TaskFeed/projector/Result/Blob，重放收敛/完整恢复/归档再终态 | 生产实现与L1/L2、指定L3组合存在；大AppendText漏测已补 新增L-G2/L-G3/L-G4公共组合与完整Blob写量通过。 L3 P-L3补正常回复输出、70000B大Append、immutable archive与late不变。 | archive不可用/terminalpublish故障与snapshot race仍L2；OB defer。 |
-| 9.1-1C | 控制/timeout/supervision/isolation/coordination/resources，多Worker故障与交接 | 生产实现、L2与指定L3隔离恢复存在；startupcapacity/pressure补丁通过独立审查 新增L-G1..L-G5公共模型组合12测试通过、独立SPEC与质量审查通过。 公共生命周期+quota13项通过；L3 P-L3正常控制与SendingUnknown监督已通过。 | Singlebox最终12项与本地changed-line门槛通过；完整远端CI待结果，不宣称第一批已生产启用。 |
+| 9.1-1C | 控制/timeout/supervision/isolation/coordination/resources，多Worker故障与交接 | 生产实现、L2与指定L3隔离恢复存在；startupcapacity/pressure补丁通过独立审查 新增L-G1..L-G5公共模型组合12测试通过、独立SPEC与质量审查通过。 公共生命周期+quota13项通过；L3 P-L3正常控制与SendingUnknown监督已通过。 | Singlebox最终12项与本地changed-line门槛通过；远端 `decdab6ea7` CI 已通过，后续 Review 增量需独立检查，不宣称第一批已生产启用。 |
 | 9.1-边界 | 三切片同一批次；测试Runner显式装配，不生产fallback；真实群Runner/Gateway/Connector第二批 | 边界保持；Singlebox按用户允许memoryStore+SQLite，只作为实际opt-in测试host | 实际群业务/完整远端链路不是本期缺口；切片不能独立称可上线 |
 
 ## §9.2 必须测试矩阵的证据与差距
@@ -272,9 +272,9 @@
 | 9.3-1 | 公共确定性、真实providerconformance、多Worker组合三层分开 | 已按L1/L2/L3逐条记录；Review PASS与测试通过也分开，不用静态审查制造执行证据 |
 | 9.3-2 | StrictLease/create/CAS/failover分别证据 | Lease与Document create/CAS各有真实conformance；HA是用户确认平台前提，本轮未做节点failover，不互相推导 |
 | 9.3-3 | provider版本/命令/配置/限制在宿主记录 | 已有源码/客户端配置/命令语义记录；新transport统计局部验证。服务端build/version若平台不公开，应记unknown/平台提供，不推测版本，不在公共稿复制私有endpoint |
-| 9.3-4 | 未通过的provider只报告公共完成；failclosed不是组合完成 | Capacity/pool声明缺失拒启是安全行为，不等于实际组合验收；公共G1–G5/quota与指定新PROXY控制/输出计量已补，但完整远端CI与最终Reviewer交付仍待父任务推进，因此本稿不宣称已部署或全CI通过 |
+| 9.3-4 | 未通过的provider只报告公共完成；failclosed不是组合完成 | Capacity/pool声明缺失拒启是安全行为，不等于实际组合验收；公共G1–G5/quota与指定新PROXY控制/输出计量已补，发布候选 `decdab6ea7` 的完整 CI 已通过且六条原评论已逐条回复；后续 Review 修复仍按实际提交验收，不宣称已部署 |
 | 9.3-5 | 不承诺长期容量/固定恢复时延/特定吞吐 | DEV耗时只诊断；容量压力本轮排除，生产profile仍未认证；不从计量功能推出生产SLO |
-| 9.3-6 | 原PR仅proposed文档，文档/实现/验证/部署分别报告 | 本稿明确原881提案基线与后续实现事实；未部署、未生产启用。Reviewer逐条回复另行执行，讨论不关闭 |
+| 9.3-6 | 原PR仅proposed文档，文档/实现/验证/部署分别报告 | 本稿明确原881提案基线与后续实现事实；未部署、未生产启用。原评论六条均已回复，本任务不改变讨论 resolved 状态 |
 
 ## G1–G5 公共补证与剩余宿主交付
 
@@ -286,8 +286,8 @@
 | G4 独立终结取消链 | Runner创建≥2dispatch，含SendingUnknown/已有terminal；终结器request_cancel首次调用可核已提交checkpoint/effectproof；部分生效丢回复后接管，同effect/requestID无重复；必要意图确认再localterminal；changedbody冲突Blocked且不跳过、Blocked无新授权 | L2 L-G4实际Worker主链已通过；真实changedbody契约、Blocked禁授权与已终态dispatch核证依赖既有专项，不冒称新用例全部独立覆盖 |
 | G5 远端Unknown实际监督 | localterminal后至少一轮due→reschedule仍Unknown，没伪造terminal/criticalfailure，持久due保留；holderUnknown不接管；随后definiteTerminal criticalreturn让Worker实际消费，Runner次数/archive不变；旧revision不盖新cancel | L2 L-G5已通过；L3 P-L3实际SendingUnknown持久回合/late消费通过；AcceptedCancelUnknown、holderUnknown与stale revision仍用已有L2专项 |
 | 观测实跑 | 新PROXY transport总命令/RESP请求响应bytes/latency/conflict/cancel；场景分段；snapshot/event/Blob/SQLite逻辑端口读写分开，说明 attempted/confirmed、重复重试及唯一对象口径；这些 payload bytes 不能冒称 SQL wire bytes | 已实现+scripted局部验证；第三轮P-L3完整通过并取得本指定场景分类记录。不是压力测试，不推导生产容量/性能 |
-| Singlebox与CI | 实际opt-in host接公共Worker，显式memory Store mock + existingSQLiteArchive；相关功能/CI完成，保持默认不启用 | 12个instrumented实际进程场景、独立SPEC/质量及本地changed-line76.091129%通过，完整远端CI待结果；无新SQLiteStoreprovider，无持久Store重启证明 |
-| 知识与Reviewer回复 | durable说明同步DocumentCas采用、≤1SetStatus、providercapacity与hostwrapper义务、legacyattempt字节上限、pressure事实/策略；原评论逐条回复变化+SPEC章节+证据层级 | 父任务负责最终同步/审查/回复；不得提前关闭原讨论 |
+| Singlebox与CI | 实际opt-in host接公共Worker，显式memory Store mock + existingSQLiteArchive；相关功能/CI完成，保持默认不启用 | 12个instrumented实际进程场景、独立SPEC/质量及本地changed-line76.091129%通过，远端 `decdab6ea7` CI 已通过，后续 Review 增量需独立检查；无新SQLiteStoreprovider，无持久Store重启证明 |
+| 知识与Reviewer回复 | durable说明同步DocumentCas采用、≤1SetStatus、providercapacity与hostwrapper义务、legacyattempt字节上限、pressure事实/策略；原评论逐条回复变化+SPEC章节+证据层级 | 六条原评论已逐条同步；本任务未改变讨论 resolved 状态；后续 Review 修订另行记录 |
 
 ## 已完成补丁的可复核运行记录
 
@@ -356,7 +356,7 @@ transport观测在业务结束、cleanup前取样：started5135/replies5004/conf
 
 **已补的明确实现缺口**：生产启动最大合法候选/完整provider封装证明、拒绝不可能容量与缺失声明、≤1SetStatus、recovery历史编码限额、retry≤5s、大AppendText外置与恢复回归、持续共享普通池压力只反压新Start。
 
-**尚未关闭的本轮交付**：后续完整远端CI、最终文档/评论逐条证据同步。Singlebox最终12项instrumented场景和本地changed-line门槛已通过。G1–G5公共模型主链、quota精确覆盖与指定真实PROXY正常控制/输出/监督计量已通过；其余精确故障仍按实际L1/L2层级报告，不声称全部L3。**OB实例defer，历史容量/持续负载本地验收按用户排除，HA按确认的平台前提记录**；后两者不能被写为本轮实测通过，也不应作为继续压测或请求环境的理由。
+**交付状态**：发布候选 `decdab6ea7` 的完整远端 CI 已通过，原评论已逐条回复。后续 Review 修复的精确证据见文末，必须区分候选 SHA。Singlebox最终12项instrumented场景和本地changed-line门槛已通过。G1–G5公共模型主链、quota精确覆盖与指定真实PROXY正常控制/输出/监督计量已通过；其余精确故障仍按实际L1/L2层级报告，不声称全部L3。**OB实例defer，历史容量/持续负载本地验收按用户排除，HA按确认的平台前提记录**；后两者不能被写为本轮实测通过，也不应作为继续压测或请求环境的理由。
 
 
 ## 最终本地组合验证（发布前）
@@ -368,4 +368,23 @@ transport观测在业务结束、cleanup前取样：started5135/replies5004/conf
 - CI编排/产物/取消回归46项通过；此后增加的清理失败回归所在4项全部通过。真实子进程启动无响应/错误ready/非法JSON均由宿主回收；产物先标失败再清profile，清理失败不能保留旧passed。
 - Host严格Clippy被同package既有build_support/git_metadata.rs collapsible_if阻断；不降gate。未改lint配置的诊断检查中新companion bin无warning，既有BCS lib警告另列。其他本次Worker/Store/adapter目标严格检查按前述记录。
 
-发布状态：生产补齐已本地提交；companion/CI/审计增量待完成最终复审后发布。GitHub当前旧版本CI结果不代表此本地候选；推送后仍需完整必需检查。OCB gitlink发布须满足公共提交的GitHub/镜像及release可达要求，不能以本机编译代替集成。
+发布状态：生产补齐、companion/CI/审计已在 PR #4245 发布为 `decdab6ea7`，该 SHA 的全部检查成功或 neutral。后续 Review 修复在本稿中另列；其最终结果以 PR 当前 head 检查为准。OCB gitlink发布须满足公共提交的GitHub/镜像及release可达要求，不能以本机编译代替集成。
+
+## 已发布候选的远端 CI 与后续 Review 修订
+
+`decdab6ea7c780d1957b5a306388b9cdc21cbcbc` 的 [BCS 单测与 MySQL 验证](https://github.com/inclusionAI/Avernet/actions/runs/44479260852)通过：9,196 passed、69 skipped；真实 MySQL 完整迁移链及后续所有 MySQL 契约步骤成功，line/changed-line 为89.49%/91.32%，原门槛不变。它补齐了早期只执行048 DDL、后续被旧版本断言阻断的证据，不能继续把完整链列为未执行。
+
+同 SHA 的 [Singlebox](https://github.com/inclusionAI/Avernet/actions/runs/44479260997)通过：line61.33%、method54.47%、changed-line9139/11983=76.27%，183/183端点、67/67 CLI 命令及必需产物验证通过。原65%变更行门槛未降低。该远端结果与前述本地局部76.09%是不同测量，不相互替换。
+
+PR #4245 后续 Review 指出的生命周期预算与旧 checkpoint 布局另作如下修订：
+
+- **§8.2／§8.3 生命周期预算。** history entries/bytes、Session额度及Inbox额度都不因消费或完成而释放。可靠受理至少预留两单位，物理重试另计；4096并不等于4096个任务。正常额度耗尽先背压新Start，修复/控制预留也耗尽后，固定profile内修复可暂停；义务和Unknown状态不丢弃，不宣称无限故障仍能装入有限存储。
+- **可恢复的协调扩容。** 去掉任意的4096历史条数上限，保留原有效4096 Session结构上限及文档硬预算；先停旧writer、验证更大profile，再以同namespace恢复所有实例和maintenance。不得清计数、删除证据或把未决输入换namespace重投。`tests/inbox_retention.rs` 用一个真实公共意图及直接设置的边界计数证明：满额时canonical不变，扩容后仅maintenance即可完成原意图，没有生成大量历史。
+- **扫描结构上限。** 放大配置不能令持久 `Scan.pending` 超出单文档。启动按最大宽度空Scan元数据222B和每个u64成员最多21B推导上限：`222 + 21 × max_history_entries <= max_document_bytes`。默认960KiB最多46,800单位；8192可用，超过推导上限拒启。纯编码及构造边界检查不代表存储容量认证。
+- **观测与算术。** `MaintenanceObservation.capacity` 给出实际计费单位和剩余history/normal/Session/Inbox预算，复用原有两次读取。新Start的已有健康检查在shard额度消耗约80%时发有频率限制的结构化告警，不增加存储往返。极端字节计数使用checked_add，溢出拒绝且不改权威状态。
+- **§7.2／§8.3 格式识别。** 普通checkpoint读取先检查版本头，再解码body；未来版本和#4145原型无task归属的旧RunnerState布局明确返回UnsupportedFormat，不推断tid、不改写或seal。旧数字版本1的原型namespace不支持直接复用，已在SPEC与协调README中说明。23项coordination回归通过，新增用例核验读取/acquire失败后内容与版本不变；独立SPEC/质量复审通过。
+- **指定PROXY功能证据。** 新 `proxy_retained_repair_and_checkpoint_format` 用生产PROXY、一个真实持久意图、pre-append故障和直接设置的预算计数，验证满额时保留Unknown、同namespace扩容后后台修复完成、旧/未来格式拒绝且无写入。1/1通过，清理11个owned keys。计数是边界fixture，不是实际写满存储；未做压力测试、SDK调用或生产容量认证。OB仍defer。
+
+以上Review增量与已发布候选的CI区分记录；其发布后的最终检查以[实施PR当前head](https://github.com/inclusionAI/Avernet/pull/4245/checks)为准。本任务已在#4144六条原评论下逐条回复，未执行resolve操作；该SPEC PR合并后的读取显示六条均resolved，这是观察到的外部状态，不是本任务关闭讨论。
+
+Review修复后的六包合并回归：71 suites／433 passed／0 failed／0 ignored；Inbox定向14项是其中子集，不相加。Store全target严格Clippy、两组补丁的独立SPEC及质量复审通过。加入扫描上限后，单条输入PROXY场景再次1/1通过，另一个新namespace的11个owned keys均清理；两次小场景不能合并解释为负载或容量认证。
