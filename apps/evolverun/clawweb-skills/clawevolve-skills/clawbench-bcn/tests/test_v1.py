@@ -111,8 +111,9 @@ class V1Tests(unittest.TestCase):
                     services.start(messages.append)
                 services.stop()
                 run.assert_not_called()
-            self.assertIn('./singlebox/singlebox.sh setup backend bcsfuse bcs', messages)
-            self.assertIn('./singlebox/singlebox.sh start backend bcsfuse bcs', messages)
+            self.assertEqual([r['service'] for r in services.records], ['backend', 'bcs'])
+            self.assertIn('./singlebox/singlebox.sh setup baas backend bcs', messages)
+            self.assertIn('./singlebox/singlebox.sh start baas backend bcs', messages)
             self.assertTrue(all(not r['owned'] for r in services.records))
 
     def test_agent_finalization_preserves_timeout(self):
