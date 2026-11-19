@@ -12,8 +12,8 @@ Base from core/base.py.
 from __future__ import annotations
 
 from agentclaw.community.core.agentswarm.domain.models.ids import (
-    AgentId, ArtifactKey, BotId, DispatchId, EpochMillis, EventId,
-    IdempotencyKey, MessageId, ModelId, RoundId, RunId, SecretRef,
+    AgentDefinitionId, AgentId, ArtifactKey, BotId, DispatchId, EpochMillis,
+    EventId, IdempotencyKey, MessageId, ModelId, RoundId, RunId, SecretRef,
     ResultId, TenantId, spawn_digest,
 )
 from agentclaw.community.core.agentswarm.domain.models.enums import (
@@ -37,13 +37,13 @@ from agentclaw.community.core.agentswarm.domain.models.specs import (
     WaitDecision,
 )
 from agentclaw.community.core.agentswarm.domain.models.entities import (
-    Agent, GuardEvent, Message, NameAliasMap, AgentResult, Round, Run,
-    RunPage,
+    Agent, AgentDefinition, AgentDefinitionPage, GuardEvent, Message,
+    NameAliasMap, AgentResult, Round, Run, RunPage, RunAgentRef,
 )
 
 __all__ = [
-    "RunId", "AgentId", "TenantId", "DispatchId", "MessageId", "ResultId",
-    "RoundId", "EventId", "ArtifactKey", "ProviderKind", "ModelId", "BotId",
+    "RunId", "AgentId", "AgentDefinitionId", "TenantId", "DispatchId",
+    "MessageId", "ResultId", "RoundId", "EventId", "ArtifactKey", "ProviderKind", "ModelId", "BotId",
     "IdempotencyKey", "SecretRef", "EpochMillis", "spawn_digest",
     "StructuredOutput", "FinalAnswer", "MessageContent", "GuardDetails",
     "RunStatus", "AgentStatus", "AgentKind", "BotState", "MessageRole",
@@ -57,5 +57,6 @@ __all__ = [
     "Decision",
     "RequestMetadata", "AgentSpec", "BotCreateSpec", "Run", "Agent", "Message",
     "AgentResult", "Round", "GuardEvent", "NameAliasMap",
+    "AgentDefinition", "AgentDefinitionPage", "RunAgentRef",
     "NonRetryableProvisioningError",
 ]

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Protocol, runtime_checkable
 
 from agentclaw.community.core.agentswarm.domain.models import (
+    AgentDefinition, AgentDefinitionId, AgentDefinitionPage, RunAgentRef,
     AgentKind, AgentSpec, AgentStatus, GuardKind, ProviderKind,
     RequestMetadata, Run,
     RunOptions, RunPage, RunStatus,
@@ -33,6 +34,37 @@ class SubmitRunRequest:
     ``None`` keeps the ordinary flow, where each Bot agent applies for its own
     passport and may park at the human authorization gate.
     """
+    agent_refs: tuple[AgentDefinitionRef, ...] = ()
+    """The roster as stored-definition references.
+
+    Supply either ``agents`` (inline, unchanged) or ``agent_refs``, never both.
+    References are resolved to specs at submit, before any run row is written,
+    and the resolved provenance is recorded beside the catalog snapshot.
+    """
+
+
+@dataclass(frozen=True)
+class AgentDefinitionRef:
+    """One reference to a stored agent definition.
+
+    ``alias`` becomes the catalog name the orchestrator spawns under; without
+    one the definition's own name is used.
+    """
+
+    definition_id: AgentDefinitionId
+    alias: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedRoster:
+    """A submit's roster after reference resolution.
+
+    ``specs`` is what the run executes; ``refs`` is the provenance to record
+    beside the catalog snapshot (empty for an inline roster).
+    """
+
+    specs: tuple[AgentSpec, ...]
+    refs: tuple[RunAgentRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -126,6 +158,28 @@ class BotAuthorizationSource(Protocol):
         """The gate descriptor for a (owner, bot) creation, or ``None`` when
         no durable creation payload exists for it. Must not raise on
         infrastructure errors — callers degrade, never fail the read."""
+        ...
+
+
+@runtime_checkable
+class ManifestDocumentValidator(Protocol):
+    """Write-time validation seam for a definition's manifest document.
+
+    Definitions are human-authored configuration, so their manifest is checked
+    **once, when written**, rather than on every run that uses it. The grammar
+    is owned by the platform's manifest preflight, which the swarm core may not
+    import (D17/D35), so this seam carries only the verdict across the boundary.
+
+    Declared required rather than optional: a definition write is a promise that
+    the document was accepted, so a profile that cannot supply this seam must
+    refuse definition writes rather than store unvalidated manifests.
+    """
+
+    @abstractmethod
+    def validate_document(self, document: str) -> None:
+        """Raise :class:`DefinitionManifestInvalid` when the document is
+        refused; return normally when it is acceptable. An empty document
+        means "no manifest" and is always acceptable."""
         ...
 
 
@@ -289,6 +343,13 @@ class RunDetail:
     agents: tuple[AgentDetailItem, ...]
     rounds: tuple[RoundDetailItem, ...]
     guards: tuple[GuardEventDetailItem, ...]
+    agent_refs: dict[str, RunAgentRef] = field(default_factory=dict)
+    """Definition provenance, keyed by catalog name.
+
+    One entry per catalog that came from a stored definition; empty for an
+    inline roster. Relating to the entry (not the spawned instance) is what lets
+    a run that never spawned still report where it came from.
+    """
 
 
 class AgentSwarmRunNotFoundError(Exception):
@@ -337,6 +398,57 @@ class IdentitySourceInvalid(Exception):
         # supplies the actionable wording from ``reason`` when none came with
         # the refusal.
         super().__init__(message or f"identity source {bot_id!r} is not usable")
+
+
+class AgentReferenceUnresolved(Exception):
+    """A submit named a definition that cannot supply its roster (422-class).
+
+    Covers all three indistinguishable cases deliberately: absent, deleted, and
+    owned by someone else. They answer alike so the id space cannot be probed,
+    and the whole submit is refused rather than a partial roster executed.
+    """
+
+    def __init__(self, definition_id: str) -> None:
+        self.definition_id = definition_id
+        super().__init__(
+            f"agent definition {definition_id!r} is not available"
+        )
+
+
+class DefinitionManifestInvalid(Exception):
+    """A definition's manifest document was refused by the platform preflight.
+
+    Raised at write time, never at submit: an accepted definition is a promise
+    that its document was valid when stored. ``message`` carries the platform's
+    own diagnostic so the caller can fix the document.
+    """
+
+    def __init__(self, message: str = "") -> None:
+        self.message = message
+        super().__init__(message or "manifest document was rejected")
+
+
+class DefinitionNameConflict(Exception):
+    """The caller already owns a live definition with this name (409-class)."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"a live definition named {name!r} already exists")
+
+
+class DefinitionRowConflict(Exception):
+    """The version the caller was editing is no longer the live one (409-class).
+
+    A definition version is a row; an edit carries the row id it read. When
+    that row has been superseded by a concurrent edit the write is refused
+    rather than stacked on top of it, and no version is created.
+    """
+
+    def __init__(self, row_id: int) -> None:
+        self.row_id = row_id
+        super().__init__(
+            f"definition version {row_id} is no longer the live one"
+        )
 
 
 class TenantRunLimitExceeded(Exception):
@@ -455,3 +567,41 @@ class AgentSwarmServiceProtocol(Protocol):
 
     @abstractmethod
     def content_classification(self, run_id: str, tenant: str) -> dict[str, int] | None: ...
+
+    # ── agent definitions (per-user; every call carries the caller's owner id) ──
+
+    @abstractmethod
+    def create_definition(
+        self, *, tenant: str, owner_id: str, name: str, role: str = "",
+        instructions: str = "", kind: AgentKind = AgentKind.LLM,
+        model: str | None = None, engine: str = "",
+        bot_type: str = "personal", manifest_document: str = "",
+    ) -> AgentDefinition: ...
+
+    @abstractmethod
+    def get_definition(self, definition_id: AgentDefinitionId, tenant: str,
+                       owner_id: str) -> AgentDefinition | None: ...
+
+    @abstractmethod
+    def list_definitions(self, tenant: str, owner_id: str,
+                         name_filter: str | None = None,
+                         page: int = 1, page_size: int = 20
+                         ) -> AgentDefinitionPage: ...
+
+    @abstractmethod
+    def list_definition_versions(self, definition_id: AgentDefinitionId,
+                                 tenant: str,
+                                 owner_id: str) -> list[AgentDefinition]: ...
+
+    @abstractmethod
+    def update_definition(
+        self, *, definition_id: AgentDefinitionId, tenant: str, owner_id: str,
+        expected_row_id: int, name: str, role: str = "",
+        instructions: str = "", kind: AgentKind = AgentKind.LLM,
+        model: str | None = None, engine: str = "",
+        bot_type: str = "personal", manifest_document: str = "",
+    ) -> AgentDefinition: ...
+
+    @abstractmethod
+    def delete_definition(self, definition_id: AgentDefinitionId, tenant: str,
+                          owner_id: str) -> int: ...
