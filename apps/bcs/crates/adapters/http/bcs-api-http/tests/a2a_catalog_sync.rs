@@ -75,7 +75,7 @@ async fn v1_mutations_publish_to_fuse_and_rejected_writes_do_not() {
     let published=tokio::time::timeout(std::time::Duration::from_secs(3),rx.recv()).await.unwrap().unwrap();
     assert_eq!(published.0,id);
     assert_eq!(published.1["card"]["name"],"Catalog Agent");
-    assert_eq!(published.1["card"]["description"],"Card description\nbilling");
+    assert_eq!(published.1["card"]["description"],"Card description");
     assert_eq!(published.1["card"]["skills"][0]["id"],"query");
     assert_eq!(published.1["card"]["skills"][0]["description"],"Queries");
     assert_eq!(published.1["card"]["domains"],json!(["billing"]));
