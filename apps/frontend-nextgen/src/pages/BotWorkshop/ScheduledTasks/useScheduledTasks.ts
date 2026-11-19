@@ -20,8 +20,8 @@ export function useScheduledTasks(
 ) {
   const identity = useBotWorkshopRequestIdentity();
   const client = useMemo(
-    () => createRoutineClient(botId, ownerId, identity.userId || ''),
-    [botId, ownerId, identity.userId],
+    () => createRoutineClient(botId, ownerId, identity.userId || '', target.runtime_stage || undefined),
+    [botId, ownerId, identity.userId, target.runtime_stage],
   );
   const [context, setContext] = useState<RoutineContext>();
   const [tasks, setTasks] = useState<ManagedRoutine[]>([]);
@@ -123,7 +123,8 @@ export function useScheduledTasks(
     }
   }, [client, lockBotType, lockOwner]);
   useEffect(() => {
-    if (!identity.ready || !botId || !context?.can_manage) return;
+    // 个人 Bot 与老前端一致不做编辑锁检查；锁轮询只针对可管理的服务 Bot。
+    if (!identity.ready || !botId || !context?.can_manage || context?.bot_type !== 'service') return;
     let active = true;
     const check = () => {
       if (active)
@@ -139,7 +140,7 @@ export function useScheduledTasks(
       clearInterval(timer);
       window.removeEventListener('focus', check);
     };
-  }, [botId, identity.ready, context?.can_manage, refreshLock]);
+  }, [botId, identity.ready, context?.can_manage, context?.bot_type, refreshLock]);
   const ownsLock = useCallback(
     (value?: RoutineLock) =>
       Boolean(
@@ -149,23 +150,29 @@ export function useScheduledTasks(
       ),
     [identity.userId],
   );
-  const editable = Boolean(context?.can_manage && ownsLock(lock));
+  // 个人 Bot 不检查编辑锁，可管理即可编辑；服务 Bot 必须持锁。
+  const editable = Boolean(context?.can_manage) && (botType !== 'service' || ownsLock(lock));
   async function mutate(work: (current: RoutineContext) => Promise<OperationResult>) {
     if (busyRef.current) throw new Error('操作处理中，请稍后');
     busyRef.current = true;
     setBusy(true);
     try {
-      const [next, currentLock] = await Promise.all([client.context(), refreshLock()]);
+      // 个人 Bot 不查锁（loadRoutineLock 会拒绝非服务 Bot）；服务 Bot 变更前须确认持锁。
+      const [next, currentLock] = await Promise.all([
+        client.context(),
+        botType === 'service' ? refreshLock() : Promise.resolve(undefined),
+      ]);
       if (currentClient.current !== client) throw new Error('Bot 或登录身份已切换，请重新操作');
       const current = addReportedTargets(next, rowsRef.current, identity.userId);
       setContext(current);
       if (!current.can_manage) throw new Error('当前账号没有定时任务管理权限');
-      if (!ownsLock(currentLock)) throw new Error('当前未持有 Bot 编辑锁，请到 Bot 列表获取后重试。输入已保留');
+      if (current.bot_type === 'service' && !ownsLock(currentLock))
+        throw new Error('当前未持有 Bot 编辑锁，请到 Bot 列表获取后重试。输入已保留');
       const result = await work(current);
       await load();
       return result;
     } catch (reason) {
-      void refreshLock().catch(() => setLock(undefined));
+      if (botType === 'service') void refreshLock().catch(() => setLock(undefined));
       throw reason;
     } finally {
       busyRef.current = false;
@@ -190,7 +197,7 @@ export function useScheduledTasks(
       await Promise.all([
         load(),
         refreshContext(),
-        context?.can_manage ? refreshLock().catch(() => undefined) : Promise.resolve(),
+        context?.can_manage && botType === 'service' ? refreshLock().catch(() => undefined) : Promise.resolve(),
       ]);
     },
     loadModels,

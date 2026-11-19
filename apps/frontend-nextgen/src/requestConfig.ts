@@ -1,5 +1,6 @@
 import type { RuntimeRequestConfig } from '@/adapters/request';
 import { defaultRequestAdapter } from '@/adapters/request';
+import { resolveApiUrl } from '@/services/backendApi/apiBaseUrl';
 import { resolveAuthFailureDisposition } from '@/services/backendApi/authFailurePolicy';
 import { AceLoginRedirectError } from '@/services/backendApi/httpClient';
 import { isEnvelopeFailure } from '@/services/backendApi/types';
@@ -133,6 +134,9 @@ export const request: RequestConfig = {
       const adapted = defaultRequestAdapter(config, { platform: getPlatform() });
       return {
         ...adapted,
+        // 与通道 B(httpClient)共用同一 URL 变体接缝:Open Core 恒等,
+        // 内部 Overlay 注册绝对地址改写规则后两通道行为一致。
+        url: typeof adapted.url === 'string' ? resolveApiUrl(adapted.url) : adapted.url,
         headers: {
           ...adapted.headers,
         },
