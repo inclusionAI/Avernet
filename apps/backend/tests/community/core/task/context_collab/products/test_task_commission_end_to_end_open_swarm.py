@@ -350,7 +350,7 @@ def _create_product_profile():
                     ),
                     MethodTemplate(
                         get_profile("Swarm", "0.2"),
-                        policy=SwarmMethodPolicy(PLAN_SERVICE),
+                        policy=SwarmMethodPolicy("common_task_plan"),
                     ),
                 ),
                 relations=(

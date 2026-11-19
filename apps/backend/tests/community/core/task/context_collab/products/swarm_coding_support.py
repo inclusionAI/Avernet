@@ -27,7 +27,7 @@ ARTIFACTS = (
     "test-report.json",
     "pr-draft.json",
 )
-PLAN_SERVICE = "mock.ai_coding.plan/1"
+PLAN_SERVICE = "common_task_plan"
 
 
 class LocalCodingPlanService:
