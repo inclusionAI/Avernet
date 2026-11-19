@@ -493,6 +493,9 @@ pub async fn verify(
 }
 
 /// Cross-viewer discovery/collaboration visibility pinned before paging.
+/// Shared support module: exercised from bcs-bot-store's own contract
+/// suites; other includers (e.g. bcs-admin chain tests) only use `verify`.
+#[allow(dead_code)]
 pub async fn verify_viewer_visibility(
     repo: &dyn BotControlPlaneRepoPort,
     bots: &dyn BotRepoPort,

@@ -297,7 +297,7 @@ async fn config_read_failure_fails_closed() {
     assert!(transport.delivered.lock().await.is_empty());
 
     let db = sqlite_db().await;
-    let (gate, transport) = gate_with(db).await;
+    let (gate, _transport) = gate_with(db).await;
     let result = gate.deliver(command("ghost")).await.expect("pass-through");
     assert!(result.delivered, "unknown target is the transport's concern");
 }

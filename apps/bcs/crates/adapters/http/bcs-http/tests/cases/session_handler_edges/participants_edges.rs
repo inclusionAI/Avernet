@@ -22,17 +22,6 @@ fn mode_of(body: &serde_json::Value, bot_uuid: &str) -> Option<String> {
         .and_then(|p| p["mode"].as_str().map(str::to_string))
 }
 
-fn scope_of(body: &serde_json::Value, bot_uuid: &str) -> Option<String> {
-    body["participants"]
-        .as_array()
-        .and_then(|participants| {
-            participants
-                .iter()
-                .find(|p| p["bot_uuid"] == bot_uuid)
-        })
-        .and_then(|p| p["message_view_scope"].as_str().map(str::to_string))
-}
-
 // ----- remaining store / notifier edge paths ----------------------------
 
 #[tokio::test]

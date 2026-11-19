@@ -31,7 +31,7 @@ use bcs_api_http::{
 };
 use bcs_bot_store::MemoryBotRepo;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, RegisterService,
+    ApplicationError, RegisterService,
 };
 // The Noop service impls live in register_support; the
 // trait items they implement are referenced there.

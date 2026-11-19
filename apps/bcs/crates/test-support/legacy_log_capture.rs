@@ -1,6 +1,9 @@
 // Shared by logging regression tests. Run in a child because tracing permanently
 // disables its legacy fallback after any subscriber has been installed. This
 // keeps the tests independent of libtest ordering as well as nextest isolation.
+// Each includer exercises its own subset of this harness; unused-in-one-includer
+// items stay available for the others (same pattern as flow_test_support.rs).
+#![allow(dead_code)]
 use std::sync::Mutex;
 use tracing::log::{Level, LevelFilter, Log, Metadata, Record};
 

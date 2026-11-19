@@ -18,7 +18,7 @@ use bcs_service_api::port::repo::{
 use bcs_service_api::{
     BotRegistryCoreService, BotControlPlaneCoreService, ProviderAuthMode, ProviderCoreService,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderCredentialRepoPort,
-    ProviderManagementService, RegisterProviderCommand, ServiceError,
+    ProviderManagementService, ServiceError,
     SyncProviderBotCallerConfigurationCommand,
 };
 use bcs_test_support::NoopRelationCoreService;

@@ -20,7 +20,7 @@ use bcs_service_api::port::repo::bot_control_plane::{
     BotTaskModesQuery, CallerConfigurationSync,
 };
 use bcs_service_api::{
-    BotRegistryCoreService, ProviderAuthMode, ProviderBotBindingRepoPort,
+    ProviderAuthMode, ProviderBotBindingRepoPort,
     ProviderBotConnectionMode, ProviderBotCoreService, ProviderCoreService,
     ProviderCredentialRepoPort, ProviderRepoPort, RegisterProviderBotParams, ServiceError,
     ServiceResult,
@@ -110,6 +110,7 @@ impl BotControlPlaneRepoPort for CallerStore {
 
 struct Harness {
     core: ProviderCore,
+    #[allow(dead_code)]
     registry: Arc<BotCore>,
     #[allow(dead_code)]
     temp_dir: tempfile::TempDir,

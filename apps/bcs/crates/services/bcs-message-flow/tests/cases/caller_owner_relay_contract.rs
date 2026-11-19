@@ -10,7 +10,7 @@ use std::sync::{Arc, atomic::Ordering};
 
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_config_api::message_delivery::{BotDeliveryMode, DeliveryPolicy};
-use bcs_service_api::port::repo::session_speaking_lease::{AcquireLease, LeaseAcquire, SpeakingLeaseRepoPort as _SpeakingLeaseRepoPort};
+use bcs_service_api::port::repo::session_speaking_lease::{AcquireLease, LeaseAcquire};
 use bcs_service_api::WebSendLeaseClaim;
 use bcs_session_store::MemorySpeakingLeaseRepo;
 use bcs_service_api::{
@@ -185,7 +185,6 @@ impl BotControlPlaneCoreService for CallerEnabledControlPlane {
 }
 
 struct Fixture {
-    support: support::FlowTestSupport,
     flow: Arc<BcsMessageFlow>,
     service: Arc<ManagedMessageDelivery>,
     handoff: Arc<HumanCallerDeliveryHandoff>,
@@ -250,7 +249,7 @@ async fn fixture_with_plane(
     policy.queue_ttl_ms = Some(300_000);
     let admin = CallerContext::Human(HumanActor { actor_id: "human_operator".into(), staff_no: "operator".into() });
     flow.replace_delivery_policy(admin, 0, policy).await.unwrap();
-    Fixture { support, flow, service, handoff, ledger }
+    Fixture { flow, service, handoff, ledger }
 }
 
 async fn dispatch_row(f: &Fixture) -> (String, bcs_domain::message_delivery::PersistedMessageDelivery) {

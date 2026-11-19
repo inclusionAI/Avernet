@@ -139,7 +139,7 @@ impl ChainUserIdentityPort {
         if principal.bot_uuid.is_some() || principal.owner_id.is_some() {
             return Err(CallerIngressExtractionError::Unsupported);
         }
-        let mut staff_no = principal
+        let staff_no = principal
             .user_id
             .clone()
             .ok_or(CallerIngressExtractionError::Unsupported)?;

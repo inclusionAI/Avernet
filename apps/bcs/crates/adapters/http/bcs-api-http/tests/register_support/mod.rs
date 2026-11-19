@@ -272,6 +272,9 @@ impl FriendshipService for NoopFriendshipService {
     }
 }
 
+// Shared support: exercised by register/bot-self/authority-registration
+// suites; not every includer calls it.
+#[allow(dead_code)]
 pub(crate) fn test_router(service: Arc<dyn RegisterService>) -> axum::Router {
     router(test_state(service))
 }
