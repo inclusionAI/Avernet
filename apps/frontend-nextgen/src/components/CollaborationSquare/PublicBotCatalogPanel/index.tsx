@@ -155,6 +155,7 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
               busy={vm.busyKeys.includes(getPublicBotActionKey(activeActor, getPublicBotTargetId(bot)))}
               highlighted={bot.id === highlightBotId}
               onShare={(item) => vm.share(item)}
+              onResubmit={vm.resubmitAction}
               onPrimaryAction={(item) => {
                 Tracert.click(Points.collabSquare.openBotCard, { bot_id: getPublicBotTargetId(item) });
                 handlePrimaryAction(item);

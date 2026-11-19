@@ -30,9 +30,13 @@ function getOtherActorId(
   throw new CollaborationSquareError('protocol_error', '好友关系接口返回了无法识别的参与方');
 }
 
-/** Search 已提供 approved 状态时，仅补读 pending 申请，避免重复查询已确认的好友连接。 */
-export async function listPendingFriendBotRelationships(actor: FriendRequestActor, signal?: AbortSignal) {
-  const applyingIds = new Set<string>();
+/** Search 已提供 approved 状态时，仅补读 pending 申请，避免重复查询已确认的好友连接。
+ * 返回 target actor id → pending 申请单号 映射（「重新申请」入口取消当前申请时需要单号）。 */
+export async function listPendingFriendBotRelationships(
+  actor: FriendRequestActor,
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const requestIdByTargetId = new Map<string, string>();
   const pageSize = 100;
   let page = 1;
   while (true) {
@@ -58,17 +62,22 @@ export async function listPendingFriendBotRelationships(actor: FriendRequestActo
       if (!request || request.status !== 'pending') {
         throw new CollaborationSquareError('protocol_error', '好友申请接口返回了无法识别的状态');
       }
-      applyingIds.add(getOtherActorId(request.from_actor, request.to_actor, actor.id));
+      requestIdByTargetId.set(getOtherActorId(request.from_actor, request.to_actor, actor.id), request.request_id);
     }
     const total = requestsResponse.data?.total;
     if (requests.length === 0 || (typeof total === 'number' ? page * pageSize >= total : requests.length < pageSize))
       break;
     page += 1;
   }
-  return applyingIds;
+  return requestIdByTargetId;
 }
 
-export async function listFriendBotRelationships(actor: FriendRequestActor, signal?: AbortSignal) {
+/** 好友关系与 pending 申请回填数据：friendIds/applyingIds 供卡片状态判定，
+ * pendingRequestIdByTargetId 供「重新申请」入口取当前申请单号。 */
+export async function listFriendBotRelationships(
+  actor: FriendRequestActor,
+  signal?: AbortSignal,
+): Promise<{ friendIds: Set<string>; applyingIds: Set<string>; pendingRequestIdByTargetId: Map<string, string> }> {
   const friendIds = new Set<string>();
   const connectionsResponse = await listFriendConnections(
     {
@@ -92,6 +101,6 @@ export async function listFriendBotRelationships(actor: FriendRequestActor, sign
     if (connection.actor.type === 'bot') friendIds.add(connection.actor.id.trim());
   }
 
-  const applyingIds = await listPendingFriendBotRelationships(actor, signal);
-  return { friendIds, applyingIds };
+  const pendingRequestIdByTargetId = await listPendingFriendBotRelationships(actor, signal);
+  return { friendIds, applyingIds: new Set(pendingRequestIdByTargetId.keys()), pendingRequestIdByTargetId };
 }

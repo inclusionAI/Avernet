@@ -124,19 +124,19 @@ describe('collaboration friend connection controller', () => {
     );
   });
 
-  it('deletes the current Human connection with actor filters', async () => {
+  it('deletes the current Human connection with the target actor in query params', async () => {
     backendRequest.mockResolvedValue({ code: 20000, data: {} });
 
     await deleteFriendConnection({
-      from_actor: { type: 'human', id: '900003' },
-      to_actor: { type: 'bot', id: 'bot-1' },
+      target_actor_type: 'bot',
+      target_actor_id: 'bot-1',
     });
 
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/friend-connections', {
       method: 'DELETE',
-      data: {
-        from_actor: { type: 'human', id: '900003' },
-        to_actor: { type: 'bot', id: 'bot-1' },
+      params: {
+        target_actor_type: 'bot',
+        target_actor_id: 'bot-1',
       },
       injectUserId: false,
     });

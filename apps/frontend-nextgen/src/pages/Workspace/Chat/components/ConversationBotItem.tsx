@@ -44,6 +44,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   onToggleFavorite,
   isFavoritePending,
   onOpenBotManagement,
+  onRemoveFriend,
   replyingSessionId,
   createSessionPending = false,
   sessionActions,
@@ -83,6 +84,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     searchVisible,
     showFilter,
     showMenu,
+    showRemoveFriend,
     stripVisible,
     hoverActionsPadding,
     pinnedMarked,
@@ -100,6 +102,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     supportsArchives,
     searchMarked,
     hasManagement: Boolean(onOpenBotManagement && bot.spaceId),
+    canRemoveFriend: !isManaged && Boolean(onRemoveFriend),
   });
   const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
   const handleSearchToggle = () => {
@@ -212,6 +215,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           onSearchToggle={handleSearchToggle}
           showMenu={showMenu}
           onOpenBotManagement={onOpenBotManagement}
+          showRemoveFriend={showRemoveFriend}
+          onRemoveFriend={onRemoveFriend}
         />
       )}
     </div>

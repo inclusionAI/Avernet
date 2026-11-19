@@ -8,6 +8,7 @@ export * from './ConfirmDialog';
 export * from './Drawer';
 export * from './Empty';
 export * from './IconButton';
+export * from './InlineCode';
 export * from './Input';
 export * from './Modal';
 export * from './notify';

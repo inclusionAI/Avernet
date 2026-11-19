@@ -127,7 +127,8 @@ export function useCollaborationSquare(resource: SquareResource) {
 
   // Task 4：好友操作（申请／已有好友打开私聊）的代次隔离与 Human 建聊开关拆至
   // useCollaborationSquareFriendActions（控制本 Hook 体积）；群操作沿用 runBusy，语义不变。
-  const primaryBotAction = useCollaborationSquareFriendActions({
+  // 「重新申请」为好友申请死锁自救入口（取消当前 pending 并重发，触发 owner 通知重试）。
+  const { primaryBotAction, resubmitBotFriendRequest } = useCollaborationSquareFriendActions({
     resource,
     activeActor,
     humanBotContext,
@@ -166,6 +167,7 @@ export function useCollaborationSquare(resource: SquareResource) {
     openGroupMembers,
     closeGroupMembers,
     primaryBotAction,
+    resubmitBotFriendRequest,
     createGroupSession,
     openTaskDetail: taskView.openTaskDetail,
     closeTaskDetail: taskView.closeTaskDetail,
