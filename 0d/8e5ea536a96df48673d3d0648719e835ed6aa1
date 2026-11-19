@@ -13,6 +13,7 @@ apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
   s_5e0eab15b95f7c::t_8379e43cd04757 54-57
 apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
   s_5e0eab15b95f7c::t_597fd3900bee4e 71-73,75,80,85,91-92,96
+  s_c276f50f57aefb::t_c6643109065ae7 93
 apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
   s_5e0eab15b95f7c::t_8aa5da1231cf0c 291,309-310
   s_5e0eab15b95f7c::t_8b09b63a427b5e 287-288
