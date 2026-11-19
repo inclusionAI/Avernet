@@ -28,3 +28,20 @@ owned and validated; public CI does not execute an enterprise provider.
 public contract/model change. Required GitHub Unit Tests and Singlebox Coverage
 will be checked on the new published head; earlier-head green runs are not new
 verification evidence. Publication does not imply release, integration or deployment.
+
+## CI follow-up
+
+At public head `1f9f3fd772`, [Singlebox run 44573792889](https://github.com/inclusionAI/Avernet/actions/runs/44573792889)
+failed in the retained Dispatch-obligation assertion. The companion's `due` probe
+shares the supervisor's durable scan cursor: a first end-of-round can cover only
+the remaining suffix, so it cannot prove absence. The probe now crosses that
+boundary and checks a complete subsequent round before returning false. It keeps
+the same 64-poll bound and production Store/Supervisor behavior. No business
+assertion, coverage threshold or exclusion was relaxed. Verification of the fix
+uses a remote Singlebox rerun; no local Singlebox was executed.
+
+[Unit Tests run 44573792866](https://github.com/inclusionAI/Avernet/actions/runs/44573792866)
+passed on `1f9f3fd772`, including the BCS coverage and MySQL conformance steps.
+The corrected companion passed `cargo +1.94.0 check -p bcs --features
+worker-runtime-e2e --bin bcs-worker-e2e --locked --offline` with the public manifest.
+The follow-up head still requires its own remote results.

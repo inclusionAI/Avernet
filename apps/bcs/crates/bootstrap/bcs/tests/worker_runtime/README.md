@@ -14,6 +14,8 @@ takeover by a second Worker incarnation sharing the same memory Store, and
 graceful handoff with a pending task. The companion Dispatch story exercises
 HumanReply through a real held dispatch, ambiguous Sending/Cancel supervision,
 late definitive evidence, live follow, snapshot coverage, retention and cursor Gap.
+The retained-obligation probe crosses a durable scan boundary before concluding
+absence; the supervisor may have already consumed the current round prefix.
 It is a bounded functional suite, not a load or capacity benchmark. Test-only
 Runner workloads from [bcs-dist-test-runner](../../../../test-support/bcs-dist-test-runner/README.md)
 provide decisions; all admission, checkpoint, projection,
