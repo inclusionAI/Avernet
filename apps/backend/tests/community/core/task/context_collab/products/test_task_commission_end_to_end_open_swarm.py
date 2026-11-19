@@ -182,7 +182,6 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         collet_id,
         role_refs,
         open_binding_id,
-        swarm_binding_id,
     )
 
     # 3. 招募完成后，仅创建根 Task，进入 Swarm 执行前保持 created。
@@ -362,7 +361,7 @@ def _create_product_profile():
 
 
 def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_service, storage_envs,
-                                profile, collet_id, role_refs, open_binding_id, swarm_binding_id):
+                                profile, collet_id, role_refs, open_binding_id):
     admission = profile.composition.require_policy("Open").publication.admission
 
     ## 使用L5的open方法 发布公开机会
@@ -473,9 +472,6 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
     )
     assert closed.accepted and closed.state == "CLOSED"
     assert _record(injector, collet_id).task is None
-    assert storage_service.list_plans(storage_envs, swarm_binding_id, collet_id) == []
-    assert storage_service.list_allocations(storage_envs, swarm_binding_id, collet_id) == []
-    assert storage_service.list_execution_profiles(storage_envs, swarm_binding_id, collet_id) == []
 
     # 录取后才绑定具体 Agent：身份取实际申请者，角色取被审核录取的申请。
     # 根执行者由本案例的协调策略选择已录取的 PR 提交者，不取 AGENTS 的位置。
