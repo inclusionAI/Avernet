@@ -1,0 +1,26 @@
+apps/backend/tests/community/core/task/task_harness/test_relay_session_recovery.py
+  s_ad6596e5f395ca::t_eef6fbdf21e0b1 159-162
+apps/backend/src/agentclaw/community/core/task/task_harness/relay_runtime_policy.py
+  s_ad6596e5f395ca::t_eef6fbdf21e0b1 22-45,68-70,74-80
+apps/backend/src/agentclaw/community/core/task/task_harness/relay_session_recovery.py
+  s_ad6596e5f395ca::t_eef6fbdf21e0b1 33-42
+apps/backend/tests/community/core/task/task_harness/test_harness.py
+  s_ad6596e5f395ca::t_eef6fbdf21e0b1 458-468
+  s_ad6596e5f395ca::t_67713b7c15fb6a 457
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "84084c053ea4f5e3163430b4fc9ef149001af533",
+  "prompts": {},
+  "sessions": {
+    "s_ad6596e5f395ca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e724-7273-7761-8b9a-88eacb18b252",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

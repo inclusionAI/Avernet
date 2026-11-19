@@ -1,0 +1,44 @@
+apps/bcs/crates/adapters/ws/bcs-ws/tests/support/ws_lease_harness.rs
+  s_5cfa3f3cdf3cc2::t_4910544a91ff14 316
+  s_5cfa3f3cdf3cc2::t_7e39fd178b6620 312-315,317-323
+  s_5cfa3f3cdf3cc2::t_614e21543fcab5 231-238,243
+  s_5cfa3f3cdf3cc2::t_227f49ce9f2efc 123-130,149-151,153-161,163
+  s_5cfa3f3cdf3cc2::t_2ed9f4d1031a18 152
+  s_5cfa3f3cdf3cc2::t_d2d403be38ca2e 230
+apps/bcs/specs/2026-11-18-caller-group-initiator-alignment/spec.md
+  s_5cfa3f3cdf3cc2::t_80e23c894bd248 50-57
+  s_5cfa3f3cdf3cc2::t_2db8d48adf182e 47-49
+  s_5cfa3f3cdf3cc2::t_b82be4c7625b1e 58-60
+  s_0730573c3c12ee::t_ebc16586822fae 1-46,61-68
+apps/bcs/crates/adapters/ws/bcs-ws/tests/speaking_lease_commands_contract.rs
+  s_5cfa3f3cdf3cc2::t_c8c78c1bfa59fb 227-233,235-283
+  s_5cfa3f3cdf3cc2::t_4e3c971c5bbcca 234
+  s_5cfa3f3cdf3cc2::t_81d20328154860 9
+apps/bcs/crates/adapters/ws/bcs-ws/src/web/dispatcher/lease.rs
+  s_5cfa3f3cdf3cc2::t_d921c4f6a0c106 15-22
+  s_5cfa3f3cdf3cc2::t_83f19a445bf14a 85-87,93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c1817e0f72fce75d17940459e353c42a5b354748",
+  "prompts": {},
+  "sessions": {
+    "s_0730573c3c12ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_0730573c3c12ee",
+        "model": "unknown"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    },
+    "s_5cfa3f3cdf3cc2": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "4a503214-00dd-4792-8587-55cdc98fb755",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

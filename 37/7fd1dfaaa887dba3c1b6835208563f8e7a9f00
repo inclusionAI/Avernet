@@ -1,0 +1,23 @@
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_20c3b110241190::t_5919f101b3c7af 99-103,109-110,125-127
+apps/bcsfuse/packages/search-core/src/search_core/providers/keyword.py
+  s_20c3b110241190::t_095a335bcd8d8d 52,150-164
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  s_20c3b110241190::t_238b4384fcbd31 87,102-106,108,111-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "377fd1dfaaa887dba3c1b6835208563f8e7a9f00",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

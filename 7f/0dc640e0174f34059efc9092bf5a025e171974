@@ -1,0 +1,33 @@
+apps/bcs/crates/service-api/bcs-service-api/src/application/channel.rs
+  s_d2bf2069ff97fe::t_da328635bed426 107-109
+apps/bcs/crates/services/bcs-channel/src/tests.rs
+  s_d2bf2069ff97fe::t_da328635bed426 677,700
+apps/bcs/crates/services/bcs-channel/src/tests/caller_execution.rs
+  s_d2bf2069ff97fe::t_f696e96d35c6fb 4
+  s_d2bf2069ff97fe::t_4b52df4b1dacc0 3,5,47-53,57
+apps/bcs/crates/services/bcs-channel/src/tests/outbound.rs
+  s_d2bf2069ff97fe::t_da328635bed426 6
+apps/bcs/docs/caller-execution.md
+  s_d2bf2069ff97fe::t_202d581d278677 3-11
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/provider.rs
+  s_d2bf2069ff97fe::t_da328635bed426 93
+apps/bcs/crates/services/bcs-channel/src/service.rs
+  s_d2bf2069ff97fe::t_f2b6e0e7d440af 98-112
+  s_d2bf2069ff97fe::t_da328635bed426 316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7f0dc640e0174f34059efc9092bf5a025e171974",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
