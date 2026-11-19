@@ -118,6 +118,7 @@ from .schemas_create_with_manifest import (
     BotCreateWithManifestStatus,
     CreationState,
 )
+from .source_bot_access import assert_from_bot_source_access
 
 #: Bot statuses that mean no container is ever coming. The same set the creation
 #: job stops on — imported would be better, but the job's copy is keyed to its
@@ -252,6 +253,13 @@ async def submit_manifest_creation(
     space_context: BusinessSpaceContextProtocol, manifest_seam: ManifestCreationSeam,
 ) -> Envelope[BotCreateWithManifestAccepted]:
     """Map an ordinary Manifest request into the existing Bot creation flow."""
+    # Before a bot is created or a manifest stored: a ``from: from_bot`` local
+    # skill reads a source Bot the caller may not be authorized to read. The
+    # Copy endpoint checks this at submission; create-with-manifest reaches the
+    # same path without it, so the gate lives here too.
+    assert_from_bot_source_access(
+        document=body.config_manifest, owner_id=owner_id, bot_repo=bot_repo
+    )
     bot_id, spec, context = prepare_manifest_creation(
         body=body, owner_id=owner_id, bot_repo=bot_repo, space_context=space_context,
     )
