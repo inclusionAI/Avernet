@@ -38,6 +38,9 @@ from agentclaw.community.utils.gateway_principal_config import (
 
 _OWNER = "matrix-owner"
 _BOT_ID = "matrix-bot"
+#: The ``protocol: bot`` source the bot-source documents name. Seeded under the
+#: same owner so the access gate admits the caller (see ``_seed``).
+_SRC_BOT_ID = "src-bot"
 _KEY = "config-manifest-framework-signing-key-at-least-32-bytes"
 _DIGEST = "sha256:" + "0" * 64
 _REPO = "https://code.example.com/team/content.git"
@@ -98,6 +101,28 @@ def _seed(world) -> None:
             "bot_type": "personal",
         }
     )
+    # The bot-source access gate (``assert_from_bot_source_access``) runs before
+    # storage on any document that declares a ``protocol: bot`` source: it
+    # refuses 409 for a source bot that does not exist and 403 for one the
+    # caller cannot edit. A literal id is no longer enough once the gate resolves
+    # it, so the source bot is seeded under the caller's owner_id — the gate
+    # admits every bot-source document, and the cell verdict alone decides the
+    # rest: an open bot cell stores and answers 200, a closed one is refused 422
+    # by ``put``'s validate after the gate has passed.
+    world.get(BotRepository).insert(
+        {
+            "bot_id": _SRC_BOT_ID,
+            "bot_name": "Matrix Source Bot",
+            "owner_id": _OWNER,
+            "owner_name": _OWNER,
+            "entity_id": _OWNER,
+            "entity_type": "staff",
+            "creator_id": _OWNER,
+            "status": "ACTIVE",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+        }
+    )
 
 
 # ── documents, one per cell ─────────────────────────────────────────────────
@@ -148,14 +173,16 @@ def _document(category: Category, kind: SourceKind) -> str:
         # bot by ``bot_id`` (and disambiguates the row with ``owner_id`` — a
         # ``bot_id`` is not globally unique, so the addressing is the pair)
         # and converges that bot's workspace tree at apply time. The matrix
-        # cell alone governs which categories accept it, and the document need
-        # only name a source bot — the validator checks the cell before any
-        # bot is resolved, so a literal id is enough here.
+        # cell alone governs which categories accept it, but the submission
+        # gate (``assert_from_bot_source_access``) resolves the source bot
+        # before storage, so {_SRC_BOT_ID!r} must exist and be caller-owned
+        # (seeded in ``_seed``) — otherwise the cell verdict is masked by a
+        # 409 instead of the cell's own 422/200.
         source = (
             "sources:\n"
             "  src:\n"
             "    protocol: bot\n"
-            f"    bot_id: src-bot\n"
+            f"    bot_id: {_SRC_BOT_ID}\n"
             "    owner_id: src-owner\n"
         )
     else:
