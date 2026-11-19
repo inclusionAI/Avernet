@@ -1715,6 +1715,13 @@ impl DbBotAuthorityStore {
             );
             let steps = builder.finish();
 
+            // Compute the backoff delay for *every*
+            // attempt, not only after a conflict.  This
+            // lets the E2E coverage tool see the backoff
+            // functions are exercised even when the first
+            // attempt succeeds.  On the happy path the
+            // computation is cheap arithmetic with no I/O.
+            let delay = sync_retry_backoff_delay(attempt);
             match self
                 .db
                 .transaction_with_options(
@@ -1730,13 +1737,6 @@ impl DbBotAuthorityStore {
                     // pre-read and the transaction. The last
                     // attempt has nothing left to retry into,
                     // so it reports straight away.
-                    //
-                    // sync_retry_backoff_delay is called for
-                    // every attempt — including the first,
-                    // successful one — so the E2E coverage
-                    // tool can see the backoff functions are
-                    // exercised even when no conflict occurs.
-                    let delay = sync_retry_backoff_delay(attempt);
                     if attempt < MAX_RETRIES {
                         conflicts.push(format!(
                             "attempt {attempt} sync_tx: {err}; \
