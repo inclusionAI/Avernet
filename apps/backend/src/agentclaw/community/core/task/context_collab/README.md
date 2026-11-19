@@ -76,7 +76,7 @@ l4_context_primitives/
     records.py             # lower records/repository contract and read decoder port
     creation.py / row_codec.py # primitive construction and row conversion
 l5_methods/
-  method_policies.py        # MethodPolicy / OpenMethodPolicy; L6 selects these values
+  method_policies.py        # MethodPolicy / OpenMethodPolicy / SwarmMethodPolicy; L6 selects these values
   publication.py            # Open admission/publication and Bot self-application contracts
   operations/               # layer-owned Method operations
     contracts.py            # Method commands, results and public protocols
@@ -107,8 +107,8 @@ products/
 
 - L6 [profile creation](l6_products/README.md#create-a-product-profile) is a pure
   `create_product_profile` operation returning `ProductProfileDefinition`.
-  L5-owned Method policies are selected in `composition.policies` (for example,
-  `OpenMethodPolicy(publication=...)`), not top-level Profile fields; see the
+  L5-owned Method policies are co-located in each `MethodTemplate(profile, policy)`
+  declaration (for example, `OpenMethodPolicy(publication=...)`), not top-level Profile fields; see the
   [L6 authoring contract](l6_products/README.md#create-a-product-profile). Creation
   and catalog installation share validation but remain separate; neither profile
   authoring nor role declarations grant runtime participation or create a Collet.

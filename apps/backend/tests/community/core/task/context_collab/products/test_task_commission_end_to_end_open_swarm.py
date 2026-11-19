@@ -12,6 +12,9 @@ from dataclasses import dataclass
 import pytest
 from injector import AssistedBuilder, Binder, Injector, InstanceProvider
 
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError,
+)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
@@ -29,6 +32,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     ColletCreateCommand,
     EventAppendCommand,
     TaskCreateCommand,
+    WorkStartCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     role_binding_ref,
@@ -40,6 +44,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_composition 
     CompositionRelation,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
+    SwarmMethodPolicy,
     OpenMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
@@ -80,14 +85,17 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodTemplate,
     CompatibilityRequirements,
     GovernanceRequirements,
     MethodCompositionTemplate,
     MethodRelationTemplate,
     ScenarioRole,
     VersionedProfileRef,
-    WorkflowAction,
-    WorkflowProfile,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    STANDARD_TASK_CONTRACT,
+    resolve_event_contract,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
@@ -125,10 +133,10 @@ OWNER = ActorContext(PrincipalRef("human", "coding_owner"), source="api")
 OBJECTIVE = "实现计算器求和并测试后提交 PR 草稿"
 # 五阶段协作 Agent：按需求分析 → 方案设计 → 编码 → 测试验证 → PR 提交排列。
 AGENTS = (
-    AgentRef("bot", "coding_requirements"),   # 需求分析
-    AgentRef("bot", "coding_design"),         # 方案设计
-    AgentRef("bot", "coding_coding"),         # 编写代码
-    AgentRef("bot", "coding_verification"),   # 测试验证
+    AgentRef("bot", "coding_requirements"),  # 需求分析
+    AgentRef("bot", "coding_design"),  # 方案设计
+    AgentRef("bot", "coding_coding"),  # 编写代码
+    AgentRef("bot", "coding_verification"),  # 测试验证
     AgentRef("bot", "coding_pr_submission"),  # 提交 PR 草稿
 )
 # 同样参与 OPEN 申请、但因角色或能力证据不匹配而被拒绝的候选 Agent。
@@ -151,15 +159,35 @@ CANDIDATE_COUNT = len(AGENTS) + len(OTHER_AGENTS)
   - [ ] open方法中的参与类型，协议中的枚举不在一个维度：participation_type: COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | SINGLE_CONTRIBUTION
 """
 
+
 def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
     # 1、发布一个代办任务 （基于L5层OPEN + SWARM方法的组合）
-    (profile, injector, l4_context_service, l5_open_method_operate, storage_service, storage_envs,
-     collet_id, open_binding_id, swarm_binding_id, role_refs, participants) \
-        = publish_todo_task(deploy_open_swarm, tmp_path)
+    (
+        profile,
+        injector,
+        l4_context_service,
+        l5_open_method_operate,
+        storage_service,
+        storage_envs,
+        collet_id,
+        open_binding_id,
+        swarm_binding_id,
+        role_refs,
+        participants,
+    ) = publish_todo_task(deploy_open_swarm, tmp_path)
 
     # 3. 公开招募多个Coding Agents (执行OPEN方法)
-    recruit_multi_coding_agents(injector, l5_open_method_operate, storage_service, storage_envs, profile,
-                                collet_id, role_refs, open_binding_id, swarm_binding_id)
+    recruit_multi_coding_agents(
+        injector,
+        l5_open_method_operate,
+        storage_service,
+        storage_envs,
+        profile,
+        collet_id,
+        role_refs,
+        open_binding_id,
+        swarm_binding_id,
+    )
 
     # 4. 招募完成之后，通过 L4 创建根 Task，但不启动
     l4_context_service.create_task(
@@ -172,16 +200,79 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         OWNER,
     )
 
+    # 标准 Task 合同要求根执行者启动，协调人不能借 Driver 绕过 G1/G4。
+    executor = ActorContext(
+        PrincipalRef(AGENTS[-1].agent_type, AGENTS[-1].agent_id), source="local_agent"
+    )
+    before = _record(injector, collet_id)
+    assert before.product_instance.workflow_ref is None
+    assert before.product_instance.task_contract_ref == STANDARD_TASK_CONTRACT.ref
+    with pytest.raises(ContextCollabValidationError, match="designated executor"):
+        l4_context_service.start(
+            collet_id, WorkStartCommand(before.collet.version), OWNER
+        )
+    assert _record(injector, collet_id).collet.version == before.collet.version
+    l4_context_service.start(
+        collet_id, WorkStartCommand(before.collet.version), executor
+    )
+
     # 5. 招募到agents之后，开始写作进行AiCoding（执行SWARM方法：规划-划分stage和task-分派执行）
     stages = swarm_run(injector, collet_id)
 
     # 6. 任务完成之后，校验每个阶段、每个Task的产物
-    judge_artifacts(injector, storage_service, storage_envs, stages, collet_id, swarm_binding_id)
+    judge_artifacts(
+        injector, storage_service, storage_envs, stages, collet_id, swarm_binding_id
+    )
+
+    # Swarm 完成不等于根 Task 已验收；根执行者提交总成果，用户经 G4 验收。
+    completed = _record(injector, collet_id)
+    assert completed.task.status == "in_progress"
+    assert all(
+        task.status == "done" for task in completed.tasks if task.parent_task_ref
+    )
+    l4_context_service.append_event(
+        collet_id,
+        EventAppendCommand(
+            expected_version=completed.collet.version,
+            actor_ref=executor.actor,
+            parent_event=completed.events[-1].event_id,
+            visibility="public",
+            event_kind="task.submitted",
+            primitive_type="Task",
+            payload={"artifacts": [f"artifact://{name}" for name in ARTIFACTS]},
+        ),
+        executor,
+    )
+    reviewing = _record(injector, collet_id)
+    assert reviewing.task.status == "reviewing"
+    l4_context_service.append_event(
+        collet_id,
+        EventAppendCommand(
+            expected_version=reviewing.collet.version,
+            actor_ref=OWNER.actor,
+            parent_event=reviewing.events[-1].event_id,
+            visibility="public",
+            event_kind="task.accepted",
+            primitive_type="Task",
+            payload={"note": "五阶段成果与测试报告验收通过"},
+        ),
+        OWNER,
+    )
+    accepted = _record(injector, collet_id)
+    assert len(accepted.tasks) == len(ROLES) + 1
+    assert all(task.status == "done" for task in accepted.tasks)
+    assert accepted.events[-1].actor_ref == OWNER.actor
+    assert accepted.task.last_event_ref == accepted.events[-1].event_id
+    test_report = json.loads((tmp_path / "test-report.json").read_text())
+    assert test_report["exit_code"] == 0 and "Ran 4 tests" in test_report["output"]
+    assert json.loads((tmp_path / "pr-draft.json").read_text())["simulated"] is True
 
 
 def publish_todo_task(deploy_open_swarm, tmp_path):
     # 1. L6 声明 OPEN + SWARM 产品
     profile = _create_product_profile()
+    assert profile.workflow is None
+    assert resolve_event_contract(profile) is STANDARD_TASK_CONTRACT
 
     # 测试用例DI装配真实协议，可忽略
     injector = deploy_open_swarm(profile, tmp_path)
@@ -192,7 +283,9 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
     # 2. 协议要求Instantiate：创建 ProductInstance，并实例化 Collet、MethodBinding、RoleBinding 与策略引用
     instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
         ProductInstantiateNewCommand(
-            collet=ColletCreateCommand(OWNER.actor, title="AI coding", description=OBJECTIVE),
+            collet=ColletCreateCommand(
+                OWNER.actor, title="AI coding", description=OBJECTIVE
+            ),
             profile_ref=profile.ref,
             participant_refs=AGENTS,
             executor_ref=AGENTS[-1],
@@ -205,11 +298,23 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
     role_refs = {b.role: role_binding_ref(collet_id, b) for b in record.role_bindings}
     participants = {p.participant_id: p for p in record.participants}
 
-    return profile, injector, l4_context_service, l5_open_method_operate, storage_service, storage_envs, collet_id, open_binding_id, swarm_binding_id, role_refs, participants
+    return (
+        profile,
+        injector,
+        l4_context_service,
+        l5_open_method_operate,
+        storage_service,
+        storage_envs,
+        collet_id,
+        open_binding_id,
+        swarm_binding_id,
+        role_refs,
+        participants,
+    )
 
 
 def swarm_run(injector, collet_id):
-    # 8. 第八步：只传 collet_id 构造真实 SwarmDriver；wake 启动根 Task，step 调用配置的 plan 服务。
+    # 8. 构造真实 SwarmDriver；根 Task 已启动，wake 只入队，step 调用 Swarm 声明的 plan 服务。
     driver = injector.get(AssistedBuilder[SwarmDriver]).build(collet_id=collet_id)
     driver.wake()
     assert driver.step()
@@ -268,29 +373,36 @@ def judge_artifacts(injector, storage_service, storage_envs, stages, collet_id, 
 
 
 def _create_product_profile():
+    # Swarm 的 Plan/Stage 决定协作阶段；Task 使用 standard_task@1 + G4，
+    # 无需再声明一份产品 workflow 或阶段状态机。
     return create_product_profile(
         ProductProfileCreateCommand(
             ref=VersionedProfileRef("ai_coding_open_swarm", 1),
-            swarm_plan_service_ref=PLAN_SERVICE,
             composition=MethodCompositionTemplate(
-                (get_profile("Open", "0.2"), get_profile("Swarm", "0.2")),
+                (
+                    MethodTemplate(
+                        get_profile("Open", "0.2"),
+                        policy=OpenMethodPolicy(
+                            OpenPublicationProfile(
+                                OpenAdmissionPolicy(
+                                    applicant_role="submitter",
+                                    accountable_role="owner",
+                                    participation_type=ParticipationType.COLLET_PARTICIPANT,
+                                    capacity=CANDIDATE_COUNT,
+                                    decision_actor="accountable_role",
+                                    decision_rule="capability_evidence",
+                                )
+                            )
+                        ),
+                    ),
+                    MethodTemplate(
+                        get_profile("Swarm", "0.2"),
+                        policy=SwarmMethodPolicy(PLAN_SERVICE),
+                    ),
+                ),
                 relations=(
                     MethodRelationTemplate(
                         "Swarm", "Open", CompositionRelation.SUPPORT
-                    ),
-                ),
-                policies=(
-                    OpenMethodPolicy(
-                        OpenPublicationProfile(
-                            OpenAdmissionPolicy(
-                                applicant_role="submitter",
-                                accountable_role="owner",
-                                participation_type=ParticipationType.COLLET_PARTICIPANT,
-                                capacity=CANDIDATE_COUNT,
-                                decision_actor="accountable_role",
-                                decision_rule="capability_evidence",
-                            )
-                        )
                     ),
                 ),
             ),
@@ -313,40 +425,6 @@ def _create_product_profile():
                 *(
                     ScenarioRole(role, role, "agent_ref", True, (role,), agent)
                     for role, agent in zip(ROLES, AGENTS)
-                ),
-            ),
-            workflow=WorkflowProfile(
-                ref=VersionedProfileRef("ai_coding_delivery", 1),
-                state_machine_ref=VersionedProfileRef("task_commission_goal", 1),
-                completion_states=("done",),
-                compensation_events=("task.rejected", "task.cancelled"),
-                strict_control_events=True,
-                public_events_only=True,
-                actions=(
-                    WorkflowAction(
-                        "start", "task.started", "Task", ("note",), "responsible_user"
-                    ),
-                    WorkflowAction(
-                        "progress",
-                        "task.progress.updated",
-                        "Task",
-                        ("note", "percent"),
-                        "responsible_user",
-                    ),
-                    WorkflowAction(
-                        "submit",
-                        "task.submitted",
-                        "Task",
-                        ("note", "artifacts"),
-                        "pr_submission",
-                    ),
-                    WorkflowAction(
-                        "accept",
-                        "task.accepted",
-                        "Task",
-                        ("note", "artifacts"),
-                        "responsible_user",
-                    ),
                 ),
             ),
             governance=GovernanceRequirements(
@@ -475,6 +553,7 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
     assert storage_service.list_plans(storage_envs, swarm_binding_id, collet_id) == []
     assert storage_service.list_allocations(storage_envs, swarm_binding_id, collet_id) == []
     assert storage_service.list_execution_profiles(storage_envs, swarm_binding_id, collet_id) == []
+
 
 @pytest.fixture
 def deploy_open_swarm(db):

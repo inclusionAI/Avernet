@@ -25,6 +25,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     EventAppendCommand,
     TaskCreateCommand,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
+    SwarmMethodPolicy,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
     get_profile,
 )
@@ -46,6 +49,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodTemplate,
     CompatibilityRequirements,
     GovernanceRequirements,
     MethodCompositionTemplate,
@@ -208,8 +212,14 @@ def _create_product_profile():
     return create_product_profile(
         ProductProfileCreateCommand(
             ref=VersionedProfileRef("ai_coding_swarm", 1),
-            swarm_plan_service_ref=PLAN_SERVICE,
-            composition=MethodCompositionTemplate((get_profile("Swarm", "0.2"),)),
+            composition=MethodCompositionTemplate(
+                (
+                    MethodTemplate(
+                        get_profile("Swarm", "0.2"),
+                        policy=SwarmMethodPolicy(PLAN_SERVICE),
+                    ),
+                )
+            ),
             participant_scope=ParticipantScope(ParticipantScopeKind.ALLOWLIST, AGENTS),
             scenario_roles=(
                 ScenarioRole(

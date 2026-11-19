@@ -50,7 +50,8 @@ permits only those three executor actions.
 ## L5 Method policy selection
 
 Commission selects L5-owned Open publication/admission values in
-`profile.composition.policies` as `OpenMethodPolicy(publication=OpenPublicationProfile(...))`.
+the Open declaration's `MethodTemplate.policy` as
+`MethodTemplate(get_profile("Open", "0.2"), OpenMethodPolicy(publication=OpenPublicationProfile(...)))`.
 `OpenMethodPolicy` lives in `l5_methods.method_policies`; `OpenPublicationProfile`,
 `OpenAdmissionPolicy` and `BotSelfApplicationAdmission` live in
 [`l5_methods.publication`](../../l5_methods/publication.py). L6 composes those
@@ -68,7 +69,7 @@ policies and are not migrated.
 
 The product service and DI adapters resolve
 `composition.require_policy("Open").publication`; creation and catalog installation
-reject duplicate, untyped or unbound Method policies. Other Methods do not need
+reject duplicate Method selections, untyped policies or a policy paired with the wrong Method. Other Methods do not need
 an Open policy or a null placeholder. See the [L5 boundary](../../l5_methods/README.md)
 and [L6 authoring example](../../l6_products/README.md#create-a-product-profile).
 This ownership correction preserves role validation, capacity, admission, dispatch

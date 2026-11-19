@@ -46,7 +46,7 @@ class ProductProfileCreateCommand:
 
     Without workflow, a fixed versioned standard Task contract still applies.
     ``domain=None`` uses standard L3/L4 terms. Method-specific product policies
-    belong to ``composition.policies``; an empty tuple declares none.
+    belong to each ``MethodTemplate.policy``; omission declares none.
     Creation does not allocate a version, install a profile or create an instance.
     """
 
@@ -59,8 +59,6 @@ class ProductProfileCreateCommand:
     workflow: WorkflowProfile | None = None
     task_contract_ref: VersionedProfileRef | None = None
     participant_scope: ParticipantScope = ParticipantScope()
-    # None explicitly means no autonomous Swarm coordination capability.
-    swarm_plan_service_ref: str | None = None
 
 
 @dataclass(frozen=True)

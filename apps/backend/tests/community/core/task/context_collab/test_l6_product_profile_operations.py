@@ -28,6 +28,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     DomainProfile,
     GovernanceRequirements,
     MethodCompositionTemplate,
+    MethodTemplate,
     ProductProfileDefinition,
     ScenarioRole,
     VersionedProfileRef,
@@ -38,6 +39,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
+    SwarmMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
@@ -62,7 +64,7 @@ def command():
     return ProductProfileCreateCommand(
         ref=VersionedProfileRef("custom_product", 3),
         composition=MethodCompositionTemplate(
-            required_methods=(get_profile("Open", "0.2"),),
+            required_methods=(MethodTemplate(get_profile("Open", "0.2")),),
         ),
         scenario_roles=(
             ScenarioRole(
@@ -123,7 +125,13 @@ def _with_publication(command, publication):
     return replace(
         command,
         composition=replace(
-            command.composition, policies=(OpenMethodPolicy(publication),)
+            command.composition,
+            required_methods=(
+                replace(
+                    command.composition.required_methods[0],
+                    policy=OpenMethodPolicy(publication),
+                ),
+            ),
         ),
     )
 
@@ -133,7 +141,7 @@ def test_create_returns_the_exact_immutable_definition(command):
     assert isinstance(profile, ProductProfileDefinition)
     for field in fields(command):
         assert getattr(profile, field.name) == getattr(command, field.name)
-    assert profile.composition.policies == ()
+    assert all(item.policy is None for item in profile.composition.required_methods)
     assert "publication" not in {field.name for field in fields(command)}
     assert "publication" not in {field.name for field in fields(profile)}
     with pytest.raises(FrozenInstanceError):
@@ -163,7 +171,9 @@ def test_creation_preserves_versions_without_local_capability_negotiation(comman
         composition=replace(
             command.composition,
             required_methods=(
-                replace(get_profile("Open", "0.2"), profile_version="999"),
+                MethodTemplate(
+                    replace(get_profile("Open", "0.2"), profile_version="999")
+                ),
             ),
         ),
     )
@@ -259,11 +269,15 @@ def test_creation_keeps_the_authored_product_admission_strategy(command, policy)
             lambda c: replace(
                 c,
                 composition=MethodCompositionTemplate(
-                    (get_profile("Single", "0.2"),),
-                    policies=(OpenMethodPolicy(_publication()),),
+                    (
+                        MethodTemplate(
+                            get_profile("Single", "0.2"),
+                            OpenMethodPolicy(_publication()),
+                        ),
+                    ),
                 ),
             ),
-            "requires Open Method",
+            "must match its declared Method",
         ),
         (
             lambda c: replace(
@@ -293,7 +307,7 @@ def test_commission_initialization_uses_l6_without_changing_its_authored_policy(
     profile = init_product_profile()
     assert profile == create_product_profile(TASK_COMMISSION_PROFILE)
     assert profile is not TASK_COMMISSION_PROFILE
-    assert profile.composition.policies is TASK_COMMISSION_PROFILE.composition.policies
+    assert profile.composition is TASK_COMMISSION_PROFILE.composition
 
 
 @pytest.mark.parametrize(
@@ -395,10 +409,14 @@ def test_explicit_standard_task_contract_matches_the_fixed_default(command):
         (("Open", "Swarm"), "Open + Swarm"),
     ],
 )
-def test_method_composition_derives_legacy_wire_without_authored_kind(methods, expected):
+def test_method_composition_derives_legacy_wire_without_authored_kind(
+    methods, expected
+):
     composition = MethodCompositionTemplate(
-        required_methods=tuple(get_profile(method, "0.2") for method in methods),
-        optional_methods=(get_profile("Swarm", "0.2"),),
+        required_methods=tuple(
+            MethodTemplate(get_profile(method, "0.2")) for method in methods
+        ),
+        optional_methods=(MethodTemplate(get_profile("Swarm", "0.2")),),
     )
     assert "method_kind" not in {field.name for field in fields(composition)}
     assert not hasattr(composition, "method_kind")
@@ -414,7 +432,9 @@ def test_invalid_required_method_sets_fail_creation_and_installation(command, me
     command = replace(
         command,
         composition=MethodCompositionTemplate(
-            required_methods=tuple(get_profile(method, "0.2") for method in methods)
+            required_methods=tuple(
+                MethodTemplate(get_profile(method, "0.2")) for method in methods
+            )
         ),
     )
     with pytest.raises(ContextCollabValidationError, match="unknown method_kind"):
@@ -440,10 +460,10 @@ def test_method_composition_has_no_caller_configurable_scope(command):
 @pytest.mark.parametrize("method", ["Single", "Group", "Swarm", "Open"])
 def test_method_composition_does_not_require_open_product_policy(command, method):
     composition = MethodCompositionTemplate(
-        required_methods=(get_profile(method, "0.2"),),
+        required_methods=(MethodTemplate(get_profile(method, "0.2")),),
     )
     profile = create_product_profile(replace(command, composition=composition))
-    assert profile.composition.policies == ()
+    assert all(item.policy is None for item in profile.composition.required_methods)
     assert ProductCatalog((profile,)).get("custom_product", 3) is profile
     with pytest.raises(ContextCollabValidationError, match="exactly one Open"):
         profile.composition.require_policy("Open")
@@ -453,10 +473,9 @@ def test_composite_method_keeps_open_policy_scoped_to_open(command):
     policy = OpenMethodPolicy(_publication())
     composition = MethodCompositionTemplate(
         required_methods=(
-            get_profile("Open", "0.2"),
-            get_profile("Group", "0.2"),
+            MethodTemplate(get_profile("Open", "0.2"), policy),
+            MethodTemplate(get_profile("Group", "0.2")),
         ),
-        policies=(policy,),
     )
     profile = create_product_profile(replace(command, composition=composition))
     assert ProductCatalog((profile,)).get("custom_product", 3) is profile
@@ -466,59 +485,28 @@ def test_composite_method_keeps_open_policy_scoped_to_open(command):
     with pytest.raises(FrozenInstanceError):
         policy.method = "Group"
     with pytest.raises(FrozenInstanceError):
-        profile.composition.policies = ()
+        profile.composition.required_methods[0].policy = None
 
 
-@pytest.mark.parametrize(
-    "invalid, message",
-    [
-        (
-            lambda c: replace(
-                c.composition, policies=(OpenMethodPolicy(_publication()),) * 2
-            ),
-            "duplicate Method policy",
-        ),
-        (
-            lambda c: replace(c.composition, policies=(_publication(),)),
-            "unsupported Method policy type",
-        ),
-        (
-            lambda c: replace(
-                c.composition,
-                policies=({"method": "Open", "publication": _publication()},),
-            ),
-            "unsupported Method policy type",
-        ),
-        (
-            lambda c: replace(
-                c.composition, policies=[OpenMethodPolicy(_publication())]
-            ),
-            "immutable tuple",
-        ),
-        (
-            lambda c: replace(c.composition, policies=None),
-            "immutable tuple",
-        ),
-        (
-            lambda c: MethodCompositionTemplate(
-                required_methods=(get_profile("Single", "0.2"),),
-                optional_methods=(get_profile("Open", "0.2"),),
-                policies=(OpenMethodPolicy(_publication()),),
-            ),
-            "requires Open Method in required_methods",
-        ),
-    ],
-)
+@pytest.mark.parametrize("policy", [_publication(), {"method": "Open"}, "Open"])
 def test_method_policy_validation_is_shared_by_creation_and_installation(
-    command, invalid, message
+    command, policy
 ):
-    command = replace(command, composition=invalid(command))
-    with pytest.raises(ContextCollabValidationError, match=message):
+    command = replace(
+        command,
+        composition=replace(
+            command.composition,
+            required_methods=(
+                replace(command.composition.required_methods[0], policy=policy),
+            ),
+        ),
+    )
+    with pytest.raises(ContextCollabValidationError, match="unsupported Method policy"):
         create_product_profile(command)
     unchecked = ProductProfileDefinition(
         **{f.name: getattr(command, f.name) for f in fields(command)}
     )
-    with pytest.raises(ContextCollabValidationError, match=message):
+    with pytest.raises(ContextCollabValidationError, match="unsupported Method policy"):
         ProductCatalog((unchecked,))
 
 
@@ -531,8 +519,11 @@ def test_open_method_policy_requires_a_typed_publication_contract(publication):
 
 
 def test_policy_lookup_does_not_choose_arbitrarily_between_duplicates(command):
+    declaration = replace(
+        command.composition.required_methods[0], policy=OpenMethodPolicy(_publication())
+    )
     composition = replace(
-        command.composition, policies=(OpenMethodPolicy(_publication()),) * 2
+        command.composition, required_methods=(declaration, declaration)
     )
     with pytest.raises(ContextCollabValidationError, match="exactly one Open"):
         composition.require_policy("Open")
@@ -544,12 +535,14 @@ def test_composition_uses_the_actual_l5_method_profile_contract(command):
     profile = create_product_profile(
         replace(
             command,
-            composition=replace(command.composition, optional_methods=(optional,)),
+            composition=replace(
+                command.composition, optional_methods=(MethodTemplate(optional),)
+            ),
         )
     )
-    assert isinstance(profile.composition.required_methods[0], MethodProfile)
-    assert profile.composition.required_methods[0] is required
-    assert profile.composition.optional_methods[0] is optional
+    assert isinstance(profile.composition.required_methods[0].profile, MethodProfile)
+    assert profile.composition.required_methods[0].profile is required
+    assert profile.composition.optional_methods[0].profile is optional
     assert required.capabilities and required.primitives_used
     assert required.participation_model == "admission"
     assert required.composable_relations
@@ -564,41 +557,75 @@ def test_composition_does_not_accept_references_or_untyped_contracts(
     invalid = replace(
         command, composition=replace(command.composition, **{field: entries})
     )
-    with pytest.raises(ContextCollabValidationError, match="tuple of L5 MethodProfile"):
+    with pytest.raises(ContextCollabValidationError, match="tuple of MethodTemplate"):
         create_product_profile(invalid)
     unchecked = ProductProfileDefinition(
         **{item.name: getattr(invalid, item.name) for item in fields(invalid)}
     )
-    with pytest.raises(ContextCollabValidationError, match="tuple of L5 MethodProfile"):
+    with pytest.raises(ContextCollabValidationError, match="tuple of MethodTemplate"):
         ProductCatalog((unchecked,))
 
 
 @pytest.mark.parametrize("service_ref", ["", "  ", 42])
-def test_swarm_planner_reference_requires_nonempty_string(command, service_ref):
-    swarm_command = replace(
-        command,
-        composition=MethodCompositionTemplate((get_profile("Swarm", "0.2"),)),
-        swarm_plan_service_ref=service_ref,
-    )
+def test_swarm_planner_reference_requires_nonempty_string(service_ref):
     with pytest.raises(ContextCollabValidationError, match="plan capability"):
-        create_product_profile(swarm_command)
+        SwarmMethodPolicy(service_ref)
 
 
-def test_swarm_planner_requires_swarm_method(command):
-    with pytest.raises(ContextCollabValidationError, match="Swarm Method"):
-        create_product_profile(replace(command, swarm_plan_service_ref="plan/1"))
+@pytest.mark.parametrize(
+    "method,policy",
+    [
+        ("Open", SwarmMethodPolicy("plan/1")),
+        ("Swarm", OpenMethodPolicy(_publication())),
+    ],
+)
+def test_method_policy_must_match_its_own_declaration(command, method, policy):
+    composition = MethodCompositionTemplate(
+        (MethodTemplate(get_profile(method, "0.2"), policy),)
+    )
+    invalid = replace(command, composition=composition)
+    with pytest.raises(
+        ContextCollabValidationError, match="must match its declared Method"
+    ):
+        create_product_profile(invalid)
+    unchecked = ProductProfileDefinition(
+        **{f.name: getattr(invalid, f.name) for f in fields(invalid)}
+    )
+    with pytest.raises(
+        ContextCollabValidationError, match="must match its declared Method"
+    ):
+        ProductCatalog((unchecked,))
 
 
 def test_explicit_swarm_planner_is_preserved_by_authoring_and_catalog(command):
+    policy = SwarmMethodPolicy("plan/1")
     profile = create_product_profile(
         replace(
             command,
-            composition=MethodCompositionTemplate((get_profile("Swarm", "0.2"),)),
-            swarm_plan_service_ref="plan/1",
+            composition=MethodCompositionTemplate(
+                (MethodTemplate(get_profile("Swarm", "0.2"), policy),)
+            ),
         )
     )
-    assert profile.swarm_plan_service_ref == "plan/1"
+    assert profile.composition.required_methods[0].policy is policy
+    assert profile.composition.require_policy("Swarm").plan_service_ref == "plan/1"
     assert (
         ProductCatalog((profile,)).get(profile.ref.profile_id, profile.ref.version)
         is profile
     )
+    for value in (command, profile):
+        assert "swarm_plan_service_ref" not in {f.name for f in fields(value)}
+    assert "policies" not in {f.name for f in fields(profile.composition)}
+
+
+def test_optional_policy_is_co_located_but_not_selected(command):
+    optional = MethodTemplate(get_profile("Swarm", "0.2"), SwarmMethodPolicy("plan/1"))
+    profile = create_product_profile(
+        replace(
+            command,
+            composition=replace(command.composition, optional_methods=(optional,)),
+        )
+    )
+    assert profile.composition.optional_methods[0] is optional
+    with pytest.raises(ContextCollabValidationError, match="exactly one Swarm"):
+        profile.composition.require_policy("Swarm")

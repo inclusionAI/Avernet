@@ -18,7 +18,7 @@ def product_binding_refs(
 ) -> tuple[str, ...]:
     if profile.composition.relations:
         return tuple(
-            profile_binding_id(collet_id, method.method_kind)
+            profile_binding_id(collet_id, method.profile.method_kind)
             for method in profile.composition.required_methods
         )
     return (top_level_binding_id(collet_id),)
@@ -28,7 +28,7 @@ def product_method_binding_ref(
     collet_id: str, profile: ProductProfileDefinition, method: str
 ) -> str:
     if method not in {
-        item.method_kind for item in profile.composition.required_methods
+        item.profile.method_kind for item in profile.composition.required_methods
     }:
         raise ContextCollabValidationError(
             f"product does not require Method {method!r}"
@@ -41,7 +41,9 @@ def product_method_binding_ref(
 def product_execution_binding_ref(
     collet_id: str, profile: ProductProfileDefinition
 ) -> str:
-    methods = {item.method_kind for item in profile.composition.required_methods}
+    methods = {
+        item.profile.method_kind for item in profile.composition.required_methods
+    }
     return product_method_binding_ref(
         collet_id, profile, "Single" if "Single" in methods else "Open"
     )

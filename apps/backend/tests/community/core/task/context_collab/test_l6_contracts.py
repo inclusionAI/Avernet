@@ -37,6 +37,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodTemplate,
     VersionedProfileRef,
     negotiate,
 )
@@ -129,7 +130,9 @@ def test_required_and_optional_extensions_and_methods_are_distinct():
         composition=replace(
             profile.composition,
             optional_methods=(
-                replace(get_profile("Swarm", "0.2"), profile_version="999"),
+                MethodTemplate(
+                    replace(get_profile("Swarm", "0.2"), profile_version="999")
+                ),
             ),
         ),
     )

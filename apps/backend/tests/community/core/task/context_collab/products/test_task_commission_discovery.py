@@ -74,17 +74,21 @@ PROFILE = create_product_profile(
         TASK_COMMISSION_PROFILE,
         composition=replace(
             TASK_COMMISSION_PROFILE.composition,
-            policies=(
-                OpenMethodPolicy(
-                    publication=OpenPublicationProfile(
-                        admission=BotSelfApplicationAdmission(
-                            applicant_role="assignee",
-                            accountable_role="owner",
-                            participation_type=ParticipationType.COLLET_PARTICIPANT,
-                            capacity=1,
-                        )
+            required_methods=(
+                replace(
+                    TASK_COMMISSION_PROFILE.composition.required_methods[0],
+                    policy=OpenMethodPolicy(
+                        publication=OpenPublicationProfile(
+                            admission=BotSelfApplicationAdmission(
+                                applicant_role="assignee",
+                                accountable_role="owner",
+                                participation_type=ParticipationType.COLLET_PARTICIPANT,
+                                capacity=1,
+                            )
+                        ),
                     ),
                 ),
+                *TASK_COMMISSION_PROFILE.composition.required_methods[1:],
             ),
         ),
     )

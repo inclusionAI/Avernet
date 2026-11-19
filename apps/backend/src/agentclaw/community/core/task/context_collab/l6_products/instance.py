@@ -182,7 +182,7 @@ def _instance(
         ),
         method_binding_refs=product_binding_refs(collet_id, profile),
         method_profiles=tuple(
-            item.ref for item in profile.composition.required_methods
+            item.profile.ref for item in profile.composition.required_methods
         ),
         role_binding_refs=role_binding_refs(
             collet_id, profile=profile, executor_ref=executor_ref
@@ -281,7 +281,7 @@ def decode_product_instance(
     ):
         raise ContextCollabValidationError("invalid persisted product negotiation")
     optional = {
-        f"method:{item.method_kind}@{item.profile_version}"
+        f"method:{item.profile.method_kind}@{item.profile.profile_version}"
         for item in profile.composition.optional_methods
     }
     optional.update(

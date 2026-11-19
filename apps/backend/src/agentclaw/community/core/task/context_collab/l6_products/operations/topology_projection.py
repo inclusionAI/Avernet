@@ -51,7 +51,7 @@ def project_method_topology(
     """
     bindings: dict[str, MethodBinding] = {}
     for method in profile.composition.required_methods:
-        name, version = method.method_kind, method.profile_version
+        name, version = method.profile.method_kind, method.profile.profile_version
         binding_id = product_method_binding_ref(collet_id, profile, name)
         binding = store.get_binding(axes, binding_id, collet_id)
         if binding is None:
@@ -113,4 +113,4 @@ def project_method_topology(
                 transitioned_at=now,
             ),
         )
-    return bindings[profile.composition.required_methods[0].method_kind]
+    return bindings[profile.composition.required_methods[0].profile.method_kind]

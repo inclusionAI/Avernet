@@ -22,12 +22,14 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodRelationTemplate,
+    MethodTemplate,
     ProductProfileDefinition,
     TaskLifecycleContract,
     composition_method_kind,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
+    SwarmMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (
     ParticipantScope,
@@ -46,20 +48,13 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
     methods = definition.composition.required_methods
     for profiles in (methods, definition.composition.optional_methods):
         if not isinstance(profiles, tuple) or any(
-            not isinstance(item, MethodProfile) for item in profiles
+            not isinstance(item, MethodTemplate)
+            or not isinstance(item.profile, MethodProfile)
+            for item in profiles
         ):
             raise ContextCollabValidationError(
-                "composition Methods must be an immutable tuple of L5 MethodProfile contracts"
+                "composition Methods must be an immutable tuple of MethodTemplate declarations with L5 MethodProfile contracts"
             )
-    if definition.swarm_plan_service_ref is not None and (
-        not isinstance(definition.swarm_plan_service_ref, str)
-        or not definition.swarm_plan_service_ref.strip()
-        or "Swarm"
-        not in {m.method_kind for m in definition.composition.required_methods}
-    ):
-        raise ContextCollabValidationError(
-            "Swarm plan capability requires a non-empty reference and Swarm Method"
-        )
     # Preserve supported legacy creation/binding wires without a duplicate
     # author-supplied Method kind. Empty/duplicate/unsupported sets fail closed.
     parse_method_kinds(composition_method_kind(definition.composition))
@@ -107,25 +102,24 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
             raise ContextCollabValidationError(
                 "workflow action requires an undeclared scenario role"
             )
-    policies = definition.composition.policies
-    if not isinstance(policies, tuple):
-        raise ContextCollabValidationError("Method policies must be an immutable tuple")
-    seen: set[str] = set()
-    for policy in policies:
-        if not isinstance(policy, OpenMethodPolicy):
+    # Validate optional declarations too, but never enable their policies unless
+    # they become required/selected in a separately authored composition.
+    for declaration in (*methods, *definition.composition.optional_methods):
+        policy = declaration.policy
+        if policy is None:
+            continue
+        if not isinstance(policy, (OpenMethodPolicy, SwarmMethodPolicy)):
             raise ContextCollabValidationError("unsupported Method policy type")
-        if policy.method in seen:
-            raise ContextCollabValidationError("duplicate Method policy")
-        seen.add(policy.method)
-        if policy.method not in {method.method_kind for method in methods}:
+        if policy.method != declaration.profile.method_kind:
             raise ContextCollabValidationError(
-                "Open publication requires Open Method in required_methods"
+                "Method policy must match its declared Method Profile"
             )
-        policy.publication.admission.validate_roles(definition.scenario_roles)
-        if not contract.actions:
-            raise ContextCollabValidationError(
-                "publication requires Task/workflow actions"
-            )
+        if isinstance(policy, OpenMethodPolicy):
+            policy.publication.admission.validate_roles(definition.scenario_roles)
+            if not contract.actions:
+                raise ContextCollabValidationError(
+                    "publication requires Task/workflow actions"
+                )
 
 
 def _validate_relations(definition: ProductProfileDefinition) -> None:
@@ -137,7 +131,7 @@ def _validate_relations(definition: ProductProfileDefinition) -> None:
         raise ContextCollabValidationError(
             "Method relations must be an immutable tuple"
         )
-    methods = {item.method_kind for item in composition.required_methods}
+    methods = {item.profile.method_kind for item in composition.required_methods}
     if methods == {"Open", "Single"} and not relations:
         raise ContextCollabValidationError(
             "Open + Single requires explicit Method relations"

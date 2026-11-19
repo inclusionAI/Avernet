@@ -84,6 +84,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodTemplate,
     CompatibilityRequirements,
     GovernanceRequirements,
     MethodCompositionTemplate,
@@ -183,6 +184,7 @@ OBJECTIVE = (
   - [ ] open方法中的参与类型，协议中的枚举不在一个维度：participation_type: COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | SINGLE_CONTRIBUTION
 """
 
+
 def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     # 1. L6层产品定义是可复用合同,创建 Profile 本身不产生协作运行对象。L5层OPEN + SINGLE方法的组合
     profile = _create_product_profile()
@@ -264,26 +266,26 @@ def _create_product_profile():
         # 绑定 L5 的 Open 和 Single 方法。
         composition=MethodCompositionTemplate(
             required_methods=(
-                get_profile("Open", "0.2"),
-                get_profile("Single", "0.2"),
-            ),
-            relations=(
-                MethodRelationTemplate("Single", "Open", CompositionRelation.SUPPORT),
-            ),
-            policies=(
-                OpenMethodPolicy(
-                    publication=OpenPublicationProfile(
-                        admission=BotSelfApplicationAdmission(
-                            applicant_role="assignee",
-                            accountable_role="owner",
-                            participation_type=ParticipationType.COLLET_PARTICIPANT,
-                            capacity=1,
-                            decision_actor="configured_agent",
-                            decision_agent_ref=ADMISSION_AGENT,
-                            decision_rule="capability_evidence",
+                MethodTemplate(
+                    get_profile("Open", "0.2"),
+                    policy=OpenMethodPolicy(
+                        publication=OpenPublicationProfile(
+                            admission=BotSelfApplicationAdmission(
+                                applicant_role="assignee",
+                                accountable_role="owner",
+                                participation_type=ParticipationType.COLLET_PARTICIPANT,
+                                capacity=1,
+                                decision_actor="configured_agent",
+                                decision_agent_ref=ADMISSION_AGENT,
+                                decision_rule="capability_evidence",
+                            ),
                         ),
                     ),
                 ),
+                MethodTemplate(get_profile("Single", "0.2")),
+            ),
+            relations=(
+                MethodRelationTemplate("Single", "Open", CompositionRelation.SUPPORT),
             ),
         ),
         # 三个 Agent 有参与资格;只有 BOT_ASSIGNEE 在实例化时绑定为执行者。
@@ -348,7 +350,7 @@ def _create_product_profile():
         ADMISSION_AGENT,
     )
     assert composition_method_kind(profile.composition) == "Open + Single"
-    assert profile.composition.required_methods == (
+    assert tuple(item.profile for item in profile.composition.required_methods) == (
         get_profile("Open", "0.2"),
         get_profile("Single", "0.2"),
     )
