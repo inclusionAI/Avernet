@@ -55,7 +55,10 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.depend
     SessionFileRuntimeTargetDep,
     UploadActorNameDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import authorize_file_list
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import (
+    authorize_file_list,
+    authorize_file_operation,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     DeviceUuidQuery,
@@ -553,16 +556,17 @@ async def create_session_file_upload_intents(
     request: Request,
     runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFileUploadIntentResult]:
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    access = await authorize_file_operation(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
+        runtime_target=runtime_target, require_caller_instance=True,
     )
     try:
         intents = adapter.create_upload_intents(
@@ -572,8 +576,8 @@ async def create_session_file_upload_intents(
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,
-            stage=stage.value,
-            engine_type=facts.active_engine,
+            stage=access.stage,
+            engine_type=access.facts.active_engine,
             files=[
                 (item.filename, item.size_bytes, item.content_hash)
                 for item in body.files
@@ -611,12 +615,16 @@ async def complete_session_file_upload(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFile]:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    await authorize_file_operation(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
     )
     try:
         record = adapter.complete_upload(
@@ -650,7 +658,7 @@ async def session_file_materialize_status(
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFile]:
-    await authorize_file_list(
+    await authorize_file_operation(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
         owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
         relay=relay, friendships=friendships, expert=expert,
@@ -781,18 +789,23 @@ async def delete_session_file(
     request: Request,
     runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[Deleted]:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    access = await authorize_file_operation(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
+        runtime_target=runtime_target, require_caller_instance=True,
     )
     try:
         await adapter.delete(
             target=RuntimeBindingRequest(
                 target=runtime_target,
-                bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=stage.value,
+                bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=access.stage,
             ),
             session_key=session_id,
             resource_id=resource_id,

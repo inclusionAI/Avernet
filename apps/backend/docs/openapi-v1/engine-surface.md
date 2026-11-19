@@ -122,6 +122,18 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 | PUT | `…/{bot_id}/sessions/{session_id}/favorite` | `PUT /api/session-favorites/{encoded_session_id}` | idempotently favorite → `Envelope[SessionFavorite]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}/favorite` | `DELETE /api/session-favorites/{encoded_session_id}` | idempotently unfavorite → `Envelope[SessionFavorite]` |
 
+### Friend session files
+
+Non-TeClaw friend Bots support the same session-file lifecycle as an owner or
+explicit member collaborator: upload intent, upload completion, materialization
+status, listing, content reads, and deletion. This is not an operator grant.
+Each friend request rechecks the live BCN friendship and Backend-owned session;
+upload and deletion additionally require
+`caller_runtime_target=caller_instance`, so they cannot target the Bot owner's
+service runtime. Existing upload clients may omit `f_user_id`: Backend attempts
+operator authorization first and only then falls back to the authenticated
+user's strictly owned friend session. Failures remain masked as 404.
+
 Two things about this group are not the shape a reader would assume:
 
 **Opt-in source filtering:** `GET /bots/{bot_id}/sessions?source=mine|others`
