@@ -64,6 +64,8 @@ pub enum ActionIntent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Decision {
     pub next_state: RunnerState,
+    /// At most one SetStatus per Decision. Status interaction metadata is not
+    /// externalized, so this bound keeps every admitted batch finalizable.
     pub actions: Vec<ActionIntent>,
     pub next_deadlines: Vec<Deadline>,
 }

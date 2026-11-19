@@ -567,3 +567,14 @@ fn quiet_snapshot_flush_preserves_custom_task_deadlines_and_private_state() {
     assert!(flushed.tasks[0].publication.flush_deadline.is_none());
     assert_eq!(flushed.tasks[0].steps, first.tasks[0].steps);
 }
+
+#[test]
+fn repeated_status_actions_are_rejected_before_building_unbounded_status_events() {
+    let status = ActionIntent::SetStatus {
+        tid: task().tid,
+        status: TaskStatus::Working,
+        interactions: vec![],
+    };
+    assert!(matches!(check(decision(vec![status.clone(), status])),
+        Err(DecisionFailure::Invalid("multiple_status_actions"))));
+}

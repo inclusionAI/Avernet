@@ -10,7 +10,7 @@ fn awaiting_result_checkpoint_retains_replayable_result_and_input_coverage(
         "commit_seq":8,
         "consumed":{"sid":"s","token":{"backend":"store-a","generation":"v1","value":"opaque-8"}},
         "tasks":[{"tid":"t","phase":{"kind":"awaiting_result","status":"completed"},
-            "input":{"kind":"inline","value":{}},"result_ref":null,
+            "input":{"kind":"inline","value":{}},"result_ref":null,"steps":0,
             "output_limits":PHASE_ONE_OUTPUT_LIMITS,"output_usage":OutputUsage::default(),
             "publication":SnapshotProgress::default(),"finalization":null}],
         "runner_state":null,
@@ -43,6 +43,9 @@ fn awaiting_result_checkpoint_retains_replayable_result_and_input_coverage(
         EffectKind::SaveResult { .. }
     ));
     assert_eq!(serde_json::to_value(checkpoint)?, wire);
+    wire["tasks"][0].as_object_mut().unwrap().remove("steps");
+    let legacy: Checkpoint = serde_json::from_value(wire)?;
+    assert_eq!(legacy.tasks.front().unwrap().steps, 0);
     Ok(())
 }
 

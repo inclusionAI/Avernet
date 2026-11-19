@@ -160,6 +160,20 @@ a quarter of the quota; the last quarter is shared. Global scan IO is at most
 eight and at most a quarter of the configured pool. Startup rejects absent or
 mismatched profiles. These limits alone are not a capacity certification.
 
+The document provider must expose current ordinary-pool observations. Startup
+rejects unavailable or inconsistent facts and a bounded pool whose capacity
+differs from `connection_pool_size`; an explicit unpooled provider is supported.
+Host assembly must expose the actual shared ordinary pool used by these store
+ports, separately from blocking readers. `pool_pressure_after` defaults to 200ms
+and accepts 5ms through 5s. Sustained congestion (full pool or queued callers),
+unavailable observations or invalid facts refuse only new Start reservations
+with `admission_pool_pressure`. The check is synchronous and adds no store IO.
+Existing pending/canonical identities, repair, result/critical admission and
+controls retain their obligations and reserved budgets. A refusal still rechecks
+a racing canonical winner before claiming definite non-application. Brief pool
+pressure is allowed; valid recovered observations remove only this pressure gate,
+without bypassing the independent historical-capacity and maintenance gates.
+
 New Start admission requires recent monotonic evidence of complete repair and
 discovery rounds. Cold producers do not trust a persisted timestamp/counter;
 they must perform a new complete round or observe subsequent progress after a

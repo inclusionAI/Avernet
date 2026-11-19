@@ -49,7 +49,7 @@ impl Clock for ClockAt {
         TimestampMillis(self.0.load(Ordering::SeqCst))
     }
 }
-struct Directory;
+pub struct Directory;
 #[async_trait]
 impl DistGroupDirectoryPort for Directory {
     async fn resolve(
@@ -113,6 +113,7 @@ impl DistRunnerCoreService for FinishingRunner {
 }
 pub struct FaultSessions {
     pub inner: Arc<CoordinationStore>,
+    pub capacity: std::sync::Mutex<Option<SessionCheckpointCapacity>>,
     pub lose_commit: AtomicBool,
     pub fail_release: AtomicBool,
     pub pause_release: AtomicBool,
@@ -127,6 +128,10 @@ pub struct FaultSessions {
 }
 #[async_trait]
 impl SessionStorePort for FaultSessions {
+    fn checkpoint_capacity(&self) -> Option<SessionCheckpointCapacity> {
+        *self.capacity.lock().unwrap()
+    }
+
     fn local_session_capacity(&self) -> Option<usize> {
         self.inner.local_session_capacity()
     }
@@ -261,6 +266,7 @@ impl Fixture {
         });
         let sessions = Arc::new(FaultSessions {
             inner: coordination.clone(),
+            capacity: std::sync::Mutex::new(coordination.checkpoint_capacity()),
             lose_commit: AtomicBool::new(false),
             fail_release: AtomicBool::new(false),
             pause_release: AtomicBool::new(false),

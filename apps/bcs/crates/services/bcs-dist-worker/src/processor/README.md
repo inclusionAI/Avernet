@@ -70,8 +70,14 @@ arrives and must enforce the declared capacity/health envelope.
 The physical checkpoint/outbox/Ref frames and finalization reserves use the
 phase-one profile. Semantic Task quotas may be lower and remain frozen. Metadata
 identities and bindings are bounded by JSON encoded bytes including escaping.
-The maximum mixed-action and terminal candidates are serialized through real
-Rust types in `capacity_tests.rs`, including retained deadline identities.
+Startup requires an explicit `SessionCheckpointCapacity` declaration and validates
+maximum ordinary, queued-finalization and frozen-result candidates using actual
+Rust serialization (`capacity.rs`). The proof includes retained deadline identities,
+Running state preserved while another task finishes, and immutable inline final
+content. The 64–128 KiB configured envelope reserve must cover the provider's
+declaration; it includes the backend wrapper. Each Decision permits at most one
+`SetStatus`, so repeated unexternalizable interaction/status metadata cannot bypass
+the outbox bound. Retry delay must be between 5 ms and 5 seconds.
 
 `observations()` exposes body-free local gauges: unknown commits/age, persisted
 outbox age (None for older unstamped batches), archive wait, resident isolation,

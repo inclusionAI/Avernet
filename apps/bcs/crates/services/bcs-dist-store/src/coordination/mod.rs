@@ -1,5 +1,8 @@
 //! Provider-independent membership, shard transitions and checkpoint fencing.
 //! Private document versions never encode epoch or business commit sequence.
+#[cfg(test)]
+mod capacity_tests;
+mod capacity;
 mod control;
 mod membership;
 mod session;
@@ -56,12 +59,19 @@ pub struct CoordinationStoreConfig {
     pub max_cached_sessions: usize,
     /// Independent shard/handoff dimension, not an active-session budget.
     pub max_handoff_timers: usize,
+    /// Enforced before every CAS; the host separately validates backend capacity.
+    pub checkpoint_capacity: SessionCheckpointCapacity,
+    /// Host-declared worst-case private DocumentCas wrapper bytes. The adapter
+    /// must prove this bound; it is included in both declared byte budgets.
+    pub storage_envelope_bytes: usize,
 }
 impl Default for CoordinationStoreConfig {
     fn default() -> Self {
         Self {
             max_cached_sessions: 10_000,
             max_handoff_timers: 4096,
+            checkpoint_capacity: SessionCheckpointCapacity::default(),
+            storage_envelope_bytes: 64,
         }
     }
 }
@@ -97,9 +107,17 @@ impl CoordinationStore {
         layout: KeyLayout,
         config: CoordinationStoreConfig,
     ) -> Result<Self, StoreError> {
-        if config.max_cached_sessions == 0 || config.max_handoff_timers == 0 {
+        if config.max_cached_sessions == 0 || config.max_handoff_timers == 0
+            || config.checkpoint_capacity.max_document_bytes < 256 * 1024
+            || config.checkpoint_capacity.max_document_bytes > 1024 * 1024
+            || config.checkpoint_capacity.max_envelope_bytes < 64 * 1024
+            || config.checkpoint_capacity.max_envelope_bytes > 128 * 1024
+            || config.checkpoint_capacity.max_envelope_bytes >= config.checkpoint_capacity.max_document_bytes
+            || config.storage_envelope_bytes >= config.checkpoint_capacity.max_envelope_bytes
+        {
             return Err(invalid("coordination_capacity"));
         }
+        capacity::validate_config(&config)?;
         for (supported, code) in [
             (
                 documents.supports(StoreCapability::DocumentCas),
@@ -149,6 +167,7 @@ impl CoordinationStore {
         operation: &str,
     ) -> Result<Option<Version>, StoreError> {
         let data = encode_json(value)?;
+        capacity::validate_row(&data, &self.config)?;
         let outcome = match expected {
             Some(v) => self.documents.replace_document(key, v, &data).await,
             None => self.documents.create_document(key, &data).await,

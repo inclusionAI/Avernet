@@ -205,8 +205,30 @@ pub enum RecoveryUpdate {
     Fenced,
 }
 
+/// Enforced JSON encoding bounds for a Session provider, not a measurement of
+/// the underlying database. The host must confirm that its DocumentCas adapter
+/// can store this complete document, including any private storage encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionCheckpointCapacity {
+    /// Complete stored document, including checkpoint, control and storage wrapper.
+    pub max_document_bytes: usize,
+    /// Maximum bytes outside Checkpoint, including the private storage wrapper.
+    pub max_envelope_bytes: usize,
+}
+impl Default for SessionCheckpointCapacity {
+    fn default() -> Self {
+        Self { max_document_bytes: 1024 * 1024, max_envelope_bytes: 64 * 1024 }
+    }
+}
+
 #[async_trait]
 pub trait SessionStorePort: Send + Sync {
+    /// None means this provider has not adopted the bounded Worker checkpoint
+    /// contract. WorkerProcessor must reject such a composition at startup.
+    fn checkpoint_capacity(&self) -> Option<SessionCheckpointCapacity> {
+        None
+    }
+
     /// Maximum local session reservations supported by this port instance.
     /// None means no local cache limit. Runtime wiring must reject a configured
     /// active-session limit above Some(capacity), and apply backpressure before

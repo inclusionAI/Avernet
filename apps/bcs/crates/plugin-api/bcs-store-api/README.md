@@ -342,3 +342,20 @@ response can be `OutcomeUnknown`; consumers resolve it without treating absence
 as death. The test-only model uses one lock and a controllable clock. It is not a
 production lease service and proves neither durability nor failover behavior.
 Document CAS and ordinary TTL alone do not establish StrictLease support.
+
+## Ordinary connection-pool observations
+
+`StorePlugin::pool_observation` supplies current, body-free local resource facts
+without storage IO. `None` means unavailable evidence; it is never an idle pool.
+`Unpooled` is explicit for providers without a connection pool. `Bounded` reports
+one consistent ordinary-pool capacity, checked-out count, waiter count and the
+monotonic duration for which all slots are occupied or a caller is queued.
+That congestion duration survives direct slot handoff to waiting callers and
+resets only when neither condition holds. Connection setup and authentication
+occupy the checked-out slot; cancellation releases queued and checked-out state.
+Separate blocking-read pools do not contribute to the ordinary-pool snapshot.
+
+Wrappers forward this metadata. The configured provider's resource kind and
+capacity remain stable; a current snapshot that cannot be obtained returns
+`None`. Consumers own pressure thresholds and business admission policy. This
+observation neither authorizes writes nor changes their atomicity or uncertainty.

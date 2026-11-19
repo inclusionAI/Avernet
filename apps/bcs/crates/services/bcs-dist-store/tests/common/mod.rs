@@ -30,9 +30,13 @@ pub struct Recorder {
     fail_write: Mutex<Option<usize>>,
     pause: Mutex<Option<PauseRule>>,
     fail_document_read: Mutex<Option<String>>,
+    pool_override: Mutex<Option<Option<StorePoolObservation>>>,
 }
 
 impl Recorder {
+    pub fn observe_pool(&self, observation: Option<StorePoolObservation>) {
+        *self.pool_override.lock().unwrap() = Some(observation);
+    }
     pub fn without_capability(capability: StoreCapability) -> Self {
         Self {
             disabled: Some(capability),
@@ -166,6 +170,9 @@ macro_rules! run {
 
 
 impl StorePlugin for Recorder {
+    fn pool_observation(&self) -> Option<StorePoolObservation> {
+        self.pool_override.lock().unwrap().unwrap_or_else(|| self.model.pool_observation())
+    }
     fn supports(&self, capability: StoreCapability) -> bool {
         self.disabled != Some(capability) && self.model.supports(capability)
     }
