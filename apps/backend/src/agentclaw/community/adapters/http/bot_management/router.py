@@ -1600,7 +1600,10 @@ async def get_bot_passport(
         operator_id = ctx.user_id
         resolved_owner_id = owner_id or operator_id
 
-        bot = bot_service.get_bot(bot_id, resolved_owner_id)
+        try:
+            bot = bot_service.get_bot(bot_id, resolved_owner_id)
+        except BotNotFoundError:
+            return ApiResponse(success=False, message="Bot not found", error_code=404)
         if not bot:
             return ApiResponse(success=False, message="Bot not found", error_code=404)
 
