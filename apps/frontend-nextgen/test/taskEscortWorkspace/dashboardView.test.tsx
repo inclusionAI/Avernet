@@ -75,13 +75,16 @@ beforeEach(() => {
   jest.clearAllMocks();
   hook.mockReturnValue(state() as any);
 });
-it('renders genuine admin dashboard sections and actual aggregate values, not sample lists/tabs/mode banners', () => {
+it('renders genuine permission-scoped dashboard sections and actual aggregate values, not sample lists/tabs/mode banners', () => {
   const scope = { key: 'user:space', ready: true };
   render(<Dashboard demo={demo} scope={scope} />);
   expect(hook).toHaveBeenCalledWith(scope, '7d');
-  expect(screen.getByRole('heading', { name: '管理员数据大盘' })).toBeTruthy();
-  for (const name of ['全局运行健康', '护航待办', '护航处理进度', '运行质量趋势', '异常热点', '工作流列表'])
+  expect(screen.getByRole('heading', { name: '任务护航数据大盘' })).toBeTruthy();
+  for (const name of ['运行健康', '护航待办', '护航处理进度', '运行质量趋势', '异常热点', '工作流列表'])
     expect(screen.getByRole('heading', { name })).toBeTruthy();
+  expect(screen.getAllByText(/当前权限范围$/)).toHaveLength(2);
+  expect(screen.getByRole('group', { name: '统一时间范围' })).toBeTruthy();
+  expect(screen.queryByText(/管理员|全局运行健康|全局数据|全量视角/)).toBeNull();
   expect(screen.getByText('1,234')).toBeTruthy();
   expect(screen.getAllByText('87.5%').length).toBeGreaterThan(0);
   expect(screen.getByText('123s')).toBeTruthy();
@@ -101,9 +104,13 @@ it('explicit forbidden replaces all dashboard data and never suggests demo fallb
   data.forbidden = true;
   hook.mockReturnValue(data as any);
   render(<Dashboard demo={demo} scope={{ key: 'u:s', ready: true }} />);
-  expect(screen.getByText('只有管理员可以查看全局数据大盘')).toBeTruthy();
+  expect(screen.getByText('当前无法查看大盘数据')).toBeTruthy();
+  expect(screen.getByText('请确认当前身份与空间是否有访问权限，或联系权限负责人后重试')).toBeTruthy();
   expect(screen.queryByText('1,234')).toBeNull();
-  expect(screen.queryByText(/演示/)).toBeNull();
+  expect(screen.queryByRole('table', { name: '工作流列表' })).toBeNull();
+  expect(screen.queryByText(/演示|管理员|全局/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重试大盘权限' }));
+  expect(data.refresh).toHaveBeenCalledTimes(1);
 });
 it('shows readiness failures and safe retry without exposing stale metrics', () => {
   const retry = jest.fn();
@@ -130,7 +137,7 @@ it('renders the shared Skeleton primitive for identity and every widget loading 
     data[name] = { ...resource(null), loading: true };
   hook.mockReturnValue(data as any);
   const view = render(<Dashboard demo={demo} scope={{ key: 'u:s', ready: true }} />);
-  expect(screen.getByRole('status', { name: '全局运行健康加载中' })).toBeTruthy();
+  expect(screen.getByRole('status', { name: '运行健康加载中' })).toBeTruthy();
   expect(screen.getByRole('status', { name: '工作流列表加载中' })).toBeTruthy();
   expect(screen.queryByText('1,234')).toBeNull();
   view.rerender(<Dashboard demo={demo} scope={{ key: 'u:s', ready: false, loading: true }} />);

@@ -262,6 +262,36 @@ describe('reviewed candidate publication', () => {
       expect(hidden.capabilities.publication).toBe(false);
     } finally { await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }); }
   });
+  it('lets a verified viewer publish a reviewed workflow target but never a legacy Bot target', async () => {
+    const f = await setup();
+    const legacyTargets = await f.publisher.targets('wf-1', 'reviewer');
+    const target = { id: 'workflow-target', scope: 'workflow' as const, botId: '', ownerId: '', environment: 'pre' as const, label: 'Workflow' };
+    f.publisher.targets = async (_workflow, actor) => actor === 'reviewer' ? [target, ...legacyTargets] : [];
+    const app = express(); app.use(express.json());
+    app.use('/repairs', createRepairBatchesRouter({ service: f.workbench, release: f.service,
+      authorize: async req => req.get('x-test-role') === 'viewer' ? { actorId: 'reviewer', canEdit: false, canOptimize: true } : null }));
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>(resolve => server.once('listening', resolve));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/repairs/${f.revision.taskId}`;
+    const headers = { 'Content-Type': 'application/json', 'X-Test-Role': 'viewer' };
+    const post = (path: string, body: object, role = 'viewer') => fetch(`${url}/${path}`, {
+      method: 'POST', headers: { ...headers, 'X-Test-Role': role }, body: JSON.stringify(body),
+    });
+    try {
+      expect(await (await fetch(`${url}/deployment-targets`, { headers })).json()).toEqual({ targets: [target] });
+      expect((await post('publish', { ...f.request, targetId: target.id }, 'denied')).status).toBe(403);
+      expect((await post('publish', f.request)).status).toBe(403);
+      expect((await post('confirm', { ...f.request, targetId: target.id })).status).toBe(403);
+      expect((await post('publish', { ...f.request, targetId: target.id, acknowledgeUncoveredChecks: false })).status).toBe(409);
+      expect((await f.service.detail(f.revision.taskId)).approval).toBeNull();
+      expect(f.dispatches).toHaveLength(0);
+      const published = await post('publish', { ...f.request, targetId: target.id });
+      expect(published.status).toBe(202);
+      expect(await published.json()).toMatchObject({ target });
+      expect(f.dispatches).toHaveLength(1);
+      expect((await f.service.detail(f.revision.taskId)).approval).toMatchObject({ actorId: 'reviewer', target });
+    } finally { await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }); }
+  });
   it('publishes from one user decision and deduplicates concurrent and response-lost retries', async () => {
     const f = await setup();
     f.publisher.targets = async () => [{ id: 'target-1', scope: 'workflow', environment: 'pre', botId: '', ownerId: '', label: 'workflow scope' }];

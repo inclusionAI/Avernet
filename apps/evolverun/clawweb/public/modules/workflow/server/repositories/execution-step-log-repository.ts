@@ -14,6 +14,8 @@ import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
 
 // ── Types ──
 
+import { exactRunKey, runFlowWhere } from "./run-evidence-scope.js";
+
 export type ExecutionStepType =
   | "start"
   | "complete"
@@ -95,14 +97,16 @@ function stepToParams(step: ExecutionStepLogInsert, now: number | string): unkno
 }
 
 function buildWhereClause(
+  db: IDatabase,
   flowId: string,
   options?: FindExecutionStepLogOptions,
+  workflowId?: string,
 ): { sql: string; params: unknown[] } {
-  const conditions = ["flow_id = ?"];
-  const params: unknown[] = [flowId];
+  const [scope, params] = runFlowWhere(db, flowId, workflowId);
+  const conditions = [scope];
 
   if (options?.nodeId) {
-    conditions.push("node_id = ?");
+    conditions.push(exactRunKey(db, "node_id"));
     params.push(options.nodeId);
   }
   if (options?.stepType) {
@@ -133,9 +137,10 @@ export class ExecutionStepLogRepository {
   async getStepsByFlow(
     flowId: string,
     options?: FindExecutionStepLogOptions,
+    workflowId?: string,
   ): Promise<ExecutionStepLogRow[]> {
     try {
-      const { sql: where, params } = buildWhereClause(flowId, options);
+      const { sql: where, params } = buildWhereClause(this.db, flowId, options, workflowId);
       const limit = options?.limit ?? 100;
       const offset = options?.offset ?? 0;
       return await this.db.query<ExecutionStepLogRow>(
@@ -153,9 +158,10 @@ export class ExecutionStepLogRepository {
   async getStepCountByFlow(
     flowId: string,
     options?: FindExecutionStepLogOptions,
+    workflowId?: string,
   ): Promise<number> {
     try {
-      const { sql: where, params } = buildWhereClause(flowId, options);
+      const { sql: where, params } = buildWhereClause(this.db, flowId, options, workflowId);
       const rows = await this.db.query<Row>(
         `SELECT COUNT(*) AS cnt FROM execution_step_log WHERE ${where}`,
         params,

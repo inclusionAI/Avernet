@@ -211,7 +211,13 @@ function IssueContents({ context, canEdit }: { context: TaskEscortParityContext;
       {repairs.data && (
         <ReadCapabilities capabilities={repairs.data.capabilities} canEdit={canEdit && repairs.data.canEdit} />
       )}
-      <WriteUnavailable canEdit={canEdit && !!repairs.data?.canEdit} reason={repairs.data?.capabilities.reason} />
+      {repairs.data?.canOptimize === true ? (
+        <p className="text-xs text-muted-foreground">
+          在当前版本的修复建议中选择条目后，可提交草稿生成，不会应用或发布。
+        </p>
+      ) : (
+        <WriteUnavailable canEdit={canEdit && !!repairs.data?.canEdit} reason={repairs.data?.capabilities.reason} />
+      )}
       <HistoricalIssues
         context={context}
         onOpen={(signature, snapshotKey) => setSelection({ signature, snapshotKey, scope: 'historical' })}

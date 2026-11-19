@@ -44,6 +44,7 @@ export interface RepairCandidates {
   page: PageInfo;
   limits: { maxItems: number; maxRequestBytes: number };
   canEdit: boolean;
+  canOptimize?: boolean;
 }
 export interface RepairQuery {
   versionScope?: VersionScope;

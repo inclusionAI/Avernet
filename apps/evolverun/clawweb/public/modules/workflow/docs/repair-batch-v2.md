@@ -152,7 +152,7 @@ OCB 已实现以上内容重建；部署历史事务激活前还会再次调用�
 | `GET /candidates?workflowId=&state=&page=&pageSize=&includeHistorical=&includeTasks=&nodeId=&failureMode=&signature=&versionScope=&snapshotKey=` | 默认读取最近 7 天，显式 `includeHistorical=true` 包含历史；可选节点/类型/签名先过滤再分页和计数；inputDigest 仍绑定整个时间范围的来源，支持跨页选择；不读取证据 payload，不物化写库。`includeTasks` 默认 true，false 时跳过修复版本历史读取并返回空 tasks；POST 查询语义相同 |
 | `POST /candidates/query` | 只读查询，与 GET 使用相同 view 权限、过滤和快照；JSON 请求体包含 workflowId 和查询字段，批量 previewSignatures 最多 50 个，解压后请求体最多 256 KiB，避免长签名撑大 URL。返回每个问题的真实总数及最多 3 项预览，与全局建议页独立；先为基础响应和所有总数预留字节，再按剩余 4 MiB 响应预算添加完整项，不截断建议。预算不足时预览可少于 3 项或为空，仍可通过“查看全部”分页读取。旧 GET previewSignature 参数兼容保留，新客户端不再使用 |
 | `GET /items/:itemId?workflowId=` | 展开单条时读取该项完整建议、来源与证据 payload |
-| `POST /` | 校验当前来源摘要，原子写入处理项、修订、workflow_repair task 和 draft step，提交后派发，202 |
+| `POST /` | edit 权限沿用原行为；Host 授予手工优化能力的 workflow viewer 可以用同站 JSON 请求创建首轮手工草稿，或按同一请求 ID、身份与内容重试。工作流锁内校验重试，不按相同选项或要求复用其他任务；自动来源仍要求 edit。校验来源并原子写入处理项、修订、workflow_repair task 和 draft step，提交后派发草稿生成，202；不授予工作流执行或试跑权限 |
 | `GET /:taskId` | 当前尝试、最近成功候选、修订列表和派发状态 |
 | `GET /:taskId/revisions/:revision` | 指定冻结修订 |
 | `POST /:taskId/revisions` | 原任务冻结基线 + 最近成功父候选 + 当前选择/反馈，新增修订，202 |
@@ -378,3 +378,7 @@ permits reading the failure receipt. Reconciliation retains the receipt's error 
 AIS reports failure. Older writers or Git transport failure retain the existing AIS
 error fallback; no new callback, credentials, DB schema or business execution is added.
 Failure refs follow the repository's diagnostic retention policy.
+
+手动试跑仍要求实际的执行权限和合格的 Bot。试跑历史的 `canStopUnstarted` 只用于表示可结束尚未登记的请求；
+服务端在工作流锁内核对请求的创建者，不会中止已登记的运行。恢复发布时重新校验当前操作人的发布范围，
+部署记录继续保留原发起人和精确的候选版本。

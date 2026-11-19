@@ -8,12 +8,13 @@ import { BotWorkflowPermissionRepository } from "../bot-workflow-permission-repo
 const databases: Database.Database[] = [];
 afterEach(() => { databases.splice(0).forEach(db => db.close()); vi.restoreAllMocks(); });
 
-function fixture() {
+function fixture(caseInsensitive = false) {
   const raw = new Database(":memory:");
   databases.push(raw);
+  const idType = caseInsensitive ? "TEXT COLLATE NOCASE" : "TEXT";
   raw.exec(`CREATE TABLE bot_workflow_permissions (
-    id INTEGER PRIMARY KEY, bot_id TEXT, bot_owner_id TEXT NOT NULL,
-    workflow_id TEXT NOT NULL, env TEXT NOT NULL,
+    id INTEGER PRIMARY KEY, bot_id ${idType}, bot_owner_id ${idType} NOT NULL,
+    workflow_id ${idType} NOT NULL, env TEXT NOT NULL,
     can_view INTEGER NOT NULL, can_execute INTEGER NOT NULL, can_edit INTEGER NOT NULL,
     gmt_create INTEGER NOT NULL, gmt_modified INTEGER NOT NULL
   )`);
@@ -124,5 +125,63 @@ describe("workflow collaborator permission union", () => {
     bots[0].ownerId = "owner";
     bots[0].botId = "*";
     expect(await repo.hasEditPermission("shared", "member")).toBe(false);
+  });
+});
+
+
+describe("browser can_view whitelist", () => {
+  it("is empty without grants; never interprets missing permissions as unrestricted", async () => {
+    const { repo } = fixture();
+    expect(await repo.listBrowserViewableWorkflowIds("member")).toEqual(new Set());
+  });
+
+  it("accepts direct, explicit global and exact inherited view grants but not edit-only or unrelated grants", async () => {
+    const { repo, grant, bots } = fixture();
+    await grant("direct", "member", null, 1, 0);
+    await grant("global", "*", null, 1, 0);
+    await grant("inherited", "owner", "shared-bot", 1, 0);
+    await grant("inherited-wildcard", "*", "shared-bot", 1, 0);
+    await grant("edit-only", "member", null, 0, 1);
+    await grant("private", "owner", null, 1, 0);
+    await grant("wrong-owner", "other", "shared-bot", 1, 0);
+    expect([...await repo.listBrowserViewableWorkflowIds("member")].sort())
+      .toEqual(["direct", "global", "inherited", "inherited-wildcard"]);
+    expect(await repo.listBrowserViewableWorkflowIds("member", "inherited")).toEqual(new Set(["inherited"]));
+    expect(await repo.listBrowserViewableWorkflowIds("member", "Inherited")).toEqual(new Set());
+    expect(await repo.listBrowserViewableWorkflowIds("member", "edit-only")).toEqual(new Set());
+    bots.splice(0);
+    expect(await repo.listBrowserViewableWorkflowIds("member")).toEqual(new Set(["direct", "global"]));
+  });
+
+  it("uses exact owner, Bot and workflow identities even with a case-insensitive schema", async () => {
+    const { raw, repo } = fixture(true);
+    const insert = raw.prepare(`INSERT INTO bot_workflow_permissions
+      (bot_id, bot_owner_id, workflow_id, env, can_view, can_execute, can_edit, gmt_create, gmt_modified)
+      VALUES (?, ?, ?, 'test', 1, 0, 0, 0, 0)`);
+    insert.run(null, "Member", "wrong-direct-owner");
+    insert.run("shared-bot", "Owner", "wrong-inherited-owner");
+    insert.run("Shared-Bot", "owner", "wrong-bot");
+    insert.run("Shared-Bot", "*", "wrong-wildcard-bot");
+    insert.run(null, "member", "flow");
+    insert.run(null, "member", "Flow");
+    insert.run("shared-bot", "owner", "shared");
+    insert.run("*", "*", "global");
+    expect(await repo.listBrowserViewableWorkflowIds("member")).toEqual(new Set(["flow", "Flow", "shared", "global"]));
+    expect(await repo.listBrowserViewableWorkflowIds("member", "FLOW")).toEqual(new Set());
+    expect(await repo.listBrowserViewableWorkflowIds("member", "Flow")).toEqual(new Set(["Flow"]));
+    expect(await repo.listBrowserViewableWorkflowIds("*")).toEqual(new Set());
+    raw.exec("UPDATE bot_workflow_permissions SET can_edit = 1, can_execute = 1 WHERE workflow_id = 'wrong-direct-owner'");
+    expect(await repo.hasBrowserPermission("wrong-direct-owner", "member", "can_edit")).toBe(false);
+    expect(await repo.hasBrowserPermission("wrong-direct-owner", "member", "can_execute")).toBe(false);
+    expect(await repo.hasBrowserPermission("wrong-direct-owner", "Member", "can_execute")).toBe(true);
+    expect(await repo.hasBrowserPermission("shared", "member", "can_view")).toBe(true);
+    expect(await repo.hasBrowserPermission("shared", "member", "can_view", "shared-bot")).toBe(false);
+    expect(await repo.hasBrowserPermission("shared", "owner", "can_view", "Shared-Bot")).toBe(false);
+  });
+
+  it("propagates storage failures instead of widening access", async () => {
+    const { repo, raw } = fixture();
+    raw.exec("DROP TABLE bot_workflow_permissions");
+    await expect(repo.listBrowserViewableWorkflowIds("member")).rejects.toThrow();
   });
 });

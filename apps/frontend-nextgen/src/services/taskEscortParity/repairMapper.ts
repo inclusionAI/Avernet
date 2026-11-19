@@ -70,6 +70,7 @@ export function candidatesView(d: RepairCandidatesDto, workflowId: string): Repa
     page: { page: count(p.page), pageSize: count(p.pageSize), total: count(p.total), totalPages: count(p.totalPages) },
     limits: { maxItems: count(limits.maxItems), maxRequestBytes: count(limits.maxRequestBytes) },
     canEdit: d.canEdit,
+    ...(typeof d.canOptimize === 'boolean' ? { canOptimize: d.canOptimize } : {}),
   };
 }
 function revisionView(d: RepairRevisionDto, wf: string, taskId: string): RepairRevision {

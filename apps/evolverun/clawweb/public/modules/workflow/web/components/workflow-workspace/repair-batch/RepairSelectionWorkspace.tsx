@@ -1,23 +1,24 @@
 import { useEffect, useState } from 'react'
-import { repairBatches } from '../../../api/repair-batches'
+import { repairBatches, type RepairCandidatePage } from '../../../api/repair-batches'
 import { repairReadError } from '../../../api/repair-read-error'
-import type { RepairCandidatesResponse, RepairInboxItem } from '../../../../server/contracts/repair-workbench'
+import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 import RepairWorkspace from './RepairWorkspace'
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
 import { button, exclusion, itemTitle, itemHeading, primary, states } from './repair-view'
 import { proposalChecked, proposalMembers, proposalSelection } from '../../../../server/contracts/repair-proposal'
 import ProposalEvidence from './ProposalEvidence'
+import { allowsRepairOptimization } from './repair-permissions'
 
 export default function RepairSelectionWorkspace({ workflowId, includeHistorical, refreshToken, selected, selectedItems, instructions, busy, reason, error,
-  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack, onRecover, nextRound = false, canEdit = true, notice, onReviewSelection, onConfirmSelection, reviewPending = false }: {
+  onInstructions, onToggle, onResult, onDetail, onGenerate, onBack, onRecover, nextRound = false, canEdit = true, canOptimize = canEdit, notice, onReviewSelection, onConfirmSelection, reviewPending = false }: {
   workflowId: string; includeHistorical: boolean; refreshToken: number; selected: string[]; selectedItems: RepairInboxItem[];
   instructions: string; busy: boolean; reason: string; error: string;
-  onInstructions: (value: string) => void; onToggle: (id: string) => void; onResult: (result: RepairCandidatesResponse) => void;
+  onInstructions: (value: string) => void; onToggle: (id: string) => void; onResult: (result: RepairCandidatePage) => void;
   onDetail: (item: RepairInboxItem) => void; onGenerate: () => void; onBack: () => void
-  onRecover?: () => void; nextRound?: boolean; canEdit?: boolean; notice?: string; onReviewSelection?: () => void; onConfirmSelection?: () => void; reviewPending?: boolean
+  onRecover?: () => void; nextRound?: boolean; canEdit?: boolean; canOptimize?: boolean; notice?: string; onReviewSelection?: () => void; onConfirmSelection?: () => void; reviewPending?: boolean
 }) {
   const [page, setPage] = useState(1)
-  const [data, setData] = useState<RepairCandidatesResponse | null>(null)
+  const [data, setData] = useState<RepairCandidatePage | null>(null)
   const [loading, setLoading] = useState(false)
   const [readError, setReadError] = useState('')
   const [query, setQuery] = useState('')
@@ -39,7 +40,7 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
   const allSelected = selectable.length > 0 && selectable.every(item => proposalChecked(item, selected))
   const nodes = data?.facets?.nodes ?? []
   const modes = data?.facets?.failureModes ?? []
-  const readOnly = !canEdit || !data?.canEdit
+  const readOnly = !canOptimize || !allowsRepairOptimization(data, canEdit)
   const blocker = reason || (readError ? '建议读取失败，请重试后生成。' : loading ? '读取建议…' : readOnly ? '当前只有查看权限。' : !selected.length ? '请选择建议。' : '')
   return <RepairWorkspace stage={1} title={nextRound ? '开始下一轮优化' : '把多条建议，变成一次修复'} subtitle={`${workflowId} · 选择独立建议，生成完整 Pack 候选`} onBack={onBack} backLabel={nextRound ? '返回上一轮观察' : undefined} busy={busy}>
     {nextRound && <p className="rounded-lg border border-input bg-card p-4 text-sm">将创建独立新任务，提交时读取最新生效版本作为基线；上一轮任务、发布与观察记录继续保留。已采纳且待验证的建议不能重复选择。</p>}
@@ -59,7 +60,7 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
           onChange={() => { const targets = allSelected ? selectable : selectable.filter(item => !proposalChecked(item, selected)).slice(0, Math.max(0, 100 - selected.length)); targets.forEach(item => onToggle(item.itemId)) }} className="h-4 w-4 accent-primary" /></th><th>问题与修复建议</th><th className="px-4">来源</th><th className="px-4">处理提示</th></tr></thead>
           <tbody>{rows.map(item => { const checked = proposalChecked(item, selected); const unavailable = exclusion(item); return <tr key={item.itemId} className={`border-t border-border/50 ${checked ? 'bg-primary/5' : ''}`}>
             <td className="px-4 py-4 align-top"><input type="checkbox" aria-label={`选择 ${itemTitle(item)}`} checked={checked} disabled={busy || loading || readOnly || !!unavailable || !checked && selected.length >= 100} onChange={() => onToggle(item.itemId)} className="h-4 w-4 accent-primary" /></td>
-            <td className="min-w-64 py-4 pr-4"><p className="font-semibold leading-5 text-foreground">{itemHeading(item)}</p><ProposalEvidence item={item} canEdit={!busy && !readOnly} /><p className="mt-1 font-mono text-[10px] text-muted-foreground">{String(item.context?.nodeId ?? '')}</p><p className="mt-1 leading-5 text-muted-foreground">{changeSummary(item)}</p><button onClick={() => onDetail(item)} className="mt-1 text-primary hover:underline">查看问题与证据 ↗</button></td>
+            <td className="min-w-64 py-4 pr-4"><p className="font-semibold leading-5 text-foreground">{itemHeading(item)}</p><ProposalEvidence item={item} canEdit={!busy && !loading && canEdit && data?.canEdit === true} /><p className="mt-1 font-mono text-[10px] text-muted-foreground">{String(item.context?.nodeId ?? '')}</p><p className="mt-1 leading-5 text-muted-foreground">{changeSummary(item)}</p><button onClick={() => onDetail(item)} className="mt-1 text-primary hover:underline">查看问题与证据 ↗</button></td>
             <td className="px-4 py-4 align-top text-muted-foreground">{sourceRunCount(item) ?? '未知'} 个运行</td><td className="px-4 py-4 align-top text-muted-foreground">{unavailable || states[item.state]}</td>
           </tr> })}</tbody></table></div>
         {!loading && !readError && !rows.length && <p className="p-5 text-xs text-muted-foreground">当前范围没有匹配建议。</p>}

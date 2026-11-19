@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import ReactECharts from 'echarts-for-react'
-import { dashboardApi } from '../api'
+import { dashboardApi, type DashboardQueryScope } from '../api'
 import type { MetricKey, TrendGranularity } from '../../../types/dashboard'
 
 /**
@@ -12,6 +12,7 @@ import type { MetricKey, TrendGranularity } from '../../../types/dashboard'
  * - 质量类指标底部带"查看工作流列表 →"(l2),回答"谁拖的"。
  */
 interface MetricTrendModalProps {
+  scope: DashboardQueryScope
   open: boolean
   metric: MetricKey | null
   label: string
@@ -63,6 +64,7 @@ function fmtBucket(b: string): string {
 }
 
 export function MetricTrendModal({
+  scope,
   open,
   metric,
   label,
@@ -78,12 +80,12 @@ export function MetricTrendModal({
   const from = to - win.days * 86400
 
   const meta = metric ? METRIC_META[metric] : null
-  const resolvedL2 = l2Link ?? meta?.l2
+  const resolvedL2 = scope.isAdmin ? l2Link ?? meta?.l2 : undefined
 
   const q = useQuery({
     enabled: open && metric !== null,
-    queryKey: ['dashboard', 'metric-trend', metric, gran],
-    queryFn: () => dashboardApi.metricTrend(metric as MetricKey, gran, from, to),
+    queryKey: ['dashboard', scope, 'metric-trend', metric, gran],
+    queryFn: () => dashboardApi.metricTrend(metric as MetricKey, gran, from, to, scope.demo),
   })
 
   if (!open) return null

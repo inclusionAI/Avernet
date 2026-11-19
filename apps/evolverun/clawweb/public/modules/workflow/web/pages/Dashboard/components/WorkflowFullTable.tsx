@@ -33,6 +33,7 @@ interface WorkflowFullTableProps {
   initialSort?: FullSortKey
   initialStatus?: StatusFilter
   pageSize?: number
+  canOpenDetails?: boolean
 }
 
 function Rate({ r }: { r: number | null }) {
@@ -60,7 +61,7 @@ const STATUS_BADGE: Record<MergedRow['status'], { text: string; cls: string }> =
  * 研发效能/守护效果/L2 独立页共用。分页 + 搜索 + 排序,点行 → L3。
  * SQLite 库 releaseRows 为 null → 发布列显 —,状态只有 测试/未发布 粗分。
  */
-export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError = false, initialSort = 'completionAsc', initialStatus = '', pageSize = 10 }: WorkflowFullTableProps) {
+export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError = false, initialSort = 'completionAsc', initialStatus = '', pageSize = 10, canOpenDetails = true }: WorkflowFullTableProps) {
   const navigate = useNavigate()
   const [sort, setSort] = useState<FullSortKey>(initialSort)
   const [status, setStatus] = useState<StatusFilter>(initialStatus)
@@ -208,10 +209,10 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
               {pageRows.map((w) => {
                 const badge = STATUS_BADGE[w.status]
                 return (
-                  <tr key={w.workflowId} role="button" tabIndex={0}
-                    onClick={() => goL3(w.workflowId)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') goL3(w.workflowId) }}
-                    className="cursor-pointer transition-colors hover:bg-blue-50">
+                  <tr key={w.workflowId} role={canOpenDetails ? 'button' : undefined} tabIndex={canOpenDetails ? 0 : undefined}
+                    onClick={canOpenDetails ? () => goL3(w.workflowId) : undefined}
+                    onKeyDown={canOpenDetails ? (e) => { if (e.key === 'Enter' || e.key === ' ') goL3(w.workflowId) } : undefined}
+                    className={canOpenDetails ? 'cursor-pointer transition-colors hover:bg-blue-50' : undefined}>
                     <td className="min-w-0 px-3 py-2.5">
                       <div className="truncate text-sm font-medium text-gray-900" title={w.workflowTitle}>{w.workflowTitle}</div>
                       <div className="truncate font-mono text-xs text-gray-400" title={w.workflowId}>{w.workflowId}</div>

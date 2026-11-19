@@ -1,18 +1,18 @@
 import RepairTrialPanel from './RepairTrialPanel'
-import type { RepairTrial } from '../../../../server/contracts/repair-trial'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
 import type { RepairConfirmRequest, RepairReleaseTarget } from '../../../../server/contracts/repair-release'
-import { repairBatches } from '../../../api/repair-batches'
+import { isAutomaticRepair } from './repair-permissions'
+import { repairBatches, type RepairTrialRow } from '../../../api/repair-batches'
 import { button, primary, RepairDialog } from './repair-view'
 import { repairReleaseError } from '../../../api/repair-release-error'
 
-export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, onRefresh, actions }: {
-  detail: RepairTaskDetail; selectedRevision: number; canEdit: boolean; onRefresh: () => void; actions?: ReactNode;
+export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, canOptimize = canEdit, canExecute = false, onRefresh, actions }: {
+  detail: RepairTaskDetail; selectedRevision: number; canEdit: boolean; canOptimize?: boolean; canExecute?: boolean; onRefresh: () => void; actions?: ReactNode;
 }) {
   const [trialOpen, setTrialOpen] = useState(false)
   const [trialConfigured, setTrialConfigured] = useState(false)
-  const [trials, setTrials] = useState<RepairTrial[]>([])
+  const [trials, setTrials] = useState<RepairTrialRow[]>([])
   const [dialog, setDialog] = useState(false)
   const [target, setTarget] = useState<RepairReleaseTarget | null>(null)
   const [ack, setAck] = useState(false)
@@ -31,10 +31,12 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     ?? detail.release?.deployments.find(row => row.revision === selectedRevision)
   const pending = !!deployment && ['created', 'dispatching', 'running', 'uncertain'].includes(deployment.status)
   const succeeded = deployment?.status === 'succeeded'
-  const canPublish = canEdit && isCurrent && detail.capabilities.publication && (revision?.phase === 'review' || automaticReady && revision?.phase === 'no_change')
+  const automaticTask = isAutomaticRepair(detail)
+  const canPublish = (automaticTask ? canEdit : canOptimize) && isCurrent && detail.capabilities.publication && (revision?.phase === 'review' || automaticReady && revision?.phase === 'no_change')
+  const canRecoverDeployment = canEdit || canOptimize && !automaticTask && deployment?.target?.scope === 'workflow'
   useEffect(() => { setDialog(false); setTrialOpen(false); setTrialConfigured(false); setTrials([]); setTarget(null); setAck(false); setError(''); request.current = null }, [scope])
   async function reconcile() {
-    if (!deployment || !canEdit || submitting.current) return
+    if (!deployment || !pending || !canRecoverDeployment || submitting.current) return
     const current = scope
     submitting.current = true; setBusy(true)
     try { await repairBatches.reconcileDeployment(detail.taskId, deployment.id); onRefresh() }
@@ -42,6 +44,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     finally { submitting.current = false; setBusy(false) }
   }
   async function open() {
+    if (!canPublish || pending || succeeded || submitting.current) return
     const current = scope
     setDialog(true); setTarget(null); setAck(false); setError(''); setLoading(true)
     try {
@@ -57,7 +60,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     finally { if (scopeRef.current === current) setLoading(false) }
   }
   async function publish() {
-    if (!canPublish || !target || !ack || !revision || submitting.current) return
+    if (!canPublish || pending || succeeded || loading || target?.scope !== 'workflow' || !ack || !revision || submitting.current) return
     const current = scope
     submitting.current = true; setBusy(true); setError('')
     request.current ??= { revision: revision.revision, expectedStateVersion: revision.stateVersion,
@@ -70,7 +73,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     finally { submitting.current = false; setBusy(false) }
   }
   async function resume() {
-    if (!deployment || submitting.current || !canEdit) return
+    if (!deployment || !pending || deployment.target?.scope !== 'workflow' || submitting.current || !canRecoverDeployment) return
     const current = scope
     submitting.current = true; setBusy(true)
     try { await repairBatches.resumeDeployment(detail.taskId, deployment.id, crypto.randomUUID()); onRefresh() }
@@ -80,6 +83,8 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
   const title = succeeded ? `此候选已发布为部署 #${deployment.receipt?.deployNumber}`
     : pending ? '发布结果待核对' : deployment?.status === 'failed' ? '发布未完成，候选已保留' : '任务操作'
   const selected = detail.revisions.find(row => row.revision === selectedRevision) ?? (revision?.revision === selectedRevision ? detail.latestAttempt : detail.latestSuccessful?.revision === selectedRevision ? detail.latestSuccessful : undefined)
+  const canInspectTrial = !!selected?.draft?.candidateCommit && !!isCurrent && selected.phase === 'review'
+  const canStartTrial = canInspectTrial && !pending && !succeeded && canExecute && (!automaticTask || canEdit)
   if (selected && (['failed', 'drafting', 'cancelled'].includes(selected.phase) || selected.phase === 'no_change' && !automaticReady) && !succeeded && !pending) return <section aria-label="候选发布状态" className="rounded-xl border border-input bg-card p-5 text-sm text-muted-foreground">
     <h3 className="font-semibold text-foreground">{selected.phase === 'failed' ? '所选版本生成失败，尚无可发布候选' : selected.phase === 'no_change' ? detail.automaticProgress && detail.automaticProgress.completedBatches < detail.automaticProgress.totalBatches ? '本轮尚未完整核对' : '本轮无需重新发布' : selected.phase === 'cancelled' ? '任务已取消' : '正在生成候选，暂不进入发布'}</h3>
     <p className="mt-2">{selected.phase === 'failed' ? '查看本版本错误和最近任务状态；历史失败版本不会因后续成功而变为成功。' : '查看本版本范围与逐项结果；此入口不执行生成或发布。'}</p>
@@ -96,7 +101,7 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     {!detail.capabilities.publication && <p role="alert">发布能力未启用，请检查宿主配置。</p>}
     {deployment?.error && <p className="mt-3 text-sm text-destructive">{deployment.error}</p>}
     {error && !dialog && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
-    {selected?.draft?.candidateCommit && <RepairTrialPanel taskId={detail.taskId} revision={selected} enabled={!!canEdit && !!isCurrent && selected.phase === 'review'} open={trialOpen} onClose={() => setTrialOpen(false)} onTrials={(rows, configured) => { setTrials(rows); setTrialConfigured(configured) }} />}
+    {selected?.draft?.candidateCommit && <RepairTrialPanel taskId={detail.taskId} revision={selected} canStart={canStartTrial} legacyCanStop={canEdit && canInspectTrial} open={trialOpen} onClose={() => setTrialOpen(false)} onTrials={(rows, configured) => { setTrials(rows); setTrialConfigured(configured) }} />}
     {dialog && <RepairDialog title={`确认发布 v${selectedRevision}`} busy={busy} onClose={() => setDialog(false)} footer={<div className="flex flex-wrap justify-end gap-3">
       <button className={button} disabled={busy} onClick={() => setDialog(false)}>返回查看改动</button>
       <button className={primary} disabled={busy || loading || !canPublish || !ack || !target} onClick={() => void publish()}>{busy ? '正在提交发布…' : '确认发布'}</button>
@@ -111,9 +116,9 @@ export default function RepairReleaseFlow({ detail, selectedRevision, canEdit, o
     {(!succeeded || actions) && <footer aria-label="当前修复步骤与下一步" className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-input pt-4">
       <fieldset aria-label="其他任务操作" disabled={busy||dialog||pending||trialOpen} className="flex flex-wrap gap-2">{actions}</fieldset>
       <div className="flex flex-wrap items-center gap-3">
-        {trialConfigured && canEdit && isCurrent && selected?.phase === 'review' && !pending && !succeeded && <button className={button} disabled={busy} onClick={() => setTrialOpen(true)}>先试跑</button>}
-        {pending && deployment.target.scope === 'workflow' && <button className={button} disabled={busy || !canEdit} onClick={() => void resume()}>继续原发布</button>}
-        {!succeeded && <button className={primary} disabled={trialOpen || dialog || busy || (pending ? !canEdit : !canPublish)}
+        {trialConfigured && canInspectTrial && !pending && !succeeded && <button className={button} disabled={busy} onClick={() => setTrialOpen(true)}>{canStartTrial ? '先试跑' : '查看试跑选项'}</button>}
+        {pending && deployment.target?.scope === 'workflow' && <button className={button} disabled={busy || !canRecoverDeployment} onClick={() => void resume()}>继续原发布</button>}
+        {!succeeded && <button className={primary} disabled={trialOpen || dialog || busy || (pending ? !canRecoverDeployment : !canPublish)}
           onClick={() => { if (pending) void reconcile(); else void open() }}>
           {busy ? '提交中…' : pending ? '核对发布状态' : '发布此版本'}</button>}
       </div>

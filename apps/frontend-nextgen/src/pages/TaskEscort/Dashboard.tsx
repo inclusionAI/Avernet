@@ -23,13 +23,13 @@ export function Dashboard({
   return (
     <div className="min-w-0 space-y-5">
       <PageHeader
-        title="管理员数据大盘"
-        description="全局运行健康、护航进展与风险工作流"
+        title="任务护航数据大盘"
+        description="当前权限范围内的运行健康、护航进展与风险工作流"
         actions={
           <div className="flex max-w-full flex-wrap items-center gap-2">
             <div
               role="group"
-              aria-label="全局时间范围"
+              aria-label="统一时间范围"
               className="flex flex-wrap gap-1 rounded-lg border border-border bg-muted/40 p-1"
             >
               {(
@@ -82,17 +82,17 @@ export function Dashboard({
           </div>
         ) : scope.loading ? (
           <div role="status" aria-label="正在确认身份">
-            <p className="text-sm text-muted-foreground">正在确认身份，暂不读取全局数据</p>
+            <p className="text-sm text-muted-foreground">正在确认身份，暂不读取大盘数据</p>
             <Skeleton.Block className="mt-4 h-40 w-full" />
           </div>
         ) : (
-          <Empty title="等待身份就绪" description="身份与空间就绪后读取管理员全局数据" />
+          <Empty title="等待身份就绪" description="身份与空间就绪后读取当前权限范围内的大盘数据" />
         )
       ) : dashboard.forbidden ? (
         <div role="alert">
           <Empty
-            title="只有管理员可以查看全局数据大盘"
-            description="当前身份无全局大盘权限；请联系管理员或使用有权限的身份"
+            title="当前无法查看大盘数据"
+            description="请确认当前身份与空间是否有访问权限，或联系权限负责人后重试"
             action={
               <Button variant="outline" onClick={dashboard.refresh}>
                 重试大盘权限

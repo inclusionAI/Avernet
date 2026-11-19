@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import type {
   DashboardRepository,
@@ -33,42 +33,84 @@ function parseTimeRange(
   return { from, to };
 }
 
+export type DashboardScope =
+  | { kind: "all" }
+  | { kind: "workflows"; workflowIds: readonly string[] };
+
+function forbidden(res: Response): void {
+  res.status(403).json({
+    error: "Forbidden",
+    code: "FORBIDDEN",
+    message: "只有管理员可以查看全局数据大盘",
+  });
+}
+
 export function createDashboardRouter(
   dashboardRepo: DashboardRepository | null,
   _flowRunRepo: FlowRunRepository | null,
   db: IDatabase | null,
+  // A host-provided resolver must use verified identity, never request-supplied roles or ACLs.
+  resolveScope?: (req: Request) => Promise<DashboardScope | null>,
 ): Router {
   const router = Router();
+  const scopes = new WeakMap<Request, DashboardScope>();
 
-  router.use((req, res, next) => {
-    if (!req.isAdmin) {
-      res.status(403).json({
-        error: "Forbidden",
-        code: "FORBIDDEN",
-        message: "只有管理员可以查看全局数据大盘",
-      });
-      return;
+  router.use(asyncHandler(async (req, res, next) => {
+    if (resolveScope === undefined) {
+      // Legacy hosts already set isAdmin in their own middleware. No default admin.
+      if (!req.isAdmin) return forbidden(res);
+      scopes.set(req, { kind: "all" });
+    } else {
+      res.set("Cache-Control", "private, no-store");
+      try {
+        const scope = await resolveScope(req);
+        if (scope === null) {
+          res.status(401).json({ error: "Unauthorized", code: "UNAUTHENTICATED" });
+          return;
+        }
+        if (scope?.kind === "all") {
+          scopes.set(req, { kind: "all" });
+        } else if (scope?.kind === "workflows" && Array.isArray(scope.workflowIds)) {
+          const ids = [...scope.workflowIds];
+          if (!ids.every((id) => typeof id === "string" && id.length > 0)) {
+            throw new Error("Invalid dashboard workflow IDs");
+          }
+          scopes.set(req, { kind: "workflows", workflowIds: ids });
+        } else {
+          throw new Error("Invalid dashboard scope");
+        }
+      } catch {
+        res.status(503).json({ error: "Service Unavailable", message: "Dashboard access unavailable" });
+        return;
+      }
     }
     next();
-  });
+  }));
+
+  // Only explicitly registered routes may read with a restricted repository.
+  const getScoped = (
+    path: string,
+    handler: (req: Request, res: Response, repo: DashboardRepository) => Promise<void>,
+  ) => {
+    router.get(path, asyncHandler(async (req, res) => {
+      const scope = scopes.get(req);
+      if (!scope) return forbidden(res);
+      if (!dashboardRepo) {
+        res.status(503).json({ error: "Service Unavailable", message: "Database not configured" });
+        return;
+      }
+      const repo = scope.kind === "all" ? dashboardRepo : dashboardRepo.forWorkflows(scope.workflowIds);
+      await handler(req, res, repo);
+    }));
+  };
 
   /**
    * GET /api/dashboard/overview?from=&to=
    * Core KPI aggregation: workflow count, total runs, success rate, running, avg duration, token usage.
    */
-  router.get(
+  getScoped(
     "/overview",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({
-            error: "Service Unavailable",
-            message: "Database not configured",
-          });
-        return;
-      }
-
+    async (req, res, repo) => {
       const range = parseTimeRange(req.query.from, req.query.to);
       if ("error" in range) {
         res.status(400).json({ error: "Bad Request", message: range.error });
@@ -77,8 +119,8 @@ export function createDashboardRouter(
       const { from, to } = range;
 
       const [overview, evolution] = await Promise.all([
-        dashboardRepo.getOverview(from, to),
-        dashboardRepo.getEvolutionMetrics(from, to),
+        repo.getOverview(from, to),
+        repo.getEvolutionMetrics(from, to),
       ]);
 
       const completedCount = overview.succeededCount + overview.failedCount;
@@ -136,26 +178,16 @@ export function createDashboardRouter(
         scheduledRunCount: null,
         evolution,
       });
-    }),
+    },
   );
 
   /**
    * GET /api/dashboard/daily-trend?from=&to=
    * Daily time-series: run count, success count, fail count, avg duration, token usage per day.
    */
-  router.get(
+  getScoped(
     "/daily-trend",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({
-            error: "Service Unavailable",
-            message: "Database not configured",
-          });
-        return;
-      }
-
+    async (req, res, repo) => {
       const range = parseTimeRange(req.query.from, req.query.to);
       if ("error" in range) {
         res.status(400).json({ error: "Bad Request", message: range.error });
@@ -163,7 +195,7 @@ export function createDashboardRouter(
       }
       const { from, to } = range;
 
-      const days = await dashboardRepo.getDailyTrend(from, to);
+      const days = await repo.getDailyTrend(from, to);
 
       res.json({
         from,
@@ -185,26 +217,16 @@ export function createDashboardRouter(
           selfHealSuccessRate: d.selfHealSuccessRate ?? null,
         })),
       });
-    }),
+    },
   );
 
   /**
    * GET /api/dashboard/duration-distribution?from=&to=
    * Histogram buckets of run durations.
    */
-  router.get(
+  getScoped(
     "/duration-distribution",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({
-            error: "Service Unavailable",
-            message: "Database not configured",
-          });
-        return;
-      }
-
+    async (req, res, repo) => {
       const range = parseTimeRange(req.query.from, req.query.to);
       if ("error" in range) {
         res.status(400).json({ error: "Bad Request", message: range.error });
@@ -212,28 +234,18 @@ export function createDashboardRouter(
       }
       const { from, to } = range;
 
-      const buckets = await dashboardRepo.getDurationDistribution(from, to);
+      const buckets = await repo.getDurationDistribution(from, to);
       res.json({ from, to, buckets });
-    }),
+    },
   );
 
   /**
    * GET /api/dashboard/top-workflows?from=&to=&limit=10
    * Top N workflows by run count with success rate.
    */
-  router.get(
+  getScoped(
     "/top-workflows",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({
-            error: "Service Unavailable",
-            message: "Database not configured",
-          });
-        return;
-      }
-
+    async (req, res, repo) => {
       const range = parseTimeRange(req.query.from, req.query.to);
       if ("error" in range) {
         res.status(400).json({ error: "Bad Request", message: range.error });
@@ -242,10 +254,157 @@ export function createDashboardRouter(
       const { from, to } = range;
       const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
 
-      const workflows = await dashboardRepo.getTopWorkflows(from, to, limit);
+      const workflows = await repo.getTopWorkflows(from, to, limit);
       res.json({ from, to, workflows });
-    }),
+    },
   );
+
+  /**
+   * GET /api/dashboard/failure-hotspots?from=&to=&limit=10
+   * 失败归因 Top:node_executions.error_text 聚类(真实,两库通用)。
+   */
+  getScoped(
+    "/failure-hotspots",
+    async (req, res, repo) => {
+      const range = parseTimeRange(req.query.from, req.query.to);
+      if ("error" in range) {
+        res.status(400).json({ error: "Bad Request", message: range.error });
+        return;
+      }
+      const { from, to } = range;
+      const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+      const hotspots = await repo.getFailureHotspots(from, to, limit);
+      res.json({ from, to, hotspots });
+    },
+  );
+
+  /**
+   * GET /api/dashboard/release-efficiency?from=&to=
+   * 发布效能(MySQL only;SQLite 返 available:false)。
+   */
+  getScoped(
+    "/release-efficiency",
+    async (req, res, repo) => {
+      const range = parseTimeRange(req.query.from, req.query.to);
+      if ("error" in range) {
+        res.status(400).json({ error: "Bad Request", message: range.error });
+        return;
+      }
+      const { from, to } = range;
+      const data = await repo.getReleaseEfficiency(from, to);
+      res.json(data);
+    },
+  );
+
+  /**
+   * GET /api/dashboard/metric-trend?metric=&granularity=&from=&to=
+   * 单指标趋势(KPI 点钻):runs/activeWorkflows/dau(两库)/releases(MySQL only),day/week/month 分桶。
+   */
+  getScoped(
+    "/metric-trend",
+    async (req, res, repo) => {
+      const range = parseTimeRange(req.query.from, req.query.to);
+      if ("error" in range) {
+        res.status(400).json({ error: "Bad Request", message: range.error });
+        return;
+      }
+      const metric = String(req.query.metric ?? "runs");
+      const granularity = String(req.query.granularity ?? "day");
+      const allowedMetrics = [
+        "runs", "activeWorkflows", "dau", "releases",
+        "completionRate", "successRate", "machineP50",
+        "deploys", "releaseSuccessRate", "rollbackRate", "deliveryLagHours",
+        "selfHealRate", "onlineCompletionRate", "onlineRuns", "testRuns",
+      ];
+      const allowedGran = ["day", "week", "month"];
+      if (!allowedMetrics.includes(metric) || !allowedGran.includes(granularity)) {
+        res
+          .status(400)
+          .json({ error: "Bad Request", message: "Invalid metric or granularity" });
+        return;
+      }
+      const { from, to } = range;
+      const data = await repo.getMetricTrend(
+        metric as MetricKey,
+        granularity as "day" | "week" | "month",
+        from,
+        to,
+      );
+      res.json(data);
+    },
+  );
+
+  /**
+   * GET /api/dashboard/workflow-release-stats?from=&to=
+   * 工作流发布情况表(研发效能):全量工作流为底,含未发布。
+   * 部署次数/回滚次数/批均成功率 跟窗口走;研发周期/最近部署/是否发布过 为全周期口径。
+   * MySQL only;SQLite 返 available:false。
+   */
+  getScoped(
+    "/workflow-release-stats",
+    async (req, res, repo) => {
+      const range = parseTimeRange(req.query.from, req.query.to);
+      if ("error" in range) {
+        res.status(400).json({ error: "Bad Request", message: range.error });
+        return;
+      }
+      const data = await repo.getWorkflowReleaseStats(range.from, range.to);
+      res.json(data);
+    },
+  );
+
+  /**
+   * GET /api/dashboard/workflow-health?from=&to=
+   * L2 工作流健康表:per-workflow 完成率(长程)/速度P50/avgDuration/released;
+   * 自愈缺字段留 null。两库通用(flow_runs);released 仅 MySQL 可判。
+   */
+  getScoped(
+    "/workflow-health",
+    async (req, res, repo) => {
+      const range = parseTimeRange(req.query.from, req.query.to);
+      if ("error" in range) {
+        res.status(400).json({ error: "Bad Request", message: range.error });
+        return;
+      }
+      const { from, to } = range;
+      const data = await repo.getWorkflowHealth(from, to);
+      res.json(data);
+    },
+  );
+
+  /**
+   * GET /api/dashboard/release-quality-trend?from=&to=&granularity=
+   * 发布质量趋势:每桶 发布数/回滚数/发布成功率/回滚率(MySQL only;SQLite available:false)。
+   */
+  getScoped(
+    "/release-quality-trend",
+    async (req, res, repo) => {
+      const range = parseTimeRange(req.query.from, req.query.to);
+      if ("error" in range) {
+        res.status(400).json({ error: "Bad Request", message: range.error });
+        return;
+      }
+      const granularity = String(req.query.granularity ?? "week");
+      if (!["day", "week", "month"].includes(granularity)) {
+        res.status(400).json({ error: "Bad Request", message: "Invalid granularity" });
+        return;
+      }
+      const { from, to } = range;
+      const data = await repo.getReleaseQualityTrend(
+        from,
+        to,
+        granularity as "day" | "week" | "month",
+      );
+      res.json(data);
+    },
+  );
+
+  // The subsystem totals lack a proven workflow boundary. Placeholder routes are
+  // also unchanged and admin-only; neither authorizes any workflow detail access.
+  router.use((req, res, next) => {
+    if (scopes.get(req)?.kind !== "all") return forbidden(res);
+    next();
+  });
 
   /**
    * GET /api/dashboard/subsystem-summary
@@ -346,124 +505,6 @@ export function createDashboardRouter(
   );
 
   /**
-   * GET /api/dashboard/failure-hotspots?from=&to=&limit=10
-   * 失败归因 Top:node_executions.error_text 聚类(真实,两库通用)。
-   */
-  router.get(
-    "/failure-hotspots",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({ error: "Service Unavailable", message: "Database not configured" });
-        return;
-      }
-      const range = parseTimeRange(req.query.from, req.query.to);
-      if ("error" in range) {
-        res.status(400).json({ error: "Bad Request", message: range.error });
-        return;
-      }
-      const { from, to } = range;
-      const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
-      const hotspots = await dashboardRepo.getFailureHotspots(from, to, limit);
-      res.json({ from, to, hotspots });
-    }),
-  );
-
-  /**
-   * GET /api/dashboard/release-efficiency?from=&to=
-   * 发布效能(MySQL only;SQLite 返 available:false)。
-   */
-  router.get(
-    "/release-efficiency",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({ error: "Service Unavailable", message: "Database not configured" });
-        return;
-      }
-      const range = parseTimeRange(req.query.from, req.query.to);
-      if ("error" in range) {
-        res.status(400).json({ error: "Bad Request", message: range.error });
-        return;
-      }
-      const { from, to } = range;
-      const data = await dashboardRepo.getReleaseEfficiency(from, to);
-      res.json(data);
-    }),
-  );
-
-  /**
-   * GET /api/dashboard/metric-trend?metric=&granularity=&from=&to=
-   * 单指标趋势(KPI 点钻):runs/activeWorkflows/dau(两库)/releases(MySQL only),day/week/month 分桶。
-   */
-  router.get(
-    "/metric-trend",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({ error: "Service Unavailable", message: "Database not configured" });
-        return;
-      }
-      const range = parseTimeRange(req.query.from, req.query.to);
-      if ("error" in range) {
-        res.status(400).json({ error: "Bad Request", message: range.error });
-        return;
-      }
-      const metric = String(req.query.metric ?? "runs");
-      const granularity = String(req.query.granularity ?? "day");
-      const allowedMetrics = [
-        "runs", "activeWorkflows", "dau", "releases",
-        "completionRate", "successRate", "machineP50",
-        "deploys", "releaseSuccessRate", "rollbackRate", "deliveryLagHours",
-        "selfHealRate", "onlineCompletionRate", "onlineRuns", "testRuns",
-      ];
-      const allowedGran = ["day", "week", "month"];
-      if (!allowedMetrics.includes(metric) || !allowedGran.includes(granularity)) {
-        res
-          .status(400)
-          .json({ error: "Bad Request", message: "Invalid metric or granularity" });
-        return;
-      }
-      const { from, to } = range;
-      const data = await dashboardRepo.getMetricTrend(
-        metric as MetricKey,
-        granularity as "day" | "week" | "month",
-        from,
-        to,
-      );
-      res.json(data);
-    }),
-  );
-
-/**
-   * GET /api/dashboard/workflow-release-stats?from=&to=
-   * 工作流发布情况表(研发效能):全量工作流为底,含未发布。
-   * 部署次数/回滚次数/批均成功率 跟窗口走;研发周期/最近部署/是否发布过 为全周期口径。
-   * MySQL only;SQLite 返 available:false。
-   */
-  router.get(
-    "/workflow-release-stats",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({ error: "Service Unavailable", message: "Database not configured" });
-        return;
-      }
-      const range = parseTimeRange(req.query.from, req.query.to);
-      if ("error" in range) {
-        res.status(400).json({ error: "Bad Request", message: range.error });
-        return;
-      }
-      const data = await dashboardRepo.getWorkflowReleaseStats(range.from, range.to);
-      res.json(data);
-    }),
-  );
-
-  /**
    * GET /api/dashboard/scene-breakdown?from=&to=
    * 按业务线切片 —— 暂不可算(business_scenes 表未建),返 available:false 占位,避免 404。
    */
@@ -477,64 +518,6 @@ export function createDashboardRouter(
       }
       const { from, to } = range;
       res.json({ from, to, available: false, scenes: [] });
-    }),
-  );
-
-  /**
-   * GET /api/dashboard/workflow-health?from=&to=
-   * L2 工作流健康表:per-workflow 完成率(长程)/速度P50/avgDuration/released;
-   * 自愈缺字段留 null。两库通用(flow_runs);released 仅 MySQL 可判。
-   */
-  router.get(
-    "/workflow-health",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({ error: "Service Unavailable", message: "Database not configured" });
-        return;
-      }
-      const range = parseTimeRange(req.query.from, req.query.to);
-      if ("error" in range) {
-        res.status(400).json({ error: "Bad Request", message: range.error });
-        return;
-      }
-      const { from, to } = range;
-      const data = await dashboardRepo.getWorkflowHealth(from, to);
-      res.json(data);
-    }),
-  );
-
-  /**
-   * GET /api/dashboard/release-quality-trend?from=&to=&granularity=
-   * 发布质量趋势:每桶 发布数/回滚数/发布成功率/回滚率(MySQL only;SQLite available:false)。
-   */
-  router.get(
-    "/release-quality-trend",
-    asyncHandler(async (req, res) => {
-      if (!dashboardRepo) {
-        res
-          .status(503)
-          .json({ error: "Service Unavailable", message: "Database not configured" });
-        return;
-      }
-      const range = parseTimeRange(req.query.from, req.query.to);
-      if ("error" in range) {
-        res.status(400).json({ error: "Bad Request", message: range.error });
-        return;
-      }
-      const granularity = String(req.query.granularity ?? "week");
-      if (!["day", "week", "month"].includes(granularity)) {
-        res.status(400).json({ error: "Bad Request", message: "Invalid granularity" });
-        return;
-      }
-      const { from, to } = range;
-      const data = await dashboardRepo.getReleaseQualityTrend(
-        from,
-        to,
-        granularity as "day" | "week" | "month",
-      );
-      res.json(data);
     }),
   );
 

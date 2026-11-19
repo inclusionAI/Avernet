@@ -33,7 +33,8 @@ export interface RepairPublicationPort {
   appliedState?(deployment: RepairDeployment): Promise<{ status: 'unchanged' | 'changed'; activeDeployNumber: number; packCommit: string; itemStates?: Record<string, 'unchanged' | 'changed' | 'unknown'> }>;
   dispatch(deployment: RepairDeployment): Promise<PublicationStatus>;
   reconcile(deployment: RepairDeployment): Promise<PublicationStatus>;
-  resume?(deployment: RepairDeployment): Promise<PublicationStatus>;
+  /** Recover the immutable request as the newly verified operator without rewriting its creator. */
+  resume?(deployment: RepairDeployment, operatorId?: string): Promise<PublicationStatus>;
   stop?(deployment: RepairDeployment): Promise<PublicationStatus>;
 }
 export type RepairConfirmRequest = {

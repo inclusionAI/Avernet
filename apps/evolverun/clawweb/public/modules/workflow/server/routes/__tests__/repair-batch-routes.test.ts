@@ -21,20 +21,22 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     const app = express(); app.use(express.json({ limit: '10mb' }));
     app.use('/api/workflow-repairs', createRepairBatchesRouter({ service,
       ...(withRelease ? { release: createRepairReleaseService({ db: f.db, workbench: service }) } : {}),
-      async authorize(req, workflowId) {
+      async authorize(req, workflowId, mode) {
         // A test composition root; production uses the separately tested verified principal resolver.
         const role = req.get('x-test-role');
         if (workflowId !== 'wf-1' || !role || role === 'denied') return null;
-        return { actorId: 'verified-human', canEdit: role === 'editor' };
+        if (role === 'editor-only' && mode !== 'edit') return null;
+        const canEdit = role === 'editor' || role === 'editor-only';
+        return { actorId: role === 'viewer-optimize' ? 'verified-viewer' : 'verified-human', canEdit, canOptimize: role === 'viewer-optimize' || canEdit };
       },
     }));
     const server = await new Promise<Server>(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
     close.push(() => new Promise<void>(resolve => server.close(() => resolve())), () => f.db.close());
     const port = (server.address() as { port: number }).port;
-    async function request(path: string, body?: unknown, role = 'editor', gzip = false) {
+    async function request(path: string, body?: unknown, role = 'editor', gzip = false, headers: Record<string, string> = {}) {
       const response = await fetch(`http://127.0.0.1:${port}/api/workflow-repairs${path}`, {
         method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json', 'x-test-role': role,
-          ...(gzip ? { 'content-encoding': 'gzip' } : {}) },
+          ...(gzip ? { 'content-encoding': 'gzip' } : {}), ...headers },
         ...(body === undefined ? {} : { body: gzip ? gzipSync(JSON.stringify(body)) : JSON.stringify(body) }),
       });
       return { status: response.status, body: await response.json() };
@@ -118,12 +120,53 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect(inbox.body.canEdit).toBe(false);
     const input = { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest, itemIds: ['item-0'], instructions: '', requestId: 'new', actorId: 'forged' };
     expect((await f.request('/', input, 'viewer')).status).toBe(403);
-    const created = await f.request('/', input);
+    expect((await f.request('/', input, 'denied')).status).toBe(403);
+    const created = await f.request('/', input, 'editor-only');
     expect(created.status).toBe(202);
     expect((await f.db.query('SELECT created_by FROM ce_tasks'))[0]).toEqual({ created_by: 'verified-human' });
     expect((await f.request(`/${created.body.taskId}`, undefined, 'denied')).status).toBe(403);
     expect((await f.request(`/${created.body.taskId}/revisions/1`, undefined, 'viewer')).status).toBe(200);
     expect((await f.request(`/${created.body.taskId}/revisions/999`)).status).toBe(404);
+  });
+  it('allows view-granted manual creation and exact replay but not trial execution or cross-site creation', async () => {
+    const f = await setup();
+    const { body: inbox } = await f.request('/candidates?workflowId=wf-1', undefined, 'viewer-optimize');
+    const input = { workflowId: 'wf-1', inputDigest: inbox.inputDigest, itemIds: ['item-0'], instructions: '',
+      requestId: 'viewer-create', actorId: 'forged', canEdit: true };
+    expect(await f.request('/', input, 'viewer-optimize', false, { 'sec-fetch-site': 'cross-site' }))
+      .toMatchObject({ status: 403, body: { code: 'CSRF_REJECTED' } });
+    const created = await f.request('/', input, 'viewer-optimize');
+    expect(created).toMatchObject({ status: 202, body: { revision: 1 } });
+    expect(f.calls).toMatchObject([{ actorId: 'verified-viewer' }]);
+    expect(await f.db.query('SELECT created_by FROM ce_tasks')).toEqual([{ created_by: 'verified-viewer' }]);
+    const statements = vi.spyOn(f.raw, 'prepare');
+    const baseline = vi.spyOn(f.executionPort, 'resolveBaseline').mockRejectedValue(new Error('baseline unavailable'));
+    expect(await f.request('/', input, 'viewer-optimize')).toEqual(created);
+    expect(statements).toHaveBeenCalledWith('UPDATE workflow_specs SET workflow_id = workflow_id WHERE workflow_id = ?');
+    expect(baseline).not.toHaveBeenCalled();
+    expect(f.calls).toHaveLength(1);
+    expect((await f.request(`/${created.body.taskId}/trials`, { revision: 1 }, 'viewer-optimize')).status).toBe(403);
+  });
+  it.each(['automatic', 'another actor'] as const)('does not let a viewer reuse or dispatch a matching request from %s', async origin => {
+    const f = await setup();
+    const { body: inbox } = await f.request('/candidates?workflowId=wf-1');
+    const input = { workflowId: 'wf-1', inputDigest: inbox.inputDigest, itemIds: ['item-0'], instructions: '', requestId: 'existing' };
+    const automation = { kind: 'daily' as const, intentId: 'a'.repeat(64), policyVersion: 1, evidenceCutoffMs: 1 };
+    const dispatch = vi.spyOn(f.executionPort, 'dispatch').mockRejectedValueOnce(new Error('AIS executeSnapshot HTTP 403: rejected'));
+    const prior = origin === 'automatic'
+      ? await f.service.create('verified-viewer', { ...input, automation })
+      : await f.service.create('verified-human', input);
+    expect((await f.service.task(prior.taskId)).execution?.status).toBe('dispatch_failed');
+    expect(await f.request('/', { ...input, requestId: 'fresh', actorId: 'verified-human', canEdit: true }, 'viewer-optimize'))
+      .toMatchObject({ status: 403, body: { code: 'FORBIDDEN' } });
+    expect(await f.request('/', input, 'viewer-optimize')).toMatchObject({ status: 409, body: { code: 'IDEMPOTENCY_MISMATCH' } });
+    expect(await f.request('/', { ...input, automation }, 'viewer-optimize')).toMatchObject({ status: 403, body: { code: 'FORBIDDEN' } });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect((await f.service.task(prior.taskId)).execution?.status).toBe('dispatch_failed');
+    expect(await f.db.query('SELECT task_id FROM ce_tasks')).toEqual([{ task_id: prior.taskId }]);
+    expect(await f.request('/', { ...input, requestId: 'editor-reuse' }, 'editor-only'))
+      .toMatchObject({ status: 202, body: { taskId: prior.taskId } });
+    expect(dispatch).toHaveBeenCalledTimes(2);
   });
   it('authorizes frozen material reads and rejects items outside the selected revision',async()=>{
     const f=await setup();const inbox=await f.request('/candidates?workflowId=wf-1');
@@ -142,11 +185,26 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     await f.service.reconcile();
     const path = `/${created.body.taskId}/retry-generation`;
     const input = { expectedRevision: 1, requestId: 'retry-first' };
+    expect((await f.request(path, input, 'denied')).status).toBe(403);
     expect((await f.request(path, input, 'viewer')).status).toBe(403);
-    const [first, repeated] = await Promise.all([f.request(path, input), f.request(path, input)]);
+    const [first, repeated] = await Promise.all([f.request(path, input, 'viewer-optimize'), f.request(path, input, 'viewer-optimize')]);
     expect(first.status).toBe(202); expect(repeated.status).toBe(202);
     expect(first.body.revision).toBe(2); expect(repeated.body).toEqual(first.body);
     expect(f.calls).toHaveLength(2);
+  });
+  it('does not let browser optimization change automated tasks or forge automation origin', async () => {
+    const f = await setup();
+    const inbox = await f.request('/candidates?workflowId=wf-1');
+    const created = await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.body.inputDigest,
+      itemIds: ['item-0'], instructions: '', requestId: 'first' });
+    const path = `/${created.body.taskId}`;
+    const original = await f.service.task(created.body.taskId);
+    const task = vi.spyOn(f.service, 'task');
+    task.mockResolvedValueOnce({ ...original, source: 'automatic' });
+    expect((await f.request(`${path}/retry-dispatch`, { expectedRevision: 1 }, 'viewer-optimize')).status).toBe(403);
+    expect((await f.request(`${path}/revisions`, { workflowId: 'wf-1', automation: { kind: 'daily' } }, 'viewer-optimize')).status).toBe(403);
+    expect((await f.request(`${path}/revisions`, { workflowId: 'wf-2', expectedAttemptRevision: 1 }, 'viewer-optimize')).status).toBe(403);
+    expect(f.calls).toHaveLength(1);
   });
   it('validates and forwards server-side inbox pagination', async () => {
     const f = await setup();

@@ -61,7 +61,7 @@ export type RepairRevision = {
 export type RepairBatchErrorCode = 'INVALID_INPUT' | 'PAYLOAD_TOO_LARGE' | 'IDEMPOTENCY_MISMATCH'
   | 'WORKFLOW_NOT_FOUND' | 'ITEM_NOT_FOUND' | 'ITEM_BUSY' | 'CONTENT_MISMATCH'
   | 'ACTIVE_TASK_CONFLICT' | 'STATE_CONFLICT' | 'CAPABILITY_UNAVAILABLE'
-  | 'TASK_NOT_FOUND' | 'REVISION_NOT_FOUND' | 'SOURCE_CHANGED';
+  | 'TASK_NOT_FOUND' | 'REVISION_NOT_FOUND' | 'SOURCE_CHANGED' | 'FORBIDDEN';
 export class RepairBatchError extends Error {
   constructor(public readonly code: RepairBatchErrorCode, message: string,
     public readonly details: Record<string, unknown> = {}) { super(message); this.name = 'RepairBatchError'; }

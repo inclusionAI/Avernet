@@ -256,7 +256,7 @@ export function createRepairReleaseService(input: {
         return true;
       });
       if (!claimed) return this.reconcile(actor, taskId, deploymentId);
-      const status = await p.resume(deployment);
+      const status = await p.resume(deployment, actor);
       return settle(deployment, status);
     },
     async stop(actor, taskId, deploymentId, requestId) {

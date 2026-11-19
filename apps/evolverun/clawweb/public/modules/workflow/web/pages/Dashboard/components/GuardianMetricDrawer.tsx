@@ -6,10 +6,12 @@ import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { IDailyTrendPoint, IDashboardOverview, IWorkflowHealthRow } from '../../../types/dashboard'
 import type { FlowRun } from '@avernet/clawweb-shared/web/types'
 import { formatDuration } from '../utils'
+import type { DashboardQueryScope } from '../api'
 
 export type GuardianMetricKind = 'runs' | 'successRate' | 'incomplete' | 'duration' | 'running' | 'waiting' | 'blocked' | 'queued'
 
 interface GuardianMetricDrawerProps {
+  scope: DashboardQueryScope
   kind: GuardianMetricKind
   overview: IDashboardOverview
   trend: IDailyTrendPoint[]
@@ -87,6 +89,7 @@ function formatStartedAt(value: string | number): string {
 }
 
 export function GuardianMetricDrawer({
+  scope,
   kind,
   overview,
   trend,
@@ -102,6 +105,8 @@ export function GuardianMetricDrawer({
   const meta = KIND_META[kind]
   const liveStatus = LIVE_STATUS_BY_KIND[kind]
   const showRuns = kind === 'runs' || kind === 'incomplete' || liveStatus !== undefined
+  const showRunList = scope.isAdmin && showRuns
+  const WorkflowRow = scope.isAdmin ? 'button' : 'div'
   const statuses = kind === 'incomplete' ? INCOMPLETE_STATUSES : liveStatus ? [liveStatus] : undefined
   const showHistoricalTrend = liveStatus === undefined
 
@@ -112,8 +117,8 @@ export function GuardianMetricDrawer({
   }, [onClose])
 
   const runsQ = useQuery({
-    enabled: showRuns,
-    queryKey: ['guardian-metric-runs', kind, from, to, page],
+    enabled: showRunList,
+    queryKey: ['dashboard', scope, 'guardian-metric-runs', kind, from, to, page],
     queryFn: () => api.runs.list({
       statuses,
       from: String(from),
@@ -218,7 +223,7 @@ export function GuardianMetricDrawer({
           <div>
             <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">任务护航 · 指标审计</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-950">{meta.title}</h2>
-            <p className="mt-1 text-xs text-slate-500">{rangeLabel} · 管理员全量视角 · started_at 落窗</p>
+            <p className="mt-1 text-xs text-slate-500">{rangeLabel} · {scope.isAdmin ? '管理员全量视角' : '授权工作流 · 聚合统计'} · started_at 落窗</p>
           </div>
           <button onClick={onClose} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-500 hover:bg-slate-50" aria-label="关闭">关闭</button>
         </header>
@@ -257,7 +262,11 @@ export function GuardianMetricDrawer({
             {trend.length === 0 ? <p className="py-12 text-center text-xs text-slate-400">当前周期暂无趋势数据</p> : <ReactECharts option={chartOption} style={{ height: 240 }} opts={{ renderer: 'svg' }} />}
           </section>}
 
-          {showRuns ? (
+          {showRuns && !showRunList && (
+            <p className="text-xs text-muted-foreground">当前范围仅展示聚合统计，不提供逐条运行明细。</p>
+          )}
+
+          {showRunList && (
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <div><h3 className="text-sm font-semibold text-slate-900">运行明细</h3><p className="mt-0.5 text-[11px] text-slate-400">共 {runTotal.toLocaleString()} 条，可逐条对账</p></div>
@@ -279,16 +288,17 @@ export function GuardianMetricDrawer({
                 <button disabled={page + 1 >= totalPages} onClick={() => setPage((value) => value + 1)} className="rounded-md border border-slate-200 px-3 py-1 text-xs text-slate-600 disabled:opacity-40">下一页</button>
               </div>
             </section>
-          ) : (
+          )}
+          {!showRuns && (
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
               <div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-semibold text-slate-900">{kind === 'duration' ? '耗时最高的工作流' : '成功率较低的工作流'}</h3><p className="mt-0.5 text-[11px] text-slate-400">用于定位主要贡献者，不改变主指标口径</p></div>
               <div className="divide-y divide-slate-100">
                 {workflowRows.map((row) => (
-                  <button key={row.workflowId} onClick={() => navigate(`/workflows/workspace?workflowId=${encodeURIComponent(row.workflowId)}`)} className="grid w-full grid-cols-[minmax(0,1fr)_90px_90px] items-center gap-3 px-4 py-3 text-left hover:bg-slate-50">
+                  <WorkflowRow key={row.workflowId} onClick={scope.isAdmin ? () => navigate(`/workflows/workspace?workflowId=${encodeURIComponent(row.workflowId)}`) : undefined} className={`grid w-full grid-cols-[minmax(0,1fr)_90px_90px] items-center gap-3 px-4 py-3 text-left ${scope.isAdmin ? 'hover:bg-slate-50' : ''}`}>
                     <span className="truncate text-xs font-medium text-slate-800">{row.workflowTitle}</span>
                     <span className="text-right text-xs tabular-nums text-slate-600">{formatRate(row.completionSuccessRate)}</span>
                     <span className="text-right text-xs tabular-nums text-slate-600">{row.machineDurationP50 == null ? '—' : formatDuration(row.machineDurationP50)}</span>
-                  </button>
+                  </WorkflowRow>
                 ))}
               </div>
             </section>

@@ -8,6 +8,8 @@ import { registerRunRequest } from '../run-request-registration.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 import express from 'express';
 import { createRepairBatchesRouter } from '../../routes/repair-batches.js';
+import { createRepairAuthorizer } from '../../routes/repair-authorization.js';
+import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
 
 async function fixture() {
   const f = await repairFixture();
@@ -69,21 +71,83 @@ it('does not claim to close an unfenced legacy saved-mode request', async () => 
   } finally { await f.db.close(); }
 });
 
-it('requires workflow edit access to end the matching task request through HTTP', async () => {
+it('allows a viewer to end only their own unregistered trial', async () => {
   const f = await fixture();
   const app = express(); app.use(express.json());
   app.use('/api/workflow-repairs', createRepairBatchesRouter({ service: f.workbench, trials: f.service,
-    authorize: async req => ({ actorId: 'actor', canEdit: req.headers['x-test-edit'] === 'yes' }) }));
+    authorize: async req => ({ actorId: req.get('x-test-actor') ?? 'another-viewer', canEdit: false, canOptimize: true }) }));
   const server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve));
   try {
-    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/workflow-repairs/${f.trial.taskId}/trials/${f.trial.id}/stop`;
-    const post = (edit: string) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Test-Edit': edit }, body: '{}' });
-    expect((await post('no')).status).toBe(403);
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/workflow-repairs/${f.trial.taskId}/trials`;
+    const post = (actor: string) => fetch(`${url}/${f.trial.id}/stop`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Test-Actor': actor }, body: '{}',
+    });
+    for (const [actor, allowed] of [['another-viewer', false], ['actor', true]] as const) {
+      expect(await (await fetch(url, { headers: { 'X-Test-Actor': actor } })).json())
+        .toMatchObject({ trials: [{ id: f.trial.id, canStopUnstarted: allowed }] });
+    }
+    expect((await post('another-viewer')).status).toBe(403);
     expect((await f.service.list(f.trial.taskId))[0].status).toBe('awaiting_run');
-    const response = await post('yes');
+    const response = await post('actor');
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ id: f.trial.id, status: 'failed', flowId: null });
     expect(f.dispatches()).toBe(1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await f.db.close();
+  }
+});
+
+it('preserves edit-only recovery without giving an editor browser view scope', async () => {
+  const f = await fixture();
+  f.raw.exec(`CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY, bot_id TEXT, bot_owner_id TEXT,
+    workflow_id TEXT, env TEXT, can_view INTEGER, can_execute INTEGER, can_edit INTEGER, gmt_create INTEGER, gmt_modified INTEGER);
+    INSERT INTO bot_workflow_permissions VALUES (1,NULL,'operator','wf-1','test',0,0,1,0,0);`);
+  const authorize = createRepairAuthorizer(async () => ({ actorId: 'operator', isAdmin: false }), new BotWorkflowPermissionRepository(f.db));
+  const app = express(); app.use(express.json());
+  app.use('/repairs', createRepairBatchesRouter({ service: f.workbench, trials: f.service, authorize }));
+  const server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve));
+  try {
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/repairs/${f.trial.taskId}/trials`;
+    expect((await fetch(url)).status).toBe(403);
+    const response = await fetch(`${url}/${f.trial.id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: f.trial.id, status: 'failed' });
+    expect(f.dispatches()).toBe(1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await f.db.close();
+  }
+});
+
+it('allows reading trial options but requires explicit execute to start or replay a trial', async () => {
+  const f = await fixture();
+  const app = express(); app.use(express.json());
+  app.use('/repairs', createRepairBatchesRouter({ service: f.workbench, trials: f.service,
+    authorize: async (req, workflowId, _mode, capability) => {
+      const role = req.get('x-test-role');
+      if (workflowId !== 'wf-1' || !role) return null;
+      return { actorId: 'actor', canEdit: role === 'edit', canExecute: capability === 'execute' && role === 'execute' };
+    } }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/repairs/${f.trial.taskId}/trials`;
+  const start = (role: string, body: object) => fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Test-Role': role }, body: JSON.stringify(body),
+  });
+  try {
+    expect((await fetch(`${url}/options?revision=1`, { headers: { 'X-Test-Role': 'view' } })).status).toBe(200);
+    expect((await fetch(`${url}/options?revision=1`)).status).toBe(403);
+    await f.service.stop(f.trial.taskId, f.trial.id);
+    const next = { ...f.request, requestId: 'explicit-trial' };
+    for (const role of ['', 'view', 'edit']) expect((await start(role, next)).status).toBe(403);
+    expect(f.dispatches()).toBe(1);
+    const launched = await start('execute', next);
+    expect(launched.status).toBe(202);
+    expect(await launched.json()).toMatchObject({ status: 'awaiting_run' });
+    expect(f.dispatches()).toBe(2);
+    expect((await start('view', next)).status).toBe(403);
+    expect(f.dispatches()).toBe(2);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     await f.db.close();

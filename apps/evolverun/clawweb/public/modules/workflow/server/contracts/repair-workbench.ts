@@ -113,7 +113,8 @@ export interface RepairWorkbenchService {
   material?(taskId:string,revision:number,itemId:string):Promise<RepairItem>;
   items(workflowId: string, itemIds: string[]): Promise<RepairInboxItem[]>;
   request(workflowId: string, requestId: string): Promise<RepairRevision | null>;
-  create(actorId: string, request: RepairSelectionRequest): Promise<RepairRevision>;
+  /** Server-selected viewer scope: new manual draft or an exact replay of the actor's own initial request. */
+  create(actorId: string, request: RepairSelectionRequest, scope?: 'own-manual-only'): Promise<RepairRevision>;
   revise(actorId: string, taskId: string, request: RepairFeedbackRequest): Promise<RepairRevision>;
   disposition(actorId: string, input: { workflowId: string; itemId: string; inputDigest: string; expectedStateVersion: number;
     contentRevision: number; untilMs?: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }): Promise<StoredRepairItem>;

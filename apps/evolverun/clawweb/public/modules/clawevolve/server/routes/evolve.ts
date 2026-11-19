@@ -33,8 +33,9 @@ import {
   validateWorkflowPatchProposal,
   WORKFLOW_EVOLUTION_ANALYSIS_VERSION,
 } from "../services/evolution/contracts.js";
-import { presentEvidence } from "../services/evolution/evidence-presentation.js";
+import { presentEvidence, summarizeEvidenceRow } from "../services/evolution/evidence-presentation.js";
 import { requireWorkflowAccess } from "@avernet/clawweb-shared/server/services/workflow-access";
+import { createEvolveWorkflowActionAccess, type WorkflowActionPrincipalResolver } from "./evolve-workflow-action-access.js";
 import type { InsightImprovementPort, InsightTaskCreatorPort, InsightTaskSourcePort } from "../internal/module-api.js";
 import type { BotSkillGateway } from "../contracts/bot-skill-gateway.js";
 import {
@@ -188,6 +189,7 @@ export type EvolveRouterDeps = {
   /** Signing-only dependency for artifacts uploaded from AIS containers. */
   aisArtifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   botWorkflowPermissionRepo?: BotWorkflowPermissionRepository | null;
+  resolveWorkflowActionPrincipal?: WorkflowActionPrincipalResolver;
   runAnalysisStarter?: RunAnalysisStarter | null;
   hostLocalSkills?: BotSkillGateway | null;
   hostSpaces?: SpaceDirectory;
@@ -2033,90 +2035,119 @@ type SuggestionDiagnosisContext = {
   }>;
 };
 
-function storedStringArray(value: string | null | undefined): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
-      : [];
-  } catch {
-    return [];
-  }
+function exactIds(value: unknown): string[] | null {
+  return Array.isArray(value)
+    && value.every((item) => typeof item === "string" && item.length > 0 && item === item.trim())
+    ? [...new Set<string>(value)] : null;
+}
+
+function storedIds(value: string | null): string[] | null {
+  if (value == null) return [];
+  try { return exactIds(JSON.parse(value)); }
+  catch { return null; }
 }
 
 async function buildSuggestionDiagnosisContext(
+  workflowId: string,
   suggestions: EvolveSuggestionRow[],
   workflowEvolutionRepo: WorkflowEvolutionRepository | null,
   repo: EvolveRepository,
+  db: IDatabase,
 ): Promise<SuggestionDiagnosisContext | undefined> {
-  const diagnosisIds = [...new Set(suggestions.flatMap((suggestion) => storedStringArray(suggestion.source_diagnosis_ids)))]
-    .slice(-8);
+  const links = new Map<string, Array<{ signature: string; impactRuns: Set<string> }>>();
+  for (const suggestion of suggestions) {
+    if (suggestion.workflow_id !== workflowId) continue;
+    const impactRuns = storedIds(suggestion.impact_run_ids);
+    if (!impactRuns) continue; // Malformed metadata is not a missing legacy field.
+    const link = { signature: suggestion.failure_signature, impactRuns: new Set(impactRuns) };
+    for (const diagnosisId of storedIds(suggestion.source_diagnosis_ids) ?? []) {
+      const sources = links.get(diagnosisId) ?? [];
+      sources.push(link);
+      links.set(diagnosisId, sources);
+    }
+  }
+  const diagnosisIds = [...links.keys()].slice(-8);
   if (diagnosisIds.length === 0) return undefined;
 
   try {
     const projected = workflowEvolutionRepo
-      ? (await workflowEvolutionRepo.listProjectedDiagnoses({
-          workflowId: suggestions[0]?.workflow_id,
-          limit: 200,
-        })).rows
+      ? (await workflowEvolutionRepo.listProjectedDiagnoses({ workflowId, limit: 200 })).rows
       : [];
-    const projectedById = new Map(projected.flatMap((item) => {
-      const diagnosisId = typeof item.diagnosis_id === "string" ? item.diagnosis_id : "";
-      return diagnosisId ? [[diagnosisId, item] as const] : [];
-    }));
-    const selectedProjected = diagnosisIds.flatMap((diagnosisId) => {
-      const item = projectedById.get(diagnosisId);
-      return item ? [item] : [];
-    });
-    const citedEventIds = selectedProjected.flatMap((item) => Array.isArray(item.evidence_event_ids)
-      ? item.evidence_event_ids.filter((eventId): eventId is string => typeof eventId === "string")
-      : []);
-    const evidenceRows = workflowEvolutionRepo
-      ? await workflowEvolutionRepo.listEvidenceByEventIds(citedEventIds.slice(0, 40))
-      : [];
-    const evidenceById = new Map(evidenceRows.map((row) => [row.event_id, row]));
-    const diagnoses: SuggestionDiagnosisContext["diagnoses"] = [];
+    type Diagnosis = SuggestionDiagnosisContext["diagnoses"][number];
+    const selected: Array<{ diagnosis: Omit<Diagnosis, "problemSources">; eventIds: string[] }> = [];
+
+    async function hasBoundRuns(diagnosisId: string, signature: unknown, flows: readonly string[], legacy = false): Promise<boolean> {
+      // A batch must not borrow another suggestion's impact runs. Old text
+      // suggestions may have no impact list; their exact diagnosis ID and
+      // signature must still resolve to a real run in this workflow. Projected
+      // diagnosis IDs can recur across runs, so they need explicit impact IDs.
+      if (!flows.length || !links.get(diagnosisId)?.some(({ signature: sourceSignature, impactRuns }) =>
+        signature === sourceSignature && ((legacy && !impactRuns.size) || flows.every(flowId => impactRuns.has(flowId))))) return false;
+      const runs = await db.query<{ flow_id: string; workflow_id: string }>(
+        `SELECT flow_id, workflow_id FROM flow_runs WHERE flow_id IN (${flows.map(() => "?").join(", ")})`, [...flows],
+      );
+      const bound = new Set(runs.filter(row => row.workflow_id === workflowId).map(row => row.flow_id));
+      return flows.every(flowId => bound.has(flowId));
+    }
 
     for (const diagnosisId of diagnosisIds) {
-      const item = projectedById.get(diagnosisId);
-      if (item) {
-        const flowIds = Array.isArray(item.flow_ids)
-          ? item.flow_ids.filter((flowId): flowId is string => typeof flowId === "string").slice(0, 10)
-          : typeof item.flow_id === "string" ? [item.flow_id] : [];
-        const eventIds = Array.isArray(item.evidence_event_ids)
-          ? item.evidence_event_ids.filter((eventId): eventId is string => typeof eventId === "string").slice(0, 5)
-          : [];
-        diagnoses.push({
+      let matchedProjection = false;
+      for (const item of projected) {
+        if (item.diagnosis_id !== diagnosisId || item.workflow_id !== workflowId || typeof item.analysis_id !== "string") continue;
+        const declaredFlows = exactIds(item.flow_ids);
+        if (!declaredFlows) continue;
+        const flows = declaredFlows.length ? declaredFlows : exactIds([item.flow_id]);
+        if (!flows || !await hasBoundRuns(diagnosisId, item.failure_signature, flows)) continue;
+        const analysis = await workflowEvolutionRepo?.findAnalysisRun(item.analysis_id);
+        if (!analysis || analysis.analysis_id !== item.analysis_id || analysis.workflow_id !== workflowId || analysis.status !== "completed") continue;
+        const scope = parseJson(analysis.scope_json);
+        if (!isRecord(scope)) continue;
+        const scopedFlows = scope.flowIds === undefined ? [] : exactIds(scope.flowIds);
+        if (!scopedFlows) continue;
+        const analysisFlows = scopedFlows.length ? scopedFlows : exactIds([analysis.flow_id]) ?? [];
+        if (analysis.scope_type === "single_run" && (analysisFlows.length !== 1
+          || (analysis.flow_id != null && analysisFlows[0] !== analysis.flow_id))) continue;
+        if (!flows.every(flowId => analysisFlows.includes(flowId))) continue;
+
+        selected.push({ diagnosis: {
           diagnosisId,
-          ...(typeof item.analysis_id === "string" ? { analysisId: item.analysis_id } : {}),
-          flowIds,
+          analysisId: item.analysis_id,
+          flowIds: flows.slice(0, 10),
           nodeId: typeof item.node_id === "string" ? item.node_id : null,
           failureSignature: String(item.failure_signature ?? "").slice(0, 512),
           failureMode: typeof item.failure_mode === "string" ? item.failure_mode : null,
           conclusion: String(item.reasoning ?? item.failure_signature ?? "").slice(0, 1_000),
-          problemSources: presentEvidence(eventIds, evidenceById).map((source) => ({
-            eventId: source.eventId,
-            eventType: source.eventType,
-            summary: source.summary,
-          })),
-        });
-        continue;
+        }, eventIds: exactIds(item.evidence_event_ids)?.slice(0, 5) ?? [] });
+        matchedProjection = true;
+        break;
       }
+      if (matchedProjection) continue;
 
       const legacy = await repo.findDiagnosis(diagnosisId);
-      if (!legacy) continue;
-      diagnoses.push({
+      if (!legacy || legacy.diagnosis_id !== diagnosisId || legacy.workflow_id !== workflowId) continue;
+      const flows = exactIds([legacy.flow_id]);
+      if (!flows || !await hasBoundRuns(diagnosisId, legacy.failure_signature, flows, true)) continue;
+      selected.push({ diagnosis: {
         diagnosisId,
-        flowIds: [legacy.flow_id].filter(Boolean).slice(0, 10),
+        flowIds: flows,
         nodeId: legacy.node_id,
         failureSignature: legacy.failure_signature,
         failureMode: legacy.failure_mode,
         conclusion: (legacy.error_text || legacy.failure_signature).slice(0, 1_000),
-        problemSources: [],
-      });
+      }, eventIds: [] });
     }
 
+    const evidenceRows = await workflowEvolutionRepo?.listEvidenceByEventIds(selected.flatMap(item => item.eventIds)) ?? [];
+    const evidenceById = new Map(evidenceRows.filter(row => row.workflow_id === workflowId).map(row => [row.event_id, row]));
+    const diagnoses = selected.map(({ diagnosis, eventIds }): Diagnosis => ({
+      ...diagnosis,
+      problemSources: eventIds.flatMap(eventId => {
+        const row = evidenceById.get(eventId);
+        if (!row || !diagnosis.flowIds.includes(row.flow_id)) return [];
+        const { eventType, summary } = summarizeEvidenceRow(row);
+        return [{ eventId, eventType, summary }];
+      }),
+    }));
     return diagnoses.length > 0
       ? { schemaVersion: "task-guard-diagnosis-context/v1", readOnly: true, diagnoses }
       : undefined;
@@ -2158,6 +2189,7 @@ function buildRunAnalysisMessage(input: {
 export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRouterDeps = {}): Router {
   const router = Router();
   const db = deps.db;
+  const knowledgeDb = db ?? (repo as unknown as { db: IDatabase }).db;
   const workflowEvolutionRepo = db ? new WorkflowEvolutionRepository(db) : null;
   const dispatch = deps.dispatch ?? dispatchEvolveCommand;
   const dispatchTaskLogArchive = deps.dispatchTaskLogArchive ?? dispatchEvolveTaskLogArchive;
@@ -2174,6 +2206,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const artifactUrlStore = deps.artifactUrlStore ?? deps.artifactStore ?? unavailableArtifactStore;
   const aisArtifactUrlStore = deps.aisArtifactUrlStore ?? artifactUrlStore;
   const botWorkflowPermissionRepo = deps.botWorkflowPermissionRepo ?? null;
+  const workflowAction = createEvolveWorkflowActionAccess(botWorkflowPermissionRepo, resolveRequestUserId, deps.resolveWorkflowActionPrincipal);
   const hostLocalSkills = deps.hostLocalSkills ?? null;
   const stageSkillRepo = deps.stageSkillRepo ?? null;
   const skillAssetRepo = deps.skillAssetRepo ?? null;
@@ -6341,7 +6374,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!flowId) { res.status(400).json({ error: "flowId 为必填项" }); return; }
     const workflowId = await repo.getWorkflowIdByFlowId(flowId);
     if (!workflowId) { res.status(404).json({ error: "未找到该 flow 对应的工作流" }); return; }
-    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, workflowId, "view")) return;
+    const actor = await workflowAction.actor(req, res);
+    if (!actor || !await workflowAction.require(req, res, workflowId, actor, "view")) return;
 
     const requestedAnalysisId = textOrNull(req.query.analysisId);
     const analysis = requestedAnalysisId
@@ -6389,7 +6423,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const citedIds = result.diagnoses.flatMap((diagnosis) => diagnosis.evidenceEventIds);
     const evidenceRows = await workflowEvolutionRepo.listEvidenceByEventIds(citedIds);
-    const evidenceById = new Map(evidenceRows.map((row) => [row.event_id, row]));
+    const evidenceById = new Map(evidenceRows.filter(row => row.workflow_id === workflowId).map((row) => [row.event_id, row]));
     res.json({
       analysis: {
         ...base,
@@ -6649,8 +6683,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(503).json({ error: "服务不可用", message: "Evolve repository 未配置" });
       return;
     }
-    const userId = resolveRequestUserId(req);
-    if (!userId) { res.status(401).json({ error: "未登录" }); return; }
+    const actor = await workflowAction.actor(req, res);
+    if (!actor) return;
     const raw = req.query.suggestionIds;
     const suggestionIds: string[] = [];
     if (Array.isArray(raw)) {
@@ -6667,7 +6701,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     for (const suggestionId of suggestionIds) {
       const suggestion = await repo.findSuggestionById(suggestionId);
       if (!suggestion) { res.status(404).json({ error: "Suggestion not found" }); return; }
-      if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, suggestion.workflow_id, "view")) return;
+      if (!await workflowAction.require(req, res, suggestion.workflow_id, actor, "view")) return;
     }
     const tasks = await repo.listSuggestionApplyTasks(suggestionIds);
     res.json({ tasks });
@@ -6679,11 +6713,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(503).json({ error: "\u670d\u52a1\u4e0d\u53ef\u7528", message: "Evolve repository \u672a\u914d\u7f6e" });
       return;
     }
-    const userId = resolveRequestUserId(req);
-    if (!userId) { res.status(401).json({ error: "\u672a\u767b\u5f55" }); return; }
+    const actor = await workflowAction.actor(req, res);
+    if (!actor) return;
+    const userId = actor.actorId;
     const suggestion = await repo.findSuggestionById(String(req.params.suggestionId));
     if (!suggestion) { res.status(404).json({ error: "Suggestion not found" }); return; }
-    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, suggestion.workflow_id, "edit")) return;
+    if (!await workflowAction.require(req, res, suggestion.workflow_id, actor)) return;
     const bots = await repo.listEligibleBotsForSuggestion(userId, suggestion.workflow_id);
     res.json({ bots });
   }));
@@ -6811,7 +6846,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       && task.proposalDigest !== suggestions[0].proposal_digest);
     const previousProposal = previousTask?.proposal ?? undefined;
     const proposalDelta = previousProposal && proposal ? diffSuggestionProposals(previousProposal, proposal) : undefined;
-    const diagnosisContext = await buildSuggestionDiagnosisContext(suggestions, workflowEvolutionRepo, repo);
+    const diagnosisContext = await buildSuggestionDiagnosisContext(workflowId, suggestions, workflowEvolutionRepo, repo, knowledgeDb);
     const message = buildSuggestionApplyMessage({
       taskId,
       stepId,
@@ -6909,12 +6944,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
 
   router.get('/group-repairs', asyncHandler(async (req: Request, res: Response) => {
     if (!db || !repo || !botWorkflowPermissionRepo) { res.status(503).json({ error: 'service_unavailable' }); return; }
-    const userId = resolveRequestUserId(req);
-    if (!userId) { res.status(401).json({ error: 'unauthorized' }); return; }
+    const actor = await workflowAction.actor(req, res);
+    if (!actor) return;
+    const userId = actor.actorId;
     const workflowId = typeof req.query.workflowId === 'string' ? req.query.workflowId : '';
     const signature = typeof req.query.signature === 'string' ? req.query.signature : '';
     if (!workflowId || !signature) { res.status(400).json({ error: 'invalid_group' }); return; }
-    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, workflowId, 'edit')) return;
+    if (!await workflowAction.require(req, res, workflowId, actor)) return;
     const group = (await new IssueAggregationRepository(db).list(workflowId)).find(group => group.signature === signature);
     const rows = await db.query<{ task_id: string; config_json: string; status: string; output_json: string | null; summary: string | null }>(
       `SELECT t.task_id, t.config_json, s.status, s.output_json, s.summary FROM ce_tasks t JOIN ce_steps s ON s.task_id = t.task_id
@@ -6933,11 +6969,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
 
   router.post('/group-repairs', asyncHandler(async (req: Request, res: Response) => {
     if (!db || !repo || !botWorkflowPermissionRepo) { res.status(503).json({ error: 'service_unavailable' }); return; }
-    const userId = resolveRequestUserId(req);
-    if (!userId) { res.status(401).json({ error: 'unauthorized' }); return; }
+    const actor = await workflowAction.actor(req, res);
+    if (!actor) return;
+    const userId = actor.actorId;
     const body = req.body ?? {};
     if (typeof body.workflowId !== 'string' || typeof body.signature !== 'string') { res.status(400).json({ error: 'invalid_group' }); return; }
-    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, body.workflowId, 'edit')) return;
+    if (!await workflowAction.require(req, res, body.workflowId, actor)) return;
     const group = (await new IssueAggregationRepository(db).list(body.workflowId)).find(group => group.signature === body.signature);
     if (!group) { res.status(409).json({ error: 'group_changed' }); return; }
     let selection: RepairSelection;
@@ -6957,8 +6994,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(503).json({ error: "服务不可用", message: "Evolve repository 未配置" });
       return;
     }
-    const userId = resolveRequestUserId(req);
-    if (!userId) { res.status(401).json({ error: "未登录" }); return; }
+    const actor = await workflowAction.actor(req, res);
+    if (!actor) return;
+    const userId = actor.actorId;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const rawIds = Array.isArray(body.suggestionIds) ? body.suggestionIds : [];
     const suggestionIds = Array.from(new Set(rawIds.map(String).map((id) => id.trim()).filter(Boolean)));
@@ -6975,12 +7013,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "批量应用仅支持同一 workflow 的建议" });
       return;
     }
+    if (!await workflowAction.require(req, res, workflowId, actor)) return;
     const invalid = suggestions.find((suggestion) => !["pending", "adopted", "failed"].includes(suggestion.status));
     if (invalid) {
       res.status(409).json({ error: `建议 ${invalid.id} 当前状态为 ${invalid.status}，不能发起应用` });
       return;
     }
-    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, workflowId, "edit")) return;
     const result = await dispatchSuggestionApplication(res, userId, suggestions, body);
     if (result) res.json({ ok: true, ...result });
   }));
@@ -6990,11 +7028,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(503).json({ error: "服务不可用", message: "Evolve repository 未配置" });
       return;
     }
-    const userId = resolveRequestUserId(req);
-    if (!userId) { res.status(401).json({ error: "未登录" }); return; }
+    const actor = await workflowAction.actor(req, res);
+    if (!actor) return;
+    const userId = actor.actorId;
     const suggestion = await repo.findSuggestionById(String(req.params.suggestionId));
     if (!suggestion) { res.status(404).json({ error: "Suggestion not found" }); return; }
-    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, suggestion.workflow_id, "edit")) return;
+    if (!await workflowAction.require(req, res, suggestion.workflow_id, actor)) return;
     if (!["pending", "adopted", "failed"].includes(suggestion.status)) {
       res.status(409).json({ error: `当前建议状态为 ${suggestion.status}，不能发起应用` });
       return;
@@ -7047,9 +7086,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   }));
 
   router.use(createEvolveKnowledgeRouter(
-    db ?? (repo as unknown as { db: IDatabase }).db,
+    knowledgeDb,
     repo,
     botWorkflowPermissionRepo,
+    deps.resolveWorkflowActionPrincipal ? workflowAction : undefined,
   ));
 
   return router;

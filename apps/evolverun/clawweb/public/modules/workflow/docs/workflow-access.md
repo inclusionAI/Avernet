@@ -67,3 +67,31 @@ runtime execution. Host-specific read-only compositions must authenticate before
 reading and confine any permissive policy to documented read endpoints. Secret
 configuration, permission administration, and runtime scopes are not implicitly
 part of workflow viewing.
+
+## Shared browser workflow capability
+
+ClawWeb and Task Escort consume the same Service API. A host selecting the
+shared browser policy derives scope from its verified principal. An administrator
+receives all workflows; other users receive the workflow IDs returned by the
+explicit `can_view` whitelist (`listBrowserViewableWorkflowIds`). The whitelist
+includes direct and exact collaborative-Bot grants and explicit global grants;
+`can_edit` alone does not grant access under this policy. An empty whitelist
+means no workflows. The legacy non-browser and Bot-runtime policies above are
+not changed by this new browser policy, and request filters cannot add grants.
+
+For these browser consumers, a visible workflow's statistics, runs, node I/O
+and evidence use its workflow-level scope, not an additional Bot-run view grant.
+Normal projection, redaction, and resource-to-workflow checks still apply.
+Workflow-bound repair generation, application and publication require workflow
+view; Editor mutations keep the Editor edit gate. Starting a workflow, including
+starting a trial, still requires execution permission; it is not implied by
+being able to open the trial page. Approval, deployment validation and protected
+configuration rules are independent of this browser capability.
+
+The shared dashboard routes scope both selected and comparison intervals before
+aggregation, ranking, or pagination. A logged-in viewer without grants receives
+an empty result for scoped widgets, not an admin response. The host must not
+expose any admin-only dashboard widget to non-admins until every data source
+used by that widget can be scoped. Consumers keep existing API paths and
+response fields; these rules do not implicitly connect a UI write action that
+was not previously wired to a Service API.

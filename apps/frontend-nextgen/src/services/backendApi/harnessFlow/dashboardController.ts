@@ -103,7 +103,7 @@ export interface DashboardControllerApi {
 }
 
 const BASE = '/openapi/v1/harnessflow/api/dashboard';
-/** Global admin aggregates. Never add a workspace workflowId filter or a response mapper here. */
+/** Aggregates scoped by server authorization. Never forward selector roles/IDs or add a response mapper here. */
 export const dashboardController: DashboardControllerApi = {
   overview: (range, signal) => backendRequest(`${BASE}/overview`, { method: 'GET', params: { ...range }, signal }),
   dailyTrend: (range, signal) => backendRequest(`${BASE}/daily-trend`, { method: 'GET', params: { ...range }, signal }),

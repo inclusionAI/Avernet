@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import type { RepairTaskDetail } from '../../../../../server/contracts/repair-workbench'
-const api = vi.hoisted(() => ({ deploymentTargets: vi.fn(), publish: vi.fn(), reconcileDeployment: vi.fn(), trials: vi.fn(), trialOptions: vi.fn(), startTrial: vi.fn() }))
+const api = vi.hoisted(() => ({ deploymentTargets: vi.fn(), publish: vi.fn(), reconcileDeployment: vi.fn(), resumeDeployment: vi.fn(), trials: vi.fn(), trialOptions: vi.fn(), startTrial: vi.fn() }))
 vi.mock('../../../../api/repair-batches', () => ({ repairBatches: api }))
 import RepairReleaseFlow from '../RepairReleaseFlow'
 const revision = { revision: 1, phase: 'review', stateVersion: 1, draft: { candidateCommit: 'a'.repeat(40) } } as RepairTaskDetail['latestAttempt']
@@ -132,7 +132,7 @@ it('does not count a successful legacy saved run as successful verification of t
 
 it('opens an immediately focused modal, blocks publication and preserves inputs on close/reopen without executing', async () => {
   const user = userEvent.setup()
-  render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit onRefresh={() => {}} />)
+  render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit canExecute onRefresh={() => {}} />)
   const trigger = await screen.findByRole('button', { name: '先试跑' })
   await user.click(trigger)
   const dialog = await screen.findByRole('dialog', { name: '先试跑候选 v1' })
@@ -161,7 +161,7 @@ it('allows closing during submission and reopens the same unresolved request wit
   let reject!: (reason: Error) => void
   api.startTrial.mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail })).mockResolvedValueOnce({})
   const user = userEvent.setup()
-  render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit onRefresh={() => {}} />)
+  render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit canExecute onRefresh={() => {}} />)
   const trigger = await screen.findByRole('button', { name: '先试跑' })
   await user.click(trigger)
   await user.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'bot')
@@ -184,16 +184,80 @@ it('allows closing during submission and reopens the same unresolved request wit
 
 it('resets the dialog and inputs when the selected candidate changes', async () => {
   const user = userEvent.setup()
-  const view = render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit onRefresh={() => {}} />)
+  const view = render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit canExecute onRefresh={() => {}} />)
   await user.click(await screen.findByRole('button', { name: '先试跑' }))
   await user.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'bot')
   await user.type(screen.getByRole('textbox', { name: 'query' }), 'old input')
   const next = { ...revision, revision: 2, draft: { candidateCommit: 'b'.repeat(40) } } as RepairTaskDetail['latestAttempt']
-  view.rerender(<RepairReleaseFlow detail={{ ...detail, latestAttempt: next, latestSuccessful: next, revisions: [revision, next] }} selectedRevision={2} canEdit onRefresh={() => {}} />)
+  view.rerender(<RepairReleaseFlow detail={{ ...detail, latestAttempt: next, latestSuccessful: next, revisions: [revision, next] }} selectedRevision={2} canEdit canExecute onRefresh={() => {}} />)
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   await user.click(await screen.findByRole('button', { name: '先试跑' }))
   const dialog = screen.getByRole('dialog', { name: '先试跑候选 v2' })
   expect(await within(dialog).findByRole('combobox', { name: '执行 Bot' })).toHaveValue('')
   expect(within(dialog).getByRole('textbox', { name: 'query' })).toHaveValue('')
   expect(api.startTrial).not.toHaveBeenCalled()
+})
+
+it('lets an optimizing viewer review and publish only a workflow target', async () => {
+  const bot = { id: 'legacy', botId: 'legacy-bot', label: 'Legacy Bot' }
+  api.deploymentTargets.mockResolvedValueOnce({ targets: [bot] }).mockResolvedValueOnce({ targets: [bot, { id: 'workflow:pre:wf', scope: 'workflow', label: '工作流 wf' }] })
+  api.publish.mockResolvedValue({ status: 'running' })
+  render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit={false} canOptimize onRefresh={() => {}} />)
+  await userEvent.click(screen.getByRole('button', { name: '发布此版本' }))
+  const dialog = screen.getByRole('dialog', { name: '确认发布 v1' })
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent('没有可发布的工作流范围')
+  await userEvent.click(within(dialog).getByRole('checkbox'))
+  expect(within(dialog).getByRole('button', { name: '确认发布' })).toBeDisabled()
+  await userEvent.click(within(dialog).getByRole('button', { name: '重新读取发布信息' }))
+  expect(await within(dialog).findByText('工作流 wf')).toBeVisible()
+  expect(within(dialog).queryByText('Legacy Bot')).not.toBeInTheDocument()
+  await userEvent.click(within(dialog).getByRole('checkbox'))
+  await userEvent.click(within(dialog).getByRole('button', { name: '确认发布' }))
+  expect(api.publish).toHaveBeenCalledOnce()
+  expect(api.publish.mock.calls[0][1]).toMatchObject({ targetId: 'workflow:pre:wf', acknowledgeUncoveredChecks: true })
+})
+
+it.each(['workflow', undefined])('limits viewer release recovery to workflow scope (%s)', async scope => {
+  const pending = { id: 'pending', revision: 1, status: 'uncertain', target: { scope } } as never
+  api.reconcileDeployment.mockResolvedValue({})
+  api.resumeDeployment.mockResolvedValue({})
+  render(<RepairReleaseFlow detail={{ ...detail, release: { approval: null, deployments: [pending] } }} selectedRevision={1} canEdit={false} canOptimize onRefresh={() => {}} />)
+  const reconcile = screen.getByRole('button', { name: '核对发布状态' })
+  if (scope === 'workflow') {
+    await userEvent.click(screen.getByRole('button', { name: '继续原发布' }))
+    expect(api.resumeDeployment).toHaveBeenCalledWith('task', 'pending', expect.any(String))
+    await userEvent.click(reconcile)
+    expect(api.reconcileDeployment).toHaveBeenCalledWith('task', 'pending')
+  } else {
+    expect(screen.queryByRole('button', { name: '继续原发布' })).not.toBeInTheDocument()
+    expect(reconcile).toBeDisabled()
+    expect(api.reconcileDeployment).not.toHaveBeenCalled()
+  }
+})
+
+it.each([[false, false], [true, false], [true, undefined]])('reads trial options without letting a non-executor start (editor=%s, execute=%s)', async (canEdit, canExecute) => {
+  render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit={canEdit} canExecute={canExecute} canOptimize onRefresh={() => {}} />)
+  await userEvent.click(await screen.findByRole('button', { name: '查看试跑选项' }))
+  expect(await screen.findByRole('combobox', { name: '执行 Bot' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '开始试跑' })).toBeDisabled()
+  expect(api.trialOptions).toHaveBeenCalledWith('task', 1)
+  expect(api.startTrial).not.toHaveBeenCalled()
+})
+
+it('lets a viewer with execute start a manual trial without edit or optimize', async () => {
+  api.startTrial.mockResolvedValue({})
+  render(<RepairReleaseFlow detail={detail} selectedRevision={1} canEdit={false} canExecute onRefresh={() => {}} />)
+  await userEvent.click(await screen.findByRole('button', { name: '先试跑' }))
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: '执行 Bot' }), 'bot')
+  await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
+  expect(api.startTrial).toHaveBeenCalledWith('task', expect.objectContaining({ targetId: 'bot' }))
+})
+
+it('requires edit for an automatic trial and publication even if the viewer can optimize and execute', async () => {
+  render(<RepairReleaseFlow detail={{ ...detail, source: 'automatic' }} selectedRevision={1} canEdit={false} canOptimize canExecute onRefresh={() => {}} />)
+  expect(screen.getByRole('button', { name: '发布此版本' })).toBeDisabled()
+  await userEvent.click(await screen.findByRole('button', { name: '查看试跑选项' }))
+  expect(await screen.findByRole('combobox', { name: '执行 Bot' })).toBeDisabled()
+  expect(api.startTrial).not.toHaveBeenCalled()
+  expect(api.publish).not.toHaveBeenCalled()
 })

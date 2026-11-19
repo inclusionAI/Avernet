@@ -4,13 +4,12 @@ import { describe, expect, it, vi } from 'vitest'
 
 import Sidebar from '../Sidebar'
 
-function renderSidebar(isAdmin: boolean) {
+function renderSidebar() {
   render(
     <MemoryRouter>
       <Sidebar
         activeView="diagnosis"
         onViewChange={vi.fn()}
-        isAdmin={isAdmin}
         hasWorkflow
         counts={{ diagnosis: 7, remedies: 1 }}
       />
@@ -21,7 +20,7 @@ function renderSidebar(isAdmin: boolean) {
 describe('task escort workspace sidebar', () => {
   it('offers a compact editor rail without losing accessible navigation labels', () => {
     const change = vi.fn()
-    render(<Sidebar compact activeView="editor" onViewChange={change} isAdmin={false} hasWorkflow />)
+    render(<Sidebar compact activeView="editor" onViewChange={change} hasWorkflow />)
     expect(screen.getByLabelText('任务护航导航')).toHaveClass('w-[68px]')
     expect(screen.getByText('TASK GUARD').parentElement).toHaveClass('sr-only')
     const overview = screen.getByRole('button', { name: '运行概览' })
@@ -30,8 +29,8 @@ describe('task escort workspace sidebar', () => {
     expect(change).toHaveBeenCalledWith('overview')
   })
 
-  it('puts the administrator dashboard and workflow views in one navigation', () => {
-    renderSidebar(true)
+  it('puts the dashboard and workflow views in one navigation', () => {
+    renderSidebar()
 
     expect(screen.getByText('TASK GUARD')).toBeInTheDocument()
     expect(screen.getByText('分析与改进')).toBeInTheDocument()
@@ -46,15 +45,8 @@ describe('task escort workspace sidebar', () => {
     expect(screen.getByRole('button', { name: /管理设置/ })).toBeInTheDocument()
   })
 
-  it('does not expose the global dashboard entry to a personal user', () => {
-    renderSidebar(false)
-
-    expect(screen.queryByRole('button', { name: /数据大盘/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /问题与优化.*7/ })).toBeInTheDocument()
-  })
-
   it('uses one consistent SVG icon system for workspace modules', () => {
-    renderSidebar(true)
+    renderSidebar()
 
     for (const name of ['数据大盘', '运行概览', '问题与优化 7', '可复用经验 1', '编辑器', '管理设置']) {
       const icon = screen.getByRole('button', { name }).querySelector('svg')
@@ -65,23 +57,24 @@ describe('task escort workspace sidebar', () => {
   })
 
   it('keeps workflow switching out of the navigation sidebar', () => {
-    renderSidebar(true)
+    renderSidebar()
 
     expect(screen.queryByText('当前工作流')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /技术调研.*tech-research/ })).not.toBeInTheDocument()
   })
 })
 
-it('shows the workbench to a personal user even without a selected workflow', () => {
+it('shows both dashboard and workbench even without a selected workflow', () => {
   const change = vi.fn()
-  render(<Sidebar activeView="overview" onViewChange={change} isAdmin={false} hasWorkflow={false} />)
+  render(<Sidebar activeView="overview" onViewChange={change} hasWorkflow={false} />)
   fireEvent.click(screen.getByRole('button', { name: '工作台' }))
   expect(change).toHaveBeenCalledWith('workbench')
-  expect(screen.queryByRole('button', { name: '数据大盘' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '数据大盘' }))
+  expect(change).toHaveBeenCalledWith('dashboard')
 })
 
-it('puts the workbench immediately after the dashboard for an admin', () => {
-  renderSidebar(true)
+it('puts the workbench immediately after the dashboard', () => {
+  renderSidebar()
   const labels = screen.getAllByRole('button').map(button => button.getAttribute('aria-label'))
   expect(labels.indexOf('工作台')).toBe(labels.indexOf('数据大盘') + 1)
 })

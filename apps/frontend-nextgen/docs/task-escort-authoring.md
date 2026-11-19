@@ -50,6 +50,25 @@ not grant permissions: the server must authorize the bound identity.
 - Edit permission gates YAML/AI/save/publish. Node properties and script files
   remain read-only in this authoring surface. Warn before discarding dirty work.
 
+## Shared workflow dashboard and repair
+
+The dashboard stays available to signed-in users and reads the same ClawWeb
+aggregates as the existing dashboard. Its scope comes from server authorization:
+all workflows for administrators, explicit `can_view` workflows for other users.
+The workflow selector consumes the authorized catalogue and does not grant
+workflow access. Admin-only, non-workflow aggregates are not used by Task Escort.
+
+In the repair workspace, an existing candidates response must explicitly report
+`canOptimize: true` before current-version suggestions may produce a manual
+candidate via `POST /workflow-repairs`. Generation does not apply, release, or
+run the workflow. For reviewed candidates, the existing deployment-target and
+publish APIs verify the exact candidate, workflow target and state; the UI
+requires complete baseline diff review and explicit confirmation. A lost
+publish response reuses the same immutable request on retry. Neither action
+changes Editor authorization. Direct suggestion application remains unwired in
+Task Escort; trial history remains readable, but Task Escort does not yet submit
+trial starts. ClawWeb trial start still requires `can_execute` and an eligible Bot.
+
 ## Isolation and cancellation
 
 Identity, space, workflow and request/snapshot changes must not reuse old

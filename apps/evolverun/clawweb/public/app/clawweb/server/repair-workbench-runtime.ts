@@ -30,6 +30,7 @@ import type { AutoAnalysisSettings } from '@avernet/workflow/server/services/tas
 
 export function createWorkflowRepairRuntime(db: IDatabase, options: {
   principal: RepairPrincipalResolver;
+  workflowPermissions?: BotWorkflowPermissionRepository | null;
   environment?: string;
   /** @deprecated Retained for host compatibility; suggestion reads no longer run an AI coordinator. */
   proposalModel?: ProposalModelPort;
@@ -62,7 +63,8 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
         afterId = Number(page.at(-1)!.id);
       }
     },
-    evidence: (tx, _workflowId, eventIds) => new WorkflowEvolutionRepository(tx).listEvidenceByEventIds(eventIds),
+    evidence: async (tx, workflowId, eventIds) => (await new WorkflowEvolutionRepository(tx).listEvidenceByEventIds(eventIds))
+      .filter(row => row.workflow_id === workflowId),
   });
   sources.activeSnapshot = (tx, workflowId) => new WorkflowSnapshotRepository(tx).active(workflowId);
   sources.readVersion = async (tx, workflowId) => {
@@ -100,7 +102,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     consumer: drainNotifications ? 'notification_only' : 'none', completionObserverConfigured: true }));
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const trials = createRepairTrialService({ db, workbench: service, port: options.trial });
-  const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
+  const authorize = createRepairAuthorizer(options.principal, options.workflowPermissions ?? new BotWorkflowPermissionRepository(db));
   const verification = createRepairVerificationService(db, options.publication);
   logWorkflowBackground('workflow_repair_runtime', 'configured', { enabled: true, environment: options.environment });
   let lastSummaryAt = -Infinity;

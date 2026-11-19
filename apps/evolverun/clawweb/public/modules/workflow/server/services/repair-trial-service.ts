@@ -76,11 +76,13 @@ export function createRepairTrialService(input: { db: IDatabase; workbench: Repa
       const rows = await db.query<{ body_json: string }>("SELECT body_json FROM workflow_repair_release_records WHERE task_id = ? AND record_kind = 'trial' ORDER BY created_at_ms DESC, record_id DESC LIMIT 20 OFFSET ?", [taskId, offset]);
       return Promise.all(rows.map(row => view(JSON.parse(row.body_json))));
     },
-    async stop(taskId: string, id: string) {
+    async stop(taskId: string, id: string, onlyActorId?: string) {
       const before = await find(id);
       if (before.taskId !== taskId) conflict('试跑请求不属于当前任务');
       const result = await db.transaction(async tx => {
         const locked = await lock(tx, taskId), latest = await find(id, tx);
+        if (latest.taskId !== taskId || latest.workflowId !== locked.workflowId) conflict('试跑请求不属于当前任务');
+        if (onlyActorId !== undefined && latest.actorId !== onlyActorId) throw new RepairBatchError('FORBIDDEN', 'Workflow access denied');
         // The same workflow lock fences native registration. Closing first prevents
         // late commands from registering; registration first must retain its run.
         if (latest.mode !== 'pinned' || latest.flowId) conflict('该试跑已有运行或不支持结束，请查看原运行记录');

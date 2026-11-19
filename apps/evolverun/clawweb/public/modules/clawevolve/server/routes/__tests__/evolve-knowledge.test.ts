@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import Database from "better-sqlite3";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
+import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { WorkflowEvolutionRepository } from "../../repositories/workflow-evolution-repository.js";
 import { createEvolveRouter } from "../evolve.js";
@@ -43,6 +44,17 @@ beforeEach(async () => {
   cancelExecution.mockReset();
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    req.isAdmin = req.get("X-Legacy-Admin") === "yes";
+    next();
+  });
+  app.use("/verified", createEvolveRouter(repo, {
+    db, dispatch, botWorkflowPermissionRepo: new BotWorkflowPermissionRepository(db),
+    resolveWorkflowActionPrincipal: async req => {
+      const login = req.get("X-Fixture-Auth");
+      return login ? { actorId: login, isAdmin: login === "admin" } : null;
+    },
+  }));
   app.use('/internal', createInternalEvolveRouter({ db, evolveRepo: repo }));
   app.use('/restricted', createEvolveKnowledgeRouter(db, repo, {
     getViewByIdsForOwner: async (owner: string) => ({ viewableIds: new Set(owner === 'owner' ? ['wf'] : []) }),
@@ -69,6 +81,78 @@ afterEach(async () => {
 });
 
 describe("evolve knowledge endpoints", () => {
+  it("counts and pages only lessons in exact verified view scope", async () => {
+    // Model a case-insensitive storage default without changing the ACL's exact ID semantics.
+    await db.exec("ALTER TABLE workflow_healing_lessons RENAME COLUMN workflow_id TO original_workflow_id");
+    await db.exec("ALTER TABLE workflow_healing_lessons ADD COLUMN workflow_id TEXT COLLATE NOCASE");
+    const permissions = new BotWorkflowPermissionRepository(db);
+    await permissions.upsert({ bot_owner_id: "viewer", workflow_id: "wf", can_view: 1, can_edit: 0, can_execute: 0 });
+    await permissions.upsert({ bot_owner_id: "viewer", workflow_id: "edit-only", can_view: 0, can_edit: 1, can_execute: 1 });
+    for (const [lessonId, workflowId, status] of [
+      ["old", "wf", "verified"], ["new", "wf", "verified"], ["draft", "wf", "draft"],
+      ["case-neighbor", "WF", "verified"], ["editor", "edit-only", "verified"], ["global", null, "verified"],
+    ] as const) {
+      await repo.createLesson({ lessonId, workflowId, status, failureSignature: "shared timeout",
+        failureMode: "timeout", fixKind: "prompt_patch", fixSpec: "adjust prompt" });
+    }
+    const url = `${baseUrl}/verified/lessons`;
+    const legacy = { "X-User-Id": "viewer", "X-Legacy-Admin": "yes" };
+    const read = (path: string, login?: string) => fetch(`${url}${path}`, { headers: {
+      ...legacy, ...(login ? { "X-Fixture-Auth": login } : {}),
+    } });
+    expect((await read("")).status).toBe(401);
+    expect(await (await read("?limit=1", "outsider")).json()).toMatchObject({ lessons: [], total: 0 });
+    for (const requested of ["", "&workflowId=wf"]) {
+      const filters = `?limit=1&status=verified&query=timeout${requested}`;
+      expect(await (await read(filters, "viewer")).json()).toMatchObject({ lessons: [{ lesson_id: "new" }], total: 2 });
+      expect(await (await read(`${filters}&offset=1`, "viewer")).json()).toMatchObject({ lessons: [{ lesson_id: "old" }], total: 2 });
+      expect(await (await read(`${filters}&offset=2`, "viewer")).json()).toMatchObject({ lessons: [], total: 2 });
+    }
+    expect((await read("?workflowId=WF", "viewer")).status).toBe(403);
+    expect((await read("?workflowId=edit-only", "viewer")).status).toBe(403);
+    expect((await read("/global", "viewer")).status).toBe(403);
+    expect((await read("/global", "admin")).status).toBe(200);
+    expect(await (await read("?limit=1", "admin")).json()).toMatchObject({ lessons: [{ lesson_id: "global" }], total: 6 });
+    expect((await fetch(`${baseUrl}/restricted/lessons`)).status).toBe(400);
+    expect((await fetch(`${baseUrl}/api/evolve/lessons`)).status).toBe(200);
+  });
+
+  it("allows global diagnosis reads only for a verified administrator in browser mode", async () => {
+    await new BotWorkflowPermissionRepository(db).upsert({ bot_owner_id: "viewer", workflow_id: "wf", can_view: 1, can_edit: 0, can_execute: 0 });
+    await db.exec("DROP INDEX idx_workflow_healing_diagnoses_workflow");
+    await db.exec("ALTER TABLE workflow_healing_diagnoses DROP COLUMN workflow_id");
+    await db.exec("ALTER TABLE workflow_healing_diagnoses ADD COLUMN workflow_id TEXT COLLATE NOCASE");
+    await db.exec("ALTER TABLE workflow_evolution_analysis_runs RENAME COLUMN workflow_id TO original_workflow_id");
+    await db.exec("ALTER TABLE workflow_evolution_analysis_runs ADD COLUMN workflow_id TEXT COLLATE NOCASE");
+    for (const workflowId of ["wf", "WF"]) {
+      await repo.createDiagnosis({ diagnosisId: `legacy-${workflowId}`, flowId: `legacy-${workflowId}`, workflowId,
+        failureSignature: "timeout", failureMode: "timeout" });
+      const analysisId = `an-${workflowId}`;
+      const result = { schemaVersion: "workflow-evolution-analysis/v1", analysisId, facts: [], inferences: [], unknowns: [],
+        diagnoses: [{ diagnosisId: `projected-${workflowId}`, flowIds: [`flow-${workflowId}`], nodeId: "fetch", failureSignature: "timeout",
+          failureMode: "timeout", severity: "high", reasoning: "diagnosed", evidenceEventIds: [] }] };
+      await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+        (analysis_id, request_key, scope_type, scope_json, workflow_id, status, analysis_version, result_json, requested_at_ms)
+        VALUES (?, ?, 'single_run', '{}', ?, 'completed', 'v1', ?, 1)`, [analysisId, analysisId, workflowId, JSON.stringify(result)]);
+    }
+    const list = vi.spyOn(repo, "listDiagnoses");
+    const url = `${baseUrl}/verified/diagnoses`;
+    const legacy = { "X-User-Id": "viewer", "X-Legacy-Admin": "yes" };
+    expect((await fetch(url, { headers: legacy })).status).toBe(401);
+    expect((await fetch(`${url}?flowId=other`, { headers: { ...legacy, "X-Fixture-Auth": "viewer" } })).status).toBe(403);
+    expect(list).not.toHaveBeenCalled();
+    const scoped = await fetch(`${url}?workflowId=wf&limit=1`, { headers: { ...legacy, "X-Fixture-Auth": "viewer" } });
+    expect(scoped.status).toBe(200);
+    expect(await scoped.json()).toMatchObject({ diagnoses: [{ diagnosis_id: "legacy-wf" }], total: 2 });
+    const second = await fetch(`${url}?workflowId=wf&limit=1&offset=1`, { headers: { "X-Fixture-Auth": "viewer" } });
+    expect(await second.json()).toMatchObject({ diagnoses: [{ diagnosis_id: "projected-wf" }], total: 2 });
+    const global = await fetch(url, { headers: { "X-Fixture-Auth": "admin" } });
+    expect(global.status).toBe(200);
+    expect(await global.json()).toMatchObject({ total: 4 });
+    expect((await fetch(`${baseUrl}/restricted/diagnoses`)).status).toBe(400);
+    expect((await fetch(`${baseUrl}/api/evolve/diagnoses`)).status).toBe(200);
+  });
+
   it('separates current and historical issue evidence before issue pagination', async () => {
     await db.exec("INSERT INTO workflow_deploy_history (pack_id,workflow_id,deploy_number,version,tag_name,spec_json,is_active,action) VALUES ('pack','wf',34,39,'deploy/wf/#34','{}',0,'deploy'),('pack','wf',35,40,'deploy/wf/#35','{}',1,'deploy')");
     for(const [flow,version,deploy] of [['old',39,34],['current',40,35]] as const){

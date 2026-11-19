@@ -1,7 +1,7 @@
 import express from "express";
 import { once } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDashboardRouter } from "../dashboard.js";
+import { createDashboardRouter, type DashboardScope } from "../dashboard.js";
 import type { DashboardRepository, OverviewRow } from "../../repositories/dashboard-repository.js";
 
 let server: ReturnType<express.Application["listen"]> | null;
@@ -52,13 +52,17 @@ function createRepo(): DashboardRepository {
   } as unknown as DashboardRepository;
 }
 
-async function startRouter(isAdmin: boolean, repo = createRepo()) {
+async function startRouter(
+  isAdmin: boolean | undefined,
+  repo = createRepo(),
+  resolveScope?: Parameters<typeof createDashboardRouter>[3],
+) {
   const app = express();
   app.use((req, _res, next) => {
     req.isAdmin = isAdmin;
     next();
   });
-  app.use("/api/dashboard", createDashboardRouter(repo, null, null));
+  app.use("/api/dashboard", createDashboardRouter(repo, null, null, resolveScope));
   const instance = app.listen(0, "127.0.0.1");
   await once(instance, "listening");
   server = instance;
@@ -105,4 +109,57 @@ describe("dashboard admin boundary", () => {
     });
     expect(repo.getOverview).toHaveBeenCalledOnce();
   });
+});
+
+
+describe("verified dashboard scope", () => {
+  it("allows a verified admin independently of the legacy marker", async () => {
+    const resolveScope = vi.fn(async (): Promise<DashboardScope> => ({ kind: "all" }));
+    const repo = await startRouter(false, createRepo(), resolveScope);
+    const response = await fetch(`${baseUrl}/api/dashboard/overview?from=1&to=2`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(repo.getOverview).toHaveBeenCalledExactlyOnceWith(1, 2);
+    expect(resolveScope).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when a legacy host has not set the admin marker", async () => {
+    const repo = await startRouter(undefined);
+    const response = await fetch(`${baseUrl}/api/dashboard/overview`, { headers: { "x-is-admin": "true" } });
+    expect(response.status).toBe(403);
+    expect(repo.getOverview).not.toHaveBeenCalled();
+  });
+
+  it("does not trust the legacy marker on an unauthenticated request in resolver mode", async () => {
+    const repo = await startRouter(true, createRepo(), async () => null);
+    const response = await fetch(`${baseUrl}/api/dashboard/overview`);
+    expect(response.status).toBe(401);
+    expect(repo.getOverview).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 on resolver failure with no fallback or disclosure", async () => {
+    const repo = await startRouter(true, createRepo(), async () => { throw new Error("resolver details"); });
+    const response = await fetch(`${baseUrl}/api/dashboard/overview`);
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("resolver details");
+    expect(repo.getOverview).not.toHaveBeenCalled();
+    expect(repo.getEvolutionMetrics).not.toHaveBeenCalled();
+  });
+
+  it("does not upgrade a malformed workflow scope to all", async () => {
+    const malformed = { kind: "workflows" } as DashboardScope;
+    const repo = await startRouter(true, createRepo(), async () => malformed);
+    const response = await fetch(`${baseUrl}/api/dashboard/overview`);
+    expect(response.status).toBe(503);
+    expect(repo.getOverview).not.toHaveBeenCalled();
+  });
+
+  it.each(["subsystem-summary", "scene-breakdown", "workflow-metrics"])(
+    "keeps %s admin-only even when the legacy marker is true",
+    async (route) => {
+      await startRouter(true, createRepo(), async () => ({ kind: "workflows", workflowIds: ["wf-a"] }));
+      const response = await fetch(`${baseUrl}/api/dashboard/${route}`);
+      expect(response.status).toBe(403);
+    },
+  );
 });

@@ -476,7 +476,7 @@ describe('RepairTaskDialog', () => {
     render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} onClose={() => {}} onChanged={() => {}} />);
     await userEvent.click(await screen.findByRole('tab', { name: '优化目标' }));
     expect(screen.getByRole('heading', { name: '本版优化目标' })).toBeVisible();
-    expect(screen.getByText('当前只有查看权限。')).toBeVisible();
+    expect(screen.getByText('当前无权限调整此修复任务。')).toBeVisible();
     expect(screen.queryByRole('textbox', { name: '修复要求' })).not.toBeInTheDocument();
     expect(repairApi.candidates).not.toHaveBeenCalled();
   });
@@ -531,3 +531,31 @@ it('loads all original automatic batches for feedback and appends a revision to 
  expect(new Set(repairApi.revise.mock.calls[0][1].itemIds)).toEqual(new Set(['item-1','item-2','item-3']));
  expect(repairApi.revise.mock.calls[0][1].automation).toBeUndefined();expect(repairApi.cancel).not.toHaveBeenCalled();
 });
+
+it('uses manual optimization for feedback and revision without allowing task cancellation', async () => {
+  repairApi.task.mockResolvedValue(taskDetail('review', '候选', ['item-1']))
+  repairApi.candidates.mockResolvedValue({ ...candidates(), canEdit: false, canOptimize: true })
+  repairApi.revise.mockResolvedValue({})
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} canOptimize onClose={() => {}} onChanged={() => {}} />)
+  expect(await screen.findByRole('button', { name: '取消任务' })).toBeDisabled()
+  await userEvent.click(screen.getByRole('button', { name: '调整建议与要求' }))
+  await userEvent.click(await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' }))
+  await userEvent.click(screen.getByRole('button', { name: '生成新版本' }))
+  expect(repairApi.revise).toHaveBeenCalledWith('FIX-1', expect.objectContaining({ itemIds: ['item-1', 'item-3'], expectedAttemptRevision: 1 }))
+  expect(repairApi.cancel).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('limits a viewer’s generation retry to manual tasks (automatic=%s)', async automatic => {
+  const task = taskDetail('drafting', undefined, ['item-1'])
+  task.latestAttempt.phase = 'failed'
+  // Legacy daily automation may not have a roundId or a presentation source.
+  if (automatic) task.latestAttempt.input.automation = { kind: 'daily', policyVersion: 1, intentId: 'a'.repeat(64), evidenceCutoffMs: 1 }
+  repairApi.task.mockResolvedValue(task)
+  repairApi.retryGeneration.mockResolvedValue({})
+  render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false} canEdit={false} canOptimize onClose={() => {}} onChanged={() => {}} />)
+  const retry = await screen.findByRole('button', { name: '重试生成' })
+  if (automatic) expect(retry).toBeDisabled()
+  else expect(retry).toBeEnabled()
+  await userEvent.click(retry)
+  expect(repairApi.retryGeneration).toHaveBeenCalledTimes(automatic ? 0 : 1)
+})

@@ -15,8 +15,8 @@ export function IssueRepairPreviewLoading() {
   </div>
 }
 
-export default function IssueRepairPreview({ items, total, selected, canEdit, limit, onToggle, onDetail, onMore }: {
-  items: RepairInboxItem[]; total: number; selected: string[]; canEdit: boolean; limit: number
+export default function IssueRepairPreview({ items, total, selected, canOptimize, limit, onToggle, onDetail, onMore }: {
+  items: RepairInboxItem[]; total: number; selected: string[]; canOptimize: boolean; limit: number
   onToggle: (id: string) => void; onDetail: (item: RepairInboxItem) => void; onMore: () => void
 }) {
   if (!total) return <p className="mt-3 text-xs text-slate-500">暂无可供选择的修复建议，仍可查看问题原因与证据。</p>
@@ -29,7 +29,7 @@ export default function IssueRepairPreview({ items, total, selected, canEdit, li
       const runs = sourceRunCount(item)
       return <article key={item.itemId} className={`flex items-start gap-3 px-3 py-2.5 ${checked ? 'bg-blue-50/50' : ''}`}>
         <input type="checkbox" aria-label={`选择 ${itemTitle(item)}`} checked={checked}
-          disabled={!canEdit || !!reason || !checked && new Set([...selected, ...proposalMembers(item).map(member => member.itemId)]).size > limit} onChange={() => onToggle(item.itemId)}
+          disabled={!canOptimize || !!reason || !checked && new Set([...selected, ...proposalMembers(item).map(member => member.itemId)]).size > limit} onChange={() => onToggle(item.itemId)}
           className="mt-1 h-4 w-4 shrink-0 accent-blue-600" />
         <div className="min-w-0 flex-1">
           <button type="button" className="text-left text-sm font-medium leading-6 text-slate-900 hover:text-blue-700"
@@ -37,7 +37,7 @@ export default function IssueRepairPreview({ items, total, selected, canEdit, li
           <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-slate-600">{changeSummary(item)}</p>
           <p className="mt-1 text-xs text-slate-500">{states[item.state]} · {runs === null ? '来源运行数未知' : `依据覆盖 ${runs} 个运行`}{reason && ` · ${reason}`}</p>
           {partial && <p className="mt-1 text-xs text-warning-foreground">原选择只覆盖部分来源，勾选此方案可确认完整范围。</p>}
-          <ProposalEvidence item={item} canEdit={canEdit} />
+          <ProposalEvidence item={item} />
         </div>
       </article>
     })}</div>

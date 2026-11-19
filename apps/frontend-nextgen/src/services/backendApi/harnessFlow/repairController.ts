@@ -1,4 +1,4 @@
-/** Browser-safe GET-only protocol. Full originals and frozen materials are separate endpoints. */
+/** Browser-safe repair reads and initial manual generation. */
 import { backendRequest } from '../httpClient';
 export interface RepairCapabilityDto {
   generation: boolean;
@@ -78,6 +78,7 @@ export interface RepairCandidatesDto {
   page: { page: number; pageSize: number; total: number; totalPages: number };
   limits: { maxItems: number; maxRequestBytes: number };
   canEdit: boolean;
+  canOptimize?: boolean;
   metadata?: { page: number; totalPages: number; digest: string };
 }
 export interface RepairQueryDto {
@@ -93,6 +94,15 @@ export interface RepairQueryDto {
   snapshotKey?: string;
   metadataPage?: number;
 }
+export interface CreateManualRepairRequest {
+  workflowId: string;
+  itemIds: string[];
+  inputDigest: string;
+  instructions: string;
+  includeHistorical: boolean;
+  targetSnapshotKey?: string;
+  requestId: string;
+}
 const base = '/openapi/v1/harnessflow/api/workflow-repairs';
 const seg = encodeURIComponent;
 function get<T>(path: string, userId: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
@@ -104,6 +114,25 @@ function get<T>(path: string, userId: string, params: Record<string, unknown>, s
   });
 }
 export const repairController = {
+  async createManual(data: CreateManualRepairRequest, userId: string, signal: AbortSignal): Promise<string> {
+    const result = await backendRequest<Pick<RepairRevisionDto, 'workflowId' | 'taskId' | 'revision'>>(base, {
+      method: 'POST',
+      injectUserId: false,
+      params: { user_id: userId },
+      suppressErrorNotification: true,
+      data,
+      signal,
+    });
+    if (
+      result?.workflowId !== data.workflowId ||
+      typeof result.taskId !== 'string' ||
+      !result.taskId.trim() ||
+      !Number.isSafeInteger(result.revision) ||
+      result.revision < 1
+    )
+      throw new Error('无法确认生成结果，请使用同一请求重试。');
+    return result.taskId;
+  },
   candidates: (workflowId: string, userId: string, query: RepairQueryDto, signal?: AbortSignal) =>
     get<RepairCandidatesDto>('/candidates', userId, { workflowId, ...query }, signal),
   item: (workflowId: string, itemId: string, userId: string, signal?: AbortSignal) =>
