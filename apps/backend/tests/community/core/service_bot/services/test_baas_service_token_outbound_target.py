@@ -451,9 +451,9 @@ def test_select_replica_only_from_current_bot_record(outcome, caplog):
         else:
             assert request.url.path == "/api/v1/bots/31/detail-by-id"
             if outcome == "http_error":
-                return httpx.Response(500, text="test-private-response")
+                return httpx.Response(500, text="<private-response>")
             data = {"id": 31, "status": "ACTIVE", "bot_uuid": "foreign" if outcome == "swapped" else "logical-bot",
-                    "config": {"token": "test-private-response"}, "devices": [
+                    "config": {"token": "<private-response>"}, "devices": [
                         {"device_uuid": "DEVICE-1", "status": "ACTIVE", "provider_device_id": "ARCA-SANDBOX-first@1"},
                         {"device_uuid": "DEVICE-2", "status": "ACTIVE", "provider_device_id": TARGET},
                     ]}
@@ -474,7 +474,7 @@ def test_select_replica_only_from_current_bot_record(outcome, caplog):
     assert len(requested_paths) == (1 if outcome == "inactive" else 2)
     assert "token_replica_inventory_started" in caplog.text
     assert "token_replica_inventory_succeeded" in caplog.text
-    assert "test-private-response" not in caplog.text
+    assert "<private-response>" not in caplog.text
 
 
 def test_no_uuid_keeps_original_inventory_exception(service):

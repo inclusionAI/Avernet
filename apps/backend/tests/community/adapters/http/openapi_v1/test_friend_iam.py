@@ -160,7 +160,9 @@ def test_friend_iam_failure_never_installs_credentials(friend_iam, failure):
 def jit_iam(friend_iam):
     from agentclaw.community.core.token_exchange.orchestrator import TokenExchangeOrchestrator
 
-    caller = SimpleNamespace(get_iam_token=AsyncMock(return_value=CallerIamTokenOutcome("original")))
+    caller = SimpleNamespace(
+        get_iam_token=AsyncMock(return_value=CallerIamTokenOutcome("original")),
+    )
     pipeline = SimpleNamespace(run=AsyncMock(return_value=[]))
     auth = SimpleNamespace(resolve_user_from_request=AsyncMock(side_effect=AssertionError("no browser identity")))
     bots = Mock()
