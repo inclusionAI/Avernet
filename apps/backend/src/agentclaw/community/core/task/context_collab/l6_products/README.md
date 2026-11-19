@@ -471,7 +471,7 @@ Alternatively, explicit L4 `create_task` after Instantiate creates root Work at
 CREATED/revision 1 and advances Collet once, without starting or dispatching.
 It inherits the actual Collet executor bindings and preserves the installed
 selection and initial binding Event. A later Work.start (or the Swarm
-controller's `wake()`) starts that same Task without recreating it. The
+driver's `wake()`) starts that same Task without recreating it. The
 [creation regressions](../../../../../../../tests/community/core/task/context_collab/test_l6_runtime_contract.py)
 cover selection preservation, stale/unauthorized/duplicate rejection and SQL
 insert-failure rollback on this path.
@@ -852,7 +852,7 @@ internally and binds five scoped Agents/roles and its ACTIVE top-level Swarm
 binding. Only after Instantiate returns does explicit L4 `create_task` create
 the unstarted root Task, inheriting the bound root executor without overwriting
 product metadata or participation evidence. The root Task stays CREATED through
-controller construction; `controller.wake()` starts it via L4/G1/G4 and enqueues
+driver construction; `driver.wake()` starts it via L4/G1/G4 and enqueues
 planning. G1 permits top-level Swarm; bare Group still requires a nested bind.
 No Single binding or runtime `nest` edge is introduced.
 
@@ -860,16 +860,16 @@ The profile explicitly configures `swarm_plan_service_ref="mock.ai_coding.plan/1
 This is an optional local capability reference on ProductProfile authoring, not
 an ACCS wire operation or a worker execution profile. A non-Swarm profile cannot
 set it. Legacy profiles may omit it and remain usable without an autonomous
-controller; trying to coordinate without an installed explicit capability fails.
+driver; trying to coordinate without an installed explicit capability fails.
 The composition root selects that exact implementation from its injected
 capabilities, never a hidden default. The
 [unified plan interface](../swarm_planning.py) lives outside
 L5; the [test mock](../../../../../../../tests/community/core/task/context_collab/products/swarm_coding_support.py)
 lives in test support. On every call it inspects completed stages/artifacts,
 chooses the next coding phase and the Agent that should execute it, or proposes
-completion. L6 does not implement phase selection inside SwarmController.
+completion. L6 does not implement phase selection inside SwarmDriver.
 
-The [L5 SwarmController](../l5_methods/swarm_controller.py) takes only caller input
+The [L5 SwarmDriver](../l5_methods/swarm_driver.py) takes only caller input
 `collet_id` through an assisted DI construction. Configuration, root Task,
 binding, actual L4 role facts and execution/report ports are resolved internally.
 The first unified plan decision supplies the DAG and first executor. L5 validates
@@ -890,7 +890,7 @@ A worker returning without reporting leaves both its Stage and Task running.
 
 After all phases, the mock proposes completion. L5 independently validates
 Stage success, artifacts, done child Tasks and released allocations before G4
-sets SwarmPlan COMPLETED. The test asserts `controller.is_completed()`, all five
+sets SwarmPlan COMPLETED. The test asserts `driver.is_completed()`, all five
 Stage artifacts, actual verification success, execution profiles/allocations and
 SQL-reloaded child Work. The product Workflow still governs root submission and
 human acceptance: internal completion does not auto-accept root Work. No new

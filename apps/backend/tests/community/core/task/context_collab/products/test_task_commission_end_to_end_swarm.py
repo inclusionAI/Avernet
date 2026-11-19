@@ -35,10 +35,10 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.swarm_controller import (
-    SwarmController,
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_driver import (
+    SwarmDriver,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.swarm_controller_contracts import (
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_driver_contracts import (
     StageExecutionService,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
@@ -165,16 +165,14 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
     assert not executor.calls
     assert store.list_execution_profiles(axes, binding_id, collet_id) == []
 
-    # 5. 第五步：只传 collet_id 构造真实 L5 Controller；由 wake 统一启动根 Task 并进入 Swarm 规划。
-    controller = injector.get(AssistedBuilder[SwarmController]).build(
-        collet_id=collet_id
-    )
-    assert controller.binding_id == binding_id
+    # 5. 第五步：只传 collet_id 构造真实 L5 Driver；由 wake 统一启动根 Task 并进入 Swarm 规划。
+    driver = injector.get(AssistedBuilder[SwarmDriver]).build(collet_id=collet_id)
+    assert driver.binding_id == binding_id
     assert _record(injector, collet_id).task.status == "created"
     assert not planner.calls
     assert not executor.calls
-    assert not controller.step()  # 构造本身不启动，也不产生待执行的规划。
-    controller.wake()
+    assert not driver.step()  # 构造本身不启动，也不产生待执行的规划。
+    driver.wake()
     record = _record(injector, collet_id)
     assert record.task.task_id == root_task.task_id
     assert record.task.objective == root_task.objective
@@ -182,16 +180,16 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
     assert not planner.calls
     assert not executor.calls
     # 外部 plan 同时给出初始 DAG 与第一阶段执行者，尚无权威写入。
-    assert controller.step()
+    assert driver.step()
     assert len(planner.calls) == 1
     assert planner.calls[0].stages == ()
-    assert controller.plan() is None
+    assert driver.plan() is None
     assert store.list_execution_profiles(axes, binding_id, collet_id) == []
 
     # 6. 第六步：L5 应用规划后才生成 execution profile 并派发；需求 Agent 干活后主动走 G4 上报产物。
     # G4/协议推进需求 Stage 及其独立子 Task，而不是把 execute 返回当成完成。
-    assert controller.step()
-    first = controller.stages()[0]
+    assert driver.step()
+    first = driver.stages()[0]
     assert first.state is StageState.SUCCEEDED
     assert first.output_artifact_refs == ("artifact://requirements.md",)
     assert (
@@ -200,13 +198,13 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
         ).status
         == "done"
     )
-    assert not controller.is_completed()
+    assert not driver.is_completed()
 
     # 7. 第七步：继续设计、编码、测试、PR 草稿；每次 plan 根据已完成阶段及产物重新选择下一阶段和 Agent。
     # 各 Agent 均主动 G4 上报，直到 plan 声明结束且协议确认整个 Swarm 已完成。
-    controller.drain()
-    assert controller.is_completed()
-    assert controller.plan().state is PlanState.COMPLETED
+    driver.drain()
+    assert driver.is_completed()
+    assert driver.plan().state is PlanState.COMPLETED
     assert len(planner.calls) == len(ROLES) + 1
     assert [
         sum(s.state is StageState.SUCCEEDED for s in r.stages) for r in planner.calls
@@ -214,7 +212,7 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
     assert [p.agent_ref for _, p, _ in executor.calls] == list(AGENTS)
 
     # 8. 第八步：逐阶段验证不同产物、子 Task、实际执行者及上报事件，确认分配释放与运行时合同。
-    stages = controller.stages()
+    stages = driver.stages()
     record = _record(injector, collet_id)
     tasks = {t.task_id: t for t in record.tasks}
     assert len(stages) == len(ROLES)
@@ -290,7 +288,7 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
     assert len(reread.tasks) == len(ROLES) + 1
     assert all(t.status == "done" for t in reread.tasks)
     assert reread.product_instance.method_binding_refs == (binding_id,)
-    assert controller.is_completed()
+    assert driver.is_completed()
 
 
 def _create_product_profile():
