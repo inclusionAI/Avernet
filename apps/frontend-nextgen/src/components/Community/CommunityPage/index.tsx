@@ -172,7 +172,7 @@ export function CommunityPage() {
           <section className="mt-4 flex flex-wrap items-center gap-3" aria-label="社区主题筛选">
             {viewTabs}
             <div className="community-topic-toolbar">
-              <div className="community-topic-toolbar__search">
+              <div className="community-topic-toolbar-search">
                 <Search
                   className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
                   aria-hidden

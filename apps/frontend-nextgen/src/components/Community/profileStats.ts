@@ -5,6 +5,6 @@ const number = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 });
 export function profileStats(summary?: InteractionSummary) {
   return counts.map(([label, key]) => {
     const n = summary?.[key];
-    return { label, count: n == null ? '—' : n >= 10000 ? `${number.format(n / 10000)} 万` : number.format(n) };
+    return { label, count: (n === undefined || n === null) ? '—' : n >= 10000 ? `${number.format(n / 10000)} 万` : number.format(n) };
   });
 }

@@ -6,20 +6,59 @@
   --poll-gray: rgba(138, 143, 153, .1);
   --poll-accent: #1b6ff6;
   --poll-border: #e4e4e7;
+
   background-color: var(--poll-panel);
   border-radius: 12px;
   padding: 12px 16px;
 }
-.dark .community-poll { --poll-panel: hsl(var(--muted)); --poll-option: hsl(var(--background)); --poll-gray: rgba(138,143,153,.22); --poll-blue: rgba(55,128,246,.25); --poll-border: hsl(var(--border)); --poll-accent: hsl(var(--primary)); }
-.community-poll__row {
-  position: relative; isolation: isolate; overflow: hidden; display: flex; align-items: center;
-  gap: 8px; width: 100%; min-height: 38px; box-sizing: border-box; padding: 8px 12px;
-  border: 1px solid transparent; border-radius: 8px; background-color: var(--poll-option); text-align: left;
+.dark .community-poll {
+  --poll-panel: hsl(var(--muted));
+  --poll-option: hsl(var(--background));
+  --poll-gray: rgba(138,143,153,.22);
+  --poll-blue: rgba(55,128,246,.25);
+  --poll-border: hsl(var(--border));
+  --poll-accent: hsl(var(--primary));
 }
-.community-poll__row[data-state=voted] { border-color: var(--poll-border); color: #868686; }
-.community-poll__row[data-state=selected] { border-color: var(--poll-accent); color: var(--poll-accent); }
-.community-poll__fill { position: absolute; inset: 0 auto 0 0; z-index: -1; pointer-events: none; background-color: var(--poll-blue); }
-.community-poll__row[data-state=voted] .community-poll__fill { background-color: var(--poll-gray); }
-.community-poll__letter { background-color: var(--poll-gray); }
-.community-poll__row[data-state=selected] .community-poll__letter { background-color: var(--poll-blue); }
-.community-poll__row[data-state=selected] .community-poll__result { color: var(--poll-accent); }
+.community-poll-row {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background-color: var(--poll-option);
+  text-align: left;
+}
+.community-poll-row[data-state="voted"] {
+  border-color: var(--poll-border);
+  color: #868686;
+}
+.community-poll-row[data-state="selected"] {
+  border-color: var(--poll-accent);
+  color: var(--poll-accent);
+}
+.community-poll-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--poll-blue);
+}
+.community-poll-row[data-state="voted"] .community-poll-fill {
+  background-color: var(--poll-gray);
+}
+.community-poll-letter {
+  background-color: var(--poll-gray);
+}
+.community-poll-row[data-state="selected"] .community-poll-letter {
+  background-color: var(--poll-blue);
+}
+.community-poll-row[data-state="selected"] .community-poll-result {
+  color: var(--poll-accent);
+}
