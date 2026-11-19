@@ -28,7 +28,7 @@ class LocalServices:
 
     def specs(self):
         return [('backend', 8888, '/api/health'),
-                ('bcsfuse', 8765, '/health'), ('bcs', 21000, '/health')]
+                ('bcs', 21000, '/health')]
 
     def start(self, progress):
         missing, unhealthy = [], []
@@ -50,8 +50,8 @@ class LocalServices:
                 lines.append('未启动: ' + ', '.join(missing))
                 lines.extend([
                     '请在 Avernet 仓库根目录执行（首次准备才需 setup；已准备好只需 start）：',
-                    './singlebox/singlebox.sh setup backend bcsfuse bcs',
-                    './singlebox/singlebox.sh start backend bcsfuse bcs',
+                    './singlebox/singlebox.sh setup baas backend bcs',
+                    './singlebox/singlebox.sh start baas backend bcs',
                     '只指定以上基础服务，不使用无参数命令或 all，避免启动默认 Demo Agent。'])
             if unhealthy:
                 lines.append('端口已占用但健康检查失败，请先排查，不会重启或杀进程: ' + ', '.join(unhealthy))

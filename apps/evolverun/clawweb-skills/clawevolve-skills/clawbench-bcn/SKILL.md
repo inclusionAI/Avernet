@@ -11,7 +11,7 @@ description: 使用成套 Case/Profile 执行 BCN 群协作评测，归档真实
 
 1. 阅读选定评测资产中的 `case.md`。同目录的 `profiles/` 定义完整被测团队。执行前检查 Python 评分代码；其执行环境不是安全沙箱。
 2. 执行 `python3 scripts/bench.py run --mode local --bench-dir <评测资产目录>`。可选参数为 `--model-config <openclaw.json>` 和 `--output-dir <输出目录>`；默认模型文件为 `~/.openclaw/openclaw.json`。详见[本地使用说明](references/local.md)。
-3. 脚本只检查并复用用户已启动的基础服务；缺失时提示显式 setup/start backend bcsfuse bcs 并退出，不启动默认 Demo。服务就绪后启动隔离的被测 Agent，一次性提交协作目标，随后归档并清理本次拥有的资源。只向被测群投递 Case 的 Prompt，不投递评分标准。
+3. 脚本只检查并复用用户已启动的基础服务；缺失时提示显式 setup/start baas backend bcs 并退出，不启动默认 Demo。服务就绪后启动隔离的被测 Agent，一次性提交协作目标，随后归档并清理本次拥有的资源。只向被测群投递 Case 的 Prompt，不投递评分标准。
 4. 查看终端打印的运行目录。**即使退出码为 1 或 2，只要已有归档，也需要生成失败报告。** 退出码 3 表示执行已归档、等待你完成评估，不代表整个 Bench 已成功完成。
 
 ## 评估与报告

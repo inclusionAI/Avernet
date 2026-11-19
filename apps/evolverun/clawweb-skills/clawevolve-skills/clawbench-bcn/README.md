@@ -25,22 +25,22 @@ python3 -m pip install -r apps/evolverun/clawweb-skills/clawevolve-skills/clawbe
 首次准备基础服务，或更新代码涉及依赖/构建变化时，使用 Singlebox：
 
 ```bash
-./singlebox/singlebox.sh setup backend bcsfuse bcs
+./singlebox/singlebox.sh setup baas backend bcs
 ```
 
-已准备好环境则不必每次 setup。**当前已知 `setup bcsfuse` 可能因目标配置路径未初始化而报 `.env.example` 自复制错误**，本 Skill 未修改 Singlebox。遇到该错误需先解决环境准备问题；如果依赖已经准备好，可以尝试下一步 start，但仍须确认服务启动成功。
+已准备好环境可直接启动服务。
 
 ### 2. 启动基础服务
 
 ```bash
-./singlebox/singlebox.sh start backend bcsfuse bcs
+./singlebox/singlebox.sh start baas backend bcs
 ```
 
-只指定 Backend、BCSFuse、BCS，**不要使用无参数命令或 `all`，避免启动默认 Demo Agent**。
+先启动 BAAS，供 Backend 获取本地 OpenAPI 凭据，再启动 Backend、BCS，**不要使用无参数命令或 `all`，避免启动默认 Demo Agent**。
 按 Singlebox 提示选择模型配置；如需复用个人 OpenClaw 的模型配置，选择 home。
 启动失败时先查看 Singlebox 输出，不继续评测。
 
-Bench 只检查以上服务是否健康：健康则复用，未启动则提示 setup/start 命令并退出；端口被占用但不健康时提示排查，不杀进程。Bench 不自动准备、启动或停止这些基础服务。
+Bench 检查 Backend、BCS 是否健康：健康则复用，未启动则提示 setup/start 命令并退出；端口被占用但不健康时提示排查，不杀进程。Bench 不自动准备、启动或停止这些基础服务。
 
 ### 3. 运行两成员连通性评测
 
@@ -100,7 +100,7 @@ python3 apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/be
 确认没有其他任务使用这些服务后执行：
 
 ```bash
-./singlebox/singlebox.sh stop bcs bcsfuse backend
+./singlebox/singlebox.sh stop bcs backend baas
 ```
 
 不要上传本次运行目录内的 OpenClaw 配置或私有日志，其中可能包含凭据。对外分享前需审查评测证据和报告。

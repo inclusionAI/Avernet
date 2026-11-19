@@ -1,0 +1,12 @@
+{
+  "title": "Systematic Failures in Collective Reasoning under Distributed Information in Multi-Agent LLMs",
+  "paper": "https://proceedings.mlr.press/v306/li26ej.html",
+  "repository": "https://github.com/Yassellee/HiddenBench_ICML",
+  "commit": "3be6ca16973e4fb751ffc0dfb7eb11f2d28335d1",
+  "file": "data/benchmark.json",
+  "task_id": 1,
+  "task_name": "evacuation_west_city",
+  "license": "MIT",
+  "source_record_sha256": "2bbc5f7c60018c13292f697b5a6fed105f5a18b5a0e9296d6cc7b601be37238a",
+  "adaptation": "BCN manager-worker; final individual votes only; no pre-discussion vote or fixed 15-round simulation; remove experimental monetary rewards and unpredictable end-time text"
+}

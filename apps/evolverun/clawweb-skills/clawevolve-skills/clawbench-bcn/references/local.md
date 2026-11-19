@@ -10,8 +10,8 @@ python3 apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/be
 - `--check` 只验证 Case/Profile，不读取模型配置或启动服务。
 - 模型默认读取 `~/.openclaw/openclaw.json`，可通过 `--model-config` 指定；只把模型字段复制到本次成员配置。
 - 输出默认 `~/.cache/clawbench-bcn/runs/<run_id>/`，可用 `--output-dir` 调整父目录。
-- Backend、BCSFuse、BCS 由用户通过 Singlebox 提前准备、启动；Bench 只检查健康状态。缺失时退出并提示下方命令，端口不健康时要求排查，不会启动、停止或重启基础服务。
-- 首次准备：`./singlebox/singlebox.sh setup backend bcsfuse bcs`；之后启动：`./singlebox/singlebox.sh start backend bcsfuse bcs`。不要使用无参数命令或 `all`，不会要求启动默认 Demo Agent。
+- Backend、BCS 由用户通过 Singlebox 提前准备、启动；Bench 只检查健康状态。缺失时退出并提示下方命令，端口不健康时要求排查，不会启动、停止或重启基础服务。
+- 首次准备：`./singlebox/singlebox.sh setup baas backend bcs`；之后启动：`./singlebox/singlebox.sh start baas backend bcs`。不要使用无参数命令或 `all`，不会要求启动默认 Demo Agent。
 - 本次评测成员按 Case/Profile 在运行目录下独立启动，结束后停止；不会停止用户启动的基础服务。
 - 公共入口为 `bench.py run/finalize`；Online/Simulator 尚未实现，不会自动回退本地。旧启动入口已删除。
 
