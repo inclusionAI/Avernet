@@ -75,9 +75,10 @@ def runtime(deploy_open_swarm, tmp_path, request, monkeypatch):
             ),
         )
         monkeypatch.setattr(journey, "_create_product_profile", lambda: declared)
-    profile, injector, work, open_ops, store, axes, cid, oid, sid, refs, _ = (
+    profile, injector, work, open_ops, store, axes, cid, oid, sid = (
         journey.publish_todo_task(deploy_open_swarm, tmp_path)
     )
+    refs = {role: scenario_role_ref(profile.ref, role) for role in journey.ROLES}
     published = open_ops.publish_opportunity(
         OpenOpportunityCommand(
             cid,
