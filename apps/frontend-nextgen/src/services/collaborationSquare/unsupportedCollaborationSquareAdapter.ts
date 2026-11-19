@@ -21,6 +21,9 @@ export class UnsupportedCollaborationSquareAdapter implements CollaborationSquar
   async requestBotFriendship() {
     return unsupported();
   }
+  async cancelBotFriendRequest() {
+    return unsupported();
+  }
   async openBotConversation() {
     return unsupported();
   }

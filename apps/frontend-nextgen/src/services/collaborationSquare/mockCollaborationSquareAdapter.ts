@@ -111,6 +111,15 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
     return { status: next };
   }
 
+  async cancelBotFriendRequest(_requestId: string) {
+    void _requestId;
+    await delay(240);
+    // Mock 侧无申请单记录：撤回语义近似为把「申请中」目标恢复为可申请态（none）。
+    for (const bot of this.bots) {
+      if (bot.relationshipStatus === 'applying') bot.relationshipStatus = 'none';
+    }
+  }
+
   async openBotConversation(botId: string, _context: HumanBotActionContext) {
     void _context;
     await delay(320);
