@@ -183,11 +183,14 @@ export function routineInstanceIds(context: RoutineContext, stage?: RoutineStage
     ),
   ];
 }
+/** 实例选择模式：none=无需实例；single/multiple=已确认清单，multiple 必须显式选；
+ * defer=未取得可信清单（草稿/预发没有清单接口），仅按 stage 提交并由后端解析
+ * binding，环境未发布/不活跃时后端返回阶段化提示。 */
 export function routineInstanceMode(context: RoutineContext, stage?: RoutineStage | null) {
   if (context.bot_type !== 'service' || (context.engine === 'teclaw' && stage === 'online')) return 'none';
-  if (!stage) return 'unknown';
+  if (!stage) return 'none';
   const count = routineInstanceIds(context, stage).length;
-  return count >= 2 ? 'multiple' : count === 1 ? 'single' : 'unknown';
+  return count >= 2 ? 'multiple' : count === 1 ? 'single' : 'defer';
 }
 export function validateCreateTarget(context: RoutineContext, form: RoutineTarget, actorId: string): RoutineTarget {
   if (context.bot_type !== 'service') return {};
@@ -195,7 +198,6 @@ export function validateCreateTarget(context: RoutineContext, form: RoutineTarge
   if (!form.runtime_stage) throw new Error('请选择生效环境');
   if (context.caller_mode && form.runtime_stage !== 'online') throw new Error('Caller 模式仅支持运行中环境');
   const mode = routineInstanceMode(context, form.runtime_stage);
-  if (mode === 'unknown') throw new Error('当前环境尚无可用运行实例，请确认实例已就绪后刷新');
   if (
     mode === 'multiple' &&
     (!form.device_uuid || !routineInstanceIds(context, form.runtime_stage).includes(form.device_uuid))

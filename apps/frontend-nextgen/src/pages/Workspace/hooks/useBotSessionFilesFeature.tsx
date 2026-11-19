@@ -69,10 +69,11 @@ export function useBotSessionFilesFeature(
   // (user_id 由 httpClient 注入登录工号)读聚合 bot_call_type 判定。filesSupported 进门即探测,
   // botId/ownerId 变化重查,同 Bot 会话切换不重复;cleanup cancelled 防切 Bot 晚到回写;
   // 探测失败/字段缺失静默降级不带且零提示(suppressErrorNotification 不投默认错误 toast)。
-  // 2026-11-19 二轮勘误:好友 Bot 不探测——gateway 契约本接口仅授权 Bot 的
-  // owner/collaborator,真好友视角必 404,属纯无效请求(IAM 链 botChatProvider 同规则)。
+  // 三轮勘误(2026-11-19):好友 Bot 照旧探测(二轮「好友不探测」还原)——好友视角按契约
+  // 预期探测失败,但不再据此裁剪;探测失败降级=好友文件写操作因缺少 caller_instance
+  // 定位而关闭访问(f_user_id 路由自明,契约安全)。IAM 链 botChatProvider 同规则。
   const [isCallerRuntimeBot, setIsCallerRuntimeBot] = useState(false);
-  const probeBotId = filesSupported && !bot?.isFriendBot ? botId : null;
+  const probeBotId = filesSupported ? botId : null;
   useEffect(() => {
     if (!probeBotId) return;
     let cancelled = false;
@@ -88,12 +89,14 @@ export function useBotSessionFilesFeature(
       cancelled = true;
     };
   }, [probeBotId, ownerId]);
-  // 取值推导:我管理的/我协作的 Caller Bot → service(服务实例池,由 stage(+device_uuid)
-  // 定位)。好友 Bot 不探测、恒省略(二轮勘误:契约内探测必 404,零行为变化;
-  // f_user_id 路由自明;好友文件写操作会因缺少 caller_instance 定位而关闭访问)。
+  // 取值推导(三轮勘误还原,与 f_user_id 并存合法;仅 service 并存会 404):
+  // 我管理的/我协作的 Caller Bot → service(服务实例池,由 stage(+device_uuid) 定位);
+  // 好友 Caller Bot → caller_instance(当前用户独立 Caller 实例)。
   const callerRuntimeTarget = !isCallerRuntimeBot
     ? undefined
-    : ('service' as const);
+    : bot?.isFriendBot
+      ? ('caller_instance' as const)
+      : ('service' as const);
 
   // 好友会话身份(2026-11-19 需求追加):好友 Bot 全链文件接口携带 f_user_id(与 user_id 同值);
   // 单一收口,列表/上传/删除/预览/下载全链同源同值,非好友不携带。

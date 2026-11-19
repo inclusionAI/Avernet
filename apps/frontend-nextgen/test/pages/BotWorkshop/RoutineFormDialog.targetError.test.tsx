@@ -4,8 +4,9 @@ import type { RoutineContext } from '@/services/botScheduledTasks/types';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-// 创建弹窗的目标校验错误必须始终可见：否则“无可用实例 / Caller 配置未确认”这类
-// 与表单填写无关的失败会把保存按钮永久置灰，用户却看不到任何原因。
+// 创建弹窗与目标相关的失败原因必须始终可见：Caller 配置未确认等与表单填写无关的
+// 失败会把保存按钮置灰，用户需要看到原因；未取得实例清单的环境不再拦截保存，改为
+// 提示由服务端解析并在失败时透传后端阶段化消息。
 const buildContext = (overrides: Partial<RoutineContext>): RoutineContext => ({
   bot_id: 'b1',
   bot_name: 'Bot',
@@ -44,13 +45,13 @@ beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = jest.fn();
 });
 
-it('草稿态尚无实例时显示无法保存的原因，保存保持禁用', () => {
+it('草稿态未取得实例清单时提示由服务端解析，保存可用', () => {
   renderDialog(buildContext({ engine: 'teclaw', caller_mode: false }));
   fillForm();
   fireEvent.click(screen.getByRole('combobox', { name: '生效环境' }));
   fireEvent.click(screen.getByRole('option', { name: '草稿态' }));
-  expect(screen.getByText('当前环境尚无可用运行实例，请确认实例已就绪后刷新')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+  expect(screen.getByText(/保存后由服务端解析目标/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
 });
 
 it('Caller 配置未确认时弹窗立即说明原因，而不是沉默禁用', () => {
