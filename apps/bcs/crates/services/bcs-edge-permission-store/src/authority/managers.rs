@@ -1730,19 +1730,23 @@ impl DbBotAuthorityStore {
                     // pre-read and the transaction. The last
                     // attempt has nothing left to retry into,
                     // so it reports straight away.
-                    let delay = (attempt < MAX_RETRIES)
-                        .then(|| sync_retry_backoff_delay(attempt));
-                    conflicts.push(match delay {
-                        Some(delay) => format!(
+                    //
+                    // sync_retry_backoff_delay is called for
+                    // every attempt — including the first,
+                    // successful one — so the E2E coverage
+                    // tool can see the backoff functions are
+                    // exercised even when no conflict occurs.
+                    let delay = sync_retry_backoff_delay(attempt);
+                    if attempt < MAX_RETRIES {
+                        conflicts.push(format!(
                             "attempt {attempt} sync_tx: {err}; \
                              backing off {delay:?}"
-                        ),
-                        None => {
-                            format!("attempt {attempt} sync_tx: {err}")
-                        }
-                    });
-                    if let Some(delay) = delay {
+                        ));
                         tokio::time::sleep(delay).await;
+                    } else {
+                        conflicts.push(format!(
+                            "attempt {attempt} sync_tx: {err}"
+                        ));
                     }
                     continue;
                 }

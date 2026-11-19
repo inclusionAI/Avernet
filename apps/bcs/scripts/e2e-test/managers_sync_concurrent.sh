@@ -2,11 +2,11 @@
 # managers_sync_concurrent.sh — Trigger managers sync retry path
 # via concurrent full-set replace calls on the same bot.
 #
-# Three overlapping sync requests with different manager sets
-# race on the optimistic-lock guards. At least one loser retries
-# with the exponential backoff added in PR #4170, which exercises
-# the changed lines that the single-threaded E2E stories never
-# reach.
+# Uses a Python helper (managers_sync_race.py) that opens multiple
+# HTTP connections, waits for all to be established, then sends all
+# request bodies at the same instant. This reliably triggers the
+# optimistic-lock conflict that exercises the retry+backoff path
+# added in PR #4170.
 
 E2E_TESTS_STORIES+=("story_managers_sync_concurrent")
 
@@ -34,7 +34,7 @@ story_managers_sync_concurrent() {
     owner_bot=$(printf '%s' "$register" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("bot_uuid",""))' 2>/dev/null)
     [[ -n "$owner_bot" ]] || { fail "trusted registration failed"; TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1)); return; }
 
-    # 2. Seed humans (need 5+ distinct humans for concurrent requests)
+    # 2. Seed humans (need 5+ distinct humans)
     local human_a="human_sync_a" human_b="human_sync_b" human_c="human_sync_c"
     local human_d="human_sync_d" human_e="human_sync_e"
     for h in "$human_a" "$human_b" "$human_c" "$human_d" "$human_e"; do
@@ -46,7 +46,7 @@ story_managers_sync_concurrent() {
             "${BCS_API_BASE_URL}/internal/ensure-human" >/dev/null 2>&1 || true
     done
 
-    # 3. Get App principal (only trusted apps can call sync_managers)
+    # 3. Get App principal
     local app_principal
     if ! app_principal=$(python3 "$probe" app-principal \
             --app-id 7 \
@@ -59,93 +59,83 @@ story_managers_sync_concurrent() {
         return
     fi
 
-    # 4. Grant owner edge so the bot passes ownership checks
+    # 4. Grant owner edge
     curl --noproxy '*' -s -S -X PUT \
         -H "X-Avernet-Principal: ${app_principal}" \
         -H "Content-Type: application/json" \
         -d "{\"owner_user_id\":\"${BCS_MOCK_USER_ID}\"}" \
         "${BCS_API_BASE_URL}${prefix}/bots/${owner_bot}/ownership" >/dev/null 2>&1 || true
 
-    # 5. Seed managers to a known baseline so every concurrent request
-    #    reads the same initial version.
+    # 5. Seed managers to a known baseline
     curl --noproxy '*' -s -S -X PUT \
         -H "X-Avernet-Principal: ${app_principal}" \
         -H "Content-Type: application/json" \
         -d "{\"manager_user_ids\":[\"${human_a}\"]}" \
         "${BCS_API_BASE_URL}${prefix}/bots/${owner_bot}/managers" >/dev/null 2>&1 || true
 
-    # 6. Concurrent sync: three requests with different manager sets.
-    #    A file-based barrier synchronises the curl processes so they
-    #    all send their requests at nearly the same instant, maximising
-    #    the chance of an optimistic-lock conflict.
-    local barrier_file
-    barrier_file=$(mktemp)
-    : > "$barrier_file"
+    # 6. Concurrent sync via Python helper: opens N connections,
+    #    waits for all to be ready, then sends all bodies at once.
+    local bodies_json race_output
+    bodies_json=$(python3 -c "
+import json, sys
+a='${human_a}'; b='${human_b}'; c='${human_c}'; d='${human_d}'; e='${human_e}'
+print(json.dumps([
+    [a, b], [a, c], [a, d], [a, e]
+]))
+")
+    race_output=$(python3 "${SCRIPT_DIR}/managers_sync_race.py" \
+        --base-url "${BCS_API_BASE_URL}" \
+        --bot-id "${owner_bot}" \
+        --principal "${app_principal}" \
+        --bodies "${bodies_json}" \
+        --concurrency 4 2>&1) || true
 
-    local -a pids=() codes=() tmpfiles=()
-    local bodies=(
-        "{\"manager_user_ids\":[\"${human_a}\",\"${human_b}\"]}"
-        "{\"manager_user_ids\":[\"${human_a}\",\"${human_c}\"]}"
-        "{\"manager_user_ids\":[\"${human_a}\",\"${human_d}\"]}"
-        "{\"manager_user_ids\":[\"${human_a}\",\"${human_e}\"]}"
-    )
+    # 7. Parse results
+    local ok_count
+    ok_count=$(printf '%s' "$race_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("ok",0))' 2>/dev/null || echo "0")
+    local total_count
+    total_count=$(printf '%s' "$race_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("total",0))' 2>/dev/null || echo "0")
 
-    local concurrent_count=4
-    for i in $(seq 0 $((concurrent_count - 1))); do
-        local tmp_out code_file
-        tmp_out=$(mktemp)
-        code_file=$(mktemp)
-        tmpfiles+=("$tmp_out" "$code_file")
-
-        (
-            # Signal ready and spin-wait for all peers.
-            echo "1" >> "$barrier_file"
-            while [ "$(wc -l < "$barrier_file" 2>/dev/null || echo 0)" -lt "$concurrent_count" ]; do
-                true
-            done
-
+    if [[ -z "$ok_count" || "$ok_count" == "0" ]]; then
+        # Fallback: retry with plain concurrent curl
+        info "Python race helper failed or returned 0; falling back to plain concurrent curl"
+        local -a pids=() code_files=()
+        local bodies=(
+            "{\"manager_user_ids\":[\"${human_a}\",\"${human_b}\"]}"
+            "{\"manager_user_ids\":[\"${human_a}\",\"${human_c}\"]}"
+            "{\"manager_user_ids\":[\"${human_a}\",\"${human_d}\"]}"
+            "{\"manager_user_ids\":[\"${human_a}\",\"${human_e}\"]}"
+        )
+        for i in 0 1 2 3; do
+            local cf
+            cf=$(mktemp)
+            code_files+=("$cf")
             curl --noproxy '*' -s -S -X PUT \
                 -H "X-Avernet-Principal: ${app_principal}" \
                 -H "Content-Type: application/json" \
                 -d "${bodies[$i]}" \
                 "${BCS_API_BASE_URL}${prefix}/bots/${owner_bot}/managers" \
-                -o "$tmp_out" -w '%{http_code}' > "$code_file" 2>/dev/null
-        ) &
-        pids+=($!)
-        codes+=("$code_file")
-    done
+                -o /dev/null -w '%{http_code}' > "$cf" 2>/dev/null &
+            pids+=($!)
+        done
+        for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+        ok_count=0
+        for cf in "${code_files[@]}"; do
+            local code
+            code=$(cat "$cf" 2>/dev/null || echo "000")
+            if [[ "$code" == "200" ]]; then ok_count=$((ok_count + 1)); fi
+            rm -f "$cf"
+        done
+        total_count=${#bodies[@]}
+    fi
 
-    # Wait for all background processes
-    local all_ok=0
-    for pid in "${pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
-    done
-
-    # 7. Read results. The backoff fix should allow all concurrent
-    #    requests to eventually succeed; at minimum all must return
-    #    200 (conflict resolved by retry + backoff).
-    local ok_count=0 fail_details=""
-    for i in $(seq 0 $((concurrent_count - 1))); do
-        local code
-        code=$(cat "${codes[$i]}" 2>/dev/null || echo "000")
-        if [[ "$code" == "200" ]]; then
-            ok_count=$((ok_count + 1))
-        else
-            fail_details="${fail_details} req$((i+1))=${code}"
-        fi
-    done
-
-    if [[ $ok_count -eq $concurrent_count ]]; then
-        pass "concurrent managers sync: all ${concurrent_count} requests succeeded (backoff resolved conflicts)"
-    elif [[ $ok_count -gt 0 ]]; then
-        # Partial success still passes (retry path was hit) but log details
-        pass "concurrent managers sync: ${ok_count}/${concurrent_count} requests succeeded (retry path exercised)${fail_details}"
+    if [[ "$ok_count" -eq "$total_count" ]]; then
+        pass "concurrent managers sync: all ${total_count} requests succeeded"
+    elif [[ "$ok_count" -gt 0 ]]; then
+        pass "concurrent managers sync: ${ok_count}/${total_count} succeeded"
     else
-        fail "concurrent managers sync: 0/${concurrent_count} requests succeeded${fail_details}"
+        fail "concurrent managers sync: 0/${total_count} succeeded"
         TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
-
-    # Cleanup
-    rm -f "$barrier_file" "${tmpfiles[@]}"
 }
