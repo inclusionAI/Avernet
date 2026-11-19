@@ -26,8 +26,9 @@ TOOLS = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensio
 
 
 class Peer:
-    def __init__(self, binding="HTTP+JSON"):
+    def __init__(self, binding="HTTP+JSON", *, observe_rpc=None):
         self.binding = binding
+        self.observe_rpc = observe_rpc
         self.rpc_methods = set()
         self.bearer = ""
         self.requests = []

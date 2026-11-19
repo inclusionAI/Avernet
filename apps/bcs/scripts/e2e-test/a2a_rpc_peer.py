@@ -22,6 +22,8 @@ def dispatch(handler, peer):
     method, params = request["method"], request["params"]
     with peer.lock:
         peer.rpc_methods.add(method)
+        if peer.observe_rpc is not None:
+            peer.observe_rpc(method, handler.headers)
     if method == "SubscribeToTask":
         with peer.lock:
             task = copy.deepcopy(peer.tasks[params["id"]])
