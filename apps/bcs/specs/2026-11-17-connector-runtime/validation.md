@@ -155,6 +155,13 @@ run unregistered. A refused registration (for example the empty default
 control address against the real provider) fails the start; any other
 registration failure is asked again before anything is claimed.
 
+## Review round 11 (2026-11-19)
+
+Fixed with a test: the registration retries end with the registration's
+lifetime (`membership_lost`), since an applied registration nobody renewed has
+expired by then; a registration confirmed after a retry is renewed at once; a
+drain is checked before every attempt.
+
 ## Not run, and why
 
 - `cargo nextest` and the coverage gates (changed-line > 85 %, singlebox E2E):
