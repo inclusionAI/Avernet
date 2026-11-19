@@ -111,6 +111,26 @@ def _isolate_conflicting_schemas(
                 for key, value in discriminator["mapping"].items():
                     if isinstance(value, str) and value in names:
                         mapping[key] = names[value]
+            if isinstance(discriminator, dict):
+                existing_mapping = result["discriminator"].get("mapping")
+                if existing_mapping is not None and not isinstance(
+                    existing_mapping, dict
+                ):
+                    return result
+                prefix = "#/components/schemas/"
+                for keyword in ("oneOf", "anyOf"):
+                    variants = node.get(keyword, [])
+                    if not isinstance(variants, list):
+                        continue
+                    for variant in variants:
+                        ref = variant.get("$ref") if isinstance(variant, dict) else None
+                        if not isinstance(ref, str) or not ref.startswith(prefix):
+                            continue
+                        name = ref[len(prefix) :]
+                        if name in names:
+                            result["discriminator"].setdefault(
+                                "mapping", {}
+                            ).setdefault(name, prefix + names[name])
             return result
         if isinstance(node, list):
             return [rewrite(value) for value in node]
@@ -122,10 +142,53 @@ def _isolate_conflicting_schemas(
         return node
 
     result = rewrite(doc)
+    children = _inheritance_children(schemas)
+    for parent, original in schemas.items():
+        if not isinstance(original, dict) or not isinstance(
+            original.get("discriminator"), dict
+        ):
+            continue
+        discriminator = result["components"]["schemas"][parent]["discriminator"]
+        mapping = discriminator.get("mapping")
+        if mapping is not None and not isinstance(mapping, dict):
+            continue
+        for child in sorted(_inheritance_descendants(children, parent)):
+            discriminator.setdefault("mapping", {}).setdefault(
+                child, f"#/components/schemas/{names[child]}"
+            )
     result["components"]["schemas"] = {
         names[name]: value for name, value in result["components"]["schemas"].items()
     }
     return result
+
+
+def _inheritance_children(schemas: dict[str, Any]) -> dict[str, set[str]]:
+    children: dict[str, set[str]] = {}
+    prefix = "#/components/schemas/"
+    for child, schema in schemas.items():
+        if not isinstance(schema, dict) or not isinstance(schema.get("allOf"), list):
+            continue
+        for item in schema["allOf"]:
+            ref = item.get("$ref") if isinstance(item, dict) else None
+            if (
+                isinstance(ref, str)
+                and ref.startswith(prefix)
+                and ref[len(prefix) :] in schemas
+            ):
+                children.setdefault(ref[len(prefix) :], set()).add(child)
+    return children
+
+
+def _inheritance_descendants(children: dict[str, set[str]], parent: str) -> set[str]:
+    found: set[str] = set()
+    pending = list(children.get(parent, ()))
+    while pending:
+        child = pending.pop()
+        if child == parent or child in found:
+            continue
+        found.add(child)
+        pending.extend(children.get(child, ()))
+    return found
 
 
 def build_combined_openapi(
@@ -233,6 +296,8 @@ def _prune_components(
 ) -> dict[str, Any]:
     """Keep only components transitively referenced by the kept paths."""
     needed: set[str] = set()
+    schemas = components.get("schemas", {})
+    children = _inheritance_children(schemas) if isinstance(schemas, dict) else {}
     frontier: set[str] = set()
     _collect_refs(kept_paths, frontier)
     while frontier:
@@ -243,6 +308,17 @@ def _prune_components(
         target = _resolve_ref(components, ref)
         if target is None:
             continue
+        section, name = _ref_parts(ref)
+        if (
+            section == "schemas"
+            and name
+            and isinstance(target, dict)
+            and isinstance(target.get("discriminator"), dict)
+        ):
+            frontier.update(
+                f"#/components/schemas/{child}"
+                for child in _inheritance_descendants(children, name)
+            )
         sub: set[str] = set()
         _collect_refs(target, sub)
         frontier |= sub - needed
