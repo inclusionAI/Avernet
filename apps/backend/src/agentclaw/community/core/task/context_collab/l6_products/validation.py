@@ -24,6 +24,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodRelationTemplate,
     ProductProfileDefinition,
     TaskLifecycleContract,
+    composition_method_kind,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
@@ -59,12 +60,9 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
         raise ContextCollabValidationError(
             "Swarm plan capability requires a non-empty reference and Swarm Method"
         )
-    if tuple(item.method_kind for item in methods) != tuple(
-        item.value for item in parse_method_kinds(definition.composition.method_kind)
-    ):
-        raise ContextCollabValidationError(
-            "composition and required Method profiles disagree"
-        )
+    # Preserve supported legacy creation/binding wires without a duplicate
+    # author-supplied Method kind. Empty/duplicate/unsupported sets fail closed.
+    parse_method_kinds(composition_method_kind(definition.composition))
     _validate_relations(definition)
     if definition.compatibility.downgrade_policy != "reject_missing_required":
         raise ContextCollabValidationError("unsupported downgrade policy")
@@ -139,11 +137,11 @@ def _validate_relations(definition: ProductProfileDefinition) -> None:
         raise ContextCollabValidationError(
             "Method relations must be an immutable tuple"
         )
-    if composition.method_kind == "Open + Single" and not relations:
+    methods = {item.method_kind for item in composition.required_methods}
+    if methods == {"Open", "Single"} and not relations:
         raise ContextCollabValidationError(
             "Open + Single requires explicit Method relations"
         )
-    methods = {item.method_kind for item in composition.required_methods}
     pairs: list[tuple[str, str]] = []
     for item in relations:
         if item.parent_method not in methods or item.child_method not in methods:

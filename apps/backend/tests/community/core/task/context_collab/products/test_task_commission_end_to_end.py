@@ -90,6 +90,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodRelationTemplate,
     ScenarioRole,
     VersionedProfileRef,
+    composition_method_kind,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
@@ -262,7 +263,6 @@ def _create_product_profile():
         ref=VersionedProfileRef("task_commission", 2),
         # 绑定 L5 的 Open 和 Single 方法。
         composition=MethodCompositionTemplate(
-            method_kind="Open + Single",
             required_methods=(
                 get_profile("Open", "0.2"),
                 get_profile("Single", "0.2"),
@@ -347,7 +347,7 @@ def _create_product_profile():
         OTHER_ELIGIBLE_AGENT,
         ADMISSION_AGENT,
     )
-    assert profile.composition.method_kind == "Open + Single"
+    assert composition_method_kind(profile.composition) == "Open + Single"
     assert profile.composition.required_methods == (
         get_profile("Open", "0.2"),
         get_profile("Single", "0.2"),

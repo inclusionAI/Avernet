@@ -60,6 +60,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
     VersionedProfileRef,
+    composition_method_kind,
 )
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
@@ -122,7 +123,8 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         profile = self._product_catalog.get(ref.profile_id, ref.version)
         if (
             profile.ref.profile_id != "task_commission"
-            or profile.composition.method_kind not in {"Open", "Open + Single"}
+            or composition_method_kind(profile.composition)
+            not in {"Open", "Open + Single"}
             or not isinstance(
                 profile.composition.require_policy("Open").publication.admission,
                 BotSelfApplicationAdmission,

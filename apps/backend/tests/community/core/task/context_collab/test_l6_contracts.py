@@ -176,12 +176,12 @@ def test_code_owned_catalog_does_not_require_extending_enum():
         catalog.get("custom_product", 1)
     with pytest.raises(ContextCollabValidationError, match="duplicate"):
         ProductCatalog((custom, custom))
-    with pytest.raises(ContextCollabValidationError, match="disagree"):
+    with pytest.raises(ContextCollabValidationError, match="unknown method_kind"):
         ProductCatalog(
             (
                 replace(
                     custom,
-                    composition=replace(custom.composition, method_kind="Single"),
+                    composition=replace(custom.composition, required_methods=()),
                 ),
             )
         )

@@ -55,9 +55,9 @@ class MethodCompositionTemplate:
     Instantiation always targets an existing Collet; scope is not configurable.
     Relations instantiate one binding per required Profile and explicit L5 edges.
     Empty relations retain the historical single-binding topology.
+    Required MethodProfiles are the sole source of Method kinds.
     """
 
-    method_kind: str
     required_methods: tuple[MethodProfile, ...]
     optional_methods: tuple[MethodProfile, ...] = ()
     # Empty means no method-specific product policy, not a default Open policy.
@@ -72,6 +72,16 @@ class MethodCompositionTemplate:
                 f"composition requires exactly one {method} Method policy"
             )
         return policies[0]
+
+
+def composition_method_kind(composition: MethodCompositionTemplate) -> str:
+    """Project required Profiles to the existing creation/legacy binding wire.
+
+    This string is derived only at compatibility boundaries, not authored or
+    stored as another field on the composition template. Optional Methods are
+    not selected implicitly.
+    """
+    return " + ".join(method.method_kind for method in composition.required_methods)
 
 
 @dataclass(frozen=True)
