@@ -1,0 +1,61 @@
+apps/frontend-nextgen/src/services/botHealthCheck/botHealthCheckService.ts
+  s_41ea21e8b6f781::t_8e736cbc142cb8 12,46-47,96-106,109,111
+  s_41ea21e8b6f781::t_e938e24b2560dd 4-5,11,63-68,93-95,107-108,110
+apps/frontend-nextgen/src/domain/botHealthCheck.ts
+  s_41ea21e8b6f781::t_8e736cbc142cb8 167-168
+  s_41ea21e8b6f781::t_1c8aee98d3e93a 76-79
+apps/frontend-nextgen/src/hooks/useBotHealthPatchRepair.ts
+  s_41ea21e8b6f781::t_8e736cbc142cb8 2-6,8-71
+  s_41ea21e8b6f781::t_124b6fe0cc8307 1,7
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  s_41ea21e8b6f781::t_8e736cbc142cb8 434-438
+apps/frontend-nextgen/src/components/BotWorkshop/BotHealthCheckDrawer/components/PatchPreviewDialog.tsx
+  s_41ea21e8b6f781::t_e938e24b2560dd 1-2,4-6,12-14,24-35,37-45,47-49,51-54,58-62
+  s_41ea21e8b6f781::t_8e736cbc142cb8 8-11,15-21,23,36,55-57
+  s_41ea21e8b6f781::t_bbb7ac6d0d7a0b 3,7,22,46,50
+apps/frontend-nextgen/test/components/BotWorkshop/BotHealthCheckDrawer.test.tsx
+  s_41ea21e8b6f781::t_eaaa32b494446d 6-12,14-16,122,149,172,194,215,257,283-291,293-295,297-395
+  s_41ea21e8b6f781::t_8e736cbc142cb8 13,292,296
+  s_41ea21e8b6f781::t_0e444a1699d91e 396
+apps/frontend-nextgen/src/components/BotWorkshop/BotHealthCheckDrawer/components/EnvironmentPanel.tsx
+  s_41ea21e8b6f781::t_e938e24b2560dd 11,21,33,104
+apps/frontend-nextgen/src/components/BotWorkshop/BotHealthCheckDrawer/index.tsx
+  s_41ea21e8b6f781::t_e938e24b2560dd 13,18,43,93,96-97
+  s_41ea21e8b6f781::t_e9eec99df096cd 95
+apps/frontend-nextgen/test/components/BotWorkshop/OptimizationPanel.test.tsx
+  s_41ea21e8b6f781::t_8e736cbc142cb8 32,48
+apps/frontend-nextgen/src/components/BotWorkshop/BotHealthCheckDrawer/HealthCheckView.tsx
+  s_41ea21e8b6f781::t_e938e24b2560dd 5,13,21-22,32-33,109,117-118
+  s_41ea21e8b6f781::t_8e736cbc142cb8 16,42,102,108,110-116
+  s_41ea21e8b6f781::t_f0d092d8c4c11c 119
+apps/frontend-nextgen/src/pages/BotWorkshop/HealthCheck/index.tsx
+  s_41ea21e8b6f781::t_e938e24b2560dd 127-128
+  s_41ea21e8b6f781::t_a214ebb6c2423c 37-38,44,114,126
+apps/frontend-nextgen/src/components/BotWorkshop/BotHealthCheckDrawer/components/OptimizationPanel.tsx
+  s_41ea21e8b6f781::t_e938e24b2560dd 5,11,14,85
+apps/frontend-nextgen/src/services/backendApi/harnessController.ts
+  s_41ea21e8b6f781::t_e938e24b2560dd 28-33,35-37,128-149
+  s_41ea21e8b6f781::t_df04e0e1824495 1,34,150
+apps/frontend-nextgen/src/hooks/useBotHealthCheck.ts
+  s_41ea21e8b6f781::t_59441f08a38a5b 3,14,18,23,25,30
+apps/frontend-nextgen/test/pages/BotWorkshop/HealthCheck.test.tsx
+  s_41ea21e8b6f781::t_de63250e23ea2b 3,5,23,36,38-50,55-62
+apps/frontend-nextgen/test/services/botHealthCheckService.test.ts
+  s_41ea21e8b6f781::t_5fa1e37c555f57 39-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4305bac19c9625d64a34707c02d3db6de0b934aa",
+  "prompts": {},
+  "sessions": {
+    "s_41ea21e8b6f781": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f286-bcfb-7520-8165-940d34756015",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
