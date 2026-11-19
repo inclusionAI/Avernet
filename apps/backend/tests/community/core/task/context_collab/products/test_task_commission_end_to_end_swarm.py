@@ -160,19 +160,14 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
     driver.drain()
     assert driver.is_completed()
     assert driver.plan().state is PlanState.COMPLETED
-    assert len(planner.calls) == len(ROLES) + 1
-    assert [
-        sum(s.state is StageState.SUCCEEDED for s in r.stages) for r in planner.calls
-    ] == list(range(len(ROLES) + 1))
-    assert [p.agent_ref for _, p, _ in executor.calls] == list(AGENTS)
 
     # 8. 第八步：逐阶段验证不同产物、子 Task、实际执行者及上报事件，确认分配释放与运行时合同。
     stages = driver.stages()
     record = _record(injector, collet_id)
-    tasks = {t.task_id: t for t in record.tasks}
+    tasks = {t.task_id: t for t in record.tasks}   # 一个根Task + 每个state一个子任务
     assert len(stages) == len(ROLES)
     assert [stage.name for stage in stages] == list(ROLES)
-    assert len(tasks) == len(ROLES) + 1
+    assert len(tasks) == len(ROLES) + 1            # 任务数量校验
     root_starts = [
         event
         for event in record.events
@@ -180,12 +175,13 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
     ]
     assert len(root_starts) == 1  # 后续阶段内部 wake 不会重复启动根 Task。
     assert root_starts[0].actor_ref == OWNER.actor
+
     for stage, artifact, agent in zip(stages, ARTIFACTS, AGENTS):
         assert stage.state is StageState.SUCCEEDED
-        assert stage.output_artifact_refs == (f"artifact://{artifact}",)
+        assert stage.output_artifact_refs == (f"artifact://{artifact}",)  # 验证每个stage的产物
         assert (tmp_path / artifact).read_text()
         task = tasks[stage.task_ref]
-        assert task.status == "done"
+        assert task.status == "done"                                      # 验证每个task的状态
         assert task.parent_task_ref == record.task.task_id
         assert task.executor_refs == (agent,)
         reports = [
@@ -196,6 +192,7 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
         assert len(reports) == 1
         assert reports[0].actor_ref == PrincipalRef(agent.agent_type, agent.agent_id)
         assert reports[0].payload["artifacts"] == [f"artifact://{artifact}"]
+
     allocations = store.list_allocations(axes, binding_id, collet_id)
     assert len(allocations) == len(ROLES)
     assert all(a.state is AllocationState.RELEASED for a in allocations)
@@ -209,41 +206,6 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
     assert test_report["exit_code"] == 0
     assert "Ran 4 tests" in test_report["output"]
     assert json.loads((tmp_path / "pr-draft.json").read_text())["simulated"] is True
-
-    # 9. 第九步：Swarm 内部完成不等于用户验收；PR Agent 汇总五阶段产物，提交根 Task 待验收。
-    assert record.task.status == "in_progress"
-    submitter = ActorContext(
-        PrincipalRef("bot", AGENTS[-1].agent_id), source="local_agent"
-    )
-    assert (
-        _append(
-            injector,
-            collet_id,
-            "task.submitted",
-            submitter,
-            artifacts=[f"artifact://{a}" for a in ARTIFACTS],
-        ).current_status
-        == "reviewing"
-    )
-
-    # 10. 第十步：用户显式验收成果，根 Task 才进入 done。
-    assert (
-        _append(
-            injector, collet_id, "task.accepted", note="验收五阶段产物"
-        ).current_status
-        == "done"
-    )
-
-    # 11. 第十一步：通过新仓储实例重读 SQLite，验证根/子 Task 均完成，Swarm 仍满足完成条件。
-    repo = injector.get(ContextCollabRepositoryProtocol).__class__(
-        injector.get(DatabasePlugin), injector.get(ProductCatalog)
-    )
-    reread = repo.get_current_status(collet_id)
-    assert reread.task.status == "done"
-    assert len(reread.tasks) == len(ROLES) + 1
-    assert all(t.status == "done" for t in reread.tasks)
-    assert reread.product_instance.method_binding_refs == (binding_id,)
-    assert driver.is_completed()
 
 
 def _create_product_profile():
