@@ -8,7 +8,7 @@ import type { ExecutionStepLogRepository } from "../repositories/execution-step-
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
-import { fixDurationMs, computeAvailableInterventions, toSafeRunFields } from "./run-read-fields.js";
+import { fixDurationMs, computeAvailableInterventions, allowsRuntimeMetadataFromStoredState, readRunRuntimeMetadata, toSafeRunFields } from "./run-read-fields.js";
 import type { RunSubworkflowsReader, RunReadInspection } from "../contracts/run-subworkflows.js";
 import { installFanoutReadHandlers, projectRun, projectNodes, sendRunReadError } from "./run-subworkflows-http.js";
 
@@ -45,6 +45,7 @@ export function createRunReadRouter(
   workflowSpecRepo: WorkflowSpecRepository | null,
   executionStepLogRepo: ExecutionStepLogRepository | null,
   runSubviews: RunSubworkflowsReader | null,
+  exposeRuntimeMetadata = false,
 ): Router {
   const router = Router();
   /** GET / — list flow runs, filtered by view permission if botOwnerId provided */
@@ -283,7 +284,14 @@ export function createRunReadRouter(
       const availableInterventions = res.locals.runRead?.managed || res.locals.runRead?.sensitiveChild ? [] : computeAvailableInterventions(run);
       // Never expose credentials_json; add safe derived fields
       const safeRun = projectRun(toSafeRunFields(fixDurationMs(run) as Record<string, unknown>), inspection);
-      res.json({ run: safeRun, nodes: projectNodes(nodes, inspection), availableInterventions });
+      const includeMetadata = exposeRuntimeMetadata && (inspection
+        ? !inspection.managed && !inspection.restricted && !inspection.sensitiveChild
+        : allowsRuntimeMetadataFromStoredState(run.state_json));
+      res.json({
+        run: includeMetadata ? { ...safeRun, ...readRunRuntimeMetadata(run.credentials_json) } : safeRun,
+        nodes: projectNodes(nodes, inspection),
+        availableInterventions,
+      });
     } catch (error) {
       sendRunReadError(res, error);
     }

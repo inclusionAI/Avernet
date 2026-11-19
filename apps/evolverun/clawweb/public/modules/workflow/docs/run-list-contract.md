@@ -49,6 +49,7 @@ Records with equal start times have no additional guaranteed order.
 ## Response compatibility
 
 The JSON envelope remains `{ runs, total, limit, offset, statusCounts? }`.
+Opt-in runtime metadata is limited to [run detail](run-detail-contract.md).
 `total` is the number of authorized matches **before** pagination; `runs`
 contains only the requested page. A no-match result is HTTP 200 with
 `runs: []` and `total: 0`. Hidden matches must not affect either field.

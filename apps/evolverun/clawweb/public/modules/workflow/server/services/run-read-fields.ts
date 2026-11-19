@@ -1,4 +1,6 @@
 import type { InterventionAction } from "./intervention-message-builder.js";
+import type { RunRuntimeMetadata } from "../../shared/run-runtime-metadata.js";
+import { object } from "./fanout-state-reader.js";
 
 /**
  * Fix total_duration_ms values that were inflated 1000x by a bug in
@@ -59,5 +61,40 @@ export function toSafeRunFields(run: Record<string, unknown>): Record<string, un
   return {
     ...safe,
     ...("credentials_json" in run ? { hasCredentials: credentials_json != null && credentials_json !== "" } : {}),
+  };
+}
+
+/** On mounts without run inspection, decline the additional projection unless state is ordinary. */
+export function allowsRuntimeMetadataFromStoredState(stateJson: string | null): boolean {
+  if (stateJson === null || stateJson === "") return true;
+  try {
+    const state = object(JSON.parse(stateJson));
+    return !Object.hasOwn(state, "subworkflowFanouts") && !Object.hasOwn(state, "fanoutOrigin");
+  } catch {
+    // Invalid state must not expose new metadata or change the existing detail response.
+    return false;
+  }
+}
+
+export function readRunRuntimeMetadata(credentialsJson: unknown): RunRuntimeMetadata {
+  let parsed: unknown;
+  if (typeof credentialsJson === "string" && credentialsJson !== "") {
+    try {
+      parsed = JSON.parse(credentialsJson);
+    } catch {
+      // Parse errors can quote stored credentials; treat malformed data as absent.
+    }
+  }
+  const readString = (key: string): string | null => {
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || !Object.hasOwn(parsed, key)) {
+      return null;
+    }
+    const value = (parsed as Record<string, unknown>)[key];
+    return typeof value === "string" && value.trim() !== "" ? value : null;
+  };
+  return {
+    device_id: readString("CLIENT_ID"),
+    bot_type: readString("BOT_TYPE"),
+    stage: readString("STAGE"),
   };
 }

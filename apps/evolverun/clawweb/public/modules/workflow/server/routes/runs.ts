@@ -76,6 +76,11 @@ function toSafeRunFields(run: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+interface RunsRouterOptions {
+  /** Enable only on mounts with verified per-run view authorization. */
+  exposeRuntimeMetadata?: boolean;
+}
+
 export function createRunsRouter(
   flowRunRepo: FlowRunRepository | null,
   nodeExecRepo: NodeExecutionRepository | null,
@@ -88,11 +93,14 @@ export function createRunsRouter(
   executionStepLogRepo: ExecutionStepLogRepository | null = null,
   facadeRepo: FacadeBindingRepository | RunSubworkflowsReader | null = null,
   runSubviews: RunSubworkflowsReader | null = null,
+  options: RunsRouterOptions = {},
 ): Router {
   const router = Router();
+  const exposeRuntimeMetadata = options.exposeRuntimeMetadata === true;
   const effectiveRunSubviews = runSubviews ?? (facadeRepo && 'listRuns' in facadeRepo ? facadeRepo : null);
   const effectiveFacadeRepo = facadeRepo && !('listRuns' in facadeRepo) ? facadeRepo : null;
-  router.use(createRunReadRouter(flowRunRepo, nodeExecRepo, eventRepo, botPermRepo, workflowSpecRepo, executionStepLogRepo, effectiveRunSubviews));
+  router.use(createRunReadRouter(flowRunRepo, nodeExecRepo, eventRepo, botPermRepo, workflowSpecRepo,
+    executionStepLogRepo, effectiveRunSubviews, exposeRuntimeMetadata));
   router.use(createRunBaasRouter(flowRunRepo, eventRepo, effectiveFacadeRepo));
 
   /** GET / — list flow runs, filtered by view permission if botOwnerId provided */
