@@ -1,0 +1,29 @@
+apps/backend/tests/community/core/mcp/services/test_sync_service.py
+  s_e9f1e156097948::t_5045e8e3781c18 497
+  s_e9f1e156097948::t_ae37566e876664 571
+apps/backend/tests/community/api/bot_management/test_router_part2.py
+  s_e9f1e156097948::t_13cc0827ca4099 541-542
+  s_e9f1e156097948::t_6f31e9ccf66aad 481,486
+  s_e9f1e156097948::t_08ac66822aaee7 561
+apps/backend/src/agentclaw/community/core/mcp/services/_defaults.py
+  s_e9f1e156097948::t_6f08c3b445a249 275
+apps/backend/tests/community/core/mcp/test_defaults_per_engine.py
+  s_e9f1e156097948::t_3829963e6cb7b7 175
+  s_e9f1e156097948::t_a23e63da6feb7e 238,248-265,267,272
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1fa9baa5dd69db5c1e289080858256e122b6e57b",
+  "prompts": {},
+  "sessions": {
+    "s_e9f1e156097948": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "f7135aad-dfd7-48a0-b496-ec3ceb653234",
+        "model": "antchat/DeepSeek-V4.1-Flash-1017"
+      },
+      "human_author": "CapQing <honghu.hq@antgroup.com>"
+    }
+  }
+}

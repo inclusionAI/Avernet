@@ -1,0 +1,56 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 487,519,522-528,534-540,551,588-596
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet.py
+  h_059e888e5e4e82 32-34,83,97-99,104-106,116,125-130,212-218,233-235,255-259
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet_metadata.py
+  h_059e888e5e4e82 1,23-24,27-32,60-61,70-71,94-96,116-117,128-129
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/models.py
+  h_059e888e5e4e82 64
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/row_codec.py
+  h_059e888e5e4e82 51-58
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/README.md
+  h_059e888e5e4e82 186-212
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/open/participation.py
+  h_059e888e5e4e82 3-13,24-26,35-46,102-104
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 25-26,59-60,94-95,103-120,262-263,957-1004
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/binding.py
+  h_059e888e5e4e82 214-215
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/contracts.py
+  h_059e888e5e4e82 47-50,62-65,68-73
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/open_enrollment.py
+  h_059e888e5e4e82 40,51-53,75-80,82-83,187-189
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/open_enrollment_policy.py
+  h_059e888e5e4e82 6-17,42-47
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/product_profile.py
+  h_059e888e5e4e82 3-11,36-41,46-47,58-60,67-71,73-75,78-93
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/validation.py
+  h_059e888e5e4e82 12-14,27-28,49-54,101-103,105-108,111-113
+apps/backend/src/agentclaw/community/di/modules/context_collab_runtime.py
+  h_059e888e5e4e82 1-68
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 147,309
+apps/backend/tests/community/core/task/context_collab/products/test_open_swarm_enrollment.py
+  h_059e888e5e4e82 1-407
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 379
+apps/backend/tests/community/core/task/context_collab/test_collet_metadata.py
+  h_059e888e5e4e82 51,56-58,66,160,181-182,196,199,206-257
+apps/backend/tests/community/core/task/context_collab/test_collet_resources.py
+  h_059e888e5e4e82 1-167
+apps/backend/tests/community/core/task/context_collab/test_l6_product_profile_operations.py
+  h_059e888e5e4e82 632-716
+apps/backend/tests/community/repository/task/context_collab/test_collet_metadata.py
+  h_059e888e5e4e82 75,225-308
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2779eb43551ca64e1a303e88bee4128a4aa5036f",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

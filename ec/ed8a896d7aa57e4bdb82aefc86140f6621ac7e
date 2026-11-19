@@ -1,0 +1,47 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/file_access.py
+  s_7bf7edeb41f354::t_5471830a5774eb 37-38
+apps/backend/tests/community/core/expert_chat/services/test_caller_cron_sessions.py
+  s_7bf7edeb41f354::t_5471830a5774eb 177
+  s_7bf7edeb41f354::t_ce48efeb5723bb 33,41-42,57,63,66,69,72,89,94,183,187-188,217,240-244,256,310
+  s_7bf7edeb41f354::t_3469882b482d42 462-484,488,491,495,498,501
+  s_7bf7edeb41f354::t_1372053349cf8b 425,436
+  s_7bf7edeb41f354::t_990573fda520dd 321-323,325,327-337,339-340,342-365,507
+  s_7bf7edeb41f354::t_c7e4116e43faae 324,326,338,341,366-424,426-435,437-461,490
+  s_7bf7edeb41f354::t_cfd90c14cefe7c 485-487,489,492-494,496-497,499-500,502-506,508-510
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_caller_sessions.py
+  s_7bf7edeb41f354::t_5471830a5774eb 85,143
+  s_7bf7edeb41f354::t_1256b4c20c0f2c 22-23,25,33-35,37-38,41,46-53,55-56,71,87-92,135,137-139
+  s_7bf7edeb41f354::t_1372053349cf8b 26-31,42-45
+  s_7bf7edeb41f354::t_496a351cbbe0a1 6-8,17-21,24,32,36,39-40,54,57-70,72-84,86,93-105,151
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_7bf7edeb41f354::t_5471830a5774eb 161-174
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_owned_session.py
+  s_7bf7edeb41f354::t_5471830a5774eb 26
+  s_7bf7edeb41f354::t_1256b4c20c0f2c 11-14,73-74,111-112,147-148,178-179
+  s_7bf7edeb41f354::t_496a351cbbe0a1 57-58,61,65,96-97,100,104,132-133,136,140,163-164,167,171
+  s_7bf7edeb41f354::t_fd6eaa68b112a0 38-39
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py
+  s_7bf7edeb41f354::t_1256b4c20c0f2c 471-472,494,496-499,528,669-673,677-678
+  s_7bf7edeb41f354::t_496a351cbbe0a1 423-424,435-436,442-443,480-483,602-603,629-630,658-659,668,674-676
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_owned_session.py
+  s_7bf7edeb41f354::t_1256b4c20c0f2c 13-16,19
+  s_7bf7edeb41f354::t_5471830a5774eb 80-81,86
+apps/backend/tests/community/acceptance/expert_chat/test_caller_cron_sessions.py
+  s_7bf7edeb41f354::t_3469882b482d42 30,69,87-100,102,104-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eced8a896d7aa57e4bdb82aefc86140f6621ac7e",
+  "prompts": {},
+  "sessions": {
+    "s_7bf7edeb41f354": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda2-fe95-7ee3-8d2f-a9fa07b666f5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

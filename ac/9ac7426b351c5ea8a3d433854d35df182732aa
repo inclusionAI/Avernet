@@ -1,0 +1,28 @@
+apps/frontend-nextgen/src/domain/taskEscortParity/workflowAuthoring.ts
+  h_bb3ca6fb13c5df 2-3,93
+apps/frontend-nextgen/src/domain/taskEscortParity/workflowAuthoringNumbers.ts
+  h_bb3ca6fb13c5df 1-43
+apps/frontend-nextgen/src/domain/taskEscortParity/workflowAuthoringPack.ts
+  h_bb3ca6fb13c5df 76-86,88-90
+apps/frontend-nextgen/src/domain/taskEscortParity/workflowAuthoringTypes.ts
+  h_bb3ca6fb13c5df 95-96
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorAuthoringDialogs.tsx
+  h_bb3ca6fb13c5df 109,111
+apps/frontend-nextgen/src/services/taskEscortParity/workflowAuthoringPersistence.ts
+  h_bb3ca6fb13c5df 2,31
+apps/frontend-nextgen/test/taskEscortParity/workflowAuthoringDomain.test.ts
+  h_bb3ca6fb13c5df 19,23-35
+apps/frontend-nextgen/test/taskEscortParity/workflowAuthoringService.test.ts
+  h_bb3ca6fb13c5df 3,24-25,216-218,276,279-280,441-443
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ac9ac7426b351c5ea8a3d433854d35df182732aa",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
