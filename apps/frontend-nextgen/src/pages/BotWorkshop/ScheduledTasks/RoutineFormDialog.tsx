@@ -178,6 +178,11 @@ export function RoutineFormDialog({
                     {targetError}
                   </p>
                 )}
+                {!original && !targetError && instanceMode === 'defer' && (
+                  <p className="text-xs text-muted-foreground sm:col-span-2" role="status">
+                    该环境暂无已确认的运行实例清单，保存后由服务端解析目标；若环境未就绪，会提示先发布该环境。
+                  </p>
+                )}
                 {original && (
                   <p className="text-xs text-muted-foreground sm:col-span-2">
                     执行目标已固定。更换环境或实例请创建新任务，避免改动其他目标上的同名任务。
