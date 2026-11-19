@@ -1,123 +1,156 @@
 //! Forward scanning and the continuous repair watermark are different state.
 //! Fixed cuts and independent discovery rounds prevent a hot head or one pending
 //! intent from hiding retained sessions. No scan cursor authorizes deletion.
+use super::scan_scheduler::*;
 use super::{StoreInboxProducer, state::*, storage::*};
 use async_trait::async_trait;
 use bcs_dist_model::*;
-use bcs_service_api::port::repo::distributed::{admission::*, common::*, inbox::InboxConsumerPort};
+use bcs_service_api::port::repo::distributed::{
+    admission::*, budget::ScanClass, common::*, inbox::InboxConsumerPort,
+};
 use std::{
     collections::BTreeSet,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
-pub(super) struct Rate {
-    since: Instant,
-    logs: [u32; 2],
-    sessions: [u32; 2],
-}
-impl Default for Rate {
-    fn default() -> Self {
-        Self {
-            since: Instant::now(),
-            logs: [0; 2],
-            sessions: [0; 2],
-        }
-    }
-}
-impl Rate {
-    fn claim(&mut self, kind: usize) -> bool {
-        if self.since.elapsed() >= Duration::from_secs(1) {
-            *self = Self::default();
-        }
-        // At most 128 session checks/s here: 72 remain reserved for dispatch
-        // supervision. Each class has its own share; neither borrows the other.
-        if self.logs[kind] >= 375 || self.sessions[kind] >= 64 {
-            return false;
-        }
-        self.logs[kind] += 1;
-        self.sessions[kind] += 1;
-        true
-    }
-}
 impl StoreInboxProducer {
     pub(super) async fn history_page(
         &self,
         shard: ShardId,
         page: PageRequest,
     ) -> Result<Page<Sid>, StoreError> {
-        let work = async {
-            if page.limit.get() > 128 {
-                return Err(invalid("page_limit"));
+        let progress = Arc::new(Mutex::new(HistoryContinuation::decode(
+            shard,
+            &page,
+            self.inner.config.max_history_entries,
+        )?));
+        let id = progress
+            .lock()
+            .map_err(|_| invalid("history_lock"))?
+            .id
+            .clone();
+        let key = JobKey {
+            class: 2,
+            shard,
+            id,
+        };
+        let runner = self.scan_execution();
+        let future_progress = progress.clone();
+        let future = Box::pin(async move {
+            runner
+                .history_round(shard, page, future_progress)
+                .await
+                .map(ScanResult::History)
+        });
+        let scheduler = self.scans.scheduler()?;
+        let job = scheduler
+            .reserve(key.clone(), future, Some(progress))?
+            .ok_or_else(pressure)?;
+        match scheduler.poll(&key, &job).await? {
+            Some(ScanResult::History(page)) => Ok(page),
+            Some(_) => Err(invalid("history_job_kind")),
+            None => {
+                let guard = job.try_lock().map_err(|_| pressure())?;
+                let progress = guard
+                    .history
+                    .as_ref()
+                    .ok_or_else(|| invalid("history_progress"))?;
+                let token = progress
+                    .lock()
+                    .map_err(|_| invalid("history_lock"))?
+                    .token()?;
+                Ok(Page {
+                    items: vec![],
+                    next: Some(token),
+                })
             }
+        }
+    }
+    async fn history_round(
+        &self,
+        shard: ShardId,
+        page: PageRequest,
+        progress: Arc<Mutex<HistoryContinuation>>,
+    ) -> Result<Page<Sid>, StoreError> {
+        let _scan_io = self
+            .inner
+            .scan_budget
+            .try_io()
+            .ok_or_else(|| StoreError::NotApplied {
+                code: "scan_io_busy".into(),
+            })?;
+        let initial = progress
+            .lock()
+            .map_err(|_| invalid("history_lock"))?
+            .clone();
+        let cut = if let Some(cut) = initial.cut {
+            cut
+        } else {
             let root = self
                 .load::<JournalRoot>(&self.inner.layout.admission_root(shard))
                 .await?
                 .map(|(_, r)| r)
                 .unwrap_or_default();
-            let (cut, mut cursor) = match page.after {
-                Some(p) => serde_json::from_str::<(u64, u64)>(&p.0)
-                    .map_err(|_| invalid("history_cursor"))?,
-                None => (root.next, 0),
-            };
-            if cut > root.next || cursor > cut {
-                return Err(invalid("history_cursor"));
-            }
-            let started = Instant::now();
-            let mut bytes = 0;
-            let mut items = BTreeSet::new();
-            let end = cursor.saturating_add(u64::from(page.limit.get())).min(cut);
-            while cursor < end
-                && started.elapsed() < Duration::from_millis(80)
-                && bytes + self.inner.config.max_input_bytes + 512 <= 1024 * 1024
-            {
-                let intent = match tokio::time::timeout(
-                    Duration::from_millis(20),
-                    self.intent(shard, cursor + 1),
-                )
-                .await
-                {
-                    Ok(Ok(intent)) => intent,
-                    _ => {
-                        // This enumeration cursor is not a completion watermark.
-                        // The root's retained sequence still obliges repair; report
-                        // the failed position and continue other sessions in-page.
-                        cursor += 1;
-                        tracing::warn!(
-                            shard = shard.0,
-                            sequence = cursor,
-                            "admission discovery entry remains pending repair"
-                        );
-                        bytes += self.inner.config.max_input_bytes + 512;
-                        continue;
-                    }
-                };
-                bytes += serde_json::to_vec(&intent)
-                    .map_err(|_| invalid("intent_encoding"))?
-                    .len();
-                if bytes > 1024 * 1024 {
-                    break;
-                }
-                cursor += 1;
-                // Return candidates from the immutable discovery journal. A bad
-                // canonical/checkpoint belongs to this session's recovery, not to
-                // the shard-wide page. Worker already acquires candidates separately.
-                items.insert(intent.request.input.sid);
-            }
-            let next = if cursor < cut {
-                Some(PageToken(
-                    serde_json::to_string(&(cut, cursor)).map_err(|_| invalid("history_cursor"))?,
-                ))
-            } else {
-                None
-            };
-            Ok(Page {
-                items: items.into_iter().collect(),
-                next,
-            })
+            progress.lock().map_err(|_| invalid("history_lock"))?.cut = Some(root.next);
+            root.next
         };
-        tokio::time::timeout(Duration::from_millis(100), work)
+        let mut cursor = initial.cursor;
+        let started = Instant::now();
+        let mut bytes = 0;
+        let mut items = BTreeSet::new();
+        let end = cursor.saturating_add(u64::from(page.limit.get())).min(cut);
+        while cursor < end
+            && started.elapsed() < Duration::from_millis(80)
+            && bytes + self.inner.config.max_input_bytes + 512 <= 1024 * 1024
+        {
+            if !self.inner.scan_budget.claim(ScanClass::Discovery, 1, 0)? {
+                break;
+            }
+            let intent = match tokio::time::timeout(
+                Duration::from_millis(500),
+                self.intent(shard, cursor + 1),
+            )
             .await
-            .map_err(|_| unknown("history_page"))?
+            {
+                Ok(Ok(intent)) => intent,
+                _ => {
+                    // This enumeration cursor is not a completion watermark.
+                    // The root's retained sequence still obliges repair; report
+                    // the failed position and continue other sessions in-page.
+                    cursor += 1;
+                    tracing::warn!(
+                        shard = shard.0,
+                        sequence = cursor,
+                        "admission discovery entry remains pending repair"
+                    );
+                    bytes += self.inner.config.max_input_bytes + 512;
+                    continue;
+                }
+            };
+            bytes += serde_json::to_vec(&intent)
+                .map_err(|_| invalid("intent_encoding"))?
+                .len();
+            if bytes > 1024 * 1024 {
+                break;
+            }
+            cursor += 1;
+            // Return candidates from the immutable discovery journal. A bad
+            // canonical/checkpoint belongs to this session's recovery, not to
+            // the shard-wide page. Worker already acquires candidates separately.
+            items.insert(intent.request.input.sid);
+        }
+        let next = if cursor < cut {
+            Some(PageToken(
+                serde_json::to_string(&(cut, cursor)).map_err(|_| invalid("history_cursor"))?,
+            ))
+        } else {
+            None
+        };
+        Ok(Page {
+            items: items.into_iter().collect(),
+            next,
+        })
     }
     async fn discover_intent(&self, intent: &Intent) -> Result<bool, StoreError> {
         let key = self
@@ -143,7 +176,9 @@ impl StoreInboxProducer {
             return Ok(true);
         }
         if let Some(due) = schedule.next_check {
-            self.hint(sid, Some(due)).await?;
+            // The authoritative due time was checked. Accelerators are disposable;
+            // a missing wake cannot turn this proof into a historical repair gap.
+            let _ = self.hint(sid, Some(due)).await;
             return Ok(true);
         }
         if checkpoint.as_ref().is_some_and(|c| {
@@ -180,34 +215,68 @@ impl StoreInboxProducer {
         {
             return Err(unknown("historical_discovery"));
         }
-        self.hint(sid, schedule.next_check).await
+        // Activation is already durable. Worker also enumerates retained history,
+        // so notification timeout must not poison the completed discovery round.
+        let _ = self.hint(sid, schedule.next_check).await;
+        Ok(())
     }
     async fn maintenance(
         &self,
         shard: ShardId,
         discovery: bool,
     ) -> Result<AdmissionMaintenance, StoreError> {
-        tokio::time::timeout(
-            Duration::from_millis(100),
-            self.maintenance_round(shard, discovery),
-        )
-        .await
-        .map_err(|_| unknown("maintenance_round"))?
+        let runner = self.scan_execution();
+        let key = JobKey {
+            class: u8::from(discovery),
+            shard,
+            id: String::new(),
+        };
+        let future = Box::pin(async move {
+            let Some(_scan_io) = runner.inner.scan_budget.try_io() else {
+                return Ok(ScanResult::Maintenance(AdmissionMaintenance::default()));
+            };
+            runner
+                .maintenance_round(shard, discovery)
+                .await
+                .map(ScanResult::Maintenance)
+        });
+        let scheduler = self.scans.scheduler()?;
+        let Some(job) = scheduler.reserve(key.clone(), future, None)? else {
+            return Ok(AdmissionMaintenance::default());
+        };
+        match scheduler.poll(&key, &job).await? {
+            Some(ScanResult::Maintenance(report)) => Ok(report),
+            Some(_) => Err(invalid("maintenance_job_kind")),
+            None => Ok(AdmissionMaintenance::default()),
+        }
     }
     async fn maintenance_round(
         &self,
         shard: ShardId,
         discovery: bool,
     ) -> Result<AdmissionMaintenance, StoreError> {
-        // Includes root/scan initialization, bounded item work, and the final
-        // cursor write; reserve the last 20ms of this turn for that write.
-        let started = Instant::now();
+        // The caller polls this retained future in <=100ms slices. Native IO has
+        // its own deadline; canceled polls cannot restart the read/write prefix.
         let kind = if discovery { "discovery" } else { "repair" };
-        let kind_index = usize::from(discovery);
+        let class = if discovery {
+            ScanClass::Discovery
+        } else {
+            ScanClass::Repair
+        };
         let key = self.inner.layout.admission_scan(shard, kind)?;
         let root_key = self.inner.layout.admission_root(shard);
-        let (root, stored) =
-            tokio::try_join!(self.load::<JournalRoot>(&root_key), self.load::<Scan>(&key))?;
+        // The root pair is the sole parallel provider IO in this scan. Count
+        // its second request as well as the enclosing scan's single IO permit.
+        let (root, stored) = if let Some(_root_io) = self.inner.scan_budget.try_io() {
+            tokio::try_join!(self.load::<JournalRoot>(&root_key), self.load::<Scan>(&key))?
+        } else {
+            // The enclosing scan already holds its one permit. A small pool or
+            // temporary pressure still permits bounded sequential progress.
+            (
+                self.load::<JournalRoot>(&root_key).await?,
+                self.load::<Scan>(&key).await?,
+            )
+        };
         let root = root.map(|(_, r)| r).unwrap_or_default();
         let (version, mut scan) = stored.map_or((None, Scan::default()), |(v, s)| (Some(v), s));
         if scan.cursor >= scan.cut && scan.pending.is_empty() && scan.round > 0 {
@@ -226,6 +295,7 @@ impl StoreInboxProducer {
             self.begin_health_round(shard, &root, discovery, scan.round)?;
         }
         let mut report = AdmissionMaintenance::default();
+        drop(root);
         let mut bytes = 0;
         let retry = scan
             .pending
@@ -241,6 +311,7 @@ impl StoreInboxProducer {
         // which lane goes first durably, so it cannot starve forward discovery.
         let mut forward_first = !scan.retry_first;
         scan.retry_first = !scan.retry_first;
+        let started = Instant::now();
         while report.examined < 128
             // Avoid starting a fresh multi-IO item in the final few milliseconds;
             // returning a shorter page preserves already completed forward work.
@@ -261,16 +332,9 @@ impl StoreInboxProducer {
                 None if scan.cursor < scan.cut => scan.cursor + 1,
                 None => break,
             };
-            if !self
-                .inner
-                .scan_rate
-                .lock()
-                .map_err(|_| invalid("scan_budget_lock"))?
-                .claim(kind_index)
-            {
+            if !self.inner.scan_budget.claim(class, 1, 1)? {
                 break;
             }
-            let left = Duration::from_millis(80).saturating_sub(started.elapsed());
             // Reserve before IO: decoding/validation failures still consumed the
             // physical log bytes and may not reset this round's read budget.
             let reserved = self.inner.config.max_input_bytes + 512;
@@ -290,7 +354,7 @@ impl StoreInboxProducer {
                     Ok((self.repair_one(&intent).await?, false))
                 }
             };
-            let result = tokio::time::timeout(left, action).await;
+            let result = tokio::time::timeout(Duration::from_secs(2), action).await;
             report.examined += 1;
             if pending.is_none() {
                 scan.cursor = seq;
@@ -325,9 +389,7 @@ impl StoreInboxProducer {
         if !self.save(&key, version, &scan, kind).await? {
             return Err(unknown(kind));
         }
-        if started.elapsed() < Duration::from_millis(70) {
-            self.update_lag(shard, discovery, &scan).await?;
-        }
+        self.update_lag(shard, discovery, &scan).await?;
         Ok(report)
     }
     async fn update_lag(

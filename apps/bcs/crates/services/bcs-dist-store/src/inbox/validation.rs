@@ -51,6 +51,10 @@ impl StoreInboxProducer {
         }
 
         if let Some(t) = &r.create_task {
+            self.inner
+                .projection
+                .validate_task_limits(t, &t.output_limits)
+                .map_err(|_| invalid("initial_task_output_limits"))?;
             encode_json(t)?;
             if t.scope != r.scope {
                 return Err(invalid("task_scope_mismatch"));
@@ -91,6 +95,10 @@ impl StoreInboxProducer {
             return Err(invalid("control_task_missing"));
         }
         if let Some(t) = &r.create_task {
+            self.inner
+                .projection
+                .validate_session_limits(spec, &t.output_limits)
+                .map_err(|_| invalid("session_capacity_profile"))?;
             if t.sid != i.sid || t.tid != i.tid || t.scope != r.scope {
                 return Err(invalid("task_identity_mismatch"));
             }

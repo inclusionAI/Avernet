@@ -242,7 +242,7 @@ async fn runtime_harnesses_require_draining_state_after_drain() -> ContractResul
                 .expect(snapshot_method, (), Ok::<_, RuntimeError>(initial.clone()))
                 .expect(
                     drain_method,
-                    (Duration::from_secs(1),),
+                    (Duration::from_secs(if role == 2 { 5 } else { 1 }),),
                     Ok::<_, RuntimeError>(DrainOutcome::Drained),
                 )
                 .expect(

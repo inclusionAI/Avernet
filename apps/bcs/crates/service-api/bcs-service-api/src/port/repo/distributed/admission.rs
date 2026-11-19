@@ -14,7 +14,7 @@ pub struct AdmissionClosure {
     pub journal_cut: u64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AdmissionObligation {
     pub request: AdmitRequest,
     pub accepted: bool,
@@ -53,9 +53,10 @@ pub trait AdmissionMaintenancePort: Send + Sync {
 
 #[async_trait]
 pub trait AdmissionControlPort: Send + Sync {
+    async fn gate_state(&self, owner: &SessionOwnership) -> Result<AdmissionGateState, StoreError>;
     async fn close_gate(
         &self,
-        owner: &SessionOwnership,
+        guard: super::control::ControlGuard,
         expected_generation: u64,
         operation_id: RequestId,
     ) -> Result<GateCloseOutcome, StoreError>;
@@ -68,4 +69,90 @@ pub trait AdmissionControlPort: Send + Sync {
         closure: &AdmissionClosure,
         page: PageRequest,
     ) -> Result<Page<AdmissionObligation>, StoreError>;
+}
+
+/// Created by a complete fixed-cut closure scan, after every relevant task's
+/// immutable archive and terminal publication have been independently verified.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClosureCertificate {
+    pub closure: AdmissionClosure,
+    pub completed_through: u64,
+    pub terminal_tasks: u64,
+    pub evidence_digest: Digest,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateRecoveryReceipt {
+    pub sid: Sid,
+    pub isolation_id: RequestId,
+    pub request_id: RequestId,
+    pub owner: SessionOwnership,
+    pub head: CommitSeq,
+    pub control_revision: u64,
+    pub closed_generation: u64,
+    pub opened_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalTaskEvidence {
+    pub scope: TaskScope,
+    pub sid: Sid,
+    pub tid: Tid,
+    pub terminal_event: EventId,
+    pub source_commit: CommitSeq,
+    pub result_ref: BlobRef,
+    /// Digest of the complete verified immutable FinalTaskRecord.
+    pub archive_digest: Digest,
+    /// Digest of durable append/publication completion facts and snapshot.
+    pub publication_digest: Digest,
+}
+#[async_trait]
+pub trait TerminalTaskEvidencePort: Send + Sync {
+    /// Return Some only after reading actual scoped terminal TaskSnapshot,
+    /// verifying its immutable archive and terminal append/publication completion.
+    /// Missing/unpublished facts return None; corrupt/conflicting facts are errors.
+    async fn terminal_evidence(
+        &self,
+        scope: &TaskScope,
+        tid: &Tid,
+    ) -> Result<Option<TerminalTaskEvidence>, StoreError>;
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClosureWork {
+    pub closure: AdmissionClosure,
+    pub completed_through: u64,
+    pub obligation: Option<AdmissionObligation>,
+    pub certificate: Option<ClosureCertificate>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateReopenOutcome {
+    Opened(GateRecoveryReceipt),
+    AlreadyOpened(GateRecoveryReceipt),
+    Fenced,
+    Conflict,
+    NotReady,
+}
+#[async_trait]
+pub trait AdmissionClosurePort: AdmissionControlPort {
+    /// Advances provider-owned durable coverage; never trusts a caller cursor.
+    /// A pending Start is create-once materialized before returning its obligation.
+    /// It remains pending until TerminalTaskEvidencePort verifies actual evidence.
+    async fn advance_closure(
+        &self,
+        owner: &SessionOwnership,
+        closure: &AdmissionClosure,
+    ) -> Result<ClosureWork, StoreError>;
+    /// Requires the exact current Recovering control state and completed cut.
+    /// Reopens once, advances generation, and records the authority gate receipt.
+    async fn reopen_gate(
+        &self,
+        guard: super::control::ControlGuard,
+        request_id: RequestId,
+    ) -> Result<GateReopenOutcome, StoreError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmissionGateState {
+    pub generation: u64,
+    pub closed_operation: Option<RequestId>,
+    pub closure: Option<AdmissionClosure>,
 }

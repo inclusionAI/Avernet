@@ -14,11 +14,12 @@
 //! - [`command`]: command-stream partitions shared by the Worker and Connectors.
 
 pub mod archive;
-pub mod evidence;
 pub mod capability;
 pub mod codec;
 pub mod command;
+pub mod dispatch;
 pub mod error;
+pub mod evidence;
 pub mod identity;
 pub mod inbox;
 pub mod layout;
@@ -26,3 +27,5 @@ pub mod task_feed;
 pub mod version;
 
 pub mod coordination;
+
+pub mod budget;

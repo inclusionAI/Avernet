@@ -92,6 +92,14 @@ pub struct TaskFilter {
 
 #[async_trait]
 pub trait TaskReaderPort: Send + Sync {
+    /// Read the atomic published cut, including immutable identity and frozen
+    /// output limits needed when Worker first admits a task to its checkpoint.
+    /// This is not a reconstructed view or permission to publish/trim.
+    async fn load_snapshot(
+        &self,
+        scope: &TaskScope,
+        tid: &Tid,
+    ) -> Result<Option<TaskSnapshot>, StoreError>;
     /// Fold snapshot S and events (S,H] into one consistent view. Retry concurrent
     /// trimming; handle null initial coverage without silently skipping first events.
     async fn restore(

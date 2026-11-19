@@ -3,14 +3,18 @@
 //! See `README.md` for retained data, budgets and Worker integration obligations.
 
 mod admission;
+mod closure;
+pub use closure::StoreAdmissionControl;
 mod capacity;
 mod consumer;
 mod health;
+pub use health::MaintenanceObservation;
 mod journal;
 mod listener;
 mod maintenance;
 mod producer;
 mod progress;
+mod scan_scheduler;
 mod scheduling;
 mod state;
 mod storage;

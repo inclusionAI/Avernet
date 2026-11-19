@@ -155,6 +155,17 @@ impl StoreInboxProducer {
         loop {
             budget.attempt(key).await?;
             let (v, mut s) = budget.io(key, self.schedule(c.intent.sid())).await?;
+            if c.intent.start()
+                && s.closed
+                    .as_ref()
+                    .is_some_and(|closed| closed.generation == c.intent.generation)
+                && s.slots.contains_key(key)
+            {
+                // A canonical decision is not a terminal publication proof.
+                // The independent closure provider verifies that proof and then
+                // releases this closed-generation working slot.
+                return Ok(());
+            }
             if s.slots.remove(key).is_none() {
                 return Ok(());
             }

@@ -38,14 +38,21 @@ pub enum ControlOutcome {
 pub struct DispatchRecord {
     pub view: DispatchView,
     pub revision: Revision,
+    /// Retained evidence for the definitive terminal outcome. Unknown remote
+    /// work has no terminal evidence; Supervisor must not fabricate an outcome.
+    pub terminal_evidence: Option<String>,
 }
 
 #[async_trait]
 pub trait DispatchControlPort: Send + Sync {
+    /// Unknown on legacy adapters; full phase-one assembly requires one shared identity.
+    fn scan_budget_profile(&self) -> Option<super::budget::ScanBudgetProfile> {
+        None
+    }
     /// Success includes durable recheck registration, repaired on an existing row.
     /// Equal did with changed immutable content is a conflict, not successful NX.
     async fn create(&self, request: CreateCommittedDispatch)
-        -> Result<IdempotentWrite, StoreError>;
+    -> Result<IdempotentWrite, StoreError>;
     /// Monotonic intent: replay cannot reset a later cancellation observation.
     async fn request_cancel(
         &self,

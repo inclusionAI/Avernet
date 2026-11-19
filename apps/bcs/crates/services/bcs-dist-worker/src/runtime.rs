@@ -46,6 +46,9 @@ pub(crate) enum AcquisitionStage {
         uncertain: bool,
     },
     Observe(Box<AcquiredSession>),
+    Diagnostic {
+        code: String,
+    },
     Release(SessionOwnership),
 }
 #[derive(Clone)]
@@ -106,7 +109,7 @@ impl State {
 pub type CheckpointInitializer =
     dyn Fn(&SessionSpec) -> Result<Checkpoint, RuntimeError> + Send + Sync;
 
-type SharedFeed = Arc<AsyncMutex<Box<dyn ShardFeedPort>>>;
+type SharedFeed = Arc<AsyncMutex<Option<Box<dyn ShardFeedPort>>>>;
 
 pub struct WorkerRuntime {
     pub(crate) instance: Instance,
@@ -121,7 +124,10 @@ pub struct WorkerRuntime {
     pub(crate) initialize: Arc<CheckpointInitializer>,
     pub(crate) state: Mutex<State>,
     pub(crate) tick_guard: AsyncMutex<()>,
-    feeds: Mutex<BTreeMap<ShardId, SharedFeed>>,
+    pub(crate) feeds: Mutex<BTreeMap<ShardId, SharedFeed>>,
+    pub(crate) reader_restarts: std::sync::atomic::AtomicU64,
+    pub(crate) scan_budget:
+        Mutex<Option<Arc<dyn bcs_service_api::port::repo::distributed::budget::ScanBudgetPort>>>,
 }
 impl WorkerRuntime {
     pub fn fresh_instance(node: String) -> Instance {
@@ -218,6 +224,8 @@ impl WorkerRuntime {
             }),
             tick_guard: AsyncMutex::new(()),
             feeds: Mutex::new(BTreeMap::new()),
+            reader_restarts: std::sync::atomic::AtomicU64::new(0),
+            scan_budget: Mutex::new(None),
         }))
     }
     pub fn instance(&self) -> &Instance {
@@ -450,10 +458,18 @@ impl WorkerRuntime {
         let shard = request.shard;
         let prior_unknown = {
             let mut state = self.state()?;
-            if state.draining && state.claims.get(&shard).is_some_and(|(_, _, at)| *at > Instant::now()) {
+            if state.draining
+                && state
+                    .claims
+                    .get(&shard)
+                    .is_some_and(|(_, _, at)| *at > Instant::now())
+            {
                 return Ok(());
             }
-            let prior = state.claims.get(&shard).is_some_and(|(_, unknown, _)| *unknown);
+            let prior = state
+                .claims
+                .get(&shard)
+                .is_some_and(|(_, unknown, _)| *unknown);
             if let Some((_, unknown, retry_at)) = state.claims.get_mut(&shard) {
                 *unknown = true;
                 // Record before I/O so cancellation also respects backoff.
@@ -499,9 +515,12 @@ impl WorkerRuntime {
     pub(crate) async fn resolve_claims(&self) -> Result<(), RuntimeError> {
         let claims = {
             let state = self.state()?;
-            state.claims.values()
+            state
+                .claims
+                .values()
                 .filter(|(_, _, at)| !state.draining || *at <= Instant::now())
-                .map(|(request, _, _)| request.clone()).collect::<Vec<_>>()
+                .map(|(request, _, _)| request.clone())
+                .collect::<Vec<_>>()
         };
         let mut failure = None;
         for request in claims.into_iter().take(self.config.max_shards_per_tick) {
@@ -594,8 +613,15 @@ impl WorkerRuntime {
             session.acquired.envelope.checkpoint.consumed.clone()
         };
         let feed = self.feed(owner.shard).await?;
-        self.bounded(async { feed.lock().await.watch(owner.sid.clone(), after).await })
-            .await?;
+        self.bounded(async {
+            feed.lock()
+                .await
+                .as_mut()
+                .ok_or_else(reader_rebuilding)?
+                .watch(owner.sid.clone(), after)
+                .await
+        })
+        .await?;
         let mut state = self.state()?;
         let s = state
             .sessions
@@ -608,19 +634,38 @@ impl WorkerRuntime {
         s.phase = Phase::Idle;
         Ok(())
     }
-    async fn feed(&self, shard: ShardId) -> Result<SharedFeed, RuntimeError> {
-        let existing = self
+    pub(crate) async fn feed(&self, shard: ShardId) -> Result<SharedFeed, RuntimeError> {
+        let shared = self
             .feeds
             .lock()
             .map_err(|_| err("worker_feed_poisoned"))?
-            .get(&shard)
-            .cloned();
-        if let Some(feed) = existing {
-            return Ok(feed);
+            .entry(shard)
+            .or_insert_with(|| Arc::new(AsyncMutex::new(None)))
+            .clone();
+        {
+            let mut guard = shared.lock().await;
+            if guard.is_none() {
+                let opened = self.bounded(self.inbox.open(shard)).await?;
+                let watched = self
+                    .state()?
+                    .sessions
+                    .values()
+                    .filter(|s| s.acquired.ownership.shard == shard && s.phase != Phase::Releasing)
+                    .map(|s| {
+                        (
+                            s.acquired.ownership.sid.clone(),
+                            s.acquired.envelope.checkpoint.consumed.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                *guard = Some(Box::new(crate::rebuilding_feed::RebuildingFeed::new(
+                    opened,
+                    watched,
+                    self.config.request_timeout,
+                )));
+            }
         }
-        let opened = Arc::new(AsyncMutex::new(self.bounded(self.inbox.open(shard)).await?));
-        let mut feeds = self.feeds.lock().map_err(|_| err("worker_feed_poisoned"))?;
-        Ok(feeds.entry(shard).or_insert(opened).clone())
+        Ok(shared)
     }
     pub async fn read_inputs(
         &self,
@@ -638,6 +683,8 @@ impl WorkerRuntime {
         self.bounded(async {
             feed.lock()
                 .await
+                .as_mut()
+                .ok_or_else(reader_rebuilding)?
                 .next(limits, wait.min(self.config.request_timeout))
                 .await
         })
@@ -780,8 +827,15 @@ impl WorkerRuntime {
             .get(&owner.shard)
             .cloned();
         if let Some(feed) = feed {
-            self.bounded(async { feed.lock().await.unwatch(&owner.sid).await })
-                .await?;
+            self.bounded(async {
+                feed.lock()
+                    .await
+                    .as_mut()
+                    .ok_or_else(reader_rebuilding)?
+                    .unwatch(&owner.sid)
+                    .await
+            })
+            .await?;
         }
         // Cleanup follows transfer/unwatch I/O; its own retry interval starts
         // here, not at the earlier batch-selection or transfer timestamp.
@@ -808,11 +862,10 @@ impl WorkerRuntime {
             .lock()
             .map_err(|_| err("worker_feed_poisoned"))?
             .retain(|shard, _| {
-                state.shards.contains_key(shard)
-                    || state
-                        .sessions
-                        .values()
-                        .any(|s| s.acquired.ownership.shard == *shard)
+                state
+                    .sessions
+                    .values()
+                    .any(|s| s.acquired.ownership.shard == *shard)
                     || state.acquisitions.values().any(|a| a.claim.shard == *shard)
             });
         Ok(())
@@ -871,8 +924,17 @@ pub(crate) fn err(code: &str) -> RuntimeError {
 pub(crate) fn store_error(error: StoreError) -> RuntimeError {
     err(match error {
         StoreError::OutcomeUnknown { .. } => "store_outcome_unknown",
+        StoreError::NotApplied { ref code } if code == "session_control_paused" => {
+            "session_control_paused"
+        }
         StoreError::NotApplied { .. } => "store_not_applied",
         StoreError::Invalid { .. } => "store_invalid",
         StoreError::UnsupportedFormat { .. } => "store_format",
     })
+}
+
+pub(crate) fn reader_rebuilding() -> StoreError {
+    StoreError::NotApplied {
+        code: "reader_rebuilding".into(),
+    }
 }

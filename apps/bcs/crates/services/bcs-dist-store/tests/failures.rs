@@ -15,6 +15,13 @@ use std::sync::Arc;
 
 fn producer(store: &Arc<Recorder>) -> StoreInboxProducer {
     StoreInboxProducer::new(
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
         store.clone(),
         store.clone(),
         store.clone(),
@@ -61,38 +68,68 @@ async fn the_merged_port_harness_passes() {
 
 #[tokio::test]
 async fn admit_reports_a_definite_error_only_before_journal_reservation() {
-    let baseline=Arc::new(Recorder::default());
-    producer(&baseline).admit(new_session("count", "hello")).await.unwrap();
-    let writes:Vec<_>=baseline.calls().into_iter().filter(|c|!c.starts_with("document.read")).collect();
-    for (index,call) in writes.iter().enumerate() {
-        let store=Arc::new(Recorder::default());store.fail_write(index+1);
-        let result=producer(&store).admit(new_session("failed", "hello")).await;
-        if index==0 {assert_eq!(result,Err(definite()));}
-        else if call.ends_with(":active") || call.ends_with(":wake") {
-            assert!(matches!(result,Ok(AdmitOutcome::Accepted(_))),"{call}: {result:?}");
-        } else {assert_eq!(result,Err(unknown("failed")),"{call}");}
+    let baseline = Arc::new(Recorder::default());
+    producer(&baseline)
+        .admit(new_session("count", "hello"))
+        .await
+        .unwrap();
+    let writes: Vec<_> = baseline
+        .calls()
+        .into_iter()
+        .filter(|c| !c.starts_with("document.read"))
+        .collect();
+    for (index, call) in writes.iter().enumerate() {
+        let store = Arc::new(Recorder::default());
+        store.fail_write(index + 1);
+        let result = producer(&store).admit(new_session("failed", "hello")).await;
+        if index == 0 {
+            assert_eq!(result, Err(definite()));
+        } else if call.ends_with(":active") || call.ends_with(":wake") {
+            assert!(
+                matches!(result, Ok(AdmitOutcome::Accepted(_))),
+                "{call}: {result:?}"
+            );
+        } else {
+            assert_eq!(result, Err(unknown("failed")), "{call}");
+        }
     }
 }
 
 #[tokio::test]
 async fn existing_task_control_is_journaled_before_delivery() {
-    let store=Arc::new(Recorder::default());let p=producer(&store);
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
     p.admit(new_session("start", "hello")).await.unwrap();
     store.fail_write(1);
-    let mut request=new_session("control", "reply");request.create_session=None;request.create_task=None;
-    request.input.body=InputBody::Cancel{reason:None};
-    assert_eq!(p.admit(request).await,Err(definite()));
+    let mut request = new_session("control", "reply");
+    request.create_session = None;
+    request.create_task = None;
+    request.input.body = InputBody::Cancel { reason: None };
+    assert_eq!(p.admit(request).await, Err(definite()));
 }
 
 #[tokio::test]
 async fn intermediate_activation_failure_is_unknown_and_discoverable() {
-    let store=Arc::new(Recorder::default());let p=producer(&store);
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
     p.admit(new_session("start", "hello")).await.unwrap();
-    let request=AppendAgentEvent{sid:Sid(SID.into()),tid:Tid(TID.into()),event:AgentEvent{
-        did:Did(format!("{TID}.d")),holder_epoch:HolderEpoch(1),seq:InputSeq(1),kind:AgentEventKind::Delta,
-        remote_event_id:None,payload:Payload::Inline(serde_json::json!("delta"))}};
+    let request = AppendAgentEvent {
+        sid: Sid(SID.into()),
+        tid: Tid(TID.into()),
+        event: AgentEvent {
+            did: Did(format!("{TID}.d")),
+            holder_epoch: HolderEpoch(1),
+            seq: InputSeq(1),
+            kind: AgentEventKind::Delta,
+            remote_event_id: None,
+            payload: Payload::Inline(serde_json::json!("delta")),
+        },
+    };
     store.fail_write(3); // one atomic quota reservation, Inbox, then activation.
-    assert!(matches!(p.append_stream(request).await,Err(StoreError::OutcomeUnknown{..})));
+    assert!(matches!(
+        p.append_stream(request).await,
+        Err(StoreError::OutcomeUnknown { .. })
+    ));
     use bcs_service_api::port::repo::distributed::admission::AdmissionMaintenancePort;
-    assert!(p.discover(ShardId(42)).await.unwrap().activated>0);
+    assert!(p.discover(ShardId(42)).await.unwrap().activated > 0);
 }

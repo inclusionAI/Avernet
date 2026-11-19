@@ -2,7 +2,9 @@
 mod common;
 use bcs_dist_model::*;
 use bcs_dist_store::{inbox::*, layout::KeyLayout};
-use bcs_service_api::port::repo::distributed::{admission::*, common::*, inbox::*, session::*};
+use bcs_service_api::port::repo::distributed::{
+    admission::*, common::*, control::*, inbox::*, session::*,
+};
 use bcs_store_api::document::DocumentStorePlugin;
 use common::*;
 use std::{num::NonZeroU32, sync::Arc};
@@ -11,6 +13,13 @@ fn layout() -> KeyLayout {
 }
 fn provider(store: Arc<Recorder>) -> StoreInboxProducer {
     StoreInboxProducer::new(
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
         store.clone(),
         store.clone(),
         store.clone(),
@@ -51,6 +60,7 @@ async fn owner(store: &Recorder, p: &StoreInboxProducer) -> SessionOwnership {
             runner_state: None,
             dispatch_seq: Default::default(),
             deadlines: vec![],
+            deadline_history: Default::default(),
             view_drafts: Default::default(),
             last_event_id: None,
             outbox: None,
@@ -62,11 +72,24 @@ async fn owner(store: &Recorder, p: &StoreInboxProducer) -> SessionOwnership {
             last_active_at: TimestampMillis(100),
         },
     };
+    let mut raw = serde_json::to_value(envelope).unwrap();
+    let mut control = SessionControl {
+        revision: 1,
+        ..Default::default()
+    };
+    control.mode = ControlMode::Quarantined {
+        isolation: IsolationRecord {
+            operation_id: RequestId("isolate".into()),
+            reason: "test".into(),
+            head: CommitSeq(0),
+            failed_attempt: RequestId("attempt".into()),
+            closure: None,
+            completion: None,
+        },
+    };
+    raw["control"] = serde_json::to_value(control).unwrap();
     store
-        .create_document(
-            &layout().ckpt(&owner.sid).unwrap(),
-            &serde_json::to_value(envelope).unwrap(),
-        )
+        .create_document(&layout().ckpt(&owner.sid).unwrap(), &raw)
         .await
         .unwrap();
     assert!(matches!(
@@ -77,7 +100,15 @@ async fn owner(store: &Recorder, p: &StoreInboxProducer) -> SessionOwnership {
 }
 async fn close(p: &StoreInboxProducer, owner: &SessionOwnership) -> AdmissionClosure {
     match p
-        .close_gate(owner, 1, RequestId("isolate".into()))
+        .close_gate(
+            ControlGuard {
+                owner: owner.clone(),
+                expected_head: CommitSeq(0),
+                expected_revision: 1,
+            },
+            1,
+            RequestId("isolate".into()),
+        )
         .await
         .unwrap()
     {

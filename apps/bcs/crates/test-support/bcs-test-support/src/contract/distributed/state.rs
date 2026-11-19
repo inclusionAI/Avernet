@@ -76,8 +76,14 @@ pub async fn session_store_port_contract_tests(
             .expect("fixture epoch"),
     );
     unsealed.commit_id.0.push_str("-unsealed");
+    if let Some(batch) = unsealed.candidate.outbox.as_mut() {
+        batch.commit_id = unsealed.commit_id.clone();
+    }
     let mut competing = request;
     competing.commit_id.0.push_str("-competing");
+    if let Some(batch) = competing.candidate.outbox.as_mut() {
+        batch.commit_id = competing.commit_id.clone();
+    }
     assert_eq!(
         port.commit(competing).await?,
         CommitOutcome::CommitSeqConflict

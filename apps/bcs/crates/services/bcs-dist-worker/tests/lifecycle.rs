@@ -265,6 +265,7 @@ async fn confirmed_checkpoint_and_receipt_advance_together() {
     a.recovery_completed(&owner).await.unwrap();
     let mut acquired = a.begin_round(&sid()).unwrap();
     let batch = CommittedBatch {
+        created_at: None,
         commit_id: CommitId("commit-1".into()),
         source_commit: CommitSeq(1),
         content_digest: Digest("digest-1".into()),

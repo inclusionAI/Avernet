@@ -1,10 +1,10 @@
 # Reliable Inbox provider
 
 Status: public phase-one provider for admission, consumption, scheduling and
-admission maintenance. Worker supervision and complete isolation finalization
-are separate integration tasks. This module implements
+admission maintenance and recoverable isolation closure. Worker supervision and
+independent task finalization remain application integration responsibilities. This module implements
 [Worker runtime SPEC §4 and §8.2](../../../../../specs/2026-11-18-worker-runtime-phase1/spec.md),
-with gate/cut primitives for §7.2. The
+including the gate/cut/terminal-proof and authorized recovery protocol in §7.2. The
 [repository contracts](../../../../service-api/bcs-service-api/src/port/repo/distributed/README.md)
 own the portable method shapes.
 
@@ -49,12 +49,39 @@ The dispatch must match the existing task/session and frozen scope. Only User
 inputs may create tasks; Human, Cancel and Agent inputs cannot bypass the gate
 by supplying create_task. Final/Error cannot use the best-effort stream API.
 
-`close_gate` validates the actual sealed checkpoint owner, closes one generation
-and captures a fixed journal cut. `closure_obligations` includes prior Accepted
-and registered creators paused before task creation. It does **not** authorize
-closure completion, terminal publication, archive verification or reopening.
-The isolation implementation must confirm those facts, preserve old Accepted
-history, and bind resume to persisted recovery control before advancing a gate.
+`close_gate` requires the exact sealed owner, business head, control revision and
+persisted isolation ID. It closes one admission generation before capturing its
+fixed journal cut. A monotonic control revision in the schedule prevents an old
+close/reopen request from refreshing the schedule version and replacing a newer
+isolation. A successful fresh close uses two EQ writes and up to ten document
+reads across close, cut capture and confirmation, excluding contention retries.
+
+`closure_obligations` enumerates candidates; its caller cursor is not completion
+proof. `StoreAdmissionControl` adds `AdmissionClosurePort` and requires an injected
+`TerminalTaskEvidencePort`. It persists a continuous fixed-cut cursor, one pending
+materialization phase, checkpoint task coverage and a cumulative evidence digest.
+Each advance performs one phase/entry. It creates missing spec/index/task records
+with create-once semantics before exposing the task to the independent finalizer.
+Accepted conclusions remain stable. Closed Start slots remain until verified
+terminal evidence exists, including when a creator resumes after recovery.
+
+Completion requires actual immutable archive and terminal append/publication
+receipts, rechecks tasks added by finalization after scanning began, and retains
+an immutable certificate. `terminal_tasks` counts verified obligation observations
+(including checkpoint coverage), not distinct task identities. No caller-supplied
+boolean or guessed result reference proves completion. Per-phase reads include
+control/schedule/certificate/progress; task verification additionally invokes the
+bounded TaskFeed evidence provider and archive reads. Checkpoint coverage retains
+at most 128 task IDs; each advance is bounded and can return pending progress.
+
+Authorized recovery first persists Recovering and the original complete request.
+Reopen verifies that authorization, exact closed generation and real certificate,
+then advances the generation once and records a receipt. Checkpoint control only
+returns Normal after confirming the actual gate receipt. After owner change a
+new authorization may continue either before or after the gate write; it does not
+advance an already-open generation again. A new isolation invalidates old
+recovery, and if an old reopen won first its new generation is closed with a new
+cut covering admissions in that interval.
 
 ## Scheduling and consumption
 
@@ -81,8 +108,9 @@ No Inbox trim or physical broker deletion is performed.
 `FeedBatch.failures` reports per-Session failures and suspends that watch. Worker
 must resolve any retained candidate, invalidate the failed watch, and rebuild
 from committed consumed. A global reader failure requires rebuilding the feed.
-Current provider tests exercise this protocol; complete Worker supervision is
-part of Task 5, not established by the provider alone.
+The Worker processor rebuilds failed watches from committed consumed. Reads keep
+watches installed across awaits and stage cursor/receipt changes until the
+return boundary, so cancelling a poll cannot discard undelivered inputs.
 
 ## Retention, layout and bounded work
 
@@ -105,23 +133,32 @@ retained sequences; duplicates increase scan cost. A root is the shard hotspot.
 | Inbox 4,096 entries / 16 MiB | Atomic root ledger per Session; 64 entries / 128 KiB each reserved for controls and for normal repair |
 | Reader/watch/receipt 64 / 128 / 256 | Shared provider caps; watches/readers release on drop; unconfirmed receipts are not evicted for new work |
 | EQ loop 8 attempts / 500ms | Remaining-time IO timeout, exponential 5–200ms conflict backoff |
-| Scan 128 items / 1 MiB / 100ms | Fixed cut, per-item timeout, persistent forward cursor and separate completion prefix |
+| Scan 128 items / 1 MiB / 100ms poll | Fixed cut, retained bounded future, per-item timeout, persistent forward cursor and separate completion prefix |
 | Scan IO min(8, pool/4) | Shared provider semaphore; default connection-pool size 32 |
 
 Repair and discovery have independent durable cursors and budgets. Pending
 references rotate separately from the forward cursor. A persisted lane toggle
 alternates retry-first and forward-first turns, so even a pending item that uses
-its entire IO time slice cannot hide later Sessions. The 100ms turn starts before
-root/scan initialization, reserves time to persist its cursor, and resumes a
-completed round's health publication on the next turn when necessary. A discovery pass checks authoritative scheduling,
+its entire IO time slice cannot hide later Sessions. Each call polls a retained scan for at most 100ms, including root initialization.
+The future retains bounded intermediate state across polls and completes its
+cursor CAS and health publication; cancellation does not restart the prefix.
+Transport reads are bounded at two seconds and historical item reads at 500ms.
+Host assembly must keep the repair and discovery lanes polled independently.
+If only one shared IO permit is available, root/scan initialization proceeds
+sequentially. A failed disposable wake after confirmed activation does not mark
+that authoritative discovery check unresolved; history remains independently
+enumerable.
+A discovery pass checks authoritative scheduling,
 unconsumed Inbox and checkpoint obligations, including future deadlines and
 next_check=None. Takeover enumeration returns journal Session candidates;
 one bad canonical does not poison the shard page.
 
-The provider budgets each scan class at 64 Session checks/second and at most
-375 log items/second, combined burst at most 128. Task 7 must combine these with
-dispatch supervision and other providers under the Worker-wide SPEC budgets.
-These local limits alone are not a capacity certification.
+A single injected ScanBudget is shared with Worker discovery and Dispatch
+supervision. The default aggregate caps are 1,000 log items/second, 200 Session
+checks/second and a 128-item burst. Repair, discovery and dispatch each reserve
+a quarter of the quota; the last quarter is shared. Global scan IO is at most
+eight and at most a quarter of the configured pool. Startup rejects absent or
+mismatched profiles. These limits alone are not a capacity certification.
 
 New Start admission requires recent monotonic evidence of complete repair and
 discovery rounds. Cold producers do not trust a persisted timestamp/counter;
@@ -140,11 +177,12 @@ no fixed discovery latency is claimed under that condition.
 
 The provider tests use the exported `bcs_test_support::store_model::Model`, with
 fault wrappers for exact write/read boundaries and controlled interleavings.
-The focused suites are `reliable_inbox`, `inbox_gates`, `inbox_reader` and
-`inbox_maintenance`; existing admission and failure suites remain regressions.
+The focused suites are `reliable_inbox`, `inbox_gates`, `inbox_reader`,
+`inbox_maintenance`, `admission_closure` and `control_faults`; existing admission and failure suites remain regressions.
 The additional `inbox_latency` suite injects 5/10ms document RTT, tests repaired
 phase progress without caller retries, full-capacity first-write and lost-credit
-recovery, reader continuous-prefix delivery and closure pagination.
+recovery, reader continuous-prefix delivery, cancelled reads, closure pagination and
+80ms storage RTT with retained scan polls and reconstructed history tokens.
 They cover every normal admission lost-write boundary, cross-shard identity,
 canonical/slot/close ordering, old generations, critical event identity,
 unknown confirmation reads, no-gap-skipping, actual consumed proof, independent

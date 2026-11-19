@@ -244,6 +244,7 @@ async fn mixed_failures(shard_budget: usize) {
         WorkerConfig {
             shards: shards.clone(),
             max_shards_per_tick: shard_budget,
+            max_active_sessions: 10_000,
             ..WorkerConfig::default()
         },
         members.clone(),
