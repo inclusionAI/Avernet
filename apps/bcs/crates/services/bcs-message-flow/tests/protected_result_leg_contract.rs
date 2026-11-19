@@ -31,7 +31,6 @@ use bcs_service_api::application::caller_identity::{
 };
 use bcs_service_api::application::principal::HumanActor;
 use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
-use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
     BotCallerConfiguration, BotCandidateReadQuery, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneRecord, BotControlPlaneView, BotDeliveryPort,
@@ -106,11 +105,9 @@ struct Fixture {
     support: support::FlowTestSupport,
     flow: Arc<BcsMessageFlow>,
     service: Arc<ManagedMessageDelivery>,
-    repo: Arc<dyn MessageRepoPort>,
     live: Arc<LiveDeliveryPolicy>,
     handoff: Arc<HumanCallerDeliveryHandoff>,
     ledger: Option<Arc<bcs_message_flow::caller_relay_ledger::CallerRelayLedger>>,
-    admission: bool,
 }
 
 async fn fixture(relay: bool, plane: Plane) -> Fixture {
@@ -167,7 +164,7 @@ async fn fixture(relay: bool, plane: Plane) -> Fixture {
     policy.defaults.mode = BotDeliveryMode::Enforce;
     policy.queue_ttl_ms = Some(300_000);
     flow.replace_delivery_policy(admin(), 0, policy).await.unwrap();
-    Fixture { support, flow, service, repo, live, handoff, ledger, admission }
+    Fixture { support, flow, service, live, handoff, ledger }
 }
 
 fn dispatch_command() -> TaskDispatchCommand {
@@ -315,7 +312,7 @@ async fn runtime_timeout_notice_parks_the_protected_result_leg() {
     f.context("bot-observer").await;
     // The RUNTIME drives this lane from Queued: its own StartSend arms the
     // run deadline the timeout conversion settles.
-    let (task_id, row) = f.dispatch().await;
+    let (task_id, _row) = f.dispatch().await;
     let runtime = DeliveryRuntime { caller_dispatch: None, policy: Some(f.live.clone()), service: f.service.clone(),
         preparation: Arc::new(QueuedGroupPreparation { flow: Arc::downgrade(&f.flow), deliveries: f.service.clone() }),
         transport: f.support.bot_delivery.clone(), config: DeliveryRuntimeConfig {

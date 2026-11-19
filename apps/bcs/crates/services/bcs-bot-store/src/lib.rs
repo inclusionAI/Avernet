@@ -21,14 +21,7 @@ use std::sync::Arc;
 use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement};
 use bcs_db_api::DbValue as Value;
 use bcs_service_api::{
-    BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
-    BotSearchCandidateQuery, BotSearchFriendshipFilter,
-    BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
-    BotCallerConfiguration, CallerConfigRevisionDecision, CallerConfigurationSync,
-    CallerIdentitySnapshot, BotMetricCount,
-    BotMetricsSnapshotPort, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult, Skill,
-    is_mock_token,
+    BindingChannels, BotCapabilities, RegisteredBot, ServiceError, ServiceResult, Skill,
 };
 
 #[cfg(test)]

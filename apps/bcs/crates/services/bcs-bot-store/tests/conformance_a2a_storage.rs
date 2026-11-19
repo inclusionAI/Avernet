@@ -108,7 +108,7 @@ async fn stale_refresh_cannot_overwrite_card_or_management_metadata() {
 async fn unchanged_card_synchronize_is_not_reported_as_conflict() {
     let db = database().await;
     let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
-    let mut current = record();
+    let current = record();
     assert!(store.compare_and_set(&current, 0).await.unwrap());
     let mut committed = current.clone();
     committed.revision = 2;
