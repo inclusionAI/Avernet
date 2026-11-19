@@ -39,6 +39,8 @@ export interface CollaborationSquareGateway {
     friendRequestBotId?: string,
     fromActor?: FriendRequestActor,
   ): Promise<FriendRequestResult>;
+  /** 取消当前身份的 pending 好友申请（发起方撤回；「重新申请」自救入口第一步）。 */
+  cancelBotFriendRequest(requestId: string): Promise<void>;
   openBotConversation(
     botId: string,
     context: HumanBotActionContext,

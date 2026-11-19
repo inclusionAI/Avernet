@@ -157,6 +157,13 @@ export class CollaborationSquareService {
     );
   }
 
+  /** 取消当前身份的 pending 好友申请（发起方撤回；「重新申请」自救入口第一步）。 */
+  cancelBotFriendRequest(requestId: string) {
+    return this.runTargetAction(`friend-cancel:${requestId}`, () =>
+      this.gateway.cancelBotFriendRequest(requestId),
+    );
+  }
+
   openBotConversation(botId: string, context: HumanBotActionContext, options?: OpenBotConversationOptions) {
     return this.runTargetAction(`conversation:${botId}`, () =>
       this.gateway.openBotConversation(botId, context, options),

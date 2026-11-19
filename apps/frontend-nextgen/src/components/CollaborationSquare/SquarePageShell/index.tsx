@@ -60,6 +60,8 @@ export function SquarePageShell({ resource }: SquarePageShellProps) {
     reload: () => square.load(),
     loadMore: handleLoadMore,
     primaryAction: square.primaryBotAction,
+    // 「申请中」重试入口（好友申请死锁自救：取消当前申请并重发，触发 owner 通知重试）。
+    resubmitAction: square.resubmitBotFriendRequest,
     share: (bot) => square.share('bot', bot.id, bot.name, bot.audience),
     openProfile: square.openBotProfile,
     closeProfile: square.closeBotProfile,

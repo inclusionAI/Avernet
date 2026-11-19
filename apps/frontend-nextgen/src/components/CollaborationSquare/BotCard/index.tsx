@@ -12,7 +12,7 @@ import {
   type PublicBot,
 } from '@/domain/collaborationSquare/types';
 import { cn } from '@/utils/cn';
-import { Hash, MessageCircleMore, Plus, Share2, UserRound } from 'lucide-react';
+import { Hash, MessageCircleMore, Plus, RefreshCw, Share2, UserRound } from 'lucide-react';
 import type { ReactElement } from 'react';
 
 // 公开Bot 卡片：与公开协作群卡/专家市场卡同一套广场卡语言——白底、16px 圆角、
@@ -44,9 +44,11 @@ export interface SquareBotCardProps {
   highlighted?: boolean;
   onShare: (bot: PublicBot) => void;
   onPrimaryAction: (bot: PublicBot) => void;
+  /** 「申请中」重试入口（重新申请：取消当前申请并重发，触发 owner 通知重试）；缺省时不渲染。 */
+  onResubmit?: (bot: PublicBot) => void;
 }
 
-export default function SquareBotCard({ bot, activeActor, busy, highlighted, onShare, onPrimaryAction }: SquareBotCardProps) {
+export default function SquareBotCard({ bot, activeActor, busy, highlighted, onShare, onPrimaryAction, onResubmit }: SquareBotCardProps) {
   const applying = bot.relationshipStatus === 'applying';
   const owned = bot.isOwnedByLoggedInUser === true;
   const friend = bot.relationshipStatus === 'friend';
@@ -127,7 +129,22 @@ export default function SquareBotCard({ bot, activeActor, busy, highlighted, onS
         {/* 右上角操作区（dmore Frame 9）：可操作时为图标按钮组，等待/命中自身时为状态 chip。 */}
         <div className="ml-auto flex shrink-0 items-center justify-end gap-2">
           {applying ? (
-            <span className={cn(STATUS_CHIP, 'bg-warning/10 font-normal text-warning')}>申请中</span>
+            <>
+              <span className={cn(STATUS_CHIP, 'bg-warning/10 font-normal text-warning')}>申请中</span>
+              {/* 「重新申请」自救入口（好友申请死锁修复）：直接重复申请会被后端幂等吸收且
+                  不重发通知，入口先取消当前申请再重新发起（Cancelled 不阻塞），每次点击即
+                  一次完整的 owner 通知重试。在途反馈复用刷新 icon 自转（Button.loading 会
+                  另出独立 spinner 与 icon 并排，2026-11-18 验收反馈改为自转）。 */}
+              {onResubmit && (
+                <IconButton
+                  label="重新申请"
+                  disabled={busy}
+                  icon={<RefreshCw aria-hidden className={cn('h-4 w-4', busy && 'animate-spin')} />}
+                  onClick={() => onResubmit(bot)}
+                  className="h-8 w-8 rounded-lg text-foreground"
+                />
+              )}
+            </>
           ) : primaryAction === 'friendship_established' ? (
             <span className={cn(STATUS_CHIP, 'bg-foreground/[0.06] font-normal text-muted-foreground')}>
               {primaryLabel}

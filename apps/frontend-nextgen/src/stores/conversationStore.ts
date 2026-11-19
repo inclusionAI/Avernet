@@ -59,6 +59,21 @@ export const useConversationStore = create<ConversationState>((set) => ({
         ...revisionPatch(state, botId),
       };
     }),
+  // 移除好友后的本地状态清理(服务端关系已解除):清该 Bot 的好友会话缓存/范围记忆/
+  // 检索条件与展开位;主会话选中不在此处处理(由移除动线按当前选中判定后单独清空)。
+  removeFriendBotState: (botId) =>
+    set((state) => ({
+      ...(state.friendBotSessionsByBotId[botId] !== undefined
+        ? { friendBotSessionsByBotId: withoutKey(state.friendBotSessionsByBotId, botId) }
+        : {}),
+      ...(state.scopeByFriendBotId[botId] !== undefined
+        ? { scopeByFriendBotId: withoutKey(state.scopeByFriendBotId, botId) }
+        : {}),
+      ...(state.sessionKeyByBotId[botId] !== undefined
+        ? { sessionKeyByBotId: withoutKey(state.sessionKeyByBotId, botId) }
+        : {}),
+      ...(state.expandedBotIds[botId] ? { expandedBotIds: withoutKey(state.expandedBotIds, botId) } : {}),
+    })),
   setExpandedFriend: (botId, friendUserId, expanded) =>
     set((state) => {
       const current = state.expandedFriendUserIdsByBotId[botId] ?? {};

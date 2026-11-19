@@ -156,5 +156,57 @@ export function useCollaborationSquareFriendActions({
     [activeActor, humanBotContext, runScopedFriendAction, updateBotRelationship],
   );
 
-  return primaryBotAction;
+  // 「重新申请」自救入口（好友申请死锁修复）：取消当前 pending 申请并重新发起。
+  // 直接重复申请会被后端 dedup 幂等吸收且不重发 owner 通知；先取消（Cancelled 不阻塞
+  // dedup）再申请才能新建申请单并重发一次通知。可反复点击，每次点击即一次完整的
+  // 通知重试。文案差异化提示引导线下触达 Owner（申请单重发后仍可能因通知链路问题
+  // 无人可见，用户可自行联系 Owner 在工单列表处理）。
+  const resubmitBotFriendRequest = useCallback(
+    (bot: PublicBot) => {
+      if (!humanBotContext || !activeActor) {
+        notifyError('当前工作身份不可用，请刷新后重试');
+        return;
+      }
+      const targetId = getPublicBotTargetId(bot);
+      const busyKey = getPublicBotActionKey(activeActor, targetId);
+      void runScopedFriendAction(bot.id, busyKey, async (isCurrent) => {
+        // ① 取消当前 pending（有单号才可取消；无单号直接重发，由后端 dedup 幂等吸收）。
+        if (bot.pendingFriendRequestId) {
+          await collaborationSquareBotService.cancelBotFriendRequest(bot.pendingFriendRequestId);
+          if (!isCurrent()) return;
+        }
+        // ② 重新发起申请（新建 pending 申请单 + 重发一次 owner 通知）。
+        const result = bot.friendRequestBotId
+          ? await collaborationSquareBotService.requestBotFriendship(
+              bot.id,
+              humanBotContext,
+              bot.friendRequestBotId,
+              activeActor,
+            )
+          : await collaborationSquareBotService.requestBotFriendship(bot.id, humanBotContext, undefined, activeActor);
+        if (!isCurrent()) return;
+        updateBotRelationship(targetId, result.status);
+        if (result.status === 'friend') {
+          // 罕见窗口（重试瞬间申请被接受）直接成为好友：与主操作同款落点。
+          notifySuccess('好友关系已建立');
+          if (activeActor.type === 'human' && getCapabilities().getPublicBotBackendEnabled()) {
+            try {
+              const conversation = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
+              if (!isCurrent()) return;
+              history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId));
+            } catch {
+              if (isCurrent()) notifyError('已成为好友，但暂未进入对话');
+            }
+          }
+        } else if (result.status === 'applying') {
+          notifySuccess('已重新提交申请，可联系该 Bot Owner 及时处理');
+        } else {
+          notifyError('当前未建立好友关系，申请未提交');
+        }
+      });
+    },
+    [activeActor, humanBotContext, runScopedFriendAction, updateBotRelationship],
+  );
+
+  return { primaryBotAction, resubmitBotFriendRequest };
 }

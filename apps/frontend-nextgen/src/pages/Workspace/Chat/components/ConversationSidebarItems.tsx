@@ -144,7 +144,16 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
 }
 
 /** 好友 Bot 行:无归属概念,交互会话一律走好友 Bot 模型回调;会话范围读 scopeByFriendBotId。 */
-export function FriendItem({ view, props }: { view: ConversationBotView; props: ConversationSidebarProps }) {
+export function FriendItem({
+  view,
+  props,
+  onRemoveFriend,
+}: {
+  view: ConversationBotView;
+  props: ConversationSidebarProps;
+  /** 移除好友动线入口(侧栏内装配,打开移除确认弹窗);仅好友分组项提供。 */
+  onRemoveFriend: (bot: ConversationBotView['bot']) => void;
+}) {
   const botId = view.bot.botId;
   const { store, sessions, replyingSessionId } = props;
   const scope = store.scopeByFriendBotId[botId] ?? 'all';
@@ -178,6 +187,7 @@ export function FriendItem({ view, props }: { view: ConversationBotView; props: 
       onLoadMore={() => void sessions.loadMoreSessions(botId, 'friend', scope)}
       onToggleFavorite={(sessionId) => void sessions.favorites.toggleFavorite(botId, 'friend', sessionId)}
       isFavoritePending={(sessionId) => sessions.favorites.isPending(botId, 'friend', sessionId)}
+      onRemoveFriend={onRemoveFriend}
       replyingSessionId={replyingSessionId}
     />
   );

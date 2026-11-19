@@ -79,6 +79,8 @@ export interface ConversationState {
   /** 写入多实例服务 Bot 的选中实例(device UUID);实际变化时失效该 Bot 列表缓存并递增过滤代次。 */
   setBotInstanceSelection(botId: string, instanceUuid: string): void;
   setFriendBotScope(botId: string, scope: ConversationSessionScope): void;
+  /** 移除好友后的本地状态清理:该 Bot 的好友会话缓存/范围/检索条件与展开位(服务端关系已解除,重加好友从默认态开始)。 */
+  removeFriendBotState(botId: string): void;
   setExpandedFriend(botId: string, friendUserId: string, expanded: boolean): void;
   setBotGroupCollapsed(groupId: string, collapsed: boolean): void;
   selectConversation(input: {
@@ -104,6 +106,7 @@ export type ConversationInitialData = Omit<
   | 'setSessionKeyFilter'
   | 'setBotInstanceSelection'
   | 'setFriendBotScope'
+  | 'removeFriendBotState'
   | 'setExpandedFriend'
   | 'setBotGroupCollapsed'
   | 'selectConversation'

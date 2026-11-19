@@ -55,6 +55,8 @@ export interface ConversationBotItemProps {
   /** 「Bot 管理」菜单项回调(#2990 还原):跳转该 Bot 所属空间的 Bot 管理页;
    *  好友 Bot 不传(菜单项不渲染);bot.spaceId 有值才显示菜单入口。 */
   onOpenBotManagement?(bot: ChatBotView): void;
+  /** 「移除好友」入口回调(仅好友分组):打开移除确认弹窗;管理/团队分组不传(入口不渲染)。 */
+  onRemoveFriend?(bot: ChatBotView): void;
   /** Bot 正在回复中的会话 id(#2990 还原):仅当前会话;透传会话行渲染 loading 指示。 */
   replyingSessionId?: string | null;
   /** 恢复的单聊会话操作(编辑标题/清除上下文/删除会话);只读/好友分组区不消费。 */
