@@ -166,6 +166,17 @@ class DesiredStateCompiler(Protocol):
         ...
 
 
+@runtime_checkable
+class SubmittedDocumentCompiler(Protocol):
+    """A compiler that can preview an unpublished input without a stored reference."""
+
+    async def compile_submitted_document(
+        self, ctx: ApplyContext, document: str
+    ) -> Compiled:
+        """Validate and compile this request's document without loading stored input."""
+        ...
+
+
 #: The run service's lookup: one compiler per reference type. A map
 #: multibinding, so each compiler's module contributes its own row.
 StateCompilers = Dict[str, DesiredStateCompiler]

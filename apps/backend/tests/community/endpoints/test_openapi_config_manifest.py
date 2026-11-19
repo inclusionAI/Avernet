@@ -595,7 +595,7 @@ def _the_apply_is_running_and_readable(response, world) -> None:
     path="/openapi/v1/bots/{bot_id}/config-manifest",
     scenario="starts_an_apply_and_notes_the_script",
     input=CaseInput(
-        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS,
+        path_params={"bot_id": _BOT_ID}, query_params={**_QUERY, "dry_run": "false"}, headers=_HEADERS,
         json_body={"document": _DOCUMENT},
     ),
     seed=_seed_bot,
