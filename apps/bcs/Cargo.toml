@@ -139,6 +139,7 @@ members = [
     "crates/auxiliary/ding-logger",
     # test-support
     "crates/test-support/bcs-test-support",
+    "crates/test-support/bcs-dist-test-runner",
 ]
 resolver = "2"
 
@@ -339,6 +340,7 @@ bcs-domain       = { path = "crates/contracts/bcs-domain" }
 bcs-protocol     = { path = "crates/contracts/bcs-protocol" }
 bcs-config-api   = { path = "crates/service-api/bcs-config-api" }
 bcs-test-support = { path = "crates/test-support/bcs-test-support" }
+bcs-dist-test-runner = { path = "crates/test-support/bcs-dist-test-runner" }
 bcs-http         = { path = "crates/adapters/http/bcs-http" }
 bcs-app-a2a-bot = { path = "crates/application/bcs-app-a2a-bot" }
 bcs-app-dist-gateway = { path = "crates/application/bcs-app-dist-gateway" }

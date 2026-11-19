@@ -10,7 +10,7 @@ mod assembly;
 mod commands;
 mod dispatch;
 mod storage;
-mod workload;
+use bcs_dist_test_runner as workload;
 use clap::Parser;
 use std::{io::Write, path::PathBuf};
 use tokio::io::{AsyncBufReadExt, BufReader};

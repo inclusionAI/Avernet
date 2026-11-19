@@ -19,7 +19,8 @@ impl DistGroupDirectoryPort for Directory {
         _: &TaskScope,
         _: &WorkflowRef,
     ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        Ok(serde_json::from_value(serde_json::json!({})).unwrap())
+        serde_json::from_value(serde_json::json!({}))
+            .map_err(|_| GroupDirectoryError::InvalidRevision)
     }
 }
 #[derive(Default)]
