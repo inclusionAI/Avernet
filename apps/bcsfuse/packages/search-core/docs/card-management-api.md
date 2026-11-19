@@ -46,12 +46,12 @@ Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空�
 | 请求字段 | 是否必填 | 说明 |
 | --- | --- | --- |
 | card | 新建必填 | 完整业务 JSON；更新时允许只传 labels |
-| labels | 按业务约定 | 与 card 同级的字符串数组映射。按键合并，传数组替换该键，空数组删除普通标签，GET 返回完整标签。标签键支持字母、数字、下划线和连字符。 |
+| labels | 按业务约定 | 与 card 同级的字符串数组映射。省略 labels 保留原标签；传入 labels 时整体替换，未包含的 key 删除。空对象清空标签；空数组不保存对应 key。业务必需的可见性字段仍须提供有效值，校验失败整次写入不落库。GET 返回完整标签。标签键支持字母、数字、下划线和连字符。 |
 | resource_type | 否 | agent/group；新建省略时为 agent，更新省略时保留原类型；已有 ID 不能改成另一种类型 |
 
 不接收外层 source_version、expected_revision 或 search_config。card.search_config 若由业务传入，仍原样保存，不控制运维行为。`card.version` 若存在，仍只是业务自己的字段，服务不要求修改它才能更新资料。
 
-只改标签示例：`{"labels":{"topic":["invoice"],"department":[]}}`。标签随 Card 版本发布，原检索正文相同可复用已保存的向量。查询使用 `filters["labels.topic"]=["invoice"]`。
+替换标签示例：`{"labels":{"visibility":["public"],"user_visibility":["public"],"topic":["invoice"]}}`。原来的 department 等未包含的标签会被删除，调用方必须提交完整的最终标签集合。`labels: {}` 仅适用于没有必需标签约束的宿主。标签随 Card 版本发布，原检索正文相同可复用已保存的向量。查询使用 `filters["labels.topic"]=["invoice"]`。
 
 只改描述：
 
@@ -75,7 +75,7 @@ Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空�
 
 `card_version` 由服务端生成，仅供排查，不需要在后续请求里传回来。重复提交当前相同内容可直接成功，不会因重试而重新增加版本。这里只确认持久化成功，不返回固定的 pending 状态。
 
-同一 ID 的并发更新由服务端处理，未提供的字段仍保留；同时修改同一字段时，以数据库最终提交顺序为准。服务能阻止内部旧加工任务覆盖新数据，但无法自行识别上游网络迟到的旧业务请求。
+同一 ID 的并发更新由服务端处理，未提供的 card 字段仍保留；labels 整体作为一个字段替换，并发提交标签时以数据库最终提交顺序为准。服务能阻止内部旧加工任务覆盖新数据，但无法自行识别上游网络迟到的旧业务请求。
 
 Group 创建示例：`PUT /api/v2/agent-cards/bcs_grp_example`
 

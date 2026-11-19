@@ -124,7 +124,9 @@ def test_card_recommend_translates_the_user_catalog_filters(runtime):
         sync(client, worker, availability=availability, runtime_state=state)
         response = client.put(
             f"/api/v2/agent-cards/{worker}",
-            json={"labels": {"user_visibility": [audience]}},
+            json={
+                "labels": {"visibility": [availability], "user_visibility": [audience]}
+            },
         )
         assert response.status_code == 202, response.text
     registry.require("tc_card_search").updates.run_once()

@@ -95,9 +95,14 @@ class ApiMigrationRepository:
         raise TimeoutError("TC index synchronization timed out")
 
     def upsert(self, agent_id, fields, resource_type, search_config, *, labels=None):
+        payload = {"card": fields, "resource_type": resource_type}
+        # Historical CSVs can lack user_visibility. In that case availability
+        # updates visibility through the legacy Worker contract, preserving labels.
+        if labels is not None and "user_visibility" in labels:
+            payload["labels"] = labels
         response = self.client.put(
             self._path(agent_id),
-            json={"card": fields, "resource_type": resource_type, "labels": labels},
+            json=payload,
         )
         response.raise_for_status()
         self._wait(agent_id, response.json()["card_version"])

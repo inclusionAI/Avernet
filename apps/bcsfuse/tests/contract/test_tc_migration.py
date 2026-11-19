@@ -109,6 +109,29 @@ def test_csv_preserves_user_visibility_independently_of_runtime_state(repo):
     assert "user_visibility" not in card.source_card
 
 
+@pytest.mark.parametrize("user_visibility", [None, "private"])
+def test_csv_import_preserves_unrelated_labels(repo, user_visibility):
+    repo.upsert(
+        "bot:owner:worker",
+        {"name": "Existing"},
+        resource_type="agent",
+        search_config={},
+        labels={
+            "visibility": ["public"],
+            "user_visibility": ["protected"],
+            "topic": ["invoice"],
+        },
+    )
+    migrate(
+        [row(user_visibility=user_visibility)], repo, environment="pre", dry_run=False
+    )
+    assert repo.read_card("bot:owner:worker").card.labels == {
+        "visibility": ["protected"],
+        "user_visibility": [user_visibility or "protected"],
+        "topic": ["invoice"],
+    }
+
+
 @pytest.mark.parametrize("encoding_depth", [0, 1, 2, 3])
 def test_bot_info_accepts_object_and_at_most_two_json_decodes(repo, encoding_depth):
     info = {"name": "Name", "summary": None, "skills": [], "domains": []}

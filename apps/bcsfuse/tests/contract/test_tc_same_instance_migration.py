@@ -361,6 +361,26 @@ def test_api_migration_import_is_visible_to_v1(service):
         # Replaying the identical source/config is idempotent.
         migrate_rows([row], repository, environment=environment, dry_run=False)
         assert repository.read_card("import:owner").revision == new.revision
+        path = "/api/v2/agent-cards/import:owner"
+        client.put(
+            path,
+            json={
+                "labels": {
+                    "visibility": ["public"],
+                    "user_visibility": ["protected"],
+                    "topic": ["invoice"],
+                }
+            },
+        ).raise_for_status()
+        for extra in ({}, {"user_visibility": "private"}):
+            migrate_rows(
+                [{**row, **extra}], repository, environment=environment, dry_run=False
+            )
+            assert client.get(path).json()["labels"] == {
+                "visibility": ["public"],
+                "user_visibility": [extra.get("user_visibility", "protected")],
+                "topic": ["invoice"],
+            }
         migrate_rows(
             [{**row, "is_deleted": "1"}],
             repository,
@@ -458,7 +478,14 @@ def test_v1_visibility_updates_preserve_user_label(service):
         new_card(client, key, name=key, description="invoice lookup")
         path = f"/api/v2/agent-cards/{key}"
         client.put(
-            path, json={"labels": {"user_visibility": ["protected"]}}
+            path,
+            json={
+                "labels": {
+                    "visibility": ["public"],
+                    "user_visibility": ["protected"],
+                    "topic": ["invoice"],
+                }
+            },
         ).raise_for_status()
         for operation in ("availability", "sync"):
             if operation == "availability":
@@ -476,6 +503,7 @@ def test_v1_visibility_updates_preserve_user_label(service):
             assert labels == {
                 "visibility": [expected],
                 "user_visibility": ["protected"],
+                "topic": ["invoice"],
             }
         before = client.get(path).json()["labels"]
         for state in ("offline", "online"):
@@ -510,7 +538,10 @@ def test_v2_visibility_updates_old_reads_filters_and_fuse_without_changing_nativ
             ("private", False),
             ("protected", True),
         ):
-            response = client.put(path, json={"labels": {"visibility": [value]}})
+            response = client.put(
+                path,
+                json={"labels": {"visibility": [value], "user_visibility": ["public"]}},
+            )
             assert response.status_code == 202, response.text
             registry.require("tc_card_search").updates.run_once()
             assert client.get(path).json()["card"] == stored
@@ -549,12 +580,18 @@ def test_v2_rejects_conflicting_visibility_and_keeps_legacy_card_fields_consiste
         )
         assert response.status_code == 400, response.text
         assert client.get(path).json() == before
-        response = client.put(path, json={"labels": {"visibility": ["private"]}})
+        response = client.put(
+            path,
+            json={"labels": {"visibility": ["private"], "user_visibility": ["public"]}},
+        )
         assert response.status_code == 202, response.text
         assert client.get(path).json()["card"]["availability"] == "private"
         response = client.put(path, json={"card": {"availability": "protected"}})
         assert response.status_code == 202, response.text
         registry.require("tc_card_search").updates.run_once()
         saved = client.get(path).json()
-        assert saved["labels"] == {"visibility": ["protected"]}
+        assert saved["labels"] == {
+            "visibility": ["protected"],
+            "user_visibility": ["public"],
+        }
         assert saved["card"]["availability"] == "protected"

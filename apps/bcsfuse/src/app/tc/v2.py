@@ -44,17 +44,25 @@ class CardOperations:
             raise ValueError("TC accepts Worker Cards")
         if not current and not fields:
             raise ValueError("card required for creation")
-        fields, labels = dict(fields), dict(labels or {})
+        fields = dict(fields)
+        labels_supplied = labels is not None
+        labels = dict(labels) if labels_supplied else None
         if "availability" in fields:
             visibility = [fields["availability"]]
-            if "visibility" in labels and labels["visibility"] != visibility:
+            if labels is None:
+                labels = dict(current.card.labels) if current else {}
+            if labels_supplied and labels.get("visibility") != visibility:
                 raise ValueError("conflicting TC visibility")
             labels["visibility"] = visibility
         # Legacy Worker imports carry both Worker state fields. Historical CSVs
         # may lack user_visibility; never infer it from runtime_state.
         legacy_worker = "runtime_state" in fields and "availability" in fields
         for key in ("visibility", "user_visibility"):
-            if key in (labels or {}) or (not current and not legacy_worker):
+            if (
+                labels_supplied
+                or key in (labels or {})
+                or (not current and not legacy_worker)
+            ):
                 values = (labels or {}).get(key, [])
                 if len(values) != 1 or values[0] not in {
                     "private",
@@ -65,7 +73,7 @@ class CardOperations:
         if (
             current
             and "availability" in current.card.source_card
-            and "visibility" in labels
+            and "visibility" in (labels or {})
         ):
             # Keep imported Worker fields consistent; native Cards stay intact.
             fields["availability"] = labels["visibility"][0]

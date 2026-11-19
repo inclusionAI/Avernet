@@ -231,7 +231,10 @@ def _migrate_row(
         return "skipped_tombstone", {}, historical
     legacy = _legacy(old)
     fields = _fields(row, current, legacy, environment)
-    labels = {"visibility": [fields["availability"]]}
+    labels = {
+        **(current.card.labels if current else {}),
+        "visibility": [fields["availability"]],
+    }
     if row.get("user_visibility"):
         if row["user_visibility"] not in {"private", "protected", "public"}:
             raise _InvalidRow("invalid_user_visibility")

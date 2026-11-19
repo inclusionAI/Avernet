@@ -10,6 +10,48 @@ from tests.contract.test_tc_catalog import runtime, sync  # noqa: F401
 PATH = "/api/v2/agent-cards/bot:owner"
 
 
+def test_tc_label_replacement_removes_old_filters_and_reuses_vector(runtime):
+    client, registry = runtime
+    sync(client)
+    labels = {"visibility": ["public"], "user_visibility": ["public"]}
+    response = client.put(PATH, json={"labels": {**labels, "topic": ["old"]}})
+    assert response.status_code == 202, response.text
+    updates = registry.require("tc_card_search").updates
+    updates.run_once()
+    vector = updates.documents.load_by_id("bot:owner").point.vector
+    response = client.put(PATH, json={"labels": labels})
+    assert response.status_code == 202, response.text
+    updates.run_once()
+    doc = updates.documents.load_by_id("bot:owner")
+    assert doc.point.vector == vector
+    assert "labels.topic" not in doc.filters
+    status = client.get(PATH + "/index-status").json()
+    for indexed in (
+        status["qdrant"]["vector_documents"] + status["qdrant"]["keyword_documents"]
+    ):
+        assert "labels.topic" not in indexed["filters"]
+    assert client.get(PATH).json()["labels"] == labels
+    before = client.get(PATH).json()
+    for invalid in ({}, {"topic": ["new"]}, {"visibility": ["public"]}):
+        response = client.put(
+            PATH, json={"card": {"description": "invalid"}, "labels": invalid}
+        )
+        assert response.status_code == 400, response.text
+        assert client.get(PATH).json() == before
+    response = client.put(
+        PATH,
+        json={
+            "card": {"availability": "public"},
+            "labels": {"user_visibility": ["public"]},
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert client.get(PATH).json() == before
+    response = client.put(PATH, json={"card": {"description": "changed"}})
+    assert response.status_code == 202, response.text
+    assert client.get(PATH).json()["labels"] == labels
+
+
 def test_tc_mapping_update_labels_clear_and_legacy_config_preservation(runtime):
     client, registry = runtime
     sync(client)
@@ -33,7 +75,10 @@ def test_tc_mapping_update_labels_clear_and_legacy_config_preservation(runtime):
 
     vector = doc.point.vector
     assert (
-        client.put(PATH, json={"labels": {"user_visibility": ["public"]}}).status_code
+        client.put(
+            PATH,
+            json={"labels": {"visibility": ["public"], "user_visibility": ["public"]}},
+        ).status_code
         == 202
     )
     updates.run_once()
