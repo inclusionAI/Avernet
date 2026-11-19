@@ -21,6 +21,8 @@ export interface BotTableProps {
   onOpenContainers?: (bot: BotDomain) => void;
   canViewContainers?: (bot: BotDomain) => boolean;
   containerUserId?: string;
+  /** 当前用户 OpenApi ID,copy 态重试/删除 owner 门控用(useBotWorkshop.currentUserId)。 */
+  currentUserId?: string;
   onEngineVersionUpdated?: (bot: BotDomain) => Promise<void> | void;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
@@ -58,6 +60,7 @@ export type BotTableColumnOptions = Pick<
   | 'onOpenContainers'
   | 'canViewContainers'
   | 'containerUserId'
+  | 'currentUserId'
   | 'onHealthCheck'
   | 'onChangeSpace'
   | 'onAuthorize'

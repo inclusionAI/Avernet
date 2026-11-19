@@ -24,6 +24,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     engineVersionStates,
     engineVersionUpdateAvailability,
     containerUserId,
+    currentUserId,
     onView,
     onEdit,
     onConversation,
@@ -140,9 +141,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         align: 'end',
         sticky: 'right',
         cell: (bot) => {
-          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined; // 非空 → 收敛为重试(FAILED)+删除,见 BotCopyActionsCell
-          if (copyState)
-            return <BotCopyActionsCell bot={bot} copyState={copyState} onRetryCopy={onRetryCopy} onAction={onAction} />;
+          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined; // 非空 → 收敛为重试(FAILED)+删除,均 owner 门控,见 BotCopyActionsCell
+          if (copyState) return <BotCopyActionsCell {...{ bot, copyState, onRetryCopy, onAction, currentUserId }} />;
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
           const primaryCell = (
@@ -218,6 +218,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onOpenContainers,
       canViewContainers,
       containerUserId,
+      currentUserId,
       onHealthCheck,
       onChangeSpace,
       onAuthorize,

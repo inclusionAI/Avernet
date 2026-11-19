@@ -161,6 +161,7 @@ const BotWorkshopPage: React.FC = () => {
                       onOpenContainers={setContainerBot}
                       canViewContainers={workshop.canViewContainers}
                       containerUserId={workshop.containerUserId}
+                      currentUserId={workshop.currentUserId}
                       onEngineVersionUpdated={() => workshop.retry({ silent: true })}
                       onChangeSpace={(bot) => {
                         if (workshop.canChangeSpace(bot)) workshop.openSpaceChange(bot);
