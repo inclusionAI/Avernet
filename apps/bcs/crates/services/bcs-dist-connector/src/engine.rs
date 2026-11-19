@@ -353,7 +353,15 @@ impl ConnectorEngine {
                 .await;
             match registered {
                 Ok(lease) => {
-                    *lock(&inner.lease) = Some(lease);
+                    *lock(&inner.lease) = Some(lease.clone());
+                    // A drain that arrived while this call was in flight saw
+                    // no lease to mark: mark it now.
+                    if inner.draining.load(Ordering::SeqCst) {
+                        if let Err(error) = inner.ports.membership.set_draining(&lease).await {
+                            tracing::warn!(?error, "could not mark the registration as draining");
+                        }
+                        return Ok(());
+                    }
                     // A registration confirmed late keeps the lifetime of its
                     // first attempt: renew at once instead of a period later.
                     if retried && !self.renew().await {
