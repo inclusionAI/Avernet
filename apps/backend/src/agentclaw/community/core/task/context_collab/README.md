@@ -529,15 +529,16 @@ before its removal must be refreshed; existing `version`-based CAS is unchanged.
 Audit timestamps are timezone-aware UTC values, normalized without losing
 microseconds. The authenticated creation actor supplies creation/update
 identity; existing initiator-versus-responsible-Task-principal semantics remain
-unchanged. Callers can supply optional nonblank title/description through
-`ColletCreateCommand`, but not server-owned audit fields. Descriptions do not
-replace Task objectives or completion conditions. Metadata also carries the
-collaboration-level `objective` and `acceptance_criteria`, both `str` with empty
-string defaults for absent legacy values; explicit null or non-string values
-are invalid. Both fields serialize at the Collet top level and participate in
-its ETag, so older tags must be refreshed after adding these fields. This is a
-metadata-only addition: creation commands, Work initialization, Task fields and
-acceptance/transition logic are unchanged; no automatic propagation is added.
+unchanged. Through `ColletCreateCommand`, callers can supply optional nonblank
+`title`/`description` and collaboration-level `objective`/`acceptance_criteria`,
+but not server-owned audit fields. The latter two are keyword-only `str` fields
+with empty string defaults; explicit null or non-string values are invalid.
+Creation copies them into Collet metadata and persists them in its metadata JSON.
+Absent legacy values also default to empty strings. Both fields serialize at the
+Collet top level and participate in its ETag, so older tags must be refreshed after
+adding these fields. They do not create/start Work or populate Task objectives or
+completion conditions. Work initialization, Task fields and acceptance/transition
+logic remain independent and unchanged.
 
 Every accepted SQL event append updates `updated_at`/`updated_by` in the same
 Collet CAS transaction as its revision. Creation audit remains fixed.
@@ -591,9 +592,11 @@ Collet.root_task_ref ──→ Task.task_id
   Artifact. It defaults to empty, including when the wire field is missing.
   Non-empty resources serialize as a list of binding objects and participate in
   the Collet ETag; empty resources are omitted to preserve existing shapes and
-  ETags. This is model-only: no SQL mapping or automatic propagation from L6
-  inputs or initial binding events is added. Existing event-based binding facts
-  remain unchanged, and a resource entry does not grant access.
+  ETags. `ColletCreateCommand.resources` accepts the same typed tuple and stores
+  it in the Collet's dedicated `resources` JSON column; legacy SQL NULL reads as
+  empty. Creation does not grant access or create binding events, and there is
+  no automatic propagation from L6 inputs or initial binding events. Existing
+  event-based binding facts remain unchanged, and a resource entry does not grant access.
 - Task `artifacts` is an immutable tuple of existing L4
   [Artifact](l4_context_primitives/artifact.py) values, serialized as a JSON list
   of objects using Artifact's ResourceBinding/ResourceRef contract, not strings
@@ -631,7 +634,11 @@ Existing deployments without `collet_metadata` must additionally apply the
 [additive metadata migration](sql/2026_11_17_context_collab_collet_metadata.sql)
 after their Task/creation-facts cutover and **before** deploying the new runtime.
 No legacy audit backfill is performed. Fresh installations using the current
-baseline already have this column and must skip that ALTER. The historical
+baseline already have this column and must skip that ALTER. Existing deployments
+without `resources` must also apply the
+[additive resources migration](sql/2026_11_19_context_collab_collet_resources.sql)
+before deploying the new runtime; fresh installations skip this ALTER too.
+No resource backfill or resource authorization change is performed. The historical
 [creation-facts migration](sql/2026_11_16_context_collab_creation_facts.sql) is
 only for deployments still storing `context_spec`, not the current baseline.
 

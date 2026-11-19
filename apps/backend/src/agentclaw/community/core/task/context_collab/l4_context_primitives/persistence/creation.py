@@ -41,6 +41,7 @@ def build_created_collet(
             state=ColletState.ACTIVE,
             scope=None,
             version=1,
+            resources=command.resources,
             metadata=ColletMetadata(
                 created_at=now,
                 created_by=actor_ref,
@@ -48,6 +49,8 @@ def build_created_collet(
                 updated_by=actor_ref,
                 title=command.title,
                 description=command.description,
+                objective=command.objective,
+                acceptance_criteria=command.acceptance_criteria,
             ),
         )
     )

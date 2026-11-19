@@ -11,6 +11,7 @@ CREATE TABLE `ac_context_collab_collet` (
   `actor_ref` varchar(2048) DEFAULT NULL COMMENT 'JSON creating-principal reference; same value as the initial task.created event',
   `scope` mediumtext NOT NULL COMMENT 'JSON: L4 Collet scope reference',
   `collet_metadata` mediumtext DEFAULT NULL COMMENT 'JSON: L4 schema, description and audit; NULL for unknown legacy history',
+  `resources` mediumtext DEFAULT NULL COMMENT 'JSON: L4 ResourceBinding list; NULL means empty legacy resources',
   `creation_facts` mediumtext NOT NULL COMMENT 'JSON: plain creation facts and optional L6 ProductInstance',
   `current_snapshot` mediumtext DEFAULT NULL COMMENT 'JSON: current objective, status, executor and progress; nullable for spec/only rows',
   `current_event_id` varchar(128) DEFAULT NULL,

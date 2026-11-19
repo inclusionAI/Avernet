@@ -82,6 +82,8 @@ class ContextCollabColletModel(Base):
     # Complete L4 description/audit facts for new writes; NULL means legacy
     # unknown history, never a license to synthesize timestamps or actors.
     collet_metadata = Column(_medium_text(), nullable=True)
+    # Typed L4 ResourceBinding list; legacy NULL decodes as an empty tuple.
+    resources = Column(_medium_text(), nullable=True)
     creation_facts = Column(_medium_text(), nullable=False)
     # Legacy-only compatibility column. New rows write NULL; a non-null root
     # Task reference always wins, even if an old snapshot is still present.

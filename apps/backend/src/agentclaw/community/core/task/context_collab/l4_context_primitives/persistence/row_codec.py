@@ -28,6 +28,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
     ContextCollabColletModel,
     ContextCollabEventModel,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.resource_binding import (
+    ResourceBinding,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -61,6 +64,20 @@ def _collet_from_row(
                 f"collaboration context {row.collab_context_id!r} has invalid "
                 f"collet_metadata: {error}"
             ) from error
+    resources = ()
+    if row.resources is not None:
+        try:
+            raw_resources = json.loads(row.resources)
+            if not isinstance(raw_resources, list):
+                raise ContextCollabValidationError("resources must be a list")
+            resources = tuple(
+                ResourceBinding.from_dict(resource) for resource in raw_resources
+            )
+        except (json.JSONDecodeError, ContextCollabValidationError) as error:
+            raise ContextCollabValidationError(
+                f"collaboration context {row.collab_context_id!r} has invalid "
+                f"resources: {error}"
+            ) from error
     scope = json.loads(row.scope)
     collet = Collet(
         collet_id=row.collab_context_id,
@@ -69,6 +86,7 @@ def _collet_from_row(
         scope=SpaceRef.from_dict(scope) if scope is not None else None,
         version=int(row.context_version),
         metadata=metadata,
+        resources=resources,
     )
     return collet
 
