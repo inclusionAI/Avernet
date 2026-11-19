@@ -1224,3 +1224,79 @@ describe('BotTable 管理菜单重启词表（服务卡三动词分裂）', () =
     expect(screen.queryByRole('button', { name: /重启发布/ })).not.toBeInTheDocument();
   });
 });
+
+/**
+ * copy 态操作列收敛(AC-6 回归保护,S-1):copyState 非空(含中间态 INITIAL,非 FAILED)时,
+ * useBotTableColumns 的 actions 列必须只渲染 BotCopyActionsCell —— 三点管理菜单与对话/查看/编辑
+ * 等常规 primary 入口一律不渲染。防未来误改 `if (copyState)` 收敛分支让复制中行错走常规 cell。
+ */
+describe('BotTable copy 态操作列收敛 + owner 门控', () => {
+  test('AC-6: copyState 非空(中间态)→ 隐藏管理菜单与常规 primary,收敛为 copy 操作', () => {
+    const bot = mapBotDto({
+      bot_id: 'copy-mid',
+      bot_name: '复制中 Bot',
+      active_engine: 'openclaw',
+      bot_type: 'personal',
+      display_state: 'running',
+      owner_entity_id: 'u_owner',
+      actions: ['view', 'chat', 'edit', 'restart'],
+      copy_state: { operation_id: 'op_1', status: 'BOT_STARTED', source_bot_id: 'src_1' },
+    }).item;
+    renderTable(bot, {
+      onConversation: noop,
+      onAction: jest.fn().mockResolvedValue(undefined),
+      currentUserId: 'u_owner',
+    });
+
+    // 常规 primary(此处 openclaw 个人 running 行会渲染「对话」)与三点管理菜单都不出现。
+    expect(screen.queryByRole('button', { name: /与 复制中 Bot 对话/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '管理 复制中 Bot' })).not.toBeInTheDocument();
+    // owner + running 中间态(非 FAILED):收敛后仅删除可见(无重试)。
+    expect(screen.getByText('删除')).toBeInTheDocument();
+    expect(screen.queryByText('重试')).not.toBeInTheDocument();
+  });
+
+  test('AC-2: copyState 中间态 + 非 owner → 常规与重试/删除均不渲染(操作列为空)', () => {
+    const bot = mapBotDto({
+      bot_id: 'copy-other',
+      bot_name: '他人复制中 Bot',
+      active_engine: 'openclaw',
+      bot_type: 'personal',
+      display_state: 'running',
+      owner_entity_id: 'u_owner',
+      actions: ['view', 'chat', 'edit', 'restart'],
+      copy_state: { operation_id: 'op_1', status: 'BOT_STARTED', source_bot_id: 'src_1' },
+    }).item;
+    renderTable(bot, {
+      onConversation: noop,
+      onAction: jest.fn().mockResolvedValue(undefined),
+      currentUserId: 'someone_else',
+    });
+
+    expect(screen.queryByRole('button', { name: '管理 他人复制中 Bot' })).not.toBeInTheDocument();
+    expect(screen.queryByText('重试')).not.toBeInTheDocument();
+    expect(screen.queryByText('删除')).not.toBeInTheDocument();
+  });
+
+  test('AC-4: copyState FAILED + 非 owner → 常规/重试/删除均不渲染(操作列为空)', () => {
+    const bot = mapBotDto({
+      bot_id: 'copy-failed-other',
+      bot_name: '他人复制失败 Bot',
+      active_engine: 'openclaw',
+      bot_type: 'personal',
+      display_state: 'running',
+      owner_entity_id: 'u_owner',
+      actions: ['view', 'chat', 'edit', 'restart', 'delete'],
+      copy_state: { operation_id: 'op_1', status: 'FAILED', source_bot_id: 'src_1' },
+    }).item;
+    renderTable(bot, {
+      onConversation: noop,
+      onAction: jest.fn().mockResolvedValue(undefined),
+      currentUserId: 'someone_else',
+    });
+
+    expect(screen.queryByRole('button', { name: '管理 他人复制失败 Bot' })).not.toBeInTheDocument();
+    expect(screen.queryByText('重试')).not.toBeInTheDocument();
+    expect(screen.queryByText('删除')).not.toBeInTheDocument();
+  });
+});
