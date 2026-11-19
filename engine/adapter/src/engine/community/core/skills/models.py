@@ -283,6 +283,7 @@ class PoolLayoutProbeRequest:
 
     engine: str
     layout_contract_version: str
+    for_service_build: bool = False
 
 
 class PoolLayoutProbeStatus(StrEnum):

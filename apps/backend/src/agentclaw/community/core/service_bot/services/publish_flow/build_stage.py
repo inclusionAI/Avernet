@@ -168,6 +168,7 @@ class BuildStageRunner:
                 bot_id=str(bot["bot_id"]),
                 user_id=str(bot["owner_id"]),
                 engine=runtime_engine,
+                for_service_build=runtime_engine == "openclaw",
             )
             layout_observation = ServiceArtifactLayoutObservation.from_probe(
                 probe,
