@@ -215,7 +215,7 @@ def map_native_session_analysis_result(
     if preserve_semantic_result and root == "COMPLETED":
         case_type = "good"
     failure = _normalize_failure_mode(result.get("evolution_failure_mode"), root)
-    generated_query = clean_query(str(result.get("query") or ""), max_len=900)
+    generated_query = str(result.get("query") or "").strip()
     fidelity = ReplayQueryFidelityPolicy().decide(row, generated_query)
     query = fidelity.query
     original_query = fidelity.source_invocation or clean_query(
@@ -282,7 +282,9 @@ def failed_native_session_analysis_diagnosis(
     root = "UNKNOWN"
     failure = FAILURE_MODE_BY_ROOT[root]
     safe = redact_secrets(str(exc), secrets or [])
-    fidelity = ReplayQueryFidelityPolicy().decide(row, row.first_question or row.user_text)
+    fidelity = ReplayQueryFidelityPolicy().decide(
+        row, compact_replay_text(row.first_question or row.user_text, max_len=900)
+    )
     query = fidelity.query or clean_query(row.first_question or row.user_text, max_len=700)
     if not query:
         query = "请基于一个失败的 agent 会话，定位可复现的任务目标并改进处理策略。"
