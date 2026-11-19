@@ -13,6 +13,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact import (
+    Artifact,
+)
 
 
 def normalize_executor_refs(
@@ -48,6 +51,8 @@ class Task:
     selected workflow still enforces its completion guards. parent_task_ref is
     absent for a root. Legacy import provenance is explicit; legacy versions
     start at the import baseline, not at a fabricated historic Task revision.
+    artifacts contains L4 Artifact values, not resource bodies. It defaults
+    to empty; Work/report handling does not populate or aggregate it yet.
     """
 
     task_id: str
@@ -64,6 +69,7 @@ class Task:
     reported_percent: int | None = None
     progress_event_ref: str | None = None
     legacy_context_version: int | None = None
+    artifacts: tuple[Artifact, ...] = ()
 
     def __post_init__(self) -> None:
         for key in ("task_id", "collet_ref", "objective"):
@@ -103,6 +109,12 @@ class Task:
             raise ContextCollabValidationError(
                 "Task completion conditions must be strings"
             )
+        if not isinstance(self.artifacts, tuple) or any(
+            not isinstance(artifact, Artifact) for artifact in self.artifacts
+        ):
+            raise ContextCollabValidationError(
+                "Task.artifacts must be a tuple of L4 Artifact values"
+            )
         if self.reported_percent is not None and (
             type(self.reported_percent) is not int
             or not 0 <= self.reported_percent <= 100
@@ -141,6 +153,7 @@ class Task:
         data = asdict(self)
         data["executor_refs"] = [ref.to_dict() for ref in self.executor_refs]
         data["completion_conditions"] = list(self.completion_conditions)
+        data["artifacts"] = [artifact.to_dict() for artifact in self.artifacts]
         return data
 
     @classmethod
@@ -184,6 +197,17 @@ class Task:
                     "Task completion_conditions must be a list"
                 )
             values["completion_conditions"] = tuple(conditions)
+            # Older Task records do not declare artifacts.
+            artifacts = values.get("artifacts", [])
+            if not isinstance(artifacts, list) or any(
+                not isinstance(artifact, dict) for artifact in artifacts
+            ):
+                raise ContextCollabValidationError(
+                    "Task artifacts must be a list of objects"
+                )
+            values["artifacts"] = tuple(
+                Artifact.from_dict(artifact) for artifact in artifacts
+            )
             return cls(**values)
         except (KeyError, TypeError) as error:
             raise ContextCollabValidationError("invalid Task record") from error
