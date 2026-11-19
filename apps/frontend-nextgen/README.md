@@ -51,6 +51,24 @@ Group absent from the current sidebar page/filter is resolved by ID through the
 existing selected-Group detail fallback, including Session-only membership; list
 absence alone never changes the participation filter or discards the requested Session.
 
+Both already-joined and newly accepted invitations support these optional URL
+query parameters. The verified token target, not the editable path segment or
+query, supplies the resource IDs and determines the allowed views.
+
+| Invitation URL path | `view` values | Result |
+| --- | --- | --- |
+| `/workspace/invite/groups/{token}` | `group`, `full` | `group` opens `/workspace/collaboration/group` for the invited Group. |
+| `/workspace/invite/sessions/{token}` | `session`, `group`, `full` | `session` opens `/workspace/collaboration/session` without the session list. `group` opens the parent Group and initially selects the invited Session. Neither view changes membership in the parent Group. |
+
+`view=full` or an omitted, unknown, or unsupported `view` keeps the original
+`/workspace/collaboration` destination and target selection. If the verified
+target lacks the IDs required to open a focused page, the invitation uses that
+same full-workspace fallback. On focused pages, `showReturn=false` hides the
+**Return to full collaboration** button; `showReturn=true`, an omitted value, or
+an unknown value leaves it visible. The full workspace has no such return bar.
+For example, `/workspace/invite/sessions/{token}?view=session&showReturn=false`
+opens the invited Session with no session list or return bar.
+
 An explicit Session deep link issues one sidebar-location request after route
 identity hydration. Once the target Group and Session details are verified,
 location clears obstructing sidebar filters, displays an out-of-list target,
@@ -78,6 +96,8 @@ Regression coverage is in [invitationService.test.ts](test/services/workspace/in
 [useInviteAccept.preview.test.ts](test/pages/Workspace/hooks/useInviteAccept.preview.test.ts),
 [useInviteAccept.readonlyIdentity.test.ts](test/pages/Workspace/hooks/useInviteAccept.readonlyIdentity.test.ts)
 and [InviteAcceptPanel.test.tsx](test/pages/Workspace/InviteAcceptPanel.test.tsx).
+The [focused-page tests](test/pages/Workspace/FocusedCollaboration.test.tsx)
+cover the return bar and preservation of its option when changing Sessions.
 Sidebar and route regressions are covered by
 [invitationSidebarNavigation.test.tsx](test/pages/Workspace/invitationSidebarNavigation.test.tsx),
 [useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
