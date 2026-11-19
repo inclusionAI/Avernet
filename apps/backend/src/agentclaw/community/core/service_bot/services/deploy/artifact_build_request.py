@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import PurePosixPath
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from agentclaw.community.core.config_compose.models import ComposeOccasion
 from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol import (
@@ -55,6 +55,7 @@ class ServiceArtifactResolvedLayout:
     local_root: str
     repo_root: str
     center_root: str
+    source_layout: Literal["legacy"] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +113,9 @@ class ServiceArtifactLayoutObservation:
 
         try:
             resolved = cls._parse_resolved_layout(
-                evidence.get("resolved_layout"), expected_engine=expected_engine
+                evidence.get("resolved_layout"),
+                expected_engine=expected_engine,
+                source_layout=evidence.get("source_layout"),
             )
             supported = cls._parse_supported_mapping_contracts(evidence)
             center_mount_status = cls._parse_center_mount_status(evidence)
@@ -142,6 +145,7 @@ class ServiceArtifactLayoutObservation:
         value: object,
         *,
         expected_engine: str,
+        source_layout: object = None,
     ) -> ServiceArtifactResolvedLayout:
         required = {
             "engine",
@@ -178,7 +182,17 @@ class ServiceArtifactLayoutObservation:
         local = paths["local_root"]
         repo = paths["repo_root"]
         center = paths["pool_center"]
-        if (
+        active = paths["active_root"]
+        if source_layout == "legacy" and expected_engine == "openclaw":
+            if (
+                local.parent != active
+                or repo.parent != active
+                or local == repo
+                or center.is_relative_to(active)
+                or center.parent.parent != active.parent
+            ):
+                raise ValueError("invalid OpenClaw Legacy Skills roots")
+        elif source_layout is not None or (
             local.parent != repo.parent
             or repo.parent != center.parent
             or local.name != "skills-local"
@@ -186,7 +200,6 @@ class ServiceArtifactLayoutObservation:
             or center.name != "skill-center"
         ):
             raise ValueError("invalid shared Skills-Pool roots")
-        active = paths["active_root"]
         for corpus in (local, repo, center):
             try:
                 active.relative_to(corpus)
@@ -201,6 +214,7 @@ class ServiceArtifactLayoutObservation:
             local_root=local.as_posix(),
             repo_root=repo.as_posix(),
             center_root=center.as_posix(),
+            source_layout="legacy" if source_layout == "legacy" else None,
         )
 
     @staticmethod

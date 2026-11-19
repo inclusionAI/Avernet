@@ -67,6 +67,7 @@ class _CenterMountEvidence(BaseModel):
 class _RuntimeLayoutProbeEvidence(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    source_layout: Literal["legacy"] | None = None
     resolved_layout: _ResolvedFilesystemLayoutEvidence | None = None
     center_mount: _CenterMountEvidence | None = None
 
@@ -105,6 +106,7 @@ class CurrentRuntimeLayoutProbeService:
         bot_id: str,
         user_id: str,
         engine: str,
+        for_service_build: bool = False,
     ) -> RuntimeLayoutProbeResult:
         if engine == "teclaw":
             return self._not_capable(
@@ -122,6 +124,7 @@ class CurrentRuntimeLayoutProbeService:
                 body={
                     "engine": engine,
                     "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                    **({"for_service_build": True} if for_service_build else {}),
                 },
                 timeout=10.0,
             )
@@ -146,7 +149,9 @@ class CurrentRuntimeLayoutProbeService:
         except Exception as error:
             return self._transient(engine, error)
 
-        return self._parse_response(response, engine=engine)
+        return self._parse_response(
+            response, engine=engine, for_service_build=for_service_build
+        )
 
     async def _confirm_runtime_without_probe_endpoint(
         self,
@@ -196,6 +201,7 @@ class CurrentRuntimeLayoutProbeService:
         response: dict[str, Any],
         *,
         engine: str,
+        for_service_build: bool = False,
     ) -> RuntimeLayoutProbeResult:
         try:
             envelope = _RuntimeLayoutProbeEnvelope.model_validate(response)
@@ -212,13 +218,16 @@ class CurrentRuntimeLayoutProbeService:
             and evidence["checks"].get("pool_local_valid") is True
             and evidence["checks"].get("legacy_storage_entries_absent") is True
         )
+        legacy = data.evidence.source_layout == "legacy"
         if (
-            data.engine != engine
+            (legacy and not (for_service_build and engine == "openclaw"))
+            or data.engine != engine
             or data.layout_contract_version != LAYOUT_CONTRACT_VERSION
             or (
                 data.status is RuntimeLayoutProbeStatus.READY
                 and not isinstance(data.preparation_id, str)
                 and not steady_active
+                and not legacy
             )
         ):
             return CurrentRuntimeLayoutProbeService._invalid_response(engine)
