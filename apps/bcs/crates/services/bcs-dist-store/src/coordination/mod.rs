@@ -284,14 +284,16 @@ impl CoordinationStore {
         sid: &Sid,
     ) -> Result<Option<Versioned<StoredCheckpoint>>, StoreError> {
         let value = self
-            .read::<StoredCheckpoint>(&self.layout.ckpt(sid)?)
-            .await?;
+            .read::<serde_json::Value>(&self.layout.ckpt(sid)?)
+            .await?
+            .map(|raw| {
+                decode_checkpoint(raw.value).map(|value| Versioned {
+                    version: raw.version,
+                    value,
+                })
+            })
+            .transpose()?;
         if let Some(v) = &value {
-            if v.value.checkpoint.format_version != 1 {
-                return Err(StoreError::UnsupportedFormat {
-                    format: v.value.checkpoint.format_version,
-                });
-            }
             if v.value
                 .checkpoint
                 .consumed
@@ -335,6 +337,22 @@ impl CoordinationStore {
                     && Instant::now() < *end
             }))
     }
+}
+
+fn decode_checkpoint(value: serde_json::Value) -> Result<StoredCheckpoint, StoreError> {
+    let checkpoint = &value["checkpoint"];
+    let format: u32 = decode_json(checkpoint["format_version"].clone())?;
+    // Inspect the header before decoding a body whose layout may be unknown.
+    // The #4145 coordination prototype reused v1 for an unscoped RunnerState;
+    // it is not a phase-one runtime namespace and has no implicit migration.
+    let legacy_runner = checkpoint["runner_state"].as_object().is_some_and(|runner| {
+        runner.contains_key("format_version") && runner.contains_key("value")
+            && !runner.contains_key("tid") && !runner.contains_key("state")
+    });
+    if format != 1 || legacy_runner {
+        return Err(StoreError::UnsupportedFormat { format });
+    }
+    decode_json(value)
 }
 fn invalid(code: &str) -> StoreError {
     StoreError::Invalid { code: code.into() }

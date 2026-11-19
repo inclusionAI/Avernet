@@ -24,6 +24,8 @@ pub struct InboxProducerConfig {
     pub wake_max_len: u64,
     pub max_input_bytes: usize,
     pub max_document_bytes: usize,
+    /// Namespace-lifetime charge units, including physical append attempts.
+    /// A larger profile requires coordinated rollout and capacity validation.
     pub max_history_entries: u64,
     pub max_history_bytes: u64,
     pub reserved_entries: u64,
@@ -73,12 +75,14 @@ impl InboxProducerConfig {
             || self.max_document_bytes > 1024 * 1024
             || self.max_document_bytes < 256 * 1024
             || self.max_history_entries == 0
-            || self.max_history_entries > 4096
             || self.reserved_entries == 0
             || self.reserved_entries.saturating_add(64) >= self.max_history_entries
             || self.reserved_bytes < 64 * 1024
             || self.reserved_bytes.saturating_add(128 * 1024) >= self.max_history_bytes
             || self.max_sessions == 0
+            // Preserve the previous effective bound independently of retained
+            // history. The distinct-Session ledger lives in one root document.
+            || self.max_sessions > 4096
             || self.max_sessions > self.max_history_entries
             || self.max_watches == 0
             || self.max_watches > 128
@@ -94,6 +98,11 @@ impl InboxProducerConfig {
             || self.max_inbox_bytes <= 256 * 1024
         {
             return Err(invalid("admission_configuration"));
+        }
+        if super::capacity::maximum_scan_bytes(self.max_history_entries)
+            .is_none_or(|bytes| bytes > self.max_document_bytes as u64)
+        {
+            return Err(invalid("admission_scan_capacity"));
         }
         Ok(())
     }
