@@ -1,0 +1,30 @@
+apps/bcs/crates/services/bcs-event-store/tests/memory_atomicity.rs
+  s_ccca9d535b6e9a::t_70b0959283293a 6
+apps/bcs/crates/services/bcs-friend/tests/conformance_friend_services.rs
+  s_ccca9d535b6e9a::t_70b0959283293a 20
+apps/bcs/scripts/ci/reusable_coverage.sh
+  s_ccca9d535b6e9a::t_70b0959283293a 20-27
+apps/bcs/docs/diagnostics/unit-test-ci.md
+  s_ccca9d535b6e9a::t_9a138484c6fdb4 39-48
+apps/bcs/scripts/ci_test.sh
+  s_ccca9d535b6e9a::t_c333c6b90adc67 15-16,137-138
+  s_ccca9d535b6e9a::t_70b0959283293a 152,186-190
+singlebox/ci/tests/test_bcs_ci_build_reuse.py
+  s_ccca9d535b6e9a::t_9a138484c6fdb4 119-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "22e56c4322e20d059ad4f9b11b2d034f51f82371",
+  "prompts": {},
+  "sessions": {
+    "s_ccca9d535b6e9a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d46b-3825-7a11-9b62-ea0dcc4a42fc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

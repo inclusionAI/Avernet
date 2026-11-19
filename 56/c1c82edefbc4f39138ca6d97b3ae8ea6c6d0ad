@@ -1,0 +1,33 @@
+apps/bcs/crates/service-api/bcs-service-api/src/port/mod.rs
+  s_d2bf2069ff97fe::t_5baacd6f52d2b5 165-166
+apps/bcs/docs/caller-execution.md
+  s_d2bf2069ff97fe::t_5baacd6f52d2b5 21-35
+apps/bcs/crates/adapters/http/bcs-provider-http/src/lib.rs
+  s_d2bf2069ff97fe::t_5baacd6f52d2b5 254-256
+apps/bcs/docs/flows/README.md
+  s_d2bf2069ff97fe::t_5baacd6f52d2b5 16-17
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/request_header_policy.rs
+  s_d2bf2069ff97fe::t_d4b8a69e28802c 1-95
+apps/bcs/crates/adapters/http/bcs-provider-http/src/network.rs
+  s_d2bf2069ff97fe::t_5baacd6f52d2b5 222
+apps/bcs/crates/service-api/bcs-service-api/src/port/provider_request_headers.rs
+  s_d2bf2069ff97fe::t_5baacd6f52d2b5 1-20
+apps/bcs/crates/adapters/http/bcs-provider-http/src/request_headers.rs
+  s_d2bf2069ff97fe::t_5baacd6f52d2b5 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "56c1c82edefbc4f39138ca6d97b3ae8ea6c6d0ad",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

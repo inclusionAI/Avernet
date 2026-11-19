@@ -1,0 +1,19 @@
+apps/backend/tests/corp/plugins/prod/test_risk_approval_h3_integration.py
+  s_befd386ce20825::t_89205529b1b570 1-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b906ea2046d1bddbe2b9b88646256a0526cfb71b",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

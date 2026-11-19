@@ -1,0 +1,20 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/contracts.py
+  h_059e888e5e4e82 138
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_open_swarm.py
+  h_059e888e5e4e82 226-231
+apps/backend/tests/community/repository/task/context_collab/test_models.py
+  h_059e888e5e4e82 37
+apps/backend/tests/community/repository/task/context_collab/test_product_instantiation.py
+  h_059e888e5e4e82 55,510-537
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4bd70742b311f1840cd0f8a100c7793f560d7d92",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

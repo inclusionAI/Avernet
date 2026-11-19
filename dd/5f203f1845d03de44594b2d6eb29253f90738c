@@ -1,0 +1,22 @@
+apps/bcs/crates/adapters/http/bcs-provider-http/src/sse_loop_tests.rs
+  s_9e2e54049fb1e5::t_96c48bcfd28724 763-766,768-773,778-779
+  s_9e2e54049fb1e5::t_cebf3561a4b36c 699,703,709,718-723,732,758-762,767,774-777,780-789
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/log_correlation/tests.rs
+  s_9e2e54049fb1e5::t_24588bcfac133b 104-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd5f203f1845d03de44594b2d6eb29253f90738c",
+  "prompts": {},
+  "sessions": {
+    "s_9e2e54049fb1e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf52-8e0f-7750-b4eb-cbba1ad9aac6",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

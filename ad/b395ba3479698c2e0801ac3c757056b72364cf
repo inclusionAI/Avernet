@@ -1,0 +1,21 @@
+CONTEXT.md
+  s_47ed8e91e4b8af::t_59089ea4f1bf81 3-4,10-12,16-18,22-24,28-30
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_667b20f84ad735 3,18-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "adb395ba3479698c2e0801ac3c757056b72364cf",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

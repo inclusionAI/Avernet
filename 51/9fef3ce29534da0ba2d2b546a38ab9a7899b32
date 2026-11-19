@@ -1,0 +1,31 @@
+apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/plan.md
+  s_64261436edbb0b::t_ba3e4595aacfa1 18
+  s_64261436edbb0b::t_81b60cd1331894 5,7
+  s_64261436edbb0b::t_6f6c1a54d6169e 63
+  s_64261436edbb0b::t_af6c3b45a0b4d3 66
+  s_64261436edbb0b::t_12df8b8b6a7df5 79-88,90,92,94
+  s_64261436edbb0b::t_8a34b493bb4d3b 189,192-193,195-197
+  s_64261436edbb0b::t_6531f819352032 203-204
+apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/spec.md
+  s_64261436edbb0b::t_9c94660a844a25 151
+  s_64261436edbb0b::t_1eee5c38646708 124-126,129-139,142,144
+  s_64261436edbb0b::t_9e3bc121069948 170,173
+  s_64261436edbb0b::t_1bfbf84b4c3ad5 21,23-25
+  s_64261436edbb0b::t_d093337fba0e8f 112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "519fef3ce29534da0ba2d2b546a38ab9a7899b32",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

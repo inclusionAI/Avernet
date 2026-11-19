@@ -1,0 +1,21 @@
+apps/bcs/crates/services/bcs-bot-store/src/memory_authority.rs
+  s_4f8fe823739c31::t_6efa5e2f0cb526 201,294,352,419
+apps/bcs/crates/services/bcs-edge-permission-store/src/authority/reads_ownerships.rs
+  s_4f8fe823739c31::t_e136483a61d790 80-100,136-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "09195fc1df4a75c8983512a2beac75c6382debc5",
+  "prompts": {},
+  "sessions": {
+    "s_4f8fe823739c31": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1da5d-66e5-7dc0-af58-a876ebd45930",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+apps/backend/tests/community/core/bot_public/test_bot_discover_service.py
+  s_a72d635bf5a378::t_bec1d1f9390bc7 10,55,64,146-178
+  s_a72d635bf5a378::t_a3a74225301cad 24,48
+  s_a72d635bf5a378::t_f71c611f8b673a 35,47
+  s_a72d635bf5a378::t_4737a71fe12c7c 179-180
+apps/backend/src/agentclaw/community/core/bot_public/services/bot_discover_service.py
+  s_a72d635bf5a378::t_f71c611f8b673a 424
+apps/backend/tests/community/adapters/http/openapi_v1/bot_public/test_bot_public_router.py
+  s_a72d635bf5a378::t_b3c0a0dfb60cfa 645-655
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eba66a32039616dad4d8ad3f8dd9afab6a68b1b7",
+  "prompts": {},
+  "sessions": {
+    "s_a72d635bf5a378": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9d4-6412-7ef2-8a46-6634943856d3",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

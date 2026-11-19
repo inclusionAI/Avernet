@@ -1,0 +1,48 @@
+apps/backend/specs/2026-10-20-task-artifact-domain/spec.md
+  h_059e888e5e4e82 160-162,172,206-207,225-226,389,401-402,545
+apps/backend/src/agentclaw/community/adapters/http/task/artifact_object_file_routes.py
+  h_059e888e5e4e82 58-60,77
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_artifact.py
+  h_059e888e5e4e82 36-38,61-63
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_report.py
+  h_059e888e5e4e82 53-54
+apps/backend/src/agentclaw/community/core/task/task_context/task_artifact/artifact_object_file_service.py
+  h_059e888e5e4e82 109,164,216
+apps/backend/src/agentclaw/community/core/task/task_context/task_artifact/models.py
+  h_059e888e5e4e82 12,22,56-64,71,87,149,245-246,273,275
+apps/backend/tests/community/core/task/task_artifact/test_artifact_models.py
+  h_059e888e5e4e82 45-64,311,333-339
+apps/backend/tests/community/core/task/task_artifact/test_artifact_object_file_service.py
+  h_059e888e5e4e82 160,166-186
+apps/backend/tests/community/core/task/task_artifact/test_artifact_report_item.py
+  h_059e888e5e4e82 69-93,199-215
+apps/backend/tests/community/endpoints/test_task_artifact_object_file_endpoints.py
+  h_059e888e5e4e82 124,136-140,202-222,302-307,318-322
+apps/frontend-nextgen/src/assets/TaskPanel/artifactDescriptor.ts
+  h_059e888e5e4e82 47,81
+apps/frontend-nextgen/src/assets/TaskPanel/contract.ts
+  h_059e888e5e4e82 46
+apps/frontend-nextgen/src/assets/TaskPanel/types.ts
+  h_059e888e5e4e82 37-38
+apps/frontend-nextgen/src/assets/TaskPanel/v2/ArtifactsSection.tsx
+  h_059e888e5e4e82 118-123,133-134,167-169
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskArtifactsList.tsx
+  h_059e888e5e4e82 28
+apps/frontend-nextgen/test/assets/TaskPanel/taskArtifactStage.test.ts
+  h_059e888e5e4e82 36,66,70-71,73
+apps/frontend-nextgen/test/assets/TaskPanel/v2/ArtifactsSection.test.tsx
+  h_059e888e5e4e82 36-74
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskOverviewV2.test.tsx
+  h_059e888e5e4e82 92,208,210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d5d2a010340cd188dd1dbe2c3d40fb74bafd753e",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

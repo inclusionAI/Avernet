@@ -1,0 +1,28 @@
+apps/evolverun/clawweb/docs/pack-scripts-browser-auth.md
+  h_5f06d4d8b4bdd5 20-24,35-38,43-82,106-108,112-119,250-251
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-browser-login.test.ts
+  h_5f06d4d8b4bdd5 1-193
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-persistence.test.ts
+  h_5f06d4d8b4bdd5 69
+apps/evolverun/clawweb/internal/bootstrap/clawweb/vitest.config.ts
+  h_5f06d4d8b4bdd5 13-16
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auth-pack-script.test.ts
+  h_5f06d4d8b4bdd5 3,8-11,13-14,20-23,29,46,50-99,145-148,165-169,209
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auto-heal-write-security.test.ts
+  h_5f06d4d8b4bdd5 168-243
+apps/evolverun/clawweb/internal/modules/archive/server/routes/auth.ts
+  h_5f06d4d8b4bdd5 3,296-298,306,315
+apps/evolverun/clawweb/internal/modules/archive/server/routes/auto-heal.ts
+  h_5f06d4d8b4bdd5 238,249-264,287-288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5cc055b8ee39f74dc4e4687fe2a54ab76ff36cfc",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

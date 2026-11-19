@@ -1,0 +1,25 @@
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_9e428ec8192673::t_c399cb844b565d 3-4,68,102-147
+apps/bcsfuse/packages/search-core/src/search_core/application/cache.py
+  s_9e428ec8192673::t_c399cb844b565d 55-56
+apps/bcsfuse/packages/search-core/tests/test_card_metadata_coalescing.py
+  s_9e428ec8192673::t_8e1e69aa97fd57 1-27,31-41,45-65,69-86
+  s_9e428ec8192673::t_11418b6d79a91d 87-128
+  s_9e428ec8192673::t_2e76505d78e35d 28-30,42-44,66-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "05b443d18ded94f3894fc34a2c24f140bb6f53b2",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

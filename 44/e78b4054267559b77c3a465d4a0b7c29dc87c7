@@ -1,0 +1,21 @@
+apps/backend/tests/corp/di/test_corp_cli_bootstrap_wiring.py
+  s_f34bddef00d9b0::t_447e0afd960f80 35
+  s_f34bddef00d9b0::t_d14fcb13707343 40-42
+  s_f34bddef00d9b0::t_369f9bde982586 138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "44e78b4054267559b77c3a465d4a0b7c29dc87c7",
+  "prompts": {},
+  "sessions": {
+    "s_f34bddef00d9b0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0146ab22-33c9-4afb-a36f-26c1d576d45a",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

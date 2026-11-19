@@ -1,0 +1,59 @@
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/baas-intervention.ts
+  s_0c9b3af0be1e6f::t_cd79f537c68d35 224-225,265,270,275,279-282,290-329
+  s_1515a2ffb44a94::t_6b3ab524db01cb 91
+  s_1515a2ffb44a94::t_d3b9240b9f3ff6 47-48,90,92-95,215-218,232
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-baas.test.ts
+  s_1515a2ffb44a94::t_30c59cf76e8a48 84,135-172,176,182-317,337-339,342-346,350-351,353-365
+  s_1515a2ffb44a94::t_f8d7b55c7c4f97 81-83
+  s_1515a2ffb44a94::t_56290a0b65f2a2 85-87
+  s_1515a2ffb44a94::t_bf5582b7f1c449 132-134
+  s_1515a2ffb44a94::t_67ab1a84751fba 347
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-baas-execution.ts
+  s_1515a2ffb44a94::t_d3b9240b9f3ff6 106-107,116-117
+  s_f055f71a132094::t_e9810a89c48d9c 132-133,135,137
+  s_f055f71a132094::t_fff2d1e515d779 18,122-125,130-131
+  s_9fdf331bac042e::t_dca55bc32f5450 6,68,82-88,126,128-129,134,136
+  s_f055f71a132094::t_6f539b3f61e787 4,10-17,19-40,43-45,67,69-81,89-94,98-99,101,104,120,138-139
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflow-ai.route.integration.test.ts
+  s_1515a2ffb44a94::t_3417f6a55aea6c 16,20,60,62-64,66-67,69-71,73-76,78-81,84-90,92,96,101,103-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1da11e85328ad5580347637c2d9e9cc41dd6a217",
+  "prompts": {},
+  "sessions": {
+    "s_0c9b3af0be1e6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd31-943b-7b01-987a-5b52f6fd4d58",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    },
+    "s_1515a2ffb44a94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd23-2120-7020-ad1c-3d72cf004f09",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    },
+    "s_9fdf331bac042e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd3c-19fd-7b02-9fb5-3ab74ed44c5e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    },
+    "s_f055f71a132094": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd32-0647-7692-aca4-5f93b782c065",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

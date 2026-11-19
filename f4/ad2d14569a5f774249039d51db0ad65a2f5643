@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/plugin_api/mcp_auth.py
+  s_763a81eb308339::t_e463910aaa63e8 45
+apps/backend/src/agentclaw/community/core/mcp/mcp_auth_service_protocol.py
+  s_763a81eb308339::t_dff277c0b318fb 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f4ad2d14569a5f774249039d51db0ad65a2f5643",
+  "prompts": {},
+  "sessions": {
+    "s_763a81eb308339": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed82-b79a-76e0-8143-6b80bc462b82",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

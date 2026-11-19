@@ -1,0 +1,37 @@
+docs/session-files.md
+  s_f364df1c07a1e6::t_a8d7c4f89732f8 102-105
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_owned_session.py
+  s_f364df1c07a1e6::t_7ab48868c7bd60 26-36
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/file_access.py
+  s_f364df1c07a1e6::t_7ab48868c7bd60 3-4,22,37-41
+apps/backend/src/agentclaw/community/core/expert_chat/expert_chat_service_protocol.py
+  s_f364df1c07a1e6::t_7ab48868c7bd60 95-98
+apps/backend/src/agentclaw/community/core/session_resources/engine_files.py
+  s_f364df1c07a1e6::t_a8d7c4f89732f8 21,56-64
+  s_f364df1c07a1e6::t_38d626eaf583b7 67-71
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_owned_session.py
+  s_f364df1c07a1e6::t_7ab48868c7bd60 144-157
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_f364df1c07a1e6::t_7ab48868c7bd60 86,689,738
+  s_f364df1c07a1e6::t_a8d7c4f89732f8 688,737
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_session_files.py
+  s_f364df1c07a1e6::t_6d5d7d98121b84 10,185,839-846,848-870,874-878
+apps/backend/tests/community/core/session_resources/test_engine_files.py
+  s_f364df1c07a1e6::t_dddeb35794eaaa 13,252-254,256,258-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1386f3106ba15884d30086e54b054a9526689299",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

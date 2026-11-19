@@ -1,0 +1,105 @@
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/http_client.rs
+  s_de8b18a148c239::t_93cb12485b1be1 1-42,44-71
+  s_de8b18a148c239::t_3a1948222c4a5a 43
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/blocking.rs
+  s_de8b18a148c239::t_210eebe3025fe3 1-10,12-33
+  s_de8b18a148c239::t_3a1948222c4a5a 11
+apps/bcs/crates/adapters/http/bcs-provider-http/src/transport.rs
+  s_de8b18a148c239::t_d7da9dbe709c6f 354,364
+apps/bcs/crates/plugins/bcs-auth-alipay/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 11
+apps/bcs/crates/bootstrap/bcs/src/server/server_run.rs
+  s_de8b18a148c239::t_be493195a31258 229-230
+apps/bcs/crates/plugins/bcs-auth-github/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 11
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs
+  s_de8b18a148c239::t_4e6098a9f9477d 301,306
+apps/bcs/crates/adapters/http/bcs-http/src/admin_invocation_terminal.rs
+  s_de8b18a148c239::t_4e6098a9f9477d 60,106,118
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/conformance.rs
+  s_de8b18a148c239::t_9b3b88ca4563d7 1-70
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_de8b18a148c239::t_be493195a31258 26
+apps/bcs/crates/adapters/http/bcs-http/src/routes/services.rs
+  s_de8b18a148c239::t_d7da9dbe709c6f 142,158
+apps/bcs/crates/external-clients/bcs-a2a-http/Cargo.toml
+  s_de8b18a148c239::t_cbd54d52e21081 15
+  s_de8b18a148c239::t_a3be499c912d73 14
+apps/bcs/crates/plugins/bcs-auth-alipay/src/provider.rs
+  s_de8b18a148c239::t_a3be499c912d73 262,354
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/lib.rs
+  s_de8b18a148c239::t_210eebe3025fe3 5,26-29
+  s_de8b18a148c239::t_3a1948222c4a5a 9
+  s_de8b18a148c239::t_cab85107c77d13 1-4,6-8,10-23
+  s_de8b18a148c239::t_cbd54d52e21081 24-25
+apps/bcs/crates/plugin-api/bcs-tracing-api/Cargo.toml
+  s_de8b18a148c239::t_cab85107c77d13 1-11
+apps/bcs/crates/auxiliary/bcs-network-tracing/Cargo.toml
+  s_de8b18a148c239::t_9b3b88ca4563d7 20-21
+  s_de8b18a148c239::t_210eebe3025fe3 9
+  s_de8b18a148c239::t_cab85107c77d13 1-6,11,13-19,22-24
+  s_de8b18a148c239::t_cbd54d52e21081 7-8,10,12
+apps/bcs/crates/plugins/bcs-auth-google/src/provider.rs
+  s_de8b18a148c239::t_a3be499c912d73 86,124
+apps/bcs/crates/plugins/bcs-auth-wechat/src/provider.rs
+  s_de8b18a148c239::t_a3be499c912d73 89,149
+apps/bcs/Cargo.toml
+  s_de8b18a148c239::t_be493195a31258 3-4,145-146
+apps/bcs/crates/plugins/bcs-auth-wechat/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 11
+apps/bcs/crates/plugins/bcs-auth-github/src/provider.rs
+  s_de8b18a148c239::t_a3be499c912d73 92,125
+apps/bcs/crates/adapters/http/bcs-http/src/state.rs
+  s_de8b18a148c239::t_4e6098a9f9477d 708,710
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/lib.rs
+  s_de8b18a148c239::t_210eebe3025fe3 75-81
+  s_de8b18a148c239::t_cab85107c77d13 1-50,54-74,82-106
+  s_de8b18a148c239::t_3a1948222c4a5a 51-53
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_send.rs
+  s_de8b18a148c239::t_3a1948222c4a5a 375
+  s_de8b18a148c239::t_6de251e18d856d 3,209
+apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_client.rs
+  s_de8b18a148c239::t_4e6098a9f9477d 40
+  s_de8b18a148c239::t_a3be499c912d73 36-39,41-44,46-56,61,70,77,84,92
+  s_de8b18a148c239::t_a1189108306928 45
+apps/bcs/crates/plugin-api/bcs-tracing-api/CONTEXT.md
+  s_de8b18a148c239::t_6f81e4583af470 1-39
+apps/bcs/crates/plugins/bcs-auth-google/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 11
+apps/bcs/crates/auxiliary/bcs-network-tracing/CONTEXT.md
+  s_de8b18a148c239::t_6f81e4583af470 1-33
+apps/bcs/crates/adapters/http/bcs-http/Cargo.toml
+  s_de8b18a148c239::t_397d10f9d494d0 14
+apps/bcs/crates/adapters/http/bcs-provider-http/Cargo.toml
+  s_de8b18a148c239::t_bb7702f59dac47 14
+apps/bcs/crates/external-clients/bcs-fuse-client/Cargo.toml
+  s_de8b18a148c239::t_209516b51e0ea9 13
+apps/bcs/crates/external-clients/bcs-webhook-client/Cargo.toml
+  s_de8b18a148c239::t_32603e84e1440d 14
+apps/bcs/crates/plugins/bcs-human-notify-work-order/Cargo.toml
+  s_de8b18a148c239::t_c58d304c6ae659 14
+apps/bcs/crates/plugins/bcs-llm-anthropic/Cargo.toml
+  s_de8b18a148c239::t_be4eb7becf80fa 14
+apps/bcs/crates/plugins/bcs-llm-openai-compatible/Cargo.toml
+  s_de8b18a148c239::t_8270e49446678a 14
+apps/bcs/crates/plugins/bcs-storage-baas/Cargo.toml
+  s_de8b18a148c239::t_5577fd0db303e9 9
+apps/bcs/crates/plugins/bcs-storage-baas/src/lib.rs
+  s_de8b18a148c239::t_0c92fe2fbf84c3 6-7,231,297,310,336,353,377
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e731273c744e3b7c85dfddfd6bc53d56c414e039",
+  "prompts": {},
+  "sessions": {
+    "s_de8b18a148c239": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a659-522b-7611-85d7-89f0d4fb9517",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+apps/backend/tests/community/api/expert_chat/test_router.py
+  s_edf09d9cb9f10c::t_65ca600e8fb69c 411
+  s_edf09d9cb9f10c::t_e8b7bd64b40d8b 395,398,407-410
+apps/backend/src/agentclaw/community/adapters/http/expert_chat/router.py
+  s_edf09d9cb9f10c::t_2d35f4c60dcd4f 192-195,413-416
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3162acf6d39ef8161e37c37e0ff43d5d98746d1a",
+  "prompts": {},
+  "sessions": {
+    "s_edf09d9cb9f10c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-046a-7441-bc8f-a1cf3118dc24",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

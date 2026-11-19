@@ -1,0 +1,19 @@
+apps/backend/tests/corp/plugins/prod/test_arca_async.py
+  s_770782c7fd8135::t_b4df2f08448ca6 228-263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "262f931d427006fe79d141bd76cfee28e63ad19e",
+  "prompts": {},
+  "sessions": {
+    "s_770782c7fd8135": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b7-0e87-7360-ace8-cd1dab64ed4d",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

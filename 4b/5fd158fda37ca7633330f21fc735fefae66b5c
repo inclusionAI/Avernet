@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_6e30540202ac1f::t_94d1755a21c550 344-345
+apps/backend/tests/community/api/skill_center/test_legacy_skill_upload_validation.py
+  s_6e30540202ac1f::t_7fa447f93cb501 110-111,115-127,152
+  s_6e30540202ac1f::t_cb6a8b0b034f3c 112-114
+  s_6e30540202ac1f::t_3fde8fd2c7f6fa 49,135
+  s_6e30540202ac1f::t_4af731f4bdd6e1 4,54-109
+  s_6e30540202ac1f::t_1dcc74b99a0994 3,48,128-134,136-151
+apps/backend/src/agentclaw/community/adapters/http/skill_center/skills_upload_routes.py
+  s_6e30540202ac1f::t_c624c80613ea8d 4,42,291-296
+  s_6e30540202ac1f::t_4e271211eafe0c 41,60,186,289,298-306
+  s_6e30540202ac1f::t_25d77da5a51066 61,290,297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4b5fd158fda37ca7633330f21fc735fefae66b5c",
+  "prompts": {},
+  "sessions": {
+    "s_6e30540202ac1f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4c7-9184-7141-a621-608a5054a3e0",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

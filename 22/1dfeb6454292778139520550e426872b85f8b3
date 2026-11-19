@@ -1,0 +1,29 @@
+apps/backend/tests/community/core/task/task_harness/test_harness.py
+  s_ad6596e5f395ca::t_ca648dac4d2d69 458
+  s_ad6596e5f395ca::t_0a17df84e96051 468
+apps/backend/src/agentclaw/community/core/task/task_harness/relay_session_recovery.py
+  s_ad6596e5f395ca::t_0a17df84e96051 27-34
+apps/backend/tests/community/core/task/task_harness/test_relay_session_recovery.py
+  s_ad6596e5f395ca::t_0a17df84e96051 229-237
+apps/backend/src/agentclaw/community/core/task/task_harness/relay_runtime_policy.py
+  s_ad6596e5f395ca::t_cf145702fbce81 41-42
+  s_ad6596e5f395ca::t_0a17df84e96051 45-46,56
+apps/backend/src/agentclaw/community/core/task/README.md
+  s_ad6596e5f395ca::t_ca648dac4d2d69 243-246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "221dfeb6454292778139520550e426872b85f8b3",
+  "prompts": {},
+  "sessions": {
+    "s_ad6596e5f395ca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e724-7273-7761-8b9a-88eacb18b252",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+apps/bcsfuse/packages/search-core/tests/test_late_card_timing.py
+  s_20c3b110241190::t_cae9029081c27a 1-62,65-89
+  s_20c3b110241190::t_75c0683cb09829 63-64
+apps/bcsfuse/packages/search-core/README.md
+  s_20c3b110241190::t_cb3d61919de633 47-56
+apps/bcsfuse/packages/search-core/src/search_core/core/timing.py
+  s_20c3b110241190::t_75c0683cb09829 128
+  s_20c3b110241190::t_c55870ef5378d7 97,101,110-111,127,129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d82f7ebcec67f7baf516edb738f404ce57d9f952",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

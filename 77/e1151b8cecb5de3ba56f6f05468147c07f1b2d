@@ -1,0 +1,19 @@
+submodules/avernet
+  s_5a4fa894bac008::t_2136805e4b8db4 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "77e1151b8cecb5de3ba56f6f05468147c07f1b2d",
+  "prompts": {},
+  "sessions": {
+    "s_5a4fa894bac008": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_5a4fa894bac008",
+        "model": "unknown"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

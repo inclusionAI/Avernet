@@ -1,0 +1,19 @@
+submodules/avernet
+  s_254a2810b90bf8::t_4011dbf10d61df 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f806ef5110d9996c67f3082ffb9b9b80cf06d6c0",
+  "prompts": {},
+  "sessions": {
+    "s_254a2810b90bf8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b001-0dfb-7190-8787-dc2cbea78c48",
+        "model": "DeepSeek-V4.1-Flash-1017"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
