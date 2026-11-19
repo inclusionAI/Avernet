@@ -148,6 +148,13 @@ Tests after the rebase: `bcs-dist-connector` 77, `bcs-dist-connector-store`
 `bcs-app-dist-runtime`, `bcs-service-api`, `bcs-test-support` pass;
 `cargo check --locked --workspace` passes.
 
+## Review round 10 (2026-11-19)
+
+Fixed with tests: only the "no provider wired" stub answer lets the Connector
+run unregistered. A refused registration (for example the empty default
+control address against the real provider) fails the start; any other
+registration failure is asked again before anything is claimed.
+
 ## Not run, and why
 
 - `cargo nextest` and the coverage gates (changed-line > 85 %, singlebox E2E):

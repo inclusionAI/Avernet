@@ -130,12 +130,18 @@ struct Leases {
     calls: Mutex<Vec<String>>,
     renewals: AtomicUsize,
     lose_after: usize,
+    /// Answers of the first registrations; afterwards they succeed.
+    register_errors: Mutex<Vec<StoreError>>,
 }
 
 #[async_trait]
 impl MembershipPort for Leases {
     async fn register(&self, instance: Instance, role: RuntimeRole, _: String, ttl: Duration) -> Result<MembershipLease, StoreError> {
         self.calls.lock().unwrap().push(format!("register {} {role:?} {}", instance.node, ttl.as_secs()));
+        let mut errors = self.register_errors.lock().unwrap();
+        if !errors.is_empty() {
+            return Err(errors.remove(0));
+        }
         Ok(MembershipLease { instance })
     }
     async fn renew(&self, _: &MembershipLease, _: Duration) -> Result<Renewal, StoreError> {
@@ -167,6 +173,39 @@ async fn the_connector_registers_renews_and_marks_draining() {
     assert_eq!(leases.calls.lock().unwrap()[0], "register conn-03 Connector 3");
     assert_eq!(running.engine.drain(Duration::from_millis(50)).await.unwrap(), DrainOutcome::Drained);
     assert!(leases.calls.lock().unwrap().contains(&"draining conn-03".to_owned()));
+}
+
+#[tokio::test]
+async fn a_refused_registration_fails_the_start() {
+    let mut rig = Rig::new();
+    let refusal = StoreError::Invalid { code: "registration".into() };
+    let leases = Arc::new(Leases { lose_after: usize::MAX, register_errors: Mutex::new(vec![refusal]), ..Leases::default() });
+    rig.membership = leases.clone();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let engine = ConnectorEngine::new(rig.config.clone(), rig.ports()).unwrap();
+    assert_eq!(engine.run().await.unwrap_err().code, "membership_registration_refused");
+    assert_eq!(rig.phase().await, "created", "nothing is claimed without a registration");
+}
+
+#[tokio::test]
+async fn an_uncertain_registration_is_asked_again_before_any_claim() {
+    let mut rig = Rig::new();
+    let unknown = || StoreError::OutcomeUnknown { operation_id: "register".into() };
+    let leases = Arc::new(Leases {
+        lose_after: usize::MAX,
+        register_errors: Mutex::new(vec![unknown(), unknown()]),
+        ..Leases::default()
+    });
+    rig.membership = leases.clone();
+    let _events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let _running = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let registrations = leases.calls.lock().unwrap().iter().filter(|call| call.starts_with("register")).count();
+    assert_eq!(registrations, 3, "asked again until it answered");
+    until("the lease is renewed", || async { leases.renewals.load(Ordering::SeqCst) >= 1 }).await;
 }
 
 #[tokio::test]
