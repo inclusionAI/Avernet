@@ -22,26 +22,22 @@ describe.each([false, true])('SidebarNavList (collapsed=%s)', (collapsed) => {
       />,
     );
 
-  it('任务护航紧邻智能进化上方，两个入口分别导航且不增加模块页签', () => {
+  it('只隐藏任务护航的侧栏入口，保留智能进化导航', () => {
     const onNavigate = jest.fn();
     renderNavigation('/workspace/chat', onNavigate);
-    const escort = screen.getByRole('button', { name: '任务护航' });
+    expect(screen.queryByRole('button', { name: '任务护航' })).not.toBeInTheDocument();
     const evolution = screen.getByRole('button', { name: '智能进化' });
-    const buttons = screen.getAllByRole('button');
-    expect(buttons.indexOf(escort)).toBe(buttons.indexOf(evolution) - 1);
-    fireEvent.click(escort);
     fireEvent.click(evolution);
-    expect(onNavigate.mock.calls).toEqual([['/evolution-factory/task-escort'], ['/evolution-factory']]);
+    expect(onNavigate.mock.calls).toEqual([['/evolution-factory']]);
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
   it.each(['/evolution-factory/task-escort', '/evolution-factory/task-escort/detail'])(
-    '护航路径 %s 只高亮任务护航',
+    '直接访问护航路径 %s 时，侧栏不显示护航入口或高亮其他入口',
     (path) => {
       const view = renderNavigation(path);
-      expect(screen.getByRole('button', { name: '任务护航' })).toHaveClass('bg-selected');
-      expect(screen.getByRole('button', { name: '智能进化' })).not.toHaveClass('bg-selected');
-      expect(view.container.querySelectorAll('button.bg-selected')).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: '任务护航' })).not.toBeInTheDocument();
+      expect(view.container.querySelectorAll('button.bg-selected')).toHaveLength(0);
     },
   );
 
@@ -57,7 +53,7 @@ describe.each([false, true])('SidebarNavList (collapsed=%s)', (collapsed) => {
     expect(screen.getByRole('button', { name: '智能进化' })).toHaveClass('bg-selected');
     expect(view.container.querySelectorAll('button.bg-selected')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Bot 管理' })).not.toHaveClass('bg-selected');
-    expect(screen.getByRole('button', { name: '任务护航' })).not.toHaveClass('bg-selected');
+    expect(screen.queryByRole('button', { name: '任务护航' })).not.toBeInTheDocument();
   });
 
   it.each(['/space-admin', '/ticket-center', '/evolution-factory-other', '/bot-workshop-other'])(
@@ -103,7 +99,7 @@ it.each([false, true])('无 route meta 的 overlay 项保留最长路径兜底 (
   expect(onNavigate).toHaveBeenCalledWith('/custom');
 });
 
-it.each([false, true])('overlay 合并后保持护航 / 进化相邻及互斥高亮 (collapsed=%s)', (collapsed) => {
+it.each([false, true])('overlay 合并后仍隐藏护航，保留其他管理菜单顺序 (collapsed=%s)', (collapsed) => {
   extendCapabilities({
     getInternalNavigationItems: () => ({
       status: 'available',
@@ -140,8 +136,8 @@ it.each([false, true])('overlay 合并后保持护航 / 进化相邻及互斥高
     />,
   );
   const labels = screen.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent);
-  expect(labels.slice(-6)).toEqual(['Bot 管理', '能力管理', '能力市场', '任务护航', '智能进化', '尾部扩展']);
-  expect(screen.getByRole('button', { name: '任务护航' })).toHaveClass('bg-selected');
+  expect(labels.slice(-5)).toEqual(['Bot 管理', '能力管理', '能力市场', '智能进化', '尾部扩展']);
+  expect(screen.queryByRole('button', { name: '任务护航' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '智能进化' })).not.toHaveClass('bg-selected');
   fireEvent.click(screen.getByRole('button', { name: '智能进化' }));
   expect(onNavigate).toHaveBeenCalledWith('/evolution-factory');
@@ -153,7 +149,6 @@ it.each([false, true])('overlay 合并后保持护航 / 进化相邻及互斥高
       collapsed={collapsed}
     />,
   );
-  expect(screen.getByRole('button', { name: '任务护航' })).not.toHaveClass('bg-selected');
   expect(screen.getByRole('button', { name: '智能进化' })).toHaveClass('bg-selected');
   expect(view.container.querySelectorAll('button.bg-selected')).toHaveLength(1);
 });
