@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-git-settings.test.ts
+  h_bb3ca6fb13c5df 113-127,130-143,146-158,160-172
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/clawflows-manifest-git.test.ts
+  h_bb3ca6fb13c5df 164-167,600-603,629-631,657-659
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a58e497d97fe817bbcce085bce2deef11a49a05",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
