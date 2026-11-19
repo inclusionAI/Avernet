@@ -23,6 +23,7 @@ from agentclaw.community.core.task.domain.models import (
     RelationType,
     RuntimeInfo,
     Status,
+    TaskExecutionGraph,
     TaskNode,
     TaskNodePatch,
     TaskReportCommand,
@@ -33,6 +34,7 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_context.task_graph_support import (
     _relay_graph_output,
+    _used_executor_ids,
 )
 from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
     default_publish_service,
@@ -176,6 +178,40 @@ def _validate_successor_candidate_origin(
                 raise TaskStateError(
                     "successor PLAN_RESULT group members must come from searched candidates"
                 )
+
+
+def _validate_successor_executor_reuse(
+    graph: TaskExecutionGraph, successor: TaskNode,
+) -> None:
+    """Enforce S5D exclusion from graph facts, independent of optional trace."""
+    runtime = successor.run_info
+    if runtime.run_mode == "single_bot":
+        selected = {
+            (
+                str(runtime.assignee or "").strip(),
+                str(runtime.extend_props.get("assignee_owner_id") or "").strip() or None,
+            )
+        }
+    elif runtime.run_mode == "coop_group":
+        formation = runtime.extend_props["pending_group_formation"]
+        selected = {
+            _searched_runtime_identity(bot_id) for bot_id in formation["bot_ids"]
+        }
+    else:
+        # BBS has no executor until a claim is accepted.
+        return
+    used = {_searched_runtime_identity(bot_id) for bot_id in _used_executor_ids(graph)}
+    # Legacy bare identities cannot prove a different owner. Explicit, distinct
+    # owner scopes remain distinct Bots; missing scope must not bypass exclusion.
+    if any(
+        bot_id == used_bot and (owner is None or used_owner is None or owner == used_owner)
+        for bot_id, owner in selected
+        for used_bot, used_owner in used
+    ):
+        raise TaskStateError(
+            "successor PLAN_RESULT cannot reuse a current or historical executor"
+        )
+
 
 def _json_value(value: Any) -> Any:
     if isinstance(value, Enum):
@@ -561,6 +597,7 @@ def apply_relay_report(
                 _validate_successor_candidate_origin(
                     node, command.relay_token, next_node
                 )
+                _validate_successor_executor_reuse(graph, next_node)
                 max_rounds = int(config.get("MAX_LOOP", 3))
                 node.run_info.progress_reason = command.progress_reason or None
                 node.run_info.end_time = now

@@ -38,17 +38,21 @@ def resolve_relay_resume_step(
     """Anchor a same-session resume to the authoritative current Relay stage.
 
     The returned caller-local label is not persisted and is not a task-loop
-    protocol step.  A graph read failure falls back to ``None`` so recovery can
-    still send the unchanged generic prompt.
+    protocol step. A graph read failure uses a broad scope hint; task-loop must
+    re-read S1 successfully before interpreting its local ledger.
     """
+    # Backend accepted state is authoritative and must win over a stale local
+    # projection. Local state is read by task-loop inside the resumed runtime,
+    # not copied into backend node properties or inferred here.
     try:
         context = graph.get_node_context(task_id, node.node_id)
     except Exception:  # noqa: BLE001 - graph history is optional at this boundary
-        return None
-    if context.accepted_plan_report is not None:
-        return "S6"
-    if context.accepted_execution_patch is not None:
-        return "S5"
+        context = None
+    if context is not None:
+        if context.accepted_plan_report is not None:
+            return "S6"
+        if context.accepted_execution_patch is not None:
+            return "S5"
     return "S1-S4a"
 
 

@@ -701,3 +701,108 @@ def test_plan_splits_composite_single_bot_identity_for_node_projection() -> None
     assert successor.run_info.extend_props["assignee_owner_id"] == "owner-2"
     context = service.get_node_context("task-1", result.target_node_id)
     assert context.used_executor_ids == ["bot-1", "bot-2:owner-2"]
+
+
+@pytest.mark.parametrize(
+    "run_mode,actual_run_mode,owner,selected",
+    [
+        ("single_bot", None, None, "bot-1"),
+        ("single_bot", None, "owner-1", "bot-1:owner-1"),
+        ("single_bot", None, None, "bot-1:owner-1"),
+        ("single_bot", None, "owner-1", "bot-1"),
+        ("bbs", None, "owner-1", "bot-1:owner-1"),
+        ("coop_group", "single_bot", "owner-1", "bot-1:owner-1"),
+        ("coop_group", "bbs", "owner-1", "bot-1:owner-1"),
+    ],
+)
+def test_no_trace_plan_rejects_current_executor(
+    run_mode, actual_run_mode, owner, selected,
+) -> None:
+    service = _graph_service()
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.run_mode = run_mode
+    if actual_run_mode:
+        node.run_info.extend_props["actual_run_mode"] = actual_run_mode
+    if owner:
+        node.run_info.extend_props["assignee_owner_id"] = owner
+    if run_mode == "bbs" or actual_run_mode == "bbs":
+        node.run_info.extend_props["bbs_owner"] = selected
+        node.run_info.assignee = "bot-1"
+    _record_relay_search(service, bot_ids=[selected])
+    service.apply_relay_report(_execution())
+    command = _planned_single_bot_command(event_id="plan-reused", assignee=selected)
+    assert command.trace is None
+
+    with pytest.raises(TaskStateError, match="current or historical executor"):
+        service.apply_relay_report(command)
+    assert len(service.query_task_dashboard("task-1").tasks) == 1
+    assert service.get_node_context("task-1", "task-1").accepted_plan_report is None
+
+
+def test_no_trace_plan_rejects_historical_executor() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    first = service.apply_relay_report(
+        _planned_single_bot_command(event_id="plan-first", assignee="bot-2")
+    )
+    graph = service.query_task_dashboard("task-1")
+    current = graph.tasks[1]
+    execution = _execution()
+    execution.event.node_id = current.node_id
+    token = current.run_info.extend_props["relay_token"]
+    service.apply_relay_report(replace(
+        execution, node_id=current.node_id, event_id="execution-second", relay_token=token,
+    ))
+    service.append_action_event(
+        "task-1", current.node_id, NodeAction.DISPATCH,
+        {"phase": "search", "action_result": "search",
+         "relay_token_fingerprint": hashlib.sha256(token.encode()).hexdigest(),
+         "candidates": [{"bot_id": "bot-1"}]},
+    )
+    command = replace(
+        _planned_single_bot_command(event_id="plan-return", assignee="bot-1"),
+        node_id=first.target_node_id, relay_token=token,
+    )
+    with pytest.raises(TaskStateError, match="current or historical executor"):
+        service.apply_relay_report(command)
+    assert len(service.query_task_dashboard("task-1").tasks) == 2
+
+
+def test_executor_exclusion_preserves_owner_scope() -> None:
+    service = _graph_service()
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.extend_props["assignee_owner_id"] = "owner-1"
+    _record_relay_search(service, bot_ids=["bot-1:owner-2"])
+    service.apply_relay_report(_execution())
+    result = service.apply_relay_report(
+        _planned_single_bot_command(event_id="plan-other-owner", assignee="bot-1:owner-2")
+    )
+    assert result.target_node_id is not None
+
+
+@pytest.mark.parametrize("initially_with_trace", [False, True])
+def test_event_replay_cannot_add_or_remove_optional_trace(initially_with_trace) -> None:
+    service = _graph_service()
+    trace = TaskReportTrace(steps=[TaskReportTraceStep(
+        action_type="S1_CONTEXT", action_result='{"status":"completed","read":true}',
+    )])
+    command = replace(_execution(), trace=trace if initially_with_trace else None)
+    result = service.apply_relay_report(command)
+    assert service.apply_relay_report(command) == result
+    with pytest.raises(TaskStateError, match="conflicts"):
+        service.apply_relay_report(replace(
+            command, trace=None if initially_with_trace else trace,
+        ))
+
+
+def test_no_trace_bbs_plan_has_no_preselected_executor() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    _record_relay_search(service, bot_ids=[])
+    command = _planned_single_bot_command(event_id="plan-bbs-miss", assignee=None)
+    command.event.run_info.run_mode = "bbs"
+    command.event.run_info.failure_reason = "no_unused_candidate"
+    result = service.apply_relay_report(command)
+    assert result.bbs_publish_pending is True
+    assert result.target_node_id is not None
+    assert service.query_task_dashboard("task-1").tasks[1].run_info.assignee is None
