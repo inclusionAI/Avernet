@@ -1,0 +1,27 @@
+apps/bcs-internal/crates/plugins/bcs-provider-headers-dingtalk/tests/wire.rs
+  s_d2bf2069ff97fe::t_25725b74fd85b0 63
+apps/bcs-internal/docs/channels/dingtalk-caller.md
+  s_d2bf2069ff97fe::t_f78f575f350fb4 16-18
+apps/bcs-internal/Cargo.lock
+  s_d2bf2069ff97fe::t_e9fd85ff7ddf82 2397
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/outbound.rs
+  s_d2bf2069ff97fe::t_de8bbb7a2dc0ad 1850,2418,3291,3303-3305,3342,3351-3353,3362-3364
+submodules/avernet
+  s_d2bf2069ff97fe::t_d17dcba58b1541 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6450bc75292c45e8938a1ffb455020ba71a8054e",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": null
+    }
+  }
+}
