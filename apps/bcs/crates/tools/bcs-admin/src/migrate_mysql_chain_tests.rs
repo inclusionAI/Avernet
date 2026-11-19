@@ -140,6 +140,10 @@ async fn full_mysql_migration_chain_applies_and_preserves_history() -> Result<()
     bcs_config.database.database_type = DatabaseType::Mysql;
     bcs_config.database.mysql = config.clone();
     fs::write(&config_file, serde_json::to_vec(&bcs_config)?)?;
+    // Config loading requires the catalog label policy file next to the
+    // config file; stage the repository dictionary into the sandbox.
+    fs::copy(bcs_root().join("configs").join("catalog-labels.toml"),
+        temp.path().join("catalog-labels.toml"))?;
     let global = MigrateGlobalArgs { config_dir: None, config_file: Some(config_file) };
     let manager = MysqlDbManager::new(config).await?;
     let db: Arc<dyn DbPlugin> = Arc::new(MysqlDbPlugin::new(manager.clone(), "bcs"));

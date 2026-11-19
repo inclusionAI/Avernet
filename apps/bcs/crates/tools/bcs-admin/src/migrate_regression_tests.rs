@@ -110,6 +110,10 @@ async fn coverage_mysql_admin_apply_is_idempotent_and_refuses_changed_history() 
         let mut bcs = BcsConfig::default(); bcs.database.database_type = DatabaseType::Mysql;
         bcs.database.mysql = config;
         let config_file = dir.path().join("bcs-config.json"); fs::write(&config_file, serde_json::to_vec(&bcs)?)?;
+        // Config loading requires the catalog label policy file next to the
+        // config file; stage the repository dictionary into the sandbox.
+        fs::copy(bcs_root().join("configs").join("catalog-labels.toml"),
+            dir.path().join("catalog-labels.toml"))?;
         let global = MigrateGlobalArgs { config_dir: None, config_file: Some(config_file) };
         let mut args = MigrateArgs { dialect: Some(MigrationDialect::Mysql), migrations_dir: Some(migrations.clone()),
             sqlite_path: None, emit_sql: false, check_files: false, check_db: false, apply: true,

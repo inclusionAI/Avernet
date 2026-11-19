@@ -133,6 +133,9 @@ runtime:
             assert self.request("GET", f"/groups/{group_id}")["visibility"] == visibility
             if strategy == "chat":
                 assert not self.rows("bcs_group_agent_cards", group_id), "Chat must not get a Group Card"
+                # Chat/DM Groups reject normalized non-empty catalog labels.
+                self.request("POST", "/groups", {**body, "group_kind": "dm",
+                    "catalog_labels": {"lifecycle": ["trial"]}}, status=400)
             else:
                 self.card(group_id, body.get("label", group_id), strategy)
                 # Exercise both retained label and general Group mutation routes.
@@ -144,6 +147,18 @@ runtime:
                 for context in ("Updated collaboration goal", ""):
                     self.request("PATCH", f"/groups/{group_id}", {"context": context})
                     assert self.card(group_id, "PATCH 名称", strategy)["description"] == context
+                # Managed catalog labels: replace, read back, then clear.
+                assert created["catalog_labels"] == {}
+                patched = self.request("PATCH", f"/groups/{group_id}",
+                                       {"catalog_labels": {"lifecycle": ["running"]}})
+                assert patched["catalog_labels"] == {"lifecycle": ["running"]}
+                assert self.request("GET", f"/groups/{group_id}")["catalog_labels"] == {"lifecycle": ["running"]}
+                # An unknown key must be rejected as a whole; labels stay intact.
+                self.request("PATCH", f"/groups/{group_id}",
+                             {"catalog_labels": {"lifecycle": ["offline"], "stage": ["x"]}}, status=400)
+                assert self.request("GET", f"/groups/{group_id}")["catalog_labels"] == {"lifecycle": ["running"]}
+                cleared = self.request("PATCH", f"/groups/{group_id}", {"catalog_labels": {}})
+                assert cleared["catalog_labels"] == {}
             self.request("DELETE", f"/groups/{group_id}?bot_id={self.bot}")
             assert not self.rows("bcs_groups", group_id), "Group deletion was not persisted"
             assert not self.rows("bcs_group_agent_cards", group_id), "Orphaned Group Card after deletion"
