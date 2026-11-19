@@ -17,10 +17,19 @@ impl std::fmt::Debug for ExecutionToken {
 #[derive(Debug, Clone)]
 pub struct CallerExecution {
     pub reference: String,
-    pub token: ExecutionToken,
+    pub token: Option<ExecutionToken>,
     pub token_type: String,
+    pub legacy_enabled: bool,
+    pub native_protected: bool,
     pub user_id: String,
     pub binding_id: String,
     pub source_message_id: String,
     pub target_bot_id: String,
+}
+
+/// Scoped, runtime-only proof from a trusted channel, resolved at queue pickup.
+pub struct NativeCallerCredential {
+    pub proof: bcs_domain::caller_identity_material::CallerExecutionToken,
+    pub token_type: String,
+    pub user_id: String,
 }

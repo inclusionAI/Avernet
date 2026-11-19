@@ -48,8 +48,9 @@ fn caller_command(id: &str, user: &str, token: &str) -> WebSendCommand {
     let mut cmd = command(id, "x-routing-zone", "blue");
     cmd.source_im_message_id = Some(id.into());
     cmd.caller_execution = Some(CallerExecution {
-        reference: uuid::Uuid::new_v4().to_string(), token: ExecutionToken::new(token.into(), "iam-token".into()),
-        token_type: "iam-token".into(), user_id: user.into(), binding_id: "binding-1".into(),
+        reference: uuid::Uuid::new_v4().to_string(), token: Some(ExecutionToken::new(token.into(), "iam-token".into())),
+        token_type: "iam-token".into(), legacy_enabled: true, native_protected: false,
+        user_id: user.into(), binding_id: "binding-1".into(),
         source_message_id: id.into(), target_bot_id: "bot-driver".into(),
     });
     cmd
@@ -62,7 +63,7 @@ async fn caller_queue_is_scoped_secret_free_and_survives_another_consumer() {
         let mut cmd = caller_command(id, user, token);
         if user == "user-b" {
             let caller = cmd.caller_execution.as_mut().unwrap();
-            caller.token = ExecutionToken::new(token.into(), "test-proof".into());
+            caller.token = Some(ExecutionToken::new(token.into(), "test-proof".into()));
             caller.token_type = "test-proof".into();
         }
         assert!(!format!("{cmd:?}").contains(token));
@@ -271,7 +272,7 @@ async fn caller_rejects_blank_and_inconsistent_type_labels_before_queueing() {
         let mut cmd = caller_command("invalid-type", "user", "test-value");
         let caller = cmd.caller_execution.as_mut().unwrap();
         caller.token_type = declared.into();
-        caller.token = ExecutionToken::new("test-value".into(), embedded.into());
+        caller.token = Some(ExecutionToken::new("test-value".into(), embedded.into()));
         assert!(flow.handle_web_send(cmd).await.is_err());
     }
     assert!(service.snapshot(None).await.unwrap().is_empty());

@@ -217,19 +217,6 @@ pub(super) async fn handle_web_send_with_result(
         }
     }
 
-    if let Some(caller) = &cmd.caller_execution {
-        // A channel caller is never a general-purpose credential for routing fan-out.
-        if group.group_strategy != GroupStrategy::Chat || decision.targets.len() != 1
-            || decision.targets[0].bot_uuid != caller.target_bot_id
-            || decision.targets[0].delivery_type != DeliveryType::Send
-            || !flow.registry.resolve_delivery_target(&caller.target_bot_id).await?.is_http_provider() {
-            return Err(ServiceError::InvalidOperation {
-                message: "caller execution requires one direct HTTP provider Bot".into(), request_id: None,
-            });
-        }
-        crate::caller_execution::store(flow, &cmd).await?;
-    }
-
     log_routing_digest(
         &cmd,
         &decision,
@@ -239,18 +226,6 @@ pub(super) async fn handle_web_send_with_result(
 
     let sender_display_name = preferred_sender_display_name(flow, &cmd).await;
     let from_bot_owner = from_bot_owner(flow, &cmd.from_actor_id).await;
-    let (mention_source, mention_message_text): (Option<&[String]>, String) =
-        if group.group_kind == GroupKind::Dm {
-            (None, String::new())
-        } else if !cmd.mentions.is_empty() {
-            // 显式 mention 路径：使用人类发送者看到的原始消息文本。
-            (Some(cmd.mentions.as_slice()), cmd.message.clone())
-        } else {
-            (
-                Some(decision.mentions.as_slice()),
-                decision.cleaned_message.clone(),
-            )
-        };
     let sender_type = if cmd.from_actor_id.starts_with("human_") {
         SenderType::Human
     } else {
@@ -360,6 +335,21 @@ pub(super) async fn handle_web_send_with_result(
         }
     }
     let caller_deps = if caller_admission_targets.is_empty() { None } else { flow.caller_admission.clone() };
+    crate::caller_execution::prepare_channel_credential(
+        flow, &mut cmd, &group, &decision.targets, &caller_admission_targets,
+    ).await?;
+    let (mention_source, mention_message_text): (Option<&[String]>, String) =
+        if group.group_kind == GroupKind::Dm {
+            (None, String::new())
+        } else if !cmd.mentions.is_empty() {
+            // 显式 mention 路径：使用人类发送者看到的原始消息文本。
+            (Some(cmd.mentions.as_slice()), cmd.message.clone())
+        } else {
+            (
+                Some(decision.mentions.as_slice()),
+                decision.cleaned_message.clone(),
+            )
+        };
     // Owner→caller identity relay (spec L62 direction): with the deployment's
     // allowlist naming a relay-capable middle hop among the routed
     // participants, the authenticated Human's ingress is captured against

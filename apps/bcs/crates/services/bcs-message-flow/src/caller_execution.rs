@@ -3,7 +3,7 @@ use crate::BcsMessageFlow;
 use bcs_cache_api::CacheSetMode;
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{BotDeliveryTarget, ServiceError, ServiceResult, WebSendCommand};
-use bcs_service_api::application::caller_execution::CallerExecution;
+use bcs_domain::{DeliveryType, Group, GroupStrategy};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -20,6 +20,8 @@ pub(crate) struct ExecutionRef {
     user_id: String,
     group_id: String,
     session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    native_env: Option<String>,
 }
 
 impl ExecutionRef {
@@ -29,6 +31,7 @@ impl ExecutionRef {
             source_message_id: c.source_message_id.clone(), target_bot_id: c.target_bot_id.clone(),
             user_id: c.user_id.clone(), group_id: cmd.group_id.clone(),
             session_id: cmd.session_id.clone().unwrap_or_default(),
+            native_env: c.native_protected.then(bcs_config::resolve_env_str),
         })
     }
     fn key(&self) -> String { format!("bcs:caller-execution:v1:{}", self.reference) }
@@ -50,10 +53,46 @@ fn invalid() -> ServiceError {
     }
 }
 
+pub(crate) async fn prepare_channel_credential(
+    flow: &BcsMessageFlow,
+    cmd: &mut WebSendCommand,
+    group: &Group,
+    targets: &[bcs_service_api::RoutingTarget],
+    caller_targets: &[String],
+) -> ServiceResult<()> {
+    let Some(credential) = cmd.caller_execution.as_mut() else { return Ok(()); };
+    let protected = !caller_targets.is_empty();
+    if (protected && !credential.native_protected) || (!protected && !credential.legacy_enabled) {
+        cmd.caller_execution = None;
+        return Ok(());
+    }
+    if group.group_strategy != GroupStrategy::Chat || targets.len() != 1
+        || targets[0].bot_uuid != credential.target_bot_id
+        || targets[0].delivery_type != DeliveryType::Send
+        || !flow.registry.resolve_delivery_target(&credential.target_bot_id).await?.is_http_provider()
+    {
+        return Err(ServiceError::InvalidOperation {
+            message: "caller execution requires one direct HTTP provider Bot".into(), request_id: None,
+        });
+    }
+    if protected && (caller_targets.len() != 1 || caller_targets[0] != credential.target_bot_id
+        || !cmd.caller_ingress.as_ref().is_some_and(|ingress| {
+            ingress.auth_source() == bcs_domain::caller_identity_material::HumanCallerAuthSource::ChannelIngress
+                && ingress.actor().staff_no == credential.user_id
+        }))
+    {
+        return Err(invalid());
+    }
+    credential.native_protected = protected;
+    store(flow, cmd).await
+}
+
 pub(crate) async fn store(flow: &BcsMessageFlow, cmd: &WebSendCommand) -> ServiceResult<()> {
     let Some(scope) = ExecutionRef::from_command(cmd) else { return Ok(()); };
-    let c: &CallerExecution = cmd.caller_execution.as_ref().ok_or_else(invalid)?;
-    if c.token.expose().trim().is_empty() || c.token_type.trim().is_empty() || c.token_type != c.token.token_type() || c.user_id.trim().is_empty()
+    let c = cmd.caller_execution.as_ref().ok_or_else(invalid)?;
+    let token = c.token.as_ref().ok_or_else(invalid)?;
+    if token.expose().trim().is_empty() || c.token_type.trim().is_empty() || c.token_type != token.token_type()
+        || c.user_id.trim().is_empty()
         || c.binding_id.is_empty() || c.source_message_id.is_empty() || c.reference.is_empty()
         || scope.session_id.is_empty() || cmd.source_im_message_id.as_deref() != Some(&c.source_message_id) {
         return Err(invalid());
@@ -61,18 +100,17 @@ pub(crate) async fn store(flow: &BcsMessageFlow, cmd: &WebSendCommand) -> Servic
     let cache = flow.execution_cache.as_ref().ok_or_else(invalid)?;
     let key = scope.key();
     let record = CachedExecution { scope, expires_at_ms: bcs_protocol::now_ms().saturating_add(TTL_MS),
-        token_type: c.token_type.clone(), token: c.token.expose().to_string() };
+        token_type: token.token_type().to_string(), token: token.expose().to_string() };
     let value = serde_json::to_vec(&record).map_err(|_| invalid())?;
     if !cache.set_value(&key, value, Some(Duration::from_millis(TTL_MS)), CacheSetMode::InsertOnly)
         .await.map_err(|_| invalid())? { return Err(invalid()); }
     Ok(())
 }
 
-pub(crate) async fn apply(
+async fn load(
     flow: &BcsMessageFlow, scope: &ExecutionRef, target: &BotDeliveryTarget,
     bot_id: &str, group_id: &str, session_id: &str, source_message_id: Option<&str>,
-    frame: &mut BcsFrame,
-) -> ServiceResult<u64> {
+) -> ServiceResult<CachedExecution> {
     if !target.is_http_provider() || scope.target_bot_id != bot_id || scope.group_id != group_id
         || scope.session_id != session_id || source_message_id != Some(scope.source_message_id.as_str()) {
         return Err(invalid());
@@ -82,6 +120,16 @@ pub(crate) async fn apply(
     let record: CachedExecution = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
     if &record.scope != scope || record.expires_at_ms <= bcs_protocol::now_ms()
         || record.token_type.trim().is_empty() || record.token.trim().is_empty() { return Err(invalid()); }
+    Ok(record)
+}
+
+pub(crate) async fn apply(
+    flow: &BcsMessageFlow, scope: &ExecutionRef, target: &BotDeliveryTarget,
+    bot_id: &str, group_id: &str, session_id: &str, source_message_id: Option<&str>,
+    frame: &mut BcsFrame,
+) -> ServiceResult<u64> {
+    if scope.native_env.is_some() { return Err(invalid()); }
+    let record = load(flow, scope, target, bot_id, group_id, session_id, source_message_id).await?;
     let BcsFrame::Request(request) = frame else { return Err(invalid()); };
     if request.method != "chat.send" { return Err(invalid()); }
     let params = request.params.as_mut().and_then(|p| p.as_object_mut()).ok_or_else(invalid)?;
@@ -90,4 +138,25 @@ pub(crate) async fn apply(
     extensions.insert("caller_context".into(), serde_json::json!({"subject": {"kind": "human", "ref": scope.user_id}}));
     extensions.insert("caller_execution_token".into(), serde_json::json!({"type": record.token_type, "token": record.token}));
     Ok(record.expires_at_ms)
+}
+
+pub(crate) async fn load_native(
+    flow: &BcsMessageFlow,
+    row: &bcs_domain::message_delivery::PersistedMessageDelivery,
+    target: &BotDeliveryTarget,
+    source_im_message_id: Option<&str>,
+) -> ServiceResult<Option<bcs_service_api::NativeCallerCredential>> {
+    let Some(value) = row.semantic_projection_json.get("caller_execution").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let scope: ExecutionRef = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
+    let Some(env) = scope.native_env.as_deref() else { return Ok(None); };
+    if env != row.env { return Err(invalid()); }
+    let record = load(flow, &scope, target, &row.target_bot_id, &row.group_id, &row.session_id, source_im_message_id).await?;
+    let proof = bcs_domain::caller_identity_material::CallerExecutionToken::new(
+        bcs_domain::caller_identity_material::CallerProofFormat::Opaque, record.token, record.expires_at_ms as i64,
+    ).map_err(|_| invalid())?;
+    Ok(Some(bcs_service_api::NativeCallerCredential {
+        proof, token_type: record.token_type, user_id: scope.user_id,
+    }))
 }

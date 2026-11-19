@@ -548,6 +548,7 @@ pub struct CallerDispatchContext {
     pub service_credential: bcs_domain::RedactedToken,
     pub provider_id: String,
     pub provider_bot_ref: String,
+    pub native_credential: Option<super::caller_execution::NativeCallerCredential>,
 }
 
 /// Application-owned reconstruction and current access/policy checks. This is
