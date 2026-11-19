@@ -46,6 +46,7 @@ provides:
   - caller_from_claims
   - resign_principal_token
   - mint_service_app_principal
+  - mint_baas_service_app_principal
   - key_fingerprint
   - is_weak_signing_key
   - MIN_SIGNING_KEY_BYTES
@@ -115,3 +116,17 @@ not accept inbound principals or re-address user identity. The composition root
 resolves the existing shared key; the envelope is `iss=backend`, `aud=bcs`,
 `kid=bare`, with a 60-second lifetime and the authoritative Bot tenant. BCS
 still verifies the signature and requires a matching trusted-App action rule.
+
+**Added 2026-11-18 — BaaS chat service identity.** `baas_service_principal.py`
+(`mint_baas_service_app_principal`) mints the short-lived token the agentswarm
+`baas_gateway` chat transport presents to BaaS's `/openapi/v1/chat/*`. Like the
+BCS token it accepts only operator-provisioned facts, not caller-shaped
+identity: `principals[0].access_key.access_key` names the `baas_resource_key`
+row and `principals[0].tenant` scopes that lookup, with `iss=backend`,
+`aud=baas`, `kid=bare` and a 60-second TTL. An optional `bot_id` is stated in
+`principals[0].app.bot_id` to narrow the grant to one exact Bot; it is
+normalized to the platform's spelling (leading zeros stripped from the entity
+id), an absent claim omits the field entirely, and a claim never replaces the
+grant that must still name the Bot. BaaS owns the matching rules in
+[ADR 0017](../../../../../../baas/docs/adr/0017-exact-bot-claim.md) and
+[ADR 0016](../../../../../../baas/docs/adr/0016-wildcard-bot-mapping.md).
