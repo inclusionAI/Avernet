@@ -10,13 +10,18 @@ def repair_format(result_json: str, rule_version: int) -> HostingDecision:
     """Accept one flat JSON object with missing/trailing commas, not prose/multiple outputs.
 
     Keys and values are still decoded by the JSON parser. Only delimiters can
-    change: no new key, action, rule version or text is generated. More general
-    LLM repair remains disabled until the plugin is qualified in deployment.
+    change: no new key, action, rule version or text is generated.
     """
     try:
+        if len(result_json) > 262_144:
+            raise ValueError("result too large")
         result = strict_json(result_json)
         payloads = result["payloads"]
-        if len(payloads) != 1 or set(payloads[0]) != {"text"}:
+        if (
+            not isinstance(payloads, list) or len(payloads) != 1
+            or not isinstance(payloads[0], dict)
+            or not isinstance(payloads[0].get("text"), str)
+        ):
             raise ValueError("single plain payload required")
         text = payloads[0]["text"].strip()
         lines = text.splitlines()
@@ -26,6 +31,10 @@ def repair_format(result_json: str, rule_version: int) -> HostingDecision:
             and lines[-1] == "```"
         ):
             text = "\n".join(lines[1:-1]).strip()
+        # Remove at most one terminal delimiter; the entire remaining object
+        # must still parse. Never select the first of several decisions.
+        if text.endswith(","):
+            text = text[:-1].rstrip()
         if not text.startswith("{") or not text.endswith("}"):
             raise ValueError("object required")
         decoder, fields, position = json.JSONDecoder(), {}, 1
@@ -53,7 +62,9 @@ def repair_format(result_json: str, rule_version: int) -> HostingDecision:
             if position < len(text) - 1 and text[position] == ",":
                 position += 1
         # Reuse all original meta/error checks and the strict action/version contract.
-        result["payloads"] = [{"text": json.dumps(fields, ensure_ascii=False)}]
+        result["payloads"] = [
+            payloads[0] | {"text": json.dumps(fields, ensure_ascii=False)}
+        ]
         return parse_decision(json.dumps(result, ensure_ascii=False), rule_version)
     except (ValueError, KeyError, TypeError, IndexError, RecursionError):
         raise ExecutionError("invalid_decision") from None
