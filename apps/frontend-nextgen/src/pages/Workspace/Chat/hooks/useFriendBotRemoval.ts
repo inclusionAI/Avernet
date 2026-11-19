@@ -3,8 +3,8 @@
 // 口径:移除为静默、不可逆、只作用于好友关系维度(R2–R4);历史单聊会话仅前端隐藏
 // (数据保留,R8),由好友行从目录消失承载,不调用会话删除;移除后如正选中该好友
 // 或其会话,清除选中回到默认态(R9)。
-import { deleteFriendConnection } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
+import { conversationService } from '@/services/workspace/conversationService';
 import { useConversationStore } from '@/stores/conversationStore';
 import { notifySuccess } from '@/components/ui/notify';
 import { safeReportError } from '@/utils/errorToast';
@@ -41,7 +41,7 @@ export function useFriendBotRemoval({ retryFriend }: { retryFriend(): void }): F
     if (!target || busy) return;
     setBusy(true);
     try {
-      await deleteFriendConnection({ target_actor_type: 'bot', target_actor_id: target.botId });
+      await conversationService.removeFriendConnection(target.botId);
       const store = useConversationStore.getState();
       // 本地状态清理:该 Bot 的好友会话缓存/范围记忆/检索条件与展开位(重加好友从默认态开始)。
       store.removeFriendBotState(target.botId);

@@ -63,10 +63,15 @@ describe('useFriendBotRemoval', () => {
       await result.current.confirm();
     });
 
-    expect(deleteFriendConnectionMock).toHaveBeenCalledWith({
-      target_actor_type: 'bot',
-      target_actor_id: 'friend-bot:1',
-    });
+    // 经 Service 层包装(conversationService.removeFriendConnection)后,controller
+    // 收到 (query 参数, signal);未透传 signal 时第二参为 undefined。
+    expect(deleteFriendConnectionMock).toHaveBeenCalledWith(
+      {
+        target_actor_type: 'bot',
+        target_actor_id: 'friend-bot:1',
+      },
+      undefined,
+    );
     const next = useConversationStore.getState();
     expect(next.expandedBotIds['friend-bot:1']).toBeUndefined();
     expect(next.scopeByFriendBotId['friend-bot:1']).toBeUndefined();

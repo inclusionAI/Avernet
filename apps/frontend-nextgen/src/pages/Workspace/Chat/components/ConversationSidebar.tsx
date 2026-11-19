@@ -22,6 +22,8 @@ import type { ConversationCollapsedRailSection } from './ConversationCollapsedRa
 import { CreateBotEntryButton, HeaderActionButton } from './ConversationSidebarQuickEntries';
 import { ConversationSidebarSection as SidebarSection } from './ConversationSidebarSection';
 import { FriendItem, ManagedItem } from './ConversationSidebarItems';
+import { useFriendBotRemoval } from '../hooks/useFriendBotRemoval';
+import { FriendBotRemovalDialog } from './FriendBotRemovalDialog';
 
 export interface ConversationSidebarProps {
   managedBots: ConversationBotView[];
@@ -47,9 +49,6 @@ export interface ConversationSidebarProps {
   /** 「Bot 管理」菜单项回调(#2990 还原):带该 Bot 所属空间上下文跳转 Bot 管理页;
    *  好友 Bot 不提供(装配层只经 ManagedItem 传导,菜单项不渲染)。 */
   onOpenBotManagement?(bot: ConversationBotView['bot']): void;
-  /** 「移除好友」入口回调(移除好友 PRD R6):仅好友 Bot 分组项提供(装配层只经 FriendItem
-   *  传导);管理/团队分组不渲染;装配层负责打开移除确认弹窗并执行移除动线。 */
-  onRemoveFriend?(bot: ConversationBotView['bot']): void;
   /** Bot 正在回复中的会话 id(#2990 还原):仅当前打开的普通 Runtime 会话;Coding Bot 暂为 null。 */
   replyingSessionId: string | null;
 }
@@ -76,6 +75,10 @@ function filterBots(bots: ConversationBotView[], keyword: string): ConversationB
 export function ConversationSidebarContent(props: ConversationSidebarProps) {
   const { managedBots, teamBots, friendBots, directory, onOpenPublicBots, onOpenBotWorkshop } = props;
   const { createEntrySpaces, createEntryCurrentSpaceId, onCreateBotInSpace } = props;
+  // 好友 Bot 移除动线(移除好友 PRD):仅好友分组入口触发;确认后静默解除好友关系、
+  // 历史会话随好友行从目录消失(前端隐藏,数据保留),目录重拉驱动分组更新。
+  // (2026-11-19 自页面下沉装配:页面组件行数门禁 TC-G005;入口与确认弹窗在侧栏内闭环。)
+  const friendRemoval = useFriendBotRemoval({ retryFriend: directory.retryFriend });
   const [search, setSearch] = useState('');
   const keyword = search.trim().toLowerCase();
   const isSearching = keyword.length > 0;
@@ -188,7 +191,9 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               emptyHint={friendEmptyHint}
               infoHint="从发现菜单中以用户身份申请添加的好友 Bot"
               isSearching={isSearching}
-              renderItem={(view) => <FriendItem key={view.bot.botId} view={view} props={props} />}
+              renderItem={(view) => (
+                <FriendItem key={view.bot.botId} view={view} props={props} onRemoveFriend={friendRemoval.open} />
+              )}
               collapsible
               collapsed={!isSearching && props.store.collapsedBotGroups.friend === true}
               onToggleCollapsed={() =>
@@ -211,6 +216,8 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
           </>
         )}
       </div>
+      {/* 移除好友确认弹窗:与好友行入口同源装配(移除动线整体收敛于侧栏)。 */}
+      <FriendBotRemovalDialog removal={friendRemoval} />
     </div>
   );
 }

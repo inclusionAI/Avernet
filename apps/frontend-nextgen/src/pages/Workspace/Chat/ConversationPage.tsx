@@ -3,7 +3,6 @@
 // Task 4 会话 Hook(目录/会话/他人只读/URL 同步)+ Task 6 对话侧栏 +
 // 只读面板 + 普通/Coding Bot 两个互斥的 Runtime 边界。
 import { getCapabilities } from '@/capabilities';
-import { ConfirmDialog, InlineCode } from '@/components/ui';
 import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/FriendRequestConfirmModal';
 import { ConversationTargetPlaceholder } from './components/ConversationTargetPlaceholder';
 import type { ConversationBotSection } from '@/domain/conversation/types';
@@ -28,7 +27,6 @@ import { useConversationDeepLinkSessionHydration } from './hooks/useConversation
 import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationHistory } from './hooks/useConversationHistory';
 import { useConversationIdentityReset } from './hooks/useConversationIdentityReset';
-import { useFriendBotRemoval } from './hooks/useFriendBotRemoval';
 import { useConversationMobileSidebar } from './hooks/useConversationMobileSidebar';
 import { useConversationSelection } from './hooks/useConversationSelection';
 import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
@@ -204,9 +202,6 @@ export default function ConversationPage(): JSX.Element {
     setStandardChatRequesting(isRequesting);
   }, []);
   const replyingSessionId = standardChatRequesting ? selectedSession?.sessionId ?? null : null;
-  // 好友 Bot 移除动线(移除好友 PRD):仅好友分组入口触发;确认后静默解除好友关系、
-  // 历史会话随好友行从目录消失(前端隐藏,数据保留),目录重拉驱动分组更新。
-  const friendRemoval = useFriendBotRemoval({ retryFriend: directory.retryFriend });
   const sidebarProps: ConversationSidebarProps = {
     managedBots: directory.managedBots,
     teamBots: directory.teamBots,
@@ -225,8 +220,6 @@ export default function ConversationPage(): JSX.Element {
     createEntryCurrentSpaceId,
     onCreateBotInSpace: createBotInSpace,
     onOpenBotManagement: openBotManagement,
-    // 好友 Bot「移除好友」入口回调(移除好友 PRD R6):仅好友分组项提供(经 FriendItem 传导)。
-    onRemoveFriend: friendRemoval.open,
     replyingSessionId,
   };
 
@@ -297,32 +290,6 @@ export default function ConversationPage(): JSX.Element {
           actorName={human.displayName || human.userId}
           onClose={legacyShareLinkGuard.onClose}
           onConfirm={legacyShareLinkGuard.onConfirm}
-        />
-      )}
-      {/* 移除好友确认弹窗(移除好友 PRD R5/R7):危险操作二次确认;疑问句独立成行,
-          两项后果分行列示(2026-11-18 验收反馈:文案精简、关键信息分行)——
-          ①移除后如需继续协作，须重新发起添加好友申请；
-          ②历史单聊会话将从会话列表隐藏，重新添加好友后恢复。 */}
-      {friendRemoval.target && (
-        <ConfirmDialog
-          open
-          title="移除好友"
-          description={
-            <>
-              <span className="block">
-                确定移除好友
-                <InlineCode className="mx-1">{friendRemoval.target.displayName}</InlineCode>
-                吗？
-              </span>
-              <span className="mt-2 block">· 移除后如需继续协作，须重新发起添加好友申请</span>
-              <span className="mt-1 block">· 历史单聊会话将从会话列表隐藏，重新添加好友后恢复</span>
-            </>
-          }
-          confirmText="确认移除"
-          confirmVariant="destructive"
-          loading={friendRemoval.busy}
-          onCancel={friendRemoval.cancel}
-          onConfirm={friendRemoval.confirm}
         />
       )}
     </div>

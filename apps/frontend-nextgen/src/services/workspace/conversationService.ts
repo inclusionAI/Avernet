@@ -20,6 +20,7 @@ import {
 import { collaborationCandidateService, type CollaborationBotView } from './collaborationCandidateService';
 import type { DomainResult } from './identityService';
 import { listConversationSource } from './conversationSourceService';
+import { deleteFriendConnection } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 
 export interface ConversationDirectoryResult {
   /** 当前用户管理的 Bot;包含 AgentCoding Bot,行点击走专用 coding-chat 入口。 */
@@ -189,5 +190,11 @@ export const conversationService = {
       ...rangeArgs,
     );
     return result;
+  },
+
+  /** 移除好友关系(移除好友动线的 Service 层封装,Hook 经此调用 API):主体为登录用户,
+   *  目标由 query 指定(契约 delete_friend_connection);静默解除、幂等,失败由调用方收敛提示。 */
+  removeFriendConnection(botId: string, signal?: AbortSignal) {
+    return deleteFriendConnection({ target_actor_type: 'bot', target_actor_id: botId }, signal);
   },
 };
