@@ -16,6 +16,14 @@ _extra_options: dict[
 ] = {}
 _plugin_option_providers: dict[str, dict[str, Callable[[Any], Any]]] = {}
 _authn_strategy_providers: dict[str, Callable[[Any], Any]] = {}
+_schema_catalog_providers: dict[str, Callable[[Any], Any]] = {}
+
+
+def register_schema_catalog_provider(
+    name: str, provider_factory: Callable[[Any], Any]
+) -> None:
+    """Register a schema source adapter without importing enterprise code."""
+    _schema_catalog_providers[name] = provider_factory
 
 
 def register_plugin_option_provider(
@@ -76,6 +84,12 @@ def inject_into_plugin_container(container: Any) -> None:
 
     plugin_container = container.plugins()
 
+    for name, provider_factory in _schema_catalog_providers.items():
+        if name not in plugin_container.schema_catalogs.kwargs:
+            plugin_container.schema_catalogs.add_kwargs(
+                **{name: provider_factory(container)}
+            )
+
     for plugin_name, options in _extra_options.items():
         selector: providers.Selector | None = getattr(
             plugin_container, plugin_name, None
@@ -128,4 +142,9 @@ def inject_extra_authn_strategies() -> None:
 
 def has_enterprise_plugins() -> bool:
     """Check if any enterprise plugin options have been registered."""
-    return bool(_extra_options or _plugin_option_providers or _authn_strategy_providers)
+    return bool(
+        _extra_options
+        or _plugin_option_providers
+        or _authn_strategy_providers
+        or _schema_catalog_providers
+    )

@@ -18,12 +18,14 @@ def setup_function() -> None:
     registry_mod._extra_options.clear()
     registry_mod._plugin_option_providers.clear()
     registry_mod._authn_strategy_providers.clear()
+    registry_mod._schema_catalog_providers.clear()
 
 
 def teardown_function() -> None:
     registry_mod._extra_options.clear()
     registry_mod._plugin_option_providers.clear()
     registry_mod._authn_strategy_providers.clear()
+    registry_mod._schema_catalog_providers.clear()
 
 
 def test_register_authn_strategy_provider_adds_to_container_dict() -> None:
