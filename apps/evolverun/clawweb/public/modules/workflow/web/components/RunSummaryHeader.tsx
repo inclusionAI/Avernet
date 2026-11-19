@@ -3,9 +3,10 @@ import type { FlowRun } from '@avernet/clawweb-shared/web/types'
 import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
 import RunMarkers from './RunMarkers'
 import { useDeleteFlowRun, useRerunFlowRun, useAbortFlowRun } from '@avernet/clawweb-shared/web/api/hooks'
+import type { RunRuntimeMetadata } from '../../shared/run-runtime-metadata'
 
 interface RunSummaryHeaderProps {
-  run: FlowRun
+  run: FlowRun & Partial<RunRuntimeMetadata>
   nodeCount: number
   succeededCount?: number
   failedCount?: number
@@ -187,8 +188,11 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
         <Stat label="发起 Bot" value={(run.origin_bot_id || '—') + (run.plugin_version ? ` / ${run.plugin_version}` : '')} mono={!!(run.origin_bot_id || run.plugin_version)} />
         <Stat label="运行引擎" value={run.engine || '—'} mono={!!run.engine} />
         <RunMarkers run={run} variant="details" />
-        <Stat label="耗时" value={formatDuration(run.total_duration_ms)} />
+        <Stat label="耗时" value={formatDuration(run.total_duration_ms)} className="lg:col-start-1" />
         <Stat label="开始时间" value={formatTime(run.started_at)} />
+        <Stat label="device_id" value={run.device_id ?? ''} mono className="break-all" />
+        <Stat label="BOT_TYPE" value={run.bot_type ?? ''} className="break-all" />
+        <Stat label="STAGE" value={run.stage ?? ''} className="break-all" />
       </dl>
 
       {/* Node progress bar */}
@@ -224,9 +228,9 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
   )
 }
 
-function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Stat({ label, value, mono, className }: { label: string; value: string; mono?: boolean; className?: string }) {
   return (
-    <div>
+    <div className={className}>
       <dt className="text-gray-400 text-xs">{label}</dt>
       <dd className={`mt-0.5 text-sm font-medium text-gray-900 ${mono ? 'font-mono' : ''}`}>
         {value}
