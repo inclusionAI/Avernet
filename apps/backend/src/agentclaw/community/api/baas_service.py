@@ -45,7 +45,7 @@ class BaasServiceProtocol(Protocol):
         ...
 
     def resolve_token_outbound_device_id(
-        self, binding: DeviceBindingRecord | None,
+        self, binding: DeviceBindingRecord | None, *, device_uuid: str | None = None,
     ) -> str:
         """Resolve an authorized ACTIVE binding to a validated token append target.
 
@@ -54,6 +54,8 @@ class BaasServiceProtocol(Protocol):
         @template suffix and requiring ARCA-SANDBOX-. No template lookup occurs.
         BaasOutboundTargetError.reason is binding_unavailable,
         unsupported_provider, target_not_found, target_ambiguous or invalid_target.
+        With a device_uuid, require an exact ACTIVE BaaS replica of this binding
+        or matching device_uuid metadata on the ACTIVE direct ARCA binding.
         Query transport errors propagate unchanged.
         """
         ...

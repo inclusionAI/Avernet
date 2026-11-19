@@ -1,21 +1,25 @@
 /** @jest-environment jsdom */
-// TaskOverviewV2(L1):节点视图/下钻入口隐藏/产物区(PRD #1/2/3/4/9)。DAG 视图入口当前隐藏。
+// TaskOverviewV2(L1):节点视图/独立下钻/产物区(PRD #1/2/3/4/9)。DAG 视图入口当前隐藏。
+import { describe, expect, it, jest } from '@jest/globals';
+import type { TaskPanelDeclaration, TaskPanelHost } from '@task-panel-test/contracts';
+import { createTaskPanelController } from '@task-panel-test/controller/createTaskPanelController';
+import type { ResolvedSessionTarget } from '@task-panel-test/panel/sessionResolution';
 import {
   artifactDescriptorCode,
   artifactDescriptorText,
   artifactDescriptorUrlLink,
 } from '@task-panel-test/panel/testdata/artifactFixtures';
 import type { TaskNodeView, TaskView } from '@task-panel-test/panel/types';
-import type { ResolvedSessionTarget } from '@task-panel-test/panel/sessionResolution';
 import { TaskOverviewV2, type TaskOverviewV2Props } from '@task-panel-test/panel/v2/TaskOverviewV2';
 import type { TaskPanelNav } from '@task-panel-test/panel/v2/taskPanelNav';
-import { fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from '@jest/globals';
-import { TaskPanelTestHost } from '../../../helpers/taskPanelHost';
+import { TaskPanelV2 } from '@task-panel-test/panel/v2/TaskPanelV2';
+import { act, render as baseRender, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useSyncExternalStore } from 'react';
+import { taskPanelTestHost, TaskPanelTestHost } from '../../../helpers/taskPanelHost';
 
-const render = (ui: Parameters<typeof baseRender>[0], options?: Parameters<typeof baseRender>[1]) => baseRender(ui, { wrapper: TaskPanelTestHost, ...options });
-
-
+const render = (ui: Parameters<typeof baseRender>[0], options?: Parameters<typeof baseRender>[1]) =>
+  baseRender(ui, { wrapper: TaskPanelTestHost, ...options });
 
 const nodeArtifacts = (n: Partial<TaskNodeView>): TaskNodeView =>
   ({
@@ -27,7 +31,7 @@ const nodeArtifacts = (n: Partial<TaskNodeView>): TaskNodeView =>
     artifacts: [],
     stepTraces: [],
     ...n,
-  }) as TaskNodeView;
+  } as TaskNodeView);
 
 const task = {
   id: 't1',
@@ -113,17 +117,42 @@ const task = {
           owner: 'bot-coder',
           updatedAt: '2026-10-20T08:56:40.000Z',
         },
-        { id: 'art-text', name: '阶段结论', type: 'document', kind: 'text', summary: '一段纯文本结论', owner: 'bot-planner', updatedAt: '2026-10-20T08:58:20.000Z' },
+        {
+          id: 'art-text',
+          name: '阶段结论',
+          type: 'document',
+          kind: 'text',
+          summary: '一段纯文本结论',
+          owner: 'bot-planner',
+          updatedAt: '2026-10-20T08:58:20.000Z',
+        },
       ],
     }),
   ],
   dagNodes: [
-    { id: 'n-solo', label: '需求澄清与规划', status: 'done', x: 0, y: 0, isCurrent: false, present: 'merged', short: '需求澄清与规划' },
-    { id: 'n-group', label: '并行调研执行', status: 'running', x: 0, y: 100, isCurrent: false, present: 'running', drillable: true, short: '并行调研执…' },
+    {
+      id: 'n-solo',
+      label: '需求澄清与规划',
+      status: 'done',
+      x: 0,
+      y: 0,
+      isCurrent: false,
+      present: 'merged',
+      short: '需求澄清与规划',
+    },
+    {
+      id: 'n-group',
+      label: '并行调研执行',
+      status: 'running',
+      x: 0,
+      y: 100,
+      isCurrent: false,
+      present: 'running',
+      drillable: true,
+      short: '并行调研执…',
+    },
   ],
-  dagEdges: [
-    { from: 'n-solo', to: 'n-group', semantics: 'rework', reason: 'Owner Bot 裁决 revise: 返工' },
-  ],
+  dagEdges: [{ from: 'n-solo', to: 'n-group', semantics: 'rework', reason: 'Owner Bot 裁决 revise: 返工' }],
 } as unknown as TaskView;
 
 // fixture Descriptor 断言备份(kind 徽章依赖)
@@ -160,8 +189,8 @@ const props = (overrides?: Partial<TaskOverviewV2Props>): TaskOverviewV2Props =>
 describe('TaskOverviewV2(L1)', () => {
   it('节点视图默认:卡片渲染执行体 pill/返工徽章/HITL 徽章/完成划线', () => {
     render(<TaskOverviewV2 {...props()} />);
-    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
-    expect(screen.getByText('第2棒 并行调研执行')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '选中节点 第2棒 并行调研执行' })).toBeTruthy();
     expect(screen.getByText('竞品研究员Group')).toBeTruthy();
     expect(screen.getByText('点击查看会话')).toBeTruthy();
     // I2:返工次数 = attemptCount-1(action_log 的 attempt 从 1 起 = 首发);attemptCount=2 → 第 1 次返工
@@ -170,36 +199,42 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.queryByText('第 0 次返工')).toBeNull();
     expect(screen.getByText('人工处理')).toBeTruthy();
     // demo 语义:完成态(present done/merged)节点标题划线
-    const doneTitle = screen.getByText('第1棒 需求澄清与规划');
+    const doneTitle = screen
+      .getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' })
+      .querySelector('[data-node-title]')!;
     expect((doneTitle as HTMLElement).style.textDecoration).toContain('line-through');
   });
 
-  it('第一棒和后续节点均按节点会话目标联动', () => {
+  it('根节点恢复宿主会话；其他节点保持会话联动', () => {
     const nav = makeNav();
     render(<TaskOverviewV2 {...props({ nav })} />);
 
-    fireEvent.click(screen.getByText('第1棒 需求澄清与规划'));
-    expect(nav.calls.root).toHaveLength(0);
-    expect(nav.calls.select).toHaveLength(1);
-    expect(nav.calls.select[0][0]).toBe('n-solo');
+    fireEvent.click(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' }));
+    expect(nav.calls.root).toEqual(['n-solo']);
+    expect(nav.calls.select).toHaveLength(0);
     expect(nav.calls.drill).toHaveLength(0);
 
-    fireEvent.click(screen.getByText('第2棒 并行调研执行'));
-    expect(nav.calls.select).toHaveLength(2);
-    expect(nav.calls.select[1][0]).toBe('n-group');
-    expect(nav.calls.select[1][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
+    fireEvent.click(screen.getByRole('button', { name: '选中节点 第2棒 并行调研执行' }));
+    expect(nav.calls.select).toHaveLength(1);
+    expect(nav.calls.select[0][0]).toBe('n-group');
+    expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
     expect(nav.calls.drill).toHaveLength(0);
   });
 
-  it('节点视图下钻入口隐藏,协作群节点也不渲染下钻按钮', () => {
-    render(<TaskOverviewV2 {...props()} />);
-    expect(screen.queryByTitle('下钻节点副屏')).toBeNull();
-    expect(screen.queryByLabelText('下钻 并行调研执行')).toBeNull();
+  it('群节点有独立下钻图标，身份/会话缺失的节点有不可用说明', () => {
+    const nav = makeNav();
+    render(<TaskOverviewV2 {...props({ nav })} />);
+    fireEvent.click(screen.getByRole('button', { name: '下钻 并行调研执行' }));
+    expect(nav.calls.drill).toEqual(['n-group']);
+    expect(nav.calls.root).toEqual([]);
+    expect(nav.calls.select).toEqual([]);
+    const unavailable = screen.getByRole('button', { name: /下钻 需求澄清与规划：节点缺少会话或执行者信息/ });
+    expect(unavailable.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('DAG 视图入口隐藏,总览始终展示节点视图', () => {
     render(<TaskOverviewV2 {...props()} />);
-    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'DAG视图' })).toBeNull();
     expect(screen.queryByTitle('切换到 DAG 视图')).toBeNull();
     expect(screen.queryByTitle('当前为 DAG 视图')).toBeNull();
@@ -214,19 +249,16 @@ describe('TaskOverviewV2(L1)', () => {
     // 每个产物标记归属棒次; 仅 is_final_artifact=true 的产物边框高亮。
     // 展示顺序按棒次 sequence 正序;根 legacy 产物回落第 1 棒,第 2 棒内按创建时间正序。
     const stageLabels = screen.getAllByTestId('artifact-stage').map((item) => item.textContent);
-    expect(stageLabels).toEqual(['第1棒产物', '最终产物', '第2棒产物', '第2棒产物']);
+    expect(stageLabels).toEqual(['节点 n-solo', '最终产物', '节点 n-group', '节点 n-group']);
     const finalArtifactRow = screen.getByText('需求说明书').closest('li')!;
-    expect(finalArtifactRow.style.border).toBe('1px solid rgb(37, 99, 235)');
-    expect(finalArtifactRow.style.background).toBe('rgba(37, 99, 235, 0.06)');
-    const finalArtifact = within(finalArtifactRow);
-    const stageLabelElement = finalArtifact.getByTestId('artifact-stage');
-    expect(finalArtifact.getByText('链接').compareDocumentPosition(stageLabelElement)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    // kind 徽章
-    expect(screen.getByText('链接')).toBeTruthy();
-    expect(screen.getByText('代码')).toBeTruthy();
-    expect(screen.queryByText('文件')).toBeNull(); // 无 file kind 产物
+    expect(finalArtifactRow.getAttribute('data-final-artifact')).toBe('true');
+    expect(finalArtifactRow.className).toContain('task-artifact-row');
+    expect(finalArtifactRow.style.border).toBe('');
+    expect(finalArtifactRow.querySelector('svg')).not.toBeNull();
+    expect(within(finalArtifactRow).getByTestId('artifact-stage').textContent).toBe('最终产物');
+    // 文件类型以图标呈现，不再使用类型标签。
+    expect(screen.queryByText('链接')).toBeNull();
+    expect(screen.queryByText('代码')).toBeNull();
     // url_link/code 卡仅保留外链入口，不提供站内预览按钮。
     expect(screen.getByRole('link', { name: '跳转产物 需求说明书' }).getAttribute('href')).toBe(
       'https://yuque.example/doc1',
@@ -305,5 +337,176 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.queryByText('任务产出')).toBeNull();
     expect(screen.queryByText('任务信息')).toBeNull();
     expect(screen.queryByText('任务背景描述')).toBeNull();
+  });
+});
+
+// 实际资产控制器与 L1/L2 壳层：callback mock 无法捕获 drillInto(target) 的宿主导航副作用。
+describe('TaskOverviewV2 real controller navigation', () => {
+  it.each([
+    ['Bot', 'mouse'],
+    ['Bot', 'Enter'],
+    ['Bot', ' '],
+    ['group', 'mouse'],
+    ['group', 'Enter'],
+    ['group', ' '],
+  ])('%s icon via %s drills locally; body navigates; back/switch/close isolate state', async (kind, activation) => {
+    const user = userEvent.setup();
+    const host: TaskPanelHost = {
+      ...taskPanelTestHost,
+      getViewer: () => ({ userId: 'user-1' }),
+      getConversation: () => ({ sessionId: 'origin-session', kind: 'bot' }),
+      transport: {
+        requestJson: jest.fn(async () => {
+          throw new Error('Unexpected request');
+        }),
+      },
+      history: { readPage: jest.fn(async () => ({ messages: [], nextCursor: null })) },
+      navigate: jest.fn(async () => ({ status: 'ready' as const })),
+      captureOrigin: jest.fn(() => 'origin-handle'),
+      restoreOrigin: jest.fn(async () => ({ status: 'ready' as const })),
+      present: jest.fn(),
+      preservePanel: jest.fn(),
+      recordInteraction: jest.fn(),
+    };
+    const controller = createTaskPanelController(host);
+    const tab = (id: string): TaskPanelDeclaration => ({
+      id: `task-${id}`,
+      type: 'taskPanel.TaskLoopView',
+      title: id,
+      closable: true,
+      params: { taskId: id },
+    });
+    const bot = nodeArtifacts({
+      id: 'n-bot',
+      name: 'Bot 执行节点',
+      sequence: 3,
+      runMode: 'single_bot',
+      assignee: 'bot-2',
+      sessionId: 'bot-session',
+      executor: 'Bot 2',
+      hasSubTask: true,
+      subTaskId: 'child-task',
+      artifacts: [
+        {
+          id: 'bot-output',
+          name: 'Bot 节点产物',
+          type: 'document',
+          kind: 'text',
+          summary: 'Bot 实际输出',
+          updatedAt: '',
+        },
+      ],
+    });
+    const first = { ...task, nodes: [...task.nodes, bot] };
+    const second = {
+      ...task,
+      id: 't2',
+      name: '另一任务',
+      artifacts: [],
+      nodes: [
+        nodeArtifacts({ id: 'other-node', name: '另一任务节点', sessionId: 'other-session', assignee: 'other-bot' }),
+      ],
+      dagNodes: [],
+      dagEdges: [],
+    };
+    const onOpenSubTask = jest.fn();
+    function Panel() {
+      const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+      if (!snapshot.activeTaskId) return null;
+      const activeTask = snapshot.activeTaskId === first.id ? first : second;
+      return (
+        <TaskPanelV2
+          task={activeTask}
+          nav={controller.nav(activeTask.id)}
+          apiBaseUrl=""
+          onOpenSubTask={onOpenSubTask}
+        />
+      );
+    }
+    await controller.enterConversation({ sessionId: 'origin-session', kind: 'bot' }, null, { recover: false });
+    controller.openTask(tab(first.id), 'explicit');
+    const view = render(<Panel />);
+    try {
+      const node = kind === 'Bot' ? bot : task.nodes[1];
+      const icon = screen.getByRole('button', { name: `下钻 ${node.name}` });
+      if (activation === 'mouse') await user.click(icon);
+      else {
+        icon.focus();
+        await user.keyboard(activation === 'Enter' ? '{Enter}' : ' ');
+      }
+      expect(controller.getSnapshot().navByTask[first.id].drillStack).toEqual([node.id]);
+      expect(screen.queryByTestId('task-overview-v2')).toBeNull();
+      const detail = screen.getByTestId('task-node-panel-v2');
+      expect(within(detail).getByText(node.name)).toBeTruthy();
+      expect(within(detail).getByText(kind === 'Bot' ? 'Bot 节点产物' : '需求说明书')).toBeTruthy();
+      expect(host.navigate).not.toHaveBeenCalled();
+      expect(host.restoreOrigin).not.toHaveBeenCalled();
+      expect(host.recordInteraction).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: '任务总览' }));
+      expect(controller.getSnapshot().navByTask[first.id].drillStack).toEqual([]);
+      expect(screen.getByTestId('task-overview-v2')).toBeTruthy();
+      expect(host.navigate).not.toHaveBeenCalled();
+      expect(host.restoreOrigin).not.toHaveBeenCalled();
+      // 子任务按钮的原生 Enter/Space 不得激活父卡片。
+      for (const key of ['{Enter}', ' ']) {
+        screen.getByRole('button', { name: '子任务' }).focus();
+        await user.keyboard(key);
+      }
+      expect(onOpenSubTask).toHaveBeenCalledTimes(2);
+      expect(onOpenSubTask).toHaveBeenCalledWith('child-task');
+      const unavailable = screen.getByRole('button', { name: /下钻 需求澄清与规划：节点缺少会话或执行者信息/ });
+      await user.click(unavailable);
+      unavailable.focus();
+      await user.keyboard('{Enter} ');
+      expect(document.activeElement).toBe(unavailable);
+      expect(controller.getSnapshot().navByTask[first.id].drillStack).toEqual([]);
+      expect(host.navigate).not.toHaveBeenCalled();
+      expect(host.restoreOrigin).not.toHaveBeenCalled();
+
+      const row = screen.getByRole('button', { name: `选中节点 第${kind === 'Bot' ? 3 : 2}棒 ${node.name}` });
+      await user.click(row);
+      row.focus();
+      await user.keyboard('{Enter} ');
+      expect(host.navigate).toHaveBeenCalledTimes(3);
+      expect(host.navigate).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sessionId: node.sessionId,
+          kind: kind === 'Bot' ? 'bot' : 'group',
+          ...(kind === 'Bot' ? { botId: 'bot-2' } : { groupId: node.groupId }),
+        }),
+        expect.any(AbortSignal),
+      );
+      expect(controller.getSnapshot().navByTask[first.id].selectedNodeId).toBe(node.id);
+      expect(controller.getSnapshot().navByTask[first.id].drillStack).toEqual([]);
+      await user.click(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' }));
+      expect(host.restoreOrigin).toHaveBeenCalledTimes(1);
+      expect(host.restoreOrigin).toHaveBeenCalledWith('origin-handle', expect.any(AbortSignal));
+
+      await user.click(screen.getByRole('button', { name: `下钻 ${node.name}` }));
+      act(() => controller.openTask(tab(second.id), 'explicit'));
+      expect(controller.getSnapshot().navByTask[second.id].drillStack).toEqual([]);
+      expect(screen.getByTestId('task-overview-v2')).toBeTruthy();
+      expect(screen.queryByTestId('task-node-panel-v2')).toBeNull();
+      expect(screen.getByRole('button', { name: '选中节点 第1棒 另一任务节点' })).toBeTruthy();
+      expect(screen.queryByText('Bot 节点产物')).toBeNull();
+      expect(screen.queryByText('需求说明书')).toBeNull();
+      await user.click(screen.getByRole('button', { name: '下钻 另一任务节点' }));
+      expect(controller.getSnapshot().navByTask[second.id].drillStack).toEqual(['other-node']);
+      act(() => controller.closeTask(second.id));
+      expect(controller.getSnapshot().navByTask[second.id]).toBeUndefined();
+      expect(screen.queryByTestId('task-node-panel-v2')).toBeNull();
+      act(() => controller.openTask(tab(second.id), 'explicit'));
+      expect(controller.getSnapshot().navByTask[second.id].drillStack).toEqual([]);
+      expect(screen.getByTestId('task-overview-v2')).toBeTruthy();
+      expect(host.navigate).toHaveBeenCalledTimes(3);
+      expect(host.restoreOrigin).toHaveBeenCalledTimes(1);
+      expect(host.recordInteraction).not.toHaveBeenCalled();
+      expect(host.transport.requestJson).not.toHaveBeenCalled();
+      expect(host.history.readPage).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      controller.dispose();
+    }
   });
 });

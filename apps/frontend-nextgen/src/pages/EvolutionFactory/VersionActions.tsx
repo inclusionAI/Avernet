@@ -32,11 +32,11 @@ export function stableVersion(items: EvolutionVersion[]) {
 const score = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(4)).toString() : '—');
 export function Comparison({ version }: { version: EvolutionVersion }) {
   const c = version.scoreComparison;
-  if (!c) return <span className="text-xs text-muted-foreground">未评测</span>;
+  if (!c) return <span className="text-xs text-foreground">未评测</span>;
   const delta = typeof c.delta === 'number' && Number.isFinite(c.delta) ? c.delta : null;
   return (
     <div className="flex flex-nowrap items-center gap-x-2 whitespace-nowrap text-[13px]" aria-label={c.name || 'test_score'}>
-      <span className="whitespace-nowrap">
+      <span className="whitespace-nowrap text-foreground">
         {score(c.baseline)} → {score(c.candidate)}
       </span>
       <span

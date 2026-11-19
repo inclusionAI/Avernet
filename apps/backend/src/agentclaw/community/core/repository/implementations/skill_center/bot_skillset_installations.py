@@ -14,6 +14,7 @@ from agentclaw.community.core.models.skill import (
     SkillSet,
     SkillSetSkill,
 )
+from agentclaw.community.core.models.space_skill import SkillVersion
 from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
     global_default_scope,
 )
@@ -28,11 +29,39 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
 )
+from agentclaw.community.core.skill_center.default_members import effective_default_members
+from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import skill_mcp_dependency_codes
+from agentclaw.community.core.skill_center.mcp_dependency_scope import mcp_dependency_codes_from_version_metadata
+from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
 
 CENTER_MEMBERSHIP_IDENTITY_MISSING = "CENTER_MEMBERSHIP_IDENTITY_MISSING"
+logger = get_logger()
+
+
+def _latest_published_versions(scope, session, skill_ids, *, metadata=False, locked=False):
+    latest = scope(session.query(
+        SkillVersion.skill_id.label("skill_id"),
+        func.max(SkillVersion.version_ordinal).label("ordinal"),
+    ), SkillVersion).filter(
+        SkillVersion.skill_id.in_(skill_ids), SkillVersion.status == "PUBLISHED"
+    ).group_by(SkillVersion.skill_id).subquery()
+    columns = [SkillVersion.skill_id, SkillVersion.sc_version_number, SkillVersion.name]
+    if metadata:
+        columns.append(SkillVersion.metadata_json)
+    query = scope(session.query(*columns), SkillVersion).join(
+        latest, and_(SkillVersion.skill_id == latest.c.skill_id,
+                     SkillVersion.version_ordinal == latest.c.ordinal),
+    ).filter(SkillVersion.status == "PUBLISHED")
+    return (query.with_for_update() if locked else query).all()
+
+
+def available_published_version_skill_ids(scope, session, skill_ids: set[int]) -> set[int]:
+    """Find Center identities whose latest published Version has an address."""
+    rows = _latest_published_versions(scope, session, skill_ids)
+    return {int(skill_id) for skill_id, number, name in rows if number and name}
 
 
 def center_membership_skill_uuid(skill: Skill) -> str | None:
@@ -57,6 +86,31 @@ def set_member_skill_ids(
     the highest PUBLISHED version, everything else joins by ``skill_id``.
     """
     env = get_current_env()
+    default = scope(session.query(SkillSet), SkillSet).filter(SkillSet.id == skill_set_id).one_or_none()
+    if default is not None and default.is_default:
+        members = scope(session.query(SkillSetSkill), SkillSetSkill).filter(
+            SkillSetSkill.skill_set_id == skill_set_id,
+            SkillSetSkill.skill_id.notin_(excluded_raw_ids),
+        ).all()
+        ids = {int(row.skill_id) for row in members}
+        uuids = {row.skill_uuid for row in members if row.skill_uuid}
+        candidates = scope(session.query(Skill), Skill).filter(
+            or_(Skill.id.in_(ids), Skill.skill_uuid.in_(uuids))
+        ).all()
+        published_ids = available_published_version_skill_ids(
+            scope, session, {int(row.id) for row in candidates}
+        )
+        catalog = [{key: getattr(row, key) for key in (
+            "id", "skill_uuid", "git_path", "status", "version", "offline_at"
+        )} | {"has_published_version": int(row.id) in published_ids} for row in candidates]
+        resolved, skipped = effective_default_members(
+            ((int(row.skill_id), row.skill_uuid) for row in members), catalog
+        )
+        if "missing_center_identity" in skipped.values():
+            raise SkillSetControlPlaneConflictError(CENTER_MEMBERSHIP_IDENTITY_MISSING)
+        for raw_id, reason in skipped.items():
+            logger.info("default_member_skipped set_id=%s raw_skill_id=%s reason=%s", skill_set_id, raw_id, reason)
+        return {int(row["id"]) for row in resolved.values()}
 
     malformed_center = (
         scope(session.query(SkillSetSkill.id), SkillSetSkill)
@@ -290,6 +344,11 @@ class BotSkillSetInstallations:
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
             )
+            self._validate_default_dependencies(
+                session, bot_id=bot_id, owner_id=owner_id, engine_type=engine_type,
+                default_engine_types=default_engine_types, locked=False,
+                retired_ids=plan.skills_to_uninstall,
+            )
             installed = skill_installations.installed_ids(
                 session, bot_id=bot_id, owner_id=owner_id, env=env
             )
@@ -309,6 +368,14 @@ class BotSkillSetInstallations:
 
         with self._db.transactional_orm_session() as session:
             lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id, env=env)
+            # Lock every existing Default candidate, including currently offline
+            # or unpublished assets, before taking the transactional snapshot.
+            # Publication and offlining take the same Skill row lock.
+            rows = self._bot_sets(
+                session, bot_id=bot_id, owner_id=owner_id, engine_type=engine_type,
+                default_engine_types=default_engine_types, locked=True,
+            )
+            self._lock_default_candidates(session, rows)
             plan = plan_resolver(
                 session,
                 bot_id=bot_id,
@@ -318,6 +385,18 @@ class BotSkillSetInstallations:
                 default_engine_types=default_engine_types,
                 locked=True,
             )
+            self._validate_default_dependencies(
+                session, bot_id=bot_id, owner_id=owner_id, engine_type=engine_type,
+                default_engine_types=default_engine_types, locked=True,
+                retired_ids=plan.skills_to_uninstall,
+            )
+            verified = plan_resolver(
+                session, bot_id=bot_id, owner_id=owner_id, env=env,
+                engine_type=engine_type, default_engine_types=default_engine_types,
+                locked=True,
+            )
+            if verified != plan:
+                raise SkillSetControlPlaneConflictError("DEFAULT_SUPPLY_CHANGED")
             installed = skill_installations.installed_ids(
                 session, bot_id=bot_id, owner_id=owner_id, env=env, locked=True
             )
@@ -350,6 +429,85 @@ class BotSkillSetInstallations:
                 )
             return plan
 
+    def _lock_default_candidates(self, session, rows):
+        default_set_ids = {int(row.id) for row in rows if row.is_default}
+        members = self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(
+            SkillSetSkill.skill_set_id.in_(default_set_ids)
+        ).order_by(SkillSetSkill.skill_set_id, SkillSetSkill.skill_id).with_for_update().all()
+        raw_ids = {int(member.skill_id) for member in members}
+        uuids = {member.skill_uuid for member in members if member.skill_uuid}
+        self._scope(session.query(Skill), Skill).filter(
+            or_(Skill.id.in_(raw_ids), Skill.skill_uuid.in_(uuids))
+        ).order_by(Skill.id).with_for_update().all()
+
+    def _validate_default_dependencies(
+        self, session, *, bot_id, owner_id, engine_type, default_engine_types, locked, retired_ids
+    ):
+        """Validate effective Default dependencies before reconciling installations."""
+        default_ids: set[int] = set()
+        bot_sets = self._bot_sets(
+            session, bot_id=bot_id, owner_id=owner_id, engine_type=engine_type,
+            default_engine_types=default_engine_types,
+        )
+        for row in bot_sets:
+            if not row.is_default:
+                continue
+            excluded = default_exclusions.excluded_skill_ids(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+            )
+            default_ids.update(set_member_skill_ids(
+                self._scope, session, skill_set_id=int(row.id),
+                excluded_raw_ids=frozenset(excluded),
+            ))
+        if not default_ids:
+            return
+        query = self._scope(session.query(Skill), Skill).filter(
+            Skill.id.in_(default_ids)
+        ).order_by(Skill.id)
+        skills = (query.with_for_update() if locked else query).all()
+        if {int(skill.id) for skill in skills} != default_ids or any(
+            skill.offline_at is not None or str(skill.status or "").upper() in {"OFFLINE", "DELETED"}
+            for skill in skills
+        ):
+            raise SkillSetControlPlaneConflictError("DEFAULT_SUPPLY_CHANGED")
+        direct_ids = {skill_id for skill_id, (kind, _) in skill_installations.sources(
+            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env(), locked=locked
+        ).items() if kind == SkillInstallationSourceKind.DIRECT}
+        center_uuids = {skill.skill_uuid for skill in skills
+                        if str(skill.git_path or "").startswith("center://") and skill.skill_uuid}
+        other_direct_ids = direct_ids - default_ids
+        if center_uuids and other_direct_ids and self._scope(
+            session.query(Skill.id), Skill
+        ).filter(Skill.id.in_(other_direct_ids), Skill.git_path.like("center://%"),
+                 Skill.skill_uuid.in_(center_uuids)).first():
+            raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
+        ordinary_facts = self._apply_facts(session, [row for row in bot_sets if not row.is_default])
+        if any(self._apply_set_owns_skill(fact, skill, frozenset())
+               for fact in ordinary_facts for skill in skills):
+            raise SkillSetControlPlaneConflictError("RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET")
+        self._require_unique_runtime_names(
+            session, bot_id=bot_id, owner_id=owner_id, candidate_ids=default_ids,
+            retired_ids=set(retired_ids), engine_type=engine_type,
+            default_engine_types=default_engine_types,
+        )
+        center_ids = set()
+        for skill in skills:
+            if str(skill.git_path or "").startswith("center://"):
+                center_ids.add(int(skill.id))
+            else:
+                skill_mcp_dependency_codes(skill)
+        versions = _latest_published_versions(
+            self._scope, session, center_ids, metadata=True, locked=locked
+        )
+        if {int(row[0]) for row in versions} != center_ids:
+            raise ValueError("Center Skill has no PUBLISHED Version")
+        for _, number, name, metadata in versions:
+            if not number or not name or not metadata:
+                raise ValueError("Center Skill has no available PUBLISHED Version")
+            codes = mcp_dependency_codes_from_version_metadata(metadata)
+            if any(not code for code in codes):
+                raise ValueError("Skill Version has an empty MCP dependency code")
+
     def _skill_installation_source(
         self, session, *, bot_id: str, owner_id: str, skill_id: int,
         engine_type: str | None, default_engine_types: tuple[str, ...] | None,
@@ -359,10 +517,6 @@ class BotSkillSetInstallations:
             default_engine_types=default_engine_types,
         ):
             if not (row.is_default or row.is_active):
-                continue
-            if row.is_default and skill_id in default_exclusions.excluded_skill_ids(
-                session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id),
-            ):
                 continue
             excluded_ids = default_exclusions.excluded_skill_ids(
                 session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
@@ -408,7 +562,7 @@ class BotSkillSetInstallations:
                 ) if row.is_default else set()
                 ids = set_member_skill_ids(self._scope, session,
                     skill_set_id=int(row.id), excluded_raw_ids=frozenset(excluded))
-                members |= ids - excluded
+                members |= ids
             return frozenset(members)
 
     def _resolve_default_sync_plan(
@@ -470,8 +624,8 @@ class BotSkillSetInstallations:
                 )
             )
             raw_excluded_members = {int(value[0]) for value in self._scope(session.query(SkillSetSkill.skill_id), SkillSetSkill).filter(SkillSetSkill.skill_set_id == row.id, SkillSetSkill.skill_id.in_(excluded_skill_ids)).all()}
-            default_skills |= skill_ids - excluded_skill_ids
-            excluded_skills |= ((skill_ids & excluded_skill_ids) | raw_excluded_members) - installed_skills
+            default_skills |= skill_ids
+            excluded_skills |= raw_excluded_members - installed_skills
             default_mcps |= mcp_codes - excluded_mcp_codes
             excluded_mcps |= (mcp_codes & excluded_mcp_codes) - installed_mcps
         return InstallationFlushPlan(
@@ -541,13 +695,8 @@ class BotSkillSetInstallations:
                 self._scope, session, skill_set_id=int(row.id),
                 excluded_raw_ids=frozenset(excluded),
             ):
-                # Exclusion is the Default Set's per-Bot deactivation: an
-                # excluded member stays the Set's, is absent from the listing,
-                # and must not hold an Installation row.
-                if member_id in excluded:
-                    if member_id not in installed_skills:
-                        inactive_skills.add(member_id)
-                    continue
+                # Raw exclusions were applied before identity resolution. A
+                # different raw key can equal this resolved asset's ID.
                 members.add(member_id)
                 (active_skills if set_is_active else inactive_skills).add(member_id)
             excluded_mcps = (

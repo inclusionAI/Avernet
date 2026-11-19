@@ -65,7 +65,8 @@ class SkillSetApplyService:
         actual_policy = self._platform_default_mcp_codes(bot, scope.bot_id)
         if actual_policy != platform_default_codes:
             raise SkillSetControlPlaneConflictError("DEFAULT_MCP_POLICY_CHANGED")
-        codes = {code for target in sets for code in target.mcp_codes}
+        explicit_codes = {code for target in sets for code in target.mcp_codes}
+        codes = set(explicit_codes)
         if default_change.remove_mcps:
             current = self._repository.read_apply_snapshot(
                 scope=scope, platform_default_codes=actual_policy
@@ -83,7 +84,12 @@ class SkillSetApplyService:
             )
         mcp_catalog_entries = {}
         for code in sorted(codes):
-            self._require_mcp_permission(actor_id=actor_id, server_code=code)
+            if code in explicit_codes:
+                self._require_mcp_permission(actor_id=actor_id, server_code=code)
+            else:
+                verdict = self._mcp_center.check_mcp_permission_detail(actor_id, code)
+                if not verdict.get("access_level"):
+                    raise ValueError("MCP permission service or catalogue returned incomplete detail")
             detail = resolve_mcp_catalog_detail(self._mcp_center, code)
             mcp_catalog_entries[code] = mcp_catalog_entry(code, detail)
             require_mcp_delivery_eligibility(

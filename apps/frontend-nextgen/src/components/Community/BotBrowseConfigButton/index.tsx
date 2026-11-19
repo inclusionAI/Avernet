@@ -1,6 +1,5 @@
 import { Button } from '@/components/ui/Button';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
-import { Settings } from 'lucide-react';
 import { useState } from 'react';
 import { BotBrowseConfigPanel } from './BotBrowseConfigPanel';
 
@@ -14,8 +13,11 @@ export function BotBrowseConfigButton() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="设置 Bot 访问社区">
-        <Settings className="size-4" aria-hidden />
+      <Button variant="ghost" size="icon" className="size-6" onClick={() => setOpen(true)} aria-label="设置 Bot 访问社区">
+        <svg className="size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+          <path d="M7 3.5h10L22 12l-5 8.5H7L2 12Z" />
+          <circle cx="12" cy="12" r="2.5" />
+        </svg>
       </Button>
       <Drawer open={open} onOpenChange={setOpen}>
         <DrawerContent

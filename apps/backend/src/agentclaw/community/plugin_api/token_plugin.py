@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +20,9 @@ class TokenExchangeContext:
     publish_id: int | None
     binding_id: int | None
     request_id: str | None
+    actor_user_id: str | None = None
+    caller_runtime_target: Literal["service", "caller_instance"] | None = None
+    device_uuid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

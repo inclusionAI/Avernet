@@ -34,7 +34,7 @@ export interface TaskArtifactView {
   nodeId?: string | null;
   /** 产物归属棒次;按 TaskView.nodes 展示顺序派生,仅产物列表展示层使用。 */
   stage?: number | null;
-  /** 是否最终产物(Descriptor content.is_final_artifact === "true");卡片边框高亮使用。 */
+  /** 是否最终产物(Descriptor content.is_final_artifact === "true");列表最终产物标识使用，不再以卡片边框高亮。 */
   isFinalArtifact?: boolean;
   /** 内部排序辅助键:对应后端产物列表输入序(读侧倒序),仅排序层反转使用,不做展示。 */
   sourceOrder?: number;

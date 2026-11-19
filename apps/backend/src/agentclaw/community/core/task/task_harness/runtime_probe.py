@@ -188,7 +188,7 @@ def _last_message_cursor(messages: Any) -> Any:
         return None
     identifiers = {
         key: last.get(key)
-        for key in ("id", "message_id", "version", "seq")
+        for key in ("id", "message_id", "seq")
         if last.get(key) is not None
     }
     return {"last": {**identifiers, **payload}, "count": len(messages)}
@@ -206,7 +206,7 @@ def _run_cursor(run: dict[str, Any]) -> Any:
         return None
     return {
         key: run.get(key)
-        for key in ("status", "version", "completed_at")
+        for key in ("status", "completed_at")
         if run.get(key) is not None
     }
 
@@ -218,13 +218,13 @@ def _group_cursor(group: dict[str, Any]) -> Any:
     return {
         "group": {
             key: group.get(key)
-            for key in ("status", "version", "state")
+            for key in ("status", "state")
             if group.get(key) is not None
         },
         "session": {
             key: session.get(key)
             for key in (
-                "status", "version", "updated_at", "updated_at_ms", "state",
+                "status", "state",
             )
             if isinstance(session, dict) and session.get(key) is not None
         },

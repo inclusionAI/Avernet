@@ -157,12 +157,12 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                 await recovery.resume(node, resume_step=resume_step)
 
         self.assertEqual(bot.calls[0]["message"], RELAY_HARNESS_RESUME_PROMPT)
-        self.assertIn("当前恢复锚点：S1-S4a", bot.calls[1]["message"])
-        self.assertIn("当前恢复锚点：S5", bot.calls[2]["message"])
-        self.assertIn("当前恢复锚点：S6", bot.calls[3]["message"])
-        self.assertIn("从当前会话历史中获取 S1 到断点前已形成的上下文和结果", RELAY_HARNESS_RESUME_PROMPT)
-        self.assertIn("不要重做已完成步骤", RELAY_HARNESS_RESUME_PROMPT)
-        self.assertIn("从第一个未完成步骤继续执行，直到流程执行完为止", RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("后端恢复范围：S1-S4a", bot.calls[1]["message"])
+        self.assertIn("后端恢复范围：S5", bot.calls[2]["message"])
+        self.assertIn("后端恢复范围：S6", bot.calls[3]["message"])
+        self.assertNotIn("从当前会话历史", RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("复用已完成成果", RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("直到协议收口", RELAY_HARNESS_RESUME_PROMPT)
 
     async def test_missing_session_is_a_precondition_error(self):
         recovery = RelaySessionRecovery(bot=_FakeOpenApiBot())
@@ -231,7 +231,21 @@ if __name__ == "__main__":
 def test_resume_instructions_use_runtime_local_ledger_not_backend_projection():
     for step in (None, "S1-S4a", "S5", "S6"):
         prompt = relay_harness_resume_prompt(step)
-        assert "relay_ledger_runtime.py" in prompt
-        assert "真实重读当前节点 S1" in prompt
-        assert "retry_original_report" in prompt
-        assert "禁止直接重放" in prompt
+        assert "统一 resume 入口" in prompt
+        assert "本节点账本" in prompt
+        assert "decision" in prompt
+        assert "不要重放结果未知" in prompt
+        assert len(prompt) < 240
+
+
+class GroupDeliveryRejectionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_undelivered_resume_is_not_success(self):
+        from agentclaw.community.core.task.task_harness.relay_session_recovery import RelaySessionRecoveryError
+
+        class Undelivered(_FakeBcs):
+            async def send_session_chat(self, *args, **kwargs):
+                return {"delivered": False, "session_id": "s1"}
+
+        recovery = RelaySessionRecovery(bcs=Undelivered(), bot_tokens=_FakeTokens())
+        with self.assertRaises(RelaySessionRecoveryError):
+            await recovery.resume(_Node(group_id="g1", session_id="s1"))

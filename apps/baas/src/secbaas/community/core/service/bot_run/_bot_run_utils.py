@@ -281,19 +281,19 @@ def is_caller_mode(
     metadata: dict[str, Any] | None,
     binding_info: BotBindingInfo | None,
 ) -> bool:
-    """caller 模式判定：统一凭据 + 引擎非 teclaw。
+    """caller 模式判定：user_id + 引擎非 teclaw。
 
-    metadata 需同时携带统一后的 ``caller_token`` 与 ``user_id``
-    （caller-connection 使用者标识）；``type`` 在 resolver 中校验并 fail closed，
-    缺一按普通模式解析；binding 引擎
-    类型为 ``teclaw`` 时不支持 caller 容器（teclaw 走物化/session 语义），
-    同样按普通模式。binding_info 缺失时无法确认引擎，保守判 False。
+    metadata 携带 ``user_id``（caller-connection 使用者标识）即进入 caller 模式：
+    有统一 ``caller_token`` 时由 resolver 校验 ``type`` 并 fail closed，拉起后
+    安装调用方凭据；只有 ``user_id`` 没有 token 时，resolver 先走只读状态查询
+    （app-caller-instance/status），确认已登记且存活的 caller sandbox 才拉起，
+    否则直接报错（不触发容器创建）。binding 引擎类型为 ``teclaw`` 时不支持
+    caller 容器（teclaw 走物化/session 语义），按普通模式。binding_info 缺失时
+    无法确认引擎，保守判 False。
     凭据只允许存在于内存请求链路（runner 入口 → 后台 dispatch 闭包 /
     流式 iterator），落库前必须经 :func:`strip_sensitive_metadata` 剥离。
     """
     if not (metadata and metadata.get("user_id")):
-        return False
-    if not metadata.get(CALLER_METADATA_TOKEN_KEY):
         return False
     if binding_info is None:
         return False

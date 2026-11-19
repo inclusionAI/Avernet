@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import type { TaskListItem } from '@/domain/tasks/models';
-import { getCollaborationBotConversationUrl, getCollaborationGroupConversationUrl } from '@/utils/collaborationSquare';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
+import { getCollaborationBotConversationUrl, getCollaborationGroupConversationUrl } from '@/utils/collaborationSquare';
 import { history } from '@umijs/max';
 import { MessageCircle } from 'lucide-react';
 
@@ -15,6 +15,7 @@ import { MessageCircle } from 'lucide-react';
 interface ViewSessionButtonProps {
   record: TaskListItem;
   label?: string;
+  displayVariant?: 'default' | 'lab';
   ownerBotUserIdMap: Record<string, string>;
 }
 
@@ -41,7 +42,12 @@ function resolveSingleConversationBotTarget(
   return { botId, ownerId: ownerId.trim() };
 }
 
-export function ViewSessionButton({ record, label = '查看会话', ownerBotUserIdMap }: ViewSessionButtonProps) {
+export function ViewSessionButton({
+  record,
+  label = '查看会话',
+  displayVariant = 'default',
+  ownerBotUserIdMap,
+}: ViewSessionButtonProps) {
   const sessionId =
     record.execution_config?.main_session_id?.trim() ||
     record.task_spec?.context?.extend_props?.teamclaw_context?.main_session_id?.trim();
@@ -59,19 +65,22 @@ export function ViewSessionButton({ record, label = '查看会话', ownerBotUser
     groupIdFromSession;
 
   const isGroupTask = record.source_type === 'coop_group' || sessionId.startsWith('bcs_grp_');
-  const singleBotTarget = isGroupTask ? null : resolveSingleConversationBotTarget(record.owner_bot_id, ownerBotUserIdMap);
+  const singleBotTarget = isGroupTask
+    ? null
+    : resolveSingleConversationBotTarget(record.owner_bot_id, ownerBotUserIdMap);
   const conversationUrl = isGroupTask
     ? getCollaborationGroupConversationUrl(groupId, sessionId)
     : singleBotTarget
-      ? getCollaborationBotConversationUrl(`${singleBotTarget.botId}:${singleBotTarget.ownerId}`, sessionId)
-      : null;
+    ? getCollaborationBotConversationUrl(`${singleBotTarget.botId}:${singleBotTarget.ownerId}`, sessionId)
+    : null;
   if (!conversationUrl) return null;
 
   return (
     <Button
-      variant="secondary"
+      variant={displayVariant === 'lab' ? 'link' : 'secondary'}
+      className={displayVariant === 'lab' ? 'h-7 rounded-md px-1.5 text-[13px] font-normal text-primary no-underline hover:bg-primary/10 hover:text-primary' : undefined}
       size="sm"
-      leftIcon={<MessageCircle className="size-4" />}
+      leftIcon={displayVariant === 'lab' ? undefined : <MessageCircle className="size-4" />}
       onClick={() => {
         // 任务列表点击行携带焦点任务；目标会话按该任务而不是“最新任务”恢复 TaskPanel。
         useTaskSidePanelStore.getState().markTaskPanelOpenIntent(record.task_id);

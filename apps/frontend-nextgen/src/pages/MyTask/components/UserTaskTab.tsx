@@ -7,11 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spin } from '@/components/ui/Spin';
 import type { TaskListItem } from '@/domain/tasks/models';
 import { cn } from '@/utils/cn';
-import { Eye, FileOutput, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import {
   formatDateTime,
-  formatDuration,
   getBotDisplayName,
   getUserTaskGoal,
   getUserTaskTitle,
@@ -21,12 +20,15 @@ import {
   type UserTaskStatusFilter,
   userTaskStatusOptions,
 } from '../userTaskUtils';
+import { UserTaskActions } from './UserTaskActions';
 import { filterUserTaskRecords, type UserTaskOwnerBotOption } from './userTaskFilters';
 import { UserTaskOwnerBotFilter } from './UserTaskOwnerBotFilter';
-import { UserTaskGoalContent, UserTaskPrimaryContent } from './UserTaskTableCells';
-import { ViewSessionButton } from './ViewSessionButton';
-import { Points } from '@/tracking/points';
-import { Tracert } from '@/utils/tracert';
+import {
+  UserTaskGoalContent,
+  UserTaskModifiedTime,
+  UserTaskOwnerBotCell,
+  UserTaskPrimaryContent,
+} from './UserTaskTableCells';
 
 function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
   return <th className={cn('h-10 px-4 py-3 text-xs font-medium text-muted-foreground', className)} {...props} />;
@@ -52,6 +54,7 @@ export interface UserTaskTabProps {
   onPageSizeChange: (pageSize: number) => void;
   botNameMap: Record<string, string>;
   ownerBotUserIdMap: Record<string, string>;
+  ownerBotMetaMap?: Record<string, { botId: string; avatarUrl?: string }>;
   ownerBotOptions?: UserTaskOwnerBotOption[];
   /** 实验室页专用列与操作布局；默认值保持“我的任务”现有行为。 */
   displayVariant?: 'default' | 'lab';
@@ -73,6 +76,7 @@ export function UserTaskTab({
   onPageSizeChange,
   botNameMap,
   ownerBotUserIdMap,
+  ownerBotMetaMap = {},
   ownerBotOptions = [],
   displayVariant = 'default',
 }: UserTaskTabProps) {
@@ -86,15 +90,16 @@ export function UserTaskTab({
       filterUserTaskRecords({
         taskRecords,
         keyword: userKeyword,
+        titleOnly: isLabVariant,
         ownerBotFilter,
         ownerBotOptions,
       }),
-    [ownerBotFilter, ownerBotOptions, taskRecords, userKeyword],
+    [isLabVariant, ownerBotFilter, ownerBotOptions, taskRecords, userKeyword],
   );
 
   return (
     <section className="space-y-4">
-      <div className={cn('grid gap-3', isLabVariant ? 'md:grid-cols-3' : 'md:grid-cols-2')}>
+      <div className={cn('grid gap-3', isLabVariant ? 'md:grid-cols-[2fr_1.2fr_1.2fr]' : 'md:grid-cols-2')}>
         <div className="relative min-w-0">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -134,10 +139,23 @@ export function UserTaskTab({
         ) : null}
       </div>
 
-      <Card className="overflow-hidden rounded-lg shadow-sm">
+      <Card className={cn('overflow-hidden rounded-lg shadow-sm', isLabVariant && 'border-0 shadow-none')}>
         <div className="overflow-hidden bg-card">
           <div className="app-scrollbar overflow-x-auto">
-            <table className="min-w-full border-separate border-spacing-0">
+            <table
+              className={cn(
+                'min-w-full border-separate border-spacing-0',
+                isLabVariant &&
+                  'w-full min-w-[1440px] table-fixed [&_td]:align-middle [&_td]:py-4 [&_th]:whitespace-nowrap [&_th]:text-foreground [&_th]:text-sm [&_td]:text-sm',
+              )}
+            >
+              {isLabVariant ? (
+                <colgroup>
+                  {['18%', '19%', '17%', '13%', '13%', '7%', '13%'].map((width, index) => (
+                    <col key={index} style={{ width }} />
+                  ))}
+                </colgroup>
+              ) : null}
               <thead>
                 <tr className="bg-muted/30 text-left text-xs font-medium text-muted-foreground">
                   <Th>任务</Th>
@@ -145,9 +163,9 @@ export function UserTaskTab({
                   <Th>{isLabVariant ? 'Owner Bot' : 'Owner Bot / 来源'}</Th>
                   {!isLabVariant ? <Th>状态</Th> : null}
                   <Th>创建时间</Th>
-                  <Th>完成时间</Th>
+                  <Th>{isLabVariant ? '更新时间' : '完成时间'}</Th>
                   {isLabVariant ? <Th>状态</Th> : null}
-                  <Th className="text-right">操作</Th>
+                  <Th className={isLabVariant ? 'text-left' : 'text-right'}>操作</Th>
                 </tr>
               </thead>
               <tbody>
@@ -208,7 +226,13 @@ export function UserTaskTab({
                         ) : null}
                         <Td>
                           {isLabVariant ? (
-                            <div className="text-xs font-medium leading-5 text-foreground">{ownerBotName}</div>
+                            <UserTaskOwnerBotCell
+                              name={ownerBotName}
+                              botId={
+                                ownerBotMetaMap[record.owner_bot_id.trim().toLowerCase()]?.botId || record.owner_bot_id
+                              }
+                              avatarUrl={ownerBotMetaMap[record.owner_bot_id.trim().toLowerCase()]?.avatarUrl}
+                            />
                           ) : (
                             <div className="space-y-1">
                               <div className="text-xs leading-5 text-foreground">
@@ -222,57 +246,22 @@ export function UserTaskTab({
                           )}
                         </Td>
                         {!isLabVariant ? <Td className="whitespace-nowrap">{taskStatusBadge(record.status)}</Td> : null}
-                        <Td>
+                        <Td className={isLabVariant ? 'whitespace-nowrap' : undefined}>
                           <div className="text-xs leading-5 text-foreground">{formatDateTime(record.gmt_create)}</div>
                         </Td>
                         <Td>
-                          <div className="space-y-1 text-xs leading-5 text-foreground">
-                            <div>{formatDateTime(record.gmt_modified)}</div>
-                            <div className="text-xs text-muted-foreground">
-                              耗时：{formatDuration(record.gmt_create, record.gmt_modified)}
-                            </div>
-                          </div>
+                          <UserTaskModifiedTime record={record} lab={isLabVariant} />
                         </Td>
-                        {isLabVariant ? <Td className="whitespace-nowrap">{taskStatusBadge(record.status)}</Td> : null}
+                        {isLabVariant ? (
+                          <Td className="whitespace-nowrap">{taskStatusBadge(record.status, isLabVariant)}</Td>
+                        ) : null}
                         <Td>
-                          <div
-                            className="flex flex-row items-center justify-end gap-2"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            {isLabVariant ? (
-                              <>
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  leftIcon={<FileOutput className="size-4" />}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    Tracert.click(Points.myTask.openDetail, { task_id: record.task_id });
-                                    onSelectTask(record.task_id);
-                                  }}
-                                >
-                                  查看产物
-                                </Button>
-                                <ViewSessionButton record={record} label="进入对话" ownerBotUserIdMap={ownerBotUserIdMap} />
-                              </>
-                            ) : (
-                              <>
-                                <ViewSessionButton record={record} ownerBotUserIdMap={ownerBotUserIdMap} />
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  leftIcon={<Eye className="size-4" />}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    Tracert.click(Points.myTask.openDetail, { task_id: record.task_id });
-                                    onSelectTask(record.task_id);
-                                  }}
-                                >
-                                  查看详情
-                                </Button>
-                              </>
-                            )}
-                          </div>
+                          <UserTaskActions
+                            record={record}
+                            lab={isLabVariant}
+                            ownerBotUserIdMap={ownerBotUserIdMap}
+                            onSelect={onSelectTask}
+                          />
                         </Td>
                       </tr>
                     );
@@ -290,7 +279,8 @@ export function UserTaskTab({
             onChange={onPageChange}
             onPageSizeChange={onPageSizeChange}
             pageSizeOptions={[10, 20, 50]}
-            className="justify-end pt-4"
+            layout={isLabVariant ? 'between' : 'end'}
+            className="pt-4"
           />
         </div>
       </Card>

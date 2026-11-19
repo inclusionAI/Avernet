@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
+
 from agentclaw.community.core.task.task_harness.runtime_probe import (
     TaskRuntimeLivenessProbe,
 )
@@ -324,3 +326,15 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.asyncio
+async def test_run_version_only_does_not_reset_activity_clock():
+    bot = _FakeBot()
+    probe = TaskRuntimeLivenessProbe(bot=bot)
+    node = _Node(run_id="r1", session_id="s1")
+    first = await probe.probe(node)
+    bot.run["version"] = 999
+    second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
+    assert second.state == "active"
+    assert not second.progressed

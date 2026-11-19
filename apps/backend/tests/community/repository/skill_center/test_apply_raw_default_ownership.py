@@ -33,7 +33,7 @@ def test_ordinary_set_join_uses_raw_default_exclusion_and_retains_direct_guard(e
         platform_default_codes=frozenset(), mcp_catalog_entries={},
     )
     if not excluded or direct:
-        reason = "RESOURCE_DIRECT_ACTIVE" if direct and excluded else "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
+        reason = "RESOURCE_DIRECT_ACTIVE" if direct else "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
         with pytest.raises(SkillSetControlPlaneConflictError, match=reason):
             repo.replace_apply_skill_sets(**kwargs)
         assert snapshot(repo) == before

@@ -100,19 +100,59 @@ class BotBindingResolver:
         每次现拉容器，用 ``device_provider="caller"`` 标记，使 ``BotServiceSelector`` 路由到
         ``CallerBotService``，并把返回的 sandbox_id 作为连接目标（不参与 device affinity 选设备）。
 
+        凭据分两支（子方法实现）：
+
+        - 有 ``caller_token``：:meth:`_resolve_sandbox_with_credential`——构造
+          CallerExecutionCredential（``type`` 校验并 fail closed），拉起就绪后安装
+          调用方执行凭据。
+        - 只有 ``user_id`` 没有 token：:meth:`_resolve_sandbox_by_status`——先走只读
+          状态查询（app-caller-instance/status），仅当已登记且存活才继续拉起
+          （不安装凭据）；未登记或未存活直接报错，不触发容器创建。
+
         拉起含 need_poll 轮询（分钟级），只应由 runner 的后台 dispatch 调用；
         metadata 的统一 caller 凭据（caller_token/type）只存在于内存请求链路，不落库。
         Principal 由 bot_service 插件用共享密钥自签。
         """
         real_bot_id, entity_id = parse_bot_id(bot_id)
         user_id = str(metadata.get(CALLER_METADATA_USER_ID_KEY) or "")
-        credential_type = str(metadata.get(CALLER_METADATA_TYPE_KEY) or "")
+        if not user_id:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                f"caller binding requires user_id: bot_id={real_bot_id}",
+            )
         credential_value = str(metadata.get(CALLER_METADATA_TOKEN_KEY) or "")
-        if not credential_type or not credential_value:
+        if credential_value:
+            sandbox_id = await self._resolve_sandbox_with_credential(
+                metadata=metadata,
+                bot_id=real_bot_id,
+                owner_id=entity_id,
+                user_id=user_id,
+                credential_value=credential_value,
+            )
+        else:
+            sandbox_id = await self._resolve_sandbox_by_status(
+                bot_id=real_bot_id,
+                owner_id=entity_id,
+                user_id=user_id,
+            )
+        return build_caller_binding(bot_id, sandbox_id)
+
+    async def _resolve_sandbox_with_credential(
+        self,
+        *,
+        metadata: dict[str, Any],
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        credential_value: str,
+    ) -> str:
+        """带凭据分支：type fail closed，拉起后安装调用方执行凭据。"""
+        credential_type = str(metadata.get(CALLER_METADATA_TYPE_KEY) or "")
+        if not credential_type:
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
                 f"caller binding requires a supported execution credential: "
-                f"bot_id={real_bot_id}",
+                f"bot_id={bot_id}",
             )
         credential = CallerExecutionCredential(
             type=credential_type, token=credential_value
@@ -123,21 +163,61 @@ class BotBindingResolver:
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
                 f"caller binding requires a supported execution credential: "
-                f"bot_id={real_bot_id}",
+                f"bot_id={bot_id}",
             )
-        sandbox_id = await self._bot_service_plugin.get_caller_connection(
-            bot_id=real_bot_id,
-            owner_id=entity_id,
+        # spi 协议在 mypy 下解析为 Any（见 _plugin.py 同类既有告警），显式标注收紧回 str
+        sandbox_id: str = await self._bot_service_plugin.get_caller_connection(
+            bot_id=bot_id,
+            owner_id=owner_id,
             user_id=user_id,
             credential=credential,
         )
         logger.info(
             "[resolve_caller_binding] bot_id=%s owner_id=%s user_id=%s "
             "credential_type=%s sandbox_id=%s",
-            real_bot_id,
-            entity_id,
+            bot_id,
+            owner_id,
             user_id,
             credential_type,
             sandbox_id,
         )
-        return build_caller_binding(bot_id, sandbox_id)
+        return sandbox_id
+
+    async def _resolve_sandbox_by_status(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ) -> str:
+        """user_id-only 分支：只读状态门禁通过才拉起，不安装凭据。
+
+        状态查询要求 ``exists`` 与 ``alive`` 同时为真（登记且存活）；未登记或
+        未存活抛 NOT_FOUND，不触发容器创建。凭据安装跳过——实例凭据在先前
+        带 token 创建时已安装。
+        """
+        status = await self._bot_service_plugin.get_caller_instance_status(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
+        )
+        if not (status.exists and status.alive):
+            raise PaasError(
+                ErrorCode.NOT_FOUND,
+                f"no live caller sandbox for user_id={user_id}: "
+                f"bot_id={bot_id}, "
+                f"exists={status.exists}, alive={status.alive}",
+            )
+        sandbox_id: str = await self._bot_service_plugin.get_existing_caller_connection(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
+        )
+        logger.info(
+            "[resolve_caller_binding] bot_id=%s owner_id=%s user_id=%s sandbox_id=%s",
+            bot_id,
+            owner_id,
+            user_id,
+            sandbox_id,
+        )
+        return sandbox_id
