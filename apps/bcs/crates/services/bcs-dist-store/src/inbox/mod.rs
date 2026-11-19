@@ -6,6 +6,7 @@ mod admission;
 mod closure;
 pub use closure::StoreAdmissionControl;
 mod capacity;
+pub use capacity::RetentionCapacityObservation;
 mod consumer;
 mod health;
 pub use health::MaintenanceObservation;

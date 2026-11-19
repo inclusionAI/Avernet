@@ -561,6 +561,40 @@ async fn unknown_checkpoint_format_is_rejected_before_sealing() {
     ));
 }
 
+#[tokio::test]
+async fn unsupported_checkpoint_layout_is_classified_before_typed_decode() {
+    for (format, runner) in [
+        (99, json!({"future_state": true})),
+        (1, json!({"format_version": 1, "value": {"legacy": true}})),
+    ] {
+        let (model, store) = setup();
+        register(&store, "a").await;
+        let owner = claim(&store, "a", None).await;
+        let envelope = acquire(&store, &owner).await.envelope;
+        let key = KeyLayout::new("test", "worker").unwrap().ckpt(&sid()).unwrap();
+        let old = model.read_document(&key).await.unwrap().unwrap();
+        let mut raw = serde_json::to_value(envelope).unwrap();
+        raw["checkpoint"]["format_version"] = json!(format);
+        raw["checkpoint"]["runner_state"] = runner;
+        assert!(matches!(
+            model.replace_document(&key, old.version, &raw).await.unwrap(),
+            bcs_store_api::WriteOutcome::Applied { .. }
+        ));
+        let before = model.read_document(&key).await.unwrap().unwrap();
+        assert!(matches!(
+            store.load(&sid()).await,
+            Err(StoreError::UnsupportedFormat { format: found }) if found == format
+        ));
+        assert!(matches!(
+            store.acquire(&sid(), &owner, initial()).await,
+            Err(StoreError::UnsupportedFormat { format: found }) if found == format
+        ));
+        let after = model.read_document(&key).await.unwrap().unwrap();
+        assert_eq!(after.version, before.version);
+        assert_eq!(after.value, before.value);
+    }
+}
+
 struct DelayedDocuments {
     model: Arc<Model>,
     armed: std::sync::atomic::AtomicBool,

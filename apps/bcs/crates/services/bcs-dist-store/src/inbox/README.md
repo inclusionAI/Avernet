@@ -127,7 +127,7 @@ retained sequences; duplicates increase scan cost. A root is the shard hotspot.
 | Input 64 KiB; document 960 KiB | Encoded request/envelope and JSON expansion checked before admission |
 | Schedule 64 slots / 64 KiB | 56 normal slots; 8 reserved for existing controls/critical events |
 | Pending full requests 16 / 8 normal | Atomic root reservation; full requests never occupy all schedule slots |
-| Shard history 4,096 units / 64 MiB | CAS count/byte reservation before intent; first append prepaid, later physical attempts charged separately |
+| Shard lifetime history 4,096 units / 64 MiB | CAS count/byte reservation before intent; first append prepaid, later physical attempts charged separately; completion never refunds these counters |
 | Reserved history 512 units / 8 MiB | Normal admissions cannot spend control capacity; additional normal repair reserve 64 units / 128 KiB |
 | Session history charge / distinct ledger 1,024 | Conservative new-session intent charge plus an independently bounded distinct-sid quota map |
 | Inbox 4,096 entries / 16 MiB | Atomic root ledger per Session; 64 entries / 128 KiB each reserved for controls and for normal repair |
@@ -135,6 +135,65 @@ retained sequences; duplicates increase scan cost. A root is the shard hotspot.
 | EQ loop 8 attempts / 500ms | Remaining-time IO timeout, exponential 5–200ms conflict backoff |
 | Scan 128 items / 1 MiB / 100ms poll | Fixed cut, retained bounded future, per-item timeout, persistent forward cursor and separate completion prefix |
 | Scan IO min(8, pool/4) | Shared provider semaphore; default connection-pool size 32 |
+
+These are **namespace-lifetime budgets**, not active-work limits. A reliable input
+reserves two history units (intent and first physical append); an intermediate
+entry reserves one, and each additional physical append reservation consumes
+another unit. Successful completion, `trim_committed`, duplicate classification
+and maintenance do not return capacity. With the default count profile, ordinary
+Start reservations have at most 3,520 units, or 1,760 reliable inputs before other
+charges; 4,096 / 2 = 2,048 is only the theoretical total before control/repair
+reserves. Byte limits, intermediate events, retries and Session charges can stop
+admission earlier. A request carrying `create_session` conservatively consumes a
+Session reservation even if its sid already exists; the distinct-sid ledger has
+an independent bound. Neither counter means currently active Sessions.
+
+Normal exhaustion rejects a new Start before its durable reservation. Existing
+canonical identity retries still return their original decision; controls and
+repair can use their reserved budgets. Those reserves are finite too: a repair
+that needs another append reservation pauses if the relevant shard or Session
+hard count/byte limit is exhausted. Its intent and Unknown obligation remain
+durable, and maintenance must not advance its completion watermark. It is not
+safe to bypass the hard limit or refund an uncertain append: a timed-out writer
+may still have written a physical duplicate. No fixed profile promises to absorb
+arbitrarily many uncertain writes.
+
+`maintenance_observation().capacity` exposes charged history units separately
+from retained intent count, remaining hard/normal units and bytes, Session
+reservation/distinct-sid headroom, and minimum remaining Inbox headroom across
+the bounded Session map. None means the root does not exist, not zero usage.
+These observations reuse the existing two bounded authority reads; they add no
+per-Session queries. Headroom is diagnostic, not authorization or free-disk
+measurement: encoded-root size, slots and maintenance health are separate gates.
+New-Start health checks emit a structured warning when a shard count, byte or
+Session budget has at most 20% remaining. Warnings are limited to one per minute
+per locally tracked shard; cache eviction/restart can emit again. This adds no
+storage read or map scan to the admission path and logs no payload or identity.
+The on-demand `near_limit` observation also includes retained Inbox headroom.
+
+Before the reserve is exhausted, stop new work and arrange a coordinated capacity
+profile expansion on the **same namespace**. Stop all old writers, validate the
+larger retained-history/byte/Inbox profile against the actual provider and scan
+budget, roll out one matching profile to all instances, and resume repair and
+discovery before allowing new Starts. `max_history_entries` is configurable above
+4,096; that number is a default, not a structural array size. Startup still bounds
+the singleton repair/discovery cursor: every retained intent may be pending, so
+the maximum encoded empty `Scan` metadata plus 21 bytes per configured history
+unit must fit `max_document_bytes`. The actual maximum-width metadata is currently
+222 bytes (including `i64::MIN`, maximum `u64` fields and the longer boolean).
+This permits at most 46,800 units with the default 960 KiB document limit; 8,192
+is supported by this structural check. Oversized or overflowing profiles fail
+before storage IO with `admission_scan_capacity`, rather than letting a full
+pending set prevent durable forward-cursor progress. No large history allocation
+is used to prove the bound.
+The distinct-Session root ledger retains its previous effective maximum of 4,096,
+and every root/scan write still enforces `max_document_bytes` (at most 1 MiB).
+Raising count limits does not
+certify scan latency or remove document, Session and physical-storage limits.
+Do not reset counters, delete evidence, silently refund Unknown writes or switch
+namespace while unresolved work remains. If a compatible larger profile cannot
+be validated, leave new work stopped and preserve the old namespace for recovery;
+there is no automatic GC or migration fallback in phase one.
 
 Repair and discovery have independent durable cursors and budgets. Pending
 references rotate separately from the forward cursor. A persisted lane toggle
@@ -201,6 +260,14 @@ They cover every normal admission lost-write boundary, cross-shard identity,
 canonical/slot/close ordering, old generations, critical event identity,
 unknown confirmation reads, no-gap-skipping, actual consumed proof, independent
 discovery, fixed cuts, quota races and actual scan read bytes.
+`inbox_retention` adds deterministic lifetime-boundary checks: one accepted input
+keeps its charges, controls survive the normal stop, hard exhaustion preserves a
+pending repair, and coordinated same-namespace expansion lets that original
+intent complete without caller re-admission. Its boundary counters are seeded;
+it does not generate a capacity load or certify an expanded deployment profile.
+Pure serialization and constructor checks prove the full pending-scan envelope,
+exact document/entry boundaries and rejection before IO without constructing a
+large retained history.
 
 Run from the Avernet root:
 

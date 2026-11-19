@@ -15,6 +15,7 @@ pub(super) struct ShardHealth {
     rounds: [Option<(u64, Instant)>; 2],
     observed: Instant,
     known_exists: bool,
+    capacity_warned_at: Option<Instant>,
 }
 pub(super) type Health = BTreeMap<ShardId, ShardHealth>;
 /// Diagnostic observations are not admission authorization or a cross-key cut.
@@ -29,6 +30,7 @@ pub struct MaintenanceObservation {
     pub discovery_round_age: Option<Duration>,
     pub repair_confirmed_age: Option<Duration>,
     pub discovery_confirmed_age: Option<Duration>,
+    pub capacity: Option<super::RetentionCapacityObservation>,
 }
 impl ShardHealth {
     fn new(root: &JournalRoot, fresh: bool) -> Self {
@@ -39,6 +41,35 @@ impl ShardHealth {
             rounds: [None; 2],
             observed: now,
             known_exists: !fresh,
+            capacity_warned_at: None,
+        }
+    }
+    fn warn_capacity(
+        &mut self,
+        shard: ShardId,
+        root: &JournalRoot,
+        config: &super::InboxProducerConfig,
+        now: Instant,
+    ) {
+        if super::capacity::shard_near_capacity(root, config)
+            && self
+                .capacity_warned_at
+                .is_none_or(|at| now.duration_since(at) >= Duration::from_secs(60))
+        {
+            self.capacity_warned_at = Some(now);
+            tracing::warn!(
+                shard = shard.0,
+                charged_entries = root.entries,
+                entry_limit = config.max_history_entries,
+                charged_bytes = root.bytes,
+                byte_limit = config.max_history_bytes,
+                normal_entries = root.normal_entries,
+                normal_bytes = root.normal_bytes,
+                session_reservations = root.sessions,
+                distinct_sessions = root.inbox.len(),
+                session_limit = config.max_sessions,
+                "Inbox lifetime capacity is nearly exhausted; coordinate profile expansion before reserves are consumed"
+            );
         }
     }
 }
@@ -78,6 +109,9 @@ impl StoreInboxProducer {
             retained_entries: root.as_ref().map(|r| r.next),
             retained_bytes: root.as_ref().map(|r| r.bytes),
             retained_sessions: root.as_ref().map(|r| r.sessions),
+            capacity: root
+                .as_ref()
+                .map(|r| super::RetentionCapacityObservation::from_root(r, &self.inner.config)),
             repair_backlog: root
                 .as_ref()
                 .zip(scan.as_ref())
@@ -113,6 +147,7 @@ impl StoreInboxProducer {
         let state = cache
             .get_mut(&shard)
             .ok_or_else(|| invalid("health_missing"))?;
+        state.warn_capacity(shard, root, &self.inner.config, now);
         if fresh && state.known_exists {
             return Err(invalid("journal_root_lost"));
         }
@@ -271,6 +306,35 @@ mod tests {
     use bcs_dist_model::BackendId;
     use bcs_test_support::store_model::Model;
     use std::sync::Arc;
+
+    #[test]
+    fn lifetime_capacity_warning_has_an_early_threshold_and_bounded_rate() {
+        let cfg = InboxProducerConfig::new(BackendId("model".into()));
+        let mut root = JournalRoot::default();
+        let mut health = ShardHealth::new(&root, true);
+        let shard = ShardId(42);
+        let now = Instant::now();
+        health.warn_capacity(shard, &root, &cfg, now);
+        assert!(health.capacity_warned_at.is_none());
+        root.entries = 3000;
+        root.normal_entries = 3000;
+        health.warn_capacity(shard, &root, &cfg, now);
+        assert_eq!(health.capacity_warned_at, Some(now));
+        health.warn_capacity(shard, &root, &cfg, now + Duration::from_secs(59));
+        assert_eq!(health.capacity_warned_at, Some(now));
+        health.warn_capacity(shard, &root, &cfg, now + Duration::from_secs(60));
+        assert_eq!(
+            health.capacity_warned_at,
+            Some(now + Duration::from_secs(60))
+        );
+        root.entries = 0;
+        root.normal_entries = 0;
+        health.warn_capacity(shard, &root, &cfg, now + Duration::from_secs(120));
+        assert_eq!(
+            health.capacity_warned_at,
+            Some(now + Duration::from_secs(60))
+        );
+    }
 
     #[test]
     fn concurrent_same_round_preserves_earliest_start() {
