@@ -266,6 +266,7 @@ if [[ "$aggregate_only" -eq 0 ]]; then
   # Standalone invocation retains the complete historical test inventory.
   bash "$bcs_dir/scripts/caller_e2e_coverage.sh" || e2e_status=$?
   bash "$bcs_dir/scripts/oauth_e2e_coverage.sh" || e2e_status=$?
+  bash "$bcs_dir/scripts/worker_e2e_coverage.sh" || e2e_status=$?
 else
   if [[ ! -f "$bcs_log" || ! -f "$cli_coverage_log" ]]; then
     echo "aggregate-only requires existing shared-story HTTP and CLI logs" >&2

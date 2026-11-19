@@ -27,14 +27,27 @@ path = "tests/a2a_grpc/runner.rs"
 required-features = ["test-utils"]
 test = false
 
+[[bin]]
+name = "bcs-worker-e2e"
+path = "tests/worker_runtime/runner.rs"
+required-features = ["worker-runtime-e2e"]
+test = false
+
 [features]
 default = ["prometheus-metrics"]
+worker-runtime-e2e = ["dep:bcs-dist-model", "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-worker", "dep:bcs-app-dist-runtime", "dep:bcs-store-api"]
 metrics = ["prometheus-metrics"]
 a2a-http-e2e = []
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 test-utils = ["dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e", "dep:a2a-pb-e2e", "dep:tonic-e2e"]
 
 [dependencies]
+bcs-dist-model = { workspace = true, optional = true }
+bcs-dist-store = { workspace = true, optional = true }
+bcs-dist-projection = { workspace = true, optional = true }
+bcs-dist-worker = { workspace = true, optional = true }
+bcs-app-dist-runtime = { workspace = true, optional = true }
+bcs-store-api = { workspace = true, optional = true }
 bcs-app-identity-api.workspace = true
 bcs-a2a-binding-api = { workspace = true, optional = true }
 a2a-e2e-sdk = { package = "a2a-lf", version = "=0.4.2", optional = true }
