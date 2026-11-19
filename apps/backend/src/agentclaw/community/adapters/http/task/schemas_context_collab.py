@@ -36,7 +36,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
     EventRecord,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    MethodKind,
+    parse_method_kinds,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
@@ -510,6 +510,7 @@ def created_collet_to_dto(
     )
     if initial_event is None:
         raise ValueError("created Collet must have initial event evidence")
+    parse_method_kinds(command.method_kind)
     return ContextCollabCreatedResultDto(
         collab_context_id=collet.collet_id,
         context_version=collet.version,
@@ -520,7 +521,7 @@ def created_collet_to_dto(
             executor_ref=(
                 command.executor_ref.agent_id if command.executor_ref else None
             ),
-            method_kind=MethodKind.from_wire(command.method_kind).value,
+            method_kind=command.method_kind,
             progress=ProgressDto(percent=0, current_event_id=initial_event.event_id),
         ),
         current_event=ContextEventBriefDto(

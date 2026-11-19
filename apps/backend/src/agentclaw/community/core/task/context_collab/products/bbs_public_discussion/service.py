@@ -38,9 +38,6 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.produ
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    MethodKind,
-)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     _now,
     current_axes,
@@ -156,7 +153,7 @@ class BbsPublicDiscussionService:
     ) -> DiscussionCreatedView:
         title = _required_content(command.title, "title")
         body = _required_content(command.body, "body")
-        method_kind = MethodKind.OPEN_GROUP.value
+        method_kind = "Open + Group"
         self._authorizer.check_create(
             method_kind=method_kind,
             executor_ref=None,

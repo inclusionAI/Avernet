@@ -65,8 +65,8 @@ class CompositionEdgeState(str, Enum):
             ) from None
 
 
-# 任意核心方法(含复合值 Open + Group)——作为 nest/support/delegate_to
-# 的子方法全部合法;"任意"行因此直接取 MethodKind 全部 wire 值。
+# 组合边连接基础方法绑定,不连接产品组合名称;四种基础方法都可作为
+# nest/support/delegate_to 的子方法。
 _ALL_METHOD_WIRES = frozenset(kind.value for kind in MethodKind)
 
 # 矩阵父方法:仅有三个核心方法剧本;Open 依非对称裁决不发起组合。

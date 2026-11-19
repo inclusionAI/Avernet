@@ -34,15 +34,27 @@ from agentclaw.community.core.task.context_collab.l6_products.profiles import (
 )
 
 
-@pytest.mark.parametrize("bad", ["", "swarm", "open+group", "single"])
+@pytest.mark.parametrize(
+    "bad",
+    ["", "swarm", "open+group", "single", "Open + Group", "Open + Single", "Open + Swarm"],
+)
 def test_method_kind_rejects_unknown_wire_values(bad):
     with pytest.raises(ContextCollabValidationError):
         MethodKind.from_wire(bad)
 
 
+def test_method_kind_has_exactly_four_base_members():
+    assert MethodKind.__members__ == {
+        "SINGLE": MethodKind.SINGLE,
+        "GROUP": MethodKind.GROUP,
+        "SWARM": MethodKind.SWARM,
+        "OPEN": MethodKind.OPEN,
+    }
+    assert {kind.value for kind in MethodKind} == {"Single", "Group", "Swarm", "Open"}
+
+
 def test_method_kind_accepts_spec_values():
     assert MethodKind.from_wire("Single") is MethodKind.SINGLE
-    assert MethodKind.from_wire("Open + Group") is MethodKind.OPEN_GROUP
     assert MethodKind.from_wire("Group") is MethodKind.GROUP
     assert MethodKind.from_wire("Open") is MethodKind.OPEN
     assert MethodKind.from_wire("Swarm") is MethodKind.SWARM

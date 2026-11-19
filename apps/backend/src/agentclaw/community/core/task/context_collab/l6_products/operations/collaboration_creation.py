@@ -24,7 +24,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.context_
     ContextService,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    MethodKind,
     parse_method_kinds,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
@@ -111,7 +110,8 @@ class ContextCollabService(
         (spec 作者裁决):重复调用即重复创建。
         """
         objective = _required_str(command.objective, "objective")
-        method_kind = MethodKind.from_wire(command.method_kind).value
+        method_kind = command.method_kind
+        parse_method_kinds(method_kind)
         self._authorizer.check_create(
             method_kind=method_kind,
             executor_ref=command.executor_ref,

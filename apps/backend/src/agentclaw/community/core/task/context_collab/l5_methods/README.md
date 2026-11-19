@@ -52,6 +52,16 @@ product definitions, product services and DI authorization/admission adapters.
 Preserve pinned versions and runtime authority; changing Python ownership alone
 does not migrate ProductInstances, alter stored facts or authorize participation.
 
+## Base methods and product compositions
+
+`MethodKind` contains exactly four base methods: `Single`, `Group`, `Swarm`
+and `Open`. `Open + Group`, `Open + Single` and `Open + Swarm` are product
+composition wire expressions, not enum members. `parse_method_kinds` handles
+these existing selection/legacy binding strings separately; `MethodKind.from_wire`
+and composition-edge endpoints accept only base methods. G1 allows the supported
+product compositions at creation, but parsing still rejects undeclared expressions,
+including reversed `Swarm + Open`.
+
 ## Open policy ownership
 
 - [method_policies.py](method_policies.py) defines `MethodPolicy` and
@@ -135,6 +145,30 @@ Evidence:
   exercises real DI/SQLite/L4/G1/G4 through L5 in one numbered end-to-end case:
   explicit product planning, unified Stage/worker decisions, worker reports,
   independent child Work, five different artifacts and separate root acceptance.
+
+## Open + Swarm recruitment journey
+
+The
+[combined journey](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end_open_swarm.py)
+authors a local Profile with independent Open/Swarm bindings and an explicit
+Swarm --support--> Open edge; it does not change installed product defaults.
+
+The Profile uses an OPEN participant scope and general `OpenAdmissionPolicy`,
+not the capacity-1 `BotSelfApplicationAdmission`. Seven local Bots discover and
+apply; the accountable owner reviews role/capability evidence, rejects two and
+admits the original five coding workers. Capacity covers all seven simultaneous
+applications, not just the five eventual admissions. Admission creates correlated
+scoped Participant/Decision evidence, not a placeholder Swarm allocation.
+
+The existing L4 worker roles must still be supplied at Instantiate. They are not
+proof of Open admission, and Open does not dynamically create Swarm role facts.
+This journey explicitly checks the five admissions before creating unstarted
+root Work and waking the Driver; generic SwarmDriver does not add an automatic
+Open admission guard. It verifies every executed worker against admission
+evidence, each Stage and child Task's artifacts, released allocations, completed
+Swarm, and the root Task's separate submission and owner acceptance with the
+final artifact set. Planning and worker computation remain local doubles; the
+verification worker runs real unittest cases. No live Bot/LLM/PR is exercised.
 
 ## Bounded Swarm coordination
 

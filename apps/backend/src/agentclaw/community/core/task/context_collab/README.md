@@ -151,6 +151,11 @@ products/
   so product and generic L4 execution cannot bypass these prerequisites.
   Publisher-mediated @1 remains installed unchanged; selecting @2 is explicit.
   Unrelated Open + Group products retain their structural behavior.
+- The locally authored [Open + Swarm journey](l5_methods/README.md#open--swarm-recruitment-journey)
+  combines broader Open recruitment with the original five-worker coding Swarm.
+  It checks scoped admissions before explicit Driver startup and verifies Stage,
+  child Task and final root Task artifacts; it does not install a new product
+  default or imply an automatic generic Open-to-Swarm admission guard.
 - L5 Open publication is `publish_opportunity(OpenOpportunityCommand(...))`.
   The command requires `collet_id` and `participation_type`, followed by optional
   publication fields; it has no `actor_context`. In-process publication derives

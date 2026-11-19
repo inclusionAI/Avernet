@@ -2,7 +2,7 @@
 
 覆盖:
 - ``COMPOSITION_MATRIX`` 逐行固化:Single/Group/Swarm × NEST/SUPPORT/
-  DELEGATE_TO 允许任意核心方法(含复合值 ``Open + Group``);PARALLELIZE
+  DELEGATE_TO 允许四种基础方法,不允许产品组合名称;PARALLELIZE
   仅同 kind;ESCALATE 升级链;Swarm→escalate 显式空行;
 - ``validate_composition`` 未知父/子方法拒绝、无行父×关系组合拒绝;
 - ``CompositionRelation.from_wire`` 的 ``delegate-to`` 别名与未知值拒绝;
@@ -33,8 +33,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
     METHOD_PROFILE_REGISTRY,
 )
 
-# 全部 wire 取值(含复合值 Open + Group)——nest/support/delegate_to 行
-# 允许"任意核心方法"作为子方法,复合法同样合法。
+# 组合矩阵只连接四种基础方法;产品组合名称不是矩阵节点。
 ALL_METHOD_WIRES = frozenset(kind.value for kind in MethodKind)
 # 矩阵父方法只有三个核心方法;Open 依非对称裁决不作为父方法出现。
 PARENT_WIRES = ("Single", "Group", "Swarm")
@@ -73,7 +72,7 @@ def _edge_dict() -> dict:
     ],
 )
 def test_matrix_any_parent_nest_support_delegate_allows_any_child(parent, relation):
-    # 任意父方法 × nest/support/delegate_to → 任意核心方法,含复合值。
+    # 任意父方法 × nest/support/delegate_to → 四种基础方法。
     assert COMPOSITION_MATRIX[(parent, relation)] == ALL_METHOD_WIRES
 
 
@@ -87,7 +86,7 @@ def test_matrix_any_parent_nest_support_delegate_allows_any_child(parent, relati
     ],
 )
 def test_validate_accepts_any_child_for_nest_support_delegate(parent, relation):
-    # 全部子方法 wire 值(含 Open 与 Open + Group)都应通过结构校验。
+    # 四种基础方法 wire 值(含 Open)都应通过结构校验。
     for child in ALL_METHOD_WIRES:
         validate_composition(parent, relation, child)
 
@@ -174,14 +173,27 @@ def test_validate_rejects_unknown_parent_and_child():
         validate_composition("Group", CompositionRelation.NEST, "Team")
 
 
-@pytest.mark.parametrize("parent", ["Open", "Open + Group"])
-def test_validate_rejects_parent_without_matrix_row(parent):
-    # Open(含顶层复合 Open + Group)不发起组合:即使 wire 值合法,
-    # 矩阵中也没有以其为父的行,报错需点出父×关系组合。
+def test_validate_rejects_parent_without_matrix_row():
+    # Open 是合法基础方法,但不发起组合;报错需点出父×关系组合。
+    parent = "Open"
     with pytest.raises(
         ContextCollabValidationError, match=r"Open.*nest"
     ):
         validate_composition(parent, CompositionRelation.NEST, "Group")
+
+
+@pytest.mark.parametrize("composite", ["Open + Group", "Open + Single", "Open + Swarm"])
+@pytest.mark.parametrize("endpoint", ["parent", "child"])
+@pytest.mark.parametrize(
+    "relation",
+    [CompositionRelation.NEST, CompositionRelation.SUPPORT, CompositionRelation.DELEGATE_TO],
+)
+def test_validate_rejects_product_compositions_as_method_endpoints(
+    composite, endpoint, relation
+):
+    parent, child = (composite, "Open") if endpoint == "parent" else ("Swarm", composite)
+    with pytest.raises(ContextCollabValidationError, match="unknown method_kind"):
+        validate_composition(parent, relation, child)
 
 
 # ---------------------------------------------------------------------------

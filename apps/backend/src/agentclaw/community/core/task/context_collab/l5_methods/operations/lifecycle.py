@@ -34,7 +34,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
     MethodBinding,
-    MethodKind,
     effective_max_compose_depth,
     parse_method_kinds,
 )
@@ -306,7 +305,7 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         axes = current_axes()
         method_binding_id = command.method_binding_id or f"mb_{uuid4().hex[:12]}"
         bind_reason = command.bind_reason or "compose"
-        method_kind = MethodKind.from_wire(command.method_kind).value
+        method_kind = command.method_kind
         method_names = tuple(kind.value for kind in parse_method_kinds(method_kind))
         # 经 from_dict 整形校验(method_kind 投影一致、config 结构等),
         # 垃圾入参在落库前拒绝。

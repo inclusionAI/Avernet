@@ -55,6 +55,8 @@ def _initial_event(collet):
         ("Single", "Single", AgentRef("bot", "worker")),
         ("Open", "Open", None),
         ("Open + Group", "Open + Group", None),
+        ("Open + Single", "Open + Single", AgentRef("bot", "worker")),
+        ("Open + Swarm", "Open + Swarm", None),
     ],
 )
 def test_creation_receipt_keeps_wire_shape_and_inputs(

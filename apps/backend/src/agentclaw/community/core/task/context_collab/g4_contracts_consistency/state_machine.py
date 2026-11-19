@@ -30,6 +30,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
     TaskStatus,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    METHOD_COMPOSITION_WIRES,
     MethodKind,
 )
 
@@ -166,7 +167,7 @@ def _validate_header(d: StateMachineDefinition) -> None:
 
 def _validate_states(d: StateMachineDefinition) -> dict[str, StateDefinition]:
     """§4.4 第 1/6/7 条:状态定义、治理类别词汇与 Method 兼容。"""
-    known_methods = {kind.value for kind in MethodKind}
+    known_methods = {kind.value for kind in MethodKind} | METHOD_COMPOSITION_WIRES
     states: dict[str, StateDefinition] = {}
     for state in d.states:
         _check_str(state.name, "state name")

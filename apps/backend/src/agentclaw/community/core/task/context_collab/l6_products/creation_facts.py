@@ -23,7 +23,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
     normalize_executor_refs,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    MethodKind,
+    parse_method_kinds,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
@@ -55,10 +55,11 @@ def creation_payload(
     product_profile_ref: VersionedProfileRef | None = None,
 ) -> dict:
     """Build the creation-event payload from the owning L4/L6 fields."""
+    parse_method_kinds(method_kind)
     return {
         "objective": objective,
         "resource_refs": [ref.to_dict() for ref in resource_refs],
-        "method_kind": MethodKind.from_wire(method_kind).value,
+        "method_kind": method_kind,
         "executor_ref": executor_ref.to_dict() if executor_ref else None,
         "product_kind": product_kind,
         "workflow_kind": workflow_kind,
@@ -117,7 +118,8 @@ def decode_creation_facts(data: dict[str, Any]) -> dict:
             "creation facts resource_refs must be a list"
         )
     resources = [ResourceRef.from_dict(item) for item in raw_resources]
-    method_kind = MethodKind.from_wire(data.get("method_kind")).value
+    method_kind = data.get("method_kind")
+    parse_method_kinds(method_kind)
     raw_executor = data.get("executor_ref")
     if raw_executor is not None and not isinstance(raw_executor, dict):
         raise ContextCollabValidationError(
