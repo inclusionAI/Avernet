@@ -136,7 +136,7 @@ pub enum ControlAcquireOutcome {
 }
 #[async_trait]
 pub trait SessionControlPort: Send + Sync {
-    /// Validates current shard claim/StrictLease and seals only the raw owner
+    /// Validates current shard claim/RetainedLease and seals only the raw owner
     /// header, preserving malformed business content and all control evidence.
     /// Uses the same handoff fence and local reservation as ordinary acquisition.
     async fn acquire_control(

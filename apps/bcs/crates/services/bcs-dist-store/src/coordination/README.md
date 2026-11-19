@@ -2,7 +2,7 @@
 
 This module implements MembershipPort, ShardLeasePort, SessionStorePort and
 SessionControlPort using
-public DocumentCas, StrictLease and ZSet contracts. It contains no backend client,
+public DocumentCas, RetainedLease and ZSet contracts. It contains no backend client,
 HTTP transport, environment access or vendor commands. Construction rejects any
 missing capability before registering or claiming work.
 
@@ -20,7 +20,7 @@ Only meaningful business progress resets the legacy streak and ledger; a
 consumed-only commit does not. A seal preserves both. Known missing checkpoints
 fail; fresh absence follows SPEC scheme A. Ordinary acquisition rejects an
 unsupported checkpoint before sealing. `acquire_control` validates the same
-claim/StrictLease and handoff fence, then seals the raw owner while preserving an
+claim/RetainedLease and handoff fence, then seals the raw owner while preserving an
 undecodable business body. Missing/corrupt owner or head cannot authorize this
 path. No initialization marker is introduced.
 
@@ -29,7 +29,7 @@ ignored and retained while registration may be in flight. Retire removes its
 member from the three role indexes after stable termination; a failed cleanup
 is retried by discovery. Each discovery page batches removal of Terminated
 members only, never Absent or Unknown. The index has stable member-key
-continuation and bounded pages. The strict lease implementation supplies stable termination; a missing or failed
+continuation and bounded pages. The retained membership lease implementation supplies stable termination; a missing or failed
 read is Unknown, never evidence for fault takeover. Claim and handoff mutation
 checks propagate Unknown as an uncertain result; it cannot become Fenced or
 Rejected and release an earlier unknown operation's responsibility.
@@ -84,7 +84,7 @@ decoding and explicitly reject the known prototype shape as `UnsupportedFormat`
 (format 1), without rewriting/sealing it. Other malformed current bodies remain
 data errors. Header-only control recovery continues to preserve the raw body.
 
-The provider's lease implementation must pass the strict contract before this
+The provider's lease implementation must pass the retained membership contract before this
 store can start. A document-CAS-only backend is insufficient. The test-only model
 is a fault-injection fixture, never a production fallback.
 

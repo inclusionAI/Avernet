@@ -38,7 +38,7 @@ factory registry or business wrapper is required.
 | Capability | Trait and surface | Guarantee |
 | --- | --- | --- |
 | DocumentCas | `DocumentStorePlugin`: read_document, read_document_paths, create_document, replace_document, patch_document | Persistent whole-document version; atomic create and exact-version replacement/ordered patch; consistent projections |
-| StrictLease | `LeaseStorePlugin`: register_lease, read_lease, update_lease, retire_lease | Provider-timed expiry and version checks; stable termination prevents revival |
+| RetainedLease | `LeaseStorePlugin`: register_lease, read_lease, update_lease, retire_lease | CAS-confirmed termination and 30-day retention; synchronized client time allowed |
 | Kv | `KvStorePlugin`: get, mget, set, put_if_absent, delete, expire, ttl | Byte values; atomic single-key writes/NX; explicit expiry |
 | VersionedKv | `VersionedKvStorePlugin`: create_versioned, get_versioned, delete, ttl | Atomic creation, consistent value/version read, unconditional deletion and TTL query; Persistent expiry is always supported |
 | ConditionalKv | Same trait: compare_and_set | Exact-version update of a live value; never recreate a missing/expired key |
@@ -293,7 +293,7 @@ must reject a provider without StreamRecovery instead of treating None as a clea
 stream. Service-owned snapshot/checkpoint and retention protocols remain required.
 
 
-## Persistent documents and strict leases
+## Persistent documents and retained membership leases
 
 `DocumentStorePlugin` / `DocumentCas` is an independent, smaller contract than
 `AtomicJson`: consistent whole-document reads and path projections,
@@ -332,16 +332,29 @@ version mismatch. The default implementation rejects unsupported providers
 before I/O. The model's path/patch methods use these same portable defaults;
 forced interleavings and response-loss tests validate their CAS composition.
 
-`LeaseStorePlugin` / `StrictLease` adds a separate provider-timed registration
-lifetime. Expiry/version checks, optional deadline extension and payload changes
-are atomic. A terminal lifetime cannot be revived by delayed registration or
-renewal; retirement also fences a still-pending first registration. Missing is
-not stable termination. Retrying registration preserves both its original
-identity and deadline, even after its mutable payload has changed. A failed
-response can be `OutcomeUnknown`; consumers resolve it without treating absence
-as death. The test-only model uses one lock and a controllable clock. It is not a
-production lease service and proves neither durability nor failover behavior.
-Document CAS and ordinary TTL alone do not establish StrictLease support.
+`LeaseStorePlugin` / `RetainedLease` keeps a short heartbeat deadline and a
+separate 30-day storage retention period. A timed-out observation attempts to CAS
+that exact record/version to terminal; only confirmed termination establishes
+Dead. A heartbeat may win before that CAS. Terminal records reject delayed
+registration and renewal throughout retention, including retire-before-register.
+Missing is Unknown, including after garbage collection. Return with a new
+incarnation and acquire fresh ownership after losing registration.
+
+Registration retries preserve the original identity and deadline even after
+payload edits. Successful mutations refresh retention; ordinary reads and
+idempotent retries do not. GC TTL may be written separately: partial success is
+`OutcomeUnknown`, and subsequent observation repairs a missing TTL. An orphan
+left by a crash between creation and TTL assignment can remain until observed.
+The finite recovery window deliberately excludes arbitrarily old requests.
+
+Providers may sample synchronized client wall time, without server TIME or an
+atomic time predicate. Deployments must budget clock skew/steps, heartbeat delay
+and transport latency; consumers subtract the full request duration using a
+monotonic clock. CAS preserves terminal state even when a clock error causes an
+early/late timeout decision. Owner epochs and session fences remain required.
+The deterministic model proves contract behavior, not clock discipline, storage
+durability or production capacity. See the
+[adopted amendment](../../../specs/2026-11-20-retained-membership-lease/spec.md).
 
 ## Ordinary connection-pool observations
 

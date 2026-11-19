@@ -89,14 +89,16 @@ pub trait MembershipPort: Send + Sync {
         control_address: String,
         ttl: Duration,
     ) -> Result<MembershipLease, StoreError>;
-    /// Atomically require this exact current, unexpired registration. Lost leases
-    /// return Lost without creating/reviving membership or touching a newer incarnation.
+    /// Require the exact current non-terminated registration using CAS. A timeout
+    /// permits termination; heartbeat and termination race on the same version.
+    /// Lost leases never recreate membership or touch a newer incarnation.
     async fn renew(&self, lease: &MembershipLease, ttl: Duration) -> Result<Renewal, StoreError>;
     /// Same exact-instance/valid-lease check as renew; never mutate a newer incarnation.
     async fn set_draining(&self, lease: &MembershipLease) -> Result<Renewal, StoreError>;
     /// Uncertain reads produce Unknown, never Dead.
     /// Stable terminal evidence for this exact incarnation, including a pending
-    /// registration; delayed register/renew cannot undo a successful retirement.
+    /// registration; delayed register/renew cannot undo retirement within the
+    /// 30-day retention window. Later absence is Unknown, requiring fresh identity.
     async fn retire(&self, lease: &MembershipLease) -> Result<(), StoreError>;
     async fn liveness(&self, instance: &Instance) -> Result<Liveness, StoreError>;
     async fn members(
