@@ -167,6 +167,7 @@ impl WorkerProcessor {
             || config.request_timeout > Duration::from_secs(2)
             || config.poll_interval.is_zero()
             || config.retry_delay < Duration::from_millis(5)
+            || config.retry_delay > Duration::from_secs(5)
             || !(1..=128).contains(&config.thinking_events_per_second)
             || !(1..=128).contains(&config.max_commits_per_turn)
             || config.envelope_reserve_bytes < 64 * 1024
@@ -174,6 +175,8 @@ impl WorkerProcessor {
         {
             return Err(err("processor_config"));
         }
+        super::capacity::validate(runtime.sessions.checkpoint_capacity(), config.envelope_reserve_bytes)
+            .map_err(store_error)?;
         let profile = ports.scan_budget.profile();
         if ports.dispatch.scan_budget_profile().as_ref() != Some(&profile) {
             return Err(err("processor_scan_budget_mismatch"));

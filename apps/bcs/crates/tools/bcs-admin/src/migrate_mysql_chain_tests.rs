@@ -69,6 +69,7 @@ fn mysql_v20_prefix_upgrade_reports_the_complete_pending_tail() -> Result<()> {
     assert!(report.contains("- 046 group_context_preset checksum="), "{report}");
     assert!(report.contains("- 047 message_activity_indexes checksum="), "{report}");
     assert!(report.contains("- 048 configured_catalog_labels checksum="), "{report}");
+    assert!(report.contains("- 049 dist_immutable_objects checksum="), "{report}");
     let repeated = format_mysql_apply_report(&after, &[]);
     assert!(repeated.contains("applied_versions=0\npending_versions=0"), "{repeated}");
     Ok(())

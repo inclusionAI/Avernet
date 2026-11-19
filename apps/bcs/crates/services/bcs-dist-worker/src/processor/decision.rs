@@ -98,6 +98,9 @@ pub(super) fn validate_decision(
                 ) {
                     return Err(DecisionFailure::Invalid("terminal_set_status"));
                 }
+                if status_change.is_some() {
+                    return Err(DecisionFailure::Invalid("multiple_status_actions"));
+                }
                 if interactions.len() > 64 || encoded_size(&interactions, 64 * 1024).is_none() {
                     return Err(DecisionFailure::Invalid("interaction_bound"));
                 }

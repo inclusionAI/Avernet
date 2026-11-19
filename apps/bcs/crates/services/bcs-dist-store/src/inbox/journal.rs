@@ -51,6 +51,11 @@ impl StoreInboxProducer {
                     && i.request.input.input_id == request.input.input_id
             });
             let refusal = |error| if prior_identity { unknown(op) } else { error };
+            // Existing pending identities were resolved above. Resource pressure
+            // may refuse only a new Start, never revoke durable repair duties.
+            if start && let Err(error) = self.check_pool_pressure() {
+                return Err(refusal(error));
+            }
             if start && let Err(error) = self.check_health(shard, &root, version.is_none()) {
                 return Err(refusal(error));
             }

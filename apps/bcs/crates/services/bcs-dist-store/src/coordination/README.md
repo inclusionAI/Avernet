@@ -13,7 +13,9 @@ read. Conflicts reload/revalidate; idempotent success reloads the authoritative
 owner before returning a receipt. Storage versions never prove a business commit.
 
 A checkpoint contains the public envelope and a private bounded attempt ledger
-for its current business head (64 distinct recovery attempts; overflow fails).
+for its current business head (at most 64 distinct recovery attempts, at most
+8 KiB encoded list bytes, and at most 256 encoded bytes per ID). Existing-ID
+retries remain idempotent when the new-attempt budget is full.
 Only meaningful business progress resets the legacy streak and ledger; a
 consumed-only commit does not. A seal preserves both. Known missing checkpoints
 fail; fresh absence follows SPEC scheme A. Ordinary acquisition rejects an
@@ -49,6 +51,18 @@ checkpoint-loss evidence survive errors. The embedding
 runtime can release a quiescent session's cache with `SessionStorePort::release_local`;
 active or uncertain work must retain its entry. Capacity exhaustion rejects new
 work rather than growing memory without a bound.
+
+## Encoded checkpoint capacity
+
+`checkpoint_capacity()` declares total document and non-checkpoint envelope
+budgets, including the host-declared `storage_envelope_bytes`. Defaults are 1 MiB,
+64 KiB and 64 bytes respectively; the host must prove its adapter wrapper bound
+and backend capacity. Construction serializes the maximum actual envelope,
+including bounded control and legacy recovery history, and rejects incompatible
+budgets. Every write checks the full encoded row and its envelope before CAS.
+The Worker separately validates maximum legal business/finalization candidates;
+missing capacity declarations fail startup. This is an enforced bound, not an
+extra storage read or an assumption about an unnamed backend's native limit.
 
 ## Integration and migration
 

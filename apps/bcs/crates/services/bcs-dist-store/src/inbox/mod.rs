@@ -13,6 +13,7 @@ mod journal;
 mod listener;
 mod maintenance;
 mod producer;
+mod pressure;
 mod progress;
 mod scan_scheduler;
 mod scheduling;

@@ -75,6 +75,9 @@ struct Pending {
     delivered: Instant,
 }
 impl StorePlugin for Model {
+    fn pool_observation(&self) -> Option<StorePoolObservation> {
+        Some(StorePoolObservation::Unpooled)
+    }
     fn supports(&self, c: StoreCapability) -> bool {
         !(matches!(
             c,

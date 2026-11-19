@@ -265,6 +265,7 @@ async fn missing_control_acquisitions_do_not_exhaust_local_capacity() {
         bcs_dist_store::coordination::CoordinationStoreConfig {
             max_cached_sessions: 1,
             max_handoff_timers: 1,
+            ..Default::default()
         },
     )
     .unwrap();

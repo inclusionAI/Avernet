@@ -149,6 +149,9 @@ struct Instrumented {
     disabled: bool,
 }
 impl StorePlugin for Instrumented {
+    fn pool_observation(&self) -> Option<StorePoolObservation> {
+        self.model.pool_observation()
+    }
     fn supports(&self, capability: StoreCapability) -> bool {
         capability == StoreCapability::DocumentCas && !self.disabled
     }

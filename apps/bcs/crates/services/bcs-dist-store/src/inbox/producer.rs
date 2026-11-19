@@ -38,6 +38,8 @@ pub struct InboxProducerConfig {
     pub max_receipts: usize,
     /// Shared store connection-pool capacity; scan IO is at most one quarter.
     pub connection_pool_size: usize,
+    /// New Starts yield after this duration of continuous shared-pool congestion.
+    pub pool_pressure_after: Duration,
 }
 impl InboxProducerConfig {
     pub fn new(backend: BackendId) -> Self {
@@ -59,6 +61,7 @@ impl InboxProducerConfig {
             maintenance_stale_after: Duration::from_secs(60),
             max_receipts: 256,
             connection_pool_size: 32,
+            pool_pressure_after: Duration::from_millis(200),
         }
     }
     fn validate(&self) -> Result<(), StoreError> {
@@ -86,6 +89,7 @@ impl InboxProducerConfig {
             || self.max_receipts == 0
             || self.max_receipts > 1024
             || self.connection_pool_size < 4
+            || !(Duration::from_millis(5)..=Duration::from_secs(5)).contains(&self.pool_pressure_after)
             || self.max_inbox_entries <= 128
             || self.max_inbox_bytes <= 256 * 1024
         {
@@ -141,6 +145,7 @@ impl StoreInboxProducer {
         ])?;
         config.validate()?;
         crate::budget::validate_profile(&scan_budget.profile(), config.connection_pool_size)?;
+        super::pressure::validate_observation(documents.pool_observation(), config.connection_pool_size)?;
         Ok(Self {
             scans: super::scan_scheduler::ScanHandle::new(),
             inner: Arc::new(Inner {

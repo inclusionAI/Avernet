@@ -20,6 +20,9 @@ struct IncorrectLease {
     shorten_rejected: bool,
 }
 impl StorePlugin for IncorrectLease {
+    fn pool_observation(&self) -> Option<StorePoolObservation> {
+        self.model.pool_observation()
+    }
     fn supports(&self, capability: StoreCapability) -> bool {
         self.model.supports(capability)
     }
