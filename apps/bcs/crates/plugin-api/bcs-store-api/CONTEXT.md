@@ -2,6 +2,9 @@
 
 ## Provides
 
+- Body-free ordinary-pool observations; providers report current resource facts,
+  while consumers own admission thresholds and recovery policy.
+
 - Independent DocumentCas and StrictLease contracts; their presence does not
   widen AtomicJson or ordinary TTL guarantees.
 - DocumentCas includes consistent path projection and ordered patch through

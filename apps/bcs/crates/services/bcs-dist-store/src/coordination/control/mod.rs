@@ -86,7 +86,7 @@ impl CoordinationStore {
         if serde_json::to_vec(&encoded)
             .map_err(|_| invalid("control_encoding"))?
             .len()
-            > 48 * 1024
+            > capacity::MAX_CONTROL_BYTES
         {
             return Err(invalid("control_byte_budget"));
         }

@@ -135,6 +135,19 @@ The default page and resident Session bounds are both 128. Coordination-only
 large-capacity tests configure their separate limits explicitly; they do not
 establish phase-one production capacity.
 
+The [lifecycle](tests/processor_lifecycle.rs),
+[finalization](tests/processor_finalization.rs),
+[snapshot policy](tests/processor_snapshots.rs),
+[publication race](tests/processor_snapshot_race.rs), and
+[quota lifecycle](tests/processor_quota_lifecycle.rs) integration tests compose the
+public Worker and storage providers with the conformance model and SQLite. They
+verify consumed control inputs, frozen archive retries, committed cancellation,
+remote Unknown supervision after local termination, publication coverage during
+trim, and preserved output followed by a healthy task after quota failure. The
+publication race counts actual full snapshot Blob arguments separately as unique
+content, fault retry bytes, and other idempotent writes; these are logical port
+bytes, not database physical writes or a production capacity measurement.
+
 Runtime snapshots expose active work and pending effects. Structured tracing
 records membership, claim, handoff, deferred acquisition and unfinished-drain
 transitions with instance/shard/request identities and machine-safe error codes.

@@ -582,6 +582,9 @@ impl DelayedDocuments {
     }
 }
 impl bcs_store_api::StorePlugin for DelayedDocuments {
+    fn pool_observation(&self) -> Option<bcs_store_api::StorePoolObservation> {
+        self.model.pool_observation()
+    }
     fn supports(&self, c: bcs_store_api::StoreCapability) -> bool {
         c == bcs_store_api::StoreCapability::DocumentCas
     }
@@ -848,6 +851,7 @@ async fn raw_deferred_and_fenced_observations_do_not_consume_receiver_capacity()
         bcs_dist_store::coordination::CoordinationStoreConfig {
             max_cached_sessions: 1,
             max_handoff_timers: 1,
+            ..Default::default()
         },
     )
     .unwrap();

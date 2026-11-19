@@ -31,6 +31,9 @@ impl DelayedDocuments {
     }
 }
 impl StorePlugin for DelayedDocuments {
+    fn pool_observation(&self) -> Option<StorePoolObservation> {
+        self.store.pool_observation()
+    }
     fn supports(&self, capability: StoreCapability) -> bool {
         self.store.supports(capability)
     }

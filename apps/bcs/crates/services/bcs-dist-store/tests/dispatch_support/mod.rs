@@ -234,6 +234,9 @@ pub struct SlowDocuments {
     pub delay: Duration,
 }
 impl bcs_store_api::StorePlugin for SlowDocuments {
+    fn pool_observation(&self) -> Option<bcs_store_api::StorePoolObservation> {
+        self.inner.pool_observation()
+    }
     fn supports(&self, c: bcs_store_api::StoreCapability) -> bool {
         self.inner.supports(c)
     }
@@ -271,6 +274,9 @@ pub struct HangingDocument {
     pub key: String,
 }
 impl bcs_store_api::StorePlugin for HangingDocument {
+    fn pool_observation(&self) -> Option<bcs_store_api::StorePoolObservation> {
+        self.inner.pool_observation()
+    }
     fn supports(&self, c: bcs_store_api::StoreCapability) -> bool {
         self.inner.supports(c)
     }

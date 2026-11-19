@@ -57,6 +57,10 @@ fn acquired(sid: &Sid, claim: &ShardClaim, envelope: StoredCheckpoint) -> Acquir
 }
 #[async_trait]
 impl SessionStorePort for CoordinationStore {
+    fn checkpoint_capacity(&self) -> Option<SessionCheckpointCapacity> {
+        Some(self.config.checkpoint_capacity)
+    }
+
     fn local_session_capacity(&self) -> Option<usize> {
         Some(self.config.max_cached_sessions)
     }
@@ -321,6 +325,9 @@ impl SessionStorePort for CoordinationStore {
         attempt: RequestId,
     ) -> Result<RecoveryUpdate, StoreError> {
         owner_valid(owner)?;
+        if attempt.0.is_empty() || capacity::encoded_bytes(&attempt)? > capacity::MAX_RECOVERY_ID_BYTES {
+            return Err(invalid("recovery_attempt_identity"));
+        }
         let key = self.layout.ckpt(&owner.sid)?;
         for _ in 0..RETRIES {
             let Some(old) = self.checkpoint(&owner.sid).await? else {
@@ -342,6 +349,9 @@ impl SessionStorePort for CoordinationStore {
                 return Err(not_applied("recovery_attempt_limit"));
             }
             value.recovery_attempts.push(attempt.clone());
+            if capacity::encoded_bytes(&value.recovery_attempts)? > capacity::MAX_RECOVERY_ATTEMPTS_BYTES {
+                return Err(not_applied("recovery_attempt_byte_budget"));
+            }
             value.recovery.takeover_streak = value
                 .recovery
                 .takeover_streak
