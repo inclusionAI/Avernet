@@ -710,6 +710,8 @@ impl BotService for BotServiceImpl {
                             Ok(bcs_service_api::Skill {
                                 name,
                                 description: skill.description,
+                                // The patch input has no tags concept; pass-through here would be wrong.
+                                tags: Vec::new(),
                             })
                         })
                         .collect::<Result<Vec<_>, _>>()

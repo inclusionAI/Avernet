@@ -192,9 +192,11 @@ class Story:
         stranger, _ = self.register("Card stranger", self.owner + "stranger")
         self.profile(target, name="Card target", summary="Invoices", domains=["billing"],
                      skills=[{"name": "invoice", "description": "Invoice lookup"}])
-        card = self.wait_card(target, lambda c: c["card"]["description"] == "Invoices\nbilling")
+        card = self.wait_card(target, lambda c: c["card"]["description"] == "Invoices")
         assert card["resource_type"] == "agent"
-        assert card["card"]["skills"][0]["tags"] == ["billing"]
+        # The profile path carries no skill tags (the onboard wire protocol
+        # has no tags field), and domains-stuffing is gone: tags stay empty.
+        assert card["card"]["skills"][0]["tags"] == []
         assert "visibility" not in card["card"] and token not in json.dumps(card)
         # Every bot/user visibility combination is publishable.
         for visibility in ("public", "protected", "private"):
@@ -206,7 +208,7 @@ class Story:
                     "visibility": [visibility], "user_visibility": [user_visibility]})
         self.profile(target, name="Card target", summary="Updated invoices", domains=["finance"],
                      skills=[{"name": "payment"}])
-        self.wait_card(target, lambda c: c["card"]["description"] == "Updated invoices\nfinance" and
+        self.wait_card(target, lambda c: c["card"]["description"] == "Updated invoices" and
                        c["card"]["skills"][0]["name"] == "payment")
 
         # Friendship survives a subsequent private visibility change. Friend
@@ -274,10 +276,10 @@ class Story:
         # Longer than this configuration's maximum per-attempt backoff (320 ms).
         time.sleep(0.7)
         assert len(self.catalog.matching("PUT", path, start)) == 10
-        assert self.catalog.card(target)["card"]["description"] == "Updated invoices\nfinance"
+        assert self.catalog.card(target)["card"]["description"] == "Updated invoices"
         self.catalog.fail(path, None)
         self.profile(target, name="Card target", summary="Recovered profile")
-        self.wait_card(target, lambda c: c["card"]["description"] == "Recovered profile\nfinance")
+        self.wait_card(target, lambda c: c["card"]["description"] == "Recovered profile")
 
         # A retry after deletion must read fresh state and issue DELETE, not stale PUT.
         path = "/api/v2/agent-cards/" + group
