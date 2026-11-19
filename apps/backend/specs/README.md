@@ -144,6 +144,7 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-11-10-openapi-iam-session-key](2026-11-10-openapi-iam-session-key/)
 - [2026-11-11-bot-config-task-nav-kind](2026-11-11-bot-config-task-nav-kind/)
 - [2026-11-12-teclaw-refresh-session-check](2026-11-12-teclaw-refresh-session-check/)
+- [2026-11-18-kb-deletion-forwarding](2026-11-18-kb-deletion-forwarding/)
 - [caller-token-expiry-20261113](caller-token-expiry-20261113/)
 - [dingtalk-caller-token](dingtalk-caller-token/)
 - [hourly-asc-refresh-20261115](hourly-asc-refresh-20261115/)

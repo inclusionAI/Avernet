@@ -77,6 +77,48 @@ Domain models use `@dataclass` (zero framework dependency). Transport DTOs
 in `adapters/http/agentswarm/schemas.py` are Pydantic BaseModel (FastAPI
 boundary). ORM models use SQLAlchemy `Base` from `core/base.py`.
 
+## Chat transport seam (bot-kind legs)
+
+The bot persona leg sits behind `plugins/community/agentswarm/chat/`. `base.py`
+is the synchronous `ChatTransport` contract (`chat`, `chat_timeout_seconds`)
+plus `SessionMode` (`FRESH` / `CONTINUE`) and the failure vocabulary
+`ChatError` → `ChatTimeoutError`, `ChatRefusedError`, `ChatUnavailableError`
+(also a `ConnectionError`) and `ChatRateLimitedError`. Each implementation
+bounds its own wait and checks the caller's `cancel_event`; an empty reply
+means the leg was cancelled, not an empty answer.
+
+| Transport | Module | Path |
+| --- | --- | --- |
+| `engine_ws` (default) | `chat/engine_ws.py` | engine WebSocket, moved verbatim out of `host_chat.py`; resets the session before each send. `host_chat` re-exports the names so existing imports resolve. |
+| `baas_gateway` | `chat/baas_gateway.py` | one authenticated `POST` to BaaS `/openapi/v1/chat/stream`, then consume its SSE `DefaultStreamConverter` frames (`delta` / `final` / `error` / `aborted`); the platform owns bot resolution, session bookkeeping and the engine conversation. A stream that ends without `final` is a failure. |
+
+Selection is the `user_config.agentswarm.chat` block: `transport` is
+`engine_ws` or `baas_gateway`, and any other value fails at config parse time
+instead of silently downgrading; an absent block keeps `engine_ws`. The
+`chat.baas_gateway` sub-block (read only for that channel) carries
+`resource_key_prefix` (default `agent_swarm`; the authorized key is
+`<prefix>_<tenant>`), `issuer=backend`, `audience=baas` and `key_id=bare`.
+Both channels use the deployment default
+`agentswarm.executor.bot_chat_timeout_seconds` (1800s); a per-run
+`bot_chat_timeout_seconds` may tighten it, and a transport never delegates its
+deadline to the engine or platform. Both log one `[chat][leg]` line that
+differs only in `transport=`, so one grep names the channel a run used.
+
+The BaaS channel mints its own short-lived service principal
+(`core/gateway_principal/baas_service_principal.py`): BaaS authorizes the
+`(resource_key, tenant)` row, and when present
+`principals[0].app.bot_id` narrows that grant to one exact bot. The claim is
+normalized the way the platform normalizes the request body (a zero-padded
+entity id matches its memorable form); an absent claim emits no `bot_id`, so an
+unconfigured caller's token is unchanged. A claimed bot still needs a grant
+naming it — the claim is never a bypass. BaaS owns the verification side in
+[ADR 0017 exact bot claim](../../../../../../baas/docs/adr/0017-exact-bot-claim.md)
+and [ADR 0016 wildcard mapping](../../../../../../baas/docs/adr/0016-wildcard-bot-mapping.md).
+
+`host.py` delegates `BotPlatform.chat` to the injected transport with
+`SessionMode.FRESH`; with no transport injected (the default) it runs the
+engine leg with the pre-seam behavior.
+
 ## Swarm model
 
 1. **Submit** — `AgentSwarmService.submit_async` creates a `run` row
