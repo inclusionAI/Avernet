@@ -219,6 +219,25 @@ display a dash. Lab rows do not claim execution duration from these timestamps;
 the default MyTask presentation remains unchanged. Regression coverage lives in
 [`Tasks.test.tsx`](test/pages/Lab/Tasks.test.tsx).
 
+## Notification center detail classification
+
+Approval details loaded through `workOrderService.getDetail` retain the approval
+identity even when the detail response omits `item_type` or `event_type`, or its
+event is not yet in the display catalogue. Notification details loaded through
+`notificationService.getDetail` retain their recipient-notification identity,
+even when they carry an originating approval event. Classification does not depend
+on approval status, read state or the user's current approval permission.
+Approval-result notifications display the category label “审批类”, rather than
+“审批通知”; this presentation choice does not turn a notification into an
+approvable work order or change its read state.
+The shared event catalogue also recognizes Skill editor requests.
+
+Regression coverage lives in
+[workOrderService.api.test.ts](test/services/admin/workOrderService.api.test.ts),
+[notificationService.test.ts](test/services/admin/notificationService.test.ts),
+[workOrderMeta.test.ts](test/domain/admin/workOrderMeta.test.ts) and
+[WorkOrderDetailDrawer.test.tsx](test/components/Admin/WorkOrderDetailDrawer.test.tsx).
+
 ## Source synchronization
 
 `OPEN_CORE_MANIFEST.json` records the TeamClaw source commit. Changes originating in this public directory must be taken back into the TeamClaw Open Core baseline before the next export.

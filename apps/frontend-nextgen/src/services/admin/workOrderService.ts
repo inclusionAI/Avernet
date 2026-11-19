@@ -82,7 +82,8 @@ export const workOrderService = {
     try {
       const resp = await getWorkOrderDetail(workOrderId, { user_id });
       if (!resp.data) return { data: undefined };
-      return { data: mapWorkOrderDto(resp.data).item };
+      // 此入口只加载审批工单。详情 VO 可缺 item_type/event_type，不能重新猜成通知。
+      return { data: mapWorkOrderDto({ ...resp.data, item_type: 'APPROVAL' }).item };
     } catch (e) {
       return { error: toServiceError(e) };
     }

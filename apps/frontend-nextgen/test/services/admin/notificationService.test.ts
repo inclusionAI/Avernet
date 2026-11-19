@@ -104,3 +104,22 @@ describe('notificationService.fetchRecentNotifications', () => {
     expect(r.data?.[0].itemType).toBe('NOTIFICATION');
   });
 });
+
+describe('通知详情保持通知身份', () => {
+  it.each([undefined, 'SPACE_JOIN_APPLIED', 'SKILL_COLLABORATOR_APPLIED'])(
+    '原事件 %s 不改变通知分类',
+    async (eventType) => {
+      nc.getNotificationDetail.mockResolvedValue({
+        data: {
+          notification_id: 40001,
+          event_type: eventType,
+          notification_category: 'APPROVAL',
+          is_read: true,
+        },
+      });
+      const result = await notificationService.getDetail(40001);
+      expect(nc.getNotificationDetail).toHaveBeenCalledWith(40001, { user_id: '900003' });
+      expect(result.data).toMatchObject({ itemType: 'NOTIFICATION', typeLabel: '审批类', isRead: true });
+    },
+  );
+});

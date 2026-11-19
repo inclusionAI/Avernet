@@ -129,3 +129,39 @@ describe('workOrderService.approve / reject → 统一审批入口', () => {
     expect(wc.getWorkOrderDetail).toHaveBeenCalledWith(30001, { user_id: '900003' });
   });
 });
+
+describe('审批详情分类不依赖可选事件字段', () => {
+  it.each([undefined, 'SKILL_COLLABORATOR_APPLIED', 'FUTURE_APPLIED'])(
+    '列表与详情保持审批身份：event_type=%s',
+    async (eventType) => {
+      wc.listWorkOrders.mockResolvedValue({
+        data: { items: [{ item_type: 'APPROVAL', work_order_id: 30001, event_type: eventType }] },
+      });
+      wc.getWorkOrderDetail.mockResolvedValue({
+        data: {
+          work_order_id: 30001,
+          event_type: eventType,
+          status: 'APPROVED',
+          can_approve: false,
+          content: { applicant_name: '申请者', reason: '需要编辑权限' },
+          review_remark: '同意申请',
+        },
+      });
+      const list = await workOrderService.list({ view: 'processed', category: 'APPROVAL' });
+      const detail = await workOrderService.getDetail(30001);
+      expect(detail.data?.itemType).toBe(list.data?.items[0].itemType);
+      expect(detail.data).toMatchObject({
+        itemType: 'APPROVAL',
+        typeLabel: eventType === 'SKILL_COLLABORATOR_APPLIED' ? '申请编辑权限' : '审批类',
+        applicantName: '申请者',
+        applyReason: '需要编辑权限',
+        reviewRemark: '同意申请',
+      });
+    },
+  );
+
+  it('无详情数据时不合成工单', async () => {
+    wc.getWorkOrderDetail.mockResolvedValue({ data: null });
+    expect((await workOrderService.getDetail(30001)).data).toBeUndefined();
+  });
+});
