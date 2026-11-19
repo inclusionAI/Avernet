@@ -10,7 +10,7 @@ use bcs_service_api::port::repo::distributed::common::{SessionOwnership, StoreEr
 use bcs_service_api::port::repo::distributed::ownership::ShardClaim;
 use bcs_service_api::port::repo::distributed::session::*;
 use bcs_store_api::StoreCapability;
-use bcs_store_api::json::JsonStorePlugin;
+use bcs_store_api::document::DocumentStorePlugin;
 use std::sync::Arc;
 
 /// Code of a Worker operation called on the Gateway's session store.
@@ -25,15 +25,19 @@ pub const WORKER_ONLY: &str = "worker_only_operation";
 /// Worker; a Gateway never calls them, and this provider refuses them with
 /// `NotApplied { code: "worker_only_operation" }` instead of touching `ckpt`.
 pub struct GatewaySessionStore {
-    json: Arc<dyn JsonStorePlugin>,
+    documents: Arc<dyn DocumentStorePlugin>,
     layout: KeyLayout,
 }
 
 impl GatewaySessionStore {
-    /// Fails when the store lacks `AtomicJson`.
-    pub fn new(json: Arc<dyn JsonStorePlugin>, layout: KeyLayout) -> Result<Self, StoreError> {
-        capability::require(&[(json.as_ref(), StoreCapability::AtomicJson)])?;
-        Ok(Self { json, layout })
+    /// Fails when the store lacks `DocumentCas`, the namespace admission
+    /// creates `spec` in.
+    pub fn new(
+        documents: Arc<dyn DocumentStorePlugin>,
+        layout: KeyLayout,
+    ) -> Result<Self, StoreError> {
+        capability::require(&[(documents.as_ref(), StoreCapability::DocumentCas)])?;
+        Ok(Self { documents, layout })
     }
 }
 
@@ -47,7 +51,7 @@ fn worker_only<T>() -> Result<T, StoreError> {
 impl SessionStorePort for GatewaySessionStore {
     async fn get_spec(&self, sid: &Sid) -> Result<Option<SessionSpec>, StoreError> {
         let key = self.layout.spec(sid)?;
-        match self.json.get_json(&key).await.map_err(|e| from_read(&e))? {
+        match self.documents.read_document(&key).await.map_err(|e| from_read(&e))? {
             Some(doc) => decode_json(doc.value).map(Some),
             None => Ok(None),
         }
@@ -59,6 +63,15 @@ impl SessionStorePort for GatewaySessionStore {
         _claim: &ShardClaim,
         _initial: Checkpoint,
     ) -> Result<AcquireOutcome, StoreError> {
+        worker_only()
+    }
+
+    async fn handoff_session(
+        &self,
+        _source: &SessionOwnership,
+        _target: &ShardClaim,
+        _request_id: &RequestId,
+    ) -> Result<SessionTransferOutcome, StoreError> {
         worker_only()
     }
 

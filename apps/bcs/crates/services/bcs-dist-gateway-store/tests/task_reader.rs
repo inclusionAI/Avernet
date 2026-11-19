@@ -9,8 +9,8 @@ use bcs_dist_store::codec::encode_json;
 use bcs_service_api::port::repo::distributed::common::{PageRequest, StoreError};
 use bcs_service_api::port::repo::distributed::session::SessionStorePort;
 use bcs_service_api::port::repo::distributed::task_feed::*;
-use bcs_store_api::json::{JsonMutation, JsonStorePlugin};
-use bcs_store_api::{Expiry, StoreCapability, StorePlugin, Version, WriteCondition};
+use bcs_store_api::document::DocumentStorePlugin;
+use bcs_store_api::{StoreCapability, StorePlugin};
 use bcs_test_support::store_model::Model;
 use common::*;
 use std::num::NonZeroU32;
@@ -232,12 +232,7 @@ async fn session_store_reads_the_spec_and_refuses_worker_operations() {
     let sid = Sid(SID.into());
     assert_eq!(store.get_spec(&sid).await.unwrap(), None);
     model
-        .mutate_json(
-            &layout().spec(&sid).unwrap(),
-            WriteCondition::Newer(Version(1)),
-            JsonMutation::Replace(encode_json(&spec()).unwrap()),
-            Expiry::Persistent,
-        )
+        .create_document(&layout().spec(&sid).unwrap(), &encode_json(&spec()).unwrap())
         .await
         .unwrap();
     assert_eq!(store.get_spec(&sid).await.unwrap(), Some(spec()));
@@ -251,19 +246,19 @@ async fn session_store_reads_the_spec_and_refuses_worker_operations() {
 struct NoJson(Model);
 impl StorePlugin for NoJson {
     fn supports(&self, capability: StoreCapability) -> bool {
-        capability != StoreCapability::AtomicJson && self.0.supports(capability)
+        capability != StoreCapability::DocumentCas && self.0.supports(capability)
     }
 }
 
 #[tokio::test]
 async fn a_store_without_a_required_capability_is_refused_at_startup() {
-    // `require` only asks `supports`, so a plugin that denies AtomicJson is enough.
+    // `require` only asks `supports`, so a plugin that denies DocumentCas is enough.
     let plugin = NoJson(Model::default());
-    let error = bcs_dist_store::capability::require(&[(&plugin, StoreCapability::AtomicJson)]).unwrap_err();
+    let error = bcs_dist_store::capability::require(&[(&plugin, StoreCapability::DocumentCas)]).unwrap_err();
     assert_eq!(
         error,
         StoreError::NotApplied {
-            code: "missing_store_capability:AtomicJson".into()
+            code: "missing_store_capability:DocumentCas".into()
         }
     );
 }

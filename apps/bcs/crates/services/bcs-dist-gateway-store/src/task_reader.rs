@@ -21,7 +21,7 @@ use bcs_service_api::port::repo::distributed::common::{Page, PageRequest, StoreE
 use bcs_service_api::port::repo::distributed::result::ResultStorePort;
 use bcs_service_api::port::repo::distributed::task_feed::*;
 use bcs_store_api::StoreCapability;
-use bcs_store_api::json::JsonStorePlugin;
+use bcs_store_api::document::DocumentStorePlugin;
 use bcs_store_api::stream::{StreamEntry, StreamId, StreamStorePlugin};
 use bcs_store_api::zset::{ZSetRange, ZSetStorePlugin};
 use futures::StreamExt;
@@ -69,7 +69,7 @@ impl GatewayStoreConfig {
 }
 
 struct Shared {
-    json: Arc<dyn JsonStorePlugin>,
+    documents: Arc<dyn DocumentStorePlugin>,
     zset: Arc<dyn ZSetStorePlugin>,
     stream: Arc<dyn StreamStorePlugin>,
     results: Arc<dyn ResultStorePort>,
@@ -83,9 +83,10 @@ pub struct StoreTaskReader {
 }
 
 impl StoreTaskReader {
-    /// Fails when a store lacks `AtomicJson`, `ZSet` or `Stream`.
+    /// Fails when a store lacks `DocumentCas` (the namespace `task` is created
+    /// and published in), `ZSet` or `Stream`.
     pub fn new(
-        json: Arc<dyn JsonStorePlugin>,
+        documents: Arc<dyn DocumentStorePlugin>,
         zset: Arc<dyn ZSetStorePlugin>,
         stream: Arc<dyn StreamStorePlugin>,
         results: Arc<dyn ResultStorePort>,
@@ -93,7 +94,7 @@ impl StoreTaskReader {
         config: GatewayStoreConfig,
     ) -> Result<Self, StoreError> {
         capability::require(&[
-            (json.as_ref(), StoreCapability::AtomicJson),
+            (documents.as_ref(), StoreCapability::DocumentCas),
             (zset.as_ref(), StoreCapability::ZSet),
             (stream.as_ref(), StoreCapability::Stream),
         ])?;
@@ -111,7 +112,7 @@ impl StoreTaskReader {
         );
         Ok(Self {
             shared: Arc::new(Shared {
-                json,
+                documents,
                 zset,
                 stream,
                 results,
@@ -131,7 +132,7 @@ impl StoreTaskReader {
 impl Shared {
     async fn snapshot(&self, tid: &Tid) -> Result<Option<TaskSnapshot>, StoreError> {
         let key = self.layout.task(tid)?;
-        match self.json.get_json(&key).await.map_err(|e| from_read(&e))? {
+        match self.documents.read_document(&key).await.map_err(|e| from_read(&e))? {
             Some(doc) => decode_json(doc.value).map(Some),
             None => Ok(None),
         }

@@ -562,7 +562,7 @@ async fn preload_spec_and_task(store: &Recorder, created_at: i64) {
     ] {
         store
             .model
-            .mutate_json(key, WriteCondition::Newer(Version(1)), JsonMutation::Replace(doc), Expiry::Persistent)
+            .create_document(key, &doc)
             .await
             .unwrap();
     }
@@ -606,12 +606,7 @@ async fn a_conflicting_task_is_not_listed() {
     foreign.scope.principal = PrincipalId("someone-else".into());
     store
         .model
-        .mutate_json(
-            "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
-            WriteCondition::Newer(Version(1)),
-            JsonMutation::Replace(bcs_dist_store::codec::encode_json(&foreign).unwrap()),
-            Expiry::Persistent,
-        )
+        .create_document("bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e", &bcs_dist_store::codec::encode_json(&foreign).unwrap())
         .await
         .unwrap();
     preload_only_spec(&store).await;
@@ -623,12 +618,7 @@ async fn a_conflicting_task_is_not_listed() {
 async fn preload_only_spec(store: &Recorder) {
     store
         .model
-        .mutate_json(
-            "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
-            WriteCondition::Newer(Version(1)),
-            JsonMutation::Replace(bcs_dist_store::codec::encode_json(&spec("grp-research-01")).unwrap()),
-            Expiry::Persistent,
-        )
+        .create_document("bcn:v1:c01:main:s0042:spec:s0042.7f3a9c", &bcs_dist_store::codec::encode_json(&spec("grp-research-01")).unwrap())
         .await
         .unwrap();
 }
@@ -647,8 +637,8 @@ async fn a_new_task_in_an_existing_session_writes_in_the_fixed_order() {
         store.calls(),
         vec![
             "kv.get bcn:v1:c01:main:s0042:admit:adm-9c41e7",
-            "json.get bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
-            "json.mutate bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            "document.read bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
+            "document.create bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
             "zset.add bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
             "stream.append bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
             "zset.add bcn:v1:c01:main:s0042:active",

@@ -11,6 +11,7 @@ use bcs_dist_store::layout::KeyLayout;
 use bcs_service_api::port::repo::distributed::common::{EffectSource, StoreError};
 use bcs_service_api::port::repo::distributed::common::IdempotentWrite;
 use bcs_service_api::port::repo::distributed::result::{BlobStorePort, ResultStorePort, SavedResult};
+use bcs_store_api::document::DocumentStorePlugin;
 use bcs_store_api::json::{JsonMutation, JsonStorePlugin};
 use bcs_store_api::stream::*;
 use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetStorePlugin};
@@ -137,23 +138,20 @@ impl FakeWorker {
             .unwrap();
     }
 
+    /// Creates the task document, or replaces it at the exact version read:
+    /// the document compare-and-set the Worker uses.
     pub async fn publish(&self, task: &TaskSnapshot) {
         let key = layout().task(&task.tid).unwrap();
-        let current = self.model.get_json(&key).await.unwrap().map_or(0, |doc| doc.version.0);
-        let outcome = self
-            .model
-            .mutate_json(
-                &key,
-                WriteCondition::Newer(Version(current + 1)),
-                JsonMutation::Replace(encode_json(task).unwrap()),
-                Expiry::Persistent,
-            )
-            .await
-            .unwrap();
+        let doc = encode_json(task).unwrap();
+        let outcome = match self.model.read_document(&key).await.unwrap() {
+            Some(current) => self.model.replace_document(&key, current.version, &doc).await.unwrap(),
+            None => self.model.create_document(&key, &doc).await.unwrap(),
+        };
         assert!(matches!(outcome, WriteOutcome::Applied { .. }));
     }
 
-    /// The task key expired (7 days after the task ended).
+    /// The task record is gone (removed after its retention). The document
+    /// contract has no delete, so this reaches under it in the test model.
     pub async fn expire(&self, tid: &str) {
         let key = layout().task(&Tid(tid.into())).unwrap();
         self.model

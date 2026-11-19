@@ -601,6 +601,17 @@ Changed after the PR reviews (2026-11-17):
   denied" for a new task or a listing: the session check now comes first and
   does not reveal that the session exists.
 
+- **`spec` and `task` are read through the document store** (rebase of
+  2026-11-19). `dev` moved both to `bcs-store-api`'s `DocumentStorePlugin`
+  (`DocumentCas`: create-if-absent, replace at the exact version read, the
+  store advances the version). Admission creates them there, so
+  `StoreTaskReader` and `GatewaySessionStore` read with `read_document` and
+  require `DocumentCas` instead of `AtomicJson`. The Gateway writes neither
+  after creation, so no compare-and-set logic of its own changed. The store
+  mapping in `research.md` predates this and still names the JSON calls.
+- **`SessionStorePort` gained `handoff_session`** on `dev`; the Gateway's
+  read-only provider refuses it like the other Worker operations.
+
 Delayed, tracked as Active Tasks:
 
 - a retried reply or cancel refused after it took effect (open item 1);
