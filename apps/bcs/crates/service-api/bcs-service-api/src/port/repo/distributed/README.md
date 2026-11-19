@@ -10,7 +10,7 @@ for retained layout, cold-start health, resource bounds and validation limits.
 
 | Boundary | Traits | Responsibility |
 | --- | --- | --- |
-| SessionInbox | `InboxProducerPort`, `InboxConsumerPort`, `ShardFeedPort`, `InboxSchedulingPort`, `AdmissionMaintenancePort`, `AdmissionControlPort` | Durable admission, replayable per-session input, acknowledgements and recoverable activation |
+| SessionInbox | `InboxProducerPort`, `InboxConsumerPort`, `ShardFeedPort`, `InboxSchedulingPort`, `AdmissionMaintenancePort`, `AdmissionControlPort`, `AdmissionClosurePort` | Durable admission, replayable per-session input, acknowledgements and recoverable activation |
 | TaskFeed | `TaskPublisherPort`, `TaskReaderPort` | Committed output, task snapshots, consistent restore and resumable subscriptions |
 | DispatchBoard | `DispatchControlPort`, `DispatchQueuePort`, `HeldDispatchPort`, `CommandFeedPort` | Worker intent, Connector ownership, remote progress and notification hints |
 | Session state | `SessionStorePort` | Frozen spec reads, per-session owner seal, atomic business commit, unknown-result resolution and recovery metadata |
@@ -192,8 +192,9 @@ must be serialized, and stale attempts cannot undo a business-progress reset.
 metadata, not a field copied into the next business candidate. Only actual
 business progress resets the failure streak.
 
-Owner records, checkpoint envelopes, commit receipts and recovery responses
-expose no independent revision. Storage adapters may use native versions or
+Owner records, checkpoint envelopes and commit receipts expose no storage
+revision. `SessionControl.revision` is a logical control fence used by admission
+closure and recovery; it is not a backend CAS version. Storage adapters may use native versions or
 transactions internally. Phase one uses opaque DocumentCAS versions shared by
 sealing, business commits and recovery control. It does not encode a version as
 `epoch * 10^9 + commit_seq`. Control writes preserve business sequence and outbox.
@@ -289,3 +290,16 @@ fencing is implemented in the repository provider. `release_local` drops only a
 quiescent local cache; it cannot delete durable state. Peer controls bind exact
 instances through the application boundary. See the Worker coordination SPEC and
 its implementation record for provider prerequisites and initialization scheme A.
+
+## Session isolation control
+
+[`SessionControlPort`](control.rs) persists frozen risk attempts and separates
+Normal/Quarantined/Blocked/Recovering from business state. Ordinary commits bind
+the control revision; independent finalization binds the isolation operation.
+[`AdmissionClosurePort`](admission.rs) owns recoverable close/cut scanning and
+conditional reopen, with actual `TerminalTaskEvidencePort` evidence. Application
+authorization must precede `RecoveryAuthorization`; neither an owner token nor a
+caller-created completion digest grants recovery rights. See the
+[control provider](../../../../../../services/bcs-dist-store/src/coordination/README.md)
+and [closure provider](../../../../../../services/bcs-dist-store/src/inbox/README.md)
+for retained evidence, IO budgets and validation limits.

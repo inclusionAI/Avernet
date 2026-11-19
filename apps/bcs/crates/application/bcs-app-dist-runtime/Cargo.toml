@@ -13,6 +13,7 @@ bcs-service-api.workspace = true
 bcs-dist-model.workspace = true
 
 [dev-dependencies]
+bcs-test-support = { path = "../../test-support/bcs-test-support" }
 tokio.workspace = true
 
 [lints]

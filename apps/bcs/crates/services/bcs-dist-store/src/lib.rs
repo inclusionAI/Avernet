@@ -13,10 +13,11 @@
 //! - [`inbox`]: the `InboxProducerPort` provider (admission write order).
 
 pub mod archive;
-pub mod evidence;
 pub mod capability;
 pub mod codec;
+pub mod dispatch;
 pub mod error;
+pub mod evidence;
 pub mod identity;
 pub mod inbox;
 pub mod layout;
@@ -24,3 +25,5 @@ pub mod task_feed;
 pub mod version;
 
 pub mod coordination;
+
+pub mod budget;

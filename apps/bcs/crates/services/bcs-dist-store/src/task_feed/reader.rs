@@ -355,6 +355,20 @@ impl StoreTaskFeed {
 // deadline. A page-boundary check alone cannot stop a slow final read.
 #[async_trait]
 impl TaskReaderPort for StoreTaskFeed {
+    async fn load_snapshot(
+        &self,
+        scope: &TaskScope,
+        tid: &Tid,
+    ) -> Result<Option<TaskSnapshot>, StoreError> {
+        let stored = self.io(self.task(scope, tid)).await?;
+        if let Some(stored) = &stored {
+            bounded_bytes(&stored.value, 256 * 1024)?;
+            self.projection
+                .validate_task_limits(&stored.value, &stored.value.output_limits)
+                .map_err(|_| invalid("task_snapshot_limits"))?;
+        }
+        Ok(stored.map(|stored| stored.value))
+    }
     async fn restore(
         &self,
         scope: &TaskScope,

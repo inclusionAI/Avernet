@@ -10,7 +10,7 @@
 //! There is no hash tag (`{…}`) anywhere: a brace in a name would create one, so
 //! every segment rejects `{` and `}`.
 
-use bcs_dist_model::{Did, Instance, InputId, PoolId, ShardId, Sid, Tid};
+use bcs_dist_model::{Did, InputId, Instance, PoolId, ShardId, Sid, Tid};
 use bcs_service_api::port::repo::distributed::common::StoreError;
 
 const PREFIX: &str = "bcn:v1";
@@ -72,6 +72,53 @@ impl KeyLayout {
     pub fn ckpt(&self, sid: &Sid) -> Result<String, StoreError> {
         self.by_session("ckpt", sid)
     }
+    pub fn control_attempt(
+        &self,
+        sid: &Sid,
+        id: &bcs_dist_model::RequestId,
+    ) -> Result<String, StoreError> {
+        segment(&id.0)?;
+        let digest = crate::identity::digest_fields(&[sid.0.as_bytes(), id.0.as_bytes()]);
+        Ok(format!(
+            "{}:control-attempt:{}",
+            self.shard_prefix(Self::shard_of(sid)?),
+            crate::identity::hex_of(&digest)
+        ))
+    }
+    pub fn control_isolation(
+        &self,
+        sid: &Sid,
+        id: &bcs_dist_model::RequestId,
+    ) -> Result<String, StoreError> {
+        Ok(format!("{}:isolation", self.control_attempt(sid, id)?))
+    }
+    pub fn control_recovery(
+        &self,
+        sid: &Sid,
+        id: &bcs_dist_model::RequestId,
+    ) -> Result<String, StoreError> {
+        Ok(format!("{}:recovery", self.control_attempt(sid, id)?))
+    }
+    pub fn closure_progress(
+        &self,
+        sid: &Sid,
+        id: &bcs_dist_model::RequestId,
+    ) -> Result<String, StoreError> {
+        segment(&id.0)?;
+        let digest = crate::identity::digest_fields(&[sid.0.as_bytes(), id.0.as_bytes()]);
+        Ok(format!(
+            "{}:closure:{}",
+            self.shard_prefix(Self::shard_of(sid)?),
+            crate::identity::hex_of(&digest)
+        ))
+    }
+    pub fn closure_certificate(
+        &self,
+        sid: &Sid,
+        id: &bcs_dist_model::RequestId,
+    ) -> Result<String, StoreError> {
+        Ok(format!("{}:certificate", self.closure_progress(sid, id)?))
+    }
     pub fn inbox(&self, sid: &Sid) -> Result<String, StoreError> {
         self.by_session("inbox", sid)
     }
@@ -84,8 +131,15 @@ impl KeyLayout {
     }
     /// Per-session task index (sorted set: member = task id, score = creation
     /// time in ms), written only by Gateway admission: `…:tasks:<sid>`.
-    pub fn tasks(&self, sid: &Sid) -> Result<String, StoreError> {
+    pub fn session_tasks(&self, sid: &Sid) -> Result<String, StoreError> {
         self.by_session("tasks", sid)
+    }
+    pub fn task_terminal_append(&self, tid: &Tid) -> Result<String, StoreError> {
+        self.by_prefixed_id("task-terminal-append", &tid.0)
+    }
+    pub fn task_terminal_publish(&self, tid: &Tid) -> Result<String, StoreError> {
+        self.by_prefixed_id("task-terminal-publish", &tid.0)
+
     }
     /// A dispatch id starts with its task id, so it also names the shard.
     pub fn disp(&self, did: &Did) -> Result<String, StoreError> {
@@ -115,7 +169,11 @@ impl KeyLayout {
         ))
     }
     /// `bcn:v1:hb:c01:main:a:worker-07:1794370900`.
-    pub fn heartbeat(&self, copy: HeartbeatCopy, instance: &Instance) -> Result<String, StoreError> {
+    pub fn heartbeat(
+        &self,
+        copy: HeartbeatCopy,
+        instance: &Instance,
+    ) -> Result<String, StoreError> {
         let (node, inc) = instance_segments(instance)?;
         let copy = match copy {
             HeartbeatCopy::A => "a",
@@ -153,8 +211,15 @@ impl KeyLayout {
     pub fn tasks(&self, scope: &bcs_dist_model::TaskScope) -> Result<String, StoreError> {
         segment(&scope.tenant.0)?;
         segment(&scope.principal.0)?;
-        let digest = crate::identity::digest_fields(&[scope.tenant.0.as_bytes(), scope.principal.0.as_bytes()]);
-        Ok(format!("{}:tasks:{}", self.namespace_identity(), crate::identity::hex_of(&digest)))
+        let digest = crate::identity::digest_fields(&[
+            scope.tenant.0.as_bytes(),
+            scope.principal.0.as_bytes(),
+        ]);
+        Ok(format!(
+            "{}:tasks:{}",
+            self.namespace_identity(),
+            crate::identity::hex_of(&digest)
+        ))
     }
     pub fn session_tasks(&self, sid: &Sid) -> Result<String, StoreError> {
         self.by_session("tasks", sid)
@@ -169,8 +234,16 @@ impl KeyLayout {
     pub fn task_retention(&self, tid: &Tid) -> Result<String, StoreError> {
         self.by_prefixed_id("task-retention", &tid.0)
     }
-    pub fn effect_completion(&self, effect: &bcs_dist_model::EffectId) -> Result<String, StoreError> {
-        Ok(format!("{}:{}:{}", self.by_session("effect-completion", &effect.sid)?, effect.commit.0, effect.index))
+    pub fn effect_completion(
+        &self,
+        effect: &bcs_dist_model::EffectId,
+    ) -> Result<String, StoreError> {
+        Ok(format!(
+            "{}:{}:{}",
+            self.by_session("effect-completion", &effect.sid)?,
+            effect.commit.0,
+            effect.index
+        ))
     }
     pub fn output_trim(&self, sid: &Sid) -> Result<String, StoreError> {
         self.by_session("output-trim", sid)
@@ -178,6 +251,12 @@ impl KeyLayout {
 
     pub fn schedule(&self, sid: &Sid) -> Result<String, StoreError> {
         self.by_session("schedule", sid)
+    }
+    pub fn dispatch_journal(&self, shard: ShardId) -> String {
+        format!("{}:dispatch-journal", self.shard_prefix(shard))
+    }
+    pub fn dispatch_scan(&self, shard: ShardId) -> String {
+        format!("{}:dispatch-scan", self.shard_prefix(shard))
     }
     pub fn admission_root(&self, shard: ShardId) -> String {
         format!("{}:admission-root", self.shard_prefix(shard))
@@ -187,17 +266,30 @@ impl KeyLayout {
     }
     pub fn admission_scan(&self, shard: ShardId, kind: &str) -> Result<String, StoreError> {
         segment(kind)?;
-        Ok(format!("{}:admission-scan:{kind}", self.shard_prefix(shard)))
+        Ok(format!(
+            "{}:admission-scan:{kind}",
+            self.shard_prefix(shard)
+        ))
     }
     /// Canonical identity is scope-wide, independent of the requested shard/target.
-    pub fn canonical_admission(&self, scope: &bcs_dist_model::TaskScope, id: &InputId) -> Result<String, StoreError> {
+    pub fn canonical_admission(
+        &self,
+        scope: &bcs_dist_model::TaskScope,
+        id: &InputId,
+    ) -> Result<String, StoreError> {
         segment(&scope.tenant.0)?;
         segment(&scope.principal.0)?;
         segment(&id.0)?;
         let digest = crate::identity::digest_fields(&[
-            scope.tenant.0.as_bytes(), scope.principal.0.as_bytes(), id.0.as_bytes(),
+            scope.tenant.0.as_bytes(),
+            scope.principal.0.as_bytes(),
+            id.0.as_bytes(),
         ]);
-        Ok(format!("{}:canonical:{}", self.namespace_identity(), crate::identity::hex_of(&digest)))
+        Ok(format!(
+            "{}:canonical:{}",
+            self.namespace_identity(),
+            crate::identity::hex_of(&digest)
+        ))
     }
 
     fn shard_prefix(&self, shard: ShardId) -> String {

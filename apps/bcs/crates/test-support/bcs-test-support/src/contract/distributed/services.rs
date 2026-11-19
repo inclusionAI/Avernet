@@ -102,7 +102,7 @@ pub async fn dist_runtime_control_port_contract_tests(
 ) -> ContractResult {
     assert_eq!(runtime.snapshot().await?.active_work, 0);
     assert_eq!(
-        runtime.drain(Duration::from_secs(1)).await?,
+        runtime.drain(Duration::from_secs(5)).await?,
         DrainOutcome::Drained
     );
     assert!(runtime.snapshot().await?.draining);

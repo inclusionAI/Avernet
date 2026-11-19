@@ -53,6 +53,7 @@ impl Fixture {
     }
     pub async fn persist(&self, source: &EffectSource, record: &FinalTaskRecord) {
         let batch = CommittedBatch {
+            created_at: None,
             commit_id: source.commit.commit_id.clone(),
             source_commit: source.commit.sequence,
             content_digest: source.commit.content_digest.clone(),
@@ -74,6 +75,7 @@ impl Fixture {
                 runner_state: None,
                 dispatch_seq: BTreeMap::new(),
                 deadlines: vec![],
+                deadline_history: Default::default(),
                 view_drafts: BTreeMap::new(),
                 last_event_id: None,
                 outbox: Some(batch),

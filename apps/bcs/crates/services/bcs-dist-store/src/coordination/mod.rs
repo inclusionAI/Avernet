@@ -1,5 +1,6 @@
 //! Provider-independent membership, shard transitions and checkpoint fencing.
 //! Private document versions never encode epoch or business commit sequence.
+mod control;
 mod membership;
 mod session;
 mod shard;
@@ -27,6 +28,8 @@ struct StoredCheckpoint {
     envelope: CheckpointEnvelope,
     #[serde(default)]
     recovery_attempts: Vec<RequestId>,
+    #[serde(default)]
+    control: bcs_service_api::port::repo::distributed::control::SessionControl,
 }
 impl std::ops::Deref for StoredCheckpoint {
     type Target = CheckpointEnvelope;
@@ -44,6 +47,7 @@ struct CachedSession {
     holder: ShardOwner,
     checkpoint: Option<Versioned<StoredCheckpoint>>,
     uncertain_acquisition: bool,
+    known_checkpoint: bool,
 }
 
 /// Local process bounds; no durable state is evicted to enforce these limits.
@@ -55,7 +59,10 @@ pub struct CoordinationStoreConfig {
 }
 impl Default for CoordinationStoreConfig {
     fn default() -> Self {
-        Self { max_cached_sessions: 10_000, max_handoff_timers: 4096 }
+        Self {
+            max_cached_sessions: 10_000,
+            max_handoff_timers: 4096,
+        }
     }
 }
 
@@ -75,7 +82,13 @@ impl CoordinationStore {
         index: Arc<dyn ZSetStorePlugin>,
         layout: KeyLayout,
     ) -> Result<Self, StoreError> {
-        Self::with_config(documents, leases, index, layout, CoordinationStoreConfig::default())
+        Self::with_config(
+            documents,
+            leases,
+            index,
+            layout,
+            CoordinationStoreConfig::default(),
+        )
     }
     pub fn with_config(
         documents: Arc<dyn DocumentStorePlugin>,
@@ -146,7 +159,11 @@ impl CoordinationStore {
             WriteOutcome::ConditionNotMet => None,
         })
     }
-    async fn confirmed_alive(&self, instance: &Instance, operation: &str) -> Result<bool, StoreError> {
+    async fn confirmed_alive(
+        &self,
+        instance: &Instance,
+        operation: &str,
+    ) -> Result<bool, StoreError> {
         match self.liveness(instance).await? {
             Liveness::Alive => Ok(true),
             Liveness::Dead => Ok(false),
@@ -156,10 +173,15 @@ impl CoordinationStore {
         }
     }
     async fn valid_claim(&self, claim: &ShardClaim) -> Result<bool, StoreError> {
-        if !self.current(claim.shard).await?.is_some_and(|r| r.claim == *claim) {
+        if !self
+            .current(claim.shard)
+            .await?
+            .is_some_and(|r| r.claim == *claim)
+        {
             return Ok(false);
         }
-        self.confirmed_alive(&claim.owner.instance, "claim_liveness").await
+        self.confirmed_alive(&claim.owner.instance, "claim_liveness")
+            .await
     }
     fn cached(&self, sid: &Sid) -> Result<Option<Versioned<StoredCheckpoint>>, StoreError> {
         Ok(self
@@ -182,7 +204,30 @@ impl CoordinationStore {
                 .as_ref()
                 .is_none_or(|old| old.version < value.version)
         {
+            entry.known_checkpoint = true;
             entry.checkpoint = Some(value);
+        }
+        Ok(())
+    }
+    fn known_checkpoint(&self, sid: &Sid) -> Result<bool, StoreError> {
+        Ok(self
+            .cache
+            .lock()
+            .map_err(|_| not_applied("cache_poisoned"))?
+            .get(&sid.0)
+            .is_some_and(|entry| entry.known_checkpoint || entry.checkpoint.is_some()))
+    }
+    fn observe_checkpoint(&self, sid: &Sid, invalidate: bool) -> Result<(), StoreError> {
+        if let Some(entry) = self
+            .cache
+            .lock()
+            .map_err(|_| not_applied("cache_poisoned"))?
+            .get_mut(&sid.0)
+        {
+            entry.known_checkpoint = true;
+            if invalidate {
+                entry.checkpoint = None;
+            }
         }
         Ok(())
     }
@@ -209,6 +254,7 @@ impl CoordinationStore {
                     holder: holder.clone(),
                     checkpoint: None,
                     uncertain_acquisition: false,
+                    known_checkpoint: false,
                 },
             );
         }
@@ -236,14 +282,20 @@ impl CoordinationStore {
                 return Err(invalid("stored_position"));
             }
             self.remember(sid, v.clone())?;
-        } else if self.cached(sid)?.is_some() {
+        } else if self.known_checkpoint(sid)? {
             return Err(not_applied("known_checkpoint_missing"));
         }
         Ok(value)
     }
     fn release_handoff_timer(&self, shard: ShardId, id: &RequestId) -> Result<(), StoreError> {
-        let mut timers = self.timers.lock().map_err(|_| not_applied("timer_poisoned"))?;
-        if timers.get(&shard.0).is_some_and(|(request, _)| request.request_id == *id) {
+        let mut timers = self
+            .timers
+            .lock()
+            .map_err(|_| not_applied("timer_poisoned"))?;
+        if timers
+            .get(&shard.0)
+            .is_some_and(|(request, _)| request.request_id == *id)
+        {
             timers.remove(&shard.0);
         }
         Ok(())

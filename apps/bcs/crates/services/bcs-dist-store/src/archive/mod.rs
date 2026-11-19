@@ -58,12 +58,7 @@ impl DbArchiveStore {
 /// The public provider's byte digest is domain-separated SHA-256 using the same
 /// length-prefixed field encoding as other distributed identities. It hashes
 /// exact stored bytes; JSON callers must freeze those bytes before publication.
-pub fn blob_reference(key: &str, bytes: &[u8]) -> BlobRef {
-    BlobRef {
-        key: key.into(),
-        digest: digest_fields(&[b"blob:v1", bytes]),
-    }
-}
+pub use bcs_dist_encoding::blob_reference;
 
 #[async_trait]
 impl BlobStorePort for DbArchiveStore {

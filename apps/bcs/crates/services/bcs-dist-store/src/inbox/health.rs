@@ -17,6 +17,19 @@ pub(super) struct ShardHealth {
     known_exists: bool,
 }
 pub(super) type Health = BTreeMap<ShardId, ShardHealth>;
+/// Diagnostic observations are not admission authorization or a cross-key cut.
+/// None means unavailable local evidence; it must not be graphed as zero age.
+#[derive(Debug, Clone)]
+pub struct MaintenanceObservation {
+    pub retained_entries: Option<u64>,
+    pub retained_bytes: Option<u64>,
+    pub retained_sessions: Option<u64>,
+    pub repair_backlog: Option<u64>,
+    pub repair_round_age: Option<Duration>,
+    pub discovery_round_age: Option<Duration>,
+    pub repair_confirmed_age: Option<Duration>,
+    pub discovery_confirmed_age: Option<Duration>,
+}
 impl ShardHealth {
     fn new(root: &JournalRoot, fresh: bool) -> Self {
         let now = Instant::now();
@@ -30,6 +43,51 @@ impl ShardHealth {
     }
 }
 impl StoreInboxProducer {
+    /// Two bounded authority reads, on demand. This does not refresh health or
+    /// derive monotonic age from the persisted business clock.
+    pub async fn maintenance_observation(
+        &self,
+        shard: ShardId,
+    ) -> Result<MaintenanceObservation, StoreError> {
+        let root = self
+            .load::<JournalRoot>(&self.inner.layout.admission_root(shard))
+            .await?
+            .map(|(_, r)| r);
+        let scan = self
+            .load::<super::state::Scan>(&self.inner.layout.admission_scan(shard, "repair")?)
+            .await?
+            .map(|(_, s)| s);
+        let now = Instant::now();
+        let health = self
+            .inner
+            .health
+            .lock()
+            .map_err(|_| invalid("health_lock"))?;
+        let health = health.get(&shard);
+        let round_age = |index: usize| {
+            health
+                .and_then(|h| h.rounds[index])
+                .map(|(_, at)| now.duration_since(at))
+        };
+        let confirmed_age = |index: usize| {
+            health
+                .and_then(|h| h.confirmed[index])
+                .map(|at| now.duration_since(at))
+        };
+        Ok(MaintenanceObservation {
+            retained_entries: root.as_ref().map(|r| r.next),
+            retained_bytes: root.as_ref().map(|r| r.bytes),
+            retained_sessions: root.as_ref().map(|r| r.sessions),
+            repair_backlog: root
+                .as_ref()
+                .zip(scan.as_ref())
+                .map(|(r, s)| r.next.saturating_sub(s.completed)),
+            repair_round_age: round_age(0),
+            discovery_round_age: round_age(1),
+            repair_confirmed_age: confirmed_age(0),
+            discovery_confirmed_age: confirmed_age(1),
+        })
+    }
     pub(super) fn check_health(
         &self,
         shard: ShardId,
@@ -218,6 +276,11 @@ mod tests {
     fn concurrent_same_round_preserves_earliest_start() {
         let store = Arc::new(Model::default());
         let p = StoreInboxProducer::new(
+            Arc::new(
+                crate::budget::SharedScanBudget::new(crate::budget::ScanBudgetConfig::default())
+                    .expect("valid shared scan budget"),
+            ),
+            Arc::new(bcs_dist_projection::OutputProjectionService),
             store.clone(),
             store.clone(),
             store.clone(),

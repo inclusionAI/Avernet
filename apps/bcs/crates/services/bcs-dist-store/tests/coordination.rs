@@ -33,17 +33,27 @@ fn initial() -> Checkpoint {
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: vec![TaskProgress {
-            tid: Tid("s0042.session.task".into()), phase: TaskPhase::Running,
-            input: Payload::Inline(json!({})), result_ref: None,
-            output_limits: PHASE_ONE_OUTPUT_LIMITS, output_usage: OutputUsage::default(),
-            publication: SnapshotProgress::default(), finalization: None,
-        }].into(),
+            steps: 0,
+            tid: Tid("s0042.session.task".into()),
+            phase: TaskPhase::Running,
+            input: Payload::Inline(json!({})),
+            result_ref: None,
+            output_limits: PHASE_ONE_OUTPUT_LIMITS,
+            output_usage: OutputUsage::default(),
+            publication: SnapshotProgress::default(),
+            finalization: None,
+        }]
+        .into(),
         runner_state: Some(TaskRunnerState {
             tid: Tid("s0042.session.task".into()),
-            state: RunnerState { format_version: 1, value: json!({"a":1,"b":2}) },
+            state: RunnerState {
+                format_version: 1,
+                value: json!({"a":1,"b":2}),
+            },
         }),
         dispatch_seq: Default::default(),
         deadlines: vec![],
+        deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: None,
         outbox: None,
@@ -89,12 +99,16 @@ fn commit(session: &AcquiredSession, seq: u64) -> CommitRequest {
     let id = CommitId(format!("commit-{seq}"));
     let digest = Digest(format!("digest-{seq}"));
     candidate.outbox = Some(CommittedBatch {
+        created_at: None,
         commit_id: id.clone(),
         source_commit: CommitSeq(seq),
         content_digest: digest.clone(),
         effects: vec![],
     });
     CommitRequest {
+        purpose: CommitPurpose::Ordinary {
+            control_revision: 0,
+        },
         owner: session.ownership.clone(),
         expected_commit_seq: CommitSeq(seq - 1),
         commit_id: id,
@@ -154,7 +168,7 @@ async fn sealing_preserves_state_and_rejects_old_full_checkpoint() {
     );
 }
 #[tokio::test]
-async fn control_versions_do_not_consume_business_sequence() {
+async fn control_versions_and_consumed_only_commits_do_not_reset_recovery_evidence() {
     let (_, s) = setup();
     register(&s, "a").await;
     let a = claim(&s, "a", None).await;
@@ -173,7 +187,7 @@ async fn control_versions_do_not_consume_business_sequence() {
             .unwrap()
             .recovery
             .takeover_streak,
-        0
+        1
     );
 }
 #[tokio::test]
@@ -801,6 +815,81 @@ async fn deferred_observations_do_not_fill_receiver_cache() {
     }
     assert!(matches!(
         s.acquire(&Sid("s0042.new".into()), &record.claim, initial())
+            .await
+            .unwrap(),
+        AcquireOutcome::Acquired(_)
+    ));
+}
+
+#[tokio::test]
+async fn raw_deferred_and_fenced_observations_do_not_consume_receiver_capacity() {
+    use bcs_service_api::port::repo::distributed::control::{
+        ControlAcquireOutcome, SessionControlPort,
+    };
+    let (m, s) = setup();
+    register(&s, "a").await;
+    register(&s, "b").await;
+    let a = claim(&s, "a", None).await;
+    let source = acquire(&s, &a).await;
+    let layout = KeyLayout::new("test", "worker").unwrap();
+    for n in 0..2 {
+        m.create_document(
+            &layout.ckpt(&Sid(format!("s0042.protected{n}"))).unwrap(),
+            &serde_json::to_value(&source.envelope).unwrap(),
+        )
+        .await
+        .unwrap();
+    }
+    let receiver = CoordinationStore::with_config(
+        m.clone(),
+        m.clone(),
+        m.clone(),
+        layout.clone(),
+        bcs_dist_store::coordination::CoordinationStoreConfig {
+            max_cached_sessions: 1,
+            max_handoff_timers: 1,
+        },
+    )
+    .unwrap();
+    let HandoffOutcome::Accepted(record) = receiver
+        .handoff(HandoffRequest {
+            request_id: RequestId("handoff".into()),
+            from: a,
+            target: instance("b"),
+            grace: Duration::from_secs(60),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    for n in 0..2 {
+        assert!(matches!(
+            receiver
+                .acquire_control(&Sid(format!("s0042.protected{n}")), &record.claim)
+                .await
+                .unwrap(),
+            ControlAcquireOutcome::Deferred { .. }
+        ));
+    }
+    let mut future = source.envelope.clone();
+    future.owner.epoch = WorkerEpoch(999);
+    for n in 0..2 {
+        let sid = Sid(format!("s0042.future{n}"));
+        m.create_document(
+            &layout.ckpt(&sid).unwrap(),
+            &serde_json::to_value(&future).unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            receiver.acquire_control(&sid, &record.claim).await.unwrap(),
+            ControlAcquireOutcome::Fenced
+        ));
+    }
+    assert!(matches!(
+        receiver
+            .acquire(&Sid("s0042.new".into()), &record.claim, initial())
             .await
             .unwrap(),
         AcquireOutcome::Acquired(_)

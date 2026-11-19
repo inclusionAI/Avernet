@@ -1,6 +1,7 @@
 # Worker coordination persistence
 
-This module implements MembershipPort, ShardLeasePort and SessionStorePort using
+This module implements MembershipPort, ShardLeasePort, SessionStorePort and
+SessionControlPort using
 public DocumentCas, StrictLease and ZSet contracts. It contains no backend client,
 HTTP transport, environment access or vendor commands. Construction rejects any
 missing capability before registering or claiming work.
@@ -13,10 +14,13 @@ owner before returning a receipt. Storage versions never prove a business commit
 
 A checkpoint contains the public envelope and a private bounded attempt ledger
 for its current business head (64 distinct recovery attempts; overflow fails).
-A business commit resets both the failure streak and ledger. A seal preserves
-both. Known missing checkpoints fail; fresh absence follows SPEC scheme A.
-Unsupported checkpoint formats fail before sealing. No initialization marker is
-introduced.
+Only meaningful business progress resets the legacy streak and ledger; a
+consumed-only commit does not. A seal preserves both. Known missing checkpoints
+fail; fresh absence follows SPEC scheme A. Ordinary acquisition rejects an
+unsupported checkpoint before sealing. `acquire_control` validates the same
+claim/StrictLease and handoff fence, then seals the raw owner while preserving an
+undecodable business body. Missing/corrupt owner or head cannot authorize this
+path. No initialization marker is introduced.
 
 Discovery registers the role index before the lease; orphan index records are
 ignored and retained while registration may be in flight. Retire removes its
@@ -63,3 +67,59 @@ A successful source session handoff reads the current shard once before the EQ
 write and once afterward, plus a lease check at each point and checkpoint reads
 before/after the write. The pre-write shard read supplies both claim and handoff
 validation; checks are not shared across sessions or skipped after a write.
+
+## Isolation and authorized recovery
+
+The [Session control contract](../../../../service-api/bcs-service-api/src/port/repo/distributed/control.rs)
+and [runtime SPEC §7.2](../../../../../specs/2026-11-18-worker-runtime-phase1/spec.md)
+separate Normal, Quarantined, Blocked and Recovering from business state. A
+logical control revision is independent of the private document CAS version.
+Owner, business head and frozen control revision guard every new mutation.
+An ordinary candidate freezes its control revision before its first write; it
+cannot become legal again merely because an isolation was later resumed.
+Quarantined permits only commits naming the same isolation. AwaitingResult and
+retained Done records cannot change their frozen result or finalization identity.
+Blocked and Recovering permit no new business commits.
+
+Attempts freeze state/input/context digests and time before risky work. Finishing
+a deterministic failure and entering isolation share one checkpoint-header CAS.
+`begin_replay_attempt` additionally verifies the current committed effect ID and
+digest, allowing necessary replay while Quarantined. Successful/transient
+outcomes do not count as toxicity. One suspended Runner slot preserves a pending or successful uncommitted attempt
+and
+its frozen context while takeover replays the previous committed batch at the
+same head. A successful/transient replay stores one bounded completed-replay receipt and
+restores that Runner in the same control CAS; only an already-confirmed previous
+receipt moves to independent history before the slot is reused. Failed replay
+retains both pieces of evidence under isolation. Explicit
+recovery archives and clears the suspended slot without erasing its evidence.
+Replacing the active attempt retains its
+identity and result independently; pending history can acquire only its first
+confirmed outcome. Superseded/recovered isolation records retain the original
+failure and monotonic close/completion progress; an isolation ID cannot be reused
+for a different failure after recovery. Recovery requests retain their
+complete authorization under the stable request ID before Recovering is written.
+These documents have no TTL or automatic GC in phase one.
+
+Control writes never replace the checkpoint/outbox. They invalidate typed local
+cache before awaiting IO (including cancellation/unknown replies), and refresh
+it after confirmed writes. Cached control disagreement in commit triggers one
+authoritative read before rejection, including updates from another provider
+instance; matching normal cached commits retain the one-write path. A bounded reservation retains known checkpoint
+existence even for raw acquisition. Pure Deferred/Fenced observations release
+new reservations; known losses and uncertain seals remain occupied until the
+runtime explicitly releases responsibility.
+
+A control mutation reads one checkpoint header and CAS-writes it; beginning a
+new attempt may additionally read its history and retain the previous attempt.
+Isolation/recovery transitions may also read/write retained evidence. Each
+operation is bounded by eight CAS attempts, 5–200ms conflict backoff and a 500ms
+whole-operation deadline; active control content is limited to 48 KiB. Unknown
+results keep the original identity and guard. This adds durable evidence IO to
+risk boundaries, not an extra read to an already-confirmed ordinary commit.
+
+Tests `session_control`, `admission_closure` and `control_faults` cover raw bad
+state, cache/existence protection, exact fences, retained evidence, lost writes,
+real archive/terminal proofs and authorized recovery. They use public model
+providers and SQLite archive storage; they are not PROXY or production-capacity
+acceptance evidence.

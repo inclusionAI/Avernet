@@ -135,6 +135,7 @@ fn initial() -> Checkpoint {
         runner_state: None,
         dispatch_seq: Default::default(),
         deadlines: vec![],
+        deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: None,
         outbox: None,

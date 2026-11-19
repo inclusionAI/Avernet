@@ -41,11 +41,11 @@ impl Default for WorkerConfig {
             exit_margin: Duration::from_secs(1),
             handoff_concurrency: 8,
             identity: HrwIdentity::Node,
-            page_size: 200,
+            page_size: 128,
             max_acquires_per_tick: 32,
             max_shards_per_tick: 32,
             max_member_pages: 32,
-            max_active_sessions: 10_000,
+            max_active_sessions: 128,
             max_inflight_handoffs: 32,
             shards: vec![],
         }

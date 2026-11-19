@@ -1,6 +1,7 @@
 //! Shared deterministic display transform. See the public core contract.
 mod encoding;
 mod limits;
+mod metadata;
 
 use bcs_dist_model::*;
 use bcs_service_api::core::dist_projection::*;
@@ -16,12 +17,28 @@ impl OutputProjectionCoreService for OutputProjectionService {
         limits::validate(limits)
     }
 
+    fn validate_session_limits(
+        &self,
+        spec: &SessionSpec,
+        limits: &OutputLimits,
+    ) -> Result<(), ProjectionError> {
+        metadata::session(spec, limits)
+    }
+
     fn validate_task_limits(
         &self,
         snapshot: &TaskSnapshot,
         frozen: &OutputLimits,
     ) -> Result<(), ProjectionError> {
         limits::validate(frozen)?;
+        for value in [
+            &snapshot.sid.0,
+            &snapshot.tid.0,
+            &snapshot.scope.tenant.0,
+            &snapshot.scope.principal.0,
+        ] {
+            metadata::identity(value, frozen)?;
+        }
         if snapshot.output_limits != *frozen {
             return Err(ProjectionError::FrozenLimitsChanged);
         }
@@ -69,8 +86,8 @@ fn identity(
     if node.0.is_empty() || artifact.0.is_empty() {
         return Err(invalid_artifact("empty_artifact_identity"));
     }
-    if node.0.len() > limits.max_identity_bytes as usize
-        || artifact.0.len() > limits.max_identity_bytes as usize
+    if encoded_bytes(&node.0, u64::from(limits.max_identity_bytes)).is_none()
+        || encoded_bytes(&artifact.0, u64::from(limits.max_identity_bytes)).is_none()
     {
         return Err(quota(OutputBudget::IdentityBytes));
     }

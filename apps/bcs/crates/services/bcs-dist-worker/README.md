@@ -1,4 +1,4 @@
-# Distributed Worker coordination
+# Distributed Worker runtime
 
 This crate implements the provider-independent coordination policy from the
 [Worker SPEC](../../../specs/2026-11-17-worker-coordination/spec.md). It consumes
@@ -20,9 +20,17 @@ scans. All coordination I/O is bounded by the configured request timeout.
 
 ## Processor integration
 
-The coordination runtime does not implement a reducer or execute an outbox.
-The host injects initialization through a closure around its selected Runner;
-there is no dependency on a particular workflow representation.
+`WorkerProcessor` implements the generic phase-one execution loop and persisted
+effect replay. The host injects a pure Runner, public repository providers,
+projection service, directory and time; no workflow-specific algorithm belongs
+to this crate. See the [processor contract](src/processor/README.md),
+[Dispatch supervision](src/supervisor/README.md) and
+[phase-one SPEC](../../../specs/2026-11-18-worker-runtime-phase1/spec.md).
+
+`WorkerRuntime` remains the coordination/lifecycle component. The host injects
+initial checkpoint construction and uses `WorkerProcessor::run(stop)` for the
+complete execution loop. Dispatch supervision and admission repair/discovery
+are separately scheduled, sharing the same scan budget instance.
 
 1. Recovery scans enumerate pending sessions, including future deadlines, acquire
    the checkpoint, and install the scheduling fence before exposing it through
@@ -107,7 +115,7 @@ the local session before I/O, so concurrent local release cannot erase an
 uncertain write. The per-shard transfer cursor rotates past slow/failed sessions.
 Transferred and fenced sessions
 share the quiescent unwatch/cache-release path; cleanup failures retain local
-responsibility. Feeds close once neither ownership nor local work needs them.
+responsibility. Feeds close once no local Session or acquisition needs them; shard ownership alone does not retain a reader.
 
 `heartbeat_interval + request_timeout` must be strictly less than `lease_ttl`,
 using checked arithmetic. `exit_margin` reserves final confirmation/retirement
@@ -122,7 +130,10 @@ unknown RPC outcomes, pending scheduling fences, delayed claim/shutdown races,
 retirement, stale incarnation checks, and session lifecycle completion proofs.
 They use the public in-memory conformance model and do not prove real-provider
 lease timing, persistence, or failover. Production composition still requires a
-strict-lease provider and the embedding processor/inbox implementations.
+strict-lease provider, explicit Runner and the complete public provider composition.
+The default page and resident Session bounds are both 128. Coordination-only
+large-capacity tests configure their separate limits explicitly; they do not
+establish phase-one production capacity.
 
 Runtime snapshots expose active work and pending effects. Structured tracing
 records membership, claim, handoff, deferred acquisition and unfinished-drain

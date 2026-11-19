@@ -30,7 +30,7 @@ pub async fn inbox_consumer_port_contract_tests(
             shard,
             PageRequest {
                 after: None,
-                limit: NonZeroU32::MAX,
+                limit: NonZeroU32::new(128).expect("positive page bound"),
             },
         )
         .await?;
@@ -57,7 +57,7 @@ pub async fn shard_feed_port_contract_tests(
             ReadLimits {
                 max_sessions: NonZeroU32::MIN,
                 max_entries: NonZeroU32::MIN,
-                max_bytes: NonZeroU32::MAX,
+                max_bytes: NonZeroU32::new(1024 * 1024).expect("positive byte bound"),
             },
             Duration::from_secs(1),
         )

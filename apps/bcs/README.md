@@ -16,6 +16,8 @@ Public BCS owns coordination contracts, services, adapters and reusable plugins;
 - [API contracts](api-contracts/README.md)
 - [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — portable contracts and provider status
 - [Runtime store plugin API](crates/plugin-api/bcs-store-api/README.md) — capability contracts and provider harnesses
+- [Distributed Worker runtime](crates/services/bcs-dist-worker/README.md) — generic processor, ownership, isolation and bounded recovery
+- [Dispatch supervision](crates/services/bcs-dist-worker/src/supervisor/README.md) — durable remote obligations independent of Task termination
 - [Reliable distributed Inbox](crates/services/bcs-dist-store/src/inbox/README.md) — durable admission, consumption, scheduling and independent repair/discovery
 - [Distributed immutable archive](crates/services/bcs-dist-store/src/archive/README.md) — public Result/Blob persistence and committed-effect evidence
 - [Committed TaskFeed](crates/services/bcs-dist-store/src/task_feed/README.md) — output replay, snapshot publication and logical retention

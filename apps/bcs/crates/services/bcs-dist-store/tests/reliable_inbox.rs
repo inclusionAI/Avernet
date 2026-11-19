@@ -8,6 +8,13 @@ use std::sync::Arc;
 
 fn provider(store: Arc<Recorder>) -> StoreInboxProducer {
     StoreInboxProducer::new(
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
         store.clone(),
         store.clone(),
         store.clone(),
@@ -242,4 +249,24 @@ async fn different_scope_can_independently_admit_the_same_input_id() {
         p.admit(other).await.unwrap(),
         AdmitOutcome::Accepted(_)
     ));
+}
+
+#[tokio::test]
+async fn invalid_frozen_output_limits_are_rejected_before_any_journal_intent() {
+    use bcs_service_api::port::repo::distributed::common::StoreError;
+    let store = Arc::new(Recorder::default());
+    let p = provider(store);
+    let mut r = request("invalid-profile");
+    r.create_task
+        .as_mut()
+        .unwrap()
+        .output_limits
+        .max_checkpoint_bytes = 1024;
+    assert!(matches!(p.admit(r).await, Err(StoreError::Invalid { .. })));
+    assert!(
+        p.admission_decision(&scope(), &InputId("invalid-profile".into()))
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
