@@ -87,7 +87,10 @@ function backendErrorCode(error: BackendRequestError): string | undefined {
   return undefined;
 }
 
-export function mapActionError(error: unknown, action: '申请好友权限' | '创建 Bot 会话' | '创建协作群会话'): never {
+export function mapActionError(
+  error: unknown,
+  action: '申请好友权限' | '取消好友申请' | '创建 Bot 会话' | '创建协作群会话',
+): never {
   if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') throw error;
   if (error instanceof CollaborationSquareError) throw error;
   if (isAceLoginRedirectError(error)) {
