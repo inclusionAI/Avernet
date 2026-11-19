@@ -1,0 +1,51 @@
+apps/bcs/crates/services/bcs-channel/src/tests/outbound.rs
+  s_d2bf2069ff97fe::t_aa4d79d48a7831 75,85
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_dm_web_send_contract.rs
+  s_d2bf2069ff97fe::t_438a444656c0d9 286-290
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_bot_event/channel_delivery.rs
+  s_d2bf2069ff97fe::t_7281ca65db391c 64,66-107,113-128
+  s_d2bf2069ff97fe::t_aa4d79d48a7831 155,162
+  s_d2bf2069ff97fe::t_56fce76a73df1c 63,65,108-112
+apps/bcs/docs/caller-execution.md
+  s_d2bf2069ff97fe::t_34fa8d50066c8c 27-30
+apps/bcs/crates/service-api/bcs-service-api/src/application/channel.rs
+  s_d2bf2069ff97fe::t_197c0e58e12c02 159-160
+apps/bcs/crates/service-api/bcs-service-api/src/port/channel_delivery.rs
+  s_d2bf2069ff97fe::t_c8216761375ea6 69-70
+apps/bcs/crates/services/bcs-channel/src/commands.rs
+  s_d2bf2069ff97fe::t_aa602653173051 635
+apps/bcs/crates/services/bcs-channel/src/human_input.rs
+  s_d2bf2069ff97fe::t_bb8ad5db76ff97 183
+apps/bcs/crates/services/bcs-channel/src/runtime_inbound.rs
+  s_d2bf2069ff97fe::t_84fbee07905630 225
+apps/bcs/crates/services/bcs-channel/src/service.rs
+  s_d2bf2069ff97fe::t_ff9c0283c92ac2 508
+apps/bcs/crates/services/bcs-channel/src/terminal_notification.rs
+  s_d2bf2069ff97fe::t_cb313e983c9669 55
+apps/bcs/crates/services/bcs-channel/src/tests.rs
+  s_d2bf2069ff97fe::t_f1e722bd3b5045 733
+apps/bcs/crates/services/bcs-message-flow/src/bot_event.rs
+  s_d2bf2069ff97fe::t_2f73df95e9ba27 20,181,281,394,413,429,464,602-606,615-627,658
+apps/bcs/crates/services/bcs-message-flow/src/bot_event/task_terminal.rs
+  s_d2bf2069ff97fe::t_2db06ed303ecef 51
+apps/bcs/crates/services/bcs-message-flow/src/delivery_notifications.rs
+  s_d2bf2069ff97fe::t_9b234609123dbd 275,325
+apps/bcs/crates/services/bcs-message-flow/src/queued_group.rs
+  s_d2bf2069ff97fe::t_9d0763daa36df3 287,289,298-302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "498d0f9e663555c3517c427623710c178f1c73e3",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
