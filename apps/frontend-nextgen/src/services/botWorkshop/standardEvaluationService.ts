@@ -111,6 +111,7 @@ export type StandardEvaluationStepStatus = 'WAITING' | 'RUNNING' | 'DONE' | 'FAI
 export interface StandardEvaluationTaskStep extends BackendUnknownRecord {
   key: string;
   status: StandardEvaluationStepStatus;
+  error?: string;
 }
 
 export const standardEvaluationService = {

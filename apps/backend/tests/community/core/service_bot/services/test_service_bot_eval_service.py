@@ -402,6 +402,37 @@ def test_standard_task_snapshot_covers_each_flow_state(status, expected):
     assert [step["status"] for step in snapshot["steps"]] == expected
 
 
+def test_standard_task_snapshot_separates_environment_and_masafailure_steps():
+    masa_failure = _TaskRecord(
+        status="failed",
+        ext={
+            "set_task_uuid": "masa-task-1",
+            "standard_environment": {"supported": True, "build_status": "active"},
+            "error_msg": "MASA evaluation failed (trace_id: trace-1)",
+        },
+    )
+    snapshot = ServiceBotEvalService._standard_task_snapshot(masa_failure)
+    statuses = [step["status"] for step in snapshot["steps"]]
+    assert statuses == ["DONE", "DONE", "FAILED", "FAILED", "RUNNING"]
+    assert snapshot["steps"][0]["error"] == ""
+    assert "MASA evaluation failed" in snapshot["steps"][2]["error"]
+
+    environment_failure = _TaskRecord(
+        status="failed",
+        ext={
+            "standard_environment": {
+                "supported": True,
+                "build_status": "failed",
+                "error": "Build failed before MASA task creation",
+            },
+        },
+    )
+    snapshot = ServiceBotEvalService._standard_task_snapshot(environment_failure)
+    statuses = [step["status"] for step in snapshot["steps"]]
+    assert statuses == ["FAILED", "WAITING", "WAITING", "WAITING", "RUNNING"]
+    assert snapshot["steps"][0]["error"] == "Build failed before MASA task creation"
+
+
 @pytest.mark.parametrize(
     ("ext", "expected"),
     [
