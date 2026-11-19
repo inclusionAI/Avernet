@@ -56,7 +56,7 @@ Runner 的模型为：
 | E06 | continue 边为 ControlOnly；break/exhausted 投影选中的结果；previous_result 来自同父实例的上一轮 result_node | [loop_context.rs](../../crates/services/bcs-collaboration-runtime/src/loop_context.rs)：`build_loop_context`、`projects_upstream_artifact`；[循环运行测试](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/fixed_loop.rs)：`parallel_body_join_and_next_iteration_use_the_designated_result`、`parallel_nested_child_loops_join_only_after_both_selected_exits` |
 | E07 | 恢复使用已保存计划，校验 hash、编译器版本和映射；不会拿当前限制重编译旧计划 | [snapshot.rs](../../crates/services/bcs-collaboration-runtime/src/snapshot.rs)：`load_state_machine_snapshot`；[fixed_loop_snapshot.rs](../../crates/services/bcs-collaboration-runtime/tests/fixed_loop_snapshot.rs)、[循环运行测试](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/fixed_loop.rs)：`nested_rerun_reuses_compiler_v2_snapshot_despite_tighter_current_limits` |
 | E08 | Final 不等于任意输出；空可见最终文本走失败/重试，旧 run/node/attempt/delivery/assignee 不能覆盖当前尝试 | [runtime/terminal_event.rs](../../crates/services/bcs-collaboration-runtime/src/runtime/terminal_event.rs)：`handle_bot_terminal_event_impl`、`extract_text`；[failure_recovery.rs](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/failure_recovery.rs)、[循环运行测试](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/fixed_loop.rs)：`retry_keeps_iteration_and_context_and_stale_completion_cannot_overwrite_previous_result` |
-| E09 | Judge 是独立外部求值，Agent/Human 文本先固定，再求 outcome；不是解析文本为控制命令 | [runtime_judge.rs](../../crates/services/bcs-collaboration-runtime/src/runtime_judge.rs)、[runtime/node_execution.rs](../../crates/services/bcs-collaboration-runtime/src/runtime/node_execution.rs)：`evaluate_node_outcome`；[JudgeEvaluatorPort](../../crates/service-api/bcs-service-api/src/port/judge.rs)；[judge_recovery.rs](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/judge_recovery.rs) |
+| E09 | Judge 是BCS自身的判定能力：协作运行时通过JudgeEvaluatorPort调用LlmJudgeService，再调用LLM port，不经过Agent Connector；先固定Agent/Human文本再求outcome | [runtime_judge.rs](../../crates/services/bcs-collaboration-runtime/src/runtime_judge.rs)、[runtime/node_execution.rs](../../crates/services/bcs-collaboration-runtime/src/runtime/node_execution.rs)：`evaluate_node_outcome`；[JudgeEvaluatorPort](../../crates/service-api/bcs-service-api/src/port/judge.rs)；[LlmJudgeService](../../crates/services/bcs-judge/src/lib.rs)、[装配](../../crates/bootstrap/bcs/src/server/use_case_wiring.rs)：`create_judge_evaluator`；[LLM Judge测试](../../crates/services/bcs-judge/tests/llm_judge.rs)、[judge_recovery.rs](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/judge_recovery.rs) |
 | E10 | human_input 不发 Bot dispatch，使用自然语言；有固定 deadline，过期/重复拒绝，可继续 Judge；人工超时不受全局重试次数影响 | [runtime/human_input.rs](../../crates/services/bcs-collaboration-runtime/src/runtime/human_input.rs)；[human_input_response.rs](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/human_input_response.rs)、[timeouts.rs](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/timeouts.rs) |
 | E11 | Bot 超时可直接重试同轮次的新 attempt；当前路径不等待远端取消确认；确定派发拒绝直接 FailRun | [runtime/recovery.rs](../../crates/services/bcs-collaboration-runtime/src/runtime/recovery.rs)：`process_expired_node_timeout_candidate`；[runtime/progression.rs](../../crates/services/bcs-collaboration-runtime/src/runtime/progression.rs)：`resume_failed_node`；[循环运行测试](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/fixed_loop.rs)：`timeout_retries_same_bot_iteration_and_fails_human_without_advancing`；[failure_recovery.rs](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/failure_recovery.rs)：`rejected_dispatch_stays_fatal_even_with_remaining_attempts` |
 | E12 | 全图 Completed/Skipped 才完成；优先 final_output，无 final_output 时按 node_id 降序找首个已有 artifact，并非一定取 terminal Human 的回复 | [runtime/completion.rs](../../crates/services/bcs-collaboration-runtime/src/runtime/completion.rs)：`complete_run_if_done`、`final_output_text`；[memory_runs.rs](../../crates/services/bcs-collaboration-store/src/memory_runs.rs)：`list_node_runs` 和 [sql_node_state.rs](../../crates/services/bcs-collaboration-store/src/sql_node_state.rs)：`sql_list_node_runs` 均按 node_id 升序返回；[completion.rs](../../crates/services/bcs-collaboration-runtime/tests/runtime_progression/completion.rs) |
@@ -76,8 +76,8 @@ Runner 的模型为：
 | 组件 | 本批责任 | 不能承担 |
 | --- | --- | --- |
 | Runner | 节点激活、outcome 选择验证、汇合、循环结果传递、重试策略、交互关联、业务终止、动作与业务 deadline | IO、投递确认、owner fencing、outbox 回执、远端传输恢复 |
-| Worker | 规范输入和顺序、引用解析、注入 now、原子 checkpoint/outbox、动作身份固定和重放、投影与归档、超时输入与远端义务监督 | 根据工作流私自选择 retry/skip/continue，或把 Unknown 改成失败 |
-| Connector / 执行侧适配 | Agent 与 Judge 请求执行、协议归一化、远端确定事实、能力约束内恢复、取消/继续输入 | 选择工作流下一节点，改变节点重试策略 |
+| Worker | 规范输入和顺序、引用解析、注入now、原子checkpoint/outbox、动作身份固定和重放、内部Judge请求执行与结果回流、投影与归档、超时输入与执行义务监督 | 根据工作流私自选择retry/skip/continue，或把Unknown改成失败；在纯reduce中调用Judge |
+| Connector | 与远端Agent通信、Agent协议归一化及确定事实、能力约束内恢复、Agent取消/继续输入 | 执行Judge请求，选择工作流下一节点，改变节点重试策略 |
 | admission / application facade | 冻结精确工作流和上下文、权限校验、旧入口与新会话路由、业务回复结果查询 | 读取最新定义替换活跃会话；把外部未验证 actor/控制文本直接交给 Runner |
 
 选择“复用现有编译产物，新增纯群 Runner，与旧路径隔离共存”。直接调用旧运行时会把 IO 和两套持久权威引入 reducer；重写工作流语言会扩大兼容风险，均不采用。新 Runner 拟放在独立服务 crate `bcs-group-runner`，实现现有 Core trait；共享纯编译/快照校验从原 crate 提取到 `bcs-collaboration-plan`，由 composition root 或测试装配，两边不跨服务调用具体实现。
@@ -91,9 +91,9 @@ Runner 的模型为：
 | 边界 / 当前缺口 | 最小补充与归属 | 兼容性与消费者 |
 | --- | --- | --- |
 | `load_workflow` / `EvaluationContext.workflow` 只有 `StateMachineDefinition`，SessionSpec未冻结Runner选择 | 通用层冻结模式kind、Runner语义版本、配置schema/version/digest及有界配置值/不可变Ref。FSM配置包含 `ResolvedWorkflow`：原定义身份、authoring definition、完整可选 `StateMachineExecutionPlan`、compiler_version、计划hash和envelope digest | Service API / dist-model / directory / composition root；按§3.3选择和解释配置，Worker不解释图。原具体workflow字段迁移到FSM配置，不在通用接口强制所有模式提供StateMachineDefinition |
-| SessionSpec 的节点binding与通用执行授权混合，缺少Judge配置 | 通用授权集合保留显式Agent binding、pool/capabilities和Judge executor profile；FSM配置另存节点到授权目标的映射、非敏感群上下文和业务limits。凭据继续仅用引用 | dist-model / directory；Worker验证Agent属于冻结participant binding、Judge属于冻结executor profile，不能将Judge当Bot；Runner不查询live Group/Provider，活跃权限撤销由外层显式控制输入处理 |
-| `DispatchSpec.target` 只能是 Agent，关联键耦合NodeId；Judge若放进reducer会做IO | 目标扩为显式 `Agent` / `Judge` 变体；通用关联为有作用域、长度上限的稳定模式关联键及带版本payload，FSM在模式内解释NodeExecutionKey和work/judge目的 | dist-model / Connector；执行侧保留目标/能力/schema校验，不能全部变成无约束字符串。复用DispatchBoard/outbox，通过应用层适配JudgeEvaluatorPort；FSM的NodeTask/NodeJudge不是所有模式必须有的阶段 |
-| `AgentEvent::Final/Error` 未规定完整内容、失败分类、取消及Judge结果 | 规定带版本payload和确定事实Completed/Failed/Canceled/Rejected；FSM完成载荷为artifact或JudgeDecision。NotSent/Unknown不自动变成业务失败。共享边界允许显式注册、经身份/授权校验的模式控制事件，经durable admission回流 | Connector→Worker→Runner；事实与模式策略分离，见§6.1。FSM的普通Tool/文本仅展示，不接受协同控制命令；本批不实现ManagerWorker协议 |
+| SessionSpec 的节点binding与通用执行授权混合，缺少Judge配置 | 通用授权集合保留Agent binding、pool/capabilities及独立的Worker Judge profile；FSM配置另存节点到授权目标的映射、非敏感群上下文和业务limits。凭据继续仅用引用 | dist-model / directory；Worker分别校验Agent binding与内部Judge profile，后者不伪造Agent binding或Connector pool；Runner不查询live Group/Provider |
+| `DispatchSpec.target` 只能是Agent，执行写入按Connector holder授权；Judge若放进reducer会做IO | 拟议目标区分 `Agent` / `Judge`：前者保留Agent传输字段，后者持有冻结的内部Judge profile及请求。复用稳定did/outbox/执行记录，补Worker侧Judge执行授权与恢复路径，不能只给Agent目标加一个标签 | dist-model / Worker动作消费者及执行记录端口；Judge由Worker装配的JudgeEvaluatorPort执行，Connector不领取、不调用、不写入Judge记录。§3.4定义持久化与权限边界；FSM的NodeTask/NodeJudge仅为模式内业务阶段 |
+| `AgentEvent::Final/Error` 未规定完整内容及失败分类，RunnerInput也没有内部Judge结果 | Agent事件明确artifact及Completed/Failed/Canceled/Rejected；新增独立的内部Judge结果输入，携带did、请求digest和JudgeDecision/规范失败事实，不伪装AgentEvent。共享失败schema规则一致，NotSent/Unknown不自动变成业务失败 | Agent路径为Connector→Worker→Runner，Judge路径为Worker内部执行器→durable admission→Runner；注册且受权的模式控制事件仍独立校验，FSM普通Tool/文本不控制图；本批不实现ManagerWorker协议 |
 | `Interaction` 强制did；HumanReply缺受信actor | 目标为 `ModeLocal(scoped correlation)` / `Dispatch(did, remote interaction)`；携带prompt、deadline、generation和受信actor/作用域授权事实。FSM将ModeLocal解释为原生Human节点实例 | dist-model / facade / Runner / TaskFeed；不创建假dispatch。Worker验证通用身份/授权，Runner核对当前业务关联、受答者和时效 |
 | Deadline无发生身份、模式局部关联 | 增加稳定occurrence ID，支持Task、Dispatch及ModeLocal关联；FSM将后者解释为NodeAttempt/Interaction及work/judge/wait阶段。`next_deadlines`仍是完整集合；过早Timeout返回可重驱动的InputNotDue | Runner决定时限；Worker只登记/去重/到期触发，不解释节点阶段或决定retry；详见§6.2 |
 | RunnerInput 未保留规范业务身份，无法明确反馈陈旧人工回复 | 有序输入加规范身份包装；durable 输入保留 `input_id`，中间输入使用既有 `(did, holder_epoch, seq)`。`Decision.input_dispositions` 按输入顺序给 Applied / IgnoredStale / Rejected(code) | Service API；不携带 InboxPos。Worker将durable处理结果转成既有outbox中的必要effect，与state/consumed原子提交；中间事件不逐条持久回执 |
@@ -109,9 +109,21 @@ composition root静态注册 `(kind, runner_semantic_version)` 对应的配置de
 
 SessionSpec在受理时冻结模式kind、Runner语义版本、配置schema/version/digest；这些字段参与spec digest。语义版本描述决策行为，`RunnerState.format_version`描述存储格式，工作流revision/compiler描述定义与编译产物，三者独立；不冻结二进制构建号。模式配置经对应validator校验，解析后注入纯Runner。原 `EvaluationContext.workflow`、`SessionSpec.workflow`/逐节点binding中的FSM内容迁入该配置；通用授权集合保留在Worker可验证的外壳中，不能仅给新增字段改名而留下旧必填图依赖。
 
-Worker把dispatch/deadline/interaction及展示的模式关联键视为不透明的有界身份，校验scope、tid、身份/内容一致性、schema、授权集合和预算；只有FSM解释execution_node_id、attempt、loop_path、work/judge等业务含义。当前 `ActionIntent::Show.node: NodeId` 及相关事件/快照字段也须随新schema迁为模式关联键，第一批拟议的稳定artifact身份和Upsert/AppendText语义保持；FSM仍以execution_node_id赋值。Agent/Judge目标类型、作用域、payload schema和权限保持显式，不因关联键不透明而跳过校验。
+Worker把dispatch/deadline/interaction及展示的模式关联键视为不透明的有界身份，校验scope、tid、身份/内容一致性、schema、授权集合和预算；只有FSM解释execution_node_id、attempt、loop_path、work/judge等业务含义。当前 `ActionIntent::Show.node: NodeId` 及相关事件/快照字段也须随新schema迁为模式关联键，第一批拟议的稳定artifact身份和Upsert/AppendText语义保持；FSM仍以execution_node_id赋值。Agent/Judge目标类型、作用域、payload schema和权限保持显式；Worker按目标路由到Agent Connector或内部Judge执行器，不因关联键不透明而跳过校验。
 
 未来模式必须声明Session、多轮输入、业务子任务与Worker Task的映射，并验证第一批串行启用、排队、归档和恢复契约；不满足则单独评审上游变化。本稿只规定FSM的Start→FinishTask，并行子工作不等于并行顶层Task；不预设Chat每轮消息就是一个Task，也不承诺任何未来能力都无需演进公共契约。
+
+### 3.4 Worker内部Judge执行
+
+Judge属于Worker宿主内的业务能力。生产装配注入 `JudgeEvaluatorPort`，现有实现可复用 `LlmJudgeService` 及其LLM port（E09）；它调用LLM不等于与远端Agent通信。Runner只生成冻结请求并根据结果推进，Worker内部执行器在checkpoint确认后异步调用Judge，不占住Session串行处理轮次等待LLM，也不在网络调用期间持有存储事务。这里的“内部”指责任与装配边界，不承诺模型在本机运行。
+
+本稿保留 `StartDispatch(target=Judge)` 作为有稳定身份的执行意图，以复用Worker的outbox、执行记录、计数及恢复机制；它不表示向Connector派发。Agent目标才带Connector pool、Agent传输capabilities及远端task关联；Judge目标带内部profile和JudgeRequest，不向Connector发布通知、不允许Connector claim，也不支持Agent的InputRequired/AuthRequired或ContinueDispatch。旧契约的Agent必填字段及“只有Connector holder写执行状态”不足以直接承载此路径，2A须增加显式Worker Judge执行变体与授权检查，禁止伪装Connector身份或新建第二套持久队列。
+
+Judge执行记录的创建仍须验证已提交effect证明；调用启动/恢复/取消控制写入须核对当前SessionOwnership、目标类型和执行状态前置条件。调用前持久标记“可能已调用”，同did只能有一个获准的调用；未知提交先确认，owner更换不清除该标记或重新采样。结果通过内部durable admission接纳，输入身份由judge did和固定结果种类确定，内容冲突拒绝；接纳侧核对原已提交请求、调用关联及请求digest，不信任Agent或外部调用方自报的Judge结果。旧执行器可提交具有原调用证据的确定结果，但不能以旧owner写checkpoint/执行控制；当前Worker按规范输入顺序处理，仍属当前实例的有效结果可正常推进，已终态结果不改写，已过期实例的迟到结果只可能收敛原执行义务。
+
+取消Judge时由Worker停止尚未发起的本地调用，或在已发起时请求现有LLM适配器所支持的取消；当前JudgeEvaluatorPort没有远端查询、幂等重试或取消确认能力，不能假定存在。丢弃future/终止本地等待不等于模型请求已经停止；已保存结果恢复原值，可能已调用但无结果则保持Unknown，由Runner业务deadline决定后续业务，Worker保留必要义务。上述执行记录变体、授权和内部输入均为本批最小上游提案，不宣称第一批已实现Judge执行器。
+
+现有JudgeEvaluatorPort返回的通用ServiceError也不能单凭文本证明模型调用已结束。2A须在Worker与Judge适配边界保留类型化事实：明确配置拒绝、已获得响应但结果无效、确定调用失败及调用结果未知分别处理；无法证明的调用错误保持Unknown。失败分类沿用§6.1，不从错误字符串猜取消成功或重试策略，也不把这项适配转交Agent Connector。
 
 ## 4. 工作流语义与兼容性矩阵
 
@@ -123,6 +135,7 @@ Worker把dispatch/deadline/interaction及展示的模式关联键视为不透明
 | 分支及并行 | complete.targets 可扇出；Judge outcome 选一组 targets；隐式 all-join | **必须兼容**；不增加 any/quorum/race 汇合、动态 fan-out |
 | 固定与嵌套循环 | v2 hierarchical 经版本化编译预展开；continue/break/exhausted；可串联及并行子循环 | **必须兼容**，直接执行保存的图和 loop_path，禁止另一套运行期栈解释器 |
 | 节点重试 | attempt 从 0 开始；Bot max_attempts 至少为 1；Human 固定一次；错误/空结果/Judge 错误可消耗重试 | **必须兼容**；恢复重放同一次 dispatch 不消耗业务重试 |
+| Judge执行与恢复 | BCS运行时调用JudgeEvaluatorPort；旧路径可对未保存的Judge重新求值 | **执行归属保持**，新路径由Worker内部执行器调用，不经Agent Connector；**恢复补齐并收紧**，已保存结果复用、可能已调用但结果未知时不自动重新采样，见§3.4/§8 |
 | 节点超时 | Bot 可直接重试；Human 失败；明确派发拒绝直接整体失败 | **必须兼容**；增加对旧 dispatch 的取消意图及独立监督，不能宣称已取消 |
 | 分支跳过 | 未被选择且不再可达的节点 Skipped，不能跳过仍被其他分支需要的 join | **必须兼容**；Skipped 不是“失败后继续”策略 |
 | 上游结果 | v1读取全部结构上游已有artifact；带循环计划时按选中Artifact边过滤 | **必须兼容**两条实际路径，不用同一过滤规则静默改变prompt/Judge输入，见 §4.1 |
@@ -204,9 +217,9 @@ Worker保证同一 Session 只将一个已启用任务交给 Runner，后续排�
 
 Worker负责 InputId 内容冲突、物理去重和 Session 输入顺序；Runner按给定切片从左到右逐项处理，每项后推进到稳定业务边界。同一 now 用于本轮产生的时间，仍在重试的同一 commit 候选不得换 now；宕机丢失未提交候选后的重新计算见 §9.1。业务层不比较 InboxPos，不按 remote_event_id 字典序重排输入。
 
-关键事件：确定终结、InputRequired/AuthRequired、Judge 结果和业务控制；必须走 durable admission，跨 holder 重放保持业务身份。Delta/Thinking/Tool/展示 Snapshot 是中间事件，沿用 Worker 的 `(did, holder_epoch, seq)` 去重。旧 holder 的**有效关键结果**不能只因 holder 旧被丢弃。
+关键事件：确定终结、InputRequired/AuthRequired、内部Judge结果和业务控制，必须走durable admission并保持稳定业务身份。Agent关键事件跨holder重放不改身份，旧holder的有效结果不能仅因holder旧被丢弃；Judge结果按§3.4校验已提交调用证据，不套用Agent holder协议。Delta/Thinking/Tool/展示Snapshot仅为Agent中间事件，沿用Worker的 `(did, holder_epoch, seq)` 去重。
 
-Runner只接受当前 tid、当前 NodeExecutionKey/purpose 对应 did 且状态允许的事件。一个有效 did 已唯一绑定作用域、目标和 attempt，归一化执行侧另须核对远端身份，不能让正文自报身份越权。旧轮次、旧 attempt、已接受终结后的重复关键事件、迟到 delta 均不推进、不覆盖节点结果、不再展示。
+Runner只接受当前tid、当前NodeExecutionKey/purpose对应did且状态允许的事件。did唯一绑定作用域、目标和attempt；Agent归一化核对远端身份，内部Judge输入核对Worker调用证据，Agent事件不得完成Judge目标。旧轮次、旧attempt、已接受终结后的重复关键事件、迟到delta均不推进、不覆盖节点结果、不再展示。
 
 以下事件处理、重试和FailRun规则属于本批FSM策略，不能作为所有未来模式的统一失败策略。通用归一化层报告确定事实及带schema的failure category/code，不能把“是否可重试”从远端文本或连接故障中推导出来。模式特有的有界失败详情须由该模式注册的版本化schema解释；未注册事件/schema在边界明确拒绝并保留输入失败证据，不映射成任意已知业务失败。共享终结事实的扩展仍需契约评审，不预留无约束终态变体来承诺未来永不改公共契约。
 
@@ -223,13 +236,13 @@ FSM事件规则：
 | Error / 确定 Failed | 根据明确 failure category 处理；网络断流、状态 Unknown 不准伪造为业务 Error |
 | 确定 Canceled / Rejected | 当前attempt未经本地任务取消而远端Aborted/Canceled，沿用旧Error/Aborted路径作为节点失败，可重试；不是整个任务的Cancel。明确派发拒绝/配置错误按FailRun；本地终止后的取消确认仅清理，不解析自然语言猜分类 |
 | InputRequired / AuthRequired | 当前远端执行暂停等待，生成可恢复交互；不是完成，也不启动新节点 |
-| Judge 结果 | 只接受当前 judge did 的已声明 outcome；置信度/说明是结果内容，不新增隐式阈值策略 |
+| 内部Judge结果 | 仅接受Worker内部执行器回流、当前judge did对应的JudgeDecision或规范失败；outcome须已声明，置信度/说明不新增隐式阈值策略；Agent正文不能冒充 |
 
 普通Tool/文本不能授权控制。共享模式控制输入必须显式注册、带版本、校验身份/作用域/授权后经durable admission；具体schema和允许动作由模式声明。FSM对此类协同命令明确拒绝，普通Tool仍仅展示。E17的旧受信intent路径继续从已存intent claim取得参数、保留run/Bot/群/Session/tool-call及有效期校验，不能从事件正文替换参数；本批不改该路径，也不把其存储协议规定成所有未来模式的唯一协议。
 
 外部凭证/intent的授权与受理有效性由受理侧校验并冻结为可重放事实；若模式采用intent引用，受理/Worker引用解析须提供经校验的不可变参数及内容摘要，Runner不能拿引用临时查询可变缓存。Runner仍按自身状态检查当前tid/执行实例、交互是否关闭和业务时限；“不读取系统时钟”不等于不能使用注入now。受理时合法不保证处理时仍业务有效，人工回复按§6.3/§9.1处理。未来控制模式须明确其受理期限与业务期限的区分，本批不替ManagerWorker决定该协议。
 
-远端 Unknown 不需要进入 RunnerState 的传输状态。无确定终态时节点保持业务等待，已有 deadline 继续有效。Connector只把确定事实交回 Runner，Worker可独立记录/展示运维状态，不制造节点失败。
+远端Agent或内部Judge调用的Unknown不进入RunnerState作为传输状态。无确定终态时节点保持业务等待，已有deadline继续有效。Connector仅回流Agent事实，Worker内部执行器回流Judge事实；均不因状态未知制造节点失败。
 
 ### 6.2 转移表
 
@@ -244,8 +257,8 @@ FSM事件规则：
 | 中间事件 | 当前 work did、未结束，符合阶段 | 仅必要输出关联改变 | Show(Upsert/AppendText/Thinking) | 不续期 |
 | work Final，无 Judge | 当前 Running/WaitingInput，完整非空 artifact | 关闭该 dispatch 交互，节点 Completed/outcome=complete；advance | 最终文本 Upsert；新 Ready 节点动作 | 删除该阶段/交互；增加新节点 deadline |
 | work Final，有 Judge | 同上 | 固定 artifact，Judging | StartDispatch(purpose=NodeJudge)；更新状态 | work deadline 换为 judge deadline |
-| judge Final | 当前 Judging，结果格式及 outcome 合法 | 节点 Completed，保存 outcome；advance | 新 Ready 节点动作 | 删除 judge deadline；登记新节点 |
-| Error、远端Aborted/Canceled、空 Final、无效 Judge、work/judge Timeout | 当前实例/阶段匹配；Timeout到期 | Bot还有次数：关闭当前 attempt，attempt+1；否则 end(Failed)。Human失败直接 end(Failed) | 超时先 CancelDispatch(old did)，再新 StartDispatch；耗尽则 FinishTask(Failed) | 旧发生身份撤销，新 attempt新 deadline；不改变 task deadline |
+| 内部Judge完成 | 当前Judging，Worker来源/请求关联有效，结果格式及outcome合法 | 节点Completed，保存outcome；advance | 新Ready节点动作 | 删除judge deadline；登记新节点 |
+| Agent Error/远端Aborted/Canceled、空Final、内部Judge失败/无效结果、work/judge Timeout | 当前实例/阶段匹配；Timeout到期 | Bot还有次数：关闭当前attempt，attempt+1；否则end(Failed)。Human失败直接end(Failed) | 超时先CancelDispatch(old did)，按目标交对应执行器；再新StartDispatch；耗尽则FinishTask(Failed) | 旧发生身份撤销，新attempt新deadline；不改变task deadline |
 | 明确派发拒绝 / 永久配置不匹配 | 当前 work/judge did | end(Failed)，不消耗剩余次数继续派发 | 取消同任务其他未完成 dispatch，FinishTask(Failed) | 清空业务 deadline |
 | 原生 HumanReply | 当前 pending id，actor匹配，now < deadline，非空且限长 | 固定回复；无 Judge则 Completed并advance，有 Judge则Judging | Applied；关闭交互，必要时Judge StartDispatch | 关闭交互 deadline，登记Judge/下游 |
 | 远端 HumanReply | 当前 did+interaction+generation，actor已授权，未过期 | 当前交互 answered，dispatch业务状态继续运行或仍有其他待答项 | ContinueDispatch；确定的 PendingInput id/seq；刷新非终态状态 | 回复本身不续期 |
@@ -281,9 +294,9 @@ FSM事件规则：
 | --- | --- | --- |
 | Show | 当前实例有效输出；tid、execution_node_id、稳定artifact_id、class、operation、content | Worker公共投影与TaskFeed；Upsert替换完整值并保留位置；AppendText仅文本，不做JSON merge |
 | SetStatus | Working/InputRequired/AuthRequired等非终态变化；完整pending interactions | Worker任务草稿和输出；禁止Completed/Failed/Canceled/Rejected；无变化不重复发 |
-| StartDispatch | Ready Bot或已固定artifact的Judge；固定did、purpose、attempt、target/profile、pool、capabilities、request和deadline | Worker创建/重放DispatchBoard；Connector执行；不等整个远端执行完才算必要CreateDispatch effect完成 |
-| CancelDispatch | Cancel、整体失败/总超时、旧attempt超时或放弃；原did、稳定request_id、原因码 | Worker保存取消意图并监督；Connector取消；RequestAccepted不等于ConfirmedCanceled |
-| ContinueDispatch | 当前远端交互接受一条回复；did、PendingInput(seq,input_id,digest,payload) | Worker推送继续输入，Connector执行与恢复；人工节点本身不用这个动作 |
+| StartDispatch | Ready Bot或已固定artifact的Judge；固定did、purpose、attempt、request和deadline；Agent目标含binding/pool/capabilities，Judge目标含内部profile | Worker创建/重放有类型的执行记录；Agent由Connector执行，Judge仅由Worker内部执行器调用JudgeEvaluatorPort；持久登记执行责任后必要CreateDispatch effect即可完成，不等待Agent/LLM结果 |
+| CancelDispatch | Cancel、整体失败/总超时、旧attempt超时或放弃；原did、稳定request_id、原因码 | Worker保存意图并监督；Agent交Connector取消，Judge由Worker内部执行器处理；取消请求或本地停止等待都不等于远端已经停止 |
+| ContinueDispatch | 当前Agent远端交互接受一条回复；did、PendingInput(seq,input_id,digest,payload) | Worker推送继续输入，Connector执行与恢复；原生Human节点和内部Judge均不用这个动作 |
 | FinishTask | 唯一成功终点且全图收敛，或业务失败/取消/拒绝；tid、TerminalStatus、完整稳定result | Worker两阶段归档和终态输出；Runner不写ResultStore、不发最终群消息、不自行开始下一排队任务 |
 
 ### 7.1 输出内容与稳定身份
@@ -304,7 +317,7 @@ v1保留E12：有final_output时用其文本；只有terminal HumanInput而无fi
 
 ## 8. 失败、重试、远端未知与 deadline
 
-| 情况 | Runner业务策略 | Worker/Connector义务 |
+| 情况 | Runner业务策略 | Worker义务（Agent通信经Connector） |
 | --- | --- | --- |
 | Bot确定执行失败、非本地取消引起的远端Aborted/Canceled、完整Final为空、Judge求值失败/无效outcome | `attempt+1 < effective_max_attempts`则重试同执行节点；否则Failed。effective次数沿用`max(1)`；Judge失败重试整个Bot节点，不能悄悄改为无限重判 | 重放与业务新尝试分离；新did，旧结果隔离 |
 | Bot/Judge阶段Timeout | 同上；有活跃旧did则先发取消意图，再新尝试 | 保留旧未知义务；不能因新attempt出现删除旧dispatch |
@@ -319,7 +332,7 @@ v1保留E12：有final_output时用其文本；只有terminal HumanInput而无fi
 
 远端InputRequired/AuthRequired沿用当前work deadline，不暂停、刷新或延长节点预算；新的独立“执行时间暂停计费”不是当前分布式契约，本批不移植另一套run-budget体系。所有等待由task总deadline兜底。业务事件到期产生的新重试不会延长task截止。
 
-Judge是非确定的外部计算，但**已接纳的Judge结果是确定的Runner输入**。Judge dispatch使用既有持久完成/关键回流协议；有已保存结果则恢复它，不重新调用LLM决定分支。当前JudgeEvaluatorPort本身未保证幂等调用；执行侧不能虚报该能力。调用已发生而结果未知时保持Unknown，由业务deadline处理，不能为同did重新采样后覆盖原决定。本批不承诺LLM恰好调用一次。
+Judge由Worker内部执行器执行，其LLM求值可能非确定，但**已接纳的Judge结果是确定的Runner输入**。按§3.4复用Worker持久effects/输入协议，不经过Agent Connector；有已保存结果则恢复原值。当前JudgeEvaluatorPort未保证幂等调用、查询或远端取消；调用已发生而结果未知时保持Unknown，由业务deadline处理，不能为同did重新采样后覆盖原决定。E09的legacy测试允许未保存Judge重新求值；新路径在未知调用后不自动重判是本批明确收紧的恢复语义，不将旧测试的重采样行为当作新契约。本批不承诺LLM恰好调用一次。
 
 ## 9. 确定性、恢复、状态升级与资源底线
 
@@ -355,6 +368,8 @@ format/kind/Runner语义版本/digest、节点集合、当前attempt/did、结�
 本批提议Runner业务状态的申请上限为规范编码16 MiB、每任务artifact slot最多4096；这些是待验证的保护值，不是已有配置或性能结论。最终有效Runner字节预算在admission按组合profile取较小值：申请上限与checkpoint扣除通用记录、outbox、provider封装及收尾预留后的可用空间，并随SessionSpec冻结。第一批最新提案的checkpoint总上限为1 MiB、outbox为256 KiB，因此不能直接启用16 MiB的内联Runner状态，也不能由本批默默提高第一批上限。
 
 每个输入/输出仍受第一批字节预算。admission检查有效预算能容纳物化图，另外预留终止原因、有界错误result、当前图最大活跃dispatch的Cancel intents和本批disposition effects所需空间；不能计算出正的有效预算、无法容纳所选图或最大合法动作批次时拒绝该配置/图，先收紧图和批次准入。实现验收须覆盖第一批1 MiB profile，不以正文Blob外置推导RunnerState已获得额外存储空间。
+
+下述dispatch数量及§9.4的B/O/R/C统一计Agent执行和Worker内部Judge执行，均为Worker持久执行义务预算，不是Connector连接数。Judge计入预算不改变其执行归属，也不要求配置Agent pool。内部Judge的调用标记、回流和终结证据按§3.4保存；只有确定结束或未发起的证据才可释放其占额，本地future已取消不是模型调用结束的证明。
 
 数量预算复用并补齐第一批通用约束，计数归Worker；模式图规模和steps只作进一步收紧：
 
@@ -403,7 +418,7 @@ Queued期间的Cancel、旧Task关键回流、独立归档/取消义务继续有
 
 ## 10. 迁移与共存
 
-1. 保持opt-in，生产装配按§3.3注册`bcs-group-runner`。新会话准入由宿主facade在创建SessionSpec前检查，最小粒度为`(scope, group, mode kind)`的显式允许集合及所选语义版本；总开关关闭优先于允许集合。默认关闭、未命中则明确拒绝新模式请求；测试Script永不作为fallback。第一批Worker、本文契约补充、经2A验证的容量profile及Connector能力未齐全时即使命中允许集合也拒绝。协调存储必须由实际生产provider提供DocumentCas、StrictLease、ZSet并通过对应契约套件；声明supports或测试内存模型通过均不等于生产就绪，具体套件见2D。此为最小静态配置边界，不要求百分比灰度平台。
+1. 保持opt-in，生产装配按§3.3注册`bcs-group-runner`。新会话准入由宿主facade在创建SessionSpec前检查，最小粒度为`(scope, group, mode kind)`的显式允许集合及所选语义版本；总开关关闭优先于允许集合。默认关闭、未命中则明确拒绝新模式请求；测试Script永不作为fallback。第一批Worker、本文契约补充、经2A验证的容量profile、所需Agent Connector及内部Judge能力未齐全时即使命中允许集合也拒绝。带Judge的图必须装配有效JudgeEvaluatorPort/profile，不能以NoopJudgeEvaluator或Agent Connector代替。协调存储必须由实际生产provider提供DocumentCas、StrictLease、ZSet并通过对应契约套件；声明supports或测试内存模型通过均不等于生产就绪，具体套件见2D。此为最小静态配置边界，不要求百分比灰度平台。
 2. 会话在创建时选定引擎及namespace，生命周期不切换。旧会话继续旧CollaborationRuntime；新会话只写新checkpoint/DispatchBoard，不双写legacy节点表，不让两套引擎消费同一业务输入。
 3. 保留现有authoring API/模板与fixture，验证、编译及快照reader提纯后由两套入口复用。开关和允许集合只影响新会话；一旦受理，engine/namespace/模式及语义版本按冻结选择路由，重试同一会话创建不能重新抽样或改选。已有会话不再按当前允许集合改选引擎，已冻结计划由兼容reader及reducer恢复。
 4. 本批最小应用桥接负责冻结FSM、提交Start/HumanReply/Cancel、返回业务input disposition及读TaskFeed。权限、actor真实性、作用域在桥接检查，不由Runner发起查询。现有普通群routing、Caller凭据接力、IM渠道及one-shot结果发布仍走原服务；未适配的入口明确留旧引擎，不静默降级新会话。
@@ -414,16 +429,16 @@ Queued期间的Cancel、旧Task关键回流、独立归档/取消义务继续有
 
 | 切片 | 交付及依赖 | 退出条件 |
 | --- | --- | --- |
-| 2A 共享计划与契约 | 提纯现有编译/reader；冻结模式选择/envelope；定义静态注册工厂与兼容检查；拆分通用关联/显式执行目标和FSM配置；补齐失败schema、事件/交互/deadline/disposition、容量上界和Worker启动等待/收尾契约 | fixture编译字节/hash不漂移；逐fixture/模板容量报告与profile取舍满足§9.4/R29；conformance覆盖旧字段迁移、未知schema/category拒绝和新code兼容；此片仅契约/纯计划，2D才启用生产注册和准入 |
+| 2A 共享计划与契约 | 提纯现有编译/reader；冻结模式选择/envelope；定义静态注册工厂与兼容检查；拆分通用关联/显式执行目标和FSM配置；补齐Worker内部Judge执行记录/授权/输入、失败schema、交互/deadline/disposition、容量上界和启动等待/收尾契约 | fixture编译字节/hash不漂移；逐fixture/模板容量报告与profile取舍满足§9.4/R29；conformance覆盖Agent/Judge执行权限隔离、旧字段迁移、未知schema/category拒绝和新code兼容；此片仅契约/纯计划，2D才启用生产注册和准入 |
 | 2B 生产纯Runner | 实现状态编解码、串行/并行汇合、分支skip、loop metadata/previous_result、prompt与群结果 | 真正`DistRunnerCoreService`实现通过业务测试，不用Script代替 |
 | 2C 交互和业务控制 | Agent流/终结、原生/远端交互、Judge dispatch、节点重试、取消、timeout竞争、资源与无进展 | §12纯Runner矩阵通过；无IO/时钟/随机依赖；每条事件有确定处理结果 |
-| 2D Worker集成与入口 | 复用#4145已有协调钩子；依赖第一批业务processor及本稿启动容量/等待等上游补充，装配生产Runner、可控Connector和通过契约套件的实际生产provider；facade落实准入与旧入口隔离 | 下述provider门槛及生命周期衔接、checkpoint/outbox恢复、启动背压/配额终结、历史语义保留和终态后监督通过；声明未覆盖的真实协议 |
+| 2D Worker集成与入口 | 复用#4145已有协调钩子；依赖第一批业务processor及本稿上游补充，装配生产Runner、Worker内部Judge执行器、可控Agent Connector及通过契约套件的实际生产provider；facade落实准入与旧入口隔离 | 下述provider门槛、生命周期衔接、checkpoint/outbox恢复、Judge独立执行/回流、启动背压/配额终结、历史语义保留和终态后监督通过；声明未覆盖的真实协议 |
 
 2D启用前，实际装配的DocumentCas provider必须通过 `document_store_contract_tests`，StrictLease provider通过 `lease_store_contract_tests`、`lease_expiry_contract_tests`，ZSet provider通过 `z_set_store_plugin_contract_tests`（E18）。StrictLease的过期/退休终结证据不可逆、稳定返回Terminated，迟到注册/更新不得复活；普通TTL键不是兼容替代。缺少任一能力会被协调存储构造拒绝，不能仅标为故障接管降级。这只是协调层必要条件，第一批其他业务存储/Inbox/调度能力和宿主集成仍须分别验收；本批文档不实现provider，也不把测试内存模型结果当生产验收。
 
 2D的processor从 `acquired_sessions` 取得Recovering会话，核对冻结选择并补做持久effects后调用 `recovery_completed`；可推进时通过 `begin_round` 进入本轮，再读取有序输入、固定now、调用纯Runner、校验预算并提交checkpoint。只有提交结果确定才调用 `checkpoint_confirmed`；有pending effects进入Effects阶段，必要effects全部完成后调用 `effects_completed`，零effects则由前一钩子直接返回Idle。提交未知调用 `round_unknown` 并先确认原提交。调度settle按 `scheduling_started` / `scheduling_completed` 成对管理，未知时保留pending。上述钩子属于宿主processor，Runner不调用协调/IO接口；协调代码存在不等于processor、投影或归档闭环已验收。
 
-各片段是评审/验证边界，不声称单独上线即完成本批。变更归属为公共domain/service-api、共享纯计划服务、生产Runner、Worker动作消费者、Connector执行侧及composition root；企业适配与运行证据由宿主保管，不进入此公共文档。
+各片段是评审/验证边界，不声称单独上线即完成本批。变更归属为公共domain/service-api、共享纯计划服务、生产Runner、Worker动作消费者及内部Judge执行器、Agent Connector及composition root；企业适配与运行证据由宿主保管，不进入此公共文档。
 
 ## 12. 验收矩阵与测试边界
 
@@ -443,7 +458,7 @@ Queued期间的Cancel、旧Task关键回流、独立归档/取消义务继续有
 | R10 U/I 超时策略 | Bot max_attempts=2，旧远端仍Unknown | 当前attempt Timeout | Runner发旧did Cancel及新did Start，不等待取消确认；Worker不重发旧did；旧义务仍存在；task总超时后不再重试 |
 | R11 U/I 陈旧Agent | 当前第2轮/attempt1，Worker已完成物理去重 | 旧轮次Final、旧attemptError、重复Final、迟到Delta、旧holder但当前did的有效关键Final | 前四者无业务动作；最后一项不因holder旧而丢弃；Thinking不推进/续期 |
 | R12 U 决策重放 | 同spec/plan/state、有序inputs和固定now | 序列化/反序列化后重复reduce，改变map插入顺序 | next_state、actions及顺序、deadlines、dispositions相同；不读时钟/网络/随机 |
-| R13 I checkpoint恢复 | 生产Runner+第一批Worker+持久provider+可控Connector；固定输入与时间轨迹 | 在提交前、提交未知、已提交未执行effect、半批effect、归档两次提交之间分别重启/换owner | 同now重算得到相同决定/业务结果；仅恢复不新增业务attempt/did；已提交effects及disposition原身份；归档内容不变。另测D−1回复计算后宕机：未提交且D+1重算拒绝，已提交则保持接受；不承诺跨不同now或不同commit分批的字节等价 |
+| R13 I checkpoint恢复 | 生产Runner+第一批Worker+持久provider+可控Agent Connector/独立JudgeEvaluatorPort；固定输入与时间轨迹 | 在提交前、提交未知、已提交未执行effect、半批effect、归档两次提交之间分别重启/换owner | 同now重算得到相同决定/业务结果；仅恢复不新增业务attempt/did；已提交effects及disposition原身份；归档内容不变。另测D−1回复计算后宕机：未提交且D+1重算拒绝，已提交则保持接受；不承诺跨不同now或不同commit分批的字节等价 |
 | R14 U/I 输出 | 主文本Upsert+AppendText、Tool、Thinking，且有重试 | 丢部分中间事件后发送完整Final；重放outbox；恢复TaskFeed | 最终文本正确、Thinking不归档、AppendText不重复、重试首包替换同slot；JSON隐式merge/非文本append拒绝整批 |
 | R15 U/I 非法定义/状态 | 未支持kind、guard、任意cycle、并行原生Human、错误hash/compiler、测试Runner状态 | admission/init/恢复 | 无dispatch；明确InvalidWorkflow/UnsupportedFormat/CorruptState；恢复按第一批隔离，不能伪造业务成功或清空重跑 |
 | R16 U/I 上限与无进展 | steps恰好到界；循环展开/字节/slot到界与超界；可解释但无可推进待办状态 | 再次激活或追加超量结果，运行闭包 | 边界内可执行，超界无新dispatch且有稳定失败码；不自旋；正常等待不被误判no_progress |
@@ -459,10 +474,11 @@ Queued期间的Cancel、旧Task关键回流、独立归档/取消义务继续有
 | R26 U/I 事实与FSM失败策略 | 当前attempt可重试，已注册失败schema及封闭category集合；code可有界扩展 | 分别输入普通Failed+新code、permanent/Rejected+新code、未经本地Cancel的远端Canceled；另输入未知schema、已知schema内未知category、非法payload及Unknown执行状态 | 合法新code保留原码及unrecognized标记，普通Failed按剩余次数重试，permanent/Rejected直接FailRun，Canceled按既定节点失败策略；不从code猜策略；未知schema/category及非法payload拒绝并保留有界证据，Unknown不制造业务Error；相同规范事实重放结果一致 |
 | R27 I 跨Task启动背压 | 前Task已归档但旧did仍占O，下一Task已受理且B<=C，O+B>C | 调度下一Task；释放部分旧义务仍不足；在等待截止前释放至足够；重复释放并重启 | 不足时始终Queued，无Runner Start/业务deadline；足够时原子预留B并仅Start一次，新did按R转O；旧义务不被抹除，证明仅释放一次；新Task超时仍可直接Cancel旧attempt并Start新attempt，无需等待取消确认 |
 | R28 I 容量等待恢复与竞争 | Queued Task已固定等待截止D及发生身份，旧Task清理仍在推进 | 等待登记提交未知后接管；重复唤醒；D时释放容量；分别按序输入Cancel/内部到期及反序；另在D前已Start后收到旧到期 | 先确认提交，截止不续期且不受新profile影响；D时不能抢先Start；匹配到期由Worker冻结Rejected(StartCapacityTimeout)，Cancel先有效则Canceled，已冻结终态不改；无Runner FinishTask；已Start的旧到期不影响业务，旧义务回流/取消/归档不中断 |
-| R29 U/I 容量上界与profile | 生产FSM validator、现有有效fixture/模板及1 MiB checkpoint profile；另有A→B均为无Judge的Bot且各2次、带Judge的Bot/Human及循环/分支图 | 生成§9.4报告，校验边界/溢出/排除原因；通过生产Runner与可控Connector记录合法执行的新did | A→B的B=4，覆盖实际同时3个义务的轨迹；Judge、Human无work、循环物化及互斥分支保守求和正确；每Task新did数不超其B；溢出或B>C/累计上限在受理拒绝；报告包含实际编码及收尾预留，拒绝和兼容性取舍有据，未验证profile不启用 |
+| R29 U/I 容量上界与profile | 生产FSM validator、现有有效fixture/模板及1 MiB checkpoint profile；另有A→B均为无Judge的Bot且各2次、带Judge的Bot/Human及循环/分支图 | 生成§9.4报告，校验边界/溢出/排除原因；通过生产Runner、可控Agent Connector和独立JudgeEvaluatorPort记录合法执行的新did | A→B的B=4，覆盖实际同时3个义务的轨迹；内部Judge计数但不路由Connector、Human无work、循环物化及分支保守求和正确；每Task新did数不超其B；溢出或B>C/累计上限在受理拒绝；报告包含实际编码及收尾预留，拒绝和兼容性取舍有据，未验证profile不启用 |
 | R30 I 生产provider门槛 | 生产组合选定DocumentCas/StrictLease/ZSet provider；另有各缺一种能力的配置 | 构造协调存储并执行2D列出的实际provider契约套件；覆盖lease过期/退休后迟到注册或更新 | 缺任一能力构造失败，不能降级开启新模式；实际provider全部通过才满足协调层启用条件，内存模型通过不可替代；Terminated证据不可逆，迟到请求不复活；第一批其余存储与宿主验收仍独立成立 |
+| R31 U/I Worker内部Judge | 带Judge的Bot或Human图；生产Runner/Worker，独立Recording/Blocking JudgeEvaluatorPort和记录Agent调用的Connector | 提交Judge意图，完成或调用中重启/取消；已接纳结果重放；Agent伪造Judge事件、Connector claim Judge、旧owner写执行控制 | 仅Worker调用Judge，Connector无Judge请求/通知/claim；reduce及提交确认前不调用LLM；Judge等待不阻塞同Session Cancel；合法结果按稳定身份回流，已保存结果不重判，可能已调用且无结果不重新采样；错误来源/权限拒绝；旧调用的有证据结果可接纳但不越权写状态，过期结果不推进；停止本地等待不冒充远端取消 |
 
-纯Runner测试负责语义、身份、顺序、状态格式、输出意图和确定性；共享FSM validator负责静态容量计算及profile准入，不通过mock repository宣称持久性。Worker集成测试负责输入规范化、fencing、提交未知、outbox、真实公共投影、不可变归档、dispatch监督及启动预留/等待，凡执行群工作流必须调用生产Runner；未获准Start的场景断言Runner未被调用。可控Connector负责录制请求、按脚本产生确定事实/Unknown和可恢复交互，不要求接入全部真实远端协议。provider契约套件验证真实实现，不能用可控Connector或内存模型的结果代替。
+纯Runner测试负责语义、身份、顺序、状态格式、输出意图和确定性；共享FSM validator负责静态容量计算及profile准入，不通过mock repository宣称持久性。Worker集成测试负责输入规范化、fencing、提交未知、outbox、内部Judge执行/回流、真实公共投影、不可变归档、dispatch监督及启动预留/等待，凡执行群工作流必须调用生产Runner；未获准Start的场景断言Runner未被调用。可控Connector只录制Agent请求并产生Agent事实/Unknown及交互；Judge使用单独的可控JudgeEvaluatorPort注入Worker，不经Connector模拟。无需接入全部真实Agent协议或真实LLM，但必须验证内部Judge持久执行路径。provider契约套件验证真实实现，不能用可控执行器或内存模型的结果代替。
 
 实现时既有回归入口（在仓库的`apps/bcs`目录执行，命令本次未运行）：
 
@@ -474,15 +490,15 @@ cargo test --locked -p bcs-collaboration-runtime --test fixed_loop_context
 cargo test --locked -p bcs-collaboration-runtime --test runtime_progression
 ```
 
-新crate建立后新增`cargo test --locked -p bcs-group-runner`与生产组合conformance入口，把R01–R30映射到具体测试；不存在的crate/入口不能在文档交付时宣称执行通过。legacy差分测试比较支持范围、下游输入、outcome、结果和尝试次数，显式排除旧时钟/UUID及旧存储布局差异。E17既有受信intent/无name结果的兼容测试继续保留，不因共享模式控制边界而改写旧路径。
+新crate建立后新增`cargo test --locked -p bcs-group-runner`与生产组合conformance入口，把R01–R31映射到具体测试；不存在的crate/入口不能在文档交付时宣称执行通过。legacy差分测试比较支持范围、下游输入、outcome、结果和尝试次数，显式排除旧时钟/UUID、旧存储布局及§8明确收紧的未知Judge调用重采样差异。E17既有受信intent/无name结果的兼容测试继续保留，不因共享模式控制边界而改写旧路径。
 
 ## 13. 文档交付与未验证边界
 
 2026-11-18实际检查：本SPEC与导航共94个本地链接目标存在；15条证据中的具名源码/测试符号已核对，5个既有Cargo测试入口存在；Markdown围栏配对、尾随空白及`git diff --check`通过；公开内容人工检查及私有地址/凭据常见字面量检查未发现越界内容。两份依据的状态与PR合入后的proposed状态已核对。只读独立审阅提出的v1上游输出差异、未提交候选的时间语义和过早Timeout去重问题已修订并复核。改动仅本SPEC及导航，源码HEAD保持§2.1基线。
 
-上述检查只证明文档和可追溯性；当前R01–R30是待实现的验收要求，不能作为生产能力已通过的证据。
+上述检查只证明文档和可追溯性；当前R01–R31是待实现的验收要求，不能作为生产能力已通过的证据。
 
-未执行：Cargo构建/测试、生产Runner运行、真实provider故障实验、远端Agent/Judge联调、数据库迁移、部署或存量会话迁移。已有协调实现见§2.1/E16；第一批完整业务Worker与本批新增契约是否落地，须在实施时重新核对版本与验证，不能仅凭本稿启动生产流量。
+未执行：Cargo构建/测试、生产Runner运行、真实provider故障实验、远端Agent及Judge/LLM联调、数据库迁移、部署或存量会话迁移。已有协调实现见§2.1/E16；第一批完整业务Worker与本批新增契约是否落地，须在实施时重新核对版本与验证，不能仅凭本稿启动生产流量。
 
 本稿仅新增proposed设计与[SPEC导航](../README.md)，不把拟议行为提升为现有domain契约或已接受ADR。实现交付时更新实际owning contracts、共享编译器/Runner的Context Boundary与app导航，分别记录实现、合入、集成和部署。公共文档不含私有地址、凭据、企业运行态或未脱敏材料。
 
@@ -495,3 +511,7 @@ cargo test --locked -p bcs-collaboration-runtime --test runtime_progression
 2026-11-19后续评审修订：以上轮文档提交 `58d89d1fa676c416a40a5d04bddf136b9b2e5ee8` 为基线，完整读取新增评论并按三项已确认共识修订：schema内category封闭、code允许有界扩展；跨Task遗留义务由Worker在Start前预留/等待，容量不足不转为Runner业务失败，业务超时仍直接重试；#4145能力契约与生产provider就绪分开记录。新增§9.4、E18及R27–R30，细化R24/R26和2A/2D。2A须交付现有fixture/模板容量及实际编码报告后确定profile，本次未生成该实现期报告，也未给出未经验证的容量默认值。
 
 本次文档检查：本SPEC与导航的108处本地链接均可解析到现有目标，E01–E18、R01–R30连续且唯一；新增E18构造能力检查、StrictLease语义及四个具名契约套件与源码对应，5个既有Cargo测试入口存在；Markdown围栏、尾随空白、冲突标记、公开内容边界及`git diff --check`通过。本次只修订SPEC并保持proposed；没有实现Runner/Worker/provider，也未运行Cargo或生产验证。提交和推送继续按请求使用`--no-verify`，不声称Git hooks通过。
+
+2026-11-19 Judge职责修订：以 `f7ccedb2f112e954e941e976c9fbe89cae7dd7a0` 为文档基线，重新核对E09调用链、LLM Judge实现/装配及恢复测试，纠正此前把Judge执行归入Connector的设计。§3.1–3.4、输入/动作契约、容量口径和2A/2D统一为Worker内部Judge执行，新增R31及独立Judge测试驱动要求；Agent Connector仅承担Agent通信。明确当前Agent执行记录/授权和通用ServiceError不足以直接承载新路径，所需补充仍为proposed。
+
+本次检查：本SPEC与导航111处本地链接有效，E01–E18/R01–R31连续且唯一；新增Judge源码/测试符号、5个既有Cargo入口、Markdown围栏/空白/冲突标记、公开内容边界及`git diff --check`通过。仅修订SPEC，未运行Cargo、Judge/LLM或Worker集成测试；沿用已授权的`--no-verify`提交/推送。
