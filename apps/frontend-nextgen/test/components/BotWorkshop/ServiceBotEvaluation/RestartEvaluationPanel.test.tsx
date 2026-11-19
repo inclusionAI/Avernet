@@ -61,6 +61,8 @@ function mockFlow(overrides: Partial<ReturnType<typeof useStandardEvaluationFlow
     reportUrl: undefined,
     error: undefined,
     startEvaluation: jest.fn(),
+    retryStep: jest.fn(),
+    retryingStep: undefined,
   };
   mockedUseStandardEvaluationFlow.mockReturnValue({ ...base, ...overrides });
 }
