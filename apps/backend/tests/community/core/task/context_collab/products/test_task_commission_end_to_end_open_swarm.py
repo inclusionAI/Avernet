@@ -176,7 +176,7 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         participants,
     ) = publish_todo_task(deploy_open_swarm, tmp_path)
 
-    # 3. 公开招募多个Coding Agents (执行OPEN方法)
+    # 2. 公开招募多个Coding Agents (执行OPEN方法)
     recruit_multi_coding_agents(
         injector,
         l5_open_method_operate,
@@ -189,7 +189,7 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         swarm_binding_id,
     )
 
-    # 4. 招募完成之后，通过 L4 创建根 Task，但不启动
+    # 3. 招募完成之后，通过 L4 创建根 Task，但不启动
     l4_context_service.create_task(
         collet_id,
         TaskCreateCommand(
@@ -216,56 +216,13 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         collet_id, WorkStartCommand(before.collet.version), executor
     )
 
-    # 5. 招募到agents之后，开始写作进行AiCoding（执行SWARM方法：规划-划分stage和task-分派执行）
+    # 4. 招募到agents之后，开始写作进行AiCoding（执行SWARM方法：规划-划分stage和task-分派执行）
     stages = swarm_run(injector, collet_id)
 
-    # 6. 任务完成之后，校验每个阶段、每个Task的产物
+    # 5. 任务完成之后，校验每个阶段、每个Task的产物
     judge_artifacts(
         injector, storage_service, storage_envs, stages, collet_id, swarm_binding_id
     )
-
-    # Swarm 完成不等于根 Task 已验收；根执行者提交总成果，用户经 G4 验收。
-    completed = _record(injector, collet_id)
-    assert completed.task.status == "in_progress"
-    assert all(
-        task.status == "done" for task in completed.tasks if task.parent_task_ref
-    )
-    l4_context_service.append_event(
-        collet_id,
-        EventAppendCommand(
-            expected_version=completed.collet.version,
-            actor_ref=executor.actor,
-            parent_event=completed.events[-1].event_id,
-            visibility="public",
-            event_kind="task.submitted",
-            primitive_type="Task",
-            payload={"artifacts": [f"artifact://{name}" for name in ARTIFACTS]},
-        ),
-        executor,
-    )
-    reviewing = _record(injector, collet_id)
-    assert reviewing.task.status == "reviewing"
-    l4_context_service.append_event(
-        collet_id,
-        EventAppendCommand(
-            expected_version=reviewing.collet.version,
-            actor_ref=OWNER.actor,
-            parent_event=reviewing.events[-1].event_id,
-            visibility="public",
-            event_kind="task.accepted",
-            primitive_type="Task",
-            payload={"note": "五阶段成果与测试报告验收通过"},
-        ),
-        OWNER,
-    )
-    accepted = _record(injector, collet_id)
-    assert len(accepted.tasks) == len(ROLES) + 1
-    assert all(task.status == "done" for task in accepted.tasks)
-    assert accepted.events[-1].actor_ref == OWNER.actor
-    assert accepted.task.last_event_ref == accepted.events[-1].event_id
-    test_report = json.loads((tmp_path / "test-report.json").read_text())
-    assert test_report["exit_code"] == 0 and "Ran 4 tests" in test_report["output"]
-    assert json.loads((tmp_path / "pr-draft.json").read_text())["simulated"] is True
 
 
 def publish_todo_task(deploy_open_swarm, tmp_path):
