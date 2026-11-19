@@ -124,18 +124,29 @@ impl StoreInboxProducer {
         let input = &request.input;
         self.layout.inbox(&input.sid)?;
         encode_inbox_entry(input)?;
-        let spec_doc = request.create_session.as_ref().map(encode_json).transpose()?;
+        let spec = match &request.create_session {
+            Some(spec) => Some(PreparedSpec {
+                doc: encode_json(spec)?,
+                scope: spec.scope.clone(),
+                group: spec.group.clone(),
+            }),
+            None => None,
+        };
         let task = match &request.create_task {
             Some(task) => Some(PreparedTask {
                 key: self.layout.task(&task.tid)?,
                 doc: encode_json(task)?,
                 index_key: self.layout.tasks(&task.sid)?,
+                tid: task.tid.clone(),
+                sid: task.sid.clone(),
+                scope: task.scope.clone(),
+                created_at: task.created_at,
             }),
             None => None,
         };
         Ok(Prepared {
             spec_key: self.layout.spec(&input.sid)?,
-            spec_doc,
+            spec,
             task,
             admit_key: self.layout.admit(&input.sid, &input.input_id)?,
         })
@@ -159,16 +170,16 @@ impl StoreInboxProducer {
     }
 
     /// Creates a once-only document; `Ok(false)` = it already existed.
-    async fn create_once(&self, key: &str, doc: serde_json::Value) -> Result<bool, bcs_store_api::StoreError> {
+    async fn create_once(&self, key: &str, doc: &serde_json::Value) -> Result<bool, bcs_store_api::StoreError> {
         let outcome = self
             .documents
-            .create_document(key, &doc)
+            .create_document(key, doc)
             .await?;
         Ok(matches!(outcome, WriteOutcome::Applied { .. }))
     }
 
     /// `true` when the stored spec belongs to the same scope and group.
-    async fn same_spec(&self, key: &str, spec: &SessionSpec) -> Result<bool, StoreError> {
+    async fn same_spec(&self, key: &str, spec: &PreparedSpec) -> Result<bool, StoreError> {
         Ok(self
             .stored::<SessionSpec>(key)
             .await?
@@ -243,17 +254,32 @@ impl StoreInboxProducer {
     }
 }
 
+/// Everything an admission writes, built and checked before its first read.
+/// Each part also carries the fields of its source the write steps compare,
+/// so those steps read one value instead of pairing it with the request.
 struct Prepared {
     spec_key: String,
-    spec_doc: Option<serde_json::Value>,
+    /// Set for a new session.
+    spec: Option<PreparedSpec>,
+    /// Set for a new task.
     task: Option<PreparedTask>,
     admit_key: String,
+}
+
+struct PreparedSpec {
+    doc: serde_json::Value,
+    scope: TaskScope,
+    group: GroupId,
 }
 
 struct PreparedTask {
     key: String,
     doc: serde_json::Value,
     index_key: String,
+    tid: Tid,
+    sid: Sid,
+    scope: TaskScope,
+    created_at: TimestampMillis,
 }
 
 enum Delivered {
@@ -282,7 +308,7 @@ impl InboxProducerPort for StoreInboxProducer {
         let unknown = || StoreError::OutcomeUnknown {
             operation_id: op.to_owned(),
         };
-        if let (Some(task), None) = (&request.create_task, &request.create_session) {
+        if let (Some(task), None) = (&prepared.task, &prepared.spec) {
             // A new task of an existing session must belong to its frozen scope.
             match self.stored::<SessionSpec>(&prepared.spec_key).await? {
                 Some(spec) if spec.scope == task.scope => {}
@@ -296,8 +322,8 @@ impl InboxProducerPort for StoreInboxProducer {
         }
         let mut wrote = false;
 
-        if let (Some(spec), Some(doc)) = (&request.create_session, prepared.spec_doc) {
-            match self.create_once(&prepared.spec_key, doc).await {
+        if let Some(spec) = &prepared.spec {
+            match self.create_once(&prepared.spec_key, &spec.doc).await {
                 Ok(true) => wrote = true,
                 Ok(false) => {
                     if !self.same_spec(&prepared.spec_key, spec).await? {
@@ -307,15 +333,15 @@ impl InboxProducerPort for StoreInboxProducer {
                 Err(e) => return Err(from_write(&e, op)),
             }
         }
-        if let (Some(task), Some(prepared)) = (&request.create_task, prepared.task) {
+        if let Some(task) = &prepared.task {
             // "Already exists" is fine: never replace a task the Worker advanced.
             // The index is scored with the creation time of the task as stored,
             // so a repairing retry lists it where the first attempt would have.
             let mut created_at = task.created_at;
-            match self.create_once(&prepared.key, prepared.doc).await {
+            match self.create_once(&task.key, &task.doc).await {
                 Ok(true) => wrote = true,
                 Ok(false) => {
-                    let stored = match self.stored::<TaskSnapshot>(&prepared.key).await {
+                    let stored = match self.stored::<TaskSnapshot>(&task.key).await {
                         Ok(stored) => stored,
                         Err(_) if wrote => return Err(unknown()),
                         Err(e) => return Err(e),
@@ -336,7 +362,7 @@ impl InboxProducerPort for StoreInboxProducer {
                 member: task.tid.0.clone(),
                 score: created_at.0 as f64,
             };
-            match self.zset.add(&prepared.index_key, &[entry], ZAddMode::InsertOnly).await {
+            match self.zset.add(&task.index_key, &[entry], ZAddMode::InsertOnly).await {
                 // A repairing insert is a write of this call too.
                 Ok(inserted) => wrote |= inserted > 0,
                 Err(_) if wrote => return Err(unknown()),
