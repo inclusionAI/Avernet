@@ -40,6 +40,8 @@ export function DebugChatPanel({
   runtimeStage,
   ownerId,
   fullscreen = false,
+  composerDisabled = false,
+  composerDisabledPlaceholder,
   onClose,
   onToggleFullscreen,
 }: {
@@ -48,6 +50,9 @@ export function DebugChatPanel({
   runtimeStage?: BotRuntimeStage;
   ownerId?: string;
   fullscreen?: boolean;
+  /** 外部整体禁用输入区（如查看正式运行服务 Bot 时禁止在调试面板发言）。 */
+  composerDisabled?: boolean;
+  composerDisabledPlaceholder?: string;
   onClose?: () => void;
   onToggleFullscreen?: () => void;
 }) {
@@ -252,12 +257,14 @@ export function DebugChatPanel({
           userId={identityId}
           isRequesting={debug.chat.isRequesting}
           onClear={clearContext}
+          composerDisabled={composerDisabled}
+          composerDisabledPlaceholder={composerDisabledPlaceholder}
           modelSelector={
             <BotModelSelector
               models={botModels.models}
               activeModelId={botModels.activeModelId}
               loading={botModels.isLoadingModels}
-              disabled={!session}
+              disabled={!session || composerDisabled}
               onSelect={(modelId) => void botModels.selectModel(modelId)}
             />
           }
