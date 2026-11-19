@@ -145,7 +145,7 @@ def run_story(binary, root):
             provider = story.request("POST", "/providers", {
                 "slug": "coverage-provider", "name": "A2A test-user coverage",
                 "webhook_url": endpoint, "auth": {"mode": "static_bearer"},
-                "protocol_version": "2.0",
+                "protocol_version": "2.0", "collaboration_scope": "same_owner",
             })
             admin = provider["provider_admin_token"]
             caller = register("caller", admin)
