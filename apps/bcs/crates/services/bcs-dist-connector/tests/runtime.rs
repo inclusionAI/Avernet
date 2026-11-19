@@ -134,7 +134,7 @@ struct Leases {
 
 #[async_trait]
 impl MembershipPort for Leases {
-    async fn register(&self, instance: Instance, role: RuntimeRole, ttl: Duration) -> Result<MembershipLease, StoreError> {
+    async fn register(&self, instance: Instance, role: RuntimeRole, _: String, ttl: Duration) -> Result<MembershipLease, StoreError> {
         self.calls.lock().unwrap().push(format!("register {} {role:?} {}", instance.node, ttl.as_secs()));
         Ok(MembershipLease { instance })
     }
@@ -146,10 +146,13 @@ impl MembershipPort for Leases {
         self.calls.lock().unwrap().push(format!("draining {}", lease.instance.node));
         Ok(Renewal::Renewed)
     }
+    async fn retire(&self, _: &MembershipLease) -> Result<(), StoreError> {
+        Ok(())
+    }
     async fn liveness(&self, _: &Instance) -> Result<Liveness, StoreError> {
         Ok(Liveness::Unknown)
     }
-    async fn members(&self, _: RuntimeRole, _: PageRequest) -> Result<Page<Instance>, StoreError> {
+    async fn members(&self, _: RuntimeRole, _: PageRequest) -> Result<Page<MemberRecord>, StoreError> {
         Ok(Page { items: Vec::new(), next: None })
     }
 }

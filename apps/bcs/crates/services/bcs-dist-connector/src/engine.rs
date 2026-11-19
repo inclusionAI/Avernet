@@ -330,7 +330,12 @@ impl ConnectorEngine {
             .inner
             .ports
             .membership
-            .register(config.me.clone(), RuntimeRole::Connector, config.membership_ttl)
+            .register(
+                config.me.clone(),
+                RuntimeRole::Connector,
+                config.control_address.clone(),
+                config.membership_ttl,
+            )
             .await;
         match registered {
             Ok(lease) => *lock(&self.inner.lease) = Some(lease),

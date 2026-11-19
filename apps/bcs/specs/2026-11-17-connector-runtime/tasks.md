@@ -16,7 +16,7 @@ the code of each task; each group ends with its crate's tests green.
 - [x] 1.1 `bcs_service_api::core::dist_connector`: types and
   `DistConnectorCoreService` with the call-order and rule docs (plan §2);
   `dist_connector_core_service_contract_tests` harness in `bcs-test-support`;
-  `bcs-service-api` 6.2.0 and its `CONTEXT.md` section; no name clash with `port/`.
+  `bcs-service-api` 7.1.0 (6.2.0 before the Gateway's 7.0.0 landed) and its `CONTEXT.md` section; no name clash with `port/`.
 - [x] 1.2 `bcs_dist_store::command`: `GROUP`, `CommandStreams`, `partition_of`;
   tests: stable known values, range, single partition.
 

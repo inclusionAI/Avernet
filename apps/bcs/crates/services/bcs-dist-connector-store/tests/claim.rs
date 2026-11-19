@@ -164,7 +164,7 @@ async fn pending_membership_fails_with_need_contract() {
     let me = instance("conn-03");
     let lease = MembershipLease { instance: me.clone() };
     let ttl = Duration::from_secs(3);
-    assert_eq!(stub.register(me.clone(), RuntimeRole::Connector, ttl).await, Err(need.clone()));
+    assert_eq!(stub.register(me.clone(), RuntimeRole::Connector, String::new(), ttl).await, Err(need.clone()));
     assert_eq!(stub.renew(&lease, ttl).await, Err(need.clone()));
     assert_eq!(stub.set_draining(&lease).await, Err(need.clone()));
     assert_eq!(stub.liveness(&me).await, Err(need.clone()));

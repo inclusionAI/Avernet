@@ -33,6 +33,9 @@ pub struct ConnectorConfig {
     pub not_sent_retries: u32,
     pub membership_ttl: Duration,
     pub membership_renew: Duration,
+    /// Where other instances reach this process's control endpoint; stored
+    /// with the registration. Empty until a control endpoint is wired.
+    pub control_address: String,
 }
 
 impl ConnectorConfig {
@@ -49,6 +52,7 @@ impl ConnectorConfig {
             not_sent_retries: 3,
             membership_ttl: Duration::from_secs(3),
             membership_renew: Duration::from_secs(1),
+            control_address: String::new(),
         }
     }
 

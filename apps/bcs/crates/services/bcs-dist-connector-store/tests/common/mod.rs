@@ -249,6 +249,19 @@ impl JsonStorePlugin for Recorder {
 }
 
 #[async_trait]
+impl document::DocumentStorePlugin for Recorder {
+    async fn read_document(&self, key: &str) -> StoreResult<Option<Versioned<Value>>> {
+        self.model.read_document(key).await
+    }
+    async fn create_document(&self, key: &str, value: &Value) -> StoreResult<WriteOutcome> {
+        run!(self.write("document.create", key), self.model.create_document(key, value).await)
+    }
+    async fn replace_document(&self, key: &str, expected: Version, value: &Value) -> StoreResult<WriteOutcome> {
+        run!(self.write("document.replace", key), self.model.replace_document(key, expected, value).await)
+    }
+}
+
+#[async_trait]
 impl ZSetStorePlugin for Recorder {
     async fn add(&self, key: &str, entries: &[ZSetEntry], mode: ZAddMode) -> StoreResult<u64> {
         run!(self.write("zset.add", key), self.model.add(key, entries, mode).await)
@@ -436,7 +449,7 @@ pub struct FixedLiveness(pub Liveness);
 
 #[async_trait]
 impl MembershipPort for FixedLiveness {
-    async fn register(&self, instance: Instance, _: RuntimeRole, _: Duration) -> Result<MembershipLease, PortError> {
+    async fn register(&self, instance: Instance, _: RuntimeRole, _: String, _: Duration) -> Result<MembershipLease, PortError> {
         Ok(MembershipLease { instance })
     }
     async fn renew(&self, _: &MembershipLease, _: Duration) -> Result<Renewal, PortError> {
@@ -445,10 +458,17 @@ impl MembershipPort for FixedLiveness {
     async fn set_draining(&self, _: &MembershipLease) -> Result<Renewal, PortError> {
         Ok(Renewal::Renewed)
     }
+    async fn retire(&self, _: &MembershipLease) -> Result<(), PortError> {
+        Ok(())
+    }
     async fn liveness(&self, _: &Instance) -> Result<Liveness, PortError> {
         Ok(self.0)
     }
-    async fn members(&self, _: RuntimeRole, _: PageRequest) -> Result<Page<Instance>, PortError> {
+    async fn members(
+        &self,
+        _: RuntimeRole,
+        _: PageRequest,
+    ) -> Result<Page<bcs_service_api::port::repo::distributed::ownership::MemberRecord>, PortError> {
         Ok(Page { items: Vec::new(), next: None })
     }
 }
