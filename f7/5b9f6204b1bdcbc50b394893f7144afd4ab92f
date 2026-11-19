@@ -1,0 +1,56 @@
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  s_36cb121a462c52::t_01ac4038e63ef4 46,684,686,707-712,719
+apps/backend/docs/openapi-v1/README.md
+  s_36cb121a462c52::t_d0d054ff342d4f 1368,1372-1393
+  s_36cb121a462c52::t_62f6968d0730d8 1394
+apps/backend/src/agentclaw/community/core/apply_engine/run/service_protocol.py
+  s_36cb121a462c52::t_01ac4038e63ef4 171,173,175-177,186-188
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_config_manifest_apply.py
+  s_36cb121a462c52::t_01ac4038e63ef4 142,182,197-198
+apps/backend/src/agentclaw/community/core/bot_config_manifest/compiler/compile.py
+  s_36cb121a462c52::t_01ac4038e63ef4 120-129
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest.py
+  s_36cb121a462c52::t_01ac4038e63ef4 20-22,48,55,65,108-115,126-129,140-143,171-182
+  s_36cb121a462c52::t_bd48bc28d51061 137
+apps/backend/src/agentclaw/community/core/apply_engine/compiler.py
+  s_36cb121a462c52::t_01ac4038e63ef4 169-179
+apps/gateway/configs/schemas/bots.openapi.json
+  s_bcc2d0974a665d::t_365f0653bb790a 4221-4223,4228,4300-4303,4383,33005-33081,72901,72915-72926,72995,72999
+  s_36cb121a462c52::t_1b13f99f19c73e 73408
+apps/backend/tests/community/adapters/http/openapi_v1/test_schema_docs.py
+  s_36cb121a462c52::t_ed22fd473df235 203-216,218
+  s_36cb121a462c52::t_f781cce277976e 217
+apps/backend/tests/community/endpoints/test_openapi_config_manifest_apply.py
+  s_36cb121a462c52::t_99381247e63119 34-39,51,711-729,731-861
+  s_36cb121a462c52::t_f781cce277976e 730
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest_apply.py
+  s_36cb121a462c52::t_4cdfc2fb07fae2 106-107,112-113
+apps/backend/src/agentclaw/community/core/apply_engine/README.md
+  s_36cb121a462c52::t_c68defe0b8e712 14-15,18-19,79,133
+apps/backend/src/agentclaw/community/core/bot_config_manifest/README.md
+  s_36cb121a462c52::t_6e4d1eae843af2 434,443-448,528,531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f75b9f6204b1bdcbc50b394893f7144afd4ab92f",
+  "prompts": {},
+  "sessions": {
+    "s_36cb121a462c52": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f1ba-0282-7e62-b2ff-d3a2b98eae47",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": null
+    },
+    "s_bcc2d0974a665d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d9-072f-7481-adc1-c3e3d78b7fd1",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

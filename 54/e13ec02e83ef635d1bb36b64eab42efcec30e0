@@ -1,0 +1,78 @@
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  s_5e0eab15b95f7c::t_8b7e2161977a60 57-58
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  s_5e0eab15b95f7c::t_8f1b211c11e732 395-400
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFilesFeature.test.tsx
+  s_5e0eab15b95f7c::t_8d8368f6ded1d5 261,263,265,271-286
+  s_5e0eab15b95f7c::t_d9b9713b93cfd8 65,68-72,247,249-251,255,268,287,294,304
+  s_5e0eab15b95f7c::t_cf75005aa4bcf5 66-67,246
+  s_5e0eab15b95f7c::t_1311d4d272783a 21-26
+  s_5e0eab15b95f7c::t_fc681d7d737fd5 243-245
+  s_5e0eab15b95f7c::t_001b0ad93f7bd4 248
+  s_5e0eab15b95f7c::t_36760857befe64 252-254
+  s_5e0eab15b95f7c::t_cba5d2183632ef 256-260
+  s_5e0eab15b95f7c::t_7af889ca3e1ecf 262
+  s_5e0eab15b95f7c::t_334f5e76237297 264
+  s_5e0eab15b95f7c::t_2e159eeb83f654 266-267
+  s_5e0eab15b95f7c::t_22fa8eb9af9e76 269-270
+  s_5e0eab15b95f7c::t_b0a191d09e29c5 288-293
+  s_5e0eab15b95f7c::t_208bfac8139538 295-297,301-303
+  s_5e0eab15b95f7c::t_36c3e08e13153e 305-307
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFiles.ts
+  s_5e0eab15b95f7c::t_758fd2485f1740 156-158
+  s_5e0eab15b95f7c::t_dc24352bf2afa8 111-113,122-124
+  s_5e0eab15b95f7c::t_e3c76100f8894f 47-48,55-57
+  s_5e0eab15b95f7c::t_770557a05e45f5 84-86
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_5e0eab15b95f7c::t_4b4c499d7ac82b 250-253,260,263,280-282,285,292-295,306,313-314,317-322
+  s_5e0eab15b95f7c::t_799b3778a35a69 261
+  s_5e0eab15b95f7c::t_243908ce3ad1f1 14-21
+  s_5e0eab15b95f7c::t_c2acf1fbb38008 58-59
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilePreview.ts
+  s_5e0eab15b95f7c::t_c5004ab9ea9c15 90-92
+  s_5e0eab15b95f7c::t_65a08d42f51cca 66,74-76
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  s_5e0eab15b95f7c::t_280b0ff6e83794 153-156,159
+  s_5e0eab15b95f7c::t_bf36903f469db0 167
+  s_5e0eab15b95f7c::t_bde8354304595a 184
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_5e0eab15b95f7c::t_feb250b9dc586e 70-73
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_5e0eab15b95f7c::t_36008bc4446c61 579,589-590
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_5e0eab15b95f7c::t_48694ff4d0aaba 11
+  s_5e0eab15b95f7c::t_687df5920b9474 172-194
+  s_5e0eab15b95f7c::t_1729efdfed9655 272,276-277,295-296
+  s_5e0eab15b95f7c::t_d6d91db0cb38ee 132-133
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  s_5e0eab15b95f7c::t_b6281707c93541 14,19
+  s_5e0eab15b95f7c::t_fcf29019b8569b 67-88,93-95,97
+  s_5e0eab15b95f7c::t_f18278757d579d 89-92,96
+  s_5e0eab15b95f7c::t_2cefa3ee52f329 99-100,107-109,116-118
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  s_5e0eab15b95f7c::t_b1dbdf038a0beb 329-340
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_5e0eab15b95f7c::t_1e6343cc6cccb7 82,140
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  s_5e0eab15b95f7c::t_5fba15b7d9744e 57
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileStages.test.tsx
+  s_5e0eab15b95f7c::t_13a3694b5730b6 39,43,54-56,61,66,82-83
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  s_5e0eab15b95f7c::t_b79827460edd2d 57,73,199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "54e13ec02e83ef635d1bb36b64eab42efcec30e0",
+  "prompts": {},
+  "sessions": {
+    "s_5e0eab15b95f7c": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "44b19073-2adc-4fd7-9499-390aad0a5473",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

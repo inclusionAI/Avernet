@@ -1,0 +1,87 @@
+apps/baas/tests/unit/adapters/web/test_bot_wss_router.py
+  s_c3ece772cfb1b0::t_b05b193a1b9f5f 168-169,180,192
+  s_c3ece772cfb1b0::t_4e71a26d5d8dcb 152,164
+apps/frontend-nextgen/test/services/workspace/botA2aFetch.test.ts
+  s_c3ece772cfb1b0::t_6d240ae311a25a 2-3,38-77
+  s_c3ece772cfb1b0::t_07b7c421cbbbd8 1,4-37,78-187
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_c3ece772cfb1b0::t_b05b193a1b9f5f 33,69-103
+apps/baas/src/secbaas/community/api/bot_runtime/_ws_connection_info.py
+  s_c3ece772cfb1b0::t_802096d83597c0 35-38
+apps/backend/src/agentclaw/community/core/devices/models.py
+  s_c3ece772cfb1b0::t_802096d83597c0 186-189
+  s_c3ece772cfb1b0::t_2995cacf86a725 9
+apps/backend/tests/community/core/engine_runtime/test_connection.py
+  s_c3ece772cfb1b0::t_4e71a26d5d8dcb 730-739
+  s_c3ece772cfb1b0::t_d00d2e3b96cd4a 800-801,805-811,832-833
+apps/baas/src/secbaas/community/adapters/web/routers/bot_service/wss_router.py
+  s_c3ece772cfb1b0::t_802096d83597c0 53-57,172
+engine/adapter/src/engine/community/api/tests/test_a2a_transport.py
+  s_c3ece772cfb1b0::t_071cf54287ce4c 419,436,2515
+apps/backend/tests/community/core/service_bot/services/test_baas_service_get_ws_info_by_bot_uuid.py
+  s_c3ece772cfb1b0::t_625a5d08b51b9a 109-120
+  s_c3ece772cfb1b0::t_4e71a26d5d8dcb 165,177,185
+engine/adapter/src/engine/community/api/transport/a2a/router.py
+  s_c3ece772cfb1b0::t_071cf54287ce4c 1029-1030,1058-1059
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_service.py
+  s_c3ece772cfb1b0::t_2995cacf86a725 910
+  s_c3ece772cfb1b0::t_7b69e41edc199f 38,887-889
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/connection/router.py
+  s_c3ece772cfb1b0::t_2995cacf86a725 252
+apps/frontend-nextgen/test/services/workspace/botChatProvider.a2a.seam.test.ts
+  s_c3ece772cfb1b0::t_88a0e343885b90 18,36,40
+  s_c3ece772cfb1b0::t_07b7c421cbbbd8 73,154
+apps/backend/src/agentclaw/community/core/engine_runtime/connection.py
+  s_c3ece772cfb1b0::t_2995cacf86a725 365-370
+apps/backend/src/agentclaw/community/core/devices/services/a2a_proxy_connection.py
+  s_c3ece772cfb1b0::t_7b69e41edc199f 4,6-25
+  s_c3ece772cfb1b0::t_2995cacf86a725 1-3,5,26-49
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/connection/schemas.py
+  s_c3ece772cfb1b0::t_2995cacf86a725 33,36-41,78-79
+  s_c3ece772cfb1b0::t_e8de740168fa2d 8,42-47
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_connection.py
+  s_c3ece772cfb1b0::t_4e71a26d5d8dcb 159-168
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_c3ece772cfb1b0::t_625a5d08b51b9a 264
+  s_c3ece772cfb1b0::t_802096d83597c0 2074
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_schema_docs.py
+  s_c3ece772cfb1b0::t_584ec8c24149b4 12,15,52-64
+  s_c3ece772cfb1b0::t_bd3d81f8b2d10a 65-66
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_c3ece772cfb1b0::t_a2ccf3e2f052b6 1,148,284,309-310,318-319,336-337,341,353-355,561-563
+apps/frontend-nextgen/src/services/backendApi/bots/privateBotSessionController.ts
+  s_c3ece772cfb1b0::t_a2ccf3e2f052b6 56-57
+apps/backend/src/agentclaw/community/core/engine_runtime/models.py
+  s_c3ece772cfb1b0::t_2995cacf86a725 111-112,117,131-132
+apps/frontend-nextgen/src/services/workspace/botA2aFetch.ts
+  s_c3ece772cfb1b0::t_a2ccf3e2f052b6 1-14,16-78
+  s_c3ece772cfb1b0::t_b05b193a1b9f5f 15
+apps/backend/tests/community/core/devices/services/test_baas_device_service.py
+  s_c3ece772cfb1b0::t_4e71a26d5d8dcb 376
+apps/backend/tests/community/core/devices/services/test_a2a_proxy_connection.py
+  s_c3ece772cfb1b0::t_4e71a26d5d8dcb 1-15,17,19-63,65-114
+  s_c3ece772cfb1b0::t_07b7c421cbbbd8 16,18,64
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/enums.py
+  s_c3ece772cfb1b0::t_d00d2e3b96cd4a 77-78
+apps/backend/src/agentclaw/community/core/engine_runtime/README.md
+  s_c3ece772cfb1b0::t_fceddc83338230 12,144-159
+  s_c3ece772cfb1b0::t_625a5d08b51b9a 160-163
+apps/gateway/configs/schemas/bots.openapi.json
+  s_c3ece772cfb1b0::t_cbc9be91ba6dad 4685,6226,28446-28453,28459,28481
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3d5d8323c57c223b4cf4d06e444f85be436ce2f9",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,92 @@
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/delegate.rs
+  s_d2bf2069ff97fe::t_70ae5e14384bd3 482
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_protected_dispatch_runtime_contract/watchdog.rs
+  s_d2bf2069ff97fe::t_cc0c412fc5f619 44
+apps/bcs/crates/services/bcs-message-flow/tests/caller_p2c_e2e_contract.rs
+  s_d2bf2069ff97fe::t_02a757b2cddd71 106
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/provider_headers_contract.rs
+  s_d2bf2069ff97fe::t_75d30979af5df1 220
+  s_d2bf2069ff97fe::t_fd1fa1b17552ca 93,215
+  s_d2bf2069ff97fe::t_2758831a443c70 26,86,89-92,94,134,149,200-214,216-219
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/dispatch_proof.rs
+  s_d2bf2069ff97fe::t_02a757b2cddd71 1,3-42,53-62,68-78,86,92-110,117,120-121,124-127,135-143,149-159
+  s_d2bf2069ff97fe::t_a19cebe5c38c74 43-52,63-67,79-85,87-91,111-116,118-119,122-123,128-134,144-148
+  s_d2bf2069ff97fe::t_ac884d4de66562 2
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/caller_execution_send_contract.rs
+  s_d2bf2069ff97fe::t_70ae5e14384bd3 97
+apps/bcs/crates/services/bcs-message-flow/tests/support/protected_dispatch_io.rs
+  s_d2bf2069ff97fe::t_02a757b2cddd71 69
+apps/bcs/crates/service-api/bcs-service-api/src/application/caller_execution.rs
+  s_d2bf2069ff97fe::t_bb7bc69ed58a20 20,22-23
+  s_d2bf2069ff97fe::t_2121af27069567 29-35
+apps/bcs/crates/services/bcs-message-flow/src/caller_execution.rs
+  s_d2bf2069ff97fe::t_b96334d8ad6a51 78
+  s_d2bf2069ff97fe::t_48d5db400ec566 145
+  s_d2bf2069ff97fe::t_1c5527a30db9eb 6,23-24,34,56-77,79-89,92-93,103,110,113,123-132,142-144,146-147,149-158,160-162
+  s_d2bf2069ff97fe::t_988397e0a0d295 148,159
+  s_d2bf2069ff97fe::t_b088be3d93a398 94-95
+apps/bcs/docs/caller-execution.md
+  s_d2bf2069ff97fe::t_2758831a443c70 16-28
+apps/bcs/crates/services/bcs-channel/src/service.rs
+  s_d2bf2069ff97fe::t_dda4b15afa4ec0 221-223
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_execution.rs
+  s_d2bf2069ff97fe::t_60c542bc3bcdcc 66,275
+  s_d2bf2069ff97fe::t_b088be3d93a398 52-53
+  s_d2bf2069ff97fe::t_b96334d8ad6a51 51
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/web_send.rs
+  s_d2bf2069ff97fe::t_1c5527a30db9eb 338-340
+  s_d2bf2069ff97fe::t_30a2f4805acf12 341-352
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline.rs
+  s_d2bf2069ff97fe::t_b631f3515f70d0 505,515
+  s_d2bf2069ff97fe::t_02a757b2cddd71 506-514,661-663,752,768,796,806,819,919
+  s_d2bf2069ff97fe::t_70ae5e14384bd3 660,753
+  s_d2bf2069ff97fe::t_b39ceb076a4c8a 607
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_dm_web_send_contract.rs
+  s_d2bf2069ff97fe::t_dfb0df9110ae8b 27,94-100,102-106,119,237-293
+apps/bcs/crates/services/bcs-channel/src/caller_execution.rs
+  s_d2bf2069ff97fe::t_b088be3d93a398 24,27
+  s_d2bf2069ff97fe::t_bb7bc69ed58a20 10-22,28
+apps/bcs/crates/services/bcs-message-flow/src/queued_group.rs
+  s_d2bf2069ff97fe::t_2121af27069567 211-213,220-222,287-296,302
+  s_d2bf2069ff97fe::t_dda4b15afa4ec0 214-219
+apps/bcs/crates/service-api/bcs-service-api/src/port/caller_send.rs
+  s_d2bf2069ff97fe::t_fd1fa1b17552ca 83
+  s_d2bf2069ff97fe::t_70ae5e14384bd3 71,80,84
+apps/bcs/crates/service-api/bcs-service-api/src/application/message_delivery.rs
+  s_d2bf2069ff97fe::t_2121af27069567 551
+apps/bcs/crates/plugin-api/bcs-channel-api/src/lib.rs
+  s_d2bf2069ff97fe::t_bb7bc69ed58a20 55-59
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/orchestration.rs
+  s_d2bf2069ff97fe::t_70ae5e14384bd3 312
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_protected_dispatch_runtime_contract.rs
+  s_d2bf2069ff97fe::t_2758831a443c70 61,107-115,198,206,230,250,262-266,291-292,377-383,400,480-507,813,820
+apps/bcs/crates/services/bcs-channel/src/tests/caller_execution.rs
+  s_d2bf2069ff97fe::t_b96334d8ad6a51 60
+apps/bcs/crates/service-api/bcs-service-api/src/lib.rs
+  s_d2bf2069ff97fe::t_4d9f1ed636ee5c 46
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/caller_wire_journey_contract.rs
+  s_d2bf2069ff97fe::t_70ae5e14384bd3 167
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_send.rs
+  s_d2bf2069ff97fe::t_dda4b15afa4ec0 207,214
+  s_d2bf2069ff97fe::t_70ae5e14384bd3 208-213
+  s_d2bf2069ff97fe::t_a19cebe5c38c74 62-64
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime/caller_dispatch.rs
+  s_d2bf2069ff97fe::t_2121af27069567 307,312
+  s_d2bf2069ff97fe::t_60c542bc3bcdcc 166-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6fb34907ccd08cbedf655c4a3b5efca360cf0f53",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
