@@ -73,6 +73,12 @@ export interface BotHealthPatchOperation {
   detail?: Record<string, unknown>;
 }
 
+/** 补丁预览结果（harness preview 响应的 Domain 形态，由 Service 从 DTO 映射） */
+export interface BotHealthPatchPreview {
+  risk_level: string;
+  operations: BotHealthPatchOperation[];
+}
+
 export interface BotHealthPatch {
   patch_id: string | number;
   name: string;
