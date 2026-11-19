@@ -170,14 +170,16 @@ DWS runtime eligibility; management-command verification still fails closed.
 - Confirmed-ended failures become durable manual records; this does **not** mean
   an owner notification was sent. Unknown runs remain blocked. `ignore` releases
   the slot; `reply`/`escalate` stay blocked awaiting the durable outbox.
-- The optional `HostingFormatRepair` port handles exactly one plain-text candidate.
-  Deployment wires OpenClaw `agent` with `modelRun=true`, `promptMode=none`,
-  `deliver=false` and a separate deterministic formatting session/run. Tools are
-  disabled by the engine. One bounded inference rechecks the original rules/facts;
-  any reply must preserve the candidate text exactly. Schema/version/scope checks
-  still apply. Unsupported gateways, errors, ambiguity and timeouts stay manual.
-  The original tool-enabled turn is never rerun. Formatting sessions can persist;
-  automatic temporary-session cleanup is not claimed.
+- The optional `HostingFormatRepair` port uses OpenClaw `llm-task`, not an
+  `agent` retry or persistent reply session. One bounded, tool-free inference can
+  recover a plain-text candidate; any reply must preserve that text exactly.
+  For structured output, an independent parser must first establish one complete
+  flat literal decision (including single-quoted literals or an incomplete outer
+  code fence). No evaluation, substring selection, duplicate keys, expressions,
+  conflicting decisions or truncated fields are allowed. After model formatting,
+  all decision values must match the independently validated original.
+  Failures/timeouts stay manual; the tool-enabled turn is never rerun.
+  Schema/version/scope checks and semantic review still apply.
 - Every `reply`, including a recovered decision, must pass `HostingEngine.review_reply`
   (a single payload may contain up to eight identical complete JSON objects;
   exact duplicates are reduced to one, while conflicts or trailing prose fail).
@@ -294,6 +296,21 @@ process ownership and fault propagation. `test_formatting.py` verifies lossless
 delimiter repair, refusing missing fields, duplicate decisions or changed versions.
 
 See `engine/adapter/specs/dws-personal-hosting.md` for implementation progress.
+
+### Decision format recovery
+
+Before the existing plain-text model recovery, deterministic repair can normalize
+missing/trailing field commas and one comma after a single complete object.
+OpenClaw's empty media metadata is accepted; nonempty media and error markers
+are preserved for rejection. It never invents fields, closes truncated content,
+or selects among conflicting objects. Repeated malformed decisions remain manual;
+the existing strict parser's identical valid-object compatibility is unchanged.
+Recovered decisions still pass schema/version validation, semantic review, and
+the outbox's identity, scope, disable/takeover and deduplication fences.
+`test_format_recovery_safety.py` exercises this path with real SQLite and fake
+engine/sender ports; it performs no external sends.
+`test_structured_repair.py` covers the single model-formatting attempt and
+independent field equality; an unverifiable source never reaches that call.
 
 ### Review and intake diagnostics
 
