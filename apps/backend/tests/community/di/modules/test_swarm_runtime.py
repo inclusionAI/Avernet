@@ -119,7 +119,7 @@ def test_resolver_requires_installed_product_and_work(missing):
         resolver.resolve("collet_test")
 
 
-@pytest.mark.parametrize("role", ["responsible_user", None])
+@pytest.mark.parametrize("role", ["responsible_user", None, "undeclared"])
 def test_workflow_start_uses_principal_when_contract_permits(role):
     composition = MethodCompositionTemplate(
         (MethodTemplate(get_profile("Swarm", "0.2"), SwarmMethodPolicy("plan/1")),)
@@ -129,7 +129,11 @@ def test_workflow_start_uses_principal_when_contract_permits(role):
         state_machine_ref=VersionedProfileRef("task_commission_goal", 1),
         completion_states=("done",),
         compensation_events=("task.cancelled",),
-        actions=(TaskAction("start", "task.started", "Task", ("note",), role),),
+        actions=(
+            (TaskAction("start", "task.started", "Task", ("note",), role),)
+            if role != "undeclared"
+            else ()
+        ),
     )
     resolver, _, principal = _resolver(
         composition, {"plan/1": Mock()}, workflow=workflow, task_contract_ref=None

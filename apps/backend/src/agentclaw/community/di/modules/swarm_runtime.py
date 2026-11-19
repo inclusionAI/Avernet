@@ -115,9 +115,9 @@ class ProductSwarmRuntimeResolver:
         action = next(
             (a for a in contract.actions if a.event_kind == "task.started"), None
         )
-        if action is None:
-            raise ContextCollabValidationError("Swarm requires a Task start action")
-        role = action.required_role
+        # An undeclared start adds no role restriction here; G4 still rejects
+        # it when the pinned contract requires an explicit control action.
+        role = action.required_role if action is not None else None
         if role is None or actor_has_role(
             task, task.principal_ref, role, definition, record.events
         ):

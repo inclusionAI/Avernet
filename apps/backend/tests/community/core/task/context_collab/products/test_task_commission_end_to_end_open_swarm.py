@@ -1,7 +1,7 @@
 """OPEN 广域招募 → 五 Bot 录取 → SWARM 五阶段 → 子 Task / 根 Task 成果验收。
 
 真实 DI、SQLite、L4/L5/G4；本文件显式声明五个 Bot，复用 Swarm 执行替身。
-候选 Bot 自己发现/申请，发布人按本地能力证据筛选；仅模拟身份与计算，
+候选 Bot 自己发现/申请，发布人调用本地评审方法按 Profile 所需能力筛选；仅模拟身份与计算，
 不验证远端认证、LLM、真实 PR 或持久化调度。角色预绑定不等于 OPEN 录取；
 本 case 显式编排录取后启动，不声称通用 SwarmDriver 会自动执行 OPEN 准入检查。
 """
@@ -115,6 +115,9 @@ from agentclaw.community.di.modules.swarm_runtime import SwarmPlanningCapabiliti
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from tests.community.core.task.context_collab.products.open_admission_support import (
+    LocalCapabilityAdmissionService,
+)
 from tests.community.core.task.context_collab.products.swarm_coding_support import (
     ARTIFACTS,
     PLAN_SERVICE,
@@ -135,7 +138,7 @@ AGENTS = (
     AgentRef("bot", "coding_verification"),  # 测试验证
     AgentRef("bot", "coding_pr_submission"),  # 提交 PR 草稿
 )
-# 同样参与 OPEN 申请、但因角色或能力证据不匹配而被拒绝的候选 Agent。
+# 同样参与 OPEN 申请、但声明的能力不匹配或为空而被拒绝的候选 Agent。
 OTHER_AGENTS = (
     AgentRef("bot", "copywriter"),
     AgentRef("bot", "unqualified_coder"),
@@ -346,6 +349,13 @@ def _create_product_profile():
                                     capacity=CANDIDATE_COUNT,
                                     decision_actor="accountable_role",
                                     decision_rule="capability_evidence",
+                                    required_capabilities=(
+                                        "capability://ai-coding/requirements",
+                                        "capability://ai-coding/design",
+                                        "capability://ai-coding/coding",
+                                        "capability://ai-coding/verification",
+                                        "capability://ai-coding/pr_submission",
+                                    ),
                                 )
                             )
                         ),
@@ -417,9 +427,9 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
     # 5. 第五步：七个 Bot 分别以自身身份发现机会并申请；其中两个不是 Swarm 所需的工作 Bot。
     # 不合格 Bot 也真正申请编码角色，不能仅用更大的 allowlist 冒充更大范围的招募。
     bots = (
-        SimulatedApplicantBot(OTHER_AGENTS[0], "coding", ("evidence://copywriting",)),
+        SimulatedApplicantBot(OTHER_AGENTS[0], "coding", ("capability://copywriting",)),
         *(
-            SimulatedApplicantBot(agent, role, (f"evidence://ai-coding/{role}",))
+            SimulatedApplicantBot(agent, role, (f"capability://ai-coding/{role}",))
             for role, agent in zip(ROLES, AGENTS)
         ),
         SimulatedApplicantBot(OTHER_AGENTS[1], "coding", ()),
@@ -433,28 +443,28 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
     applications = storage_service.list_applications(storage_envs, open_binding_id, collet_id)
     assert all(a.state is ApplicationState.SUBMITTED for a in applications)
     applicants = {bot.agent.agent_id: bot for bot in bots}
+    assert len(applications) == CANDIDATE_COUNT
     for application in applications:
-        bot = applicants[application.applicant_agent_ref]
+        assert application.capability_evidence_refs == applicants[
+            application.applicant_agent_ref
+        ].capability_declarations
 
-    # 6. 第六步：发布人按各阶段角色及能力证据评审，拒绝不匹配申请，录取原 Swarm 的全部五个 Bot。
-    # 这里是本地产品评审策略；L5 负责状态机、录取决定及 scoped Participant 的真实写入。
-    requirements = {
-        role_refs[role]: (agent.agent_id, f"evidence://ai-coding/{role}")
-        for role, agent in zip(ROLES, AGENTS)
-    }
+    # 6. 第六步：发布人调用独立评审方法，将申请的能力声明与 Profile 所需能力列表匹配。
+    # 不按 Bot 身份或预指定名单录取；L5 仍负责 G1/G4、决定及 scoped Participant 的真实写入。
+    reviewer = LocalCapabilityAdmissionService()
     for application in applications:
         screened = l5_open_method_operate.screen(
             OpenScreenCommand(application.application_id, OWNER, collet_id)
         )
         assert screened.accepted and screened.state == "SCREENING"
-        [requested_role] = application.requested_role_refs
-        expected_agent, evidence = requirements[requested_role]
-        if (
-                application.applicant_agent_ref == expected_agent
-                and evidence in application.capability_evidence_refs
-        ):
+        if reviewer.should_admit(admission, application):
             admitted = l5_open_method_operate.admit(
-                OpenAdmitCommand(application.application_id, OWNER, collet_id)
+                OpenAdmitCommand(
+                    application.application_id,
+                    OWNER,
+                    collet_id,
+                    reason="能力声明命中所需能力列表",
+                )
             )
             assert admitted.accepted and admitted.state == "ADMITTED"
             profile.composition.require_policy(
@@ -465,11 +475,23 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
                 collet_id,
                 open_binding_id,
                 application.application_id,
-                OpenDecisionOpCommand("阶段角色或能力证据不匹配"),
+                OpenDecisionOpCommand("能力声明未命中所需能力列表"),
                 OWNER,
             )
             assert rejected.accepted and rejected.state == "REJECTED"
+    assert len(reviewer.calls) == CANDIDATE_COUNT
+    assert {a.application_id for _, a in reviewer.calls} == {
+        a.application_id for a in applications
+    }
+    assert all(policy is admission for policy, _ in reviewer.calls)
     applications = storage_service.list_applications(storage_envs, open_binding_id, collet_id)
+    for application in applications:
+        assert application.transitioned_by == OWNER.actor.principal_id
+        assert application.transition_reason == (
+            "能力声明命中所需能力列表"
+            if application.state is ApplicationState.ADMITTED
+            else "能力声明未命中所需能力列表"
+        )
     admitted_by_agent = {
         a.applicant_agent_ref: a
         for a in applications
@@ -537,7 +559,7 @@ def deploy_open_swarm(db):
 class SimulatedApplicantBot:
     agent: AgentRef
     role: str
-    capability_evidence: tuple[str, ...]
+    capability_declarations: tuple[str, ...]
 
     def discover_and_apply(self, open_ops, opportunity_id, requested_role_ref):
         # 测试构造可信认证来源；实际入口必须验证 Bot 身份及 owner，不能从用户 JSON 信任这些字段。
@@ -555,7 +577,8 @@ class SimulatedApplicantBot:
                 opportunity.opportunity_id,
                 actor,
                 self.agent.agent_id,
-                capability_evidence_refs=list(self.capability_evidence),
+                # 本地模拟以能力引用承载自我声明，不声称验证证据内容或真实能力。
+                capability_evidence_refs=list(self.capability_declarations),
                 requested_role_refs=[requested_role_ref],
             )
         )
