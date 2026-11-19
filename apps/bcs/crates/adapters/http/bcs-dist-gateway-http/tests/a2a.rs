@@ -5,7 +5,7 @@
 #[path = "../../../../services/bcs-dist-gateway-store/tests/common/mod.rs"]
 mod common;
 
-use a2a::{Artifact, Message, Part, Role};
+use a2a::{Message, Part, Role};
 use async_trait::async_trait;
 use axum::Router;
 use axum::body::Body;
@@ -81,12 +81,23 @@ fn app_over(gateway: Arc<dyn DistGatewayService>) -> Router {
 }
 
 fn app(p: &Ports) -> Router {
-    let core = DistGatewayCore::new(p.inbox.clone(), p.tasks.clone(), p.sessions.clone(), p.blobs.clone());
+    let core = gateway_core(p);
     let mut config = DistGatewayConfig::new(64);
     config.snapshot_cover_retry = Duration::from_millis(10);
     config.snapshot_cover_limit = Duration::from_millis(300);
     let gateway = DistGateway::new(Arc::new(core), Arc::new(Groups), Arc::new(TestClock), config).unwrap();
     app_over(Arc::new(gateway))
+}
+
+fn gateway_core(p: &Ports) -> DistGatewayCore {
+    let admission = bcs_dist_worker::WorkerTaskAdmission::new(
+        p.inbox.clone(), Arc::new(|| TimestampMillis(common::NOW)),
+    );
+    DistGatewayCore::new(
+        Arc::new(admission), Arc::new(bcs_dist_worker::WorkerOutputReader::new(
+            p.tasks.clone(), p.blobs.clone(), Arc::new(bcs_dist_a2a_output::A2aOutputAdapter),
+        )), p.sessions.clone(),
+    )
 }
 
 fn rpc(method: &str, params: Value) -> Request<Body> {
@@ -180,21 +191,14 @@ async fn read_frames(response: axum::response::Response, count: usize) -> Vec<Fr
 }
 
 fn artifact_event(tid: &str, id: EventId, text: &str) -> OutputEvent {
-    let artifact = Artifact {
-        artifact_id: "a-1".into(),
-        name: None,
-        description: None,
-        parts: vec![Part::text(text)],
-        metadata: None,
-        extensions: None,
-    };
     OutputEvent {
         id,
         tid: Tid(tid.into()),
         body: OutputBody::Artifact {
             node: NodeId("n1".into()),
+            artifact_id: ArtifactId("a-1".into()),
             class: OutputClass::Output,
-            content: Payload::Inline(json!({ "artifact": artifact, "append": true })),
+            update: ArtifactUpdate::AppendText { delta: Payload::Inline(json!(text)) },
         },
     }
 }
@@ -259,6 +263,48 @@ async fn send_get_and_list_return_the_stored_task() {
 }
 
 #[tokio::test]
+async fn neutral_worker_output_reaches_get_task_and_sse_with_matching_ids() {
+    let p = ports();
+    let app = app(&p);
+    let sent = json_of(&app, send("msg-1", "hello", None, None, true)).await;
+    let tid = sent["result"]["task"]["id"].as_str().unwrap().to_owned();
+    let mut task = snapshot(&tid, TaskStatus::Working, Some(eid(1, 1)), common::NOW);
+    task.sid = Sid(tid.rsplit_once('.').unwrap().0.to_owned());
+    task.scope = TaskScope { tenant: TenantId("t-ant".into()), principal: PrincipalId("bot:pa-001".into()) };
+    task.content.snapshot = Payload::Inline(json!({ "format_version": 1, "units": [
+        { "node": "n1", "artifact_id": "a-1", "class": "output", "content": "Hello" },
+        { "node": "n2", "artifact_id": "a-1", "class": "tool", "content": { "answer": 42 } }
+    ] }));
+    p.worker.publish(&task).await;
+    let got = json_of(&app, rpc("GetTask", json!({ "id": tid }))).await;
+    let artifacts = got["result"]["artifacts"].as_array().unwrap();
+    assert_eq!(artifacts[0]["parts"], json!([{ "text": "Hello" }]));
+    assert_eq!(artifacts[1]["parts"], json!([{ "data": { "answer": 42 } }]));
+    assert_ne!(artifacts[0]["artifactId"], artifacts[1]["artifactId"]);
+    assert!(got["result"].get("history").is_none());
+    assert!(got["result"]["status"].get("message").is_none());
+
+    p.worker.append(&artifact_event(&tid, eid(2, 1), " world")).await;
+    let mut replace = artifact_event(&tid, eid(3, 1), "unused");
+    if let OutputBody::Artifact { update, .. } = &mut replace.body {
+        *update = ArtifactUpdate::Upsert { content: Payload::Inline(json!("Replacement")) };
+    }
+    p.worker.append(&replace).await;
+    p.worker.append(&status_event(&tid, eid(4, 1), TaskStatus::InputRequired)).await;
+    let frames = read_frames(app.clone().oneshot(rpc("SubscribeToTask", json!({ "id": tid }))).await.unwrap(), 10).await;
+    assert_eq!(frames.len(), 4, "{frames:?}");
+    assert_eq!(frames[0].data["result"]["task"]["artifacts"], got["result"]["artifacts"]);
+    let append = &frames[1].data["result"]["artifactUpdate"];
+    assert_eq!(append["artifact"]["artifactId"], artifacts[0]["artifactId"]);
+    assert_eq!(append["artifact"]["parts"], json!([{ "text": " world" }]));
+    assert_eq!(append["append"], true);
+    let upsert = &frames[2].data["result"]["artifactUpdate"];
+    assert_eq!(upsert["artifact"]["artifactId"], artifacts[0]["artifactId"]);
+    assert_eq!(upsert["artifact"]["parts"], json!([{ "text": "Replacement" }]));
+    assert_eq!(upsert["append"], false);
+}
+
+#[tokio::test]
 async fn admission_always_writes_wake_while_the_listener_contract_is_stubbed() {
     let p = ports();
     let app = app(&p);
@@ -297,7 +343,7 @@ async fn a_streaming_send_sends_the_task_first_then_events_with_cursor_ids() {
     assert_eq!(frames[0].data["result"]["task"]["id"], tid.as_str());
     assert_eq!(frames[0].data["id"], "r1");
     assert_eq!(frames[1].data["result"]["statusUpdate"]["status"]["state"], "TASK_STATE_WORKING");
-    assert_eq!(frames[2].data["result"]["artifactUpdate"]["artifact"]["artifactId"], "a-1");
+    assert_eq!(frames[2].data["result"]["artifactUpdate"]["artifact"]["artifactId"], "dist:output:2:n1:a-1");
     assert_eq!(frames[2].data["result"]["artifactUpdate"]["append"], true);
     assert_eq!(frames[3].data["result"]["statusUpdate"]["status"]["state"], "TASK_STATE_INPUT_REQUIRED");
 
@@ -469,7 +515,7 @@ async fn protocol_errors_are_reported_as_json_rpc_errors() {
     assert_eq!(error_code(&json_of(&app, broken).await), -32700);
 
     // Without a resolved caller the request is refused.
-    let core = DistGatewayCore::new(p.inbox.clone(), p.tasks.clone(), p.sessions.clone(), p.blobs.clone());
+    let core = gateway_core(&p);
     let gateway = DistGateway::new(Arc::new(core), Arc::new(Groups), Arc::new(TestClock), DistGatewayConfig::new(64)).unwrap();
     let bare = router(Arc::new(gateway), GatewayHttpConfig::new("https://gw.example"));
     let response = bare.oneshot(rpc("GetTask", json!({ "id": "x" }))).await.unwrap();

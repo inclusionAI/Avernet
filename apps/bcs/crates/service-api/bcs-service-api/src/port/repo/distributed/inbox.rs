@@ -30,6 +30,13 @@ pub struct AppendAgentEvent {
 
 #[async_trait]
 pub trait InboxProducerPort: Send + Sync {
+    /// Read the selected immutable request in this authenticated scope. A record
+    /// is not a success receipt: callers must still confirm/repair via admit.
+    /// Unsupported legacy providers fail explicitly rather than pretend absent.
+    async fn lookup(&self, _scope: &TaskScope, _id: &InputId) -> Result<Option<AdmitRequest>, StoreError> {
+        Err(StoreError::Invalid { code: "admission_lookup_unsupported".into() })
+    }
+
     /// Unknown on legacy adapters; full phase-one assembly requires one shared identity.
     fn scan_budget_profile(&self) -> Option<super::budget::ScanBudgetProfile> {
         None

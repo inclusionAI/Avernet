@@ -44,7 +44,8 @@ at the Service API boundary; this crate stores its immutable reference and diges
   rules live in [bcs-dist-projection](../../services/bcs-dist-projection/README.md).
 - `TaskSnapshot.output_limits` freezes the output profile at initial creation;
   checkpoint TaskProgress retains exactly that profile and authoritative usage.
-  Published usage is for that snapshot cut, not a fresh allowance on restore.
+  Published usage is diagnostic for that snapshot cut. Output content has no
+  per-unit, cumulative or full-snapshot byte quota.
   No field defaults to the host's current configuration when a record is read.
 - Each Deadline has a stable occurrence ID, including the snapshot-flush timer.
   Retries and takeover preserve it instead of manufacturing another timeout.

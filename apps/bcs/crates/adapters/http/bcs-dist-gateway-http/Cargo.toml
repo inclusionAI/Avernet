@@ -22,11 +22,14 @@ serde_json      = { workspace = true }
 tracing         = { workspace = true }
 
 [dev-dependencies]
+bcs-dist-projection = { workspace = true }
 async-trait            = { workspace = true }
 bcs-app-dist-gateway   = { workspace = true }
+bcs-dist-a2a-output    = { workspace = true }
 bcs-dist-gateway       = { workspace = true }
 bcs-dist-gateway-store = { workspace = true }
 bcs-dist-store         = { workspace = true }
+bcs-dist-worker        = { workspace = true }
 bcs-domain             = { workspace = true }
 bcs-store-api          = { workspace = true }
 bcs-test-support       = { workspace = true }

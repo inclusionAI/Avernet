@@ -11,6 +11,7 @@ use crate::{DistGateway, scope_of};
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
 use bcs_service_api::core::dist_gateway::*;
+use bcs_service_api::port::dist_output::{FormattedOutputBody, FormattedOutputEvent};
 use futures::StreamExt;
 use tokio::time::{Instant, sleep, timeout_at};
 
@@ -21,12 +22,12 @@ fn is_final(status: TaskStatus) -> bool {
     )
 }
 
-fn event_matches(event: &OutputEvent, until: WaitUntil) -> bool {
+fn event_matches(event: &FormattedOutputEvent, until: WaitUntil) -> bool {
     match (&event.body, until) {
-        (OutputBody::Terminal { .. }, _) => true,
-        (OutputBody::Status { status, .. }, WaitUntil::Final) => is_final(*status),
-        (OutputBody::Status { .. }, WaitUntil::InputOrFinal) => ends_stream(event),
-        (OutputBody::Artifact { .. }, _) => false,
+        (FormattedOutputBody::Terminal { .. }, _) => true,
+        (FormattedOutputBody::Status { status, .. }, WaitUntil::Final) => is_final(*status),
+        (FormattedOutputBody::Status { .. }, WaitUntil::InputOrFinal) => ends_stream(event),
+        (FormattedOutputBody::Artifact { .. }, _) => false,
     }
 }
 

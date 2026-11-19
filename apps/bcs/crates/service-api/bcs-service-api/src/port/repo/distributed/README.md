@@ -42,6 +42,14 @@ guarantee. The API move prescribes neither a new storage layout nor extra runtim
 database calls. Output projection is a separate pure core contract, not another
 storage interface.
 
+[`DistTaskOutputReaderPort`](../../dist_output.rs) is the Worker-side output
+read facade consumed by Gateway. It composes this neutral `TaskReaderPort` with
+immutable Blob reads and the injected pure `DistOutputAdapterPort`. Persisted
+display snapshots and artifact operations remain neutral; formatted JSON and
+`FormattedOutputEvent` are transient read results. Gateway performs no display
+parsing or artifact conversion. See the
+[A2A formatter](../../../../../../adapters/output/bcs-dist-a2a-output/README.md).
+
 ## Admission, identity and queue replacement
 
 Successful `admit` means all required facts are recoverable: immutable session
@@ -124,7 +132,7 @@ is not removed with the ownership placeholder strings.
 Task lifecycle and the pending task queue belong to Worker, independently of the
 opaque Runner state. `Checkpoint.runner_state` is `Option<TaskRunnerState>` and
 binds state to exactly one active tid. The Worker may discard it during independent
-quota finalization and must init fresh state for the next task only after terminal
+structural-limit finalization and must init fresh state for the next task only after terminal
 publication. `TaskProgress` copies frozen output limits from the initial task and
 retains cumulative usage, snapshot publication counters/deadline and finalization.
 The AwaitingResult commit freezes `TaskFinalization.record` and operation identity;
@@ -135,7 +143,7 @@ The same immutable snapshot Ref is reused in draft, published content and archiv
 Show and Artifact events use stable artifact identities and explicit operations.
 Worker and TaskFeed inject the shared
 [`OutputProjectionCoreService`](../../../core/dist_projection.rs); event replay
-does not charge cumulative quota again. The pure implementation documents exact
+does not charge cumulative diagnostic usage again. The pure implementation documents exact
 encoding, limits and recovery in
 [bcs-dist-projection](../../../../../../services/bcs-dist-projection/README.md).
 Whole-Decision validation must reject terminal SetStatus before any effects;
@@ -303,3 +311,17 @@ caller-created completion digest grants recovery rights. See the
 [control provider](../../../../../../services/bcs-dist-store/src/coordination/README.md)
 and [closure provider](../../../../../../services/bcs-dist-store/src/inbox/README.md)
 for retained evidence, IO budgets and validation limits.
+
+## Gateway/Worker integration amendment (2026-11-19)
+
+Gateway delegates stable input to TaskAdmissionCoreService and reads already
+formatted output through DistTaskOutputReaderPort. Worker admission initializes
+tasks, recovers scoped canonical requests, and assists the winner of a first-input
+race. Caller intent and full initialized-request integrity are separate checks.
+Canonical lookup is not durable activation proof. The provider may return
+Accepted/Duplicate; both map to the original successful Gateway receipt.
+
+TaskReaderPort retains neutral display data. WorkerOutputReader resolves it and
+applies an injected format adapter to snapshots and explicit artifact operations.
+Byte quotas for units/cumulative output/full snapshots are absent this phase;
+existing Result/Blob and physical commit framing remain internal.

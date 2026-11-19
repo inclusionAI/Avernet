@@ -67,13 +67,16 @@ async fn references(lose: bool, fail_read: bool) -> References {
     }
 }
 pub(super) fn candidate() -> Checkpoint {
+    candidate_with_text(1_048_574)
+}
+fn candidate_with_text(length: usize) -> Checkpoint {
     let display = DisplaySnapshot {
         format_version: 1,
         units: vec![DisplayUnit {
             node: NodeId("node".into()),
             artifact_id: ArtifactId("answer".into()),
             class: OutputClass::Output,
-            content: serde_json::json!("x".repeat(1_048_574)),
+            content: serde_json::json!("x".repeat(length)),
         }],
     };
     let content = TaskContent {
@@ -154,7 +157,7 @@ pub(super) fn candidate() -> Checkpoint {
 #[tokio::test]
 async fn large_event_and_snapshot_are_durable_refs_before_checkpoint_submission() {
     let refs = references(true, false).await;
-    let mut candidate = candidate();
+    let mut candidate = candidate_with_text(9 * 1024 * 1024);
     complete_externalization(&refs, &mut candidate).await;
     let snapshot = &candidate.view_drafts[&task().tid].snapshot;
     assert!(matches!(snapshot, Payload::Ref(_)));
@@ -177,8 +180,9 @@ async fn large_event_and_snapshot_are_durable_refs_before_checkpoint_submission(
         panic!()
     };
     assert!(matches!(content, Payload::Ref(_)));
-    let resolved = refs.resolve(content, 1_048_576).await.unwrap();
-    assert_eq!(serde_json::to_vec(&resolved).unwrap().len(), 1_048_576);
+    let resolved = refs.resolve_output(content).await.unwrap();
+    assert_eq!(resolved.as_str().unwrap().len(), 9 * 1024 * 1024);
+    assert!(refs.resolve(content, PHASE_ONE_MAX_INPUT_PAYLOAD_BYTES).await.is_err());
     assert!(serde_json::to_vec(batch).unwrap().len() < 196_608);
 }
 

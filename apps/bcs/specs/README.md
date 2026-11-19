@@ -50,3 +50,5 @@ These entries are task-specific records. Inspect their individual status, eviden
 
 - [2026-11-12-bcs-large-file-split](2026-11-12-bcs-large-file-split/)（draft）：[spec](2026-11-12-bcs-large-file-split/spec.md)、[plan](2026-11-12-bcs-large-file-split/plan.md)。
 - [2026-11-13 AgentCard Fuse synchronization (proposed)](2026-11-13-agentcard-fuse-sync/spec.md)
+
+- [Gateway/Worker admission and output integration](2026-11-19-gateway-worker-admission/plan.md): A2A conversion and A03/A04/A05 implementation.

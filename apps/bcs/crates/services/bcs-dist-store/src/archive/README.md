@@ -37,13 +37,17 @@ driver error string. A later caller retry retains the original immutable key.
 
 ## Bounds and database cost
 
-The stable phase-1 format maximum is 8 MiB + 64 KiB for a Blob and 16 MiB +
-64 KiB for a final record. The provider exposes no mutable host size override:
-reads and exact retries retain the same limits across restarts. Task-specific
-output quotas are frozen in TaskSnapshot and validated by the Worker before
-preparing the effect. JSON encoding uses a bounded
-writer, key metadata is at most 1024 bytes, and provenance at most 16 KiB. Reads
-select one primary-key row and use a SQL length guard before returning its bytes.
+The provider imposes no semantic Blob or final-record payload byte quota.
+Key metadata remains at most 1024 bytes and provenance at most 16 KiB. Reads
+select at most one complete primary-key row and verify its digest. Existing
+SQLite BLOB and MySQL LONGBLOB columns remain unchanged; actual database,
+driver, packet and available-memory limits still apply. Read failures propagate
+as storage failures; insert failures retain the existing exact-resolution /
+OutcomeUnknown protocol. No provider success is invented when storage fails.
+
+Removing byte quotas leaves row counts and round trips unchanged, but each
+operation can transfer and allocate more bytes. Host capacity validation must
+account for actual output sizes; no maximum-size throughput claim is made.
 
 | Operation | SQL round trips | Other reads |
 | --- | --- | --- |
@@ -61,14 +65,15 @@ tests do not establish a deployment throughput or latency guarantee.
 
 ## Verification
 
-`cargo +1.94.1 test --manifest-path apps/bcs/Cargo.toml -p bcs-dist-store --test archive --locked --offline`
+`cargo +1.94.0 test --manifest-path apps/bcs/Cargo.toml -p bcs-dist-store --test archive --locked --offline`
 tests real file-backed SQLite with the production provider and a fault-injecting
-driver wrapper. It covers immutable/conflicting writes, maximum-sized bytes,
+driver wrapper. It covers immutable/conflicting writes, bytes and final records
+beyond the former quotas,
 read/write counts, persisted effect authorization, scope/namespace separation,
 dangling references, lost replies, absent-row unknown results, concurrency,
 provider restart and opening another database connection pool.
 
-`cargo +1.94.1 test --manifest-path apps/bcs/Cargo.toml -p bcs-db-migrations --locked --offline`
+`cargo +1.94.0 test --manifest-path apps/bcs/Cargo.toml -p bcs-db-migrations --locked --offline`
 checks the complete SQLite chain, retained history and rows, repeatability,
 unique identities and static MySQL migration shape. Static checks do not claim
 real MySQL/OceanBase acceptance; that host validation is separately deferred.

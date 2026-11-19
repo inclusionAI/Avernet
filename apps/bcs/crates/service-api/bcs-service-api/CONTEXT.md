@@ -1,5 +1,15 @@
 # bcs-service-api Context
 
+## Distributed output reads
+
+`port::dist_output` owns the pure `DistOutputAdapterPort`, Worker-side
+`DistTaskOutputReaderPort` and transient formatted event envelopes. These use
+neutral model/JSON types and import no A2A DTOs. TaskFeed persistence continues
+to use neutral display snapshots and artifact operations. The Gateway core and
+application expose the facade's formatted results to delivery adapters, which
+retain their protocol envelopes. Centralized harnesses cover both output ports;
+the A2A adapter and Worker facade call those harnesses from conformance tests.
+
 ## Managed admission target failures
 
 `DeliveryAdmissionRejection::TargetUnavailable` records a recipient's failed
@@ -14,15 +24,35 @@ remain readable, and no schema, Plugin API or endpoint change is needed. See
 the [admission contract](src/port/repo/message_delivery.rs) and
 [message-flow boundary](../../services/bcs-message-flow/CONTEXT.md#queued-group-target-failure-isolation).
 
+## Distributed Gateway/Worker integration amendment
+
+TaskAdmissionCoreService consumes a stable caller command; Gateway no longer
+supplies initial TaskSnapshot or output policy/version. Worker admission uses
+InboxProducerPort::lookup to retrieve scoped canonical content, checks caller
+intent, and confirms/repairs that original through admit, including first-request
+races. Lookup is not success proof. Accepted/Duplicate remain provider details;
+CoreAdmission exposes one successful receipt. This supersedes the original
+Accepted-only assumption documented below for this opt-in Worker composition.
+
+DistOutputAdapterPort formats neutral snapshots and stable artifact operations.
+DistTaskOutputReaderPort exposes converted views/events. WorkerOutputReader resolves
+content and invokes an injected formatter; Gateway forwards output with its A2A
+envelope. No A2A types enter the Worker or storage model. Byte quotas for units,
+cumulative output and complete snapshots are removed; physical frames remain.
+
+Propagation: Gateway app/core, Worker admission/output, Inbox/TaskFeed, harnesses
+and explicit Singlebox test assembly rebuild together. These unpublished metadata
+shapes require a fresh distributed namespace; automatic prototype migration is not
+provided. Existing non-distributed A2A registration and endpoints are unchanged.
+
 ## Version 7.0.0: One admission success and Gateway waiting
 
 Breaking for the unpublished distributed declarations only; no existing
 runtime, wire endpoint or stored record changes.
 
-- `AdmitOutcome::Duplicate` is removed. An input already admitted with the same
-  digest is `Accepted`: the admission record may be written by a retry or by a
-  compensating writer, so the writer cannot and need not be told apart.
-  `CoreAdmission` becomes a struct holding the receipt.
+- The original Gateway-only design collapsed provider admission outcomes. The
+  integrated Worker provider retains `Accepted` and `Duplicate`; both map to the
+  same `CoreAdmission` receipt, with no difference in HTTP success behavior.
 - `GatewayError::NotCancelable` reports a cancel of a finished task.
 - `DistGatewayService::wait_task` (`WaitTask`, `WaitUntil`) waits until a task
   needs input or is finished and the stored view covers that event, and
@@ -33,16 +63,17 @@ runtime, wire endpoint or stored record changes.
   `CancelTask` and `ListTasks` carry it; another group is answered as
   NotFound. `DistGatewayCoreService::session_group` reads the frozen group.
 
-Consumers matching `Duplicate` or implementing `DistGatewayService` must be
-updated; workspace path consumers rebuild together.
+Consumers implementing `DistGatewayService`, `TaskAdmissionCoreService` or the
+formatted output ports rebuild together with the explicit Worker composition.
 
 ## Version 6.1.0: Distributed coordination contracts
 
 The phase-one refinement adds the pure
 [`OutputProjectionCoreService`](src/core/dist_projection.rs), stable artifact
-operations and frozen task output profiles. Candidate projection charges only
-newly committed output; read-side folding applies the same transform and safety
-checks without charging again. The implementation is
+operations and frozen internal physical output profiles. Candidate projection
+counts diagnostic usage only for newly committed output; read-side folding applies
+the same transform and structural checks without charging again. No output-body
+byte quota applies in this phase. The implementation is
 [bcs-dist-projection](../../services/bcs-dist-projection/README.md).
 Checkpoint Runner state is optional and bound to one task; finalization retains
 the frozen archive record and terminal publication progress independently of it.

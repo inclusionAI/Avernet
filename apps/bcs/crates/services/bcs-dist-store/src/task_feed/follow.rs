@@ -2,8 +2,8 @@ use super::*;
 use futures::{StreamExt, stream::BoxStream};
 use storage::bounded_bytes;
 
-// A resolved unit may use the entire 1 MiB output allowance. The extra 64 KiB
-// bounds its event/cursor envelope; native stream pages retain their 1 MiB cap.
+// Keep resolved batches small when possible. A single larger output is delivered
+// alone; native stream pages still retain their physical byte cap.
 const DELIVERY_BYTES: usize = 1024 * 1024 + 64 * 1024;
 struct FollowState {
     store: StoreTaskFeed,
@@ -115,11 +115,15 @@ impl StoreTaskFeed {
                     let id = event.id;
                     if event.tid == cursor.tid {
                         self.resolve_follow_event(task, &mut event).await?;
-                        let size = bounded_bytes(&event, DELIVERY_BYTES - 4096)?.len();
-                        if size > (DELIVERY_BYTES - 4096).saturating_sub(bytes) {
+                        let size = bounded_bytes(&event, DELIVERY_BYTES - 4096)
+                            .ok()
+                            .map(|encoded| encoded.len());
+                        if !items.is_empty()
+                            && size.is_none_or(|size| size > (DELIVERY_BYTES - 4096).saturating_sub(bytes))
+                        {
                             break;
                         }
-                        bytes += size;
+                        bytes = bytes.saturating_add(size.unwrap_or(DELIVERY_BYTES));
                         items.push(event);
                     }
                     scanned = Some(id);
@@ -146,7 +150,7 @@ impl StoreTaskFeed {
                     ArtifactUpdate::AppendText { delta } => delta,
                 };
                 let value = self
-                    .payload(payload, task.output_limits.max_unit_bytes as usize)
+                    .payload(payload)
                     .await?;
                 *payload = Payload::Inline(value);
             }

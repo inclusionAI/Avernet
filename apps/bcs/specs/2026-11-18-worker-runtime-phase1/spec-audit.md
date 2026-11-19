@@ -1,5 +1,10 @@
 # PR #4144 原始 SPEC 逐条核对
 
+Historical evidence: output byte quotas and original Gateway assumptions below
+are superseded for the current integration by the [2026-11-19 amendment](../2026-11-19-gateway-worker-admission/verification.md). Historical results remain
+bound to their recorded heads; they do not certify the new head.
+
+
 本稿用于复审定位，不是全部验收完成声明。基线固定为 Avernet `8811efbc9751004747451d00c5ea1e6a30a6b224` 中 `apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md`，即 #4144 原文；没有用实施分支后来修改的 SPEC 替换要求。原始三个审计分片检查的实现为 `657e324b1184bad5b5d15e72cb1a1c6c1198b5a2`；本稿另行纳入随后 rebase 后的启动容量和连接池压力补丁及其验证。随后生命周期新增五个target的13项公共组合测试（四target12项并集+quota1项）通过，SPEC/质量审查与五target严格Clippy通过；质量修正后的snapshot race另行1/1通过。第三轮真实PROXY指定控制/输出/监督场景通过，不将其外推为13项全部L3。
 
 截至本稿快照：主要生产逻辑、确定性故障测试和指定的真实 PROXY 组合已存在；启动最大候选证明、实际 provider 封装预算契约、大 AppendText 外置回归和持续连接池压力准入已补齐。G1–G5公共模型主链与quota精确场景均已补并审查通过。第三轮真实PROXY正常回复/重复、70000字节AppendText、独立Cancel、实际SendingUnknown监督回合及晚到确定证据消费通过，取得该场景真实命令/字节观测并清理64个owned keys。没有将全部模型故障断点升级为L3。Singlebox opt-in内存Store+SQLite最终12个instrumented实际进程场景通过，独立SPEC/质量审查通过；按仓库原工具与同ignore配置从merge-base测得changed-line9118/11983=76.091129%，超过未修改的65%门槛。发布候选 `decdab6ea7` 的完整远端 CI 已通过；后续 Review 增量以其自身 PR head 检查为准。OB 实例验证继续 defer。

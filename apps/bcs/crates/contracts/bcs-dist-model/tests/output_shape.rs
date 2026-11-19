@@ -29,7 +29,7 @@ fn frozen_limits_do_not_default_missing_fields_from_current_configuration()
     );
     wire.as_object_mut()
         .ok_or_else(|| serde_json::Error::io(std::io::Error::other("fixture")))?
-        .remove("max_total_output_bytes");
+        .remove("max_actions");
     assert!(serde_json::from_value::<OutputLimits>(wire).is_err());
     Ok(())
 }

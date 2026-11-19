@@ -147,63 +147,6 @@ fn thinking_is_ephemeral_and_never_consumes_persistent_quota() {
     assert_eq!(result.display_events, 1);
 }
 
-#[test]
-fn cumulative_snapshot_and_unit_budgets_are_independent() {
-    let mut limits = PHASE_ONE_OUTPUT_LIMITS;
-    limits.max_unit_bytes = 8;
-    limits.inline_threshold_bytes = 8;
-    limits.max_total_output_bytes = 10;
-    let first = OutputProjectionService
-        .project_candidate(
-            &empty(),
-            OutputUsage::default(),
-            &[upsert("a", json!("1234"))],
-            &limits,
-        )
-        .unwrap();
-    assert_eq!(
-        OutputProjectionService.project_candidate(
-            &first.snapshot,
-            first.usage,
-            &[upsert("a", json!("1234"))],
-            &limits
-        ),
-        Err(ProjectionError::OutputQuotaExceeded {
-            budget: OutputBudget::CumulativeBytes
-        })
-    );
-    assert_eq!(
-        OutputProjectionService.project_candidate(
-            &empty(),
-            OutputUsage::default(),
-            &[upsert("a", json!("1234567"))],
-            &limits
-        ),
-        Err(ProjectionError::OutputQuotaExceeded {
-            budget: OutputBudget::UnitBytes
-        })
-    );
-    let mut tiny_snapshot = PHASE_ONE_OUTPUT_LIMITS;
-    tiny_snapshot.max_snapshot_bytes = serde_json::to_vec(&empty()).unwrap().len() as u32 + 5;
-    assert_eq!(
-        OutputProjectionService.project_candidate(
-            &empty(),
-            OutputUsage::default(),
-            &[upsert("a", json!(0))],
-            &tiny_snapshot
-        ),
-        Err(ProjectionError::OutputQuotaExceeded {
-            budget: OutputBudget::SnapshotBytes
-        })
-    );
-    // Restore still enforces the unit limit rather than using an unlimited mode.
-    assert_eq!(
-        OutputProjectionService.fold_committed(&empty(), &[upsert("a", json!("1234567"))], &limits),
-        Err(ProjectionError::OutputQuotaExceeded {
-            budget: OutputBudget::UnitBytes
-        })
-    );
-}
 
 #[test]
 fn unresolved_refs_unknown_formats_and_duplicate_persisted_identity_are_rejected() {
@@ -241,71 +184,10 @@ fn unresolved_refs_unknown_formats_and_duplicate_persisted_identity_are_rejected
     );
 }
 
-#[test]
-fn encoded_snapshot_limit_includes_escaped_identity_and_order_metadata() {
-    let mut change = upsert("artifact/\"/中", json!("\"\\\n"));
-    change.node = NodeId("node/尾".into());
-    let expected = project(&[change.clone()]);
-    let bytes = serde_json::to_vec(&expected.snapshot).unwrap().len() as u32;
-    let mut limits = PHASE_ONE_OUTPUT_LIMITS;
-    limits.max_snapshot_bytes = bytes;
-    assert_eq!(
-        OutputProjectionService
-            .project_candidate(&empty(), OutputUsage::default(), &[change.clone()], &limits)
-            .unwrap(),
-        expected
-    );
-    limits.max_snapshot_bytes -= 1;
-    assert_eq!(
-        OutputProjectionService.project_candidate(
-            &empty(),
-            OutputUsage::default(),
-            &[change],
-            &limits
-        ),
-        Err(ProjectionError::OutputQuotaExceeded {
-            budget: OutputBudget::SnapshotBytes
-        })
-    );
-}
+
 
 #[test]
-fn append_and_replace_size_deltas_match_independent_full_json_encoding() {
-    let mut state = project(&[
-        upsert("a", json!("原始")),
-        upsert("b", json!({"removed":[1,2,3]})),
-    ]);
-    for change in [
-        append("a", "\"\\\n尾"),
-        upsert("b", json!([])),
-        append("a", "🙂"),
-    ] {
-        let expected = OutputProjectionService
-            .project_candidate(
-                &state.snapshot,
-                state.usage,
-                std::slice::from_ref(&change),
-                &PHASE_ONE_OUTPUT_LIMITS,
-            )
-            .unwrap();
-        let mut limits = PHASE_ONE_OUTPUT_LIMITS;
-        limits.max_snapshot_bytes = serde_json::to_vec(&expected.snapshot)
-            .unwrap()
-            .len()
-            .max(serde_json::to_vec(&state.snapshot).unwrap().len())
-            as u32;
-        assert_eq!(
-            OutputProjectionService
-                .project_candidate(&state.snapshot, state.usage, &[change], &limits)
-                .unwrap(),
-            expected
-        );
-        state = expected;
-    }
-}
-
-#[test]
-fn count_identity_and_current_unit_bounds_cannot_be_bypassed_by_small_payloads() {
+fn count_and_identity_bounds_cannot_be_bypassed_by_small_payloads() {
     let mut limits = PHASE_ONE_OUTPUT_LIMITS;
     limits.max_actions = 1;
     assert_eq!(
@@ -347,34 +229,12 @@ fn count_identity_and_current_unit_bounds_cannot_be_bypassed_by_small_payloads()
             budget: OutputBudget::IdentityBytes
         })
     );
-    limits.max_unit_bytes = 8;
-    limits.inline_threshold_bytes = 8;
-    assert_eq!(
-        OutputProjectionService.fold_committed(
-            &empty(),
-            &[append("a", "1234"), append("a", "567")],
-            &limits
-        ),
-        Err(ProjectionError::OutputQuotaExceeded {
-            budget: OutputBudget::UnitBytes
-        })
-    );
+
 }
 
 #[test]
 fn malformed_existing_state_and_invalid_profiles_are_not_quota_failures() {
     let current = project(&[upsert("a", json!("content"))]).snapshot;
-    assert_eq!(
-        OutputProjectionService.project_candidate(
-            &current,
-            OutputUsage::default(),
-            &[],
-            &PHASE_ONE_OUTPUT_LIMITS
-        ),
-        Err(ProjectionError::InvalidSnapshot {
-            code: "usage_below_display"
-        })
-    );
     let mut invalid = current.clone();
     invalid.units[0].class = OutputClass::Thinking;
     assert_eq!(
@@ -387,8 +247,8 @@ fn malformed_existing_state_and_invalid_profiles_are_not_quota_failures() {
         match limits.0 {
             0 => limits.1.max_actions = 0,
             1 => limits.1.outbox_finalization_reserve = 1,
-            2 => limits.1.max_total_output_bytes = u64::MAX,
-            _ => limits.1.max_snapshot_bytes = 1,
+            2 => limits.1.inline_threshold_bytes = u32::MAX,
+            _ => limits.1.max_identity_bytes = 0,
         }
         assert!(matches!(
             OutputProjectionService.validate_limits(&limits.1),
@@ -424,54 +284,15 @@ fn task_frozen_limits_are_checked_independently_of_current_host_configuration() 
         OutputProjectionService.validate_task_limits(&task, &PHASE_ONE_OUTPUT_LIMITS),
         Ok(())
     );
-    task.output_limits.max_total_output_bytes /= 2;
+    task.output_limits.inline_threshold_bytes /= 2;
     assert_eq!(
         OutputProjectionService.validate_task_limits(&task, &PHASE_ONE_OUTPUT_LIMITS),
         Err(ProjectionError::FrozenLimitsChanged)
     );
     task.output_limits = PHASE_ONE_OUTPUT_LIMITS;
-    task.output_usage.cumulative_bytes = PHASE_ONE_OUTPUT_LIMITS.max_total_output_bytes + 1;
+    task.output_usage.cumulative_bytes = u64::MAX;
     assert_eq!(
         OutputProjectionService.validate_task_limits(&task, &PHASE_ONE_OUTPUT_LIMITS),
-        Err(ProjectionError::InvalidSnapshot {
-            code: "usage_exceeds_frozen_limit"
-        })
-    );
-}
-
-#[test]
-fn maximum_legal_units_remain_bounded_and_snapshot_overhead_can_exhaust_first() {
-    let text = "x".repeat(PHASE_ONE_OUTPUT_LIMITS.max_unit_bytes as usize - 2);
-    let changes = (0..7)
-        .map(|i| upsert(&format!("artifact-{i}"), json!(text)))
-        .collect::<Vec<_>>();
-    let result = project(&changes);
-    assert_eq!(
-        result.usage.cumulative_bytes,
-        u64::from(PHASE_ONE_OUTPUT_LIMITS.max_unit_bytes) * 7
-    );
-    assert_eq!(result.snapshot.units.len(), 7);
-    assert_eq!(
-        OutputProjectionService.project_candidate(
-            &result.snapshot,
-            result.usage,
-            &[upsert("eighth", json!(text))],
-            &PHASE_ONE_OUTPUT_LIMITS
-        ),
-        Err(ProjectionError::OutputQuotaExceeded {
-            budget: OutputBudget::SnapshotBytes
-        })
-    );
-    let oversized = "x".repeat(PHASE_ONE_OUTPUT_LIMITS.max_unit_bytes as usize - 1);
-    assert_eq!(
-        OutputProjectionService.project_candidate(
-            &empty(),
-            OutputUsage::default(),
-            &[upsert("too-large", json!(oversized))],
-            &PHASE_ONE_OUTPUT_LIMITS
-        ),
-        Err(ProjectionError::OutputQuotaExceeded {
-            budget: OutputBudget::UnitBytes
-        })
+        Ok(())
     );
 }

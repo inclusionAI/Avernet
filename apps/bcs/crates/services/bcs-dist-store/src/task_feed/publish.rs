@@ -26,7 +26,7 @@ impl StoreTaskFeed {
                     ArtifactUpdate::AppendText { delta } => (delta, true),
                 };
                 let value = self
-                    .payload(payload, task.output_limits.max_unit_bytes as usize)
+                    .payload(payload)
                     .await?;
                 if text && !value.is_string() {
                     return Err(invalid("append_text_type"));
@@ -67,9 +67,7 @@ impl StoreTaskFeed {
             .io(self.stores.blobs.get(reference))
             .await?
             .ok_or_else(|| unavailable("terminal_archive_blob_missing"))?;
-        if bytes.len() > crate::archive::MAX_RECORD_BYTES
-            || crate::archive::blob_reference(&reference.key, &bytes).digest != reference.digest
-        {
+        if crate::archive::blob_reference(&reference.key, &bytes).digest != reference.digest {
             return Err(invalid("terminal_archive_digest"));
         }
         let referenced: FinalTaskRecord =

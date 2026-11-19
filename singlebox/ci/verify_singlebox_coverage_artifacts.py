@@ -218,6 +218,9 @@ def validate_worker_e2e(reports_dir: Path, errors: list[str]) -> None:
     if report.get("archive") != "sqlite":
         errors.append("BCS Worker E2E did not use the existing SQLite archive")
     required = {
+        "gateway_http_retry_conflict_once",
+        "gateway_http_concurrent_first_request",
+        "gateway_http_sse_get_task_consistency",
         "document_projection_atomic_patch_and_unknown",
         "finish_archive_restore_and_late_cancel", "append_archive_restore_and_late_cancel",
         "cancel_independent_of_runner", "quarantine_and_control_authorization",

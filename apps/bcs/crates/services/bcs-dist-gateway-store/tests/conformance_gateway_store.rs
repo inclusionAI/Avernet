@@ -48,6 +48,7 @@ async fn conformance_store_task_reader() {
 async fn conformance_gateway_session_store_spec_read() {
     let p = ports();
     let request = AdmitRequest {
+        scope: scope(),
         input: envelope(TID, "in-1", user_body("hello")),
         create_session: Some(session_spec(SID, scope())),
         create_task: Some(snapshot(TID, TaskStatus::Submitted, None, NOW)),

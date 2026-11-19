@@ -218,7 +218,7 @@ async fn snapshot_waits_for_complete_append_and_cannot_change_frozen_limits() {
     );
     let mut changed = publish.snapshot;
     changed.source_commit = CommitSeq(2);
-    changed.output_limits.max_unit_bytes /= 2;
+    changed.output_limits.inline_threshold_bytes /= 2;
     let sources = f
         .commit(
             2,
@@ -880,7 +880,7 @@ async fn trim_definite_later_failures_are_unknown_after_durable_progress() {
 }
 
 #[tokio::test]
-async fn referenced_json_uses_the_same_resolved_encoding_budget_as_inline() {
+async fn referenced_json_can_expand_beyond_the_former_unit_byte_quota() {
     use bcs_service_api::port::repo::distributed::result::BlobStorePort;
     let f = Fixture::new().await;
     // The parser expands these short numbers in the public compact encoding.
@@ -900,8 +900,31 @@ async fn referenced_json_uses_the_same_resolved_encoding_budget_as_inline() {
         };
     }
     let request = f.append_request(1, None, vec![event]).await;
-    assert!(matches!(
-        f.feed.append(request).await,
-        Err(bcs_service_api::port::repo::distributed::common::StoreError::Invalid { .. })
-    ));
+    assert_eq!(f.feed.append(request).await.unwrap(), AppendOutcome::Appended);
+    let Some(RestoredTask::Live { view, .. }) = f.feed.restore(&scope(), &Tid(TID.into())).await.unwrap() else {
+        panic!("live")
+    };
+    assert_eq!(display(&view).units[0].content, value);
+}
+
+#[tokio::test]
+async fn follow_and_restore_deliver_a_unit_larger_than_the_former_output_quotas() {
+    let f = Fixture::new().await;
+    let length = 9 * 1024 * 1024;
+    let cursor = append_referenced(&f, 1, length).await;
+    let mut follow = f.feed.follow(scope(), cursor);
+    let FollowItem::Events { items, next } = follow.next().await.unwrap().unwrap() else {
+        panic!("events")
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, event_id(1, 1));
+    let OutputBody::Artifact { update: ArtifactUpdate::Upsert { content: Payload::Inline(value) }, .. } = &items[0].body else {
+        panic!("resolved output")
+    };
+    assert_eq!(value.as_str().unwrap().len(), length);
+    assert_eq!(f.feed.validate_resume(&scope(), &next).await.unwrap(), ResumeCheck::Valid);
+    let Some(RestoredTask::Live { view, .. }) = f.feed.restore(&scope(), &Tid(TID.into())).await.unwrap() else {
+        panic!("live")
+    };
+    assert_eq!(display(&view).units[0].content.as_str().unwrap().len(), length);
 }

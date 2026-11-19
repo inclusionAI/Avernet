@@ -27,7 +27,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Wall clock for creation times; injected so tests are deterministic.
+/// Legacy application clock. Task initialization uses the Worker admission clock.
 pub trait Clock: Send + Sync {
     fn now(&self) -> TimestampMillis;
 }
@@ -74,7 +74,6 @@ impl DistGatewayConfig {
 pub struct DistGateway {
     core: Arc<dyn DistGatewayCoreService>,
     groups: Arc<dyn DistGroupDirectoryPort>,
-    clock: Arc<dyn Clock>,
     config: DistGatewayConfig,
 }
 
@@ -83,7 +82,7 @@ impl DistGateway {
     pub fn new(
         core: Arc<dyn DistGatewayCoreService>,
         groups: Arc<dyn DistGroupDirectoryPort>,
-        clock: Arc<dyn Clock>,
+        _clock: Arc<dyn Clock>,
         config: DistGatewayConfig,
     ) -> Result<Self, GatewayError> {
         if config.shard_count == 0 {
@@ -92,7 +91,6 @@ impl DistGateway {
         Ok(Self {
             core,
             groups,
-            clock,
             config,
         })
     }
