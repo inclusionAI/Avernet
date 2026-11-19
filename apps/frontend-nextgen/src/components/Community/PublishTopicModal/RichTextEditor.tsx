@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { DOMSerializer } from '@tiptap/pm/model';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -119,22 +120,27 @@ export function RichTextEditor({
             </option>
           ))}
         </select>
-        {controls.map(({ label, mark, Icon, click }) => (
-          <Button
-            key={label}
-            variant="ghost"
-            size="icon"
-            aria-label={label}
-            title={label}
-            aria-pressed={mark ? editor.isActive(mark) : undefined}
-            className="aria-pressed:bg-muted aria-pressed:text-primary"
-            disabled={disabled}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={click}
-          >
-            <Icon className="size-4" aria-hidden />
-          </Button>
-        ))}
+        <TooltipProvider delayDuration={200}>
+          {controls.map(({ label, mark, Icon, click }) => (
+            <Tooltip key={label}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={label}
+                  aria-pressed={mark ? editor.isActive(mark) : undefined}
+                  className="aria-pressed:bg-muted aria-pressed:text-primary"
+                  disabled={disabled}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={click}
+                >
+                  <Icon className="size-4" aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{label}</TooltipContent>
+            </Tooltip>
+          ))}
+        </TooltipProvider>
       </div>
       {link !== null && (
         <div className="flex flex-wrap items-center gap-2 border-b p-2">

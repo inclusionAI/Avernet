@@ -1,6 +1,7 @@
 import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Switch } from '@/components/ui/Switch';
@@ -16,9 +17,16 @@ function BotRow({ row, onToggle }: { row: BotBrowseRow; onToggle: (on: boolean) 
       <div className="flex min-w-0 items-center gap-2">
         <BotDisplayAvatar botId={row.botId} name={row.botName} avatarUrl={row.avatarUrl} size={32} />
         <div className="flex min-w-0 items-center gap-1">
-          <span className="truncate text-[13px] font-medium leading-[18px] text-foreground" title={row.botName}>
-            {row.botName}
-          </span>
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="truncate text-[13px] font-medium leading-[18px] text-foreground">
+                  {row.botName}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{row.botName}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {engineLabel ? (
             <Badge tone="outline" className="h-[18px] shrink-0 rounded px-2 py-0 text-xs font-normal leading-4 text-muted-foreground">
               {engineLabel}

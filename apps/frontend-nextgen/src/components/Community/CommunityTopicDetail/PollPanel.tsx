@@ -51,22 +51,22 @@ export function PollPanel({ topicType, status, poll, pollStats, viewer, onPick }
                 <li key={index}>
                   <Row
                     onClick={Row === 'button' ? () => onPick?.(index) : undefined}
-                    className="community-poll__row text-sm"
+                    className="community-poll-row text-sm"
                     data-state={ended ? 'closed' : selected ? 'selected' : results ? 'voted' : 'initial'}
                   >
                     {results && stat && (
                       <span
                         aria-hidden
-                        className="community-poll__fill"
+                        className="community-poll-fill"
                         style={{ width: `${Math.max(0, Math.min(100, stat.percent))}%` }}
                       />
                     )}
-                    <span className="community-poll__letter relative inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs">
+                    <span className="community-poll-letter relative inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs">
                       {String.fromCharCode(65 + index)}
                     </span>
                     <span className="relative min-w-0 flex-1 break-words">{label}</span>
                     {results && (
-                      <span className="community-poll__result relative shrink-0 text-xs text-muted-foreground">
+                      <span className="community-poll-result relative shrink-0 text-xs text-muted-foreground">
                         {stat ? `${stat.votes}票 · ${stat.percent}%` : '—'}
                       </span>
                     )}
