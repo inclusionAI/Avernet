@@ -138,14 +138,26 @@ OTHER_AGENTS = (
 )
 CANDIDATE_COUNT = len(AGENTS) + len(OTHER_AGENTS)
 
+"""
+协议适配问题总结：
+- 语义不明
+  - [ ] Collet语义明确性问题：这份 ACCS 协议没有给出 Collet 的完整成员变量定义
+  - [ ] open模式下，任务执行到底是在录取之后，还是在录取之前，协议没有明确说明，还是说都可以？
+  - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义
+  - [ ] 任务如何推进的语义不明确：现在只有Workflow的时候建议通过Advance操作族推进，没有workflow的时候没有说明
+- 能力缺少
+  - [ ] open模式下，协议中的DataModel只有机会发布、参与申请、决策结果这三个，缺少录取判断策略（谁来做录取判断、怎么判断）
+- 问题  
+  - [ ] open方法中的参与类型，协议中的枚举不在一个维度：participation_type: COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | SINGLE_CONTRIBUTION
+"""
 
 def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
-    # 1、发布一个代办任务
+    # 1、发布一个代办任务 （L5层OPEN + SWARM组合）
     (profile, injector, l4_context_service, l5_open_method_operate, storage_service, storage_envs,
      collet_id, open_binding_id, swarm_binding_id, role_refs, participants) \
         = publish_todo_task(deploy_open_swarm, tmp_path)
 
-    # 3. 公开招募多个Coding Agents
+    # 3. 公开招募多个Coding Agents (执行OPEN方法)
     recruit_multi_coding_agents(injector, l5_open_method_operate, storage_service, storage_envs, profile,
                                 collet_id, role_refs, open_binding_id, swarm_binding_id)
 
@@ -160,10 +172,10 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         OWNER,
     )
 
-    # 5. 招募到agents之后，开始写作进行AiCoding（执行swarm方法：规划-划分stage和task-分派执行）
+    # 5. 招募到agents之后，开始写作进行AiCoding（执行SWARM方法：规划-划分stage和task-分派执行）
     stages = swarm_run(injector, collet_id)
 
-    # 6. 任务完成之后，校验产物
+    # 6. 任务完成之后，校验每个阶段、每个Task的产物
     judge_artifacts(injector, storage_service, storage_envs, stages, collet_id, swarm_binding_id)
 
 
