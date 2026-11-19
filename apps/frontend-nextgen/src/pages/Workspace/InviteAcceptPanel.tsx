@@ -2,11 +2,11 @@ import { MessageViewScopeField } from '@/components/MessageViewScope';
 import { Button, Empty, Spin } from '@/components/ui';
 import { DEFAULT_MESSAGE_VIEW_SCOPE } from '@/domain/collaboration/messageViewScope';
 import type { MessageViewScope } from '@/domain/collaboration/types';
-import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
+import { buildInvitationDestination } from '@/domain/invitationRoute';
 import { useInviteAccept } from '@/pages/Workspace/hooks/useInviteAccept';
 import { Sparkles } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
@@ -16,10 +16,11 @@ import { Tracert } from '@/utils/tracert';
  *
  * Action 全部经 `useInviteAccept` 下发（mount 时校验 token、`accept()` 提交接受）；
  * 组件不直接 import `invitationService`，保持组件层级约束。
- * 已加入 / 成功加入后跳转到 `/workspace/collaboration[?group=#groupId]`。
+ * 已加入 / 成功加入后按邀请链接的展示选项跳转到协作区。
  */
 export function InviteAcceptPanel() {
   const params = useParams<{ token?: string; type?: string }>();
+  const { search } = useLocation();
   const navigate = useNavigate();
   const token = params.token ?? '';
   // 邀请类型来自路径段：/workspace/invite/groups/:token | /workspace/invite/sessions/:token
@@ -40,25 +41,14 @@ export function InviteAcceptPanel() {
   useEffect(() => {
     if (status !== 'accepted' || navigatedToken.current === token || !currentIdentityId) return;
     navigatedToken.current = token;
-    if (targetType === 'group' && targetId) {
-      toast.info(alreadyJoined ? '已加入该协作群' : '已加入协作群');
-      navigate(`/workspace/collaboration?${serializeWorkspaceRoute({ currentIdentityId, groupId: targetId })}`, { replace: true });
-      return;
+    if (targetType && targetId) {
+      const name = targetType === 'group' ? '协作群' : '会话';
+      toast.info(`已加入${alreadyJoined ? '该' : ''}${name}`);
+    } else {
+      toast.info(alreadyJoined ? '已加入该协作邀请' : '已加入协作邀请');
     }
-    if (targetType === 'session' && targetId) {
-      toast.info(alreadyJoined ? '已加入该会话' : '已加入会话');
-      navigate(`/workspace/collaboration?${serializeWorkspaceRoute({ currentIdentityId, groupId, sessionId: targetId })}`, { replace: true });
-      return;
-    }
-    if (alreadyJoined) {
-      toast.info('已加入该协作邀请');
-      navigate('/workspace/collaboration', { replace: true });
-      return;
-    }
-    // session 目标但暂未解析到所属群，或 409 无 target 信息：回到协作群列表。
-    toast.info('已加入协作邀请');
-    navigate('/workspace/collaboration', { replace: true });
-  }, [status, alreadyJoined, currentIdentityId, groupId, navigate, targetId, targetType, token]);
+    navigate(buildInvitationDestination(search, { currentIdentityId, groupId, targetId, targetType }), { replace: true });
+  }, [status, alreadyJoined, currentIdentityId, groupId, navigate, search, targetId, targetType, token]);
 
   if (status === 'loading') {
     return (
