@@ -115,9 +115,17 @@ def test_labels_replace_omission_preserves_and_empty_clears(setup):
     assert client.get(PATH).json()["card"]["description"] == "updated"
 
 
-@pytest.mark.parametrize("replacement", [None, {"topic": ["final"]}, {}])
+@pytest.mark.parametrize(
+    ("replacement", "label_updates"),
+    [
+        (None, None),
+        ({"topic": ["final"]}, None),
+        ({}, None),
+        (None, {"visibility": ["private"]}),
+    ],
+)
 def test_labels_retry_preserves_omitted_labels_or_replaces_complete_map(
-    setup, monkeypatch, replacement
+    setup, monkeypatch, replacement, label_updates
 ):
     repo, _ = setup
     repo.upsert("one", {"name": "old"}, None, {}, labels={"topic": ["old"]})
@@ -138,9 +146,19 @@ def test_labels_retry_preserves_omitted_labels_or_replaces_complete_map(
         return original(card, revision, **kwargs)
 
     monkeypatch.setattr(repo, "save", competing_save)
-    saved = repo.upsert("one", {"name": "updated"}, None, {}, labels=replacement)
+    saved = repo.upsert(
+        "one",
+        {"name": "updated"},
+        None,
+        {},
+        labels=replacement,
+        label_updates=label_updates,
+    )
     assert saved.card.labels == (
-        {"department": ["new"]} if replacement is None else replacement
+        {
+            **({"department": ["new"]} if replacement is None else replacement),
+            **(label_updates or {}),
+        }
     )
     assert saved.card.source_card == {"name": "updated", "description": "concurrent"}
 
