@@ -59,10 +59,9 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
         {
             return Err(Error::NotSent);
         }
-        // Shape-only guards. Expiry values (run budget, proof/context lifetimes)
-        // are advisory wire facts and are NEVER compared to the clock — a
-        // redrive that outlives an advisory must still ship (2026-10-25
-        // incident follow-up: identity windows are gone end to end).
+        // Validate the envelope shape here. Issued proof lifetimes and
+        // run budgets are advisory. Channel proofs have a separate cache
+        // deadline checked immediately before transport.
         let wall_now = bcs_protocol::now_ms() as i64;
         if command.association.attempt == 0
             || command.association.run_id.is_empty()
@@ -188,8 +187,6 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
             Ok(client) => client,
             Err(_) => return Err(Error::NotSent),
         };
-        let reception = reception::CallerReception::prepare(self, target, &command).await?;
-        let started = Instant::now();
         // Align transport negotiation with the ordinary downlink path
         // (lib.rs): protocol 2.0 with SSE-eligible provider sends
         // `Accept: text/event-stream, application/json` plus
@@ -207,6 +204,14 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
             .header("Accept", accept)
             .header("Content-Type", "application/json; charset=utf-8")
             .header(bcs_protocol::http::BCN_TRANSPORT_HEADER, transport);
+        let reception = reception::CallerReception::prepare(self, target, &command).await?;
+        if command.channel_supplied_proof
+            && command.execution_token_expires_at_ms <= bcs_protocol::now_ms() as i64
+        {
+            reception.clear().await;
+            return Err(Error::NotSent);
+        }
+        let started = Instant::now();
         let request_fut = with_bcn_headers(
             http_request,
             protocol_version,

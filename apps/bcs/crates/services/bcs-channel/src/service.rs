@@ -218,7 +218,9 @@ impl ChannelService for BcsChannelService {
             );
             self.maybe_execute_stale_reset(&ctx, &msg).await;
 
-            if caller_execution.is_some() && ctx.state_machine_trigger {
+            if caller_execution.as_ref().is_some_and(|execution| execution.legacy_enabled)
+                && ctx.state_machine_trigger
+            {
                 return Err(ChannelInboundError::new(ChannelInboundFailureKind::InvalidInbound, false,
                     "caller execution does not support state-machine targets"));
             }

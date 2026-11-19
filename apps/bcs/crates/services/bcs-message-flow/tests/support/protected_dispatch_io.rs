@@ -66,6 +66,7 @@ impl bcs_service_api::ManagedDeliveryPreparationService for RecordingIo {
             return None;
         }
         Some(bcs_service_api::CallerDispatchContext {
+            native_credential: None,
             target: BotDeliveryTarget::HttpProvider {
                 bot_id: row.target_bot_id.clone(),
                 provider_id: "provider-runtime".into(),

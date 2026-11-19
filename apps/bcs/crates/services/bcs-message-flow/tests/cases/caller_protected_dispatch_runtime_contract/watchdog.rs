@@ -41,7 +41,7 @@ async fn hanging_fixture_with_stage_timeout(
     let pipeline = Arc::new(CallerDispatchPipeline::new(
         seeded_handoff("caller-ok").await,
         Arc::new(CallerContainerPreparation::new(Arc::new(StubGateway))),
-        Arc::new(StubIdentity),
+        Arc::new(StubIdentity { forbid_issue: false }),
         Arc::new(PendingSender { entered: entered.clone(), dropped: dropped.clone() }),
         600_000,
     )

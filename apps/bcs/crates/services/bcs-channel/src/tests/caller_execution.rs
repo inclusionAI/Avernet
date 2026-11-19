@@ -57,7 +57,7 @@ async fn caller_bot_binding_supports_dm_and_at_group_and_does_not_change_default
             assert_eq!(sends[0].caller_ingress.as_ref(), Some(&ingress));
             assert_eq!(sends[0].caller_execution.is_some(), caller);
             if let Some(context) = &sends[0].caller_execution {
-                assert_eq!(context.token.expose(), "test-token");
+                assert_eq!(context.token.as_ref().unwrap().expose(), "test-token");
                 assert_eq!(context.user_id, "u1");
                 assert_eq!(context.binding_id, binding.id);
                 assert_eq!(context.target_bot_id, "target_bot");

@@ -52,6 +52,11 @@ pub trait ChannelProvider: Send + Sync {
         Ok(false)
     }
 
+    /// This channel supplies its own execution credential for snapshot Caller mode.
+    fn uses_native_caller_execution(&self) -> bool {
+        false
+    }
+
     fn redact_config(&self, config: &serde_json::Value) -> serde_json::Value;
 
     /// Resolve a BCS Human actor into a provider-native direct-message recipient.

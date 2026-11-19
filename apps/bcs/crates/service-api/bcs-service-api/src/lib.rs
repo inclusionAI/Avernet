@@ -43,6 +43,7 @@ pub use core::{
     WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::{SystemMessageService, SystemMessageQueueService, SystemQueueAdmissionOutcome};
+pub use application::caller_execution::NativeCallerCredential;
 pub use application::message_flow::WebSendLeaseClaim;
 pub use application::message_delivery::{
     CallerExecutionCancelCommand, CallerExecutionCancelOutcome, CallerExecutionControlService,

@@ -24,7 +24,7 @@ use bcs_service_api::application::MessageFlowService;
 use bcs_service_api::port::repo::BotControlPlaneRepoPort;
 use bcs_service_api::{
     BotRegistryCoreService, BotControlPlaneCoreService, CallerContext, GroupCoreService,
-    HumanActor as CallerPrincipal, ManagedMessageDeliveryService, ProviderBotBindingRepoPort,
+    HumanActor as CallerPrincipal, ManagedDeliveryPreparationService, ManagedMessageDeliveryService, ProviderBotBindingRepoPort,
     ProviderRepoPort, WebSendCommand,
 };
 use bcs_bot_store::PersistentBotRepo;
@@ -91,7 +91,19 @@ fn ingress() -> AuthenticatedHumanCallerIngress {
 }
 
 async fn dm_flow(db: Arc<dyn DbPlugin>) -> (BcsMessageFlow, Arc<HumanCallerDeliveryHandoff>, Arc<ManagedMessageDelivery>) {
+    dm_flow_with_target(db, false).await
+}
+
+async fn dm_flow_with_target(
+    db: Arc<dyn DbPlugin>,
+    http_provider: bool,
+) -> (BcsMessageFlow, Arc<HumanCallerDeliveryHandoff>, Arc<ManagedMessageDelivery>) {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    if http_provider {
+        support.registry.set_delivery_target(
+            "bot-driver", support::FakeRegistryService::provider_target("bot-driver"),
+        ).await;
+    }
     {
         use bcs_service_api::{Group, GroupKind, ParticipantMode, ParticipantRole};
         let mut group = support.group.get("group-1").await.unwrap();
@@ -104,7 +116,7 @@ async fn dm_flow(db: Arc<dyn DbPlugin>) -> (BcsMessageFlow, Arc<HumanCallerDeliv
         ];
         support.group.upsert(group).await.unwrap();
     }
-    let repo = Arc::new(MemoryMessageRepo::new());
+    let repo = Arc::new(MemoryMessageRepo::new().with_environment(resolve_env_str()));
     let managed = Arc::new(ManagedMessageDelivery::new(repo.clone()));
     let repo_port: Arc<dyn BotControlPlaneRepoPort> = Arc::new(PersistentBotRepo::new(db.clone()));
     let provider_store = Arc::new(MemoryProviderStore::default());
@@ -220,6 +232,63 @@ async fn dm_web_send_parks_identity_and_marks_the_projection() {
         handoff.claim(&scope, HandoffClaim::new(row.delivery_id.clone(), 99, None, 1, now_clock() + 2_000)).await.unwrap_err(),
         bcs_service_api::application::caller_handoff::HandoffError::AlreadyClaimed
     );
+}
+
+#[tokio::test]
+async fn native_channel_caller_admission_scopes_the_cached_proof() {
+    use bcs_message_flow::queued_group::QueuedGroupPreparation;
+    use bcs_service_api::application::caller_execution::{CallerExecution, ExecutionToken};
+
+    let db = sqlite_db().await;
+    seed_caller_enabled_bearer_bot(db.as_ref(), "bot-driver").await;
+    let (flow, _, managed) = dm_flow_with_target(db, true).await;
+    let cache = Arc::new(bcs_cache_local::InMemoryCachePlugin::new());
+    let flow = Arc::new(flow.with_execution_cache(cache.clone()));
+
+    let channel_send = |token| {
+        let ingress = AuthenticatedHumanCallerIngress::new(
+            HumanActor { actor_id: "human_1".into(), staff_no: "1".into() },
+            HumanCallerAuthSource::ChannelIngress,
+            now_clock(),
+            resolve_env_str(),
+        ).unwrap();
+        let mut cmd = web_send(Some(ingress));
+        cmd.source_im_message_id = Some("im-native".into());
+        cmd.caller_execution = Some(CallerExecution {
+            token,
+            token_type: "channel-proof".into(),
+            native_protected: true,
+            legacy_enabled: false,
+            reference: "native-reference".into(),
+            user_id: "1".into(),
+            binding_id: "binding-1".into(),
+            source_message_id: "im-native".into(),
+            target_bot_id: "bot-driver".into(),
+        });
+        cmd
+    };
+    assert!(flow.handle_web_send(channel_send(None)).await.is_err());
+    assert!(managed.snapshot(None).await.unwrap().is_empty());
+
+    flow.handle_web_send(channel_send(Some(ExecutionToken::new(
+        "original-channel-token".into(), "channel-proof".into(),
+    )))).await.unwrap();
+    let row = managed.snapshot(None).await.unwrap().remove(0);
+    assert_eq!(row.semantic_projection_json["caller_required"], true);
+    assert!(!row.semantic_projection_json.to_string().contains("original-channel-token"));
+
+    let preparer = QueuedGroupPreparation { flow: Arc::downgrade(&flow), deliveries: managed };
+    assert_eq!(row.semantic_projection_json["caller_execution"]["native_env"], row.env);
+    let context = preparer.resolve_caller_dispatch(&row).await;
+    let native = context.expect("protected channel dispatch context").native_credential.unwrap();
+    assert_eq!(native.token_type, "channel-proof");
+    assert_eq!(native.proof.expose_token(), "original-channel-token");
+
+    let mut mismatch = row.clone();
+    mismatch.semantic_projection_json["caller_execution"]["source_message_id"] = json!("im-other");
+    assert!(preparer.resolve_caller_dispatch(&mismatch).await.is_none());
+    bcs_cache_api::CachePlugin::delete(cache.as_ref(), "bcs:caller-execution:v1:native-reference").await.unwrap();
+    assert!(preparer.resolve_caller_dispatch(&row).await.is_none());
 }
 
 #[tokio::test]
