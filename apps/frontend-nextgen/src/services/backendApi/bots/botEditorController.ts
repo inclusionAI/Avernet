@@ -389,8 +389,8 @@ export const botEditorController = {
     request<ChannelDto>(path(botId, `channels/${channelId}/status`), 'PUT', { owner_id: ownerId }, { status }),
   deleteChannel: (botId: string, channelId: number, ownerId?: string) =>
     request(path(botId, `channels/${channelId}`), 'DELETE', { owner_id: ownerId }),
-  getCallerContext: (botId: string, ownerId?: string) =>
-    request<{
+  getCallerContext: (botId: string, ownerId?: string, options?: { suppressErrorNotification?: boolean }) =>
+    backendRequest<BackendApiEnvelope<{
       editable: boolean;
       /**
        * 聚合 Caller 判定:任一 MCP/CLI 以 caller 身份执行即为 'caller'。
@@ -400,7 +400,13 @@ export const botEditorController = {
       bot_call_type?: 'caller' | 'owner';
       mcp_call_types: Record<string, 'caller' | 'owner'>;
       cli_call_types: Record<string, 'caller' | 'owner'>;
-    }>(path(botId, 'caller-context'), 'GET', { stage: 'draft', owner_id: ownerId }),
+    }>>(path(botId, 'caller-context'), {
+      method: 'GET',
+      params: userScopedParams({ stage: 'draft', owner_id: ownerId }),
+      // 2026-11-19 二轮勘误:本接口授权 owner/collaborator-only,「空间成员但非协作」等形态按契约
+      // 正常 404(非故障),运行时判定语义的探测请求失败一律零提示(不投 httpClient 默认错误 toast)。
+      suppressErrorNotification: options?.suppressErrorNotification,
+    }),
   updateMcpCallType: (botId: string, serverCode: string, callType: 'caller' | 'owner', ownerId?: string) =>
     request<{ server_code: string; call_type: 'caller' | 'owner'; bot_call_type: 'caller' | 'owner' }>(
       path(botId, `mcps/${encodeURIComponent(serverCode)}/call-type`),

@@ -54,9 +54,11 @@ export async function getBotIamToken(
         ...(entityId ? { entity_id: entityId } : {}),
         ...(stage ? { stage } : {}),
         ...(chatContext?.deviceUuid ? { device_uuid: chatContext.deviceUuid } : {}),
-        ...(chatContext?.callerRuntimeTarget
-          ? { caller_runtime_target: chatContext.callerRuntimeTarget }
-          : {}),
+        // TODO(2026-11-19): 后端 iam_token 接口的 caller_runtime_target 参数暂未就绪,
+        // 先不携带;接口上线后取消下方注释恢复携带(openspec add-iam-caller-runtime-target)。
+        // ...(chatContext?.callerRuntimeTarget
+        //   ? { caller_runtime_target: chatContext.callerRuntimeTarget }
+        //   : {}),
         ...(chatContext?.friendUserId
           ? {
               owner_id: chatContext.ownerId ?? entityId,
