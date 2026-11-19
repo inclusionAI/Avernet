@@ -87,7 +87,15 @@ def runtime(db):
     profile = create_product_profile(
         replace(
             TASK_COMMISSION_PROFILE,
-            composition=replace(TASK_COMMISSION_PROFILE.composition, policies=()),
+            composition=replace(
+                TASK_COMMISSION_PROFILE.composition,
+                required_methods=(
+                    replace(
+                        TASK_COMMISSION_PROFILE.composition.required_methods[0],
+                        policy=None,
+                    ),
+                ),
+            ),
         )
     )
     catalog = ProductCatalog((profile,))

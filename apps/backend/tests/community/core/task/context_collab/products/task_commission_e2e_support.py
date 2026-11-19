@@ -163,7 +163,7 @@ def _assert_product_instance(
     assert instance.workflow_ref is instance.domain_ref is None
     assert instance.task_contract_ref == VersionedProfileRef("standard_task", 1)
     assert instance.method_profiles == tuple(
-        item.ref for item in profile.composition.required_methods
+        item.profile.ref for item in profile.composition.required_methods
     )
     assert instance.governance == profile.governance
     assert len(instance.role_binding_refs) == 2

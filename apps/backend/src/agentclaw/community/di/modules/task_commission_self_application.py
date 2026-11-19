@@ -426,14 +426,14 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
     ) -> dict[str, str]:
         axes, refs = current_axes(), {}
         for method in profile.composition.required_methods:
-            name = method.method_kind
+            name = method.profile.method_kind
             binding_id = product_method_binding_ref(collet_id, profile, name)
             binding = self._store.get_binding(axes, binding_id, collet_id)
             if (
                 binding is None
                 or binding.state is not BindingState.ACTIVE
                 or binding.method_names != (name,)
-                or binding.profile_versions != {name: method.profile_version}
+                or binding.profile_versions != {name: method.profile.profile_version}
             ):
                 raise ContextCollabValidationError(
                     f"execution requires an active {name} Method binding matching the pinned product"

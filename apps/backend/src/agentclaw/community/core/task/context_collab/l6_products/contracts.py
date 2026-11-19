@@ -49,6 +49,19 @@ class MethodRelationTemplate:
 
 
 @dataclass(frozen=True)
+class MethodTemplate:
+    """An exact L5 Profile and its own optional Method-specific product policy.
+
+    No policy means structural participation only, not an implicit Open
+    publication or autonomous Swarm capability. This is an authoring envelope,
+    not a replacement for the L5 MethodProfile contract.
+    """
+
+    profile: MethodProfile
+    policy: MethodPolicy | None = None
+
+
+@dataclass(frozen=True)
 class MethodCompositionTemplate:
     """Compose L5 MethodProfiles, not a second L6 Method requirement model.
 
@@ -58,15 +71,19 @@ class MethodCompositionTemplate:
     Required MethodProfiles are the sole source of Method kinds.
     """
 
-    required_methods: tuple[MethodProfile, ...]
-    optional_methods: tuple[MethodProfile, ...] = ()
-    # Empty means no method-specific product policy, not a default Open policy.
-    policies: tuple[MethodPolicy, ...] = ()
+    required_methods: tuple[MethodTemplate, ...]
+    optional_methods: tuple[MethodTemplate, ...] = ()
     relations: tuple[MethodRelationTemplate, ...] = ()
 
     def require_policy(self, method: str) -> MethodPolicy:
         """Return the exact declared policy; never infer one from Method kind."""
-        policies = [policy for policy in self.policies if policy.method == method]
+        policies = [
+            item.policy
+            for item in self.required_methods
+            if item.profile.method_kind == method
+            and item.policy is not None
+            and item.policy.method == method
+        ]
         if len(policies) != 1:
             raise ContextCollabValidationError(
                 f"composition requires exactly one {method} Method policy"
@@ -81,7 +98,9 @@ def composition_method_kind(composition: MethodCompositionTemplate) -> str:
     stored as another field on the composition template. Optional Methods are
     not selected implicitly.
     """
-    return " + ".join(method.method_kind for method in composition.required_methods)
+    return " + ".join(
+        method.profile.method_kind for method in composition.required_methods
+    )
 
 
 @dataclass(frozen=True)
@@ -231,8 +250,6 @@ class ProductProfileDefinition:
     # With a legacy workflow, None preserves its existing Task/action contract.
     task_contract_ref: VersionedProfileRef | None = None
     participant_scope: ParticipantScope = ParticipantScope()
-    # None explicitly means no autonomous Swarm coordination capability.
-    swarm_plan_service_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -270,10 +287,12 @@ def negotiate(
     for layer in profile.compatibility.required_layers:
         if layer not in offer.layers:
             missing.append(f"layer:{layer}")
-    for method in profile.composition.required_methods:
+    for declaration in profile.composition.required_methods:
+        method = declaration.profile
         if method.ref not in offer.methods:
             missing.append(f"method:{method.method_kind}@{method.profile_version}")
-    for method in profile.composition.optional_methods:
+    for declaration in profile.composition.optional_methods:
+        method = declaration.profile
         if method.ref not in offer.methods:
             optional.append(f"method:{method.method_kind}@{method.profile_version}")
     for extension in profile.compatibility.required_extensions:

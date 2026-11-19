@@ -14,6 +14,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
     get_profile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodTemplate,
     CompatibilityRequirements,
     DomainMapping,
     DomainProfile,
@@ -40,9 +41,9 @@ def _definition(
         ref=VersionedProfileRef(product, 1),
         composition=MethodCompositionTemplate(
             required_methods=tuple(
-                get_profile(item.value, "0.2")
+                MethodTemplate(get_profile(item.value, "0.2"))
                 for item in parse_method_kinds(method)
-            ),
+            )
         ),
         scenario_roles=(
             ScenarioRole(

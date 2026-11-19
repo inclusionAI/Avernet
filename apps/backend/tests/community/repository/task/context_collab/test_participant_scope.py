@@ -413,7 +413,14 @@ def test_pinned_scope_cannot_be_widened_in_persisted_instance(
 def test_instantiate_empty_initial_agents_when_executor_role_is_optional(db):
     profile = replace(
         TASK_COMMISSION_PROFILE,
-        composition=replace(TASK_COMMISSION_PROFILE.composition, policies=()),
+        composition=replace(
+            TASK_COMMISSION_PROFILE.composition,
+            required_methods=(
+                replace(
+                    TASK_COMMISSION_PROFILE.composition.required_methods[0], policy=None
+                ),
+            ),
+        ),
         workflow=standard_task_workflow(),
         task_contract_ref=None,
         participant_scope=ParticipantScope(ParticipantScopeKind.ALLOWLIST),

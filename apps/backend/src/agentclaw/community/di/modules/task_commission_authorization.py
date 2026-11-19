@@ -177,11 +177,11 @@ class CommissionAdmissionAuthorizer(StructuralContextCollabAuthorizer):
         if (
             profile is not None
             and any(
-                isinstance(policy, OpenMethodPolicy)
+                isinstance(method.policy, OpenMethodPolicy)
                 and isinstance(
-                    policy.publication.admission, BotSelfApplicationAdmission
+                    method.policy.publication.admission, BotSelfApplicationAdmission
                 )
-                for policy in profile.composition.policies
+                for method in profile.composition.required_methods
             )
             and command.event_kind
             in {"task.started", "task.progress.updated", "task.submitted"}

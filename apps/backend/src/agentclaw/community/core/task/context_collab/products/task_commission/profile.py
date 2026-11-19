@@ -16,6 +16,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
     get_profile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodTemplate,
     CompatibilityRequirements,
     DomainMapping,
     DomainProfile,
@@ -54,15 +55,17 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
     ref=TASK_COMMISSION_PROFILE_REF,
     # 绑定L5的method，这里是OPEN方法
     composition=MethodCompositionTemplate(
-        required_methods=(get_profile("Open", "0.2"),),
-        policies=(
-            OpenMethodPolicy(
-                publication=OpenPublicationProfile(
-                    admission=DesignatedOpenAdmission(
-                        applicant_role="assignee",
-                        accountable_role="owner",
-                        participation_type=ParticipationType.SINGLE_CONTRIBUTION,
-                        capacity=1,
+        required_methods=(
+            MethodTemplate(
+                get_profile("Open", "0.2"),
+                policy=OpenMethodPolicy(
+                    publication=OpenPublicationProfile(
+                        admission=DesignatedOpenAdmission(
+                            applicant_role="assignee",
+                            accountable_role="owner",
+                            participation_type=ParticipationType.SINGLE_CONTRIBUTION,
+                            capacity=1,
+                        ),
                     ),
                 ),
             ),
@@ -125,23 +128,23 @@ OPEN_SINGLE_COMMISSION_PROFILE = create_product_profile(
         ref=OPEN_SINGLE_COMMISSION_PROFILE_REF,
         composition=MethodCompositionTemplate(
             required_methods=(
-                get_profile("Open", "0.2"),
-                get_profile("Single", "0.2"),
-            ),
-            relations=(
-                MethodRelationTemplate("Single", "Open", CompositionRelation.SUPPORT),
-            ),
-            policies=(
-                OpenMethodPolicy(
-                    publication=OpenPublicationProfile(
-                        admission=BotSelfApplicationAdmission(
-                            applicant_role="assignee",
-                            accountable_role="owner",
-                            participation_type=ParticipationType.COLLET_PARTICIPANT,
-                            capacity=1,
+                MethodTemplate(
+                    get_profile("Open", "0.2"),
+                    policy=OpenMethodPolicy(
+                        publication=OpenPublicationProfile(
+                            admission=BotSelfApplicationAdmission(
+                                applicant_role="assignee",
+                                accountable_role="owner",
+                                participation_type=ParticipationType.COLLET_PARTICIPANT,
+                                capacity=1,
+                            ),
                         ),
                     ),
                 ),
+                MethodTemplate(get_profile("Single", "0.2")),
+            ),
+            relations=(
+                MethodRelationTemplate("Single", "Open", CompositionRelation.SUPPORT),
             ),
         ),
     )

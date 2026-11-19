@@ -20,13 +20,13 @@ itself; the L4 service/repository do not acquire a dependency on L6.
 | ProductCollaborationPolicy | [operations/collaboration_policy.py](operations/collaboration_policy.py) | Product-aware adapter to L4-owned policy ports; interprets selected L6 evidence without owning Work or query execution. |
 | ProductMethodBindingRecovery | [operations/method_bootstrap.py](operations/method_bootstrap.py) | Translates pinned product/identity facts into L5 initialization/recovery inputs through L5-owned operations and ports. |
 | ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
-| MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional L5 `MethodProfile` contracts and typed method-specific product policies; instantiation binds the new or existing Collet, with no caller-configurable `scope`. Explicit relations instantiate independent Collet-scoped Method bindings and L5 composition edges; empty relations preserve legacy topology. |
+| MethodTemplate / MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional `MethodTemplate(profile, policy=None)` declarations co-locate exact L5 `MethodProfile` contracts with their own typed policies; instantiation binds the new or existing Collet, with no caller-configurable `scope`. Explicit relations instantiate independent Collet-scoped Method bindings and L5 composition edges; empty relations preserve legacy topology. |
 | ParticipantScope | [participant_scope.py](participant_scope.py) | Local typed Profile eligibility contract: OPEN or an explicit AgentRef allowlist. Not membership, admission, selection or permission authority. |
 | ScenarioRole | [binding.py](binding.py) | Maps owner/assignee to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
 | DomainProfile | [contracts.py](contracts.py) | Maps product vocabulary to L3 Resource and L4 Collet/Task/Message/Artifact authority, not duplicate product-owned entities. |
 | TaskLifecycleContract / TaskAction | [task_contracts.py](task_contracts.py), [contracts.py](contracts.py) | Reusable, exactly versioned Task lifecycle/action contract, independent of product orchestration. References the existing G4 machine; never executes a Bot plan. |
 | WorkflowProfile | [contracts.py](contracts.py) | Optional product orchestration contract. Existing profiles own their action mappings and reference a versioned G4 machine over L4 Task, or explicitly declare a nontransition event stream. Not required merely to run an autonomous Bot. |
-| MethodPolicy / OpenMethodPolicy | [L5 method_policies.py](../l5_methods/method_policies.py) | L5-owned Method policy values selected in `composition.policies` for a required Method. Currently only Open declares one; other Methods need no placeholder policy. |
+| MethodPolicy / OpenMethodPolicy / SwarmMethodPolicy | [L5 method_policies.py](../l5_methods/method_policies.py) | L5-owned Method policies attached to their own `MethodTemplate`: Open publication/admission and Swarm planning capability selection. No policy means no implicit capability. |
 | OpenAdmissionPolicy / OpenPublicationProfile / BotSelfApplicationAdmission | [L5 publication.py](../l5_methods/publication.py) | L5-owned participation/role/capacity constraints, bounded Bot self-application, ADMITTED delivery gate and partial-failure behavior. L6 selects these values; product services and DI execute the journey. |
 | ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: Collet ID and optional independent root Task ID (absent before L4 Work creation), product and selected Task/workflow/domain versions, actual MethodBinding references for the pinned topology, selected Method versions, actual RoleBinding references, pinned participant eligibility, governance requirements and negotiation result. No independent lifecycle state. |
 | Compatibility selection | `negotiate(profile, offer)` | Exact required profile/Method/ACCS/layer/extension/governance match. Reports missing required and omitted optional capabilities separately. Never silently chooses a newer version or weaker policy. |
@@ -57,8 +57,9 @@ library operation for authoring a `ProductProfileDefinition`. Its typed input is
 [`ProductProfileCreateCommand`](operations/contracts.py): exact `ref`, Method
 composition, scenario roles, governance and compatibility requirements, plus
 optional domain, workflow and Task contract selection. L5-owned Method policies
-are selected in `composition.policies`, not the universal ProductProfile.
-The default `policies=()` declares no method-specific product policy, including
+are selected on each `MethodTemplate.policy`, not a composition-wide policy list
+or the universal ProductProfile. The default `policy=None` declares no
+method-specific product policy, including
 no automatic Open publication use case. It is valid for Open as well as other
 Methods; an Open binding alone does not imply a publication policy.
 
@@ -68,6 +69,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodCompositionTemplate,
+    MethodTemplate,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
@@ -81,8 +83,12 @@ profile = create_product_profile(
     ProductProfileCreateCommand(
         ref=profile_ref,
         composition=MethodCompositionTemplate(
-            required_methods=(get_profile("Open", "0.2"),),
-            policies=(OpenMethodPolicy(publication=publication),),
+            required_methods=(
+                MethodTemplate(
+                    get_profile("Open", "0.2"),
+                    policy=OpenMethodPolicy(publication=publication),
+                ),
+            ),
         ),
         scenario_roles=scenario_roles,
         # Autonomous Bot: no domain/workflow boilerplate.
@@ -95,16 +101,18 @@ profile = create_product_profile(
 catalog = ProductCatalog((profile,))
 ```
 
-`required_methods` and `optional_methods` contain the L5 `MethodProfile` value
+`required_methods` and `optional_methods` contain immutable `MethodTemplate`
+authoring envelopes. Each `.profile` is the actual L5 `MethodProfile` value
 contract from [`method_profile.py`](../l5_methods/method_profile.py), including its
-exact version, capabilities, used primitives and composition declarations. There
-is no separate L6 Method contract. `get_profile("Open", "0.2")` resolves that exact
-installed L5 definition and rejects unavailable versions; it never selects latest.
+exact version, capabilities, used primitives and composition declarations; its
+optional `.policy` belongs to that same Method. The envelope does not duplicate
+the L5 contract. `get_profile("Open", "0.2")` resolves that exact installed L5
+definition and rejects unavailable versions; it never selects latest.
 Authoring a definition with an unavailable Method version remains possible, but
 capability negotiation rejects it before runtime instantiation.
 
 The former Python names `MethodProfileDefinition` and `MethodRequirement` are
-removed. Consumers author compositions with `MethodProfile` values. Compact
+removed. Consumers author compositions with `MethodTemplate` wrapping `MethodProfile` values. Compact
 identity-only entries in `ProductCapabilities.methods` and
 `ProductInstance.method_profiles` use L5 `MethodProfileRef` (`method`, `version`),
 obtained through `profile.ref`. This reference is not a second Profile definition.
@@ -117,12 +125,12 @@ all supplied IDs, versions and product-specific admission strategies; it does no
 allocate versions, select latest, switch participation types or execute admission.
 [`validation.py`](validation.py) owns the shared structural checks used by both
 creation and catalog installation (Method composition, role mappings,
-Task/workflow role requirements and method-specific policies). Policy entries
-must be typed, held in an immutable tuple, unique per Method and matched to a
-required/bound Method. Merely listing Open in `optional_methods` does not allow
-an Open policy. `OpenMethodPolicy` validates publication role/action requirements
-without imposing Open configuration on Single, Group or Swarm. Composite
-`Open + Group` can declare an Open policy without a Group policy.
+Task/workflow role requirements and method-specific policies). Policies must be typed and match their declaration's Profile kind. Required
+Method kinds remain unique; optional declarations are validated but never
+implicitly selected. `OpenMethodPolicy` validates publication role/action
+requirements; `SwarmMethodPolicy(plan_service_ref=...)` selects an explicit
+planning capability without placing Swarm fields on unrelated products.
+Composite `Open + Group` can declare an Open policy without a Group policy.
 Invalid definitions raise
 `ContextCollabValidationError`. Direct dataclass construction remains compatible;
 installation still validates it. Reference uniqueness is enforced within each
@@ -139,8 +147,12 @@ receive their existing commands and do not resolve product profiles.
 **Python compatibility:** the former top-level `publication` field on both
 `ProductProfileCreateCommand` and `ProductProfileDefinition`, and
 `profile.require_publication()`, are removed. Migrate authoring/copying code to
-`composition.policies=(OpenMethodPolicy(publication=...),)` and consumers to the
-accessor above. Product definitions, DI adapters and test catalogs are migrated
+`MethodTemplate(get_profile("Open", "0.2"), OpenMethodPolicy(publication=...))`
+and consumers to the accessor above. The former composition-wide `policies`
+constructor field is also removed. Wrap all required/optional Profile values
+in `MethodTemplate`; migrate top-level `swarm_plan_service_ref` to
+`SwarmMethodPolicy(plan_service_ref=...)` on the Swarm declaration. Read Profile
+metadata through `.profile`. Product definitions, DI adapters and test catalogs are migrated
 together. This relocates the same policy, not its semantics or installed version;
 ProductInstance storage, pinned references and HTTP/ACCS wire shapes are
 unchanged. No runtime state migration or new capability negotiation is needed.
@@ -863,11 +875,13 @@ driver construction; `driver.wake()` starts it via L4/G1/G4 and enqueues
 planning. G1 permits top-level Swarm; bare Group still requires a nested bind.
 No Single binding or runtime `nest` edge is introduced.
 
-The profile explicitly configures `swarm_plan_service_ref="mock.ai_coding.plan/1"`.
-This is an optional local capability reference on ProductProfile authoring, not
-an ACCS wire operation or a worker execution profile. A non-Swarm profile cannot
-set it. Legacy profiles may omit it and remain usable without an autonomous
-driver; trying to coordinate without an installed explicit capability fails.
+The profile explicitly configures
+`MethodTemplate(get_profile("Swarm", "0.2"), SwarmMethodPolicy(plan_service_ref="mock.ai_coding.plan/1"))`.
+This is a local Method policy, not a universal ProductProfile field, an ACCS wire
+operation or a worker execution profile. Pairing this policy with another Method
+fails validation. A structural Swarm declaration may omit its policy and remain
+usable without an autonomous driver; coordination requires the policy on a
+required Swarm declaration and an installed explicit capability.
 The composition root selects that exact implementation from its injected
 capabilities, never a hidden default. The
 [unified plan interface](../swarm_planning.py) lives outside
@@ -912,3 +926,10 @@ remote PR or distributed SQL/Method transaction. See the
 [L5 coordination contract](../l5_methods/README.md#bounded-swarm-coordination)
 for report recovery and wake behavior. Local condition keys are not standardized
 ACCS schemas. These changes do not alter the installed commission product.
+
+The Open + Swarm coding case omits product `workflow`: Swarm Plan/Stage owns the
+five-phase DAG; `standard_task@1` and the existing G4 machine govern Work. The
+root executor starts through L4 before the owner-coordinator wakes the driver.
+Five workers submit their own child Task results, then the root executor submits
+the aggregate artifacts and the principal accepts the root Task. Completing a
+SwarmPlan alone never accepts root Work or completes the Collet.

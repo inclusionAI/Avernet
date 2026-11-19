@@ -77,7 +77,7 @@ def _resolve_method_spec(
 ) -> ResolvedMethodSpec:
     versions = (
         {
-            item.method_kind: item.profile_version
+            item.profile.method_kind: item.profile.profile_version
             for item in profile.composition.required_methods
         }
         if profile is not None

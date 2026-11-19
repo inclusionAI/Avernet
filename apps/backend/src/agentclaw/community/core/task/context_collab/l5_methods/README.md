@@ -15,6 +15,7 @@ provides:
   - MethodBinding
   - MethodPolicy
   - OpenMethodPolicy
+  - SwarmMethodPolicy
   - AdmissionRole
   - OpenAdmissionPolicy
   - OpenPublicationProfile
@@ -62,11 +63,14 @@ and composition-edge endpoints accept only base methods. G1 allows the supported
 product compositions at creation, but parsing still rejects undeclared expressions,
 including reversed `Swarm + Open`.
 
-## Open policy ownership
+## Method policy ownership
 
 - [method_policies.py](method_policies.py) defines `MethodPolicy` and
-  `OpenMethodPolicy`. L6 may select a policy in `composition.policies` only for a
-  required Method; it does not define another Method policy type.
+  `OpenMethodPolicy` and `SwarmMethodPolicy`. L6 co-locates each policy with its
+  exact L5 Profile in `MethodTemplate(profile, policy)`; the policy must match
+  that Method. Only required declarations enable runtime policy lookup; optional
+  declarations do not implicitly activate capabilities. L6 defines an authoring
+  envelope, not a second Method Profile or policy type.
 - [publication.py](publication.py) defines `OpenAdmissionPolicy`,
   `OpenPublicationProfile` and `BotSelfApplicationAdmission`. Shared constraints
   require named, required role mappings, positive capacity and a typed
@@ -176,7 +180,8 @@ verification worker runs real unittest cases. No live Bot/LLM/PR is exercised.
 supplies only `collet_id` through DI's `AssistedBuilder[SwarmDriver].build`;
 ports are constructor-injected, not obtained from a global injector/registry.
 The composition adapter resolves the pinned ProductProfile's explicit
-`swarm_plan_service_ref` and the one ACTIVE Swarm binding. An omitted or unknown
+`SwarmMethodPolicy.plan_service_ref` on its required Swarm declaration and the
+one ACTIVE Swarm binding. An omitted or unknown
 capability fails closed. No coding names, L6 imports or filesystem predicates
 belong in L5.
 
@@ -188,7 +193,11 @@ injected L4 `ContextServiceProtocol.start` (G1/G4 and SQL CAS), preserving its
 identity/objective, then enqueues unified planning. Subsequent wakes reconcile
 already-started Work without another start; pending wakes coalesce. Start errors
 propagate before planning is queued. This explicit driver entrypoint does
-not add automatic dispatch to the generic L4 Work.start contract.
+not add automatic dispatch to the generic L4 Work.start contract. With the
+standard Task contract, the designated root executor must first start Work
+through L4/G1/G4; the owner-coordinator's wake cannot bypass that restriction.
+The Open + Swarm coding example uses this explicit start, no product workflow,
+and executor submission followed by principal acceptance of the root result.
 
 The outbound [`SwarmPlanningService`](../swarm_planning.py)
 interface is outside L5. One `plan` call proposes BOTH the next Stage and its

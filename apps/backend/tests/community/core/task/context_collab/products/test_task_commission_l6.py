@@ -211,7 +211,17 @@ def test_catalog_rejects_publication_without_required_typed_roles_or_method():
             profile,
             composition=replace(
                 PRODUCT_CATALOG.get("team_todo", 1).composition,
-                policies=profile.composition.policies,
+                required_methods=(
+                    replace(
+                        PRODUCT_CATALOG.get(
+                            "team_todo", 1
+                        ).composition.required_methods[0],
+                        policy=profile.composition.require_policy("Open"),
+                    ),
+                    *PRODUCT_CATALOG.get("team_todo", 1).composition.required_methods[
+                        1:
+                    ],
+                ),
             ),
         ),
         replace(profile, workflow=replace(standard_task_workflow(), actions=())),
@@ -230,12 +240,17 @@ def _adapter_case(*, admitted_state="ADMITTED"):
         ref=VersionedProfileRef("task_commission", 2),
         composition=replace(
             v1.composition,
-            policies=(
-                OpenMethodPolicy(
-                    publication=replace(
-                        publication, admission=replace(publication.admission, capacity=2)
+            required_methods=(
+                replace(
+                    v1.composition.required_methods[0],
+                    policy=OpenMethodPolicy(
+                        publication=replace(
+                            publication,
+                            admission=replace(publication.admission, capacity=2),
+                        ),
                     ),
                 ),
+                *v1.composition.required_methods[1:],
             ),
         ),
     )
@@ -317,14 +332,18 @@ def test_generic_open_policy_does_not_encode_commission_role_sources():
         ),
         composition=replace(
             profile.composition,
-            policies=(
-                OpenMethodPolicy(
-                    publication=OpenPublicationProfile(
-                        OpenAdmissionPolicy(
-                            "assignee", "owner", ParticipationType.GROUP_MEMBER, 3
-                        )
+            required_methods=(
+                replace(
+                    profile.composition.required_methods[0],
+                    policy=OpenMethodPolicy(
+                        publication=OpenPublicationProfile(
+                            OpenAdmissionPolicy(
+                                "assignee", "owner", ParticipationType.GROUP_MEMBER, 3
+                            )
+                        ),
                     ),
                 ),
+                *profile.composition.required_methods[1:],
             ),
         ),
     )
@@ -346,12 +365,14 @@ def test_open_single_is_an_explicit_successor_without_changing_v1():
     assert profile.ref == VersionedProfileRef("task_commission", 2)
     assert composition_method_kind(profile.composition) == "Open + Single"
     assert {
-        item.method_kind: item.profile_version
+        item.profile.method_kind: item.profile.profile_version
         for item in profile.composition.required_methods
     } == {"Open": "0.2", "Single": "0.2"}
     [relation] = profile.composition.relations
     assert (relation.parent_method, relation.child_method, relation.relation.value) == (
-        "Single", "Open", "support"
+        "Single",
+        "Open",
+        "support",
     )
     policy = profile.composition.require_policy("Open").publication.admission
     assert policy.strategy == "designated_bot_self_application"

@@ -27,6 +27,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.swarm_driver_contra
     SwarmRuntimeResolver,
     SwarmRuntimeConfiguration,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
+    SwarmMethodPolicy,
+)
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
@@ -65,8 +68,11 @@ class ProductSwarmRuntimeResolver:
             )
         ref = record.product_instance.profile_ref
         definition = self.catalog.get(ref.profile_id, ref.version)
-        service_ref = definition.swarm_plan_service_ref
-        if service_ref is None or service_ref not in self.capabilities.services:
+        policy = definition.composition.require_policy("Swarm")
+        if not isinstance(policy, SwarmMethodPolicy):
+            raise ContextCollabValidationError("Swarm requires its own planning policy")
+        service_ref = policy.plan_service_ref
+        if service_ref not in self.capabilities.services:
             raise ContextCollabValidationError(
                 "product must explicitly configure an installed Swarm plan capability"
             )
