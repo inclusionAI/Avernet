@@ -38,7 +38,9 @@ export interface MonitoringReferences {
 }
 export type BotOption = {
   botRef: string; botName: string; botId: string; ownerId: string; env: string;
+  activeEngine?: string; botType?: string | null;
   isServiceBot?: boolean;
+  configurationDisabledReason?: string;
   enrollmentState: 'ENROLLED' | 'NOT_ENROLLED'; monitoring: MonitoringSummary | null;
   configuration?: { diagnosisEnabled: boolean; recoveryEnabled: boolean; version: number };
   capabilities: { canView: true; canRequestEnrollment: boolean };

@@ -31,6 +31,14 @@ impl BcsChannelService {
 
 #[async_trait]
 impl ChannelService for BcsChannelService {
+    async fn exclusive_session_speaker(
+        &self,
+        session: &Session,
+        group: &Group,
+    ) -> Result<Option<String>, ChannelUseCaseError> {
+        self.resolve_exclusive_session_speaker(session, group).await
+    }
+
     async fn handle_inbound(&self, mut msg: InboundMessage) -> Result<(), ChannelInboundError> {
         msg.conversation_type = normalize_required(&msg.conversation_type, "conversation_type")
             .map_err(|error| invalid_inbound(error))?
@@ -210,7 +218,9 @@ impl ChannelService for BcsChannelService {
             );
             self.maybe_execute_stale_reset(&ctx, &msg).await;
 
-            if caller_execution.is_some() && ctx.state_machine_trigger {
+            if caller_execution.as_ref().is_some_and(|execution| execution.legacy_enabled)
+                && ctx.state_machine_trigger
+            {
                 return Err(ChannelInboundError::new(ChannelInboundFailureKind::InvalidInbound, false,
                     "caller execution does not support state-machine targets"));
             }

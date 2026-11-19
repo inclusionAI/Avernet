@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { MonitoringSettings } from '../MonitoringSettings';
 const api = vi.hoisted(() => ({ options: vi.fn(), configure: vi.fn() }));
 vi.mock('../../../../api/monitoring', () => ({ monitoringApi: api, monitoringErrorText: () => '请求失败' }));
-const bot = { botRef: 'ref', botId: 'default', botName: '我的 Bot', ownerId: '001', env: 'prod',
+const bot = { botRef: 'ref', botId: 'default', botName: '我的 Bot', ownerId: '001', env: 'prod', activeEngine: 'openclaw', botType: 'personal',
   configuration: { diagnosisEnabled: true, recoveryEnabled: false, version: 7 } };
 beforeEach(() => {
   vi.clearAllMocks();
@@ -12,15 +12,32 @@ beforeEach(() => {
   api.options.mockResolvedValue({ items: [bot], nextCursor: 'next' });
   api.configure.mockResolvedValue({ updated: 1, failed: [] });
 });
-it('shows the platform contacts and disables only the service Bot switch', async () => {
-  api.options.mockResolvedValue({ items: [bot, { ...bot, botRef: 'service', botName: '服务助手', isServiceBot: true }], nextCursor: null });
+it('shows reasons and gray switches for every unsupported Bot, including enabled settings', async () => {
+  const blocked = [
+    { ...bot, botRef: 'service', botName: '服务助手', isServiceBot: true, botType: 'service', configurationDisabledReason: '服务 Bot 请联系平台评估开启' },
+    { ...bot, botRef: 'desktop', botName: '桌面助手', botType: 'desktop', configurationDisabledReason: '桌面 Bot 暂不支持' },
+    { ...bot, botRef: 'other', botName: '其他引擎助手', activeEngine: 'claude_code', configurationDisabledReason: '当前引擎暂不支持' },
+  ].map(item => ({ ...item, configuration: { diagnosisEnabled: true, recoveryEnabled: true, version: 1 } }));
+  api.options.mockResolvedValue({ items: [bot, { ...bot, botRef: 'te', botName: 'TE 助手', activeEngine: 'teclaw' }, ...blocked], nextCursor: null });
   render(<MonitoringSettings onChanged={vi.fn()} onClose={vi.fn()} />);
   expect(screen.getByText(/请联系山宗、安远、沐荛/)).toBeInTheDocument();
-  expect(await screen.findByText('服务 Bot 请联系平台')).toBeInTheDocument();
-  const service = screen.getByRole('switch', { name: '服务助手 诊断监控' });
-  expect(service).toBeDisabled();
+  expect(await screen.findByText('服务 Bot 请联系平台评估开启')).toBeInTheDocument();
+  expect(screen.getByText(/仅支持 OpenClaw、TE 引擎，桌面 Bot 暂不支持/)).toBeInTheDocument();
+  for (const item of blocked) {
+    const toggle = screen.getByRole('switch', { name: `${item.botName} 诊断监控` });
+    expect(toggle).toBeDisabled();
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(toggle.closest('li')).toHaveClass('settings-disabled-bot');
+    expect(screen.getByText(item.configurationDisabledReason)).toBeInTheDocument();
+    fireEvent.click(toggle);
+  }
   expect(screen.getByRole('switch', { name: '我的 Bot 诊断监控' })).toBeEnabled();
-  fireEvent.click(service);
+  expect(screen.getByRole('switch', { name: 'TE 助手 诊断监控' })).toBeEnabled();
+  expect(screen.getByText('TE', { exact: true })).toBeInTheDocument();
+  expect(screen.getAllByText('OpenClaw', { exact: true })).toHaveLength(3);
+  expect(screen.getByText('claude_code', { exact: true })).toBeInTheDocument();
+  expect(screen.getByText('服务 Bot', { exact: true })).toBeInTheDocument();
+  expect(screen.getByText('桌面 Bot', { exact: true })).toBeInTheDocument();
   expect(api.configure).not.toHaveBeenCalled();
 });
 it('shows the host practice link only when configured', async () => {

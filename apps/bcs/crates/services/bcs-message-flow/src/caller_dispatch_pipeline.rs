@@ -503,6 +503,17 @@ impl CallerDispatchPipeline {
         facts: CommittedDispatchFacts,
         now_ms: i64,
     ) -> Result<CallerDispatchOutcome, CallerDispatchError> {
+        self.dispatch_with_credential(target, service_credential, facts, now_ms, None).await
+    }
+
+    pub(crate) async fn dispatch_with_credential(
+        &self,
+        target: &BotDeliveryTarget,
+        provider_auth: &RedactedToken,
+        facts: CommittedDispatchFacts,
+        now_ms: i64,
+        native_credential: Option<bcs_service_api::NativeCallerCredential>,
+    ) -> Result<CallerDispatchOutcome, CallerDispatchError> {
         let at_term = self.delivery_term.as_ref().map(|token| token.load(std::sync::atomic::Ordering::SeqCst));
         // ---- Input validity (before touching the identity). ----
         if facts.attempt == 0
@@ -593,7 +604,7 @@ impl CallerDispatchPipeline {
         // wraps its network deliver in `io_timeout`; the ensure adapter
         // self-limits (10s) but the outer stage budget still bounds the
         // wait so a wedged port converges, never hangs the lane forever.
-        let prepared = match stage_bound(self.stage_timeout, "container_ensure", self.preparation.prepare(target, service_credential, ensure, now_ms)).await {
+        let prepared = match stage_bound(self.stage_timeout, "container_ensure", self.preparation.prepare(target, provider_auth, ensure, now_ms)).await {
             Some(Ok(PrepareOutcome::Prepared { descriptor, effective_deadline_ms: _ })) => {
                 // The effective bound is the row's run budget only; the
                 // container's own deadline stays container housekeeping
@@ -646,85 +657,10 @@ impl CallerDispatchPipeline {
         // The dispatch issues for the ESTABLISHED subject — never the raw
         // display identity — and the established window caps every later
         // stage (only shrinks, never extends).
-        tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "establish_subject", "caller protected dispatch stage");
-        let established = match stage_bound(self.stage_timeout, "establish_subject", self
-            .identity
-            .establish_subject(bcs_caller_identity_api::EstablishCallerSubject {
-                ingress: (*ingress).clone(),
-                now_ms,
-            }))
-            .await
-        {
-            Some(Ok(established)) => established,
-            Some(Err(error)) => {
-                tracing::warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    dispatch_id = %facts.dispatch_id,
-                    error = ?error,
-                    "caller identity plugin refused to establish the subject"
-                );
-                return Err(CallerDispatchError::EstablishFailed);
-            }
-            None => return Err(CallerDispatchError::StageTimeout { stage: "establish_subject" }),
-        };
-        // Advisory caller-context lifetime for the wire envelope; never a
-        // rejection basis.
-        let identity_deadline = established.expires_at_ms;
-        let identity_subject = established.subject_ref.expose_ref().to_string();
-        let identity_subject_type = established.subject_ref.ref_type();
-        let subject_ref = established.subject_ref;
-        // The registry lookup is in-process and fast, but the spec counts the
-        // `target_agent_code` hunt inside the issue stage's liveness bound so
-        // a wedged registry port cannot stretch the budget unmeasured.
-        let agent_code = match stage_bound(self.stage_timeout, "issue_execution", self.target_agent_code(&facts.target_bot_id)).await {
-            Some(code) => code,
-            None => return Err(CallerDispatchError::StageTimeout { stage: "issue_execution" }),
-        };
-        let issue_input = IssueCallerExecution {
-            staff_no: opaque_from(ingress.actor()),
-            agent_code,
-            sandbox_container_id: descriptor.sandbox_container_id.clone(),
-            subject: subject_ref,
-            run: bcs_caller_identity_api::CallerRunBinding {
-                run_id: facts.run_id.clone(),
-                root_run_id: facts.root_run_id.clone(),
-                parent_run_id: None,
-                message_turn_id: Some(facts.message_turn_id.clone()),
-                attempt: facts.attempt,
-            },
-            scope: bcs_caller_identity_api::CallerProofScope {
-                env: facts.environment.clone(),
-                target_bot_id: facts.target_bot_id.clone(),
-                group_id: facts.group_id.clone(),
-                session_id: facts.session_id.clone(),
-            },
-            delegation: bcs_caller_identity_api::CallerDelegationBounds { depth: 0, max_depth: if facts.group_id.is_some() { 2 } else { 0 } },
-            purpose: bcs_service_api::application::caller_identity::CallerExecutionPurpose::Execution,
-            not_after_ms: effective_deadline,
-            isolation: descriptor
-                .binding_ref
-                .as_ref()
-                .map(|binding| bcs_caller_identity_api::CallerIsolationConstraint {
-                    binding_ref: binding.expose().to_string(),
-                    generation: descriptor.runtime_generation,
-                }),
-            source: IssueCallerExecutionSource::HumanOriginHandle,
-            now_ms,
-        };
-        tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "issue_execution", "caller protected dispatch stage");
-        let proof: ProofToken = match stage_bound(self.stage_timeout, "issue_execution", self.identity.issue_execution(issue_input)).await {
-            Some(Ok(token)) => token,
-            Some(Err(error)) => {
-                tracing::warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    dispatch_id = %facts.dispatch_id,
-                    error = ?error,
-                    "caller identity plugin refused to issue an execution proof"
-                );
-                return Err(CallerDispatchError::IssueFailed);
-            }
-            None => return Err(CallerDispatchError::StageTimeout { stage: "issue_execution" }),
-        };
+        let channel_supplied_proof = native_credential.is_some();
+        let dispatch_proof::DispatchProof { proof, identity_deadline, proof_type, lineage_subject } = self
+            .prepare_dispatch_proof(&facts, &ingress, &descriptor, effective_deadline, now_ms, native_credential)
+            .await?;
 
         tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "digest_commit", "caller protected dispatch stage");
         // ---- Canonical digest + typed commit CAS (wire contract §7.5.1). ----
@@ -813,7 +749,8 @@ impl CallerDispatchPipeline {
             // no downstream may be told a longer token validity.
             execution_token_expires_at_ms: proof.expires_at_ms(),
             proof_format: proof_format_string(proof.format()),
-            proof_type: self.identity.proof_type().to_string(),
+            proof_type,
+            channel_supplied_proof,
             control_revision: facts.control_revision,
             not_after_ms: effective_deadline,
             request_digest: committed_digest.clone(),
@@ -828,7 +765,7 @@ impl CallerDispatchPipeline {
         };
         // §6.8 B3.2: the ORIGINAL command stays alive at the barrier arm —
         // the send takes a clone, the park keeps the binding.
-        let accepted_lineage = facts.group_id.clone().filter(|group| !group.is_empty()).map(|group_id| crate::caller_lineage::RootLineage {
+        let accepted_lineage = lineage_subject.zip(facts.group_id.clone().filter(|group| !group.is_empty())).map(|((identity_subject, identity_subject_type), group_id)| crate::caller_lineage::RootLineage {
                             root_run_id: facts.root_run_id.clone(),
                             environment: facts.environment.clone(),
                             delegation_depth: 0,
@@ -856,7 +793,7 @@ impl CallerDispatchPipeline {
                             delegate_subject: ingress.actor().staff_no.clone(),
                             parent_execution: true,
                         });
-        let accepted = self.accepted_effect(target, service_credential, &command, accepted_lineage,
+        let accepted = self.accepted_effect(target, provider_auth, &command, accepted_lineage,
             facts.shared_content_kind.clone(), proof, at_term);
         if !self.delivery_term_is_current(at_term) { return Err(CallerDispatchError::CommitFailed); }
         tracing::debug!(dispatch_id = %facts.dispatch_id, stage = "send", "caller protected dispatch stage");
@@ -866,7 +803,7 @@ impl CallerDispatchPipeline {
         // `Ack::Unknown` — the stage budget only converges a wedged port,
         // and converges it the SAME way the adapter's own limit would:
         // OutcomeUnknown, the only honest evidence for an in-flight send.
-        let send_result = match stage_bound(self.stage_timeout, "send", self.sender.send_caller_execution(target, service_credential, command.clone())).await {
+        let send_result = match stage_bound(self.stage_timeout, "send", self.sender.send_caller_execution(target, provider_auth, command.clone())).await {
             Some(result) => result,
             None => return Ok(CallerDispatchOutcome::OutcomeUnknown),
         };
@@ -879,7 +816,7 @@ impl CallerDispatchPipeline {
             Ok(CallerDispatchAck::Unknown) => Ok(CallerDispatchOutcome::OutcomeUnknown),
             Ok(CallerDispatchAck::Rejected { error_code, retryable }) => {
                 if error_code == "HISTORY_NOT_READY" && retryable {
-                    self.park_root_barrier(target, service_credential, &command, &facts, accepted, at_term).await;
+                    self.park_root_barrier(target, provider_auth, &command, &facts, accepted, at_term).await;
                 }
                 Ok(CallerDispatchOutcome::Rejected { error_code, retryable })
             }
@@ -979,6 +916,7 @@ mod barrier;
 mod history_replay;
 mod observe;
 mod accepted;
+mod dispatch_proof;
 mod delegate;
 mod readiness;
 mod errors;

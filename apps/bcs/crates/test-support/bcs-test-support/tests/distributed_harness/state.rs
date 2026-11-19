@@ -191,7 +191,7 @@ async fn membership_checks_lease_identity_and_drain_transition() -> ContractResu
     let script = Script::default()
         .expect(
             "MembershipPort::register",
-            (instance(), RuntimeRole::Worker, Duration::from_secs(60)),
+            (instance(), RuntimeRole::Worker, String::from("http://worker.example.test:8080"), Duration::from_secs(60)),
             ok(lease.clone()),
         )
         .expect(

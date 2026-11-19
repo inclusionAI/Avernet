@@ -309,6 +309,7 @@ impl bcs_service_api::port::OrchestrationCallerDispatchPort for CallerDispatchPi
                 CallerProofFormat::Opaque => "opaque".to_string(),
             },
             proof_type: self.identity.proof_type().to_string(),
+            channel_supplied_proof: false,
             control_revision: d.control_revision,
             not_after_ms: effective_deadline,
             // The persisted node frame's trusted ordinary sender — the

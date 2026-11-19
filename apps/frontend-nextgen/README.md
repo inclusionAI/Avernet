@@ -305,3 +305,14 @@ Presentation and interaction regression coverage lives in
 [`test/evolution`](test/evolution), including template pagination, task actions,
 score display and output inspection. Run `npm test -- --runInBand test/evolution`
 in a configured frontend workspace.
+
+## TaskEscort sidebar
+
+The [TaskEscort navigation](src/pages/TaskEscort/Navigation.tsx) uses 14px labels,
+12px group headings, 20px icons and 44px rows. On desktop its right edge is a
+focusable separator: drag right to grow, use Left/Right for 10px steps, or
+Home/End for the 220–360px bounds (264px default). Width is stored locally under
+`task-escort.sidebar-width`; unavailable storage leaves resizing usable. The
+editor retains its 72px compact rail and mobile retains horizontal navigation
+without a resize handle. No global selection styles are changed during dragging.
+Regression coverage: [sidebar.test.tsx](test/taskEscortWorkspace/sidebar.test.tsx).

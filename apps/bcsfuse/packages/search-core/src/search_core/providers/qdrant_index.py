@@ -84,6 +84,7 @@ class QdrantRetrievalIndex:
             return
         # Qdrant interprets a dotted filter key as a nested payload path.
         indexed = []
+        dense = []
         for point in points:
             labels = {
                 k[7:]: v for k, v in point.payload.items() if k.startswith("labels.")
@@ -98,9 +99,19 @@ class QdrantRetrievalIndex:
                     update={"payload": {**payload, "labels": labels}}
                 )
             indexed.append(point)
+            if "_deferred_payload" in point.payload:
+                payload = point.payload.copy()
+                del payload["_deferred_payload"]
+                point = point.model_copy(update={"payload": payload})
+            dense.append(point)
         with self._lock:
-            self._dense.upsert(indexed)
+            self._dense.upsert(dense)
             self._keyword.upsert(indexed)
+
+    def read_deferred_payloads(self, ids: list[str]) -> dict:
+        """Read the main points in one batch, independent of the recall branch."""
+        with self._lock.read(self.read_timeout_seconds):
+            return self._keyword.read_deferred_payloads(ids, **self._query_options)
 
     def delete(self, ids: list[str]) -> None:
         with self._lock:

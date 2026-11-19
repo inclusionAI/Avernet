@@ -110,66 +110,66 @@ describe.each(["save", "deploy", "editor-deploy"] as const)("AutoHeal /%s Git se
   });
   afterEach(async () => { vi.restoreAllMocks(); await db.close(); rmSync(root, { recursive: true, force: true }); });
 
-  it("provides no-store absence proof only to an authorized actor", async () => {
-    if (endpoint !== "editor-deploy") return;
-    const getState = (router: Router) => new Promise<{ status: number; body: Record<string, unknown>; cache: string }>((resolve, reject) => {
-      let status = 200, cache = "";
-      const req = { method: "GET", url: `/editor-deploy/snapshot-v2/state?workflowId=${spec.id}`, query: { workflowId: spec.id }, headers: {} } as Request;
-      const res = { set(name: string, value: string) { if (name === "Cache-Control") cache = value; return this; },
-        status(code: number) { status = code; return this; },
-        json(body: Record<string, unknown>) { resolve({ status, body, cache }); return this; } } as Response;
-      router(req, res, (error?: unknown) => reject(error ?? new Error("No response")));
+  if (endpoint === "editor-deploy") {
+    it("provides no-store absence proof only to an authorized actor", async () => {
+      const getState = (router: Router) => new Promise<{ status: number; body: Record<string, unknown>; cache: string }>((resolve, reject) => {
+        let status = 200, cache = "";
+        const req = { method: "GET", url: `/editor-deploy/snapshot-v2/state?workflowId=${spec.id}`, query: { workflowId: spec.id }, headers: {} } as Request;
+        const res = { set(name: string, value: string) { if (name === "Cache-Control") cache = value; return this; },
+          status(code: number) { status = code; return this; },
+          json(body: Record<string, unknown>) { resolve({ status, body, cache }); return this; } } as Response;
+        router(req, res, (error?: unknown) => reject(error ?? new Error("No response")));
+      });
+      expect(await getState(createAutoHealRouter(deps))).toEqual({ status: 200, cache: "no-store", body: {
+        protocol: "editor-deployment-state-v1", workflowId: spec.id, packId: "pack-1", canDeploy: true, savedCommit: candidate, activeCommit: null } });
+      expect((await getState(createAutoHealRouter({ ...deps, resolvePrincipal: async () => null }))).status).toBe(401);
+      expect((await getState(createAutoHealRouter({ ...deps, botPermRepo: null }))).status).toBe(403);
+      expect(await getState(createAutoHealRouter({ ...deps, authorizeSnapshotDeploy: undefined }))).toMatchObject({ status: 200, body: { savedCommit: candidate } });
     });
-    expect(await getState(createAutoHealRouter(deps))).toEqual({ status: 200, cache: "no-store", body: {
-      protocol: "editor-deployment-state-v1", workflowId: spec.id, packId: "pack-1", canDeploy: true, savedCommit: candidate, activeCommit: null } });
-    expect((await getState(createAutoHealRouter({ ...deps, resolvePrincipal: async () => null }))).status).toBe(401);
-    expect((await getState(createAutoHealRouter({ ...deps, botPermRepo: null }))).status).toBe(403);
-    expect(await getState(createAutoHealRouter({ ...deps, authorizeSnapshotDeploy: undefined }))).toMatchObject({ status: 200, body: { savedCommit: candidate } });
-  });
 
-  it("reports authenticated unified-save availability only for an explicit host resolver", async () => {
-    if (endpoint !== "editor-deploy") return;
-    const get = (router: Router) => new Promise<{ status: number; body: Record<string, unknown>; cache: string }>((resolve, reject) => {
-      let status = 200, cache = "";
-      const req = { method: "GET", url: "/capabilities", headers: {} } as Request;
-      const res = { set(name: string, value: string) { if (name === "Cache-Control") cache = value; return this; },
-        status(code: number) { status = code; return this; },
-        json(body: Record<string, unknown>) { resolve({ status, body, cache }); return this; } } as Response;
-      router(req, res, (error?: unknown) => reject(error ?? new Error("No capability response")));
+    it("reports authenticated unified-save availability only for an explicit host resolver", async () => {
+      const get = (router: Router) => new Promise<{ status: number; body: Record<string, unknown>; cache: string }>((resolve, reject) => {
+        let status = 200, cache = "";
+        const req = { method: "GET", url: "/capabilities", headers: {} } as Request;
+        const res = { set(name: string, value: string) { if (name === "Cache-Control") cache = value; return this; },
+          status(code: number) { status = code; return this; },
+          json(body: Record<string, unknown>) { resolve({ status, body, cache }); return this; } } as Response;
+        router(req, res, (error?: unknown) => reject(error ?? new Error("No capability response")));
+      });
+      expect(await get(createAutoHealRouter(deps))).toEqual({ status: 200, body: { autoHealUnifiedSave: false }, cache: "no-store" });
+      deps.resolveUnifiedSave = async () => null;
+      expect(await get(createAutoHealRouter(deps))).toEqual({ status: 200, body: { autoHealUnifiedSave: "v1" }, cache: "no-store" });
+      deps.resolvePrincipal = async () => null;
+      expect(await get(createAutoHealRouter(deps))).toEqual({ status: 401, body: { code: "AUTHENTICATION_REQUIRED" }, cache: "no-store" });
     });
-    expect(await get(createAutoHealRouter(deps))).toEqual({ status: 200, body: { autoHealUnifiedSave: false }, cache: "no-store" });
-    deps.resolveUnifiedSave = async () => null;
-    expect(await get(createAutoHealRouter(deps))).toEqual({ status: 200, body: { autoHealUnifiedSave: "v1" }, cache: "no-store" });
-    deps.resolvePrincipal = async () => null;
-    expect(await get(createAutoHealRouter(deps))).toEqual({ status: 401, body: { code: "AUTHENTICATION_REQUIRED" }, cache: "no-store" });
-  });
 
-  it("requires the snapshot protocol on its separate Editor endpoint", async () => {
-    if (endpoint !== "editor-deploy") return;
-    const router = createAutoHealRouter(deps);
-    const body = { ...await requestBody(), autoRun: false };
-    expect((await post(router, "editor-deploy/snapshot-v2", body)).status).toBe(400);
-    expect((await post(router, "editor-deploy/snapshot-v2", { ...body, snapshotProtocol: "future" })).status).toBe(400);
-    expect((await post(router, "editor-deploy", { ...body, snapshotProtocol: "saved-tree-v2" })).status).toBe(400);
-    remoteGit("update-ref", `refs/heads/wf/${spec.id}`, candidate);
-    const response = await post(router, "editor-deploy/snapshot-v2", { ...body, snapshotProtocol: "saved-tree-v2", expectedActiveCommit: "", confirmedFileDiff: true });
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({ snapshotProtocol: "saved-tree-v2", candidateCommit: candidate });
-    expect(remoteGit("rev-parse", `${response.body.commit}^{tree}`)).toBe(remoteGit("rev-parse", `${candidate}^{tree}`));
-  });
+    it("requires the snapshot protocol on its separate Editor endpoint", async () => {
+      const router = createAutoHealRouter(deps);
+      const body = { ...await requestBody(), autoRun: false };
+      expect((await post(router, "editor-deploy/snapshot-v2", body)).status).toBe(400);
+      expect((await post(router, "editor-deploy/snapshot-v2", { ...body, snapshotProtocol: "future" })).status).toBe(400);
+      expect((await post(router, "editor-deploy", { ...body, snapshotProtocol: "saved-tree-v2" })).status).toBe(400);
+      remoteGit("update-ref", `refs/heads/wf/${spec.id}`, candidate);
+      const response = await post(router, "editor-deploy/snapshot-v2", { ...body, snapshotProtocol: "saved-tree-v2", expectedActiveCommit: "", confirmedFileDiff: true });
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ snapshotProtocol: "saved-tree-v2", candidateCommit: candidate });
+      expect(remoteGit("rev-parse", `${response.body.commit}^{tree}`)).toBe(remoteGit("rev-parse", `${candidate}^{tree}`));
+    });
+  }
 
-  it("resolves configured Git for create-only save as well as existing drafts", async () => {
-    if (endpoint !== "save") return;
-    await repo.create({ config_key: "git", config_yaml: stringifyYaml({ remoteUrl: remote }) });
-    const create = vi.spyOn(AutoHealSaveService.prototype, "save").mockResolvedValue({ ok: true, saved: true,
-      workflowId: "new-flow", packId: "new-flow", branch: "wf/new-flow", commit: "a".repeat(40) });
-    const query = vi.spyOn(db, "query");
-    const result = await post(createAutoHealRouter(deps), "save", { workflowId: "new-flow", spec: { ...spec, id: "new-flow" }, createOnly: true });
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ branch: "wf/new-flow", commit: "a".repeat(40) });
-    expect(configQueries(query)).toHaveLength(1);
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ createOnly: true, actorId: "operator" }));
-  });
+  if (endpoint === "save") {
+    it("resolves configured Git for create-only save as well as existing drafts", async () => {
+      await repo.create({ config_key: "git", config_yaml: stringifyYaml({ remoteUrl: remote }) });
+      const create = vi.spyOn(AutoHealSaveService.prototype, "save").mockResolvedValue({ ok: true, saved: true,
+        workflowId: "new-flow", packId: "new-flow", branch: "wf/new-flow", commit: "a".repeat(40) });
+      const query = vi.spyOn(db, "query");
+      const result = await post(createAutoHealRouter(deps), "save", { workflowId: "new-flow", spec: { ...spec, id: "new-flow" }, createOnly: true });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ branch: "wf/new-flow", commit: "a".repeat(40) });
+      expect(configQueries(query)).toHaveLength(1);
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ createOnly: true, actorId: "operator" }));
+    });
+  }
 
   it("rejects unverified header identities when no trusted principal is supplied", async () => {
     deps.resolvePrincipal = undefined;

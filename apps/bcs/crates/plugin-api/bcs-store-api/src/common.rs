@@ -18,6 +18,11 @@ pub struct Versioned<T> {
 /// every deployment of the same backend product.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreCapability {
+    /// Persistent whole-document create/read/exact-version replacement. No TTL,
+    /// deletion, retained history after external deletion, or Newer is implied.
+    DocumentCas,
+    /// Provider-timed, non-revivable registration lifetimes, including retirement.
+    StrictLease,
     Kv,
     /// Versioned creation/read, unconditional deletion and TTL query; no CAS.
     VersionedKv,

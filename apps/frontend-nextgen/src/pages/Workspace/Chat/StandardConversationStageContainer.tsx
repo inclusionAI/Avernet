@@ -11,12 +11,10 @@ import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { ChatHeaderActions } from './components/ChatHeaderActions';
-import { ChatHeaderRightPanel, SessionDetailPanel } from './components/ChatHeaderRightPanel';
-import { SessionHistorySearchPanel } from './components/SessionHistorySearchPanel';
+import { ConversationHeaderPanels } from './components/ConversationHeaderPanels';
 import { ConversationInteractiveStage } from './ConversationInteractiveStage';
 import { useChatEngineVersionNotice } from './hooks/useChatEngineVersionNotice';
 import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
-import type { ChatHeaderPanelKind } from './hooks/useChatHeaderPanels';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
 import { useConversationSessionEdits } from './hooks/useConversationSessionEdits';
 import type { ConversationSessionsModel } from './hooks/useConversationSessions.types';
@@ -106,7 +104,7 @@ export function StandardConversationStageContainer({
   // /file 等面板唤起后切会话:输入清空/失效 chip/Escape 收起子面板。
   useSessionSwitchReset(session?.sessionId ?? null, interactiveModel.fileFeature.senderRef);
 
-  // 头部五图标域编排（chat-header-panels）：收藏会话/会话管理/历史消息/资源管理/副屏。
+  // 头部六图标域编排：收藏会话/会话管理/历史消息/资源管理/任务护航 DEMO/副屏。
   const headerPanels = useChatHeaderPanels({
     bot,
     historyReady: botChat.historyReady,
@@ -148,24 +146,12 @@ export function StandardConversationStageContainer({
       notice={engineVersionNotice.notice}
     />
   );
-  // 头部右缘内联副屏（chat-header-panels）：单容器常挂、经 open 开合对话区让宽（与 SDK 副屏
-  // 同构，无抽屉蒙层）；renderPanelKind 记住最近一次打开的面板，收起过渡期间内容不闪切。
-  const openPanel = headerPanels.openPanel;
-  const renderPanelKindRef = useRef<ChatHeaderPanelKind>('detail');
-  if (openPanel) renderPanelKindRef.current = openPanel;
-  const renderPanelKind = openPanel ?? renderPanelKindRef.current;
   const headerRightPanel = (
-    <ChatHeaderRightPanel
-      open={openPanel !== null}
-      title={renderPanelKind === 'history' ? '历史消息' : '会话详情'}
-      onClose={headerPanels.closePanel}
-    >
-      {renderPanelKind === 'history' ? (
-        <SessionHistorySearchPanel search={headerPanels.historySearch} onLocate={headerPanels.locateMessage} />
-      ) : (
-        <SessionDetailPanel session={interactiveModel.selectedSession} />
-      )}
-    </ChatHeaderRightPanel>
+    <ConversationHeaderPanels
+      headerPanels={headerPanels}
+      session={interactiveModel.selectedSession}
+      botName={bot?.displayName}
+    />
   );
 
   return (

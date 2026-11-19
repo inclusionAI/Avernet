@@ -4,7 +4,7 @@ use crate::error::need_contract;
 use crate::layout::KeyLayout;
 use bcs_dist_model::Sid;
 use bcs_service_api::port::repo::distributed::common::StoreError;
-use bcs_store_api::json::JsonStorePlugin;
+use bcs_store_api::document::DocumentStorePlugin;
 
 /// What admission needs to know about the session's Worker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +26,7 @@ pub enum ListenerState {
 /// treats that as `NotListening` and writes `wake`, which is also the rule for a
 /// failed read, so it stays correct; the quarantine check is skipped.
 pub async fn read_listener(
-    _json: &dyn JsonStorePlugin,
+    _documents: &dyn DocumentStorePlugin,
     _layout: &KeyLayout,
     _sid: &Sid,
 ) -> Result<ListenerState, StoreError> {

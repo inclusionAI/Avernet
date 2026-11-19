@@ -6,12 +6,14 @@ import { useEditorAuthoringNavigation } from '@/hooks/taskEscortParity/useEditor
 import { useEditorAuthoringPublish } from '@/hooks/taskEscortParity/useEditorAuthoringPublish';
 import { useTaskEscortEditor } from '@/hooks/taskEscortParity/useTaskEscortEditor';
 import { useEffect, useState } from 'react';
+import { WorkflowCreationDialog } from '../WorkflowCreationDialog';
+import { EditorAuthoringToolbar } from './EditorAuthoringToolbar';
 import { EditorAiPanel } from './EditorAiPanel';
 import { EditorLeaveDialog, EditorPublishDialog, EditorPublishReviewDialog } from './EditorAuthoringDialogs';
-import { EditorAuthoringYaml } from './EditorAuthoringYaml';
-import { EditorGraph } from './EditorGraph';
 import { EditorHistory } from './EditorHistory';
-import { EditorInspector, EditorSettings } from './EditorInspector';
+import { EditorSettings } from './EditorInspector';
+import { EditorWorkspaceBody } from './EditorWorkspaceBody';
+import './editor-workspace.css';
 import { EditorDialog, EmptyState, LoadingState, StateView, Tabs } from './EditorPrimitives';
 import { EditorScripts } from './EditorScripts';
 
@@ -32,10 +34,14 @@ function EditorAuthoringSession({
   const authoring = useEditorAuthoring(context, original, canEdit);
   const publication = useEditorAuthoringPublish(context, authoring.yaml, canEdit, authoring.save);
   const busy = !!authoring.phase || !!publication.phase;
-  const navigation = useEditorAuthoringNavigation(authoring.dirty || busy);
+  const [nodePending, setNodePending] = useState(false);
+  const [settingsPending, setSettingsPending] = useState(false);
+  const pendingFields = nodePending || settingsPending;
+  const navigation = useEditorAuthoringNavigation(authoring.dirty || busy || pendingFields);
   const [workspace, setWorkspace] = useState<Workspace>('workflow');
   const [mode, setMode] = useState<Mode>('visual');
   const [aiOpen, setAiOpen] = useState(false);
+  const [generationOpen, setGenerationOpen] = useState(false);
   const queryNodeId = context.query.nodeId;
   const [selection, setSelection] = useState<{ queryNodeId: string | undefined; id: string | null }>({
     queryNodeId,
@@ -50,68 +56,47 @@ function EditorAuthoringSession({
   const focusId = selection.queryNodeId === queryNodeId ? selection.id : queryNodeId ?? null;
   const node = spec.nodes.find((item) => item.id === focusId);
   const select = (id: string | null) => {
+    if (nodePending) return;
     setSelection({ queryNodeId, id });
     context.navigate('editor', { nodeId: id ?? undefined });
   };
   return (
-    <section aria-label="工作流编辑器" className="min-w-0 space-y-4 text-foreground">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="m-0 break-words text-lg font-semibold">{spec.title}</h2>
-          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-            {spec.id} · {spec.version === undefined ? '未提供版本' : `v${spec.version}`} ·{' '}
-            {canEdit ? '有编辑权限' : '只读权限'}
-            {authoring.dirty && (
-              <span className="ml-2 rounded-full bg-muted px-2 py-0.5 font-sans text-foreground">未保存</span>
-            )}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => setSettings(true)}>
-            流程设置
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
-            发布历史
-          </Button>
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => navigation.requestLeave(refresh)}>
-            刷新规格
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!canEdit || busy}
-            aria-describedby="editor-authoring-help"
-            onClick={() => setAiOpen((open) => !open)}
-          >
-            AI 修改
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!canEdit || busy || !authoring.saveReady}
-            aria-describedby="editor-authoring-help"
-            onClick={() => void authoring.save()}
-          >
-            {authoring.phase === 'save' ? '保存中…' : '保存工作流'}
-          </Button>
-          <Button
-            size="sm"
-            disabled={!canEdit || busy || !authoring.saveReady}
-            aria-describedby="editor-authoring-help"
-            onClick={() => setPublishOpen(true)}
-          >
-            发布工作流
-          </Button>
-        </div>
-      </header>
+    <section aria-label="工作流编辑器" className="editor-authoring-workspace min-w-0 text-foreground">
+      <div className="editor-workspace-tabs flex flex-wrap items-center justify-between gap-3">
+        <Tabs
+          value={workspace}
+          onChange={(next) => { if (!pendingFields) setWorkspace(next); }}
+          label="编辑器工作区"
+          options={[
+            { value: 'workflow', label: '工作流编排' },
+            { value: 'scripts', label: '脚本文件' },
+          ]}
+        />
+        {workspace === 'workflow' && (
+          <Tabs
+            value={mode}
+            onChange={(next) => { if (!pendingFields) setMode(next); }}
+            label="流程视图"
+            options={[
+              { value: 'visual', label: '画布' },
+              { value: 'split', label: '对照' },
+              { value: 'yaml', label: 'YAML' },
+            ]}
+          />
+        )}
+      </div>
+      <EditorAuthoringToolbar authoring={authoring} canEdit={canEdit} busy={busy || pendingFields}
+        onSettings={() => setSettings(true)} onHistory={() => setHistoryOpen(true)}
+        onRefresh={() => navigation.requestLeave(refresh)} onGenerate={() => setGenerationOpen(true)}
+        onModify={() => setAiOpen((open) => !open)} onPublish={() => setPublishOpen(true)} />
       <p
         id="editor-authoring-help"
         className="m-0 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
       >
         {canEdit
-          ? '可通过 YAML 编辑或 AI 修改当前草稿。AI 候选必须预览、校验并明确应用；保存和发布需单独操作。'
+          ? '从左侧添加节点，连接输出与输入，再选择节点填写当前任务。修改仅保留在当前会话，保存与发布需分别确认。'
           : '当前身份只有查看权限，不能 AI 修改、编辑 YAML、保存或发布。'}{' '}
-        节点属性与脚本文件保持只读；对照视图显示当前画布和 YAML 草稿。
+        未应用的 YAML 请先校验并应用；脚本文件使用独立的 Pack 快照，不随画布修改自动保存。
       </p>
       <div aria-live="polite">
         {authoring.persistence.loading && (
@@ -160,61 +145,27 @@ function EditorAuthoringSession({
           </p>
         )}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs
-          value={workspace}
-          onChange={setWorkspace}
-          label="编辑器工作区"
-          options={[
-            { value: 'workflow', label: '工作流编排' },
-            { value: 'scripts', label: '脚本文件' },
-          ]}
-        />
-        {workspace === 'workflow' && (
-          <Tabs
-            value={mode}
-            onChange={setMode}
-            label="流程视图"
-            options={[
-              { value: 'visual', label: '画布' },
-              { value: 'split', label: '对照' },
-              { value: 'yaml', label: 'YAML' },
-            ]}
-          />
-        )}
-      </div>
       {workspace === 'workflow' && (
         <div
           className={`grid min-w-0 items-start gap-4 ${aiOpen && canEdit ? '2xl:grid-cols-[minmax(0,1fr)_420px]' : ''}`}
         >
-          <div className="min-w-0 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="m-0 text-xs text-muted-foreground">
-                选择节点查看完整属性；编辑请切换 YAML 或使用 AI 修改。
-              </p>
-              <Button variant="outline" size="sm" disabled>
-                添加节点
-              </Button>
-            </div>
-            {focusId && !node && (
-              <p role="status" className="rounded-lg border border-border p-3 text-xs text-muted-foreground">
-                所选节点 {focusId} 不在当前规格中，请重新选择。
-              </p>
-            )}
-            <div className={`grid min-w-0 gap-4 ${mode !== 'yaml' ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : ''}`}>
-              <div className={`grid min-w-0 gap-4 ${mode === 'split' ? 'xl:grid-cols-2' : ''}`}>
-                {mode !== 'yaml' && <EditorGraph spec={spec} selectedId={node?.id ?? null} select={select} />}
-                {mode !== 'visual' && <EditorAuthoringYaml authoring={authoring} canEdit={canEdit} />}
-              </div>
-              {mode !== 'yaml' && <EditorInspector node={node} close={() => select(null)} />}
-            </div>
-          </div>
+          <EditorWorkspaceBody
+            authoring={authoring}
+            canEdit={canEdit}
+            busy={busy}
+            mode={mode}
+            node={node}
+            focusId={focusId}
+            select={select}
+            nodePending={nodePending}
+            onPendingChange={setNodePending}
+          />
           {aiOpen && canEdit && (
             <EditorAiPanel
               context={context}
               yaml={authoring.yaml}
               spec={spec}
-              blockedReason={busy ? '正在保存或校验，请等待操作完成。' : undefined}
+              blockedReason={busy || pendingFields ? '正在保存或校验，请等待操作完成。' : undefined}
               onApply={authoring.replaceDraft}
               onClose={() => setAiOpen(false)}
             />
@@ -222,10 +173,12 @@ function EditorAuthoringSession({
         </div>
       )}
       {workspace === 'scripts' && <EditorScripts context={context} canEdit={canEdit} />}
+      {generationOpen && <WorkflowCreationDialog context={context} initialSource="ai" onClose={() => setGenerationOpen(false)} />}
       <EditorDialog title="发布历史" open={historyOpen} onOpenChange={setHistoryOpen}>
         {historyOpen && <EditorHistory context={context} />}
       </EditorDialog>
-      <EditorSettings spec={spec} open={settings} onOpenChange={setSettings} />
+      <EditorSettings spec={spec} open={settings} onOpenChange={setSettings}
+        onChange={authoring.replaceDraft} disabled={!canEdit || busy || authoring.pendingYaml || nodePending} onPendingChange={setSettingsPending} />
       <EditorPublishDialog
         open={publishOpen}
         busy={busy}

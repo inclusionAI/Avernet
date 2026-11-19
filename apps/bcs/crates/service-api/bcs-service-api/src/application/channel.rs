@@ -167,6 +167,18 @@ pub trait ChannelService: Send + Sync {
     /// Errors are classified for the delivery adapter to provide actionable feedback.
     async fn handle_inbound(&self, msg: InboundMessage) -> Result<(), ChannelInboundError>;
 
+    /// Resolve the sole Human speaker of a server-owned, single-Bot channel
+    /// Session. Implementations must verify the live binding and conversation
+    /// mapping. The Group carries the projected Session participants; an
+    /// unproven or shared Session returns `None`.
+    async fn exclusive_session_speaker(
+        &self,
+        _session: &bcs_domain::Session,
+        _group: &bcs_domain::Group,
+    ) -> Result<Option<String>, ChannelUseCaseError> {
+        Ok(None)
+    }
+
     /// 出站 hook:若 session 绑定了 channel 会话且可见性允许,则投递到 IM。
     /// 无绑定 / 不可见 / 来自 IM(防回环)→ no-op。
     async fn try_outbound(&self, msg: OutboundMessage) -> Result<(), ChannelUseCaseError>;

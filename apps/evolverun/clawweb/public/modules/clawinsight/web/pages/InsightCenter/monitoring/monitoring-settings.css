@@ -87,6 +87,8 @@
 .insight-monitoring .settings-bots li + li { border-top: 1px solid var(--line); }
 .insight-monitoring .settings-bots .bot-glyph { flex: none; }
 .insight-monitoring .settings-bots .record-title { display: block; }
+.insight-monitoring .settings-bot-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.insight-monitoring .settings-bot-tags { display: flex; flex-wrap: wrap; gap: 5px; }
 .insight-monitoring .settings-bots .record-session { margin-top: 2px; }
 .insight-monitoring .settings-state { color: var(--sub); font-size: 12px; white-space: nowrap; }
 .insight-monitoring .settings-state.enabled { color: var(--blue); }
@@ -106,7 +108,7 @@
 .insight-monitoring .monitoring-switch span { display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--paper); }
 .insight-monitoring .monitoring-switch[aria-checked=true] { background: var(--blue); }
 .insight-monitoring .monitoring-switch[aria-checked=true] span { margin-left: 16px; }
-.insight-monitoring .settings-service-bot .monitoring-switch { background: var(--muted); }
+.insight-monitoring .settings-disabled-bot .monitoring-switch { background: var(--muted); }
 
 .insight-monitoring .recovery-toolbar { justify-content: flex-start; flex-wrap: wrap; padding-block: 11px; }
 .insight-monitoring .recovery-toolbar .refresh { margin-left: auto; }

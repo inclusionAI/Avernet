@@ -285,3 +285,29 @@ KV calls are no longer used to exercise versioned history.
 Read `page.recovery`/`trim.recovery` explicitly; services requiring loss detection
 must reject a provider without StreamRecovery instead of treating None as a clean
 stream. Service-owned snapshot/checkpoint and retention protocols remain required.
+
+
+## Persistent documents and strict leases
+
+`DocumentStorePlugin` / `DocumentCas` is an independent, smaller contract than
+`AtomicJson`: consistent whole-document reads, create-if-absent and exact-version
+whole-document replacement. It does not imply deletion, TTL editing, `Newer` or
+retained version history after external deletion. All writers in its namespace
+must use the same format and CAS discipline. Persistent coordination records
+must not expire, be evicted, be deleted or be restored to an earlier version.
+Business JSON remains ordinary JSON, including real null, removed fields and
+metadata-like field names. Provider-private storage metadata is never exposed as
+a reserved business field. Unsupported old formats fail rather than being
+silently reinterpreted. The reusable suite is
+`contract::plugin::store::document::document_store_contract_tests`.
+
+`LeaseStorePlugin` / `StrictLease` adds a separate provider-timed registration
+lifetime. Expiry/version checks, optional deadline extension and payload changes
+are atomic. A terminal lifetime cannot be revived by delayed registration or
+renewal; retirement also fences a still-pending first registration. Missing is
+not stable termination. Retrying registration preserves both its original
+identity and deadline, even after its mutable payload has changed. A failed
+response can be `OutcomeUnknown`; consumers resolve it without treating absence
+as death. The test-only model uses one lock and a controllable clock. It is not a
+production lease service and proves neither durability nor failover behavior.
+Document CAS and ordinary TTL alone do not establish StrictLease support.

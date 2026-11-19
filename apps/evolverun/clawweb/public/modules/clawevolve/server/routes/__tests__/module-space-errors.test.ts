@@ -49,8 +49,8 @@ afterEach(async () => {
   await db?.close();
 });
 
-async function startHost(configured = true, separateTeamclawSpaces = false) {
-  module = createClawevolveModule({ db, dispatch,
+async function startHost(configured = true, separateTeamclawSpaces = false, localTaskVisibilityOnly = false) {
+  module = createClawevolveModule({ db, dispatch, localTaskVisibilityOnly,
     artifactStore: { putObject, getObject, createSignedUrl },
     hostLocalSkills: {
       exportLocalSkill, listLocalSkills: vi.fn(async () => []),
@@ -169,11 +169,55 @@ describe("ClawEvolve module space errors under a generic-500 host", () => {
 });
 
 
-it("uses the new frontend space directory without redirecting old Stage/Skill space lookups",async()=>{
-  await startHost(true,true);
+it.each([false, true])("keeps new frontend space checks independent (local visibility=%s)",async(localVisibility)=>{
+  await startHost(true,true,localVisibility);
   const response=await fetch(`${baseUrl}/teamclaw/tasks?space_id=42`,{headers:{"X-User-Id":actor}});
   expect(response.status).toBe(200);expect((await response.json()).tasks).toEqual([]);
   expect(listAccessibleSpaces).not.toHaveBeenCalled();
+  const denied=await fetch(`${baseUrl}/teamclaw/tasks?space_id=999`,{headers:{"X-User-Id":actor}});
+  expect(denied.status).toBe(403);
   const old=await fetch(`${baseUrl}/spaces`,{headers:{"X-User-Id":actor}});
   expect(old.status).toBe(200);expect(listAccessibleSpaces).toHaveBeenCalledTimes(1);
+});
+
+
+describe("legacy local task visibility", () => {
+  async function seedTasks() {
+    const { EvolveRepository } = await import("../../repositories/evolve-repository.js");
+    const repo = new EvolveRepository(db);
+    for (const [taskId, createdBy] of [["EV-LOCAL-OWN", actor], ["EV-LOCAL-OTHER", "other"]] as const) {
+      await repo.createTask({ taskId, taskType: "diagnose", userId: createdBy, botId: "bot",
+        createdBy, taskName: taskId, configJson: "{}" });
+    }
+  }
+  const headers = { "X-User-Id": actor };
+  const unavailable = () => Object.assign(new Error("unavailable"), {status:503,code:"HOST_SPACE_UNAVAILABLE"});
+  it("reads only own rows with correct pagination and no space dependency", async () => {
+    await seedTasks();
+    listAccessibleSpaces.mockRejectedValue(unavailable());
+    await startHost(true, false, true);
+    const response = await fetch(`${baseUrl}/tasks?scope=mine&pageSize=1`, {headers});
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.total).toBe(1);
+    expect(body.totalPages).toBe(1);
+    expect(body.tasks.map((task: {task_id:string}) => task.task_id)).toEqual(["EV-LOCAL-OWN"]);
+    expect(body.spaceExpansion).toBe("disabled-in-dev");
+    expect((await fetch(`${baseUrl}/tasks/EV-LOCAL-OWN`, {headers})).status).toBe(200);
+    expect(listAccessibleSpaces).not.toHaveBeenCalled();
+    expect((await fetch(`${baseUrl}/tasks?scope=all`, {headers})).status).toBe(403);
+    expect([403,404]).toContain((await fetch(`${baseUrl}/tasks/EV-LOCAL-OTHER`, {headers})).status);
+  });
+  it("keeps the default host's space failure behavior", async () => {
+    await seedTasks();
+    listAccessibleSpaces.mockRejectedValue(unavailable());
+    await startHost();
+    expect((await fetch(`${baseUrl}/tasks?scope=mine`, {headers})).status).toBe(503);
+    expect(listAccessibleSpaces).toHaveBeenCalledOnce();
+  });
+  it("does not convert directory errors to successful empty lists", async () => {
+    listAccessibleSpaces.mockRejectedValue(unavailable());
+    await startHost(true, false, true);
+    expect((await fetch(`${baseUrl}/spaces`, {headers})).status).toBe(503);
+  });
 });

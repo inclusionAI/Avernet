@@ -10,8 +10,8 @@ export const fixtureResolver: MonitoringTargetResolver = {
   resolve: async botId => testTarget(botId),
 };
 export const fixtureDirectory: MonitoringBotDirectory = {
-  exact: async botId => [{ ...testTarget(botId), directoryId: '1', activeEngine: 'teclaw', botName: botId, ownerId: '001234', ownerName: null }],
-  get: async target => ({ ...target, directoryId: '1', activeEngine: target.botId === 'mock-bot-oc' || /^bot-0\d$|^bot-1[0-6]$/.test(target.botId) ? 'openclaw' : 'teclaw', botName: target.botId, ownerId: '001234', ownerName: null }),
+  exact: async botId => [{ ...testTarget(botId), directoryId: '1', botType: 'personal', activeEngine: 'teclaw', botName: botId, ownerId: '001234', ownerName: null }],
+  get: async target => ({ ...target, directoryId: '1', botType: 'personal', activeEngine: target.botId === 'mock-bot-oc' || /^bot-0\d$|^bot-1[0-6]$/.test(target.botId) ? 'openclaw' : 'teclaw', botName: target.botId, ownerId: '001234', ownerName: null }),
   search: async () => ({ items: [], hasMore: false }),
 };
 export const fixtureIntegration: MonitoringIntegration = {

@@ -74,6 +74,9 @@ class EmergencyPolicy(BaseModel):
         default=500, strict=True, gt=0, le=4000, allow_inf_nan=False
     )
     embedding_singleflight_enabled: StrictBool = True
+    card_metadata_timeout_ms: float = Field(
+        default=500, strict=True, gt=0, le=4000, allow_inf_nan=False
+    )
     reranker_timeout_ms: float = Field(strict=True, gt=0, le=4000, allow_inf_nan=False)
     cache: SearchCachePolicy = Field(default_factory=SearchCachePolicy)
 
@@ -99,6 +102,7 @@ class EmergencyControl:
         build_variants: Callable | None = None,
     ):
         self._default_keyword_timeout_ms = defaults.keyword_timeout_ms
+        self._default_card_metadata_timeout_ms = defaults.card_metadata_timeout_ms
         self._build = build
         self._build_variants = build_variants
         self._lock = Lock()  # SDK callbacks may arrive outside the event loop.
@@ -147,6 +151,12 @@ class EmergencyControl:
             if "keyword_timeout_ms" not in policy.model_fields_set:
                 policy = policy.model_copy(
                     update={"keyword_timeout_ms": self._default_keyword_timeout_ms}
+                )
+            if "card_metadata_timeout_ms" not in policy.model_fields_set:
+                policy = policy.model_copy(
+                    update={
+                        "card_metadata_timeout_ms": self._default_card_metadata_timeout_ms
+                    }
                 )
             # Zero remains a local startup option, never a DRM bypass.
             if policy.max_inflight_requests == 0:

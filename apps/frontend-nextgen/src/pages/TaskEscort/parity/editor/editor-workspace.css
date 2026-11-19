@@ -1,0 +1,81 @@
+/* Scope the full-height editor to Task Escort; never override the global shell. */
+.task-escort-editor .content-area {
+  max-width: none;
+  padding: 0;
+}
+.task-escort-editor .workspace-context-header {
+  margin: 0;
+  padding: 18px 24px;
+  background: hsl(var(--background));
+}
+.task-escort-editor .workspace-context-header h1 {
+  font-size: 18px;
+}
+.editor-authoring-workspace {
+  background: hsl(var(--background));
+}
+.editor-authoring-toolbar {
+  padding: 14px 20px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.editor-authoring-workspace #editor-authoring-help {
+  border-radius: 0;
+  border-width: 0 0 1px;
+  padding: 10px 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  background: hsl(var(--muted) / .45);
+}
+.editor-workspace-tabs {
+  padding: 8px 18px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.editor-workspace-panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  min-height: 620px;
+}
+.editor-workspace-center {
+  min-width: 0;
+}
+.editor-workspace-panes > aside {
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  overflow: auto;
+  max-height: 840px;
+}
+.editor-workspace-yaml-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+.editor-workspace-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, .7fr);
+}
+@media (min-width: 1500px) {
+  .editor-workspace-panes {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+  .editor-workspace-yaml-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+}
+@media (max-width: 1100px) {
+  .editor-workspace-panes {
+  grid-template-columns: minmax(0, 1fr);
+}
+  .editor-workspace-panes > aside {
+  max-height: none;
+  border-width: 1px 0 0;
+}
+  .editor-workspace-split {
+  grid-template-columns: minmax(0, 1fr);
+}
+}
+@media (max-width: 767px) {
+  .task-escort-editor .workspace-context-header {
+  padding: 16px;
+}
+  .editor-authoring-toolbar {
+  padding: 12px 16px;
+}
+}

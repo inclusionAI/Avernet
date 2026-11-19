@@ -357,11 +357,11 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     clawInsightAdmin = false;
     principal.allowedTargetEnvs = ['test', 'prod'];
     const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
-    const ref = createMonitoringReferences().encode({ botId: 'mock-bot-te', entityId: '001234', env: 'prod' }, 'test');
+    const ref = createMonitoringReferences().encode({ botId: 'mock-bot-oc', entityId: '001234', env: 'prod' }, 'test');
     const configure = (version: number) => call('/monitoring/configurations', { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botRef: ref, enabled: true, version }) });
     expect(await configure(0)).toMatchObject({ status: 200, body: { updated: 1, failed: [] } });
-    const stored = await new BotDiagnosisRecoveryConfigRepository(db).find({ botId: 'mock-bot-te', entityId: '001234', env: 'prod' });
+    const stored = await new BotDiagnosisRecoveryConfigRepository(db).find({ botId: 'mock-bot-oc', entityId: '001234', env: 'prod' });
     expect(stored).toMatchObject({ diagnosisEnabled: true, recoveryEnabled: true, version: 1 });
     expect(JSON.parse(stored!.configJson)).toEqual({ team_key: 'default',
       notifications: { owner: { enabled: true }, group: { enabled: true } } });
@@ -377,7 +377,7 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     const refs = createMonitoringReferences();
     const configPath = (botId: string) => '/monitoring/configurations/'
       + refs.encode({ botId, entityId: '001234', env: 'prod' }, 'test');
-    const path = configPath('mock-bot-te');
+    const path = configPath('mock-bot-oc');
     const configJson = JSON.stringify({ notifications: {
       owner: { enabled: true }, group: { enabled: true, route_id: 'private-group' },
     } });
@@ -406,7 +406,7 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     const written = { ...input, version: 1 };
     expect(await put(input)).toMatchObject({ status: 200, body: { configuration: written }, cache: 'no-store' });
     expect(await call(path)).toMatchObject({ status: 200, body: { configuration: written } });
-    expect(await call(configPath('mock-bot-oc'))).toMatchObject({ status: 200, body: { configuration: null } });
+    expect(await call(configPath('mock-bot-te'))).toMatchObject({ status: 200, body: { configuration: null } });
     expect((await put({ ...input, all: true })).status).toBe(400);
     expect((await put({ ...input, configJson: '{' })).status).toBe(400);
     expect((await put({ ...written, configJson: '{"notifications":{"group":{"enabled":true,"webhook":"https://example.invalid"}}}' })).status).toBe(400);
@@ -421,6 +421,8 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
       body: { configuration: { diagnosisEnabled: false, recoveryEnabled: false, version: 2, configJson: expectedJson } } });
     expect(await put({ ...input, version: 2, configJson: '{}' })).toMatchObject({ status: 200,
       body: { configuration: { diagnosisEnabled: false, recoveryEnabled: true, version: 3, configJson: '{}' } } });
+    expect(await call(configPath('mock-bot-te'), { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input) })).toMatchObject({ status: 200 });
     principal.tenant = 'another-tenant';
     expect((await put(input)).status).toBe(403);
   });

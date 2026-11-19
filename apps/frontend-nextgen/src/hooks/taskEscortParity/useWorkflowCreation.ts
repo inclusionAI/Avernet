@@ -42,13 +42,14 @@ export function workflowCreationError(error: unknown): string {
 }
 
 /** Creation has its own identity gate; an empty workflow list is a valid starting point. */
-export function useWorkflowCreation(context: TaskEscortParityContext, onCreated?: () => void) {
+export function useWorkflowCreation(context: TaskEscortParityContext, onCreated?: () => void, initialSource: WorkflowCreationSource = 'blank') {
   const allowed = (context.creationReady ?? context.ready) && !!context.userId?.trim();
   const token = useMemo(() => ({}), [context.scopeKey, context.userId, allowed]);
   const latest = useRef(token);
   latest.current = token;
-  const [state, setState] = useState({ token, form: emptyForm, error: '', busy: false, uncertain: false });
-  const current = state.token === token ? state : { token, form: emptyForm, error: '', busy: false, uncertain: false };
+  const initialForm = { ...emptyForm, source: initialSource };
+  const [state, setState] = useState({ token, form: initialForm, error: '', busy: false, uncertain: false });
+  const current = state.token === token ? state : { token, form: initialForm, error: '', busy: false, uncertain: false };
   const { form } = current;
   const request = useRef<{ token: object; controller: AbortController } | null>(null);
   useEffect(

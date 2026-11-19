@@ -11,6 +11,7 @@ import { history } from '@umijs/max';
 import { load } from 'js-yaml';
 import { webcrypto } from 'node:crypto';
 import { TextEncoder } from 'node:util';
+import { installReactFlowGeometry } from '../mocks/reactFlowGeometry';
 
 jest.mock('@umijs/max', () => ({ history: jest.requireActual('history').createMemoryHistory() }));
 jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
@@ -29,6 +30,11 @@ jest.mock('@/services/taskEscortParity/workflowAuthoringService', () => ({
   },
 }));
 const api = jest.mocked(workflowAuthoringService);
+let restoreGeometry: () => void;
+beforeAll(() => {
+  restoreGeometry = installReactFlowGeometry();
+});
+afterAll(() => restoreGeometry());
 const request = jest.mocked(backendRequest);
 const spec = {
   id: 'wf',
@@ -372,4 +378,26 @@ it('guards dirty exits, keeps drafts on stay and releases history only on explic
   const clean = new Event('beforeunload', { cancelable: true });
   window.dispatchEvent(clean);
   expect(clean.defaultPrevented).toBe(false);
+});
+
+it('protects unapplied node drafts in split view and shares inspector changes with visual undo', async () => {
+  render(<WorkflowEditorPage context={context} />);
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: '对照' }));
+  fireEvent.click(screen.getByRole('button', { name: /原节点.*approval/ }));
+  const name = await screen.findByRole('textbox', { name: '节点名称' });
+  fireEvent.change(name, { target: { value: '待应用名称' } });
+  expect(screen.getByRole('textbox', { name: '工作流 YAML' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '保存工作流' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '发布工作流' })).toBeDisabled();
+  const unload = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '应用节点配置' }));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '工作流 YAML' })).toBeEnabled());
+  expect((screen.getByRole('textbox', { name: '工作流 YAML' }) as HTMLTextAreaElement).value).toContain('待应用名称');
+  fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+  expect((screen.getByRole('textbox', { name: '工作流 YAML' }) as HTMLTextAreaElement).value).toContain('原节点');
+  expect(api.save).not.toHaveBeenCalled();
+  expect(api.publish).not.toHaveBeenCalled();
 });

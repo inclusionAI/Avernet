@@ -121,7 +121,7 @@ export type AIStudioTrainWatchDto = Pick<WatchRecord, 'watchId'|'flowId'|'nodeId
   manualPollAllowed: boolean; manualPollRetryAt: string | null; manualPollPending: boolean;
 };
 const publicStatuses = new Set(['submitted','accepted','running','prepare','0','1','2','6','11','success','completed','3',
-  'failed','prepare fail','4','7','stopped','cancelled','canceled','deleted','unknown','timeout','waiting']);
+  'failed','error','prepare fail','4','7','stopped','cancelled','canceled','deleted','unknown','timeout','waiting']);
 export function toWatchDto(w: WatchRecord, now: number): AIStudioTrainWatchDto {
   const active = !w.canceled && ['waiting','polling'].includes(w.phase) && now < w.timeoutAt;
   const retryAt = w.lastManualRequestedAt === null ? null : w.lastManualRequestedAt + MANUAL_POLL_COOLDOWN_SECONDS;
@@ -133,7 +133,9 @@ export function toWatchDto(w: WatchRecord, now: number): AIStudioTrainWatchDto {
     submittedAt: iso(w.submittedAt), firstPollAt: iso(w.firstPollAt), nextPollAt: w.phase === 'resolved' || w.canceled ? null : iso(w.nextPollAt),
     timeoutAt: iso(w.timeoutAt), pollInterval: w.pollIntervalSeconds, lastPolledAt: w.lastPolledAt === null ? null : iso(w.lastPolledAt),
     lastPollSource: w.lastPollSource, errorCount: w.errorCount,
-    lastError: w.lastError === null ? null : 'AIStudio status query failed',
+    // Translate only the exact watcher diagnostic; never forward raw error text.
+    lastError: w.lastError === null ? null : w.lastError === 'AIStudio status unknown'
+      ? 'AIStudio returned an unrecognized status' : 'AIStudio status query failed',
     manualPollAllowed: active && w.manualRequestedAt === null && (retryAt === null || retryAt <= now),
     manualPollRetryAt: retryAt !== null && retryAt > now ? iso(retryAt) : null,
     manualPollPending: w.manualRequestedAt !== null,

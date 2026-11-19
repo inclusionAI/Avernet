@@ -7,7 +7,25 @@ Bot's Caller configuration controls managed Caller admission; providing
 identity does not itself enable Caller mode. Adapters must leave the field
 unset unless they have authenticated the sender at their ingress boundary.
 
-The binding-level credential forwarding below is a separate path.
+Trusted channel submissions can skip the group speaking lease when a live
+single-Bot binding and its per-sender conversation mapping prove the Session
+has exactly the mapped Human and the bound Bot, and that Bot is the sole send
+target. The Caller identity checks still apply. Workbench and other ingress
+keep their existing lease checks, as do shared or unverified channel Sessions.
+
+A trusted channel can select `uses_native_caller_execution` when its ingress
+provides an execution credential. For a Caller-enabled Bot, BCS forwards that
+credential within the managed Caller dispatch. Admission requires the
+authenticated channel sender, a Bot binding and exactly one matching HTTP
+Provider target. BCS still prepares the protected container and commits the
+dispatch. The channel credential replaces identity-plugin subject establishment
+and proof issuance for that dispatch, and cannot authorize delegation.
+The queue stores only a reference, scoped to the environment, sender, source
+message, binding, Bot, Group and Session. A missing, mismatched or expired
+credential fails closed. BCS checks the cache TTL again before HTTP send.
+
+The binding-level credential forwarding below also supports explicitly
+configured bindings when managed Caller admission does not apply.
 
 Channel providers may opt into caller execution with `requires_caller_execution` and validate the binding target with `validate_binding_config`. The default implementations preserve existing providers. The channel service additionally enforces a single Bot target. Group bindings, state-machine routing, WebSocket delivery and fan-out are not supported.
 

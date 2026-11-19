@@ -383,7 +383,7 @@ Owner 卡片资源独立保存在既有 `ce_app_config` 表的 `session_recovery
 
 ## 失败监控与排障日志
 
-自愈日志由 Repair 的 `common/logging.ts` 写入 `~/logs/clawweb/clawweb-session-recovery.log`，不重复输出到 console。每行以容器本地时间 `yyyy-MM-dd HH:mm:ss.SSS` 开头，随后是 `[session-recovery]` 和单行 JSON；JSON 内的 `ts` 仍为 UTC ISO 时间。日志字段白名单和错误脱敏保持不变，不依赖工作流日志或继承工作流上下文。Repair 共用执行监测仍通过原 console 入口输出 `[agent-execution-monitor]`。
+自愈日志由 Repair 的 `common/logging.ts` 写入 `~/logs/clawweb/clawweb-session-recovery.log`，不重复输出到 console。每行以容器本地时间 `yyyy-MM-dd HH:mm:ss.SSS` 开头，随后是大写级别（INFO 或 ERROR）、`[session-recovery]` 和单行 JSON；JSON 内的 `ts` 仍为 UTC ISO 时间。日志字段白名单和错误脱敏保持不变，不依赖工作流日志或继承工作流上下文。Repair 共用执行监测仍通过原 console 入口输出 `[agent-execution-monitor]`。
 
 沿用现有文件日志的写入方式：日志入口确保目录存在，首次追加写入时创建文件，不在启动脚本中单独预建文件。轮转与保留由部署配置管理，应用只追加固定文件，不自行改名或滚动；每次写入重新打开路径，支持 `copytruncate` 及文件替换。写入失败仅报告一次目的文件错误，恢复后可重新报告，不影响任务执行。
 

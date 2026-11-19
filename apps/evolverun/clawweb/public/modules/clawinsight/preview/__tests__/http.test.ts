@@ -21,7 +21,7 @@ describe('real local preview HTTP + directory + monitoring SQL', () => {
     const page = await (await options()).json();
     expect(page.items).toHaveLength(20); expect(page.items.every((b: {ownerId: string}) => b.ownerId === '001234')).toBe(true);
     const next = await (await options(`&cursor=${page.nextCursor}`)).json();
-    expect(next.items).toHaveLength(10); expect(next.nextCursor).toBeNull();
+    expect(next.items).toHaveLength(13); expect(next.nextCursor).toBeNull();
     expect((await options('&scope=all')).status).toBe(403);
     expect((await options('&ownerId=009876')).status).toBe(400);
   });
@@ -59,15 +59,48 @@ describe('real local preview HTTP + directory + monitoring SQL', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     expect((await configure({ botRef: bot.botRef, enabled: true, version: 0 })).status).toBe(403);
-    expect(await (await configure({ all: true, enabled: true })).json()).toEqual({ updated: 1, failed: [] });
+    expect(await (await configure({ all: true, enabled: true })).json()).toEqual({ updated: 2, failed: [] });
     const { items: [after] } = await (await options('&q=weekly-report')).json();
     expect(after.configuration).toEqual(bot.configuration);
+  });
+  it('keeps desktop and other engines visible but rejects owner writes over HTTP', async () => {
+    const { items } = await (await options('&scope=mine&env=prod')).json();
+    const configure = (input: unknown) => request('/monitoring/configurations', 'member', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
+    });
+    for (const [botId, reason] of [
+      ['desktop-assistant', '桌面 Bot 暂不支持'],
+      ['claude-assistant', '当前引擎暂不支持'],
+    ]) {
+      const bot = items.find((item: { botId: string }) => item.botId === botId);
+      expect(bot).toMatchObject({ configurationDisabledReason: reason, configuration: { version: 0 } });
+      for (const enabled of [true, false]) {
+        const response = await configure({ botRef: bot.botRef, enabled, version: 0 });
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({ error: { message: reason } });
+      }
+    }
+    for (const [botId, engine] of [['default', 'openclaw'], ['te-assistant', 'teclaw']]) {
+      const supported = items.find((item: { botId: string }) => item.botId === botId);
+      expect(supported).toMatchObject({ activeEngine: engine, botType: 'personal' });
+      expect(supported.configurationDisabledReason).toBeUndefined();
+      for (const enabled of [true, false]) {
+        const current = (await (await options('&scope=mine&env=prod')).json()).items.find((item: { botId: string }) => item.botId === botId);
+        expect((await configure({ botRef: current.botRef, version: current.configuration.version, enabled })).status).toBe(200);
+      }
+    }
+    for (const enabled of [true, false]) {
+      expect(await (await configure({ all: true, enabled })).json()).toEqual({ updated: 2, failed: [] });
+      const { items: after } = await (await options('&scope=mine&env=prod')).json();
+      expect(after.filter((item: { configurationDisabledReason?: string }) => item.configurationDisabledReason)
+        .every((item: { configuration: { version: number } }) => item.configuration.version === 0)).toBe(true);
+    }
   });
   it('shows only production Bot options and preserves pre configuration during bulk changes', async () => {
     await fixture.db.exec("INSERT INTO ac_bots (bot_id,entity_id,env,owner_id,avernet_tenant,bot_type) VALUES ('default','001234','pre','001234','teamclaw','personal')");
     await fixture.db.exec("INSERT INTO ce_bot_diagnosis_recovery_config (bot_id,entity_id,env,diagnosis_enabled,recovery_enabled,config_json,version) VALUES ('default','001234','pre',1,1,'{}',1)");
     const { items } = await (await options('&scope=mine&env=prod')).json();
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(5);
     expect(items.every((bot: { env: string }) => bot.env === 'prod')).toBe(true);
     const preRows = () => fixture.db.query("SELECT diagnosis_enabled, recovery_enabled, config_json, version FROM ce_bot_diagnosis_recovery_config WHERE bot_id='default' AND env='pre'");
     const original = await preRows();
@@ -77,7 +110,7 @@ describe('real local preview HTTP + directory + monitoring SQL', () => {
     });
     expect((await configure({ botRef: pre.botRef, version: 1, enabled: false })).status).toBe(403);
     for (const enabled of [true, false]) {
-      expect(await (await configure({ all: true, enabled })).json()).toEqual({ updated: 1, failed: [] });
+      expect(await (await configure({ all: true, enabled })).json()).toEqual({ updated: 2, failed: [] });
       expect(await preRows()).toEqual(original);
     }
   });

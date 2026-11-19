@@ -88,6 +88,9 @@ impl InboxSchedulingPort for Script {
 
 #[async_trait]
 impl SessionStorePort for Script {
+    async fn handoff_session(&self, source: &SessionOwnership, target: &ShardClaim, id: &RequestId) -> Result<SessionTransferOutcome, StoreError> {
+        self.call("SessionStorePort::handoff_session", (source, target, id))
+    }
     async fn get_spec(&self, sid: &Sid) -> Result<Option<SessionSpec>, StoreError> {
         self.call("SessionStorePort::get_spec", (sid,))
     }
@@ -136,24 +139,31 @@ impl SessionStorePort for Script {
 
 #[async_trait]
 impl ShardLeasePort for Script {
+    async fn handoff(&self, request: HandoffRequest) -> Result<HandoffOutcome, StoreError> { self.call("ShardLeasePort::handoff", (request,)) }
+    async fn source_done(&self, target: &ShardClaim, id: &RequestId) -> Result<bool, StoreError> { self.call("ShardLeasePort::source_done", (target, id)) }
+    async fn clear_handoff(&self, target: &ShardClaim, id: &RequestId) -> Result<bool, StoreError> { self.call("ShardLeasePort::clear_handoff", (target, id)) }
     async fn claim(&self, request: ClaimShard) -> Result<LeaseClaim, StoreError> {
         self.call("ShardLeasePort::claim", (request,))
     }
 
-    async fn current(&self, shard: ShardId) -> Result<Option<ShardClaim>, StoreError> {
+    async fn current(&self, shard: ShardId) -> Result<Option<ShardRecord>, StoreError> {
         self.call("ShardLeasePort::current", (shard,))
     }
 }
 
 #[async_trait]
 impl MembershipPort for Script {
+    async fn retire(&self, lease: &MembershipLease) -> Result<(), StoreError> {
+        self.call("MembershipPort::retire", (lease,))
+    }
     async fn register(
         &self,
         instance: Instance,
         role: RuntimeRole,
+        control_address: String,
         ttl: Duration,
     ) -> Result<MembershipLease, StoreError> {
-        self.call("MembershipPort::register", (instance, role, ttl))
+        self.call("MembershipPort::register", (instance, role, control_address, ttl))
     }
 
     async fn renew(&self, lease: &MembershipLease, ttl: Duration) -> Result<Renewal, StoreError> {
@@ -172,7 +182,7 @@ impl MembershipPort for Script {
         &self,
         role: RuntimeRole,
         page: PageRequest,
-    ) -> Result<Page<Instance>, StoreError> {
+    ) -> Result<Page<MemberRecord>, StoreError> {
         self.call("MembershipPort::members", (role, page))
     }
 }

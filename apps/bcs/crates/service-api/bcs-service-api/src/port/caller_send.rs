@@ -68,8 +68,7 @@ pub struct SendCallerExecutionCommand {
     /// Human subject identity species; resolved to v1 human in production.
     pub subject_kind: String,
     pub caller_context_expires_at_ms: i64,
-    /// Plugin-issued execution proof: format `jwt|opaque`, lifetime capped
-    /// to effective window; never persisted nor logged forward from here.
+    /// Runtime-only execution proof from the identity plugin or trusted channel.
     pub execution_token: CallerOpaqueRef,
     /// The PROOF's own expiry (spec §10.x, review-V P2-5): the plugin may
     /// issue shorter than the effective window — legal, never extends. The
@@ -78,10 +77,11 @@ pub struct SendCallerExecutionCommand {
     /// claimed-valid past its own lifetime.
     pub execution_token_expires_at_ms: i64,
     pub proof_format: String,
-    /// Issuer tag of the identity plugin that minted the proof — the
-    /// `extensions.caller_execution_token.type` wire label (e.g. `agentpass`).
+    /// `extensions.caller_execution_token.type` wire label supplied by the issuer.
     /// Encoding tag only: trust comes from the trusted assembly.
     pub proof_type: String,
+    /// Channel-supplied proof whose local cache deadline is enforced before send.
+    pub channel_supplied_proof: bool,
     /// Version of the dispatch control state read by the trusted producer.
     pub control_revision: u64,
     /// Earliest allowed execution instant mirror: the effective window's cap.

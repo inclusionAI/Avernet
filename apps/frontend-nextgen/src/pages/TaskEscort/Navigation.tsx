@@ -1,6 +1,8 @@
 import { Button } from '@/components/ui/Button';
 import type { PageId } from '@/domain/taskEscortWorkspace/types';
 import { Activity, CircleHelp, Code2, Layers3, LayoutDashboard, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import type { CSSProperties } from 'react';
+import { useSidebarResize } from './useSidebarResize';
 
 export const pages: {
   id: Exclude<PageId, 'workbench'>;
@@ -62,8 +64,12 @@ export const pages: {
 
 export function GuardSidebar({ page, navigate }: { page: PageId; navigate: (page: PageId) => void }) {
   const compact = page === 'editor';
+  const resize = useSidebarResize(compact);
   return (
-    <aside className={`guard-sidebar${compact ? ' guard-sidebar-compact' : ''}`}>
+    <aside
+      className={`guard-sidebar${compact ? ' guard-sidebar-compact' : ''}`}
+      style={{ '--guard-sidebar-width': `${resize.width}px` } as CSSProperties}
+    >
       <div className="guard-brand">
         <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
           <ShieldCheck size={21} aria-hidden />
@@ -88,13 +94,14 @@ export function GuardSidebar({ page, navigate }: { page: PageId; navigate: (page
                   className={`guard-nav-item ${(page === 'workbench' ? 'issues' : page) === item.id ? 'active' : ''}`}
                   onClick={() => navigate(item.id)}
                 >
-                  <item.icon size={16} aria-hidden />
+                  <item.icon size={20} aria-hidden />
                   <span className="guard-nav-label">{item.label}</span>
                 </Button>
               ))}
           </div>
         ))}
       </nav>
+      {!compact && <div className="guard-sidebar-resize" {...resize.handleProps} />}
     </aside>
   );
 }
