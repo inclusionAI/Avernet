@@ -65,7 +65,7 @@ async def monitor_relay_runtime(
             state="unknown", error=f"{type(exc).__name__}: {exc}"[:500]
         )
 
-    if result.state != "probe_unavailable":
+    if result.state not in ("probe_unavailable", "activity_unknown"):
         # Successful/observable probes update the cursor; an unavailable probe
         # has no observation and therefore must not overwrite the last known
         # cursor. Otherwise the next successful probe could be misjudged as
@@ -84,6 +84,7 @@ async def monitor_relay_runtime(
         "runtime_status": result.status,
         "runtime_source": result.source,
         "runtime_error": result.error,
+        "runtime_observation": result.detail,
         "resume_step": resume_step,
         "terminal_success_elapsed_seconds": terminal_success_elapsed,
     }
@@ -108,7 +109,9 @@ async def monitor_relay_runtime(
         current["success_unreported"] = 0
         current["terminal_success_observed_at"] = None
         current["unknown"] = 0
-        if result.progressed:
+        pending_reset = current.pop("activity_baseline_pending", False)
+        baseline_reset = result.baseline_reset or pending_reset
+        if result.progressed or baseline_reset:
             current["no_progress"] = 0
             current["last_activity_at"] = now
         else:
@@ -119,6 +122,19 @@ async def monitor_relay_runtime(
             detail["stagnant_seconds"] = stagnant_seconds
             if stagnant_seconds >= self._active_no_progress_max_cycles * self._runtime_probe_threshold:
                 reason = "runtime_no_progress"
+    elif result.state == "activity_unknown":
+        current["unknown"] = 0
+        current["no_progress"] = 0
+        current["success_unreported"] = 0
+        current["terminal_success_observed_at"] = None
+        current["last_activity_at"] = now
+        current["activity_baseline_pending"] = True
+        current["activity_unknown_count"] = current.get("activity_unknown_count", 0) + 1
+        logger.warning(
+            "[task][harness] runtime activity unobservable task=%s node=%s count=%s reason=%s",
+            task_id, node.node_id, current["activity_unknown_count"], result.detail,
+        )
+        return None
     elif result.state == "probe_unavailable":
         # Transport/app request failure is not Bot unresponsiveness. Predeploy
         # and single-server deployments can make the probe read path itself

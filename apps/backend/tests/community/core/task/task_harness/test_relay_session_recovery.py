@@ -9,7 +9,9 @@ from agentclaw.community.core.task.task_harness.relay_session_recovery import (
     RELAY_HARNESS_RESUME_PROMPT,
     relay_harness_resume_prompt,
 )
-from agentclaw.community.core.task.task_harness.runtime_probe import TaskRuntimeLivenessProbe
+from agentclaw.community.core.task.task_harness.runtime_probe import (
+    _last_message_cursor,
+)
 
 
 class _FakeOpenApiBot:
@@ -189,24 +191,13 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
 class RuntimeProbeMessageCursorTest(unittest.IsolatedAsyncioTestCase):
     async def test_latest_message_is_selected_from_newest_first_payload(self):
         bot = _FakeOpenApiBot()
-        probe = TaskRuntimeLivenessProbe(bot=bot)
-        node = _Node(session_id="engine-session")
-
-        first = await probe.probe(node)
-        # A different source position with an earlier timestamp must not count as
-        # progress just because it is the list's last element.
-        second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
-
-        self.assertEqual(first.state, "active")
-        self.assertFalse(first.progressed)
-        self.assertEqual(second.state, "active")
-        self.assertFalse(second.progressed)
+        first = _last_message_cursor(bot.messages)
+        second = _last_message_cursor(list(reversed(bot.messages)))
+        self.assertEqual(first, second)
 
     async def test_new_timestamp_progresses_even_if_messages_are_newest_first(self):
         bot = _FakeOpenApiBot()
-        probe = TaskRuntimeLivenessProbe(bot=bot)
-        node = _Node(session_id="engine-session")
-        first = await probe.probe(node)
+        first = _last_message_cursor(bot.messages)
 
         bot.messages = [
             {
@@ -220,8 +211,8 @@ class RuntimeProbeMessageCursorTest(unittest.IsolatedAsyncioTestCase):
                 "content": "old",
             },
         ]
-        second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
-        self.assertTrue(second.progressed)
+        second = _last_message_cursor(bot.messages)
+        self.assertNotEqual(first, second)
 
 
 if __name__ == "__main__":

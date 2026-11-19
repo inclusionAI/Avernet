@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import TaskCallbackData, TaskNode
@@ -21,6 +23,31 @@ class BotSendResult:
 
     run_id: str
     session_id: str | None = None
+
+
+class BotSessionRuntimeStatus(BaseModel):
+    """Live Engine observation, scoped to one run; never Relay task state."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    session_id: str
+    found: bool
+    run_id: str | None = None
+    state: Literal["starting", "running", "final", "error", "aborted"] | None = None
+    started_at: int | None = Field(default=None, ge=0)
+    last_event_seq: int | None = Field(default=None, ge=0)
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def validate_observation(self) -> "BotSessionRuntimeStatus":
+        if self.found and (
+            not self.run_id or self.state is None
+            or self.started_at is None or self.last_event_seq is None
+        ):
+            raise ValueError("A found runtime requires run identity, state and sequence")
+        if not self.found and not self.reason:
+            raise ValueError("A missing observation requires a reason")
+        return self
 
 
 class OpenApiBotError(RuntimeError):
@@ -45,6 +72,13 @@ class OpenApiBotPort(Protocol):
     ) -> BotSendResult:
         """Start a Bot run or raise ``OpenApiBotError`` on delivery failure."""
         ...
+    async def get_session_runtime_status(
+        self, session_id: str, *, bot_id: str | None = None,
+        lifecycle_stage: str | None = None,
+    ) -> BotSessionRuntimeStatus:
+        """Read activity through BaaS; no Engine URL or recovery ticket is exposed."""
+        ...
+
     async def get_run(self, run_id: str) -> dict[str, Any]: ...
     async def cancel_run(self, run_id: str) -> None: ...
     async def get_session_messages(
