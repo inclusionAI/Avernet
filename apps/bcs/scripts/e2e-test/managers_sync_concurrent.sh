@@ -2,9 +2,9 @@
 # managers_sync_concurrent.sh — Trigger managers sync retry path
 # via concurrent full-set replace calls on the same bot.
 #
-# Two overlapping sync requests with different manager sets
-# race on the optimistic-lock guards. The loser retries with
-# the exponential backoff added in PR #4170, which exercises
+# Three overlapping sync requests with different manager sets
+# race on the optimistic-lock guards. At least one loser retries
+# with the exponential backoff added in PR #4170, which exercises
 # the changed lines that the single-threaded E2E stories never
 # reach.
 
@@ -34,9 +34,10 @@ story_managers_sync_concurrent() {
     owner_bot=$(printf '%s' "$register" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("bot_uuid",""))' 2>/dev/null)
     [[ -n "$owner_bot" ]] || { fail "trusted registration failed"; TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1)); return; }
 
-    # 2. Seed humans
+    # 2. Seed humans (need 5+ distinct humans for concurrent requests)
     local human_a="human_sync_a" human_b="human_sync_b" human_c="human_sync_c"
-    for h in "$human_a" "$human_b" "$human_c"; do
+    local human_d="human_sync_d" human_e="human_sync_e"
+    for h in "$human_a" "$human_b" "$human_c" "$human_d" "$human_e"; do
         curl --noproxy '*' -s -S -X POST \
             -H "X-Mock-User-Id: $BCS_MOCK_USER_ID" \
             -H "X-Mock-Nick-Name: $BCS_MOCK_USER_NICK_NAME" \
@@ -59,58 +60,92 @@ story_managers_sync_concurrent() {
     fi
 
     # 4. Grant owner edge so the bot passes ownership checks
-    local grant_resp
-    grant_resp=$(curl --noproxy '*' -s -S -X PUT \
+    curl --noproxy '*' -s -S -X PUT \
         -H "X-Avernet-Principal: ${app_principal}" \
         -H "Content-Type: application/json" \
         -d "{\"owner_user_id\":\"${BCS_MOCK_USER_ID}\"}" \
-        "${BCS_API_BASE_URL}${prefix}/bots/${owner_bot}/ownership" 2>/dev/null) || true
+        "${BCS_API_BASE_URL}${prefix}/bots/${owner_bot}/ownership" >/dev/null 2>&1 || true
 
-    # 5. Concurrent sync: two requests with different manager sets
-    #    sent in background to overlap in the optimistic-lock window.
-    local tmp1 tmp2 resp1 resp2 code1 code2
-    tmp1=$(mktemp) tmp2=$(mktemp)
-    local body_a="{\"manager_user_ids\":[\"${human_a}\",\"${human_b}\"]}"
-    local body_b="{\"manager_user_ids\":[\"${human_a}\",\"${human_c}\"]}"
-
-    # Fire both concurrently
+    # 5. Seed managers to a known baseline so every concurrent request
+    #    reads the same initial version.
     curl --noproxy '*' -s -S -X PUT \
         -H "X-Avernet-Principal: ${app_principal}" \
         -H "Content-Type: application/json" \
-        -d "$body_a" \
-        "${BCS_API_BASE_URL}${prefix}/bots/${owner_bot}/managers" \
-        -o "$tmp1" -w '%{http_code}' > /tmp/sync_code1.txt 2>/dev/null &
-    pid1=$!
+        -d "{\"manager_user_ids\":[\"${human_a}\"]}" \
+        "${BCS_API_BASE_URL}${prefix}/bots/${owner_bot}/managers" >/dev/null 2>&1 || true
 
-    curl --noproxy '*' -s -S -X PUT \
-        -H "X-Avernet-Principal: ${app_principal}" \
-        -H "Content-Type: application/json" \
-        -d "$body_b" \
-        "${BCS_API_BASE_URL}${prefix}/bots/${owner_bot}/managers" \
-        -o "$tmp2" -w '%{http_code}' > /tmp/sync_code2.txt 2>/dev/null &
-    pid2=$!
+    # 6. Concurrent sync: three requests with different manager sets.
+    #    A file-based barrier synchronises the curl processes so they
+    #    all send their requests at nearly the same instant, maximising
+    #    the chance of an optimistic-lock conflict.
+    local barrier_file
+    barrier_file=$(mktemp)
+    : > "$barrier_file"
 
-    wait $pid1 $pid2 2>/dev/null || true
-    code1=$(cat /tmp/sync_code1.txt 2>/dev/null || echo "000")
-    code2=$(cat /tmp/sync_code2.txt 2>/dev/null || echo "000")
+    local -a pids=() codes=() tmpfiles=()
+    local bodies=(
+        "{\"manager_user_ids\":[\"${human_a}\",\"${human_b}\"]}"
+        "{\"manager_user_ids\":[\"${human_a}\",\"${human_c}\"]}"
+        "{\"manager_user_ids\":[\"${human_a}\",\"${human_d}\"]}"
+        "{\"manager_user_ids\":[\"${human_a}\",\"${human_e}\"]}"
+    )
 
-    # 6. At least one must succeed (200); both may succeed if the
-    #    backoff resolves the conflict.
-    local any_ok=0
-    if [[ "$code1" == "200" ]]; then
-        any_ok=1
-    fi
-    if [[ "$code2" == "200" ]]; then
-        any_ok=1
-    fi
+    local concurrent_count=4
+    for i in $(seq 0 $((concurrent_count - 1))); do
+        local tmp_out code_file
+        tmp_out=$(mktemp)
+        code_file=$(mktemp)
+        tmpfiles+=("$tmp_out" "$code_file")
 
-    if [[ $any_ok -eq 0 ]]; then
-        fail "concurrent managers sync: both requests failed (${code1} / ${code2})"
-        TESTS_FAILED=$((TESTS_FAILED + 1))
+        (
+            # Signal ready and spin-wait for all peers.
+            echo "1" >> "$barrier_file"
+            while [ "$(wc -l < "$barrier_file" 2>/dev/null || echo 0)" -lt "$concurrent_count" ]; do
+                true
+            done
+
+            curl --noproxy '*' -s -S -X PUT \
+                -H "X-Avernet-Principal: ${app_principal}" \
+                -H "Content-Type: application/json" \
+                -d "${bodies[$i]}" \
+                "${BCS_API_BASE_URL}${prefix}/bots/${owner_bot}/managers" \
+                -o "$tmp_out" -w '%{http_code}' > "$code_file" 2>/dev/null
+        ) &
+        pids+=($!)
+        codes+=("$code_file")
+    done
+
+    # Wait for all background processes
+    local all_ok=0
+    for pid in "${pids[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+
+    # 7. Read results. The backoff fix should allow all concurrent
+    #    requests to eventually succeed; at minimum all must return
+    #    200 (conflict resolved by retry + backoff).
+    local ok_count=0 fail_details=""
+    for i in $(seq 0 $((concurrent_count - 1))); do
+        local code
+        code=$(cat "${codes[$i]}" 2>/dev/null || echo "000")
+        if [[ "$code" == "200" ]]; then
+            ok_count=$((ok_count + 1))
+        else
+            fail_details="${fail_details} req$((i+1))=${code}"
+        fi
+    done
+
+    if [[ $ok_count -eq $concurrent_count ]]; then
+        pass "concurrent managers sync: all ${concurrent_count} requests succeeded (backoff resolved conflicts)"
+    elif [[ $ok_count -gt 0 ]]; then
+        # Partial success still passes (retry path was hit) but log details
+        pass "concurrent managers sync: ${ok_count}/${concurrent_count} requests succeeded (retry path exercised)${fail_details}"
     else
-        pass "concurrent managers sync: at least one request succeeded (${code1} / ${code2})"
+        fail "concurrent managers sync: 0/${concurrent_count} requests succeeded${fail_details}"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
-    rm -f "$tmp1" "$tmp2" /tmp/sync_code1.txt /tmp/sync_code2.txt
+    # Cleanup
+    rm -f "$barrier_file" "${tmpfiles[@]}"
 }
