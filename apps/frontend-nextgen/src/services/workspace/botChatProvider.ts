@@ -285,11 +285,12 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         ...(this.options.bot.isFriendBot
           ? { friendUserId: params.user_id, ownerId: this.options.bot.ownerId }
           : {}),
-        // 生产运行态多实例服务 Bot:IAM 换签带选中实例 device_uuid(与 getChatUrl 的实例选址同源
+        // 多实例服务 Bot:IAM 换签带选中实例 device_uuid(与 getChatUrl 的实例选址同源
         // options.range,避免 Token 与实际实例不一致)。range 产出已由 useBotSessionRange /
-        // supportsConversationInstanceScope 收口(服务 Bot+非好友+非 teclaw+已选实例),
-        // 此处只补 online 门(仅生产运行态需要,openspec add-servicebot-iam-device-uuid)。
-        ...(this.options.range?.stage === 'online' && this.options.range.deviceUuid
+        // supportsConversationInstanceScope 收口(服务 Bot+非好友+非 teclaw+已选实例)。
+        // 2026-11-19 口径勘误:不再门控 stage=online——选定实例即定位目标,任意运行态
+        // (含草稿/验证)多实例 Token 都须与建连同实例(openspec add-servicebot-iam-device-uuid)。
+        ...(this.options.range?.deviceUuid
           ? { deviceUuid: this.options.range.deviceUuid }
           : {}),
         ...(callerRuntimeTarget
