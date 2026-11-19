@@ -209,9 +209,7 @@ def _create_product_profile():
         ProductProfileCreateCommand(
             ref=VersionedProfileRef("ai_coding_swarm", 1),
             swarm_plan_service_ref=PLAN_SERVICE,
-            composition=MethodCompositionTemplate(
-                "Swarm", (get_profile("Swarm", "0.2"),)
-            ),
+            composition=MethodCompositionTemplate((get_profile("Swarm", "0.2"),)),
             participant_scope=ParticipantScope(ParticipantScopeKind.ALLOWLIST, AGENTS),
             scenario_roles=(
                 ScenarioRole(

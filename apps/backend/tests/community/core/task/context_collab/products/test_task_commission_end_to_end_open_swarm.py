@@ -242,7 +242,6 @@ def _create_product_profile():
             ref=VersionedProfileRef("ai_coding_open_swarm", 1),
             swarm_plan_service_ref=PLAN_SERVICE,
             composition=MethodCompositionTemplate(
-                "Open + Swarm",
                 (get_profile("Open", "0.2"), get_profile("Swarm", "0.2")),
                 relations=(
                     MethodRelationTemplate(

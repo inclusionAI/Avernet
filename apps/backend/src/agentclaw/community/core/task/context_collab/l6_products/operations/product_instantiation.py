@@ -37,6 +37,9 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    composition_method_kind,
+)
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
@@ -112,14 +115,14 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
         prepare_product_profile(
             product_kind=profile.ref.profile_id,
             workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
-            method_kind=profile.composition.method_kind,
+            method_kind=composition_method_kind(profile.composition),
             profile_ref=profile.ref,
             principal_ref=command.collet.initiator_ref,
             executor_ref=executor_ref,
             catalog=self._catalog,
         )
         self._authorizer.check_create(
-            method_kind=profile.composition.method_kind,
+            method_kind=composition_method_kind(profile.composition),
             executor_ref=executor_ref,
             actor=context,
         )
@@ -184,12 +187,12 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
             profile, principal, command.participant_refs, executor_ref
         )
         self._authorizer.check_create(
-            method_kind=profile.composition.method_kind,
+            method_kind=composition_method_kind(profile.composition),
             executor_ref=executor_ref,
             actor=context,
         )
         facts = creation_payload(
-            method_kind=profile.composition.method_kind,
+            method_kind=composition_method_kind(profile.composition),
             executor_ref=executor_ref,
             objective=task.objective if task is not None else None,
             resource_refs=command.resource_refs,
@@ -222,7 +225,7 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
             self._store,
             current_axes(),
             command.collet_id,
-            method_kind=profile.composition.method_kind,
+            method_kind=composition_method_kind(profile.composition),
             principal_ref=principal,
             executor_ref=executor_ref,
             profile=profile,

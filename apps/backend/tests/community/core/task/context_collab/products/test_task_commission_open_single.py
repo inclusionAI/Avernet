@@ -35,6 +35,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
+    composition_method_kind,
     negotiate,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
@@ -96,8 +97,11 @@ def test_open_single_is_an_explicit_new_version_not_a_legacy_upgrade():
         catalog.get("task_commission", 1).composition
         == TASK_COMMISSION_PROFILE.composition
     )
-    assert TASK_COMMISSION_PROFILE.composition.method_kind == "Open"
-    assert OPEN_SINGLE_COMMISSION_PROFILE.composition.method_kind == "Open + Single"
+    assert composition_method_kind(TASK_COMMISSION_PROFILE.composition) == "Open"
+    assert (
+        composition_method_kind(OPEN_SINGLE_COMMISSION_PROFILE.composition)
+        == "Open + Single"
+    )
 
 
 @pytest.mark.parametrize("missing_method", ["Open", "Single"])

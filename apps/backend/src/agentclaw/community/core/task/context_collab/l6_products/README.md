@@ -81,7 +81,6 @@ profile = create_product_profile(
     ProductProfileCreateCommand(
         ref=profile_ref,
         composition=MethodCompositionTemplate(
-            method_kind="Open",
             required_methods=(get_profile("Open", "0.2"),),
             policies=(OpenMethodPolicy(publication=publication),),
         ),
@@ -414,7 +413,15 @@ compensation across the stores is not implemented.
 
 ### Explicit installation on an existing Collet
 
-`MethodCompositionTemplate` has no `scope` field. Profile creation declares only
+`MethodCompositionTemplate` has no `scope` or `method_kind` field.
+`required_methods` is the sole source of selected Method kinds;
+`optional_methods` does not implicitly add Methods to the selection. Existing
+creation facts and legacy bindings retain their `method_kind` wire strings
+(for example, `Open + Group`), derived by `composition_method_kind` at compatibility
+boundaries rather than authored a second time. Empty, duplicate and unsupported
+required Method combinations are still rejected.
+
+Profile creation declares only
 Method contracts, relations and policies; `ProductInstantiateCommand.collet_id`
 selects the actual existing Collet, and resulting Method bindings are Collet-scoped.
 This removes the former fixed `scope="collet"` authoring argument; it does not

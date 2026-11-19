@@ -27,6 +27,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
+    composition_method_kind,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
@@ -84,7 +85,8 @@ def test_commission_has_a_complete_declarative_publication_and_work_contract():
     )
     assert publication.dispatch_after is ApplicationState.ADMITTED
     assert publication.partial_failure == "propagate_without_rollback"
-    assert profile.composition.method_kind == "Open"  # No inferred Single binding.
+    # No inferred Single binding.
+    assert composition_method_kind(profile.composition) == "Open"
 
     assert profile.workflow is None
     contract = resolve_event_contract(profile)
@@ -122,7 +124,7 @@ def test_publish_uses_selected_profile_and_passes_actual_binding_to_method_adapt
         "profile_id": profile.ref.profile_id,
         "version": profile.ref.version,
     }
-    assert facts["method_kind"] == profile.composition.method_kind
+    assert facts["method_kind"] == composition_method_kind(profile.composition)
     assert facts["workflow_kind"] is None
     from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
         current_axes,
@@ -342,7 +344,7 @@ def test_open_single_is_an_explicit_successor_without_changing_v1():
     assert PRODUCT_CATALOG.get("task_commission", 1) == legacy
     assert PRODUCT_CATALOG.get("task_commission", 2) == profile
     assert profile.ref == VersionedProfileRef("task_commission", 2)
-    assert profile.composition.method_kind == "Open + Single"
+    assert composition_method_kind(profile.composition) == "Open + Single"
     assert {
         item.method_kind: item.profile_version
         for item in profile.composition.required_methods
@@ -356,7 +358,7 @@ def test_open_single_is_an_explicit_successor_without_changing_v1():
     assert policy.participation_type is ParticipationType.COLLET_PARTICIPANT
     assert policy.capacity == 1
     assert profile.workflow is legacy.workflow is None
-    assert legacy.composition.method_kind == "Open"
+    assert composition_method_kind(legacy.composition) == "Open"
     legacy_policy = legacy.composition.require_policy("Open").publication.admission
     assert legacy_policy.strategy == "publisher_mediated"
     assert legacy_policy.participation_type is ParticipationType.SINGLE_CONTRIBUTION

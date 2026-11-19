@@ -54,7 +54,6 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
     ref=TASK_COMMISSION_PROFILE_REF,
     # 绑定L5的method，这里是OPEN方法
     composition=MethodCompositionTemplate(
-        method_kind="Open",
         required_methods=(get_profile("Open", "0.2"),),
         policies=(
             OpenMethodPolicy(
@@ -125,7 +124,6 @@ OPEN_SINGLE_COMMISSION_PROFILE = create_product_profile(
         TASK_COMMISSION_PROFILE,
         ref=OPEN_SINGLE_COMMISSION_PROFILE_REF,
         composition=MethodCompositionTemplate(
-            method_kind="Open + Single",
             required_methods=(
                 get_profile("Open", "0.2"),
                 get_profile("Single", "0.2"),

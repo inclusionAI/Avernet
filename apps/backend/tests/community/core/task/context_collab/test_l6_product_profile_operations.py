@@ -33,6 +33,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
     WorkflowAction,
     WorkflowProfile,
+    composition_method_kind,
     negotiate,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
@@ -61,7 +62,6 @@ def command():
     return ProductProfileCreateCommand(
         ref=VersionedProfileRef("custom_product", 3),
         composition=MethodCompositionTemplate(
-            method_kind="Open",
             required_methods=(get_profile("Open", "0.2"),),
         ),
         scenario_roles=(
@@ -198,9 +198,9 @@ def test_creation_keeps_the_authored_product_admission_strategy(command, policy)
     [
         (
             lambda c: replace(
-                c, composition=replace(c.composition, method_kind="Single")
+                c, composition=replace(c.composition, required_methods=())
             ),
-            "disagree",
+            "unknown method_kind",
         ),
         (
             lambda c: replace(
@@ -259,7 +259,6 @@ def test_creation_keeps_the_authored_product_admission_strategy(command, policy)
             lambda c: replace(
                 c,
                 composition=MethodCompositionTemplate(
-                    "Single",
                     (get_profile("Single", "0.2"),),
                     policies=(OpenMethodPolicy(_publication()),),
                 ),
@@ -387,13 +386,52 @@ def test_explicit_standard_task_contract_matches_the_fixed_default(command):
     assert ProductCatalog((explicit,)).get("custom_product", 3) is explicit
 
 
+@pytest.mark.parametrize(
+    "methods,expected",
+    [
+        (("Single",), "Single"),
+        (("Open", "Group"), "Open + Group"),
+        (("Open", "Single"), "Open + Single"),
+        (("Open", "Swarm"), "Open + Swarm"),
+    ],
+)
+def test_method_composition_derives_legacy_wire_without_authored_kind(methods, expected):
+    composition = MethodCompositionTemplate(
+        required_methods=tuple(get_profile(method, "0.2") for method in methods),
+        optional_methods=(get_profile("Swarm", "0.2"),),
+    )
+    assert "method_kind" not in {field.name for field in fields(composition)}
+    assert not hasattr(composition, "method_kind")
+    assert composition_method_kind(composition) == expected
+    with pytest.raises(TypeError, match="method_kind"):
+        MethodCompositionTemplate(
+            required_methods=composition.required_methods, method_kind=expected
+        )
+
+
+@pytest.mark.parametrize("methods", [(), ("Open", "Open"), ("Single", "Group")])
+def test_invalid_required_method_sets_fail_creation_and_installation(command, methods):
+    command = replace(
+        command,
+        composition=MethodCompositionTemplate(
+            required_methods=tuple(get_profile(method, "0.2") for method in methods)
+        ),
+    )
+    with pytest.raises(ContextCollabValidationError, match="unknown method_kind"):
+        create_product_profile(command)
+    unchecked = ProductProfileDefinition(
+        **{field.name: getattr(command, field.name) for field in fields(command)}
+    )
+    with pytest.raises(ContextCollabValidationError, match="unknown method_kind"):
+        ProductCatalog((unchecked,))
+
+
 def test_method_composition_has_no_caller_configurable_scope(command):
     composition = command.composition
     assert "scope" not in {field.name for field in fields(composition)}
     assert create_product_profile(command).composition is composition
     with pytest.raises(TypeError, match="scope"):
         MethodCompositionTemplate(
-            method_kind=composition.method_kind,
             required_methods=composition.required_methods,
             scope="collet",
         )
@@ -402,7 +440,6 @@ def test_method_composition_has_no_caller_configurable_scope(command):
 @pytest.mark.parametrize("method", ["Single", "Group", "Swarm", "Open"])
 def test_method_composition_does_not_require_open_product_policy(command, method):
     composition = MethodCompositionTemplate(
-        method_kind=method,
         required_methods=(get_profile(method, "0.2"),),
     )
     profile = create_product_profile(replace(command, composition=composition))
@@ -415,7 +452,6 @@ def test_method_composition_does_not_require_open_product_policy(command, method
 def test_composite_method_keeps_open_policy_scoped_to_open(command):
     policy = OpenMethodPolicy(_publication())
     composition = MethodCompositionTemplate(
-        method_kind="Open + Group",
         required_methods=(
             get_profile("Open", "0.2"),
             get_profile("Group", "0.2"),
@@ -465,7 +501,6 @@ def test_composite_method_keeps_open_policy_scoped_to_open(command):
         ),
         (
             lambda c: MethodCompositionTemplate(
-                method_kind="Single",
                 required_methods=(get_profile("Single", "0.2"),),
                 optional_methods=(get_profile("Open", "0.2"),),
                 policies=(OpenMethodPolicy(_publication()),),
@@ -542,7 +577,7 @@ def test_composition_does_not_accept_references_or_untyped_contracts(
 def test_swarm_planner_reference_requires_nonempty_string(command, service_ref):
     swarm_command = replace(
         command,
-        composition=MethodCompositionTemplate("Swarm", (get_profile("Swarm", "0.2"),)),
+        composition=MethodCompositionTemplate((get_profile("Swarm", "0.2"),)),
         swarm_plan_service_ref=service_ref,
     )
     with pytest.raises(ContextCollabValidationError, match="plan capability"):
@@ -558,9 +593,7 @@ def test_explicit_swarm_planner_is_preserved_by_authoring_and_catalog(command):
     profile = create_product_profile(
         replace(
             command,
-            composition=MethodCompositionTemplate(
-                "Swarm", (get_profile("Swarm", "0.2"),)
-            ),
+            composition=MethodCompositionTemplate((get_profile("Swarm", "0.2"),)),
             swarm_plan_service_ref="plan/1",
         )
     )

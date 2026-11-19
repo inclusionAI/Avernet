@@ -39,6 +39,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
     WorkflowProfile,
+    composition_method_kind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     create_product_profile,
@@ -112,7 +113,7 @@ def runtime(db, request):
             principal_ref=OWNER.actor,
             product_kind=profile.ref.profile_id,
             workflow_kind=workflow.ref.profile_id if workflow else None,
-            method_kind=profile.composition.method_kind,
+            method_kind=composition_method_kind(profile.composition),
             executor_ref=AgentRef("bot", "worker"),
             objective="交付可验收的工作成果",
             resource_refs=[],

@@ -52,6 +52,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
     ParticipationType,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import actor_has_role
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    composition_method_kind,
+)
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     STANDARD_TASK_CONTRACT_REF,
 )
@@ -168,7 +171,7 @@ def test_commission_protocol_and_persistence_integration(product_app, db, engine
         TASK_COMMISSION_PROFILE_REF.profile_id, TASK_COMMISSION_PROFILE_REF.version
     )
     assert profile.ref == TASK_COMMISSION_PROFILE_REF
-    assert profile.composition.method_kind == "Open"  # 指定 Bot 不等于 Single。
+    assert composition_method_kind(profile.composition) == "Open"  # 指定 Bot 不等于 Single。
 
     # 1. 用户只调用产品入口;实例、版本、角色与方法全部由实际实现生成。
     created = _publish(service)
@@ -196,7 +199,7 @@ def test_commission_protocol_and_persistence_integration(product_app, db, engine
     assert spec["product_profile_ref"] == {
         "profile_id": profile.ref.profile_id, "version": profile.ref.version
     }
-    assert spec["method_kind"] == profile.composition.method_kind
+    assert spec["method_kind"] == composition_method_kind(profile.composition)
     assert spec["workflow_kind"] is None
 
     # Role references are L6 selection evidence. Subjects are resolved from

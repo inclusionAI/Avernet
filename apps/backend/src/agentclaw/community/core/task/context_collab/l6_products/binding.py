@@ -28,6 +28,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
     ScenarioRole,
     VersionedProfileRef,
+    composition_method_kind,
     negotiate,
 )
 
@@ -58,7 +59,7 @@ def product_definition(
         raise ContextCollabValidationError(
             f"workflow_kind {workflow_kind!r} is incompatible with product {product_kind!r}"
         )
-    if method_kind != profile.composition.method_kind:
+    if method_kind != composition_method_kind(profile.composition):
         raise ContextCollabValidationError(
             f"method_kind {method_kind!r} is incompatible with product {product_kind!r}"
         )

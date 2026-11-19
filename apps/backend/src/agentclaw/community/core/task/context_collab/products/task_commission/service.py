@@ -59,6 +59,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
+    composition_method_kind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_method_kind,
@@ -189,7 +190,7 @@ class TaskCommissionService:
         profile = self._product_catalog.get(
             command.product_profile_ref.profile_id, command.product_profile_ref.version
         )
-        method_kind = profile.composition.method_kind
+        method_kind = composition_method_kind(profile.composition)
         executor_ref = AgentRef(agent_type="bot", agent_id=assignee)
         profile = prepare_product_profile(
             product_kind=profile.ref.profile_id,

@@ -36,6 +36,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
+    composition_method_kind,
     negotiate,
 )
 from agentclaw.community.core.task.context_collab.l6_products.instance import (
@@ -139,7 +140,7 @@ def _create(runtime):
             principal_ref=OWNER.actor,
             product_kind=profile.ref.profile_id,
             workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
-            method_kind=profile.composition.method_kind,
+            method_kind=composition_method_kind(profile.composition),
             executor_ref=AgentRef("bot", "worker"),
             objective="autonomous work",
             resource_refs=[],
@@ -414,7 +415,7 @@ def test_optional_profiles_still_validate_creation_before_persistence(
         principal_ref=OWNER.actor,
         product_kind=profile.ref.profile_id,
         workflow_kind="wrong" if case == "workflow_mismatch" else workflow_kind,
-        method_kind=profile.composition.method_kind,
+        method_kind=composition_method_kind(profile.composition),
         executor_ref=None if case == "executor_missing" else AgentRef("bot", "worker"),
         objective="deliver",
         resource_refs=[],
