@@ -22,6 +22,7 @@ def phase_repo(tmp_path):
     for file, text in {
         'e2e-test/e2e.sh': 'echo stories >> "$EVENTS"; echo hit >> "$BCS_LOG"; exit "${STORIES_RC:-0}"',
         'caller_e2e_coverage.sh': 'echo caller >> "$EVENTS"; exit "${CALLER_RC:-0}"',
+        'worker_e2e_coverage.sh': 'echo worker >> "$EVENTS"; exit "${WORKER_RC:-0}"',
         'oauth_e2e_coverage.sh': 'echo oauth >> "$EVENTS"; exit "${OAUTH_RC:-0}"',
     }.items():
         (scripts / file).write_text(text + '\n')
@@ -102,7 +103,7 @@ def test_aggregate_phase_fails_closed_when_all_reports_cannot_merge(phase_repo):
 def test_default_still_runs_all_tests_and_reports_after_failure(phase_repo):
     result, events = run(phase_repo, '--skip-start', CALLER_RC='8')
     assert result.returncode == 8, result.stderr
-    assert events[:3] == ['stories', 'caller', 'oauth']
+    assert events[:4] == ['stories', 'caller', 'oauth', 'worker']
     assert events.count('report') == 3
 
 

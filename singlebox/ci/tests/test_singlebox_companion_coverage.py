@@ -61,7 +61,7 @@ root = pathlib.Path(os.environ['CASE_ROOT'])
 sys.exit(int(os.environ.get('BUILD_RC','0')))
 ''')
     cargo.chmod(0o755)
-    for name in ('caller', 'oauth'):
+    for name in ('caller', 'oauth', 'worker'):
         (scripts / f'{name}_e2e_coverage.sh').write_text(f'''#!/bin/bash
 set -eu
 test "$1" = --run-only
@@ -98,22 +98,24 @@ def command(root):
             '--report-dir', str(root / 'reports')]
 
 
-@pytest.mark.parametrize('caller_rc,oauth_rc', [('0', '0'), ('17', '0'), ('0', '19')])
-def test_builds_companion_bins_once_then_overlaps_and_joins_all_runs(companion_repo, caller_rc, oauth_rc):
+@pytest.mark.parametrize('caller_rc,oauth_rc,worker_rc', [('0', '0', '0'), ('17', '0', '0'), ('0', '19', '0'), ('0', '0', '21')])
+def test_builds_companion_bins_once_then_overlaps_and_joins_all_runs(companion_repo, caller_rc, oauth_rc, worker_rc):
     root, env = companion_repo
-    result = subprocess.run(command(root), env={**env, 'CALLER_RC': caller_rc, 'OAUTH_RC': oauth_rc},
+    result = subprocess.run(command(root), env={**env, 'CALLER_RC': caller_rc, 'OAUTH_RC': oauth_rc, 'WORKER_RC': worker_rc},
                             capture_output=True, text=True, timeout=15)
-    assert result.returncode == (int(caller_rc) or int(oauth_rc)), result.stderr
+    assert result.returncode == (int(caller_rc) or int(oauth_rc) or int(worker_rc)), result.stderr
     build = json.loads((root / 'build.json').read_text())
-    assert build['args'] == ['build', '-p', 'bcs', '--features', 'test-utils',
+    assert build['args'] == ['build', '-p', 'bcs', '--features', 'test-utils,worker-runtime-e2e',
                              '--bin', 'bcs-caller-e2e', '--bin', 'bcs-oauth-e2e',
-                             '--bin', 'bcs-a2a-grpc-peer']
+                             '--bin', 'bcs-a2a-grpc-peer', '--bin', 'bcs-worker-e2e']
     assert build['flags'] == '-Cinstrument-coverage -Clink-dead-code'
     assert build['target'].endswith('target/cov-e2e/llvm-cov-target')
     assert (root / 'caller-finished').exists() and (root / 'oauth-finished').exists()
     timings = json.loads((root / 'reports/companion-timings.json').read_text())
     assert timings['phases']['caller']['exit_code'] == int(caller_rc)
     assert timings['phases']['oauth']['exit_code'] == int(oauth_rc)
+    assert timings['phases']['worker']['exit_code'] == int(worker_rc)
+    assert (root / 'worker-finished').exists()
     assert timings['status'] == ('passed' if result.returncode == 0 else 'failed')
     assert (root / 'target/cov-e2e/llvm-cov-target/bcs-shared.profraw').read_text() == 'do not remove'
 
@@ -133,9 +135,11 @@ def test_sigterm_stops_owned_descendants_and_records_failure(companion_repo):
     try:
         wait_for(root / 'caller-child', process)
         wait_for(root / 'oauth-child', process)
-        children = [int((root / f'{name}-child').read_text()) for name in ('caller', 'oauth')]
+        wait_for(root / 'worker-child', process)
+        children = [int((root / f'{name}-child').read_text()) for name in ('caller', 'oauth', 'worker')]
         process.send_signal(signal.SIGTERM)
-        process.communicate(timeout=15)
+        stdout, stderr = process.communicate(timeout=15)
+        assert (root / 'reports/companion-timings.json').exists(), (process.returncode, stdout, stderr)
         assert process.returncode != 0
         # A killed child can remain in uninterruptible kernel wait (D) before
         # it reaches a terminal state; do not sample /proc only once.
@@ -147,7 +151,7 @@ def test_sigterm_stops_owned_descendants_and_records_failure(companion_repo):
             process.communicate()
 
 
-@pytest.mark.parametrize('name', ['caller', 'oauth'])
+@pytest.mark.parametrize('name', ['caller', 'oauth', 'worker'])
 def test_run_only_wrappers_use_prebuilt_bins_without_touching_shared_evidence(tmp_path, name):
     scripts = tmp_path / 'scripts'
     (scripts / 'e2e-test/oauth').mkdir(parents=True)
@@ -166,7 +170,8 @@ def test_run_only_wrappers_use_prebuilt_bins_without_touching_shared_evidence(tm
     shared.write_text('shared')
     names = (['caller_execution_story.py', 'task_cache_story.py', 'custom_binding_story.py',
               'custom_binding_story.py', 'a2a_test_user_story.py']
-             if name == 'caller' else ['oauth/story.py'])
+             if name == 'caller' else ['oauth/story.py'] if name == 'oauth' else ['worker_runtime_story.py'])
+
     events = tmp_path / 'events'
     for story in names:
         (scripts / 'e2e-test' / story).write_text(
