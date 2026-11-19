@@ -93,13 +93,13 @@ impl StoreTaskFeed {
                 let update = match update {
                     ArtifactUpdate::Upsert { content } => ArtifactUpdate::Upsert {
                         content: Payload::Inline(
-                            self.payload(&content, task.output_limits.max_unit_bytes as usize)
+                            self.payload(&content)
                                 .await?,
                         ),
                     },
                     ArtifactUpdate::AppendText { delta } => ArtifactUpdate::AppendText {
                         delta: Payload::Inline(
-                            self.payload(&delta, task.output_limits.max_unit_bytes as usize)
+                            self.payload(&delta)
                                 .await?,
                         ),
                     },

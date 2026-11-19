@@ -8,14 +8,9 @@ pub(super) struct Object {
 }
 impl DbArchiveStore {
     pub(super) async fn read_object(&self, key: &str) -> Result<Option<Object>, StoreError> {
-        let maximum = if key.starts_with("result:") {
-            MAX_RECORD_BYTES
-        } else {
-            MAX_BLOB_BYTES
-        };
         let rows = self.db.query(DbStatement::with_params(
-            "SELECT namespace_key, object_key, content_digest, source_json, CASE WHEN LENGTH(content_bytes) <= ? THEN content_bytes ELSE NULL END AS content_bytes FROM bcs_dist_immutable_objects WHERE namespace_hash = ? AND object_hash = ? LIMIT 1",
-            vec![DbValue::U64(maximum as u64), DbValue::String(self.namespace_hash.clone()), DbValue::String(object_hash(key))],
+            "SELECT namespace_key, object_key, content_digest, source_json, content_bytes FROM bcs_dist_immutable_objects WHERE namespace_hash = ? AND object_hash = ? LIMIT 1",
+            vec![DbValue::String(self.namespace_hash.clone()), DbValue::String(object_hash(key))],
         )).await.map_err(|_| not_applied("archive_read"))?;
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
@@ -30,7 +25,7 @@ impl DbArchiveStore {
         }
         let bytes = match row.get("content_bytes") {
             Some(DbValue::Bytes(bytes)) => bytes.clone(),
-            _ => return Err(invalid("archive_bytes_or_size")),
+            _ => return Err(invalid("archive_bytes")),
         };
         let reference = blob_reference(key, &bytes);
         if reference.digest.0 != string("content_digest")? {

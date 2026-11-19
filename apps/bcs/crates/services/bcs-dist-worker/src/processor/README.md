@@ -22,10 +22,10 @@ until the corresponding head changes. Unknown Blob writes confirm the same key.
 Task finalization first commits `AwaitingResult` and its immutable result record.
 After confirmed archive storage, a second commit publishes the terminal event and
 snapshot. Publication completion is required before retiring the task or starting
-the next task. Quota exhaustion, cancellation and task timeout use the same
+the next task. Metadata/count exhaustion, cancellation and task timeout use the same
 independent finalizer and do not require the Runner to cooperate.
 
-Raw Thinking is bounded temporary output: it advances raw sequence/consumed and
+Raw Thinking is temporary output: it advances raw sequence/consumed and
 emits a Thinking event, but does not call Runner, charge durable-output usage or
 modify display/snapshot progress. The default local rate is 32 events/second with
 an equal token burst; excess temporary events are consumed without publication.
@@ -68,7 +68,9 @@ production capacity. The host drives repair/discovery even when no user input
 arrives and must enforce the declared capacity/health envelope.
 
 The physical checkpoint/outbox/Ref frames and finalization reserves use the
-phase-one profile. Semantic Task quotas may be lower and remain frozen. Metadata
+phase-one profile. Frozen metadata/count budgets may be lower. Output units,
+cumulative output and complete DisplaySnapshots have no semantic byte quota;
+large content uses immutable Blob references before checkpoint submission. Metadata
 identities and bindings are bounded by JSON encoded bytes including escaping.
 Startup requires an explicit `SessionCheckpointCapacity` declaration and validates
 maximum ordinary, queued-finalization and frozen-result candidates using actual

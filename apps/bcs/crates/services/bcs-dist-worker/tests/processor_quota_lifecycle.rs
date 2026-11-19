@@ -53,31 +53,20 @@ impl DistRunnerCoreService for QuotaRunner {
         Ok(Decision {
             next_state: state.clone(),
             next_deadlines: vec![],
-            actions: vec![
-                ActionIntent::Show {
-                    tid: tid.clone(),
-                    node: NodeId("n".into()),
-                    artifact_id: ArtifactId("partial-must-not-appear".into()),
-                    class: OutputClass::Output,
-                    update: ArtifactUpdate::Upsert {
-                        content: Payload::Inline(serde_json::json!("discard entire decision")),
-                    },
+            actions: (0..33).map(|index| ActionIntent::Show {
+                tid: tid.clone(),
+                node: NodeId("n".into()),
+                artifact_id: ArtifactId(format!("rejected-{index}")),
+                class: OutputClass::Output,
+                update: ArtifactUpdate::Upsert {
+                    content: Payload::Inline(serde_json::json!("discard entire decision")),
                 },
-                ActionIntent::Show {
-                    tid: tid.clone(),
-                    node: NodeId("n".into()),
-                    artifact_id: ArtifactId("answer".into()),
-                    class: OutputClass::Output,
-                    update: ArtifactUpdate::AppendText {
-                        delta: Payload::Inline(serde_json::json!("x".repeat(1_048_574))),
-                    },
-                },
-            ],
+            }).collect(),
         })
     }
 }
 #[tokio::test(start_paused = true)]
-async fn quota_failure_preserves_confirmed_output_rejects_entire_decision_and_initializes_next_task()
+async fn action_quota_failure_preserves_confirmed_output_rejects_entire_decision_and_initializes_next_task()
  {
     let runner = Arc::new(QuotaRunner {
         initializations: AtomicUsize::new(0),

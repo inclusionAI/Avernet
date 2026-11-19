@@ -33,7 +33,8 @@ def _write_bcs_reports(reports_dir: Path, endpoint_overall: str) -> None:
     }))
     (bcs_dir / "worker_e2e.json").write_text(json.dumps({
         "status": "passed", "store": "memory_mock", "durable_store": False, "archive": "sqlite",
-        "checks": ["document_projection_atomic_patch_and_unknown",
+        "checks": ["gateway_http_retry_conflict_once", "gateway_http_concurrent_first_request", "gateway_http_sse_get_task_consistency",
+                   "document_projection_atomic_patch_and_unknown",
                    "finish_archive_restore_and_late_cancel", "append_archive_restore_and_late_cancel",
                    "cancel_independent_of_runner", "quarantine_and_control_authorization",
                    "blocked_and_control_authorization", "memory_store_worker_takeover",
@@ -158,6 +159,15 @@ def test_worker_e2e_fails_closed_for_missing_failed_or_misrepresented_evidence(t
         errors = []
         VERIFIER.validate_worker_e2e(tmp_path, errors)
         assert errors, field
+    for scenario in ["gateway_http_retry_conflict_once",
+                     "gateway_http_concurrent_first_request",
+                     "gateway_http_sse_get_task_consistency"]:
+        path.write_text(json.dumps({**valid, "checks": [
+            check for check in valid["checks"] if check != scenario
+        ]}))
+        errors = []
+        VERIFIER.validate_worker_e2e(tmp_path, errors)
+        assert errors, scenario
     path.unlink()
     errors = []
     VERIFIER.validate_worker_e2e(tmp_path, errors)

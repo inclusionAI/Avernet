@@ -71,7 +71,7 @@ async fn restore_of_a_finished_or_expired_task_is_final() {
         panic!("expected the archived task");
     };
     assert_eq!(view.content.status, TaskStatus::Completed);
-    assert_eq!(view.content.snapshot, Payload::Inline(serde_json::json!({ "artifacts": ["final"] })));
+    assert_eq!(view.content.snapshot, final_record(TID).snapshot);
 }
 
 #[tokio::test]

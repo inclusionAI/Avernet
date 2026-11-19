@@ -1,4 +1,9 @@
 ---
+
+Historical evidence: output byte quotas and original Gateway assumptions below
+are superseded for the current integration by the [2026-11-19 amendment](../2026-11-19-gateway-worker-admission/verification.md). Historical results remain
+bound to their recorded heads; they do not certify the new head.
+
 status: in-progress
 date: 2026-11-19
 owner: BCS distributed Worker

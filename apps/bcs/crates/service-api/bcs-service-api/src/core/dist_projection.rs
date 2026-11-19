@@ -3,9 +3,6 @@ use bcs_dist_model::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputBudget {
-    UnitBytes,
-    CumulativeBytes,
-    SnapshotBytes,
     Actions,
     Artifacts,
     IdentityBytes,
@@ -34,7 +31,7 @@ pub struct OutputProjection {
     pub snapshot: DisplaySnapshot,
     pub usage: OutputUsage,
     pub display_events: u32,
-    /// Encoded logical payload bytes charged by this candidate. Publication's
+    /// Encoded logical payload bytes observed by this candidate. Publication's
     /// byte threshold separately counts the complete encoded output events.
     pub charged_bytes: u64,
 }
@@ -44,7 +41,7 @@ pub struct OutputProjection {
 pub trait OutputProjectionCoreService: Send + Sync {
     fn validate_limits(&self, limits: &OutputLimits) -> Result<(), ProjectionError>;
     /// Validate bounded frozen metadata repeated in checkpoint/effect envelopes.
-    /// Physical framing is shared across tasks; semantic quotas may be reduced.
+    /// Physical framing is shared across tasks; metadata/count budgets may be reduced.
     fn validate_session_limits(
         &self,
         spec: &SessionSpec,
@@ -68,7 +65,7 @@ pub trait OutputProjectionCoreService: Send + Sync {
         limits: &OutputLimits,
     ) -> Result<OutputProjection, ProjectionError>;
     /// Read-side replay of already committed events. Reuse the same transform and
-    /// format/unit/snapshot checks, but do not charge the task's cumulative quota.
+    /// format/identity/count checks, without counting cumulative usage again.
     /// The caller selects events strictly after snapshot coverage and deduplicates
     /// stable event identities; repeated AppendText is not intrinsically idempotent.
     fn fold_committed(

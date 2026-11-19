@@ -22,7 +22,7 @@ fn spec_script() -> (Script, AdmitRequest) {
         .expect(
             "InboxProducerPort::admit",
             (&request,),
-            ok(AdmitOutcome::Accepted(receipt())),
+            ok(AdmitOutcome::Duplicate(receipt())),
         )
         .expect(
             "SessionStorePort::get_spec",

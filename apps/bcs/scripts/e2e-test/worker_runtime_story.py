@@ -126,6 +126,8 @@ def document_story(h):
 
 
 def run(h, checks):
+    from gateway_worker_story import run as gateway_run
+    gateway_run(h, checks)
     document_story(h)
     checks.append('document_projection_atomic_patch_and_unknown')
     h.until(lambda: h.call('runtime')['ready'], 'Worker never became ready')

@@ -15,7 +15,7 @@ ID alone never proves success. Retained completion evidence permits exact replay
 after the checkpoint outbox advances. Changed content remains a conflict.
 
 Snapshot publication checks the committed outbox, frozen Task limits, confirmed
-append coverage, monotonic usage and the original source commit. State, display
+append coverage, monotonic diagnostic usage and the original source commit. State, display
 reference and coverage change in one EQ. A terminal event or snapshot requires
 the matching immutable archive, including its digest and complete display.
 Archive success alone does not expose a terminal Task. Ref values are resolved
@@ -38,15 +38,17 @@ at most eight attempts and 5–200 ms backoff. These are reader/provider bounds,
 not measured deployment capacity or the maintenance profile from SPEC §8.2.
 
 Follow admits at most 128 subscriptions and retains at most 256 KiB of Task
-metadata per subscription. Native pages remain at most 1 MiB; a resolved delivery
-has 1 MiB plus 64 KiB for the event/cursor envelope so a full allowed output unit
-can be delivered. Pagination never skips an event that did not fit. A Gap,
+metadata per subscription. Native pages remain at most 1 MiB. Resolved delivery batches target 1 MiB
+plus 64 KiB for the event/cursor envelope; a single larger output is delivered
+alone. Output units, complete snapshots and cumulative output have no semantic
+byte quota. Immutable Blob resolution verifies digests without an output size
+cap. Pagination never skips an event that did not fit. A Gap,
 terminal event, error or dropped stream releases the subscription. List cursors
 bind namespace, scope and filter and advance scanned index members, including
 dangling members not yet created by admission.
 
 `tests/task_feed.rs` exercises actual store-provider logic with the public memory
 adapter and SQLite archive: partial append visibility, lost replies, late replay,
-Ref digest and byte boundaries, archive/terminal ordering, trim races, sparse
+Ref digest and large-output delivery, archive/terminal ordering, trim races, sparse
 listing and stalled-read/CAS deadlines. These tests do not prove host throughput,
 provider failover, or the complete Worker execution pipeline.

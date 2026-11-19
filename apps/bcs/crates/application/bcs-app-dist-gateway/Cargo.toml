@@ -21,6 +21,9 @@ sha2 = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+bcs-dist-a2a-output = { workspace = true }
+bcs-dist-projection = { workspace = true }
+bcs-dist-worker.workspace = true
 bcs-domain = { workspace = true }
 bcs-dist-gateway = { workspace = true }
 bcs-dist-gateway-store = { workspace = true }

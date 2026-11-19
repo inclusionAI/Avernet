@@ -1,8 +1,7 @@
 //! The JSON carried in task snapshots and artifact events.
 //!
-//! The model stores both as opaque payloads; this file is the only place that
-//! knows their shape. They are A2A-shaped JSON written by the Worker and
-//! passed through:
+//! The injected output adapter formats neutral Worker output before this HTTP
+//! boundary. This file only decodes those formatted fields for the A2A envelope:
 //!
 //! ```json
 //! // task snapshot (display state)
@@ -19,6 +18,7 @@ use a2a::{Artifact, Message};
 use bcs_dist_model::Payload;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub(crate) struct Display {
@@ -54,16 +54,15 @@ pub(crate) struct ArtifactUpdate {
     pub artifact: Artifact,
     pub append: Option<bool>,
     pub last_chunk: Option<bool>,
+    pub metadata: Option<HashMap<String, Value>>,
 }
 
 /// `None` when the content carries no readable artifact.
-pub(crate) fn artifact_update(content: &Payload) -> Option<ArtifactUpdate> {
-    let Payload::Inline(value) = content else {
-        return None;
-    };
+pub(crate) fn artifact_update(value: &Value) -> Option<ArtifactUpdate> {
     Some(ArtifactUpdate {
         artifact: field(value, "artifact")?,
         append: field(value, "append"),
         last_chunk: field(value, "last_chunk"),
+        metadata: field(value, "metadata"),
     })
 }

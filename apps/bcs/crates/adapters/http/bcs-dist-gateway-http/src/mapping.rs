@@ -3,8 +3,7 @@
 use crate::content;
 use a2a::{StreamResponse, Task, TaskArtifactUpdateEvent, TaskState, TaskStatusUpdateEvent};
 use bcs_dist_model::*;
-use serde_json::{Value, json};
-use std::collections::HashMap;
+use bcs_service_api::application::dist_gateway::{FormattedOutputBody, FormattedOutputEvent};
 
 pub(crate) fn state(status: TaskStatus) -> TaskState {
     match status {
@@ -102,29 +101,22 @@ fn status_update(sid: &Sid, tid: &Tid, state: TaskState) -> StreamResponse {
 
 /// The A2A event of one output event; `None` when it carries nothing a client
 /// can read (its position is still advanced by later events).
-pub(crate) fn event(sid: &Sid, event: &OutputEvent) -> Option<StreamResponse> {
+pub(crate) fn event(sid: &Sid, event: &FormattedOutputEvent) -> Option<StreamResponse> {
     match &event.body {
-        OutputBody::Status { status, .. } => Some(status_update(sid, &event.tid, state(*status))),
-        OutputBody::Terminal { status, .. } => Some(status_update(sid, &event.tid, terminal(*status))),
-        OutputBody::Artifact { node, class, content } => {
+        FormattedOutputBody::Status { status, .. } => Some(status_update(sid, &event.tid, state(*status))),
+        FormattedOutputBody::Terminal { status, .. } => Some(status_update(sid, &event.tid, terminal(*status))),
+        FormattedOutputBody::Artifact { content } => {
             let Some(update) = content::artifact_update(content) else {
                 tracing::warn!(id = ?event.id, "skipping artifact event without readable content");
                 return None;
             };
-            let class = match class {
-                OutputClass::Output => "output",
-                OutputClass::Tool => "tool",
-                OutputClass::Thinking => "thinking",
-            };
-            let metadata: HashMap<String, Value> =
-                HashMap::from([("node".to_owned(), json!(node.0)), ("class".to_owned(), json!(class))]);
             Some(StreamResponse::ArtifactUpdate(TaskArtifactUpdateEvent {
                 task_id: event.tid.0.clone(),
                 context_id: sid.0.clone(),
                 artifact: update.artifact,
                 append: update.append,
                 last_chunk: update.last_chunk,
-                metadata: Some(metadata),
+                metadata: update.metadata,
             }))
         }
     }

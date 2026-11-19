@@ -65,7 +65,7 @@ impl WorkerProcessor {
         }
         let content = self
             .references
-            .resolve(&event.payload, PHASE_ONE_MAX_INPUT_PAYLOAD_BYTES)
+            .resolve_output(&event.payload)
             .await
             .map_err(store_error)?;
         let artifact_id = ArtifactId(format!(
@@ -80,7 +80,7 @@ impl WorkerProcessor {
                 content: Payload::Inline(content),
             },
         };
-        // The shared projection validates event identity/size. Thinking is
+        // The shared projection validates event identity and shape. Thinking is
         // deliberately independent of the current full display and its usage.
         match self.ports.projection.project_candidate(
             &DisplaySnapshot {

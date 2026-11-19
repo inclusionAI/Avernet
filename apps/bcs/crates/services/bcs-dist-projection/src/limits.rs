@@ -8,20 +8,9 @@ pub(super) fn validate(limits: &OutputLimits) -> Result<(), ProjectionError> {
             format: limits.display_format,
         });
     }
-    if super::encoding::encoded_bytes(
-        &DisplaySnapshot {
-            format_version: DISPLAY_FORMAT_VERSION,
-            units: vec![],
-        },
-        u64::from(limits.max_snapshot_bytes),
-    )
-    .is_none()
-    {
-        return Err(invalid("empty_snapshot_bytes"));
-    }
     let maxima = PHASE_ONE_OUTPUT_LIMITS;
-    // Phase one enables one bounded physical frame. A semantic Task quota may
-    // shrink independently, but cannot change the Session's persistence frame.
+    // Phase one enables one bounded physical frame. Task metadata/count budgets
+    // may shrink independently, but cannot change the persistence frame.
     if limits.max_checkpoint_bytes != maxima.max_checkpoint_bytes
         || limits.max_outbox_bytes != maxima.max_outbox_bytes
         || limits.checkpoint_finalization_reserve != maxima.checkpoint_finalization_reserve
@@ -31,15 +20,6 @@ pub(super) fn validate(limits: &OutputLimits) -> Result<(), ProjectionError> {
         return Err(invalid("unsupported_physical_profile"));
     }
     for (value, maximum) in [
-        (
-            u64::from(limits.max_unit_bytes),
-            u64::from(maxima.max_unit_bytes),
-        ),
-        (limits.max_total_output_bytes, maxima.max_total_output_bytes),
-        (
-            u64::from(limits.max_snapshot_bytes),
-            u64::from(maxima.max_snapshot_bytes),
-        ),
         (
             u64::from(limits.inline_threshold_bytes),
             u64::from(maxima.inline_threshold_bytes),
@@ -94,10 +74,7 @@ pub(super) fn validate(limits: &OutputLimits) -> Result<(), ProjectionError> {
             return Err(invalid("outside_phase_one_profile"));
         }
     }
-    if limits.inline_threshold_bytes > limits.max_unit_bytes
-        || u64::from(limits.max_unit_bytes) > limits.max_total_output_bytes
-        || limits.max_outbox_bytes > limits.max_checkpoint_bytes
-    {
+    if limits.max_outbox_bytes > limits.max_checkpoint_bytes {
         return Err(invalid("inconsistent_byte_budgets"));
     }
     if limits.checkpoint_finalization_reserve < maxima.checkpoint_finalization_reserve
