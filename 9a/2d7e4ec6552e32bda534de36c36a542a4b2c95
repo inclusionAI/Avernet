@@ -1,0 +1,30 @@
+apps/agentclawscs/conf/docker/scripts/admin/bin/init-mosn.sh
+  h_fa66fe7c023b4b 16-22,24-27,29-30
+apps/agentclawscs/conf/docker/scripts/admin/bin/preStop.sh
+  h_fa66fe7c023b4b 21-27,29-32,34-35
+apps/agentclawscs/conf/docker/scripts/admin/bin/start.sh
+  h_fa66fe7c023b4b 47-53,55-58,60-61
+apps/agentclawscs/docker/bcn/scripts/admin/bin/init-mosn.sh
+  h_fa66fe7c023b4b 16-22,24-27,29-30
+apps/agentclawscs/docker/bcn/scripts/admin/bin/preStop.sh
+  h_fa66fe7c023b4b 21-27,29-32,34-35
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start.sh
+  h_fa66fe7c023b4b 47-53,55-58,60-61
+apps/agentclawscs/docker/bcs/scripts/admin/bin/init-mosn.sh
+  h_fa66fe7c023b4b 16-22,24-27,29-30
+apps/agentclawscs/docker/bcs/scripts/admin/bin/preStop.sh
+  h_fa66fe7c023b4b 21-27,29-32,34-35
+apps/agentclawscs/docker/bcs/scripts/admin/bin/start.sh
+  h_fa66fe7c023b4b 47-53,55-58,60-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a2d7e4ec6552e32bda534de36c36a542a4b2c95",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

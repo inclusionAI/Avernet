@@ -1,0 +1,44 @@
+apps/bcs-internal/specs/2026-11-16-tbase-store/progress.md
+  s_a9c87caa3de52e::t_1cdbdda6c58ec3 5,13,15,17-21
+singlebox/ci/bcs.avernet.conf
+  s_a9c87caa3de52e::t_a09cac009b8dd2 1-2
+singlebox/ci/checkout_avernet_bcs.sh
+  s_a9c87caa3de52e::t_a09cac009b8dd2 142,153
+apps/bcs-internal/specs/2026-11-16-tbase-store/plan.md
+  s_a9c87caa3de52e::t_f25997c3270437 74-85
+devops/pipeline/PRChecker.aci.yml
+  s_a9c87caa3de52e::t_a09cac009b8dd2 495-496
+apps/bcs-internal/crates/plugins/bcs-tbase-store/README.md
+  s_a9c87caa3de52e::t_50a9cec7029389 171-181
+apps/bcs-internal/specs/2026-11-16-tbase-store/verification.md
+  s_2a51cb4a02f4d1::t_494bc590c26109 18
+  s_a9c87caa3de52e::t_fa82462541cecb 22,27
+  s_a9c87caa3de52e::t_7b6cb920821e46 6,8,25,109,111-116,118-122,126-130
+  s_a9c87caa3de52e::t_78921a334409ae 5
+submodules/avernet
+  s_a9c87caa3de52e::t_546d2bd3fd456b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d708c5508fa34ff2e20121be8f4062b16ccc707a",
+  "prompts": {},
+  "sessions": {
+    "s_2a51cb4a02f4d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e770-4d8b-74b0-ab62-f3442a6c7bd2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    },
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

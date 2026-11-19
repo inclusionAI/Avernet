@@ -1,0 +1,37 @@
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/tc.py
+  s_ce84d91f3d35be::t_3e538b2b2362c5 38-46,50,105-107,111-112,117,121,126,143
+  s_ce84d91f3d35be::t_e7b61c8459cc2d 108-110,200
+  s_ce84d91f3d35be::t_f640680c7a6bf3 29-32,47-49,51,102-104,113-116,118-120,122-125,127-138,140-141,144-147,192-199
+  s_ce84d91f3d35be::t_15670833b9afb8 11,139,142
+apps/bcsfuse/tests/composition/test_internal_shadow_app.py
+  s_ce84d91f3d35be::t_78189e9ff1b383 71-75
+apps/bcsfuse/tests/composition/test_tc_card_storage.py
+  s_ce84d91f3d35be::t_78189e9ff1b383 26-30,233-237,239,241-245,249,251-258,263-265
+  s_ce84d91f3d35be::t_a84c1e0607b08b 270
+  s_ce84d91f3d35be::t_c0db39e866a9a8 238,240,246-248,259-260,262
+  s_ce84d91f3d35be::t_d7677ed90b48ff 267,271,274,277,283,287,296
+  s_ce84d91f3d35be::t_f640680c7a6bf3 304-305
+  s_ce84d91f3d35be::t_ef1b61083e2414 250,266,268-269,272-273,275-276,281-282,284-286,288-295,298-299
+  s_ce84d91f3d35be::t_bb5377c89ebac4 261
+  s_ce84d91f3d35be::t_1f8050f967538c 278-280
+  s_ce84d91f3d35be::t_c89222909719d0 297
+  s_ce84d91f3d35be::t_5c4cd3a10de712 300-303
+apps/bcsfuse/docs/deployment/tc-card-storage.md
+  s_ce84d91f3d35be::t_4ec99fd043fb0c 3-18,92-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "392822deaa32b61bf62869fa91c74ec9b9a70c84",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

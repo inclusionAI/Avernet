@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/monitoring-runtime.ts
+  s_c5125da3cacb9c::t_362166af913b2f 24-25
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/monitoring-runtime.test.ts
+  s_c5125da3cacb9c::t_362166af913b2f 51-56,58-59,62,66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f5371e221f79b83bba0634c9808c272b0b2fb62b",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+apps/bcs-internal/crates/plugins/bcs-tbase-store/README.md
+  s_a9c87caa3de52e::t_280994e28bc43c 177-179,233-238,244-245,247-254
+  s_a9c87caa3de52e::t_7a635f5516902e 28-30,37,45-84
+  s_a9c87caa3de52e::t_32f86b2db61251 85
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/tests/document.rs
+  s_a9c87caa3de52e::t_beb0113fd4e590 1-15,28-29,34,39-44,59-60,82-85,94,102,107-112,116-126,131-140,158,164-165,175-179,185,190,198,203-205,210-215,220,243-244,270-273,291-292
+  s_a9c87caa3de52e::t_6b666f3feea893 245-247,252,257-258,268-269
+  s_a9c87caa3de52e::t_61beb5601de61b 16-27,30-33,35-38,45-58,61-81,86-93,95-101,103-106,113-115,127-130,141-157,159-163,166-174,180-184,186-189,191-197,199-202,206-209,216-219,221-242,248-251,253-256,259-267,274-290
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/lib.rs
+  s_a9c87caa3de52e::t_b3c974ea8a1d09 3,115
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/transport/mod.rs
+  s_a9c87caa3de52e::t_b3c974ea8a1d09 65-71
+  s_a9c87caa3de52e::t_d26d0d075baeff 56-61
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/unsupported.rs
+  s_a9c87caa3de52e::t_b3c974ea8a1d09 3,5,32-47
+  s_a9c87caa3de52e::t_b3569c7edad360 48
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/tests.rs
+  s_a9c87caa3de52e::t_beb0113fd4e590 7
+apps/bcs-internal/crates/plugins/bcs-tbase-store/tests/document_dev.rs
+  s_a9c87caa3de52e::t_fa999c0c2be431 1-8,17,23-27,42-45,51,60,65-66,73-77,83-85,89,94-96,102-104,113,123-125,129,160,167,175,201-211,219-220,227,241-242,244,254-256
+  s_a9c87caa3de52e::t_61beb5601de61b 9-16,18-22,28-41,46-50,52-59,61-64,67-72,78-82,86-88,90-93,97-101,105-112,114-122,126-128,130-159,161-166,168-174,176-200,212-218,221-226,228-240,243,245-253
+apps/bcs-internal/crates/plugins/bcs-tbase-store/CONTEXT.md
+  s_a9c87caa3de52e::t_7a635f5516902e 13-16
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/document.rs
+  s_a9c87caa3de52e::t_61beb5601de61b 5,18-21,25-28,32-35,39-42,60-63,65-67,76-91,97-102,105-107,116-125,127-131
+  s_a9c87caa3de52e::t_b3c974ea8a1d09 1-4,6-17,22-24,29-31,36-38,43-59,64,68-75,92-96,103-104,108-115,126,132-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "af083f3c7d4f1d75e8eaac295e5348dd12d73323",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
