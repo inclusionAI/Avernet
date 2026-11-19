@@ -25,6 +25,17 @@ internal_dependencies:
 
 ### Change impact
 
+For IAM credentials, `TokenExchangeOrchestrator` runs Caller refresh and the
+independent outbound token plugin pipeline concurrently, awaiting both before
+returning the original Caller outcome or raising its original error. Plugin and
+context failures remain isolated from Caller; non-IAM credentials skip plugins.
+Each branch retains its own authenticated subject and target checks. Caller
+targets and individual plugins retain their existing internal order. Request
+cancellation cancels and joins coroutine branches; already-running thread-backed
+I/O may still finish and is not rolled back. Synchronous context reads and plugin
+appends run off the event loop. `token_pipelines_started/finished` identify the
+Bot, stage and total elapsed time without logging credentials.
+
 The existing IAM refresh endpoint accepts `token_type=dingtalk` for an opaque
 platform DeviceToken. It adds no caller or owner query parameters. This branch
 first authenticates the existing application signature, resolves the owner using
