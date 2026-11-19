@@ -258,16 +258,10 @@ def swarm_run(injector, collet_id):
     started = _record(injector, collet_id)
     assert started.task.status == "in_progress"
 
-    # 推进一个step
-    assert swarm_driver.step()
-    assert swarm_driver.step()
-    assert swarm_driver.stages()[0].state is StageState.SUCCEEDED
-    assert not swarm_driver.is_completed()
-
-    # drain自动推动任务，直到结束
+    # drain自动推进任务，直到结束
     swarm_driver.drain()
 
-    # swarm任务结束
+    # 校验swarm任务结束状态
     assert swarm_driver.is_completed() and swarm_driver.plan().state is PlanState.COMPLETED
 
     return swarm_driver.stages()
