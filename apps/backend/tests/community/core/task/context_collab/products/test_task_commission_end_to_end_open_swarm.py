@@ -152,7 +152,7 @@ CANDIDATE_COUNT = len(AGENTS) + len(OTHER_AGENTS)
 """
 
 def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
-    # 1、发布一个代办任务 （L5层OPEN + SWARM组合）
+    # 1、发布一个代办任务 （基于L5层OPEN + SWARM方法的组合）
     (profile, injector, l4_context_service, l5_open_method_operate, storage_service, storage_envs,
      collet_id, open_binding_id, swarm_binding_id, role_refs, participants) \
         = publish_todo_task(deploy_open_swarm, tmp_path)
