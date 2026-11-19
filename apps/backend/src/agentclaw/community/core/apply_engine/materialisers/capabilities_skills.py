@@ -18,7 +18,7 @@ from agentclaw.community.core.skill_center.skill_reference_contract import (
     ReadySharedSkill,
     SkillAccessScope,
 )
-from .capabilities_types import Skill, asset_key, center_key, local_owned
+from .capabilities_types import FromBotSource, Skill, asset_key, center_key, local_owned
 
 
 def access_scope(ctx):
@@ -59,31 +59,31 @@ async def resolve_skill(materialiser, ctx, snapshot, entry):
             note=entry.note,
         )
     if isinstance(source, BotSyncedLocalSkill):
-        # file-sync has already written the package into the dst
-        # ``skills-local`` directory; upload_local_skill is not the road here.
-        # The upload port carries ``ensure_dst_local_skill_asset`` for this
-        # case: it reverse-looks-up the source bot's ``ac_skill`` row for
-        # name/description, recomputes the dst git_path through the same
-        # factory the upload road takes, and registers the dst ac_skill row
-        # without writing a package (file-sync already owns the bytes).
-        result = await materialiser._uploads.ensure_dst_local_skill_asset(
-            bot_id=ctx.bot_id,
-            owner_id=ctx.owner_id,
-            actor_id=ctx.actor_id,
-            source_bot_id=source.source_bot_id,
-            source_owner_id=source.source_owner_id,
-            name=entry.name,
-        )
-        skill_row = result["skill"]
-        # No package bytes flow through this road — the capabilities writer
-        # takes ``package is None → prepared = skill_id`` and runs the
-        # activation claim against the freshly-registered id.
+        # file-sync carries the package bytes; this road never reads them and
+        # never uploads. ``resolve`` is read-only: it reads the existing dst
+        # ``ac_skill`` row straight off the in-memory snapshot for identity —
+        # the same read the ``LocalSkillPackage`` branch makes, metadata only,
+        # never the skill file — and defers the create-or-replace to the
+        # capabilities writer via ``from_bot``. A ``dry_run`` stops after
+        # ``plan`` and never reaches the writer, so the dst ``ac_skill`` table
+        # is left untouched; the upload-port method is not called here.
+        matches = [
+            a
+            for a in snapshot.skills
+            if a["name"] == entry.name and local_owned(a, snapshot)
+        ]
+        if len(matches) > 1:
+            raise ValueError("multiple Bot Local assets have this runtime name")
+        existing = matches[0] if matches else None
+        if existing and existing.get("resolution_error"):
+            raise ValueError(str(existing["resolution_error"]))
         return Skill(
             entry.name,
-            asset_key(skill_row),
-            str(skill_row["id"]),
-            frozenset(),
+            asset_key(existing) if existing else "local:" + entry.name,
+            str(existing["id"]) if existing else None,
+            frozenset(existing["mcp_codes"]) if existing else frozenset(),
             package=None,
+            from_bot=FromBotSource(source.source_bot_id, source.source_owner_id),
             note=entry.note,
         )
     if isinstance(source, CenterSkillRef):
