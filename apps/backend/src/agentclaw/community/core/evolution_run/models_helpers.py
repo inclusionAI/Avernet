@@ -1,15 +1,5 @@
-"""运行上下文里永远授予的部件名（06 §5.1）。"""
+"""Deprecated import compatibility; canonical implementation: ``avernet_evolution.core.evolution_run.models_helpers``."""
+import sys
+from avernet_evolution.core.evolution_run import models_helpers as _implementation
 
-from __future__ import annotations
-
-__all__ = ["ALWAYS_GRANTED_PARTS"]
-
-ALWAYS_GRANTED_PARTS: tuple[str, ...] = (
-    "parent",
-    "workspace",
-    "operations",
-    "budget",
-    "log",
-    "artifacts",
-    "cancelled",
-)
+sys.modules[__name__] = _implementation

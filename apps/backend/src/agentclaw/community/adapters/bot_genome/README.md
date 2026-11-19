@@ -6,7 +6,7 @@ Adapters between the production Bot Genome registry and the RSI runtime.
 
 - `real_bot_genome.py` captures and resolves real Bot Genome data through the
   platform-facing APIs.
-- `core/evolution_run/genome_registry_port.py` materializes persona files,
+- [`plugins/evolution/genome_registry.py`](../../plugins/evolution/genome_registry.py) materializes persona files,
   local Skill trees, and file resources for a strategy workspace.
 - Local Skill content is stored as `acm-tree-v1` and must be expanded into all
   member files; it is not equivalent to reading the tree digest as `SKILL.md`.

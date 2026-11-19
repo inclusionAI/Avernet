@@ -22,6 +22,7 @@ from agentclaw.community.core.skill_center import draft_content
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
 from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.evolution_control_config import EvolutionControlConfig
 from agentclaw.community.di.task_dispatch_config_loader import load_task_dispatch_config
 from agentclaw.community.di.modules.ecb_config import resource_ready_settings
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
@@ -236,6 +237,11 @@ class ConfigModule(Module):
     """Bind every typed config dataclass."""
 
     # ── Workspace ───────────────────────────────────────────────────
+
+    @singleton
+    @provider
+    def evolution_control(self) -> EvolutionControlConfig:
+        return EvolutionControlConfig(**_block("evolution_control"))
 
     @singleton
     @provider

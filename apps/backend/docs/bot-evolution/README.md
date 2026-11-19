@@ -47,7 +47,7 @@ owned), then the **services** (things that run). Each has the same shape:
 domain model, service interface, API with examples, and code examples.
 
 These files are one design, not separate work sessions. Follow-up sessions
-are the work items RSI-01…RSI-24 in [work-items.md](work-items.md), each of
+are the work items RSI-01…RSI-25 in [work-items.md](work-items.md), each of
 which names the documents to read first.
 
 | Doc | Kind | Answers |
@@ -66,6 +66,7 @@ which names the documents to read first.
 | [research.md](research.md) | Appendix | Industry survey and codebase evidence |
 | [work-items.md](work-items.md) | Appendix | Work items for follow-up sessions, with dependencies |
 | [integration-guide.md](integration-guide.md) | Guide | How callers and strategies use the platform: the two API layers, where orchestration lives, one API rather than two, worked examples, who builds what |
+| [evolution-run-integration.zh-CN.md](evolution-run-integration.zh-CN.md) | Implementation guide (Chinese) | Current 01–06 entry points/outputs, execution flow, 15 Worker HTTP routes, observation and implementation gaps, distinct from design targets |
 
 Decision records. Accepted ones are promoted to `docs/adr/` with the next free
 ADR number; drafts stay in [decisions/](decisions/) while under discussion:

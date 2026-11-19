@@ -1,12 +1,17 @@
-# `adapters.http.evolution_jobs`
+# Retired Backend Worker HTTP location
 
-HTTP adapter for the 06-evolution-run worker Job Protocol.
+Backend no longer mounts `/openapi/v1/evolution/jobs` or installs legacy
+Evolution execution modules. The old router/builders are removed, not silently
+forwarded to a second in-process runtime.
 
-It exposes the transport layer for worker claim, heartbeat, workspace-file,
-candidate-submission, verdict and completion operations. Domain rules remain in
-`core/evolution_run`; this package only maps HTTP requests to the injected
-service ports.
+Use `avernet_evolution.adapters.jobs.build_job_app` / `build_job_router` for
+explicit test composition. Production Worker HTTP is mounted by the independent
+[Evolution service](../../../../../../../evolution/README.md). Its HMAC claim and fencing
+protocol is separate from the existing user login and Bot authorization.
 
-The route is registered from the backend HTTP composition root and assembled
-through the evolution DI modules. Validate HMAC/worker ownership and error
-mapping with the focused evolution-run tests before changing the wire contract.
+All 58 success/stale-fence/missing-grant/empty-fence HTTP cases are now owned by
+[Evolution Worker contracts](../../../../../../../evolution/tests/contracts/test_worker_http.py).
+The actual service graph, provider calls, persistence and failure effects remain
+asserted. These are local fixture tests, not live Worker or 02 provider proof.
+Public Bot-scoped control paths remain in Backend's normal authenticated router;
+see [control ingress](../../../../../../docs/flows/bot-evolution-control.md).

@@ -10,7 +10,7 @@ from agentclaw.community.core.content_store import canonical_tree_bytes
 from agentclaw.community.core.bot_genome.models import (
     ProvenanceKind, RevisionStatus, RunScope,
 )
-from agentclaw.community.core.evolution_run.genome_registry_port import RegistryGenomePort
+from agentclaw.community.plugins.evolution.genome_registry import RegistryGenomePort
 
 BOT = SimpleNamespace(owner_id="owner_1", bot_id="bot_1", to_dict=lambda: {})
 
@@ -48,7 +48,9 @@ class FakeRegistry:
 
     async def commit_patch(self, bot, patch, *, created_by, status, run=None):
         self.committed.append({"created_by": created_by, "status": status, "run": run})
-        return SimpleNamespace(revision=SimpleNamespace(id="sha256:" + "d" * 64))
+        return SimpleNamespace(
+            revision=SimpleNamespace(revision=SimpleNamespace(id="sha256:" + "d" * 64))
+        )
 
 
 @pytest.mark.asyncio

@@ -315,3 +315,14 @@ class PromotionPayload(BaseModel):
     settled_at: UtcDatetime | None = Field(
         description="When its delivery ended and it took its final status, UTC with a `Z` suffix; null while in flight."
     )
+
+
+class GenomeDriftPayload(BaseModel):
+    """Observed hashes only; this operation records no revision and moves no ref."""
+
+    active: str
+    observed: str
+
+
+class GenomeDriftResult(BaseModel):
+    drift: GenomeDriftPayload | None

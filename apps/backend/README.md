@@ -120,6 +120,7 @@ exact refs and any missing enterprise evidence in the private work ledger.
 | Trace a request to its runtime target | [Backend runtime targeting](../../docs/flows/backend-runtime-targeting.md) |
 | Missing runtime/resource, wrong-instance result or timeout | [Runtime target diagnostics](docs/diagnostics/runtime-targeting.md) |
 | Backend manager/Owner projection into BCS | [Manager sync](docs/flows/bot-manager-sync.md), [Owner sync](docs/bot-ownership-sync-operations.md) |
+| Bot RSI configuration / task control | [RSI control ingress](docs/flows/bot-evolution-control.md), [independent Evolution](../evolution/README.md) |
 | Bot capability configuration and apply | [Manifest guide](docs/bot-config-manifest/README.zh-CN.md), [apply-engine boundary](src/agentclaw/community/core/apply_engine/README.md) |
 
 The [repository map](../../CONTEXT-MAP.md) selects the app; this README is its

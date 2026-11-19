@@ -88,6 +88,9 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # The service-Bot evaluation rows of that table, split from authorization_rules
     # at the 1000-line module cap. Policy rows only, no HTTP stack.
     "authorization_rules_service_eval.py",
+    # RSI control policy rows follow the same table split at the module cap.
+    # This exemption is endpoint-shape only; service-import checks still apply.
+    "authorization_rules_evolution.py",
 
     "__init__.py",
 })

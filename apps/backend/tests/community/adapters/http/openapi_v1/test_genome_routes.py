@@ -145,11 +145,12 @@ def _promotion() -> Promotion:
 # -- the surface -----------------------------------------------------------------------------------
 
 
-def test_the_thirteen_operations_are_mounted_once_in_the_right_order() -> None:
+def test_the_fourteen_operations_are_mounted_once_in_the_right_order() -> None:
     app = FastAPI()
     app.include_router(router)
     paths = app.openapi()["paths"]
     assert {(m.upper(), p) for p, ops in paths.items() for m in ops} == {
+        ("GET", f"{_GENOME}/drift"),
         ("GET", f"{_GENOME}/revisions"),
         ("POST", f"{_GENOME}/revisions"),
         ("POST", f"{_GENOME}/revisions:capture"),
@@ -206,6 +207,7 @@ def test_wildcard_paths_route_candidate_refs_without_swallowing_the_suffixes() -
 @pytest.mark.parametrize(
     ("method", "suffix", "level", "lock"),
     [
+        ("GET", "/drift", PermissionLevel.MEMBER, None),
         ("GET", "/revisions", PermissionLevel.MEMBER, None),
         ("POST", "/revisions", PermissionLevel.ADMIN, None),
         ("POST", "/revisions:capture", PermissionLevel.ADMIN, None),
@@ -592,3 +594,19 @@ def test_bot_ref_reads_the_record_and_defaults() -> None:
         "staff",
     )
     assert genome.bot_ref({"entity_id": "e"}, owner_id="o", bot_id="b").bot_type == "personal"
+
+
+@pytest.mark.parametrize("changed", [False, True])
+async def test_drift_observes_without_recording_or_moving_refs(changed):
+    from agentclaw.community.core.bot_genome.models import Drift
+
+    registry = Mock()
+    registry.drift = AsyncMock(return_value=Drift(R1, R2) if changed else None)
+    result = await genome.get_genome_drift(
+        bot_id="b", request=_request(), actor_id="u1", owner_id="u1",
+        bot_service=_bot_service(), registry=registry,
+    )
+    assert result.data.model_dump() == {"drift": {"active": R1, "observed": R2} if changed else None}
+    registry.drift.assert_awaited_once()
+    assert registry.drift.call_args.args[0].entity_id == "ent_1"
+    assert [call[0] for call in registry.mock_calls] == ["drift"]

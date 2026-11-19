@@ -12,7 +12,6 @@ from agentclaw.community.core.evolution_run import (
     EventTrigger,
     EventName,
     RunStatus,
-    build_evolution_runtime,
 )
 from agentclaw.community.core.evolution_verify import (
     Case,
@@ -24,6 +23,8 @@ from agentclaw.community.core.evolution_verify import (
     Split,
     VerificationProfile,
 )
+
+from agentclaw.community.di.evolution_acceptance.runtime import build_evolution_runtime
 
 from .conftest import (
     BOT,
@@ -183,8 +184,8 @@ async def test_runtime_container_path_runs_a_worker_in_the_sandbox() -> None:
     from agentclaw.community.core.evolution_run.sandbox import ENV_JOB_TOKEN
     from agentclaw.community.core.evolution_run.worker import Worker
 
-    from .test_sandbox import IMAGE, FakeSandbox
-    from .test_worker import WorkspaceOnlyStrategy
+    from .acceptance_fixtures import IMAGE, FakeSandbox
+    from .acceptance_fixtures import WorkspaceOnlyStrategy
 
     genome = FakeGenome()
 

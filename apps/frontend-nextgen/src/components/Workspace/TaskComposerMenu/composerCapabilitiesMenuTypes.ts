@@ -21,6 +21,8 @@ export interface ComposerCapabilitiesMenuProps {
   onDynamicSelected?: () => void;
   /** Agent Compute 入口回调：与「任务」「工作流任务」并列渲染；不传时该行不出现。 */
   onAgentCompute?: () => void;
+  /** Bot-scoped RSI configuration/run/evidence panel; not a chat task. */
+  onEvolution?: () => void;
   /** 清除指定胶囊（key 见 composerSelectionKey：'dynamic' | workflowId）。 */
   onRemoveSelection?: (key: string) => void;
   /** 能力集只读查看装配（useBotCapabilitySets；单聊 我的/团队空间 Bot 传入）。

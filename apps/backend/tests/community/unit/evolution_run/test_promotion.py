@@ -22,6 +22,8 @@ from agentclaw.community.core.evolution_promote import (
     decide,
 )
 
+from agentclaw.community.core.bot_genome.patch_models import GenomePatch
+
 from .conftest import BOT
 
 POLICY = SimpleNamespace(
@@ -174,7 +176,12 @@ def _service(
         candidate="sha256:cand",
         revision="sha256:cand",
         parent_revision="sha256:parent",
-        patch=_patch(_op("memory.update", item=_mem_item())),
+        patch=GenomePatch.model_validate({
+            "patch_schema": 1, "base": "sha256:" + "a" * 64,
+            "ops": [{"op": "memory.update", "item": {"key": "k1", "text": "fact",
+                                                  "tags": [], "source": ["episode:1"]}}],
+            "rationale": "test", "evidence": ["episode:1"],
+        }),
         policy=POLICY,
         allowed_genes=("memory",),
         verdict=verdict,

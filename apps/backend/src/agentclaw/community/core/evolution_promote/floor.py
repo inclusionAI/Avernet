@@ -31,7 +31,7 @@ class FloorChecker:
         )
 
     def _mutable_and_pins(self, patch: Any, policy: Any) -> GateCheck:
-        from agentclaw.community.core.evolution_strategy import check_allowed_genes
+        from avernet_evolution.core.evolution_strategy import check_allowed_genes
 
         problems = check_allowed_genes(
             patch,
@@ -49,7 +49,7 @@ class FloorChecker:
         )
 
     def _allowed_genes(self, patch: Any, allowed_genes: Sequence[str]) -> GateCheck:
-        from agentclaw.community.core.evolution_strategy import check_allowed_genes
+        from avernet_evolution.core.evolution_strategy import check_allowed_genes
 
         problems = check_allowed_genes(patch, list(allowed_genes))
         if problems:

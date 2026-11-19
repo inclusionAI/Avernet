@@ -13,8 +13,8 @@ from agentclaw.community.core.evolution_run import (
     JobService,
     JobTokenIssuer,
 )
-from agentclaw.community.core.evolution_run.genome_registry_port import RegistryGenomePort
-from agentclaw.community.di.modules.evolution_runtime_module import (
+from agentclaw.community.plugins.evolution.genome_registry import RegistryGenomePort
+from agentclaw.community.di.evolution_acceptance.runtime_module import (
     EvolutionRuntimeModule,
     _image_of,
     _strategy_refs,
@@ -128,3 +128,30 @@ async def test_discovered_runner_hooks_are_safe(monkeypatch) -> None:
     await runner.shutdown()
     await runner.teardown()
     assert runner.last_error is None
+
+
+def test_explicit_provider_failure_is_not_hidden_by_fallback() -> None:
+    from agentclaw.community.core.evolution_run.ports import StrategyRegistryPort
+    from agentclaw.community.di.evolution_acceptance.runtime_module import _resolve
+
+    injector = Injector()
+
+    def broken_provider():
+        raise RuntimeError("registry configuration failed")
+
+    injector.binder.bind(StrategyRegistryPort, to=broken_provider)
+    with pytest.raises(RuntimeError, match="registry configuration failed"):
+        _resolve(injector, StrategyRegistryPort, object())
+
+
+def test_optional_port_uses_explicit_parent_binding() -> None:
+    from injector import InstanceProvider
+
+    from agentclaw.community.core.evolution_run.ports import StrategyRegistryPort
+    from agentclaw.community.di.evolution_acceptance.runtime_module import _resolve
+
+    parent = Injector()
+    registry = object()
+    parent.binder.bind(StrategyRegistryPort, to=InstanceProvider(registry))
+    child = parent.create_child_injector()
+    assert _resolve(child, StrategyRegistryPort, None) is registry

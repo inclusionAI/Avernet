@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "avernet-genome-contracts"
+version = "1.0.0"
+description = "Genome v1 wire types and deterministic codecs, without platform services"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.12,<3", "jsonschema>=4.20", "referencing>=0.30"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/avernet_genome"]

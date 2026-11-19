@@ -1,23 +1,10 @@
-# `evolution_ledger`
+# evolution_ledger — compatibility imports only
 
-RSI experiment history and lineage records (work item 05). The package owns
-ledger domain models and persistence-facing behavior; it does not execute a
-strategy, verify a candidate, or promote a genome.
+Canonical implementation, domain contracts and tests are owned by
+[`avernet_evolution.core.evolution_ledger`](../../../../../../evolution/src/avernet_evolution/core/evolution_ledger/README.md).
+These files re-export the same module/classes; do not add new domain logic here.
+New consumers must import the canonical package. Compatibility aliases remain
+for existing Backend/platform consumers and can be removed once those consumers
+migrate; they are not a second runtime or independent service.
 
-## Current implementation
-
-- `models.py` defines the experiment/lineage records used by the evolution
-  flow.
-- `ledger.py` implements the ledger service boundary consumed by run and
-  promotion workflows.
-- The runtime binding is assembled by the evolution DI modules.
-
-For the overall design and current implementation/verification status, start
-at [`docs/bot-evolution/README.zh-CN.md`](../../../../../docs/bot-evolution/README.zh-CN.md)
-and the matching [work items](../../../../docs/bot-evolution/work-items.zh-CN.md).
-
-## Verification boundary
-
-The existence of this module is not evidence that every ledger backend or
-production persistence path is wired and live-tested. Check the current unit
-and integration tests before changing its storage contract.
+See [Evolution ownership and limitations](../../../../../../evolution/README.md).

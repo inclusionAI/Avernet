@@ -40,7 +40,7 @@ AgentEvolve / ClawEvolve 管线改进。本设计文档集把这些能力变成�
 API，以及代码示例。
 
 这些文件是同一份设计，而不是各自独立的工作会话。后续会话对应
-[work-items.zh-CN.md](work-items.zh-CN.md) 中的工作项 RSI-01…RSI-24，每个
+[work-items.zh-CN.md](work-items.zh-CN.md) 中的工作项 RSI-01…RSI-25，每个
 工作项都注明了需要先阅读哪些文档。
 
 | 文档 | 类型 | 回答的问题 |
@@ -59,6 +59,7 @@ API，以及代码示例。
 | [research.zh-CN.md](research.zh-CN.md) | 附录 | 业界调研与代码库证据 |
 | [work-items.zh-CN.md](work-items.zh-CN.md) | 附录 | 供后续会话使用的工作项及其依赖关系 |
 | [integration-guide.zh-CN.md](integration-guide.zh-CN.md) | 指南 | 调用方和进化策略如何使用平台：两层 API、编排归属于哪里、一套 API 而不是两套、完整示例、谁负责什么 |
+| [evolution-run-integration.zh-CN.md](evolution-run-integration.zh-CN.md) | 当前实现对接 | 01–06 实际入口/输出、完整执行步骤、15 个 Worker HTTP 接口、观测与实现缺口；区别于设计目标 |
 
 决策记录。已接受的记录以下一个可用的 ADR 编号晋升到 `docs/adr/`；草案在讨论期间
 存放在 [decisions/](decisions/) 中：

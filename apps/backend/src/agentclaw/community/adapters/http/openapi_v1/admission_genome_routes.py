@@ -11,6 +11,7 @@ _GENOME = "/openapi/v1/bots/{bot_id}/genome"
 GENOME_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (method, f"{_GENOME}{suffix}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
     for method, suffix in (
+        ("GET", "/drift"),
         ("GET", "/revisions"),
         ("POST", "/revisions"),
         ("POST", "/revisions:capture"),

@@ -197,6 +197,28 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **完成标准**：可按修订版查询来自 OpenClaw Bot 的片段；ClawEvolve diagnose
   可以从经验库读取。
 
+### RSI-25 Genome 兼容 SkillSet 的捕获与编辑
+- **状态**：TODO（2026-11-17 记录，未实现；负责人待确认）。
+- **模块**：backend（Genome / Skills / apply）、engine（内容与激活契约评审）。
+- **目标**：让 Genome 可读取 Bot 已启用 SkillSet 成员的实际内容并建立可复现基线，
+  策略可在授权范围编辑这些 Skill，再经候选与既有投递边界处理；不再只看到 Direct Skills。
+- **先读**：[01](01-genome.zh-CN.md)、[03](03-strategy.zh-CN.md)、
+  [运行对接说明](evolution-run-integration.zh-CN.md)、
+  [Skills 架构约束](../../src/agentclaw/community/core/skill_center/AGENTS.md)。
+- **待评审**：SkillSet 的组织/激活关系与 Local/Repo/Center 内容所有权分开建模；
+  冻结成员身份、来源、版本/内容摘要以及集合成员关系。先确定复制写入（copy-on-write）
+  与共享源发布的授权、冲突和生命周期语义，不默认将共享源复制成 Local 或原地覆盖共享 Skill。
+- **完成标准**：
+  1. capture/读取能解析已启用成员的受权内容，保留来源/成员身份，集合或共享源后续变化
+     不得静默改变已冻结基线；与 Center 跟随最新版等既有契约的兼容变更须显式评审。
+  2. workspace → Patch → candidate → 投递有明确映射，名称冲突、源变化、授权不足
+     明确报错；不绕过发布/激活，不意外修改共享源或其他 Bot。
+  3. 覆盖 Local、Set、混合安装、同名/重复引用、未启用成员、共享源权限、并发源变化、
+     中断持久化与重试、基线可复现测试；只暴露当前 Bot 激活的成员，不暴露全内容库。
+  4. 保留 `skills/` 等资源保留路径拒绝；上传普通资源不能冒充 Skill 安装。
+     先完成 01–06 捕获/编辑/候选验证，不以 07–09 评测上线为前置条件。
+- **范围说明**：本项是后续开发，不表示当前 Set 成员已可进化；共享源写入方案尚未决定。
+
 ## P3/P4 — 评估、治理与默认进化策略
 
 ### RSI-11 验证服务（Bot 验证）

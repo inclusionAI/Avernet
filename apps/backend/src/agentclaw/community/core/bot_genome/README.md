@@ -183,3 +183,13 @@ internal_dependencies:
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils
 ```
+
+### Read-only HTTP drift observation
+
+`GET /openapi/v1/bots/{bot_id}/genome/drift` exposes `GenomeRegistryProtocol.drift`
+through the existing MEMBER and addressed-Bot application-delegation gates.
+The success envelope contains `data.drift`, either `{active, observed}` or null.
+Null includes an absent active baseline; consumers requiring a parent must also
+resolve active. Observation failures propagate; they are not "no drift".
+This operation records no content/revision, moves no refs and starts no apply.
+It is an additive Service API delivery operation for isolated Evolution providers.

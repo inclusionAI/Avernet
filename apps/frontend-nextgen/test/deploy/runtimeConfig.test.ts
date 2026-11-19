@@ -7,10 +7,8 @@ import { runInNewContext } from 'node:vm';
 it.each(['local', ''])('writes provider opt-in %s into deployed runtime configuration', (slug) => {
   const directory = mkdtempSync(join(tmpdir(), 'qwen-runtime-'));
   try {
-    const script = readFileSync(join(process.cwd(), 'deploy/docker-entrypoint.sh'), 'utf8').replace(
-      '/usr/share/nginx/html/runtime-config.js',
-      join(directory, 'runtime-config.js'),
-    );
+    const script = readFileSync(join(process.cwd(), 'deploy/docker-entrypoint.sh'), 'utf8')
+      .replace('/usr/share/nginx/html/runtime-config.js', join(directory, 'runtime-config.js'));
     const path = join(directory, 'entrypoint.sh');
     writeFileSync(path, script);
     const keys = [

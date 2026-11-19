@@ -14,3 +14,5 @@ Current entry: [Bot manager synchronization](bot-manager-sync.md). For runtime
 selection across components, see [Backend runtime targeting](../../../../docs/flows/backend-runtime-targeting.md).
 
 For the wider inventory of existing app documentation and domain context, see the [existing knowledge catalog](../agents/existing-knowledge.md). Check each entry's status and target version.
+
+- [Bot RSI 控制入口](bot-evolution-control.md)：复用系统登录与 Bot 权限、内部授权回执、独立 Evolution 执行和故障边界。

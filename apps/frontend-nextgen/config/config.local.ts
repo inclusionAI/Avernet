@@ -65,40 +65,4 @@ export default defineConfig({
     // 预发时 gateway 由 TEAMCLAW_GW_BASE 注入为 teamclawgw-pre，公开仓库不硬编码部署域名。
     '/openapi/v1/collaboration/tasks/bbs': proxy(gateway, true),
     '/openapi/v1/collaboration/tasks/bots/*/bbs/**': proxy(gateway, true),
-    '/openapi/v1/collaboration/tasks': proxy(gateway, true),
-    '/openapi': proxy(gateway, true),
-    // 本地直连 Task Engine 调试：必须位于通用 collaboration Gateway 路由之前。
-    '/api/v1/collaboration/tasks': proxy(taskEngine, true),
-    '/api/v1/collaboration': proxy(gateway, true),
-    '/api/workflows': proxy(clawweb),
-    '/api': proxy(privateChatManagement),
-    '/proxypass': proxy(privateChatSession, true),
-    '/bcnproxy': { ...proxy(gateway), pathRewrite: { '^/bcnproxy': '/api/v1/collaboration' } },
-    '/docs': proxy(gateway),
-    '/aixcore': {
-      ...proxy(preset.servers.AIXCORE || 'http://127.0.0.1:8888'),
-      pathRewrite: { '^/aixcore/(.*)': '/api/$1' },
-    },
-  },
-  define: {
-    // 仅 bcs-only 开发 profile 覆盖：编译关闭可选 Backend 增强（布尔 false，与部署
-    // runtime-config.js 同语义）；full 缺省不覆盖，有效值仍由 config/config.ts 定义。
-    ...(bcsOnlyProfile ? { TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED: false } : {}),
-    TEAMCLAW_LOGIN_STRATEGY: loginStrategy,
-    TEAMCLAW_TASK_API_BASE: taskApiBase,
-    TEAMCLAW_DEV_ENV:
-      presetName === 'prod' ? 'PROD' : presetName === 'pre' ? 'PRE' : presetName === 'dev' ? 'DEV' : 'LOCAL',
-    BCS_ENDPOINT_PRE: bcsEndpointPre,
-    BCS_ENDPOINT_PROD: bcsEndpointProd,
-    TEAMCLAW_OPENAPI_USER_ID: '',
-    // agentswarm 的 tenant 是必填请求参数(不来自登录主体);本版本固定为 teamclaw。
-    TEAMCLAW_AGENTSWARM_TENANT: process.env.TEAMCLAW_AGENTSWARM_TENANT || 'teamclaw',
-    TEAMCLAW_GW_BASE: gateway,
-    TEAMCLAW_ADMIN_BASE: admin,
-    TEAMCLAW_PRIVATE_CHAT_MANAGEMENT_BASE: privateChatManagement,
-    TEAMCLAW_PRIVATE_CHAT_SESSION_BASE: privateChatSession,
-    TEAMCLAW_CLAWWEB_BASE: clawweb,
-    TEAMCLAW_WS_GW_PRE: gateway,
-    TEAMCLAW_WS_GW_PROD: gateway,
-  },
-});
+    // RSI uses the same authenticated Gateway as every other Bot capability.

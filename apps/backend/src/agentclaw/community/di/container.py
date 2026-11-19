@@ -151,8 +151,6 @@ from agentclaw.community.di.openapi_bot_access_check_config import (
 from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig,
 )
-from agentclaw.community.di.modules.evolution_jobs_module import EvolutionJobsModule
-from agentclaw.community.di.modules.evolution_runtime_module import EvolutionRuntimeModule
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
@@ -252,8 +250,6 @@ def build_injector(
         ContentStoreModule(),
         ApplyEngineModule(),
         BotGenomeModule(),
-        EvolutionJobsModule(),
-        EvolutionRuntimeModule(),
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),

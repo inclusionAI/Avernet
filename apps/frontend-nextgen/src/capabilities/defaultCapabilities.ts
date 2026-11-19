@@ -74,6 +74,11 @@ function normalizeTaskConversationRouteUrl(routeUrl: string): string | null {
 }
 
 export const defaultCapabilities: AppCapabilities = {
+  getRsiEnabled: () => {
+    const runtime = typeof window === 'undefined' ? undefined
+      : (window as { AVERNET_RUNTIME_CONFIG?: { RSI_ENABLED?: boolean } }).AVERNET_RUNTIME_CONFIG;
+    return { status: 'available', value: runtime?.RSI_ENABLED === true };
+  },
   // Open Core 固定展示体验环境提示；Internal overlay 覆盖为 null。
   getOpenSourceExperienceNotice: (): CapabilityResult<OpenSourceExperienceNoticeSpec | null> => ({
     status: 'available',

@@ -5,6 +5,9 @@
 // 未选中会话由 ConversationSessionPlaceholder 承接；Agent Coding 已由页边界互斥地
 // 交给 CodingBotStageBoundary，本组件只负责普通 OpenClaw Runtime。
 import { ConversationComposerHost } from '@/components/Workspace/ConversationComposerHost';
+import { getCapabilities } from '@/capabilities';
+import { RsiPanel } from '@/components/rsi/RsiPanel';
+import { useRsiPanelStore } from '@/stores/rsiPanelStore';
 import { AgentComputePanel } from '@/components/agentswarm/AgentComputePanel';
 import { useAgentComputePanelStore } from '@/stores/agentComputePanelStore';
 import { ChatPanel } from '@/components/Workspace/ChatPanel';
@@ -50,6 +53,14 @@ export function ConversationInteractiveStage(props: {
     ? model.chatBots.find((bot) => bot.botId === model.selectedSession?.botId) ?? null
     : null;
   const composerSession = presentation.composerExtensions ? model.selectedSession : null;
+  const rsiEnabled = getCapabilities().getRsiEnabled().value;
+  const rsiScope = composerBot?.realBotId && composerBot.ownerId && !composerBot.isFriendBot
+    ? {
+        botId: composerBot.realBotId,
+        ownerId: composerBot.ownerId,
+        actorId: model.requesterIdentityId ?? undefined,
+      }
+    : undefined;
   return (
     <div
       className="relative isolate flex min-h-0 min-w-0 flex-1"
@@ -146,9 +157,16 @@ export function ConversationInteractiveStage(props: {
                   capabilitySets={fileFeature.capabilitySets}
                   /* 平台注入的额外菜单行（capability 覆盖式插槽），如知识库引用入口。 */
                   extraMenuRows={composer.extraMenuRows}
+                  onEvolution={rsiEnabled && rsiScope ? () => {
+                    useAgentComputePanelStore.getState().close();
+                    useRsiPanelStore.getState().open(rsiScope);
+                  } : undefined}
                   onAgentCompute={
                     composerSession?.sessionId
-                      ? () => useAgentComputePanelStore.getState().open(composerSession.sessionId)
+                      ? () => {
+                          useRsiPanelStore.getState().close();
+                          useAgentComputePanelStore.getState().open(composerSession.sessionId);
+                        }
                       : undefined
                   }
                 />
@@ -174,6 +192,7 @@ export function ConversationInteractiveStage(props: {
         defaultIdentityBotId={composerBot?.realBotId ?? composerBot?.botId ?? null}
         enabled={Boolean(composerSession?.sessionId)}
       />
+      <RsiPanel scope={rsiScope} enabled={rsiEnabled} />
       {presentation.fileFeatures ? fileFeature.featureNode : null}
       {headerRightPanels}
     </div>

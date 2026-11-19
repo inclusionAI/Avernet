@@ -51,7 +51,7 @@ jobs:
           # Diff the base ref against the working tree. PR runs check out a merge commit,
           # for which "<base>...HEAD" collapses to nothing; diffing base against the tree
           # sees all PR-introduced changes regardless of the merge-commit checkout.
-          mapfile -t files < <(git diff --name-only "${BACKEND_BASE_REF}" -- apps/backend singlebox/ci/legacy_skill_compatibility.sh .github/workflows/backend-unit-tests.yml || true)
+          mapfile -t files < <(git diff --name-only "${BACKEND_BASE_REF}" -- apps/backend apps/evolution packages/genome-contracts singlebox/ci/legacy_skill_compatibility.sh .github/workflows/backend-unit-tests.yml || true)
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"

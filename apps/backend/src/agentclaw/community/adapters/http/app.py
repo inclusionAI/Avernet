@@ -78,7 +78,6 @@ from agentclaw.community.adapters.http.common_config.router import router as com
 from agentclaw.community.adapters.http.bot_common_config.router import router as bot_common_config_router  # noqa: E402
 from agentclaw.community.adapters.http.skills_pool import router as skills_pool_ops_router  # noqa: E402
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
-from agentclaw.community.adapters.http.evolution_jobs.router import router as evolution_jobs_router  # noqa: E402
 from agentclaw.community.adapters.http.task.bbs import digest_router as bbs_digest_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.task.bbs import read_router as bbs_internal_read_router, router as bbs_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.task.feedback import read_router as feedback_internal_read_router  # noqa: E402
@@ -891,7 +890,6 @@ app.include_router(common_config_router)
 app.include_router(bot_common_config_router)
 app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
-app.include_router(evolution_jobs_router)  # 06 §7：沙箱内 worker 的作业协议
 app.include_router(bbs_internal_read_router)
 app.include_router(bbs_digest_internal_router)
 app.include_router(bbs_internal_router)

@@ -52,6 +52,8 @@ from .schemas_genome import (
     BotIdentityPayload,
     ContentStored,
     GenomeDiffPayload,
+    GenomeDriftPayload,
+    GenomeDriftResult,
     GenomeRefPayload,
     GenomeRefsPayload,
     GenomeRevisionPayload,
@@ -211,6 +213,32 @@ def _promotion(promotion: Promotion) -> PromotionPayload:
         created_at=promotion.created_at,
         settled_at=promotion.settled_at,
     )
+
+
+@router.get(
+    "/drift",
+    response_model=Envelope[GenomeDriftResult],
+    responses=USER_SCOPED_403,
+    operation_id="get_bot_genome_drift",
+)
+@envelope_errors
+async def get_genome_drift(
+    bot_id: BotIdPath,
+    request: Request,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
+) -> Envelope[GenomeDriftResult]:
+    """Read live drift without capturing, recording or reconciling the bot.
+
+    Null means no observed drift (also when active is absent). Consumers that
+    require a baseline must separately resolve active and reject its absence.
+    """
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    drift = await registry.drift(bot)
+    payload = None if drift is None else GenomeDriftPayload(active=drift.active, observed=drift.observed)
+    return envelope(GenomeDriftResult(drift=payload), request)
 
 
 # -- revisions ----------------------------------------------------------------------------------

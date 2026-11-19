@@ -1,0 +1,24 @@
+name: Evolution independent service
+on:
+  pull_request:
+    paths: ['apps/evolution/**', 'packages/genome-contracts/**', '.github/workflows/evolution.yml']
+  push:
+    branches: [dev, main]
+    paths: ['apps/evolution/**', 'packages/genome-contracts/**', '.github/workflows/evolution.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  evolution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/evolution/uv.lock
+      - name: Independent lint, boundaries and consumer contract tests
+        run: apps/evolution/scripts/ci_test.sh

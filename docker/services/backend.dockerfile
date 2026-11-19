@@ -9,16 +9,21 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
-WORKDIR /app
+WORKDIR /workspace/apps/backend
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 
 RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources \
     && pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple "uv${UV_VERSION:+==${UV_VERSION}}"
 
 # Install dependencies first (without the project) for better layer caching.
 # The default uv index is the Aliyun PyPI mirror (see apps/backend/pyproject.toml).
+# Keep relative local-package sources resolvable; install non-editably so the
+# runtime venv never points back into the builder checkout.
 COPY apps/backend/pyproject.toml apps/backend/uv.lock apps/backend/README.md ./
+COPY apps/evolution /workspace/apps/evolution
+COPY packages/genome-contracts /workspace/packages/genome-contracts
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --no-editable --no-install-project
 
 # Then install the project itself — the entrypoint runs the app as a module
 # (``python -m agentclaw.community.main``), so ``agentclaw.community`` has to be
@@ -26,7 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # 420 namespace whose only child here is community/ (see the hatch wheel target).
 COPY apps/backend/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --no-editable
 
 ########## Runtime ##########
 FROM python:3.12-slim-bookworm AS runtime

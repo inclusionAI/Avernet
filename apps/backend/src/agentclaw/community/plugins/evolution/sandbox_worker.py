@@ -6,6 +6,9 @@
 运行时的 `create_sandbox` / `exec_command` / `destroy_sandbox` 是同步阻塞调用
 （`exec_command` 可能等待数分钟），因此统一用 `asyncio.to_thread` 挪出事件循环，
 避免拖住整个 backend 进程。
+
+OutBoundOperationRule 并不是已验证的网络 ACL；平台端口也没有逐沙箱只读根开关。
+这两项隔离必须由模板/网络策略另行保证，不能仅凭 JobWorkerSpec 宣称生效。
 """
 
 from __future__ import annotations
@@ -33,9 +36,10 @@ class SandboxRuntimeJobWorker:
     tenant_idx: int = 1
 
     async def create(self, spec: JobWorkerSpec) -> str:
+        # JobWorkerSpec uses MiB; platform ResourceSpecification uses GiB.
         overrides = {
             "image": spec.image,
-            "resource_spec": ResourceSpecification(cpu=spec.cpu, memory=spec.memory),
+            "resource_spec": ResourceSpecification(cpu=spec.cpu, memory=(spec.memory + 1023) // 1024),
         }
         info = await asyncio.to_thread(
             self.runtime.create_sandbox,
@@ -59,8 +63,10 @@ class SandboxRuntimeJobWorker:
         return result.exit_code
 
     async def destroy(self, sandbox_id: str) -> None:
-        await asyncio.to_thread(
+        destroyed = await asyncio.to_thread(
             self.runtime.destroy_sandbox,
             sandbox_id=sandbox_id,
             tenant_idx=self.tenant_idx,
         )
+        if not destroyed:
+            raise RuntimeError("sandbox runtime did not confirm destruction")
