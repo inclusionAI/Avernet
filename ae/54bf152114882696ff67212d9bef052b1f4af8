@@ -1,0 +1,180 @@
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  s_7b8f9bb75d926b::t_ad4902e21ab85f 143-144,148-150
+apps/backend/specs/2026-11-12-context-collab-l6-product-forms/spec.md
+  s_7b8f9bb75d926b::t_b69693028396d1 1-168
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/profiles.py
+  s_7b8f9bb75d926b::t_26eed30f32d11f 1,16,18-19,27-28
+apps/backend/tests/community/core/task/context_collab/test_state_machine.py
+  s_7b8f9bb75d926b::t_b8fca09a349124 3,19,46-49,91-112,281
+  s_7b8f9bb75d926b::t_6b311b580f0911 278-280
+  s_7b8f9bb75d926b::t_96c70ceb684b2c 282-284
+  s_7b8f9bb75d926b::t_0c7af5b6717df2 264,275-277,285-286
+apps/backend/tests/community/core/task/context_collab/test_l6_product_e2e.py
+  s_7b8f9bb75d926b::t_762f3d88044e2d 1-316
+  s_a5f125bde83e04::t_4cdddb9e170448 317-325
+apps/backend/tests/community/core/task/context_collab/test_network_profiles.py
+  s_7b8f9bb75d926b::t_cef90999e40b12 5,37,46-48,166-167,176-177
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/state_machine.py
+  s_7b8f9bb75d926b::t_0c32d0129f0bef 1,472-525,528,533
+apps/backend/tests/community/core/task/context_collab/test_context_collab_append.py
+  s_7b8f9bb75d926b::t_73791052cd9461 499
+  s_a5f125bde83e04::t_b2503d9549be5d 46-48,221-224
+apps/backend/specs/README.md
+  s_7b8f9bb75d926b::t_99be94412ab60e 143
+  s_f44d5bdd34238d::t_3e40dac8e3f1cf 144
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/authorization.py
+  s_7b8f9bb75d926b::t_bc7887f483a7e3 88-89,96-103,111-115,118-120
+  s_a5f125bde83e04::t_ca4bc21acbfb3a 33-39,64-80,84-86
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  s_f44d5bdd34238d::t_1b6e78add075af 148,900
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/group_profile.py
+  s_3f41ed3b174fb4::t_ebfeda34016fc1 1-257
+apps/backend/src/agentclaw/community/core/task/context_collab/method_service_api.py
+  s_a5f125bde83e04::t_c48854c001060c 1-480
+apps/backend/src/agentclaw/community/core/task/context_collab/services/context_collab_service.py
+  s_a5f125bde83e04::t_9bc5cb152d2542 54-56,73-77,216,220,226-227,230-232,267-279
+apps/backend/src/agentclaw/community/core/task/context_collab/services/method_lifecycle_service.py
+  s_3f41ed3b174fb4::t_ff92369a1359e0 1-870
+apps/backend/src/agentclaw/community/core/task/context_collab/services/single_group_method_service.py
+  s_3f41ed3b174fb4::t_3443a5e1eec7c1 1-972
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_f44d5bdd34238d::t_402774f445be77 104-129,335-369
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  s_a5f125bde83e04::t_82cf69f9078aa7 42-47,62-64,152-155,188-191,202,213-216,221-224,227-330,345-348,356-358
+apps/backend/tests/community/core/task/context_collab/test_context_collab_status.py
+  s_a5f125bde83e04::t_3ecf05334d02ab 35-37,213-216
+apps/backend/tests/community/core/task/context_collab/test_group_profile.py
+  s_3f41ed3b174fb4::t_4c0f8c89d1a743 1-1404
+apps/backend/tests/community/core/task/context_collab/test_service_real_repository.py
+  s_a5f125bde83e04::t_046cddb5ee8ec2 50-52,126-129
+apps/backend/tests/community/core/task/context_collab/test_spec_acceptance.py
+  s_a5f125bde83e04::t_bcb9be23036316 43-45,121-124
+apps/backend/tests/community/di/test_task_module.py
+  s_f44d5bdd34238d::t_5d32d0492fc26e 44-71,339-394
+apps/backend/tests/community/endpoints/test_context_collab_endpoints.py
+  s_a5f125bde83e04::t_a8358fcb092d26 32-34,128
+apps/backend/tests/community/endpoints/test_context_collab_methods_endpoints.py
+  s_f44d5bdd34238d::t_1edc0590e87a74 1-410
+apps/backend/specs/2026-11-12-context-collab-l5-method-objects/plan.md
+  s_7b8f9bb75d926b::t_66df9f7d022d4e 1-310
+apps/backend/specs/2026-11-12-context-collab-l5-method-objects/spec.md
+  s_7b8f9bb75d926b::t_55d164f22ba211 1-388
+apps/backend/src/agentclaw/community/adapters/http/task/context_collab_methods.py
+  s_7b8f9bb75d926b::t_943f8c2c1526f9 1-955
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab_methods.py
+  s_7b8f9bb75d926b::t_c3c3a25c3784d9 1-551
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/method_authorization.py
+  s_7b8f9bb75d926b::t_e6a65d52d3a8bb 1-310
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/method_state_machines.py
+  s_7b8f9bb75d926b::t_622f6a263d850e 1-543
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/method_binding.py
+  s_7b8f9bb75d926b::t_dcdad9b2f2a0f1 1,4-13,18,25-27,33,35-38,49-383
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/method_composition.py
+  s_7b8f9bb75d926b::t_e064c023bb04b2 1-241
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/method_profile.py
+  s_7b8f9bb75d926b::t_73c57e21e1b373 1-146
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/open_profile.py
+  s_7b8f9bb75d926b::t_7b36311a788484 1-462
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/single_profile.py
+  s_7b8f9bb75d926b::t_4126dd6b862046 1-189
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_profile.py
+  s_7b8f9bb75d926b::t_0e90d429806237 1-892
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store.py
+  s_7b8f9bb75d926b::t_5e64445777b782 1-467
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/__init__.py
+  s_7b8f9bb75d926b::t_90934282b445dc 1-39
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/base.py
+  s_7b8f9bb75d926b::t_c19ccb6721dba1 1-50
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/binding_slice.py
+  s_7b8f9bb75d926b::t_eb101322fda054 1-199
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/group_slice.py
+  s_7b8f9bb75d926b::t_52b70dffb2c8dd 1-307
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/open_slice.py
+  s_7b8f9bb75d926b::t_65fb6eef60f97f 1-357
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/selection_slice.py
+  s_7b8f9bb75d926b::t_46712b9053ccb4 1-257
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/swarm_slice.py
+  s_7b8f9bb75d926b::t_66e85007694cc8 1-436
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_application_ops.py
+  s_7b8f9bb75d926b::t_bb8d90e5453258 1-540
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_method_service.py
+  s_7b8f9bb75d926b::t_a7848ae7ae911d 1-40
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_method_service_base.py
+  s_7b8f9bb75d926b::t_135683f5007a88 1-205
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_opportunity_ops.py
+  s_7b8f9bb75d926b::t_d72322c101566b 1-449
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_method_service.py
+  s_7b8f9bb75d926b::t_dbec6a2b8308f5 1-43
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_method_service_base.py
+  s_7b8f9bb75d926b::t_92f57cd5ea3c4e 1-171
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_plan_ops.py
+  s_7b8f9bb75d926b::t_e9d26510f86f81 1-613
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_stage_ops.py
+  s_7b8f9bb75d926b::t_6f5580f21de841 1-464
+apps/backend/tests/community/core/task/context_collab/test_l4_primitives.py
+  s_7b8f9bb75d926b::t_b8b1c77b748819 148,204
+apps/backend/tests/community/core/task/context_collab/test_l5_method_e2e.py
+  s_7b8f9bb75d926b::t_5de0456477ebf9 1-415
+apps/backend/tests/community/core/task/context_collab/test_method_authorization.py
+  s_7b8f9bb75d926b::t_f62a866c4212b0 1-345
+apps/backend/tests/community/core/task/context_collab/test_method_binding.py
+  s_7b8f9bb75d926b::t_52889a6b23c3c7 1-455
+apps/backend/tests/community/core/task/context_collab/test_method_composition.py
+  s_7b8f9bb75d926b::t_a1cf89b09cd22d 1-385
+apps/backend/tests/community/core/task/context_collab/test_method_g4_conformance.py
+  s_7b8f9bb75d926b::t_9c85d1003e63d2 1-424
+apps/backend/tests/community/core/task/context_collab/test_method_lifecycle_service.py
+  s_7b8f9bb75d926b::t_58840b0efbdc5d 1-669
+apps/backend/tests/community/core/task/context_collab/test_method_profiles.py
+  s_7b8f9bb75d926b::t_7dfd5068ab1da5 1-70
+apps/backend/tests/community/core/task/context_collab/test_method_service_api.py
+  s_7b8f9bb75d926b::t_0d9d6195cc1f0a 1-527
+apps/backend/tests/community/core/task/context_collab/test_method_store.py
+  s_7b8f9bb75d926b::t_70eaccb028a990 1-303
+apps/backend/tests/community/core/task/context_collab/test_open_profile.py
+  s_7b8f9bb75d926b::t_478b41c33328a3 1-1318
+apps/backend/tests/community/core/task/context_collab/test_single_profile.py
+  s_7b8f9bb75d926b::t_93751aa6289763 1-954
+apps/backend/tests/community/core/task/context_collab/test_swarm_profile.py
+  s_7b8f9bb75d926b::t_e0a5a50240c3bb 1-1531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ae54bf152114882696ff67212d9bef052b1f4af8",
+  "prompts": {},
+  "sessions": {
+    "s_3f41ed3b174fb4": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "7d09ecd4-15a4-4cae-9a0f-c06620b0c68e",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    },
+    "s_7b8f9bb75d926b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_7b8f9bb75d926b",
+        "model": "unknown"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    },
+    "s_a5f125bde83e04": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0433ddbf-9b42-46c4-b365-8eb872c67797",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    },
+    "s_f44d5bdd34238d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a40d10e5-4f25-4d4e-b484-fdd2ddf45506",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

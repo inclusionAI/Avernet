@@ -1,0 +1,16 @@
+apps/bcs-internal/Cargo.lock
+  h_9547b72f8f06cd 549,554,675
+submodules/avernet
+  h_9547b72f8f06cd 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5e86d2009660a7f63ecf61569d77d93597c3069a",
+  "prompts": {},
+  "humans": {
+    "h_9547b72f8f06cd": {
+      "author": "ray <ray@U-PCF66F1V-2003.local>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/flat_module_budget.json
+  s_cecdc98e721f4b::t_bd543986555baa 1-17
+apps/bcs/scripts/e2e-runner/tests/test_direct_conversation_density.py
+  s_cecdc98e721f4b::t_cb4199ba3cb1dc 717-731,733,735-738,742-753
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6750c4c7e954b7c5ae20449a5c67eff980f8bb1e",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

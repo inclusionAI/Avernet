@@ -1,0 +1,53 @@
+apps/frontend-nextgen/test/internal/market/components/AddToCapabilitySetModal.test.tsx
+  s_c3635e70e0c280::t_2f211a3f9be606 486-487,492
+  s_c3635e70e0c280::t_dabb30bd2004ea 17,359
+  s_c3635e70e0c280::t_b543de9aec3669 506,509-532,577
+  s_c3635e70e0c280::t_8ad68bc9fa947b 490-491
+  s_c3635e70e0c280::t_18a27e89707689 352-358,360-366
+  s_c3635e70e0c280::t_57000bc59ca528 479,507,568-575
+  s_c3635e70e0c280::t_a101e9583139cd 480,485
+  s_c3635e70e0c280::t_1988da89e60df8 497,508
+  s_c3635e70e0c280::t_561f378ee3849d 473-476,481-484,488-489,493-494
+  s_c3635e70e0c280::t_4a99f140d01bf4 477-478
+  s_c3635e70e0c280::t_7bb0a8eaf2abe6 576
+apps/frontend-nextgen/src/internal/market/hooks/useSkillCenterReferences.ts
+  s_c3635e70e0c280::t_27376cdd555ea7 40
+  s_c3635e70e0c280::t_d94c6d2c7e2bbf 43
+apps/frontend-nextgen/src/internal/market/components/MarketPage.tsx
+  s_c3635e70e0c280::t_38d4588452ee01 13,118-119
+  s_c3635e70e0c280::t_1988da89e60df8 336
+  s_c3635e70e0c280::t_3cf5fe2d0e2067 214-216
+apps/frontend-nextgen/test/internal/market/hooks/useAddToCapabilitySetSteal.test.tsx
+  s_c3635e70e0c280::t_867f617cfe0e0d 1-15
+apps/frontend-nextgen/src/internal/market/hooks/referenceFlow.ts
+  s_c3635e70e0c280::t_27376cdd555ea7 84,188,219,268,318,333,362,368,388
+  s_c3635e70e0c280::t_d94c6d2c7e2bbf 87,407,441
+apps/frontend-nextgen/src/internal/market/hooks/useAddToCapabilitySet.ts
+  s_c3635e70e0c280::t_49e3373b5ec201 92
+apps/frontend-nextgen/src/internal/market/components/AddToCapabilitySetModal.tsx
+  s_c3635e70e0c280::t_26bcf437ef6e57 231,233,235,242-253
+  s_c3635e70e0c280::t_d94c6d2c7e2bbf 23,167-179,468-475
+  s_c3635e70e0c280::t_1988da89e60df8 53-54,82,133,229,240
+  s_c3635e70e0c280::t_7f25e6e481430e 60-61,64
+  s_c3635e70e0c280::t_3cf5fe2d0e2067 40,62,137,149,152,154-155,241
+apps/frontend-nextgen/src/internal/market/components/SkillDetailPage.tsx
+  s_c3635e70e0c280::t_38d4588452ee01 25,90-91
+  s_c3635e70e0c280::t_3cf5fe2d0e2067 166-168
+  s_c3635e70e0c280::t_1988da89e60df8 282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d152cdaacfa377159f7824912fb38110ac162357",
+  "prompts": {},
+  "sessions": {
+    "s_c3635e70e0c280": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e77f-372c-7113-9501-d75fefd234b4",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

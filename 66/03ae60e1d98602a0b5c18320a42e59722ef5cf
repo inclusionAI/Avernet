@@ -1,0 +1,25 @@
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/mosn/transport.rs
+  s_460ca40e7dae23::t_380abd15780070 519,522-523,525,536,538
+apps/bcs-internal/vendor/sofa-rpc-services-0.0.7/src/server/h2_adapter.rs
+  s_460ca40e7dae23::t_38728b625aa629 242,247,252,326,338,343,357,364
+apps/bcs-internal/vendor/sofa-rpc-services-0.0.7/src/server/h2_handler.rs
+  s_460ca40e7dae23::t_953b5deb8f9cfa 700,705,711,730,748,753,787,1145,1152
+apps/bcs-internal/vendor/sofa-rpc-services-0.0.7/src/server/mod.rs
+  s_460ca40e7dae23::t_a0ad7f4ff37244 1980,2014
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6603ae60e1d98602a0b5c18320a42e59722ef5cf",
+  "prompts": {},
+  "sessions": {
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

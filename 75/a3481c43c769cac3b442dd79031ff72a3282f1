@@ -1,0 +1,19 @@
+apps/backend/tests/corp/core/caller_identity/test_token_expiry_coordination.py
+  s_bb98e2f10840b6::t_23646e3ac03e9d 44,46-51,76,79,85-86,102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75a3481c43c769cac3b442dd79031ff72a3282f1",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

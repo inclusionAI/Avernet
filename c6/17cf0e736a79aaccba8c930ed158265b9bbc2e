@@ -1,0 +1,39 @@
+apps/bcs-internal/configs/sofa-rpc.toml
+  s_19c0e6699afcd7::t_ccc7b0c13a5c42 56-61
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  s_19c0e6699afcd7::t_1208f957c46ac5 154,158,161,171-172,196,206,231,249,1700,1718,1722,1725
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/journal.rs
+  s_3390a382ab8b6f::t_ec2e9096aedbf2 1-6,16,36-40,42-62,73-74,162-166,182-183,196-200,215,260-261,264-269,271,279,281-282,284,286,347-354,368-376,380,408,449-452,459-465,469-476,512-521,529-532,543-549,553-557,560,569,571-573,575-577,592-598,638-639,642-649,651-652,658-663,665-670,683-686,702,709-710,721-727,730-759,761,764-765,772-788,792,794-795,797,799-842,846-886,892-897,907-908,910-919,931,937,940-941,954,976,997-1000,1003-1007,1017,1021,1028,1069,1071-1073,1078-1087,1105,1141,1151-1152,1156,1158-1162,1170,1183,1185,1188,1195,1203
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/logging.rs
+  s_19c0e6699afcd7::t_4c8e7cfc567475 51-56
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  s_19c0e6699afcd7::t_38d38a4c0853ae 153-157,196,229-230,245-250
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_19c0e6699afcd7::t_c6e116f50aece8 82-83
+apps/bcs-internal/tests/test_sofa_rpc_process.py
+  s_19c0e6699afcd7::t_a68d35ec52181b 395-397
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c617cf0e736a79aaccba8c930ed158265b9bbc2e",
+  "prompts": {},
+  "sessions": {
+    "s_19c0e6699afcd7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3be-3a1a-7b13-9090-e1745ea29304",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    },
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

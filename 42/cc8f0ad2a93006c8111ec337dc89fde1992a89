@@ -1,0 +1,37 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_reporting.py
+  s_cecdc98e721f4b::t_f304cf479f0456 18,222
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_run.py
+  s_cecdc98e721f4b::t_744476d5fa8815 236
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_run.py
+  s_cecdc98e721f4b::t_ac352a79ec840c 222
+apps/bcs/scripts/e2e-runner/retained-file-manifest.json
+  s_cecdc98e721f4b::t_a620d2b3d581ca 3,209-250
+apps/bcs/scripts/e2e-runner/retained-manifest.json
+  s_cecdc98e721f4b::t_0fe710cac1a7f9 3,209-250
+apps/bcs/scripts/e2e-runner/tests/test_local_draft_group_run.py
+  s_cecdc98e721f4b::t_e160bb1ac5f2bc 22
+apps/bcs/scripts/e2e-runner/tests/test_local_nested_fixed_loop_run.py
+  s_cecdc98e721f4b::t_27928efa81af4b 24,607
+apps/bcs/scripts/e2e-runner/tests/test_local_result_queue_run.py
+  s_cecdc98e721f4b::t_145154e49496af 22
+apps/bcs/scripts/e2e-runner/tests/test_retained_file.py
+  s_cecdc98e721f4b::t_bde6cdaef296e9 210
+apps/bcs/scripts/e2e-runner/tests/test_runner.py
+  s_cecdc98e721f4b::t_9687628706a3d4 124,126-135,137,139-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "42cc8f0ad2a93006c8111ec337dc89fde1992a89",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

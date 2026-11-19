@@ -1,0 +1,32 @@
+apps/backend/src/agentclaw/community/core/task/task_harness/harness.py
+  s_7517e37f6fcee5::t_72f9ab58f61e6d 80,105,283,285-286
+apps/backend/src/agentclaw/community/core/task/task_harness/runtime_probe.py
+  s_7517e37f6fcee5::t_60a40f1312409f 178-180,183,185-187,189-191,194,209,221
+  s_7517e37f6fcee5::t_dba9e66b3af088 188
+  s_7517e37f6fcee5::t_d6b4944db8c7fb 376
+apps/backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md
+  s_7517e37f6fcee5::t_52209d89aae426 1486,1505
+apps/backend/tests/community/core/task/task_harness/test_runtime_probe.py
+  s_7517e37f6fcee5::t_60a40f1312409f 95,104,107,109-111,114-121,311-323
+  s_7517e37f6fcee5::t_db9056ea71349c 324
+apps/backend/specs/2026-09-23-task-cli/end-to-end-relay-design.md
+  s_7517e37f6fcee5::t_72f9ab58f61e6d 41,377
+apps/backend/tests/community/core/task/task_harness/test_harness.py
+  s_7517e37f6fcee5::t_60a40f1312409f 421,427,435,440,455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "635b41c075f2988e341507c4d95f5e89b2c09c55",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

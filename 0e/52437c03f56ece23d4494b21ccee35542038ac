@@ -1,0 +1,19 @@
+apps/frontend-nextgen/src/hooks/localSkillUploadErrors.ts
+  s_79439ec6a1b301::t_4aac13cf3b3ec7 2-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0e52437c03f56ece23d4494b21ccee35542038ac",
+  "prompts": {},
+  "sessions": {
+    "s_79439ec6a1b301": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfae-5b10-75f3-9ddb-9a40d88bbad6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

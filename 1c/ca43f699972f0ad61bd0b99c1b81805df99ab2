@@ -1,0 +1,42 @@
+apps/frontend-nextgen/docs/agent-coding/session-status-bridge.md
+  h_5b2ec9c12c4d18 1-234
+apps/frontend-nextgen/scripts/public-tests.list
+  h_5b2ec9c12c4d18 130-139
+apps/frontend-nextgen/scripts/test-assemble-public-tests.sh
+  h_5b2ec9c12c4d18 18-37
+apps/frontend-nextgen/src/extensions/internal.ts
+  h_5b2ec9c12c4d18 34,559
+apps/frontend-nextgen/src/internal/agentCoding/CodingBotEmbeddedStage.tsx
+  h_5b2ec9c12c4d18 4,60,71-75,89-96,200
+apps/frontend-nextgen/src/internal/agentCoding/cronMemoryOsSession.ts
+  h_5b2ec9c12c4d18 1-8
+apps/frontend-nextgen/test/components/BotWorkshop/BotDormantLifecycle.test.tsx
+  h_5b2ec9c12c4d18 5,94-118,120-128,130-147,149-154
+apps/frontend-nextgen/test/hooks/useBotWorkshop.test.tsx
+  h_5b2ec9c12c4d18 204,210,217,220,222,240,242,245-248,509,523-525,530,533,535
+apps/frontend-nextgen/test/internal/agentCoding/cronMemoryOsSession.test.ts
+  h_5b2ec9c12c4d18 1-19
+apps/frontend-nextgen/test/internal/agentCoding/sessionStatusStage.test.tsx
+  h_5b2ec9c12c4d18 1-132
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionRow.test.tsx
+  h_5b2ec9c12c4d18 3,26-49
+apps/frontend-nextgen/test/services/backendApi/bots/botController.test.ts
+  h_5b2ec9c12c4d18 142,151-170
+apps/frontend-nextgen/test/services/botWorkshop/botManagementActionService.test.ts
+  h_5b2ec9c12c4d18 39-44
+apps/frontend-nextgen/test/services/botWorkshop/botPolicy.test.ts
+  h_5b2ec9c12c4d18 217-218,220-246,252-255
+apps/frontend-nextgen/test/services/botWorkshop/botWorkshopService.test.ts
+  h_5b2ec9c12c4d18 2,15,28,464-519
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1cca43f699972f0ad61bd0b99c1b81805df99ab2",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

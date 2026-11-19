@@ -1,0 +1,19 @@
+submodules/avernet
+  s_ffd6899ba8c9ed::t_7f41baa6f663be 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7b52737065922a9297e11fa2acae3f34a2038f42",
+  "prompts": {},
+  "sessions": {
+    "s_ffd6899ba8c9ed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c3ed-a9b7-7bc0-95e7-7d59c80c865e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

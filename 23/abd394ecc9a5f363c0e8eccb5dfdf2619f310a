@@ -1,0 +1,24 @@
+apps/bcs/crates/contracts/bcn-runtime-model/src/runner.rs
+  h_f4a73db4ad12be 92
+apps/bcs/crates/contracts/bcn-runtime-model/src/storage.rs
+  h_f4a73db4ad12be 97-119,124,127,130-133
+apps/bcs/crates/contracts/bcn-runtime-model/tests/contracts.rs
+  h_f4a73db4ad12be 30-121
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/repo.rs
+  h_f4a73db4ad12be 44-47,52-54,60-69
+apps/bcs/crates/service-api/bcn-runtime-api/tests/durable_operations_contract.rs
+  h_f4a73db4ad12be 1-37
+docs/architecture/bcn-runtime.md
+  h_f4a73db4ad12be 87-98,111-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23abd394ecc9a5f363c0e8eccb5dfdf2619f310a",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+submodules/avernet
+  s_4efef845bd857d::t_0aeb2dd8e17c79 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3654f4a8abf48f15d2d6b903eace3d4a3f21ec9d",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

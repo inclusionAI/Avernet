@@ -1,0 +1,55 @@
+apps/bcs/scripts/e2e-runner/authority-migration-contract.json
+  s_cecdc98e721f4b::t_deb03acb1c2cb0 1-505
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_c8ed6867813c2e 66,70,72-73
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_authority.py
+  s_cecdc98e721f4b::t_81acb8e4af3e41 1-632
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_authority_contract.py
+  s_cecdc98e721f4b::t_55294761ce3c8d 1-344
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_authority_reporting.py
+  s_cecdc98e721f4b::t_06d86da2b30039 1-457
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_authority_run.py
+  s_cecdc98e721f4b::t_5fa0436751a095 1-156
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_story_commands.py
+  s_cecdc98e721f4b::t_d221c96c6e94f8 73-74,345-357,766-782,833
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_526b103aec1014 315-318,385-397,399,539,560
+apps/bcs/scripts/e2e-runner/bcs_e2e/reporting.py
+  s_cecdc98e721f4b::t_4bd227a0776745 505,582
+apps/bcs/scripts/e2e-runner/migration-freeze-review-20261029.md
+  s_cecdc98e721f4b::t_799a342ec026dd 553-597
+apps/bcs/scripts/e2e-runner/provider-owner-slice/tests/test_provider_owner_contract.py
+  s_cecdc98e721f4b::t_469f0f07bef88c 201
+apps/bcs/scripts/e2e-runner/tests/test_local_authority.py
+  s_cecdc98e721f4b::t_f29da82e246c7e 1-896
+apps/bcs/scripts/e2e-runner/tests/test_local_authority_contract.py
+  s_cecdc98e721f4b::t_1507a9adbf2245 1-125
+apps/bcs/scripts/e2e-runner/tests/test_local_custom_collaboration_run.py
+  s_cecdc98e721f4b::t_b6676ed7bd3966 279
+apps/bcs/scripts/e2e-runner/tests/test_local_entry_switch.py
+  s_cecdc98e721f4b::t_548dc716e79f45 34,39,59,61,82
+apps/bcs/scripts/e2e-runner/tests/test_local_service_policy_contract.py
+  s_cecdc98e721f4b::t_64d93eed25807d 149-150
+apps/bcs/scripts/e2e-runner/tests/test_local_service_policy_run.py
+  s_cecdc98e721f4b::t_6bea5c7a820536 385,395-396
+apps/bcs/scripts/e2e-runner/tests/test_local_story_commands.py
+  s_cecdc98e721f4b::t_a5905da517d7d4 74-75,233-253,587-626
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_639e9071976b39 262,361
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "36df71b8ec1e6e362c41f930212bac2d25a8acf8",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

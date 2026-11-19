@@ -1,0 +1,67 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store.py
+  s_f44d5bdd34238d::t_5d89ab888abb15 81-84
+  s_f44d5bdd34238d::t_6783a64928c119 42-48
+  s_f44d5bdd34238d::t_a63ded2fd93b8c 226-366
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/__init__.py
+  s_f44d5bdd34238d::t_1aba73c4f51f94 18,22,28-29
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_method_service_base.py
+  s_f44d5bdd34238d::t_eb1d9eb6812b9b 1-171
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/swarm_slice.py
+  s_f44d5bdd34238d::t_7380984a97f604 1-4,10-61,68-69,71-110,115-130,132-135,142-143,145-179,181-185,189-192,195-204,206-209,218-219,221-255,257-261,266-269,272-281,283-288,293-294,296-335,337-342,347-348,350-402,404-436
+  s_f44d5bdd34238d::t_4031c5446d826c 5-9,62-67,70,111-114,131,136-141,144,180,186-188,193-194,205,210-217,220,256,262-265,270-271,282,289-292,295,336,343-346,349,403
+apps/backend/tests/community/core/task/context_collab/test_swarm_profile.py
+  s_f44d5bdd34238d::t_27645ca143cb08 888,921
+  s_f44d5bdd34238d::t_151d21b37840a0 1477
+  s_f44d5bdd34238d::t_9d68501dc1f702 1-479,489-490,492-496,498-884,886-887,889-920,922-925,927-953,955-991,993-1080,1084,1087-1089,1092-1093,1095-1097,1109-1155,1158,1162,1176-1291,1295,1306-1315,1319-1476,1478-1531
+  s_f44d5bdd34238d::t_1e07235e8db802 885
+  s_f44d5bdd34238d::t_b01e9e23018065 992
+  s_f44d5bdd34238d::t_4f638bafb0c89c 1156-1157,1159-1161,1163-1175
+  s_f44d5bdd34238d::t_602f93f31885e0 1081-1083,1085-1086,1090-1091,1094,1098-1108
+  s_f44d5bdd34238d::t_8d69f0a1805019 926,954
+  s_f44d5bdd34238d::t_d163bbd65e858d 1292-1294,1296-1305,1316-1318
+  s_f44d5bdd34238d::t_0780530908e55a 480-488,491,497
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_profile.py
+  s_f44d5bdd34238d::t_60e07767c52019 880
+  s_f44d5bdd34238d::t_c6c325b4438e35 852
+  s_f44d5bdd34238d::t_8e36c434d9f0c3 331
+  s_f44d5bdd34238d::t_28a8317d64bef0 1-33,35-42,52-330,332-419,421-626,628-795
+  s_f44d5bdd34238d::t_c7ba30b640a2be 34
+  s_f44d5bdd34238d::t_b33b4e512f8178 627
+  s_f44d5bdd34238d::t_a5a152b2961faf 43-51
+  s_f44d5bdd34238d::t_d3ef88d311a3a9 796-851,854-865,867-871,874,881-892
+  s_f44d5bdd34238d::t_f013160105b6ef 853,866,872-873,875-879
+  s_f44d5bdd34238d::t_6dec12612069bc 420
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/base.py
+  s_f44d5bdd34238d::t_13e39bc13d747c 30-36
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_method_service.py
+  s_f44d5bdd34238d::t_aaa4542d5c7819 18-21,24,27,30-32,35,40-42
+  s_f44d5bdd34238d::t_8c330f8968386a 1-17,22-23,25-26,28-29,33-34,36-39,43
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_plan_ops.py
+  s_f44d5bdd34238d::t_e11cd90d98243e 416-421
+  s_f44d5bdd34238d::t_17e303e5509bb0 58
+  s_f44d5bdd34238d::t_da6bc4eba51f9f 66
+  s_f44d5bdd34238d::t_d1834ff0a097d6 111-124
+  s_f44d5bdd34238d::t_8af3a45064b05f 423,429
+  s_f44d5bdd34238d::t_9ccbd205821bfc 1-57,59-65,67-110,125-415,422,424-428,430-613
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_stage_ops.py
+  s_f44d5bdd34238d::t_42a1f44ae2294a 71-74
+  s_f44d5bdd34238d::t_a5f6c98e039b8a 45
+  s_f44d5bdd34238d::t_9b607f77e42405 1-44,46-70,75-164,172-182,314-322,425-433
+  s_f44d5bdd34238d::t_c1f1f8d330b9f1 165-171,183-313,323-424,434-464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "04d6804f23874c74fbecce37aee19e8f3f69d94d",
+  "prompts": {},
+  "sessions": {
+    "s_f44d5bdd34238d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a40d10e5-4f25-4d4e-b484-fdd2ddf45506",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

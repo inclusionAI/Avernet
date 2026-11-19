@@ -1,0 +1,34 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/agent_card_management/v1/agent_card_management.proto
+  h_fa66fe7c023b4b 13-20,40-41,44-48,50-52,94-98,119-123,129-131,137-139,157-165,178-180,230-235,276
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/assembly.rs
+  h_fa66fe7c023b4b 21,25-26,29-30,192-202
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/mapping.rs
+  h_fa66fe7c023b4b 9-11,16,18,20,76,78-79,142,176,299,310,342,349-353,364
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/mod.rs
+  h_fa66fe7c023b4b 4,10
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/provider.rs
+  h_fa66fe7c023b4b 10-13,17,140-193,206-207,266,273,322-323
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/provider_registration.rs
+  h_fa66fe7c023b4b 1-280
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host.rs
+  h_fa66fe7c023b4b 31
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa.rs
+  h_fa66fe7c023b4b 20-21,26-27,29-30,116-121,147-152,263-266
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  h_fa66fe7c023b4b 11-14,17,21,34-36,46,48,51,54,59,61,69,126,135-140,172-175,197,221-222,226-251,267,287-333,349,357,366,371,397-412,414-427,432,446-448,453,467,481,495,510,514,519,529,545-550,596,612-614,628,633,642,649,654,669,685,703,708,722-771,781,793-795,798-799,801,804,816,823,833,840,871,883
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/runtime_config.rs
+  h_fa66fe7c023b4b 10-12,16-19,81-85,103-106,190-196,265-267,281-282,287,296-299,333-335,370-373,377-392,409-412,418-435,440-441,468-471,474-476,491-495
+apps/bcs-internal/docs/sofa-rpc/agent-card-management-service-spec.md
+  h_fa66fe7c023b4b 8,15,28-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "334b24a5c1631444eea14cbb02c246093ae8d4ca",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

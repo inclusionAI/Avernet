@@ -1,0 +1,14 @@
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  h_fa66fe7c023b4b 121,127,130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e2276729ff78d6d06438ce5894a480723a896f23",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/lib.rs
+  s_d2bf2069ff97fe::t_f8beb76584b921 107-110
+apps/bcs-internal/docs/channels/dingtalk-caller.md
+  s_d2bf2069ff97fe::t_95fe6280b59493 11-15,32,45
+submodules/avernet
+  s_d2bf2069ff97fe::t_411f89ea6f412f 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "97eddfe66ae887c717a69ec4a0ed94c7cef6a620",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

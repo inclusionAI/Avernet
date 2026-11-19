@@ -1,0 +1,16 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/README.md
+  h_fa66fe7c023b4b 39-40,49,219-254
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  h_fa66fe7c023b4b 4-5,57,66-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dee72d27ac65cb46ce82f74656e296c6fb8f6811",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

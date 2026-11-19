@@ -1,0 +1,22 @@
+apps/frontend-nextgen/src/assets/TaskPanel/v2/ArtifactsSection.tsx
+  h_059e888e5e4e82 117,198-201
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskArtifactPreviewDrawer.tsx
+  h_059e888e5e4e82 95,341-344
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskArtifactPreviewDrawer.test.tsx
+  h_059e888e5e4e82 78-100
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskOverviewV2.test.tsx
+  h_059e888e5e4e82 251,255,259-260
+apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx
+  h_059e888e5e4e82 300,303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "acf5d7fc30e9be197f53fb959c5b25473562705c",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

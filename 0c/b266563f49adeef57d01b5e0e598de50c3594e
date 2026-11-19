@@ -1,0 +1,19 @@
+apps/bcsfuse/tests/deployment/test_index_version_startup.py
+  s_9e428ec8192673::t_e424c103e6e6ac 14-15,216,219-220,222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0cb266563f49adeef57d01b5e0e598de50c3594e",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_d137ed54eff61f 33,54,242-249
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_390bdaaa1174a6 68,691-699
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_094df205fb7d1a 80,102
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_7385c514def390 363
+apps/bcs/scripts/e2e-runner/tests/test_registration_dual_waves.py
+  s_cecdc98e721f4b::t_b4cc443b265f5e 24,32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "26fb14853714b34523e2c82b4d6f78d8fc3d7eeb",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

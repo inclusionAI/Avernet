@@ -1,0 +1,51 @@
+apps/frontend-nextgen/test/internal/market/service.test.ts
+  s_ffd6899ba8c9ed::t_31336b9876cbb9 472,485,515,542,554
+apps/frontend-nextgen/test/internal/market/useSkillCenterReferences.test.ts
+  s_ffd6899ba8c9ed::t_e1c138bf937fe3 439,446,449,453
+  s_ffd6899ba8c9ed::t_31336b9876cbb9 256,263,425,532,535,603,608
+apps/frontend-nextgen/test/internal/market/scReferenceService.test.ts
+  s_ffd6899ba8c9ed::t_31336b9876cbb9 70,86,101
+apps/frontend-nextgen/src/internal/market/hooks/referenceFlow.ts
+  s_ffd6899ba8c9ed::t_023f6513d0c8f9 72,268,413
+  s_ffd6899ba8c9ed::t_9dabccbad5972d 192,235,358
+apps/frontend-nextgen/src/internal/market/types.ts
+  s_ffd6899ba8c9ed::t_ed578ce469a656 163,193
+apps/frontend-nextgen/src/internal/market/hooks/useAddToCapabilitySet.ts
+  s_ffd6899ba8c9ed::t_ed578ce469a656 124,133,156,178,204,224
+  s_ffd6899ba8c9ed::t_023f6513d0c8f9 88
+apps/frontend-nextgen/src/internal/market/mappers.ts
+  s_ffd6899ba8c9ed::t_ed578ce469a656 246
+apps/frontend-nextgen/test/internal/market/controllers/CapabilitySetController.test.ts
+  s_ffd6899ba8c9ed::t_fd12be1a655d09 78,83
+apps/frontend-nextgen/src/internal/market/controllers/CapabilitySetController.ts
+  s_ffd6899ba8c9ed::t_ed578ce469a656 44,47,52,55,63,66,94,97
+apps/frontend-nextgen/test/internal/market/hooks/useAddToCapabilitySet.test.tsx
+  s_ffd6899ba8c9ed::t_fd12be1a655d09 149-168,175,251
+apps/frontend-nextgen/src/internal/market/service.ts
+  s_ffd6899ba8c9ed::t_ed578ce469a656 295,333
+  s_ffd6899ba8c9ed::t_023f6513d0c8f9 511,540
+  s_ffd6899ba8c9ed::t_9dabccbad5972d 297,314,323,336,521,550
+apps/frontend-nextgen/src/internal/market/controllers/SkillCenterReferenceController.ts
+  s_ffd6899ba8c9ed::t_023f6513d0c8f9 45,51,73,79,86
+apps/frontend-nextgen/src/internal/market/hooks/useSkillCenterReferences.ts
+  s_ffd6899ba8c9ed::t_82463ed05e5748 97
+  s_ffd6899ba8c9ed::t_023f6513d0c8f9 20,53,76-79
+submodules/avernet
+  s_ffd6899ba8c9ed::t_7f41baa6f663be 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bb12508f43330827d177a5a694ffd618efa22195",
+  "prompts": {},
+  "sessions": {
+    "s_ffd6899ba8c9ed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c3ed-a9b7-7bc0-95e7-7d59c80c865e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

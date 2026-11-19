@@ -1,0 +1,29 @@
+apps/backend/specs/caller-instance-status/009-pr-report.md
+  s_ccda8e611a6d06::t_91db09d01a7a3b 52-67
+  s_ccda8e611a6d06::t_7a89c39d4beeba 68-76
+  s_ccda8e611a6d06::t_0dd286c10a0b89 77-83
+apps/backend/specs/caller-instance-status/002-code-report.md
+  s_ccda8e611a6d06::t_a43e9a237c0af2 64-89
+apps/backend/specs/caller-instance-status/001-spec-output.md
+  s_ccda8e611a6d06::t_96a93e2cf1fca6 133-135
+apps/backend/tests/community/acceptance/expert_chat/test_caller_instance_status.py
+  s_ccda8e611a6d06::t_698d6445aae44f 1-101
+singlebox/ci/singlebox_coverage_modules.yaml
+  s_ccda8e611a6d06::t_fd858e5f1b7dd9 322
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8fc3c3634488c2e29225ba6b52b57fe90ce9700b",
+  "prompts": {},
+  "sessions": {
+    "s_ccda8e611a6d06": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda4-a056-7f61-ab7e-7505fc5c7282",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
