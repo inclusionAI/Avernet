@@ -105,7 +105,7 @@ pub fn agent_card(bot: &BotControlPlaneRecord, agent_card: Option<&Value>) -> Re
             "skills": caps.skills.iter().map(|skill| json!({
                 "id": skill.name, "name": skill.name,
                 "description": skill.description.as_deref().unwrap_or_default(),
-                "tags": caps.domains,
+                "tags": skill.tags,
             })).collect::<Vec<_>>(),
             "domains": caps.domains,
             "scopes": caps.scopes,
@@ -310,6 +310,7 @@ mod tests {
         assert_eq!(ids,["orders"]);
         assert_eq!(projected["description"],"Card summary");
         assert_eq!(projected["skills"][0]["description"],"Order queries");
+        assert_eq!(projected["skills"][0]["tags"],json!(["orders","billing"]));
         assert_eq!(projected["domains"],json!(["billing"]));
         assert_eq!(projected["scopes"],json!(["orders:read"]));
 

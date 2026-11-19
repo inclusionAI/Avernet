@@ -81,11 +81,11 @@ async fn card_capabilities_are_synchronized_with_bot_info() {
     third.agent_card["skills"]=json!([{"id":"query","name":"Query","description":"Queries","tags":["billing"]}]);
     assert!(store.compare_and_set(&third,2).await.unwrap());
     let info=stored_bot_info(&db,"bot").await;
-    // Card fields are used verbatim: skill tags never feed bot_info.domains and
-    // dropped Card fields clear their stored values.
+    // Card fields are used verbatim: skill tags travel on the stored skill and
+    // never feed bot_info.domains; dropped Card fields clear their stored values.
     assert_eq!(info["summary"],"");
     assert_eq!(info["domains"],json!([]));
-    assert_eq!(info["skills"],json!([{"name":"query","description":"Queries"}]));
+    assert_eq!(info["skills"],json!([{"name":"query","description":"Queries","tags":["billing"]}]));
     assert_eq!(info["scopes"],json!([]));
     assert_eq!(info["agent_code"],"legacy-agent");
 }

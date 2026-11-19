@@ -73,9 +73,14 @@ fn card_skills(value: &Value) -> ServiceResult<Vec<Skill>> {
             Some(value) => Some(nonempty_string(value, "agent_card.skills[].description")?),
             None => None,
         };
+        let tags = match skill.get("tags") {
+            Some(value) => string_values(value, "agent_card.skills[].tags")?,
+            None => Vec::new(),
+        };
         skills.push(Skill {
             name: name.to_owned(),
             description,
+            tags,
         });
     }
     Ok(skills)
@@ -169,6 +174,7 @@ mod tests {
             Some(vec![Skill {
                 name: "query".into(),
                 description: Some("Queries".into()),
+                tags: vec!["orders".into(), "billing".into()],
             }])
         );
     }
@@ -200,7 +206,8 @@ mod tests {
     #[test]
     fn incompatible_projection_values_are_rejected() {
         for card in [json!({"domains":"orders"}), json!({"scopes":42}),
-                json!({"skills":[{"id":""}]}), json!({"description":42})] {
+                json!({"skills":[{"id":""}]}), json!({"skills":[{"id":"q","tags":"orders"}]}),
+                json!({"description":42})] {
             assert!(
                 project_agent_card_capabilities(Some(&card)).is_err(),
                 "unexpected successful projection: {card}"

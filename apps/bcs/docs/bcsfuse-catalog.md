@@ -43,7 +43,8 @@ local context fusion service, since their API has no legacy Group-fusion route.
 
 ## Published data
 
-- Agent: BCS bot ID, display name, summary, skills, domain tags and scopes. The Card
+- Agent: BCS bot ID, display name, summary, skills (each with its own Card tags,
+  passed through verbatim), domain tags and scopes. The Card
   description is the summary, passed through as-is — domains travel in their own
   field and Fuse owns how its converter indexes them. At registration, update and
   refresh publication time,

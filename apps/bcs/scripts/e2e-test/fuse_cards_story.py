@@ -191,10 +191,10 @@ class Story:
         caller, auth = self.register("Card caller", self.owner + "caller")
         stranger, _ = self.register("Card stranger", self.owner + "stranger")
         self.profile(target, name="Card target", summary="Invoices", domains=["billing"],
-                     skills=[{"name": "invoice", "description": "Invoice lookup"}])
+                     skills=[{"name": "invoice", "description": "Invoice lookup", "tags": ["invoicing"]}])
         card = self.wait_card(target, lambda c: c["card"]["description"] == "Invoices")
         assert card["resource_type"] == "agent"
-        assert card["card"]["skills"][0]["tags"] == ["billing"]
+        assert card["card"]["skills"][0]["tags"] == ["invoicing"]
         assert "visibility" not in card["card"] and token not in json.dumps(card)
         # Every bot/user visibility combination is publishable.
         for visibility in ("public", "protected", "private"):

@@ -78,6 +78,7 @@ async fn v1_mutations_publish_to_fuse_and_rejected_writes_do_not() {
     assert_eq!(published.1["card"]["description"],"Card description");
     assert_eq!(published.1["card"]["skills"][0]["id"],"query");
     assert_eq!(published.1["card"]["skills"][0]["description"],"Queries");
+    assert_eq!(published.1["card"]["skills"][0]["tags"],json!(["orders"]));
     assert_eq!(published.1["card"]["domains"],json!(["billing"]));
     assert_eq!(published.1["card"]["scopes"],json!(["orders:read"]));
     assert_eq!(published.1["resource_type"],"agent");
