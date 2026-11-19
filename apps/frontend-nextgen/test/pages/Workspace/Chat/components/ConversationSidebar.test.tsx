@@ -564,7 +564,8 @@ describe('ConversationSidebar', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: `400001: 会话 ${sessionId}` })).toBeInTheDocument();
+    expect(screen.getByText(`会话 ${sessionId}`)).toBeInTheDocument();
+    expect(screen.getByLabelText('发起人：400001')).toBeInTheDocument();
     expect(screen.queryByText('暂无他人发起的会话')).not.toBeInTheDocument();
   });
 

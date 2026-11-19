@@ -17,6 +17,7 @@
 //   让位只走 pr 不动 mr 热区,pl 恒定保证标题起点不随状态跳动。
 // 行高 32 / 节奏 36(pitch)由列表容器承载,右余部无消息条数列(稿二级行无该元素)。
 import { Badge, Button, IconButton } from '@/components/ui';
+import type { SessionInitiator } from '@/domain/conversation/sessionInitiator';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { formatRelativeTime } from '@/utils/format';
 import { cn } from '@/utils/cn';
@@ -25,10 +26,13 @@ import React from 'react';
 import type { ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
 import { ConversationSessionActions } from './ConversationSessionActions';
 import { ConversationSessionStatus } from './ConversationSessionStatus';
+import { ConversationInitiatorBadge } from './ConversationInitiatorBadge';
 
 export interface ConversationSessionRowProps {
   session: BotChatSessionView;
   selected: boolean;
+  showInitiator?: boolean;
+  initiator?: SessionInitiator;
   /** 只读会话(他人发起 / 好友视角):仅打开历史,无任何写操作。 */
   readOnly?: boolean;
   onSelect(): void;
@@ -43,6 +47,8 @@ export interface ConversationSessionRowProps {
 export const ConversationSessionRow = React.memo(function ConversationSessionRow({
   session,
   selected,
+  showInitiator,
+  initiator,
   readOnly = false,
   onSelect,
   onToggleFavorite,
@@ -85,6 +91,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
         onClick={onSelect}
         className={cn(
           'relative flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-md pl-2 pr-2 text-left hover:bg-transparent',
+          showInitiator && 'h-auto min-h-12 py-1.5',
           // 标题左缘对齐一级名称：16px 外距 + 36px 头像槽 + 8px 间隔 = 52px margin + 8px padding。
           // 仅界定点击范围,hover 背景已移交全宽胶囊。
           favorite ? 'ml-[52px] mr-2' : 'ml-[52px] mr-4',
@@ -111,9 +118,11 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             // 选中行标题点亮 #09090B（2026-11-02 稿 = text-foreground，twMerge 后发覆盖）：
             // 与 6% 灰阶选中胶囊共同构成选中锚点，不加粗维持稿「选中不加黑加粗」的克制。
             selected && 'text-foreground',
+            showInitiator && 'flex flex-col items-start gap-1',
           )}
         >
-          {session.title}
+          {showInitiator ? <span className="w-full truncate">{session.title}</span> : session.title}
+          {showInitiator && <ConversationInitiatorBadge initiator={initiator} />}
         </span>
         {/* 相对时间(gmtModified 首次启用,2026-10-22 体验精修):静默态可见的右缘轻提示,
             让「最近聊过什么」一眼可辨;hover/键盘聚焦/触屏/「…」菜单打开期隐藏,把右缘
