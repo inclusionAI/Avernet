@@ -202,6 +202,8 @@ it.each([
     'session-1',
     'human_900003',
     '2088',
+    // 好友身份(2026-11-19 需求追加):好友 Bot 上传链携带 f_user_id,非好友缺省不携带
+    target.isFriendBot ? 'human_900003' : undefined,
     stage ?? undefined,
     undefined,
     undefined,
@@ -226,6 +228,31 @@ it('团队服务 Bot 资源面板将 online 阶段传递给预览 Hook', () => {
   render(<Fixture />);
   fireEvent.click(screen.getByText('Open files'));
   expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(null, expect.objectContaining({ stage: 'online' }));
+  // 非好友形态:预览链不带好友身份。
+  expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(null, expect.not.objectContaining({ friendUserId: 'viewer' }));
+});
+
+it('好友 Bot 资源面板将好友身份传递给预览 Hook(2026-11-19 需求追加:预览内容链携带 f_user_id)', () => {
+  function Fixture() {
+    const files = useBotSessionFilesFeature(
+      { ...bot, isFriendBot: true, botType: 'service' },
+      session,
+      'viewer',
+      jest.fn(),
+    );
+    return (
+      <>
+        <button type="button" onClick={files.openFileDrawer}>Open friend files</button>
+        {files.featureNode}
+      </>
+    );
+  }
+  render(<Fixture />);
+  fireEvent.click(screen.getByText('Open friend files'));
+  expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(
+    null,
+    expect.objectContaining({ friendUserId: 'viewer', stage: 'online', userId: 'viewer' }),
+  );
 });
 
 it.each(['draft', 'verify', 'online'] as const)('debug stage override %s applies to file list, uploads and preview', (stage) => {
@@ -236,7 +263,7 @@ it.each(['draft', 'verify', 'online'] as const)('debug stage override %s applies
   render(<Fixture />);
   fireEvent.click(screen.getByText('Open debug files'));
   expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', undefined, stage, undefined, undefined);
-  expect(mockedUseBotSessionFileUpload).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', stage, undefined, undefined);
+  expect(mockedUseBotSessionFileUpload).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', undefined, stage, undefined, undefined);
   expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(null, expect.objectContaining({ stage }));
 });
 
@@ -259,9 +286,9 @@ it('探测到 bot_call_type=caller 时服务 Bot 注入 callerRuntimeTarget=serv
     expect(mockedUseBotSessionFiles.mock.calls.at(-1)).toEqual(
       ['bot', 'session-1', 'viewer', '2088', undefined, undefined, undefined, 'service'],
     );
-    // upload 链 7 位(无 friendUserId 位参;stage/deviceUuid 缺省=undefined 占位)
+    // upload 链 8 位(friendUserId 位参在 stage 前;stage/deviceUuid 缺省=undefined 占位)
     expect(mockedUseBotSessionFileUpload.mock.calls.at(-1)).toEqual(
-      ['bot', 'session-1', 'viewer', '2088', undefined, undefined, 'service'],
+      ['bot', 'session-1', 'viewer', '2088', undefined, undefined, undefined, 'service'],
     );
     // key 断言:device_uuid 槽(第 7 位)不得被 caller 值顶入(勘误回归点)
     expect(mockedUseBotSessionFiles.mock.calls.at(-1)![6]).not.toBe('service');
@@ -277,12 +304,13 @@ it('好友 Bot 探测到 caller 时传 caller_runtime_target=caller_instance(202
   });
   renderHook(() => useBotSessionFilesFeature({ ...bot, botType: 'service', isFriendBot: true }, session, 'viewer', jest.fn()));
   await waitFor(() => {
-    // 好友 Bot:friendUserId=userId + stage=online;caller 位 caller_instance(IAM 链同规则)
+    // 好友 Bot:friendUserId=userId + stage=online;caller 位 caller_instance(IAM 链同规则);
+    // upload 链同带 friendUserId 位参——好友文件全链携带 f_user_id(2026-11-19 需求追加)
     expect(mockedUseBotSessionFiles.mock.calls.at(-1)).toEqual(
       ['bot', 'session-1', 'viewer', '2088', 'viewer', 'online', undefined, 'caller_instance'],
     );
     expect(mockedUseBotSessionFileUpload.mock.calls.at(-1)).toEqual(
-      ['bot', 'session-1', 'viewer', '2088', 'online', undefined, 'caller_instance'],
+      ['bot', 'session-1', 'viewer', '2088', 'viewer', 'online', undefined, 'caller_instance'],
     );
   });
 });
@@ -293,7 +321,7 @@ it('探测结果非 caller 时两 Hook 不携带 callerRuntimeTarget', async () 
     expect(mockGetCallerContext).toHaveBeenCalled();
   });
   expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', undefined, undefined, undefined, undefined);
-  expect(mockedUseBotSessionFileUpload).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', undefined, undefined, undefined);
+  expect(mockedUseBotSessionFileUpload).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', undefined, undefined, undefined, undefined);
 });
 
 it('探测失败静默降级:不携带、不重试、无提示', async () => {
@@ -304,4 +332,5 @@ it('探测失败静默降级:不携带、不重试、无提示', async () => {
   });
   expect(result.current.filesSupported).toBe(true);
   expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', undefined, undefined, undefined, undefined);
+  expect(mockedUseBotSessionFileUpload).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', undefined, undefined, undefined, undefined);
 });

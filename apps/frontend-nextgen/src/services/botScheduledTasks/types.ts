@@ -10,6 +10,8 @@ export interface RoutineScope {
   botId: string;
   userId: string;
   entityId?: string;
+  /** 链接查询参数指定的生效环境；线上容器清单等判定依赖它（详情记录不含发布状态）。 */
+  stage?: RoutineStage;
 }
 export interface RoutineEnvironment {
   runtime_stage: RoutineStage;

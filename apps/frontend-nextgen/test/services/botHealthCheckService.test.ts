@@ -1,9 +1,22 @@
 import {
+  applyHarnessPatch,
+  previewHarnessPatch,
+} from '@/services/backendApi/harnessController';
+import {
+  botHealthCheckService,
   mapBotHealthSummary,
   resolveBotHealthActionAvailability,
   toHealthCheckTarget,
 } from '@/services/botHealthCheck/botHealthCheckService';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
+
+jest.mock('@/services/backendApi/harnessController', () => ({
+  getHarnessDimReport: jest.fn(),
+  getHarnessDimHistory: jest.fn(),
+  startHarnessDiagnose: jest.fn(),
+  previewHarnessPatch: jest.fn(),
+  applyHarnessPatch: jest.fn(),
+}));
 
 describe('botHealthCheckService', () => {
   test('only Openclaw bots expose health check action', () => {
@@ -297,4 +310,55 @@ test('desktop OpenClaw does not expose cloud health diagnosis', () => {
   }).item;
   expect(resolveBotHealthActionAvailability(bot, 'owner')).toMatchObject({ visible: false, enabled: false });
   expect(toHealthCheckTarget(bot, 'owner')).toBeUndefined();
+});
+
+describe('botHealthCheckService patch fix contract', () => {
+  const target = {
+    botId: 'b1',
+    userId: 'u1',
+    botName: '测试 Bot',
+    engine: 'openclaw',
+    context: { entityType: 'staff', entityId: 'e1', botPublishId: '9' },
+  };
+
+  beforeEach(() => {
+    (previewHarnessPatch as jest.Mock).mockReset().mockResolvedValue({
+      success: true,
+      bot_id: 'b1',
+      risk_level: 'low',
+      final_content: '# AGENTS.md',
+      operations: [],
+    });
+    (applyHarnessPatch as jest.Mock).mockReset().mockResolvedValue({ success: true });
+  });
+
+  test('previewPatch calls harness preview with AGENTS.md and the patch id', async () => {
+    await botHealthCheckService.previewPatch(target, '1001');
+
+    expect(previewHarnessPatch).toHaveBeenCalledWith({
+      botId: 'b1',
+      userId: 'u1',
+      data: {
+        entity_type: 'staff',
+        entity_id: 'e1',
+        file_type: 'AGENTS.md',
+        patch_id_list: [1001],
+      },
+    });
+  });
+
+  test('applyPatch calls harness apply with publish id and the patch id', async () => {
+    await botHealthCheckService.applyPatch(target, 1001);
+
+    expect(applyHarnessPatch).toHaveBeenCalledWith({
+      botId: 'b1',
+      userId: 'u1',
+      data: {
+        entity_type: 'staff',
+        entity_id: 'e1',
+        patch_id_list: [1001],
+        bot_publish_id: '9',
+      },
+    });
+  });
 });

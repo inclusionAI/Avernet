@@ -1,3 +1,4 @@
+import { resolveApiUrl } from './apiBaseUrl';
 import { readLimitedResponse, ResponseTooLargeError } from './readLimitedResponse';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
@@ -176,7 +177,9 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
   const resolvedUrl = resolveBackendUrl(url);
   const finalParams =
     options.injectUserId === false ? options.params : injectUserId(resolvedUrl, options.params, options.data);
-  const requestUrl = withQuery(resolvedUrl, finalParams);
+  // 变体接缝在 user_id 注入之后应用:injectUserId 的 isApiRequestUrl 前缀判定基于原始相对
+  // URL,不得被内部 Overlay 的绝对地址改写干扰(缺省恒等,Open Core 行为不变)。
+  const requestUrl = resolveApiUrl(withQuery(resolvedUrl, finalParams));
   // 捕获请求发出时的认证代次：响应侧用它识别“晚到的上一代认证请求 401”（见 requestPrompt 防线）。
   const requestAuthEpoch = useExternalAuthStore.getState().authEpoch;
   const response = await fetch(requestUrl, {
