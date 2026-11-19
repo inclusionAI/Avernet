@@ -46,7 +46,13 @@ fn invalid(field: &str, reason: &'static str) -> ServiceError {
     crate::types::a2a_bot::a2a_management::ManagementError::new(
         crate::types::a2a_bot::a2a_management::ManagementCode::InvalidRequest, field, reason).into()
 }
-fn reserved(key: &str) -> bool { matches!(key, "visibility" | "user_visibility") }
+// Reserved system keys are matched case-insensitively so callers cannot smuggle a
+// case-variant ("Visibility", "USER_VISIBILITY") past governance to override a
+// retained system label. valid_key already restricts keys to ASCII, so the
+// ASCII comparison is exact over the accepted alphabet.
+fn reserved(key: &str) -> bool {
+    key.eq_ignore_ascii_case("visibility") || key.eq_ignore_ascii_case("user_visibility")
+}
 fn valid_key(key: &str) -> bool {
     !key.is_empty() && key.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
 }
@@ -120,5 +126,26 @@ mod tests {
         for values in [vec![],vec![" ".into()],vec!["a".into(),"a".into()]] {
             assert!(CatalogLabelPolicy::new([("stage".into(), CatalogLabelRule {allowed_values:values,allow_multiple:true})].into()).is_err());
         }
+    }
+    #[test]
+    fn reserved_keys_are_case_insensitive_in_dictionary_and_labels() {
+        // Dictionary config cannot register a case-variant of a reserved key.
+        for key in ["Visibility", "VISIBILITY", "User_Visibility", "UsEr_vIsIbIlItY"] {
+            assert!(
+                CatalogLabelPolicy::new([(key.into(), CatalogLabelRule {allowed_values:vec!["a".into()],allow_multiple:false})].into()).is_err(),
+                "dictionary should reject reserved case-variant {key:?}"
+            );
+        }
+        // Stored/DTO catalog labels cannot carry a case-variant reserved key;
+        // valid_key accepts these spellings, so only reserved() must reject them.
+        for key in ["Visibility", "VISIBILITY", "USER_VISIBILITY", "user_Visibility"] {
+            assert!(
+                serde_json::from_value::<CatalogLabels>(json!({key: ["a"]})).is_err(),
+                "CatalogLabels should reject reserved case-variant {key:?}"
+            );
+        }
+        // A genuine custom key that merely contains the substring is unaffected.
+        assert!(serde_json::from_value::<CatalogLabels>(json!({"visibility-tier": ["a"]})).is_ok());
+        assert!(CatalogLabelPolicy::new([("visibility-tier".into(), CatalogLabelRule {allowed_values:vec!["a".into()],allow_multiple:false})].into()).is_ok());
     }
 }
