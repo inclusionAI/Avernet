@@ -158,7 +158,7 @@ CANDIDATE_COUNT = len(AGENTS) + len(OTHER_AGENTS)
 """
 
 def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
-    # 1、发布一个代办任务 （基于L5层OPEN + SWARM方法的组合）
+    # 1、基于L6层协议发布一个代办任务 （协作方法基于L5层OPEN + SWARM方法的组合）
     (
         profile,
         injector,
@@ -173,7 +173,7 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         participants,
     ) = publish_todo_task(deploy_open_swarm, tmp_path)
 
-    # 2. 公开招募多个Coding Agents (执行OPEN方法)
+    # 2. 基于L5层OPEN方法公开招募多个Coding相关Agent
     recruit_multi_coding_agents(
         injector,
         l5_open_method_operate,
@@ -198,7 +198,7 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
     )
     assert _record(injector, collet_id).task.status == "created"
 
-    # 4. 开始协作进行AiCoding（执行SWARM方法：plan-划分stage-指派task-执行）
+    # 4. 开始协作进行AiCoding（执行L5层SWARM方法：plan-划分stage-指派task-执行）
     stages = swarm_run(injector, collet_id)
 
     # 5. 任务完成之后，校验每个阶段、每个Task的产物
@@ -331,7 +331,6 @@ def _create_product_profile():
                                     accountable_role="owner",
                                     participation_type=ParticipationType.COLLET_PARTICIPANT,
                                     capacity=CANDIDATE_COUNT,
-                                    decision_actor="accountable_role",
                                     decision_rule="capability_evidence",
                                     required_capabilities=(
                                         "capability://ai-coding/requirements",
