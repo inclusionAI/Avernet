@@ -35,7 +35,7 @@ test = false
 
 [features]
 default = ["prometheus-metrics"]
-worker-runtime-e2e = ["dep:bcs-dist-model", "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-worker", "dep:bcs-app-dist-runtime", "dep:bcs-store-api"]
+worker-runtime-e2e = ["dep:bcs-dist-model", "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-worker", "dep:bcs-app-dist-runtime", "dep:bcs-store-api", "dep:bcs-dist-test-runner"]
 metrics = ["prometheus-metrics"]
 a2a-http-e2e = []
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
@@ -46,6 +46,7 @@ bcs-dist-model = { workspace = true, optional = true }
 bcs-dist-store = { workspace = true, optional = true }
 bcs-dist-projection = { workspace = true, optional = true }
 bcs-dist-worker = { workspace = true, optional = true }
+bcs-dist-test-runner = { workspace = true, optional = true }
 bcs-app-dist-runtime = { workspace = true, optional = true }
 bcs-store-api = { workspace = true, optional = true }
 bcs-app-identity-api.workspace = true

@@ -15,7 +15,8 @@ graceful handoff with a pending task. The companion Dispatch story exercises
 HumanReply through a real held dispatch, ambiguous Sending/Cancel supervision,
 late definitive evidence, live follow, snapshot coverage, retention and cursor Gap.
 It is a bounded functional suite, not a load or capacity benchmark. Test-only
-Runner workloads provide decisions; all admission, checkpoint, projection,
+Runner workloads from [bcs-dist-test-runner](../../../../test-support/bcs-dist-test-runner/README.md)
+provide decisions; all admission, checkpoint, projection,
 archival, isolation and ownership behavior comes from production services.
 
 The Store mock disappears on process exit. In-process Worker takeover must not

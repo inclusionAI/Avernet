@@ -379,6 +379,7 @@ dependencies = [
  "bcs-dist-model",
  "bcs-dist-projection",
  "bcs-dist-store",
+ "bcs-dist-test-runner",
  "bcs-dist-worker",
  "bcs-domain",
  "bcs-edge-permission",
@@ -1636,6 +1637,17 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "bcs-dist-test-runner"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-model",
+ "bcs-domain",
+ "bcs-service-api",
+ "serde_json",
 ]
 
 [[package]]
