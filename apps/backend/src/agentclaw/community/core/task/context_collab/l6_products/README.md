@@ -929,7 +929,11 @@ ACCS schemas. These changes do not alter the installed commission product.
 
 The Open + Swarm coding case omits product `workflow`: Swarm Plan/Stage owns the
 five-phase DAG; `standard_task@1` and the existing G4 machine govern Work. The
-root executor starts through L4 before the owner-coordinator wakes the driver.
-Five workers submit their own child Task results, then the root executor submits
-the aggregate artifacts and the principal accepts the root Task. Completing a
-SwarmPlan alone never accepts root Work or completes the Collet.
+first `driver.wake()` automatically starts the CREATED root through L4/G1/G4,
+using the selected executor identity supplied by the product-aware runtime
+adapter. Driver construction never starts Work; the owner remains the Swarm
+coordinator, distinct from this startup identity. Workflow-based products still
+use their declared start role (including owner startup). Five workers submit
+their own child Task results. Root submission and principal acceptance are
+separate operations; completing a SwarmPlan alone never accepts root Work or
+completes the Collet.

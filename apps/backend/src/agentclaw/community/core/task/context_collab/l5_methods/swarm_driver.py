@@ -90,6 +90,7 @@ class SwarmDriver:
         self.axes = current_axes()
         config = resolver.resolve(collet_id)
         self.planner, self.actor = config.planner, config.actor
+        self.start_actor = config.start_actor
         bindings = [
             b
             for b in store.list_bindings(self.axes, collet_id)
@@ -168,7 +169,8 @@ class SwarmDriver:
 
         Construction never starts Work. Waking already-started Work only queues
         reconciliation; pending wakes coalesce. Start failures propagate before
-        any planning is queued, and never mutate Task state directly.
+        any planning is queued, and never mutate Task state directly. The runtime
+        supplies a contract-selected startup identity, not the coordinator identity.
         """
         if not self.pending:
             record = self._record()
@@ -176,7 +178,7 @@ class SwarmDriver:
                 self.work.start(
                     self.collet_id,
                     WorkStartCommand(record.collet.version),
-                    self.actor,
+                    self.start_actor,
                 )
             self.queue.append(None)
             self.pending = True

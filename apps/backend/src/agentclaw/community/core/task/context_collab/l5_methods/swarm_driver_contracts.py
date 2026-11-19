@@ -25,10 +25,16 @@ from agentclaw.community.core.task.context_collab.swarm_planning import (
 class SwarmRuntimeConfiguration:
     planner: SwarmPlanningService
     actor: ActorContext
+    # Trusted runtime identity for root startup, distinct from plan coordination.
+    start_actor: ActorContext
 
 
 class SwarmRuntimeResolver(Protocol):
-    """Composition adapter resolves pinned product configuration; L5 knows no L6."""
+    """Resolve pinned configuration and trusted coordination/start identities.
+
+    L5 knows no L6. Implementations must explicitly supply both actors; Work
+    startup still passes through L4/G1/G4, never an implied role grant.
+    """
 
     def resolve(self, collet_id: str) -> SwarmRuntimeConfiguration: ...
 

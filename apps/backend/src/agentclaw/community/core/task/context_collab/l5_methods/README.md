@@ -169,10 +169,9 @@ proof of Open admission, and Open does not dynamically create Swarm role facts.
 This journey explicitly checks the five admissions before creating unstarted
 root Work and waking the Driver; generic SwarmDriver does not add an automatic
 Open admission guard. It verifies every executed worker against admission
-evidence, each Stage and child Task's artifacts, released allocations, completed
-Swarm, and the root Task's separate submission and owner acceptance with the
-final artifact set. Planning and worker computation remain local doubles; the
-verification worker runs real unittest cases. No live Bot/LLM/PR is exercised.
+evidence, each Stage and child Task's artifacts, released allocations and completed
+Swarm. Root submission and owner acceptance remain separate operations.
+Planning and worker computation remain local doubles; the verification worker runs real unittest cases. No live Bot/LLM/PR is exercised.
 
 ## Bounded Swarm coordination
 
@@ -183,7 +182,9 @@ The composition adapter resolves the pinned ProductProfile's explicit
 `SwarmMethodPolicy.plan_service_ref` on its required Swarm declaration and the
 one ACTIVE Swarm binding. An omitted or unknown
 capability fails closed. No coding names, L6 imports or filesystem predicates
-belong in L5.
+belong in L5. [Runtime assembly tests](../../../../../../../tests/community/di/modules/test_swarm_runtime.py)
+cover startup identity selection; [wake regressions](../../../../../../../tests/community/core/task/context_collab/test_swarm_driver_wake.py)
+cover construction, startup, coalescing and failure propagation.
 
 Product Instantiate creates/binds the Collet first; explicit L4 `create_task`
 then creates unstarted root Work while retaining the installed selection and
@@ -194,10 +195,19 @@ identity/objective, then enqueues unified planning. Subsequent wakes reconcile
 already-started Work without another start; pending wakes coalesce. Start errors
 propagate before planning is queued. This explicit driver entrypoint does
 not add automatic dispatch to the generic L4 Work.start contract. With the
-standard Task contract, the designated root executor must first start Work
-through L4/G1/G4; the owner-coordinator's wake cannot bypass that restriction.
-The Open + Swarm coding example uses this explicit start, no product workflow,
-and executor submission followed by principal acceptance of the root result.
+standard Task contract, the composition adapter supplies the designated root
+executor as `SwarmRuntimeConfiguration.start_actor`; `actor` remains the
+accountable principal for planning and Method administration. The adapter reads
+the pinned Task/workflow start action and actual L4 role facts: it uses the
+principal if permitted, otherwise requires exactly one startup role holder.
+Missing or ambiguous role holders fail closed, without guessing an executor.
+Already-running Work needs no startup identity selection. These trusted internal
+contexts do not grant roles or bypass L4/G1/G4; startup is still adjudicated by
+`ContextServiceProtocol.start`. The Open + Swarm example has no product workflow
+and calls only `wake()`; the workflow-based Swarm example retains principal
+startup. Custom runtime resolvers must now supply `start_actor` explicitly;
+there is no fallback to the coordinator. No public command or persisted schema
+changes are required.
 
 The outbound [`SwarmPlanningService`](../swarm_planning.py)
 interface is outside L5. One `plan` call proposes BOTH the next Stage and its

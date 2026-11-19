@@ -12,9 +12,6 @@ from dataclasses import dataclass
 import pytest
 from injector import AssistedBuilder, Binder, Injector, InstanceProvider
 
-from agentclaw.community.core.task.context_collab.errors import (
-    ContextCollabValidationError,
-)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
@@ -32,7 +29,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     ColletCreateCommand,
     EventAppendCommand,
     TaskCreateCommand,
-    WorkStartCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     role_binding_ref,
@@ -189,7 +185,7 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         swarm_binding_id,
     )
 
-    # 3. 招募完成之后，通过 L4 创建根 Task，但不启动
+    # 3. 招募完成后，仅创建根 Task，进入 Swarm 执行前保持 created。
     l4_context_service.create_task(
         collet_id,
         TaskCreateCommand(
@@ -199,22 +195,7 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         ),
         OWNER,
     )
-
-    # 标准 Task 合同要求根执行者启动，协调人不能借 Driver 绕过 G1/G4。
-    executor = ActorContext(
-        PrincipalRef(AGENTS[-1].agent_type, AGENTS[-1].agent_id), source="local_agent"
-    )
-    before = _record(injector, collet_id)
-    assert before.product_instance.workflow_ref is None
-    assert before.product_instance.task_contract_ref == STANDARD_TASK_CONTRACT.ref
-    with pytest.raises(ContextCollabValidationError, match="designated executor"):
-        l4_context_service.start(
-            collet_id, WorkStartCommand(before.collet.version), OWNER
-        )
-    assert _record(injector, collet_id).collet.version == before.collet.version
-    l4_context_service.start(
-        collet_id, WorkStartCommand(before.collet.version), executor
-    )
+    assert _record(injector, collet_id).task.status == "created"
 
     # 4. 招募到agents之后，开始写作进行AiCoding（执行SWARM方法：规划-划分stage和task-分派执行）
     stages = swarm_run(injector, collet_id)
@@ -271,9 +252,20 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
 
 
 def swarm_run(injector, collet_id):
-    # 8. 构造真实 SwarmDriver；根 Task 已启动，wake 只入队，step 调用 Swarm 声明的 plan 服务。
+    # 8. 构造 Driver 不启动 Task；首次 wake 自动以根执行者身份经 L4/G1/G4 启动。
     driver = injector.get(AssistedBuilder[SwarmDriver]).build(collet_id=collet_id)
+    before = _record(injector, collet_id)
+    assert before.task.status == "created"
     driver.wake()
+    started = _record(injector, collet_id)
+    assert started.task.status == "in_progress"
+    assert started.task.task_id == before.task.task_id
+    starts = [
+        event for event in started.events
+        if event.task_ref == started.task.task_id and event.event_kind == "task.started"
+    ]
+    assert len(starts) == 1
+    assert starts[0].actor_ref == PrincipalRef(AGENTS[-1].agent_type, AGENTS[-1].agent_id)
     assert driver.step()
 
     # 9. 第九步：应用统一规划和执行者分配，需求 Bot 执行并主动 G4 上报，推进 Stage 与独立子 Task。
@@ -284,6 +276,12 @@ def swarm_run(injector, collet_id):
     # 10. 第十步：继续设计、编码、真实 unittest、模拟 PR；每次 plan 根据已完成阶段选择下一阶段及 Bot。
     driver.drain()
     assert driver.is_completed() and driver.plan().state is PlanState.COMPLETED
+    record = _record(injector, collet_id)
+    assert record.task.status == "in_progress"  # Swarm 完成不代表根 Task 已验收。
+    assert sum(
+        event.task_ref == record.task.task_id and event.event_kind == "task.started"
+        for event in record.events
+    ) == 1  # 后续 wake 不重复启动。
 
     return driver.stages()
 
