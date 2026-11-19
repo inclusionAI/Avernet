@@ -139,7 +139,7 @@ class ConfigManifestApplyState(BaseModel):
     """What the apply applied: the bot's stored Manifest, or a genome promotion's revision."""
 
     kind: Literal["manifest", "genome"] = Field(
-        description="`manifest` for the stored document, `genome` for a promotion's revision."
+        description="`manifest` for a stored or submitted document, `genome` for a promotion's revision."
     )
     reference: str | None = Field(
         default=None,
@@ -179,7 +179,7 @@ class ConfigManifestApply(BaseModel):
         }
     )
 
-    apply_id: str = Field(description="Empty when the bot has never been applied.")
+    apply_id: str = Field(description="Empty for a dry run or when the bot has never been applied.")
     bot_id: str = Field(description="The bot this apply targeted.")
     trigger: str = Field(description="What started it; `explicit` for this API.")
     result: str = Field(
@@ -194,8 +194,8 @@ class ConfigManifestApply(BaseModel):
     )
     state: ConfigManifestApplyState = Field(
         default_factory=lambda: ConfigManifestApplyState(kind="manifest"),
-        description="What was applied. This API's own applies are always the stored "
-        "Manifest; a promotion's apply reads back here too, naming its promotion.",
+        description="The state applied or previewed. PUT with dry_run=true previews "
+        "its submitted Manifest; a promotion's report names its promotion.",
     )
     sources: list[ConfigManifestApplySource] = Field(
         default_factory=list,

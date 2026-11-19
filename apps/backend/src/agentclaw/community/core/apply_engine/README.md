@@ -11,11 +11,12 @@ It owns none of what *produces* a desired state. Two compilers emit it
 through `DesiredStateCompiler`:
 
 - the **Bot Config Manifest** (`core/bot_config_manifest/compiler/`) compiles
-  the bot's stored document: grammar, source resolution, fetch, filing bytes
-  in the content store;
+  the bot's stored document or the YAML submitted for synchronous preview:
+  grammar, source resolution, fetch, filing bytes in the content store;
 - the **Genome Registry** (`core/bot_genome/compile.py`) compiles a revision.
 
-The engine never reads a Manifest document. A compiled file names content
+The compiler loads stored documents and validates submitted ones. The engine
+passes submitted YAML to the compiler through `SubmittedDocumentCompiler`. A compiled file names content
 already in the content store by digest; a first public Center reference may
 need read-only preview during capability resolution. The private
 `fetch_budget` leaf owns one 500 MiB / 300 second allowance per execution.
@@ -75,7 +76,7 @@ membership remains the exclusion target and is never deleted by Apply.
 An unchanged Direct Skill installation still reaches the claim flow so Device
 delivery can retry runtime projection. The report keeps `unchanged` and exposes
 any pending/degraded projection; Platform delegates retain their no-projection
-behavior, and dry-run performs no writes or projection.
+behavior. Dry run stops after planning and can still fetch and cache sources.
 Explicit active ordinary Sets and applicable Default references also retry the
 existing projection flow on unchanged desired state. Inactive unchanged Set
 declarations remain no-ops. Set replacement tracks resolved prior supply and
@@ -129,6 +130,7 @@ provides:
   - DesiredCliTool
   - DesiredEngineConfig
   - DesiredStateCompiler  # the compiler contract both producers implement
+  - SubmittedDocumentCompiler  # preview-only input via the producer compiler
   - StateRef  # (kind, reference) — what an apply run converges to; each compiler registers its kind
   - ApplyCompletionHandler  # completion.py: a producer's subscriber, told when an apply of its kind ends
   - ApplyOutcome

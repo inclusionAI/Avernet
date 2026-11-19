@@ -4218,11 +4218,14 @@
           "result": "SUCCEEDED",
           "sources": [],
           "started_at": "2026-08-31T09:12:04+00:00",
+          "state": {
+            "kind": "manifest"
+          },
           "trigger": "explicit"
         },
         "properties": {
           "apply_id": {
-            "description": "Empty when the bot has never been applied.",
+            "description": "Empty for a dry run or when the bot has never been applied.",
             "title": "Apply Id",
             "type": "string"
           },
@@ -4293,6 +4296,10 @@
             ],
             "description": "When the apply began. Null when the bot has never been applied.",
             "title": "Started At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConfigManifestApplyState",
+            "description": "The state applied or previewed. PUT with dry_run=true previews its submitted Manifest; a promotion's report names its promotion."
           },
           "trigger": {
             "description": "What started it; `explicit` for this API.",
@@ -4373,7 +4380,7 @@
         "description": "What happened to one declared entry.",
         "properties": {
           "action": {
-            "description": "`created` / `updated` / `unchanged` / `skipped` / `failed`. `skipped` means the entry was not written because its category was aborted — never that it was optional.",
+            "description": "`created` / `updated` / `unchanged` / `skipped` / `failed`. `skipped` means the entry was not written: its category was aborted, or its materialiser declined to deliver it (`error` says which) — never that it was optional.",
             "title": "Action",
             "type": "string"
           },
@@ -32994,6 +33001,83 @@
           "request_id"
         ],
         "title": "Envelope[TodoEventResponse]",
+        "type": "object"
+      },
+      "ConfigManifestApplyState": {
+        "description": "What the apply applied: the bot's stored Manifest, or a genome promotion's revision.",
+        "properties": {
+          "kind": {
+            "description": "`manifest` for a stored or submitted document, `genome` for a promotion's revision.",
+            "enum": [
+              "manifest",
+              "genome"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The producer's reference within the kind: the promotion id for `genome`; `null` for `manifest` on ordinary Apply, or a producer-owned digest reference for bound creation.",
+            "title": "Reference"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "ConfigManifestApplyState",
+        "type": "object"
+      },
+      "Envelope_Union_ConfigManifest__ConfigManifestApply__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigManifest"
+              },
+              {
+                "$ref": "#/components/schemas/ConfigManifestApply"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results.",
+            "title": "Data"
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Union[ConfigManifest, ConfigManifestApply]]",
         "type": "object"
       }
     }
@@ -72814,7 +72898,7 @@
         ]
       },
       "put": {
-        "description": "Set or replace a bot's configuration manifest, and apply it.\n\n**All-or-nothing.** A document is stored only if every part of it is valid\nand supported for this bot: one unsupported category refuses the whole\ndocument, nothing is written, and the `422` carries the full list of reasons\nwith the offending entry named in each. Fixing a document is one pass, not a\nqueue.\n\nDeclaring a category this bot's engine cannot be given — or a\n(category, protocol) pair the platform cannot yet resolve — is refused\nrather than stored, because a stored declaration nothing can act on is a\nsilent no-op the caller would reasonably read as success. `GET …/config-manifest/capabilities` answers\nfrom the same rules, so it can never promise what this refuses.\n\n**Storing starts an apply.** Once the document is stored, an apply of it is\nstarted — the same apply `POST …/config-manifest/apply` starts — and the\nresponse's `apply` says whether it started: `RUNNING` with the id to poll,\nor `NOT_STARTED` with `apply_in_progress` (another apply holds the bot;\npoll it, then apply) or `not_started`. The document is stored either way,\nand the response is `200` either way.\n\n`warnings` carries two notes this surface adds: a declared `script` is\nrecorded now but takes effect on the bot's next start; and on a bot that\nis not `ACTIVE`, the categories that need a running container will be\nrecorded as failed — re-apply once it is up. A teclaw bot on the\nplatform-managed path needs no container, so it gets no such note.",
+        "description": "Set or replace a bot's configuration manifest, and apply it.\n\nWith `dry_run=true`, validate and preview the submitted document and return\nthe complete plan synchronously. The preview may fetch and cache sources.\nIt creates no Apply history and leaves the stored manifest untouched.\n\n**All-or-nothing.** A document is stored only if every part of it is valid\nand supported for this bot: one unsupported category refuses the whole\ndocument, nothing is written, and the `422` carries the full list of reasons\nwith the offending entry named in each. Fixing a document is one pass, not a\nqueue.\n\nDeclaring a category this bot's engine cannot be given — or a\n(category, protocol) pair the platform cannot yet resolve — is refused\nrather than stored, because a stored declaration nothing can act on is a\nsilent no-op the caller would reasonably read as success. `GET …/config-manifest/capabilities` answers\nfrom the same rules, so it can never promise what this refuses.\n\n**Storing starts an apply.** Once the document is stored, an apply of it is\nstarted — the same apply `POST …/config-manifest/apply` starts — and the\nresponse's `apply` says whether it started: `RUNNING` with the id to poll,\nor `NOT_STARTED` with `apply_in_progress` (another apply holds the bot;\npoll it, then apply) or `not_started`. The document is stored either way,\nand the response is `200` either way.\n\n`warnings` carries two notes this surface adds: a declared `script` is\nrecorded now but takes effect on the bot's next start; and on a bot that\nis not `ACTIVE`, the categories that need a running container will be\nrecorded as failed — re-apply once it is up. A teclaw bot on the\nplatform-managed path needs no container, so it gets no such note.",
         "operationId": "update_bot_config_manifest",
         "parameters": [
           {
@@ -72826,6 +72910,18 @@
               "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
               "title": "Bot Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Preview the submitted document without saving or applying it.",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Preview the submitted document without saving or applying it.",
+              "title": "Dry Run",
+              "type": "boolean"
             }
           },
           {
@@ -72896,11 +72992,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_ConfigManifest_"
+                  "$ref": "#/components/schemas/Envelope_Union_ConfigManifest__ConfigManifestApply__"
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Stored manifest by default; complete plan for the submitted document when dry_run=true."
           },
           "400": {
             "content": {
@@ -73309,7 +73405,7 @@
             }
           },
           {
-            "description": "Return the plan without performing it. Synchronous; it applies no part of your manifest and writes no apply record, so it mints no `apply_id` and appears in no history. Two caveats, both by design: a declared source MAY really be fetched (a preview that cannot tell you whether your sources are reachable and your digests match is a weak preview), bounded by the same per-apply fetch ledger a real apply uses — and the bytes acquired are kept as the platform's own copy, because that audit trail records acquisition, not delivery; and reading a bot's installed MCP set reconciles platform-managed installation rows against SkillSet membership, which any read of that state does. Nothing your manifest declares is applied to the bot.",
+            "description": "Return the plan without performing it. Synchronous; it applies no part of your manifest and writes no apply record, so it mints no `apply_id` and appears in no history. A declared source may be fetched (a preview that cannot tell you whether your sources are reachable and your digests match is a weak preview), bounded by the same per-apply fetch ledger a real apply uses — and the bytes acquired are kept as the platform's own copy, because that audit trail records acquisition. The Apply snapshot reads MCP installations and SkillSet membership without reconciliation.",
             "in": "query",
             "name": "dry_run",
             "required": false,

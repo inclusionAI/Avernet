@@ -43,6 +43,7 @@ from agentclaw.community.core.apply_engine.compiler import (
     DesiredStateCompiler,
     StateCompilers,
     StateRef,
+    SubmittedDocumentCompiler,
     state_ref_from_payload,
 )
 from agentclaw.community.core.apply_engine.carry_forward import (
@@ -680,8 +681,9 @@ class ApplyRunService(ApplyRunServiceProtocol):
         owner_id: str,
         actor_id: str,
         state: StateRef,
+        submitted_document: str | None = None,
     ) -> ApplyReport:
-        """Compute the plan. Writes nothing, and mints no id.
+        """Compute a plan without creating a run or entering the write stage.
 
         The compile is the real one — the same compiler, the same fetch
         bounds, the same baselines — so the plan previewed is the plan the
@@ -702,16 +704,19 @@ class ApplyRunService(ApplyRunServiceProtocol):
         )
         with fetch_budget_scope():
             try:
-                compiled = await compiler.compile(ctx, state)
+                if submitted_document is None:
+                    compiled = await compiler.compile(ctx, state)
+                elif isinstance(compiler, SubmittedDocumentCompiler) and state.reference is None:
+                    compiled = await compiler.compile_submitted_document(ctx, submitted_document)
+                else:
+                    raise ValueError("submitted documents require an unbound document compiler")
             except CompileRefused as exc:
                 domain_error = exc.domain_error
             else:
                 report = await self._orchestrator(self.delivery_for_engine(ctx.engine_type)).apply(
                     ctx,
                     compiled.state,
-                    # No id: a dry run appears in no history, so there is nothing to
-                    # address it by. Naming it explicitly rather than minting one keeps
-                    # "writes nothing" true of the record as well as of the bot.
+                    # A dry run has no history entry to address.
                     apply_id="",
                     trigger="dry_run",
                     started_at=datetime.now(),
