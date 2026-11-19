@@ -33,12 +33,13 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     prepare_event_append,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
-    initial_participation,
+    current_participation,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     Participant,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import validate_enrolled_participation
 from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.stage import (
     _parse_timestamp,
 )
@@ -88,6 +89,7 @@ class SwarmStageReportService:
             raise ContextCollabValidationError(
                 "Stage requires installed Work and Agent"
             )
+        validate_enrolled_participation(collet_id, record.events, self.store)
         parent = record.task
         if parent is None or stage.task_ref == parent.task_id:
             raise ContextCollabValidationError(
@@ -202,10 +204,11 @@ class SwarmStageReportService:
             raise ContextCollabValidationError(
                 "report requires a live Stage allocation"
             )
+        validate_enrolled_participation(report.collet_id, record.events, self.store)
         participant = next(
             (
                 p
-                for p in initial_participation(record.events).participants
+                for p in current_participation(record.events).participants
                 if p.participant_id == allocation.target_ref
             ),
             None,

@@ -107,7 +107,7 @@ def composition_method_kind(composition: MethodCompositionTemplate) -> str:
 class ScenarioRole:
     name: str
     l4_role: str
-    participant_source: str  # principal_ref / executor_ref / agent_ref
+    participant_source: str  # principal_ref / executor_ref / agent_ref / open_admission
     required: bool
     responsibilities: tuple[str, ...]
     # A fixed, profile-declared Agent assignment; never a resource grant.

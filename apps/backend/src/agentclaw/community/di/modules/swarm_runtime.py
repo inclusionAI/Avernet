@@ -18,7 +18,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
-    initial_participation,
+    current_participation,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     EventWriter,
@@ -122,7 +122,7 @@ class ProductSwarmRuntimeResolver:
             task, task.principal_ref, role, definition, record.events
         ):
             return ActorContext(task.principal_ref, source="swarm_driver")
-        facts = initial_participation(record.events)
+        facts = current_participation(record.events)
         candidates = {
             p.principal_ref
             if p.principal_ref is not None

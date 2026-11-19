@@ -9,7 +9,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     WorkStartCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
-    initial_executor_refs,
+    bound_executor_refs,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.service_ports import (
     CollaborationReadState,
@@ -36,7 +36,7 @@ def prepare_root_task(state: CollaborationReadState, command: WorkStartCommand) 
         collet_ref=state.collet.collet_id,
         objective=command.objective,
         principal_ref=state.collet.initiator_ref,
-        executor_refs=initial_executor_refs(state.events),
+        executor_refs=bound_executor_refs(state.events),
         status=TaskStatus.CREATED.value,
         version=1,
         parent_task_ref=None,

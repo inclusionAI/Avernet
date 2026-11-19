@@ -16,7 +16,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
-    initial_participation,
+    current_participation,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
@@ -107,7 +107,7 @@ def validate_role_sources(
     for role in profile.scenario_roles:
         if role.participant_source == "agent_ref":
             profile.participant_scope.require(role.agent_ref)
-        elif role.required and sources.get(role.participant_source) is None:
+        elif role.participant_source != "open_admission" and role.required and sources.get(role.participant_source) is None:
             raise ContextCollabValidationError(
                 f"product role {role.name!r} requires {role.participant_source}"
             )
@@ -166,6 +166,8 @@ def role_binding_refs(
     """Return stable references for the profile's declared role facts."""
     refs: list[str] = []
     for role in profile.scenario_roles:
+        if role.participant_source == "open_admission":
+            continue
         if role.participant_source == "executor_ref" and executor_ref is None:
             continue
         participant_id = scenario_participant_id(role, executor_ref)
@@ -188,7 +190,7 @@ def actor_has_role(
     """Resolve actual L4 RoleBindings; only legacy history uses Task identities."""
     if task is None:
         return False
-    facts = initial_participation(events)
+    facts = current_participation(events)
     if facts.participants:
         ids = {b.participant_id for b in facts.role_bindings if b.role == role}
         return any(

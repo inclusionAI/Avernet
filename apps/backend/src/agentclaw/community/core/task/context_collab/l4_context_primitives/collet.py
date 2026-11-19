@@ -22,6 +22,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact import (
+    Artifact,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
     COLLET_METADATA_KEYS,
     ColletMetadata,
@@ -73,6 +76,7 @@ _COLLET_KEYS = (
             "state",
             "scope",
             "version",
+            "artifacts",
         }
     )
     | COLLET_METADATA_KEYS
@@ -90,6 +94,9 @@ class Collet:
     distinct from metadata.schema_version. Missing metadata denotes a legacy
     representation only; every repository creation writes complete metadata.
     The existing authenticated-actor initiator convention remains unchanged.
+    artifacts contains L4 Artifact values and defaults to empty; runtime reporting
+    and Task-to-Collet aggregation do not populate it yet. Empty artifacts are
+    omitted from the representation to preserve existing shapes and ETags.
     """
 
     collet_id: str
@@ -98,6 +105,15 @@ class Collet:
     scope: SpaceRef | None
     version: int
     metadata: ColletMetadata | None = None
+    artifacts: tuple[Artifact, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.artifacts, tuple) or any(
+            not isinstance(artifact, Artifact) for artifact in self.artifacts
+        ):
+            raise ContextCollabValidationError(
+                "Collet.artifacts must be a tuple of L4 Artifact values"
+            )
 
     @property
     def revision(self) -> int:
@@ -176,6 +192,13 @@ class Collet:
         )
         if "etag" in data and metadata is None:
             raise ContextCollabValidationError("Collet.etag requires complete metadata")
+        artifacts = data.get("artifacts", [])
+        if not isinstance(artifacts, list) or any(
+            not isinstance(artifact, dict) for artifact in artifacts
+        ):
+            raise ContextCollabValidationError(
+                "Collet artifacts must be a list of objects"
+            )
         collet = cls(
             collet_id=_required_str(data, "collet_id", "Collet"),
             initiator_ref=PrincipalRef.from_dict(
@@ -189,6 +212,7 @@ class Collet:
             ),
             version=raw_version,
             metadata=metadata,
+            artifacts=tuple(Artifact.from_dict(artifact) for artifact in artifacts),
         )
         if "etag" in data and data["etag"] != collet.etag:
             raise ContextCollabValidationError(
@@ -203,6 +227,11 @@ class Collet:
             "state": self.state.value,
             "scope": self.scope.to_dict() if self.scope is not None else None,
             "version": self.version,
+            **(
+                {"artifacts": [artifact.to_dict() for artifact in self.artifacts]}
+                if self.artifacts
+                else {}
+            ),
             **(self.metadata.to_dict() if self.metadata is not None else {}),
         }
 

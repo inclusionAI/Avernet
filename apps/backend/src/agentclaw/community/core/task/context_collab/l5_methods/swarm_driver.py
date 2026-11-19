@@ -24,8 +24,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     WorkStartCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
-    initial_participation,
+    current_participation,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import validate_enrolled_participation
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     SwarmAllocateCommand,
     SwarmExecutionProfileCommand,
@@ -136,6 +137,7 @@ class SwarmDriver:
         record = self.reader.get_current_status(self.collet_id)
         if record is None:
             raise ContextCollabValidationError("Swarm Collet no longer exists")
+        validate_enrolled_participation(self.collet_id, record.events, self.store)
         return record
 
     def is_completed(self) -> bool:
@@ -217,7 +219,7 @@ class SwarmDriver:
                     self.task_ref,
                     record.task.objective,
                     tuple(self.stages()),
-                    initial_participation(record.events),
+                    current_participation(record.events),
                 )
             )
             self.queue.append(_Computed(decision, snapshot))
@@ -309,7 +311,7 @@ class SwarmDriver:
         if stage is None or stage.state is not StageState.READY:
             raise ContextCollabValidationError("plan assignment requires a READY Stage")
         candidates = stage_role_candidates(
-            self.collet_id, stage, initial_participation(record.events)
+            self.collet_id, stage, current_participation(record.events)
         )
         participant = next(
             (

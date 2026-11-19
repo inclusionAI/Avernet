@@ -43,8 +43,8 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
-    ProductCollaborationPolicy,
+from agentclaw.community.core.task.context_collab.l6_products.operations.open_enrollment_policy import (
+    OpenEnrollmentCollaborationPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.service_api import (
     CollaborationCreateCommand,
@@ -90,7 +90,7 @@ class ContextCollabService(
     ) -> None:
         super().__init__(
             repository,
-            ProductCollaborationPolicy(product_catalog, authorizer),
+            OpenEnrollmentCollaborationPolicy(product_catalog, authorizer, method_store),
             authorizer,
         )
         self._product_catalog = product_catalog
