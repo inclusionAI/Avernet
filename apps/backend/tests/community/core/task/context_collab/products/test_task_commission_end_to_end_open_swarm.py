@@ -351,7 +351,6 @@ def _create_product_profile():
 
 def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_service, storage_envs,
                                 profile, collet_id, open_binding_id):
-    # 角色引用属于招募需求，在使用处由已发布的 Profile 生成，不从发布步骤传递。
     role_refs = {role: scenario_role_ref(profile.ref, role) for role in ROLES}
     admission = profile.composition.require_policy("Open").publication.admission
 
