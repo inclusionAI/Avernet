@@ -1722,8 +1722,10 @@ impl DbBotAuthorityStore {
             // the retry branch are exercised even when the
             // first attempt succeeds.  On the happy path the
             // computation is cheap arithmetic with no I/O.
-            let delay = sync_retry_backoff_delay(attempt);
-            let ctx = format!("attempt {attempt} sync_tx");
+            let (delay, ctx) = (
+                sync_retry_backoff_delay(attempt),
+                format!("attempt {attempt} sync_tx"),
+            );
             match self
                 .db
                 .transaction_with_options(
