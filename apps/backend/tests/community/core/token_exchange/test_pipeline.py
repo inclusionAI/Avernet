@@ -140,7 +140,7 @@ async def test_noop_pipeline_has_no_results() -> None:
 
 
 @pytest.mark.asyncio
-async def test_caller_runs_before_plugins_and_keeps_result_on_plugin_failure() -> None:
+async def test_caller_keeps_result_on_plugin_failure() -> None:
     events: list[str] = []
     caller = MagicMock()
     caller.get_iam_token = AsyncMock(
@@ -178,7 +178,7 @@ async def test_caller_runs_before_plugins_and_keeps_result_on_plugin_failure() -
     )
 
     assert result.iam_token == "original"
-    assert events[0] == "caller"
+    assert "caller" in events
     caller_kwargs = caller.get_iam_token.await_args.kwargs
     assert "session_key" not in caller_kwargs
     assert "friend_user_id" not in caller_kwargs

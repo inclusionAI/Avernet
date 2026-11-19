@@ -53,7 +53,8 @@ class TokenPluginPipeline:
             stage = "exchange_token"
             token = await plugin.exchange_token(context=context, prepared=prepared)
             stage = "append_to_outbound"
-            plugin.append_to_outbound(
+            await asyncio.to_thread(
+                plugin.append_to_outbound,
                 context=context,
                 prepared=prepared,
                 token=token,
