@@ -356,6 +356,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                     group_id: group.id.clone(),
                     bcs_session_id: Some(session_id.to_string()),
                     cmd: BotDeliveryCommand {
+                        a2a_test_user: None,
                         target,
                         run_id,
                         frame,

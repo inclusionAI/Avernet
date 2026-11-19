@@ -41,6 +41,7 @@ async fn async_run_service_accepts_and_drains_events_until_final() {
 
     let accepted = service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -98,6 +99,7 @@ async fn async_run_service_marks_failed_on_chat_event_error() {
 
     service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -150,6 +152,7 @@ async fn async_run_service_times_out_and_unregisters_when_no_terminal_event_arri
 
     service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -202,6 +205,7 @@ async fn cancel_run_service_cancels_underlying_run_and_unregisters_channel() {
 
     service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -269,6 +273,7 @@ async fn cancel_run_marks_running_run_cancelled() {
 
     service
         .chat(A2aChatCommand {
+            a2a_test_user: None,
             caller: caller.clone(),
             target_bot_id: "bot-target".to_string(),
             message: "hello".to_string(),
@@ -327,6 +332,7 @@ async fn run_events_update_status_and_wake_waiters() {
 
     service
         .chat(A2aChatCommand {
+            a2a_test_user: None,
             caller: caller.clone(),
             target_bot_id: "bot-target".to_string(),
             message: "hello".to_string(),

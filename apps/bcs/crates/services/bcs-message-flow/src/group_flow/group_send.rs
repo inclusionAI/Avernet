@@ -443,6 +443,7 @@ pub async fn handle_persistent_group_send(
         let result = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: delivery_target,
                 run_id: run_id.clone(),
                 frame,

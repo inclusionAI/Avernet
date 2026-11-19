@@ -21,6 +21,7 @@ impl ChatRunCleanupPort for AdmissionEvents {
 
 fn command(message: &str) -> AsyncA2aChatCommand {
     AsyncA2aChatCommand {
+        a2a_test_user: None,
         caller: caller(), target_bot_id: "bot-observer".into(), message: message.into(), from_actor_id: None,
         run_channel_from: None, authenticated_staff_id: None, run_id: "input-run".into(),
         session_key: "input-session".into(), timeout_ms: 60_000, client: Some("bcs-cli/test".into()),
@@ -42,6 +43,7 @@ async fn empty_message_is_rejected_before_admission_for_both_service_entries() {
                     h.direct.start_async_chat(cmd).await.map(|_| ())
                 } else {
                     A2aChatService::chat(h.direct.as_ref(), A2aChatCommand {
+                        a2a_test_user: None,
                         caller: cmd.caller, target_bot_id: cmd.target_bot_id, message: cmd.message,
                         from_actor_id: cmd.from_actor_id, authenticated_staff_id: cmd.authenticated_staff_id,
                         run_id: Some(cmd.run_id), async_mode: entry == "chat-async", session_key: Some(cmd.session_key),

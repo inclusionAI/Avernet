@@ -17,6 +17,7 @@ async fn async_run_after_last_tool_call_mode_returns_only_followup_text() {
 
     service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -78,6 +79,7 @@ async fn async_run_after_last_tool_call_mode_uses_agent_tool_boundary() {
 
     service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -138,6 +140,7 @@ async fn async_run_after_last_tool_call_mode_uses_final_when_agent_tool_has_no_f
 
     service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),

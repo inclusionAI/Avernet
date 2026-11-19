@@ -190,7 +190,7 @@ async fn fixture_with_identity(
 }
 async fn command(f: &Fixture, run: &str) -> BotDeliveryCommand {
     f.contexts.put_context(BotRunContext { run_id:run.into(),bot_id:"bot".into(),group_id:"group".into(),bcs_session_id:Some("session".into()),deadline_ms:now()+60_000,terminal:false }).await;
-    BotDeliveryCommand { target:f.target.clone(), run_id:run.into(), frame:BcsFrame::Request(RequestFrame::new("attempt", "chat.send",Some(json!({
+    BotDeliveryCommand { a2a_test_user: None, target:f.target.clone(), run_id:run.into(), frame:BcsFrame::Request(RequestFrame::new("attempt", "chat.send",Some(json!({
         "session_key":"session","bcs_session_id":"session","bcs_group_id":"group", "message":{"role":"assistant","content":[{"type":"text","text":"测试"}],"timestamp":1}})))),
         delivery_kind:BotDeliveryKind::Send,provider_transport:Default::default(),provider_bypass_headers:vec![("authorization".into(),"untrusted".into()),("x-bcs-secret".into(),"untrusted".into())] }
 }

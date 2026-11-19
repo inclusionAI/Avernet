@@ -150,6 +150,9 @@ pub struct BcsConfig {
     /// Explicit deployment-owned routes through a local MOSN gRPC sidecar.
     #[serde(default)]
     pub a2a_grpc:Option<bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
+    /// Optional pre-release smoke user for the named A2A chat route.
+    #[serde(default)]
+    pub a2a_test_user: Option<bcs_config_api::a2a_test_user::A2aTestUserConfig>,
 
     /// Structured collaboration authoring-template configuration.
     #[serde(default)]
@@ -490,6 +493,7 @@ impl Default for BcsConfig {
             a2a_allow_anonymous:false,
             a2a_input:super::a2a_input::A2aInputConfig::default(),
             a2a_grpc:None,
+            a2a_test_user: None,
             collaboration: CollaborationConfig::default(),
             openapi_v1: OpenApiV1Config::default(),
             max_groups_as_driver: default_max_groups_as_driver(),

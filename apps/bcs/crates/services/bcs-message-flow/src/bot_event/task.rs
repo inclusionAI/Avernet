@@ -175,6 +175,7 @@ pub(super) async fn handle_task_bot_event(
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: delivery_target,
                 run_id: manager_result_run_id.clone(),
                 frame,

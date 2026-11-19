@@ -87,6 +87,7 @@ impl Harness {
 
     async fn submit(&self, id: &str, session: &str) -> ServiceResult<AsyncA2aChatAccepted> {
         self.direct.start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: caller(), target_bot_id: "bot-observer".into(), message: format!("request {id}"), from_actor_id: None,
             run_channel_from: None, authenticated_staff_id: None, run_id: id.into(), session_key: session.into(), timeout_ms: 60_000,
             client: Some("bcs-cli/test".into()), tags: vec![], response_mode: ChatResponseMode::Full,
@@ -115,6 +116,58 @@ impl Harness {
 }
 
 fn caller() -> CallerContext { CallerContext::Bot(BotActor { bot_uuid: "bot-driver".into() }) }
+
+#[tokio::test]
+async fn test_user_selection_survives_queue_and_rejects_transport_downgrade() {
+    use bcs_service_api::a2a_test_user::A2aTestUserSelection;
+    use bcs_service_api::types::a2a_bot::{A2aBinding, A2aInterface, A2aUpdateMode};
+
+    for sql in [false, true] {
+        let h = Harness::new(sql).await;
+        let target = BotDeliveryTarget::A2a {
+            bot_id: "bot-observer".into(), provider_id: "provider".into(), provider_bot_ref: "weather".into(),
+            interface: A2aInterface {
+                protocol_version: "1.0".into(), url: "https://gateway.example.test/weather".into(), tenant: None,
+                binding: A2aBinding::JsonRpc, update_mode: A2aUpdateMode::Stream,
+            },
+            credential_kind: "downlink_bcs_to_provider".into(),
+            bearer: RedactedToken::new("fixture-token"), card_revision: 1, extensions: vec![],
+        };
+        h.support.registry.set_delivery_target("bot-observer", target).await;
+        let selection = A2aTestUserSelection {
+            alias: "weather-smoke".into(), binding_ref: "fixture-v1".into(), caller_bot_id: "bot-driver".into(),
+        };
+        let command = AsyncA2aChatCommand {
+            a2a_test_user: Some(selection.clone()), caller: caller(),
+            target_bot_id: "bot-observer".into(), message: "check weather".into(),
+            from_actor_id: None, run_channel_from: None, authenticated_staff_id: None,
+            run_id: "fixture-run".into(), session_key: "a2a-test:fixture-run".into(),
+            timeout_ms: 60_000, client: None, tags: vec![], response_mode: ChatResponseMode::Full,
+            caller_wait_mode: None, organization_code: None, provider_bypass_headers: vec![],
+        };
+        h.policy.snapshot.write().await.policy.flow_enabled.direct_a2a = false;
+        assert!(matches!(h.direct.start_async_chat(command.clone()).await, Err(ServiceError::Conflict(_))));
+        assert!(h.direct.run_store().get("fixture-run").await.is_none());
+        h.policy.snapshot.write().await.policy.flow_enabled.direct_a2a = true;
+
+        let accepted = h.direct.start_async_chat(command).await.unwrap();
+        let row = h.row(&accepted.run_id).await;
+        assert_eq!(row.semantic_projection_json["a2a_test_user"], serde_json::to_value(&selection).unwrap());
+        assert_eq!(row.semantic_projection_json["version"], 2);
+        let runtime = h.runtime();
+        let mut downgraded = row.clone();
+        downgraded.semantic_projection_json["version"] = json!(1);
+        assert!(runtime.preparation.prepare(&downgraded).await.is_err());
+        let prepared = runtime.preparation.prepare(&row).await.unwrap();
+        assert_eq!(prepared.command.a2a_test_user, Some(selection));
+        assert!(prepared.command.provider_bypass_headers.is_empty());
+        assert!(matches!(h.submit("ordinary", &accepted.session_id).await, Err(ServiceError::InvalidOperation { .. })));
+
+        h.support.registry.set_delivery_target("bot-observer", support::FakeRegistryService::provider_target("bot-observer")).await;
+        assert!(runtime.preparation.prepare(&row).await.is_err());
+        assert!(h.support.bot_delivery.frames().await.is_empty());
+    }
+}
 
 #[tokio::test]
 async fn registry_claims_are_atomic_idempotent_and_survive_run_lifecycle() {

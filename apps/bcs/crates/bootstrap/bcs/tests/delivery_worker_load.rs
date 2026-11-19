@@ -78,6 +78,7 @@ impl ManagedDeliveryPreparationService for MockIo {
     async fn prepare(&self, row: &PersistedMessageDelivery) -> ServiceResult<PreparedManagedDelivery> {
         Ok(PreparedManagedDelivery {
             command: BotDeliveryCommand {
+                a2a_test_user: None,
                 target: BotDeliveryTarget::WebSocket { bot_id: row.target_bot_id.clone() },
                 run_id: row.run_id.clone().unwrap(),
                 frame: BcsFrame::Request(RequestFrame::new("prepared", "chat.send", None)),

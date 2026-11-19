@@ -9,6 +9,7 @@ use bcs_service_api::{BotAbortDeliveryCommand, BotAbortDeliveryResult, BotDelive
     BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotRunContextPort, ChatEventState,
     ProviderCredentialRepoPort, ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
     ProviderRunTransport, ServiceError, ServiceResult};
+use bcs_service_api::a2a_test_user::{A2aTestUserAdmission, A2aTestUserConfig, A2aTestUserSelection};
 use bcs_service_api::port::repo::a2a_run::{A2aContextScope, A2aRunRecord, A2aRunRepoPort, A2aRunState};
 use bcs_service_api::types::a2a_bot::A2aBinding;
 use serde_json::{json, Value};
@@ -47,6 +48,7 @@ struct Inner {
     slots: Arc<tokio::sync::Semaphore>,
     grpc: Option<GrpcMeshConfig>,
     identity: Option<Arc<dyn bcs_app_identity_api::OutboundAppIdentity>>,
+    test_user: Option<A2aTestUserConfig>,
 }
 
 #[derive(Clone)]
@@ -62,6 +64,55 @@ impl Drop for Lease {
 fn invalid(message: &str) -> ServiceError {
     ServiceError::InvalidOperation { message: format!("A2A: {message}"), request_id: None }
 }
+pub fn test_user_admission(config: &A2aTestUserConfig) -> Option<A2aTestUserAdmission> {
+    config.accept_new.then(|| A2aTestUserAdmission {
+        selection: test_user_selection(config),
+        target_bot_id: config.target_bot_id.clone(),
+    })
+}
+
+fn test_user_selection(config: &A2aTestUserConfig) -> A2aTestUserSelection {
+    // Pin the routing configuration across queue dwell, including restarts.
+    // The switch can be closed independently so accepted work can drain.
+    let mut digest = Sha256::new();
+    for value in [&config.binding_ref, &config.alias, &config.caller_bot_id, &config.provider_id,
+        &config.target_bot_id, &config.interface_url, &config.header_name, &config.user_id_secret]
+    {
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value.as_bytes());
+    }
+    A2aTestUserSelection {
+        alias: config.alias.clone(),
+        binding_ref: hex::encode(digest.finalize()),
+        caller_bot_id: config.caller_bot_id.clone(),
+    }
+}
+
+fn test_user_header(
+    config: Option<&A2aTestUserConfig>,
+    selection: &A2aTestUserSelection,
+    target: &BotDeliveryTarget,
+) -> ServiceResult<(reqwest::header::HeaderName, reqwest::header::HeaderValue)> {
+    let denied = || ServiceError::DeliveryNotSent { code: "a2a_test_user_scope_changed", retryable: false };
+    let config = config.ok_or_else(denied)?;
+    let BotDeliveryTarget::A2a { bot_id, provider_id, interface, .. } = target else { return Err(denied()); };
+    if test_user_selection(config) != *selection || config.target_bot_id != *bot_id
+        || config.provider_id != *provider_id || interface.binding != A2aBinding::JsonRpc
+        || interface.update_mode != bcs_service_api::types::a2a::A2aUpdateMode::Stream
+    {
+        return Err(denied());
+    }
+    let actual = reqwest::Url::parse(&interface.url).map_err(|_| denied())?;
+    let expected = reqwest::Url::parse(&config.interface_url).map_err(|_| denied())?;
+    if actual != expected || actual.scheme() != "https" {
+        return Err(denied());
+    }
+    let name = reqwest::header::HeaderName::from_bytes(config.header_name.as_bytes()).map_err(|_| denied())?;
+    let mut value = reqwest::header::HeaderValue::from_str(config.user_id().ok_or_else(denied)?).map_err(|_| denied())?;
+    value.set_sensitive(true);
+    Ok((name, value))
+}
+
 fn rejected_input(bot_id:&str,message:&str)->BotDeliveryResult {
     BotDeliveryResult {target_bot_id:bot_id.into(),delivered:false,error:Some(invalid(message))}
 }
@@ -70,7 +121,7 @@ fn now_ms() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_defa
 impl A2aHttpTransport {
     pub fn new(guard: OutboundUrlGuard, runs: Arc<dyn A2aRunRepoPort>, credentials: Arc<dyn ProviderCredentialRepoPort>) -> Self {
         Self { inner: Arc::new(Inner { guard, runs, credentials, runtime: RwLock::new(None),
-            active: Mutex::new(HashMap::new()), input:RwLock::new(None), slots: Arc::new(tokio::sync::Semaphore::new(256)), grpc:None, identity: None }) }
+            active: Mutex::new(HashMap::new()), input:RwLock::new(None), slots: Arc::new(tokio::sync::Semaphore::new(256)), grpc:None, identity: None, test_user: None }) }
     }
 
     pub fn with_grpc_mesh(mut self, config: GrpcMeshConfig) -> ServiceResult<Self> {
@@ -83,6 +134,18 @@ impl A2aHttpTransport {
         Arc::get_mut(&mut self.inner)
             .ok_or_else(|| invalid("configure application identity before sharing transport"))?
             .identity = Some(plugin);
+        Ok(self)
+    }
+
+    pub fn with_test_user(mut self, config: A2aTestUserConfig) -> ServiceResult<Self> {
+        config.validate().map_err(invalid)?;
+        let endpoint = reqwest::Url::parse(&config.interface_url).map_err(|_| invalid("invalid A2A test user URL"))?;
+        if endpoint.scheme() != "https" || !endpoint.username().is_empty() || endpoint.password().is_some()
+            || endpoint.fragment().is_some() || config.user_id().is_none()
+        {
+            return Err(invalid("invalid A2A test user configuration"));
+        }
+        Arc::get_mut(&mut self.inner).ok_or_else(|| invalid("configure A2A test user before sharing transport"))?.test_user = Some(config);
         Ok(self)
     }
 
@@ -107,6 +170,14 @@ impl A2aHttpTransport {
     }
 
     async fn client(&self, record: &A2aRunRecord) -> ServiceResult<BindingClient> {
+        self.client_with_submission_header(record, None).await
+    }
+
+    async fn client_with_submission_header(
+        &self,
+        record: &A2aRunRecord,
+        submission_header: Option<(reqwest::header::HeaderName, reqwest::header::HeaderValue)>,
+    ) -> ServiceResult<BindingClient> {
         let bearer=if record.credential_kind==bcs_service_api::types::a2a_auth::ANONYMOUS {None} else {
             let credential=self.inner.credentials.get_credential_by_kind(&record.scope.provider_id,&record.credential_kind).await?
                 .ok_or_else(||invalid("credential unavailable"))?;
@@ -139,6 +210,9 @@ impl A2aHttpTransport {
         if !negotiated.is_empty() {
             headers.insert("a2a-extensions", reqwest::header::HeaderValue::from_str(&negotiated)
                 .map_err(|_|invalid("extension header invalid"))?);
+        }
+        if let Some((name, value)) = submission_header {
+            headers.insert(name, value);
         }
         let http = crate::card_fetch::guarded_client_with_headers(&self.inner.guard, &record.interface.url, headers).await?;
         let mut http = crate::http_client::HttpClient::new(http);
@@ -243,6 +317,9 @@ impl BotDeliveryPort for A2aHttpTransport {
         let params = frame.params.as_ref().ok_or_else(||invalid("missing request parameters"))?;
         if params.get("attachments").and_then(Value::as_array).is_some_and(|a|!a.is_empty()) { return Ok(rejected_input(bot_id,"nontext attachments unsupported")); }
         let message: MessageContent = serde_json::from_value(params.get("message").cloned().ok_or_else(||invalid("message required"))?)?;
+        let submission_header = cmd.a2a_test_user.as_ref().map(|selection|
+            test_user_header(self.inner.test_user.as_ref(), selection, &cmd.target)
+        ).transpose()?;
         let mut parts = Vec::new();
         for block in message.content {
             if block.block_type != "text" || block.url.is_some() { return Ok(rejected_input(bot_id,"nontext input unsupported")); }
@@ -290,7 +367,7 @@ impl BotDeliveryPort for A2aHttpTransport {
             record.budget=Some(started.state.clone());initial_budget=Some(started);
         }
         record.context_id = self.inner.runs.context(&record.scope).await?;
-        let client = self.client(&record).await?;
+        let client = self.client_with_submission_header(&record, submission_header).await?;
         if !self.inner.runs.create(&record).await? { return Err(invalid("submission already reserved")); }
         if !runtime.contexts.begin_provider_transport(&record.run_id, record.deadline_ms).await
             || !runtime.contexts.bind_provider_transport(&record.run_id, ProviderRunTransport::A2a { binding: record.interface.binding, update_mode: record.interface.update_mode }).await {
@@ -376,3 +453,7 @@ impl BotDeliveryPort for A2aHttpTransport {
         self.cancel(cmd).await
     }
 }
+
+
+#[cfg(test)]
+mod test_user_contract;

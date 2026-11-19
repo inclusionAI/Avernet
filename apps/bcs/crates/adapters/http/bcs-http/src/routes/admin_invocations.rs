@@ -170,6 +170,7 @@ pub async fn create_admin_run(
         .services
         .a2a_chat_runs
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             // The established run engine only accepts a bot caller. The target bot
             // is used as a synthetic execution principal after this route has
             // performed the manager and effective-membership authorization above.

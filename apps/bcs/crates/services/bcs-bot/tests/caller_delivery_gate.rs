@@ -136,6 +136,7 @@ fn nil_frame_params() -> Option<serde_json::Value> {
 
 fn command(bot_id: &str) -> BotDeliveryCommand {
     BotDeliveryCommand {
+        a2a_test_user: None,
         target: BotDeliveryTarget::WebSocket { bot_id: bot_id.to_string() },
         run_id: "run-1".to_string(),
         frame: BcsFrame::Request(RequestFrame::new("frame-1", "chat.send", nil_frame_params())),
