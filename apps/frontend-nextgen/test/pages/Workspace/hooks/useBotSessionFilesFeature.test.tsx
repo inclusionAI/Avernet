@@ -295,7 +295,7 @@ it('探测到 bot_call_type=caller 时服务 Bot 注入 callerRuntimeTarget=serv
   });
 });
 
-it('好友 Bot 零探测:恒省略 caller_runtime_target(2026-11-19 二轮勘误,契约 owner/collaborator-only 必 404;IAM 链同规则)', async () => {
+it('好友 Bot 探测到 caller 时传 caller_runtime_target=caller_instance(三轮勘误还原:与 f_user_id 并存合法;探测失败唯一要求=零提示)', async () => {
   mockGetCallerContext.mockResolvedValue({
     editable: false,
     botCallType: 'caller',
@@ -303,16 +303,18 @@ it('好友 Bot 零探测:恒省略 caller_runtime_target(2026-11-19 二轮勘误
     cliCallTypes: {},
   });
   renderHook(() => useBotSessionFilesFeature({ ...bot, botType: 'service', isFriendBot: true }, session, 'viewer', jest.fn()));
-  // 好友 Bot:friendUserId=userId + stage=online 保留;caller 位恒 undefined(不发探测)。
   await waitFor(() => {
+    // 好友 Bot:friendUserId=userId + stage=online;caller 位 caller_instance(IAM 链同规则);
+    // upload 链同带 friendUserId 位参——好友文件全链携带 f_user_id(2026-11-19 需求追加)
     expect(mockedUseBotSessionFiles.mock.calls.at(-1)).toEqual(
-      ['bot', 'session-1', 'viewer', '2088', 'viewer', 'online', undefined, undefined],
+      ['bot', 'session-1', 'viewer', '2088', 'viewer', 'online', undefined, 'caller_instance'],
     );
     expect(mockedUseBotSessionFileUpload.mock.calls.at(-1)).toEqual(
-      ['bot', 'session-1', 'viewer', '2088', 'viewer', 'online', undefined, undefined],
+      ['bot', 'session-1', 'viewer', '2088', 'viewer', 'online', undefined, 'caller_instance'],
     );
   });
-  expect(mockGetCallerContext).not.toHaveBeenCalled();
+  // 三轮勘误:好友探测照旧发起,探测请求带零提示标记。
+  expect(mockGetCallerContext).toHaveBeenCalledWith('bot', '2088', { suppressErrorNotification: true });
 });
 
 it('探测结果非 caller 时两 Hook 不携带 callerRuntimeTarget', async () => {
