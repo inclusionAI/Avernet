@@ -1,0 +1,73 @@
+docs/rfcs/accs/appendices/source-mapping.md
+  s_10039830b71dc0::t_c6494537d64802 15,41,43-44,65,88,94,98-100,102,104,113
+  s_10039830b71dc0::t_e1f82ab86e4944 11-14
+docs/rfcs/accs/crosscut/203-g3-observe-evaluate-evolve.md
+  s_10039830b71dc0::t_16932ba378882b 16-17,549-550,556-561,565
+  s_10039830b71dc0::t_c6494537d64802 5,13,63,67,100,116,193,208,445,471,475
+docs/rfcs/accs/layers/102-l2-agent-network.md
+  s_10039830b71dc0::t_16932ba378882b 11
+  s_10039830b71dc0::t_e1f82ab86e4944 1,9
+  s_10039830b71dc0::t_d97251b2fd6763 10
+docs/rfcs/accs/layers/103-l3-space-resource.md
+  s_10039830b71dc0::t_e1f82ab86e4944 1-87
+docs/rfcs/accs/layers/104-l4-collaboration-context-primitives.md
+  s_10039830b71dc0::t_e1f82ab86e4944 1,9
+docs/rfcs/accs/000-architecture.md
+  s_10039830b71dc0::t_c6494537d64802 5,20,30,43,54,61,83,101-109,171,176-177,208,221,223,230-232,234,245,259,263-270
+  s_10039830b71dc0::t_e1f82ab86e4944 57-60,210
+  s_10039830b71dc0::t_16932ba378882b 95
+docs/rfcs/accs/assets/osi-vs-accs-stack.svg
+  s_10039830b71dc0::t_c6494537d64802 1-143
+docs/rfcs/accs/crosscut/201-g1-security-governance.md
+  s_10039830b71dc0::t_c6494537d64802 13,83,93,95,128,163,168
+  s_10039830b71dc0::t_16932ba378882b 11-12
+docs/rfcs/accs/crosscut/202-g2-reliability-liveness.md
+  s_10039830b71dc0::t_16932ba378882b 11-12
+  s_10039830b71dc0::t_c6494537d64802 20,75,81,106,116,153
+docs/rfcs/accs/layers/101-l1-interoperate-deliver.md
+  s_10039830b71dc0::t_16932ba378882b 94,100
+  s_10039830b71dc0::t_c6494537d64802 21,60,93
+  s_10039830b71dc0::t_389d8e2891e2f5 101
+docs/rfcs/accs/merge.sh
+  s_10039830b71dc0::t_e1f82ab86e4944 40,42,44
+  s_10039830b71dc0::t_c6494537d64802 43
+docs/rfcs/accs/README.md
+  s_10039830b71dc0::t_e1f82ab86e4944 38-41,64,66,68,103-106
+  s_10039830b71dc0::t_3b0a05896d44d5 116
+  s_10039830b71dc0::t_16932ba378882b 15,42
+  s_10039830b71dc0::t_c6494537d64802 13,21,35,48-58,62,107,135
+docs/rfcs/accs/001-common-contract.md
+  s_10039830b71dc0::t_c6494537d64802 38-39,82,101
+docs/rfcs/accs/methods/304-open.md
+  s_10039830b71dc0::t_c6494537d64802 97
+docs/rfcs/accs/methods/301-single.md
+  s_10039830b71dc0::t_c6494537d64802 65
+docs/rfcs/accs/layers/106-l6-collaboration-applications.md
+  s_10039830b71dc0::t_16932ba378882b 26-27
+  s_10039830b71dc0::t_c6494537d64802 1-25,28-114
+docs/rfcs/accs/layers/105-l5-collaboration-patterns-methods.md
+  s_10039830b71dc0::t_c6494537d64802 92
+  s_10039830b71dc0::t_e1f82ab86e4944 1-91,93-111
+docs/rfcs/accs/methods/305-method-extension.md
+  s_10039830b71dc0::t_c6494537d64802 17,20
+  s_10039830b71dc0::t_16932ba378882b 9,16,18
+docs/rfcs/accs/crosscut/204-g4-contract-consistency.md
+  s_10039830b71dc0::t_c6494537d64802 5,23,67,70,89,102,138,140,182
+  s_10039830b71dc0::t_16932ba378882b 11-12,167-176,180,189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c8bc34237f52375554433d76ef4637796bee2105",
+  "prompts": {},
+  "sessions": {
+    "s_10039830b71dc0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ee0e-a9c0-7fd3-93fd-360c16852d80",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Zhenyu Guo <guozhen.gzy@antfin.com>"
+    }
+  }
+}

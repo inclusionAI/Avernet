@@ -1,0 +1,156 @@
+apps/bcs-internal/README.md
+  h_10f6235a5d078a 85,88
+apps/bcs-internal/sdks/a2a-agent-adapter/README.md
+  h_10f6235a5d078a 1,3,5-11,17-22,24,42-43,50,52,55,59,61,71,81,83,85,102,104,109-110,113,127,137,139,143-144,175,177,183,185,195,199,203,211-217
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/pom.xml
+  h_10f6235a5d078a 3-4,13-14,17
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/A2aAgent.java
+  h_10f6235a5d078a 1,11,13-14,17
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/A2aListener.java
+  h_10f6235a5d078a 1,4,6,27,38,40
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/AgentCall.java
+  h_10f6235a5d078a 1,12,16,30,33,44,50,62
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/AgentException.java
+  h_10f6235a5d078a 1,7,20
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/AgentHandler.java
+  h_10f6235a5d078a 1,6-7,13-15,21-23,25,28,34,40,47-48,51-52,57
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/AgentStream.java
+  h_10f6235a5d078a 1,7-9,21,24,28,35,40,42-43,51,64,70
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/CallerContext.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/Messages.java
+  h_10f6235a5d078a 1,16
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/TaskEngine.java
+  h_10f6235a5d078a 1,9,12,25,28
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/ToolEvent.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/ToolResult.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/api/TraceContext.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/ext/CallerContextCodec.java
+  h_10f6235a5d078a 1,7,28
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/ext/ExtensionKeys.java
+  h_10f6235a5d078a 1,21,23
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/ext/ToolObservationCodec.java
+  h_10f6235a5d078a 1,10,56
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/A2aService.java
+  h_10f6235a5d078a 1,10-11,41-42,44,48,51,54,100,107,114,186-187,190,199,201-202,206,209,221,227
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/A2aServiceOptions.java
+  h_10f6235a5d078a 1,6
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/AgentEntry.java
+  h_10f6235a5d078a 1,6-9,16,34
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/AgentRegistry.java
+  h_10f6235a5d078a 1,10-14,26,28-29,37,40,72,89,92,99-100,120
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/CallHeaders.java
+  h_10f6235a5d078a 1,31
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/CallScope.java
+  h_10f6235a5d078a 1,5-6,20,29,107,177
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/CancelSignal.java
+  h_10f6235a5d078a 1,7
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/CollectingStream.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/DefaultAgentCall.java
+  h_10f6235a5d078a 1,8-10,14-15,17
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/ErrorMapper.java
+  h_10f6235a5d078a 1,8,29-30,35-36,46,48,50,57,62,97,114
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/ExtensionNegotiator.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/InboundValidator.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/OutboundGuard.java
+  h_10f6235a5d078a 1,3,22
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/OutputModes.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/PayloadValidator.java
+  h_10f6235a5d078a 1,7,109,120
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/ProtocolErrors.java
+  h_10f6235a5d078a 1,9
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/RequestPipeline.java
+  h_10f6235a5d078a 1,14-18,61,70,74,236,256,297,299,341
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/ResponseTrace.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/ScopedStream.java
+  h_10f6235a5d078a 1,3-4,9-10,14
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/StreamBridge.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/server/TaskStreamWriter.java
+  h_10f6235a5d078a 1,9-13,27,33,37,73,125,203
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/sofa/SofaA2aGrpc.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/sofa/SofaCallHeaders.java
+  h_10f6235a5d078a 1,17-18
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/sofa/SofaPublishSpec.java
+  h_10f6235a5d078a 1,9,20-21
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/sofa/SofaServices.java
+  h_10f6235a5d078a 1,3,59
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/sofa/SofaTracing.java
+  h_10f6235a5d078a 1,3
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/sofa/UnaryResult.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/main/java/com/alipay/a2a/adapter/sofa/package-info.java
+  h_10f6235a5d078a 6
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/ext/ExtensionKeysTest.java
+  h_10f6235a5d078a 1,12,16-21,30
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/AsyncLifecycleTest.java
+  h_10f6235a5d078a 1,9,18-20
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/BackpressureTest.java
+  h_10f6235a5d078a 1,3
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/DirectoryAndPayloadTest.java
+  h_10f6235a5d078a 1,3,13-15
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/OutputModesTest.java
+  h_10f6235a5d078a 1,23-24,28-29,39
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/ResponseTraceTest.java
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/ReviewPayloadTest.java
+  h_10f6235a5d078a 1,15
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/ScopedStreamTest.java
+  h_10f6235a5d078a 1,3,32
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/TaskStreamWriterTest.java
+  h_10f6235a5d078a 1,14-15,50,57,74
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/TenantRegistrationTest.java
+  h_10f6235a5d078a 1,3-7,19,21,28,30,66
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/server/TraceContextTest.java
+  h_10f6235a5d078a 1,3
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/sofa/SofaTracingTest.java
+  h_10f6235a5d078a 1,17
+apps/bcs-internal/sdks/a2a-agent-adapter/adapter/src/test/java/com/alipay/a2a/adapter/sofa/SofaTransportTest.java
+  h_10f6235a5d078a 1,3-4,19-20,26-27,34,39,49,56-58,171,187,200
+apps/bcs-internal/sdks/a2a-agent-adapter/examples/pom.xml
+  h_10f6235a5d078a 12-13,16,20-21,39-40
+apps/bcs-internal/sdks/a2a-agent-adapter/examples/src/main/java/com/alipay/a2a/adapter/demo/DemoWiring.java
+  h_10f6235a5d078a 1,9-11,16,23,25
+apps/bcs-internal/sdks/a2a-agent-adapter/examples/src/main/java/com/alipay/a2a/adapter/demo/OrderAgent.java
+  h_10f6235a5d078a 1,3-8,16,19,22,24
+apps/bcs-internal/sdks/a2a-agent-adapter/examples/src/main/java/com/alipay/a2a/adapter/demo/WritingAgent.java
+  h_10f6235a5d078a 1,6-10,14,17,20,22
+apps/bcs-internal/sdks/a2a-agent-adapter/examples/src/test/java/com/alipay/a2a/adapter/demo/DemoAgentsTest.java
+  h_10f6235a5d078a 1,11-17,40,42,94,96,101
+apps/bcs-internal/sdks/a2a-agent-adapter/pom.xml
+  h_10f6235a5d078a 3-4,12-13,18-20,70-71,75-76
+apps/bcs-internal/sdks/a2a-agent-adapter/scripts/verify.sh
+  h_10f6235a5d078a 4
+apps/bcs-internal/sdks/a2a-agent-adapter/test-support/pom.xml
+  h_10f6235a5d078a 8-9,12,16-17
+apps/bcs-internal/sdks/a2a-agent-adapter/test-support/src/main/java/com/alipay/a2a/adapter/test/A2aAgentTester.java
+  h_10f6235a5d078a 1,9-11,29,37,50,54
+apps/bcs-internal/sdks/a2a-agent-adapter/test-support/src/main/java/com/alipay/a2a/adapter/test/CapturingObserver.java
+  h_10f6235a5d078a 1
+devops/hook/pre_push.sh
+  h_10f6235a5d078a 179-180,185-186,189
+devops/pipeline/PRChecker.aci.yml
+  h_10f6235a5d078a 463,474-475,482
+tests/ci/test_harness_sdk_pre_push.py
+  h_10f6235a5d078a 12,26-28,35,88-89,93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0e2764f93f45b3c196ed0eede129f08de17c1f96",
+  "prompts": {},
+  "humans": {
+    "h_10f6235a5d078a": {
+      "author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
