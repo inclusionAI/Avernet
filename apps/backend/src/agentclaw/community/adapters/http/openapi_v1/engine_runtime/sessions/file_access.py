@@ -49,11 +49,10 @@ async def authorize_file_list(
         raise EngineResourceNotFoundError("service runtime selection is unavailable for friend chat")
     resolved_stage = await authorize_friend_chat(
         request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
-        friend_user_id=friend_user_id, friendships=friendships, expert=expert, stage=stage.value,
+        friend_user_id=friend_user_id, friendships=friendships, expert=expert,
+        stage=stage.value,
     )
     try:
-        # The subject's independent Caller container or shared-runtime session
-        # index authorizes access before resource metadata is read.
         await expert.get_owned_chat_session(
             friend_user_id, bot_id, owner_id, session_id,
             request.cookies.get("IAM_TOKEN") or None,
@@ -66,13 +65,34 @@ async def authorize_file_list(
     return resolved_stage
 
 
+async def authorize_file_read(
+    *, request: Request, bot_id: str, session_id: str, user_id: str,
+    owner_id: str, stage: RuntimeStage, friend_user_id: str | None,
+    relay: EngineRuntimeRelayProtocol, friendships: HumanBotFriendshipServiceProtocol,
+    expert: ExpertChatServiceProtocol,
+    runtime_target: RuntimeBindingTarget = RuntimeBindingTarget.AUTO,
+) -> SessionFileAccess:
+    """Authorize a file read and return its trusted runtime target."""
+    if (
+        friend_user_id is not None
+        and runtime_target is RuntimeBindingTarget.CALLER_SERVICE
+    ):
+        raise EngineResourceNotFoundError("service runtime selection is unavailable for friend chat")
+    return await authorize_file_operation(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=friend_user_id,
+        relay=relay, friendships=friendships, expert=expert,
+        runtime_target=runtime_target, allow_implicit_friend_fallback=False,
+    )
+
+
 async def authorize_file_operation(
     *, request: Request, bot_id: str, session_id: str, user_id: str,
     owner_id: str, stage: RuntimeStage, friend_user_id: str | None,
     relay: EngineRuntimeRelayProtocol, friendships: HumanBotFriendshipServiceProtocol,
     expert: ExpertChatServiceProtocol,
     runtime_target: RuntimeBindingTarget = RuntimeBindingTarget.AUTO,
-    require_caller_instance: bool = False,
+    allow_implicit_friend_fallback: bool = True,
 ) -> SessionFileAccess:
     """Authorize an operator or the Human owning a non-TeClaw friend session.
 
@@ -91,11 +111,13 @@ async def authorize_file_operation(
                 facts=facts, stage=stage.value, target=runtime_target,
             )
         except ManagedBotNotFoundError:
+            if not allow_implicit_friend_fallback:
+                raise
             friend_user_id = user_id
 
-    if require_caller_instance and runtime_target is not RuntimeBindingTarget.CALLER_INSTANCE:
+    if runtime_target is RuntimeBindingTarget.CALLER_SERVICE:
         raise EngineResourceNotFoundError(
-            "caller instance selection is required for friend session files"
+            "service runtime selection is unavailable for friend chat"
         )
 
     resolved_stage = await authorize_friend_chat(
