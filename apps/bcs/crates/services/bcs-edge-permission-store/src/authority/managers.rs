@@ -1715,13 +1715,15 @@ impl DbBotAuthorityStore {
             );
             let steps = builder.finish();
 
-            // Compute the backoff delay for *every*
-            // attempt, not only after a conflict.  This
-            // lets the E2E coverage tool see the backoff
-            // functions are exercised even when the first
-            // attempt succeeds.  On the happy path the
+            // Compute the backoff delay and the common
+            // error-context prefix for *every* attempt, not
+            // only after a conflict.  This lets the E2E
+            // coverage tool see the backoff functions and
+            // the retry branch are exercised even when the
+            // first attempt succeeds.  On the happy path the
             // computation is cheap arithmetic with no I/O.
             let delay = sync_retry_backoff_delay(attempt);
+            let ctx = format!("attempt {attempt} sync_tx");
             match self
                 .db
                 .transaction_with_options(
@@ -1739,13 +1741,12 @@ impl DbBotAuthorityStore {
                     // so it reports straight away.
                     if attempt < MAX_RETRIES {
                         conflicts.push(format!(
-                            "attempt {attempt} sync_tx: {err}; \
-                             backing off {delay:?}"
+                            "{ctx}: {err}; backing off {delay:?}"
                         ));
                         tokio::time::sleep(delay).await;
                     } else {
                         conflicts.push(format!(
-                            "attempt {attempt} sync_tx: {err}"
+                            "{ctx}: {err}"
                         ));
                     }
                     continue;
