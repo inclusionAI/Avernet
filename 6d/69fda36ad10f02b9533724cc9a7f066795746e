@@ -1,0 +1,14 @@
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py
+  h_059e888e5e4e82 167,170,178,181,184,195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6d69fda36ad10f02b9533724cc9a7f066795746e",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
