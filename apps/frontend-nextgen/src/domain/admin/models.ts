@@ -96,9 +96,9 @@ export interface WorkOrder {
   status: WorkOrderStatus;
   /** 状态中文 label（mapper 填充，单一源 workOrderMeta） */
   statusLabel: string;
-  /** 类型中文 label（mapper 填充） */
+  /** 事件类型中文 label（mapper 填充）；通知中心分类展示统一用 workOrderCategoryLabel。 */
   typeLabel: string;
-  /** 类型颜色 tone（mapper 填充；组件只消费，不自定） */
+  /** 事件类型颜色元数据（兼容保留）；通知中心分类标签统一使用中性样式。 */
   typeTone: WorkOrderTone;
   isRead: boolean;
   /** 阅读时间（ISO，未读为 null/undefined） */

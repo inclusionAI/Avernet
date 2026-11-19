@@ -7,6 +7,7 @@ import type { WorkOrder } from '@/domain/admin/models';
 import { formatAbsoluteTime } from '@/utils/format';
 import { ExternalLink } from 'lucide-react';
 import { Tag } from '../Tag';
+import { WorkOrderCategoryTag } from '../WorkOrderCategoryTag';
 import { JsonBlock } from './JsonBlock';
 
 export interface WorkOrderDetailDrawerProps {
@@ -33,7 +34,7 @@ export function WorkOrderDetailDrawer({
           {detail && (
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Tag tone={detail.typeTone}>{detail.typeLabel}</Tag>
+                <WorkOrderCategoryTag workOrder={detail} />
                 {detail.isRead && <Tag>已查看</Tag>}
               </div>
               <span className="text-xs text-muted-foreground">
