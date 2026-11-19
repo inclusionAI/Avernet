@@ -546,3 +546,14 @@ it('loads shared Bot MCP facts using the same addressed owner as other configura
   expect(result.capabilityLoadError).toBeUndefined();
   expect(result.errors).toBe(0);
 });
+
+it('getCallerContext 透传 options.suppressErrorNotification(2026-11-19 二轮勘误:探测失败零提示)', async () => {
+  controller.getCallerContext.mockResolvedValue({
+    data: { editable: false, bot_call_type: 'owner', mcp_call_types: {}, cli_call_types: {} },
+  });
+  await botEditorService.getCallerContext('bot-3', 'owner-3', { suppressErrorNotification: true });
+  expect(controller.getCallerContext).toHaveBeenCalledWith('bot-3', 'owner-3', { suppressErrorNotification: true });
+  // 缺省形态不带第三参,编辑器既有调用零扰动。
+  await botEditorService.getCallerContext('bot-3', 'owner-3');
+  expect(controller.getCallerContext).toHaveBeenLastCalledWith('bot-3', 'owner-3');
+});

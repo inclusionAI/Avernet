@@ -170,26 +170,29 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       resolveChatRuntimeStage(options.bot),
     ].join(' ');
     // Caller 判据探测随构造即发,与连接握手(getBotConnection)并行,保证首次换签
-    // 前已有结论、不串行加时延;desktop 直连不走云端换签,不探测。
-    if (options.bot.botType !== 'desktop') void this.resolveCallerRuntimeTarget();
+    // 前已有结论、不串行加时延;desktop 直连不走云端换签、好友 Bot 契约内必 404
+    // (2026-11-19 二轮勘误),均不探测。
+    if (options.bot.botType !== 'desktop' && !options.bot.isFriendBot) void this.resolveCallerRuntimeTarget();
   }
 
   /** Caller 模式判据运行时化(2026-11-19 需求变更,与文件链 useBotSessionFilesFeature
-   *  同款判据/取值):新版目录接口族不下发 call_type,静态 options.bot.callType 恒
+   *  同款判据):新版目录接口族不下发 call_type,静态 options.bot.callType 恒
    *  undefined(判据死参数事故的根因);改探测 GET /openapi/v1/bots/{id}/caller-context
    *  (stage=draft,聚合 bot_call_type 存量存于 Bot 行,与运行 stage 无关)。
-   *  取值:我管理的/我协作的 → service(服务实例池,实例仍由 stage/device_uuid 定位);
-   *  好友 Bot → caller_instance(当前用户独立 Caller 实例)。探测失败/非 caller
-   *  静默不带(好友视角探测受 Check(MEMBER) 管控时降级省略,契约安全:f_user_id 路由
-   *  自明)。单飞缓存:结果跨多次换签定格,失效面(改调用身份)随 provider 重建刷新。 */
+   *  取值:我管理的/我协作的 → service(服务实例池,实例仍由 stage/device_uuid 定位)。
+   *  2026-11-19 二轮勘误:好友 Bot 不探测——gateway 契约本接口仅授权 Bot 的
+   *  owner/collaborator,其余按 404 应答,真好友视角探测必然失败属纯无效请求;好友
+   *  IAM 恒省略 caller_runtime_target(=原探测失败降级形态,行为零变化,契约安全:
+   *  f_user_id 路由自明)。探测失败(如「我协作」空间成员而非 Bot 协作者的 404)
+   *  静默不带且零提示——请求层 suppressErrorNotification 不投默认错误 toast。
+   *  单飞缓存:结果跨多次换签定格,失效面(改调用身份)随 provider 重建刷新。 */
   private resolveCallerRuntimeTarget(): Promise<'service' | 'caller_instance' | undefined> {
-    if (this.options.bot.botType === 'desktop') return Promise.resolve(undefined);
+    if (this.options.bot.botType === 'desktop' || this.options.bot.isFriendBot) return Promise.resolve(undefined);
     this.callerRuntimeTargetPromise ??= botEditorService
-      .getCallerContext(this.options.bot.realBotId, this.options.bot.ownerId)
-      .then((ctx) =>
-        ctx.botCallType === 'caller'
-          ? (this.options.bot.isFriendBot ? ('caller_instance' as const) : ('service' as const))
-          : undefined)
+      .getCallerContext(this.options.bot.realBotId, this.options.bot.ownerId, {
+        suppressErrorNotification: true,
+      })
+      .then((ctx) => (ctx.botCallType === 'caller' ? ('service' as const) : undefined))
       .catch(() => undefined);
     return this.callerRuntimeTargetPromise;
   }
