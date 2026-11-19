@@ -1,0 +1,28 @@
+apps/bcs/scripts/e2e-test/a2a_rpc_peer.py
+  s_405f6041118eb1::t_44d55e951ff171 25-26
+apps/bcs/scripts/caller_e2e_coverage.sh
+  s_405f6041118eb1::t_44d55e951ff171 36-44
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_405f6041118eb1::t_44d55e951ff171 29,31
+apps/bcs/scripts/e2e-test/a2a_test_user_story.py
+  s_405f6041118eb1::t_0dfd4fa646e6ab 35,89-90,97,116,191
+  s_405f6041118eb1::t_89d43193b3aea3 131,135
+  s_405f6041118eb1::t_fa97d1a5f0e5c5 126,128-129,132,171-172,188-189
+  s_405f6041118eb1::t_44d55e951ff171 1-34,36-88,91-96,98-115,117-125,127,130,133-134,136-170,173-187,190,192-212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8d71768a00374f9ed321fe07e7364a5366eee9a3",
+  "prompts": {},
+  "sessions": {
+    "s_405f6041118eb1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4a4-3df3-7910-8f9f-0ef7f4920a3e",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": null
+    }
+  }
+}
