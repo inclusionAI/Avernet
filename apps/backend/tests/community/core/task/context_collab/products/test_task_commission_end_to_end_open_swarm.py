@@ -169,7 +169,6 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         collet_id,
         open_binding_id,
         swarm_binding_id,
-        role_refs,
     ) = publish_todo_task(deploy_open_swarm, tmp_path)
 
     # 2. 基于L5层OPEN方法公开招募多个Coding相关Agent
@@ -180,7 +179,6 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         storage_envs,
         profile,
         collet_id,
-        role_refs,
         open_binding_id,
     )
 
@@ -234,8 +232,6 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
     )
     collet_id = instance.collet_ref
     open_binding_id, swarm_binding_id = instance.method_binding_refs
-    role_refs = {role: scenario_role_ref(profile.ref, role) for role in ROLES}
-
     return (
         profile,
         injector,
@@ -246,7 +242,6 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
         collet_id,
         open_binding_id,
         swarm_binding_id,
-        role_refs
     )
 
 
@@ -355,7 +350,9 @@ def _create_product_profile():
 
 
 def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_service, storage_envs,
-                                profile, collet_id, role_refs, open_binding_id):
+                                profile, collet_id, open_binding_id):
+    # 角色引用属于招募需求，在使用处由已发布的 Profile 生成，不从发布步骤传递。
+    role_refs = {role: scenario_role_ref(profile.ref, role) for role in ROLES}
     admission = profile.composition.require_policy("Open").publication.admission
 
     ## 使用L5的open方法 发布公开机会
