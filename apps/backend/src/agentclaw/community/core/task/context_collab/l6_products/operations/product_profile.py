@@ -25,6 +25,7 @@ def create_product_profile(
     definition = ProductProfileDefinition(
         ref=command.ref,
         participant_scope=command.participant_scope,
+        swarm_plan_service_ref=command.swarm_plan_service_ref,
         composition=command.composition,
         scenario_roles=command.scenario_roles,
         domain=command.domain,

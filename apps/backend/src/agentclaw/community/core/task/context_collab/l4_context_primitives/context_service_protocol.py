@@ -91,12 +91,15 @@ class ContextServiceProtocol(Protocol):
     def create_task(
         self, collab_context_id: str, command: TaskCreateCommand, context: ActorContext
     ) -> Task:
-        """Explicitly create this Collet's unassigned root Task and task.created.
+        """Explicitly create this Collet's root Task and task.created, not start it.
 
         Only the Collet initiator may create Work; principal_ref supplies Task
         accountability independently. Fences Collet version, creates Task at
         version 1 and advances Collet once. Duplicate roots fail without writes.
-        No product selection, method initialization or participant binding.
+        Works before or after product instantiation: existing Collet executor
+        binding evidence supplies assignees; absent bindings leave Work unassigned.
+        Preserves installed selection metadata and participation. No product
+        selection, method initialization, participant binding or dispatch.
         """
         ...
 

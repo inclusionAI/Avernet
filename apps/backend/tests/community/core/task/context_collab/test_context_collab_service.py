@@ -381,19 +381,41 @@ class TestCreateContext:
         )
         assert isinstance(service, ContextCollabServiceProtocol)
 
-    def test_create_rejects_bare_group_swarm_top_level(self):
-        """顶层白名单 = Single / Open + Group / Open(task_commission spec
-        裁决 B);裸 Group / Swarm 经嵌套 bind 进入,直接创建拒绝。"""
+    def test_create_projects_top_level_swarm_binding(self):
+        repo = _FakeContextCollabRepository()
+        store = InMemoryMethodStore()
+        service = ContextCollabService(
+            method_store=store,
+            repository=repo,
+            product_catalog=ProductCatalog(()),
+        )
+        created = service.create_collaboration(
+            make_create_command(
+                method_kind="Swarm", product_kind=None, workflow_kind=None
+            ),
+            make_actor(),
+        )
+
+        assert repo.create_calls[0].creation_facts["method_kind"] == "Swarm"
+        [binding] = store.list_bindings(current_axes(), created.collet_id)
+        assert binding.method_kind == "Swarm"
+        assert binding.method_names == ("Swarm",)
+        assert binding.profile_versions == {"Swarm": "0.2"}
+        assert binding.state is BindingState.ACTIVE
+        assert binding.parent_scope_ref is None
+        assert store.list_composition_edges(current_axes(), created.collet_id) == []
+
+    def test_create_rejects_bare_group_top_level(self):
+        """裸 Group 仍仅允许嵌套绑定;Swarm 可直接作为顶层协作方法。"""
         service = ContextCollabService(
             method_store=InMemoryMethodStore(),
             repository=_FakeContextCollabRepository(),
             product_catalog=PRODUCT_CATALOG,
         )
-        for method_kind in ("Group", "Swarm"):
-            with pytest.raises(ContextCollabValidationError, match="top-level"):
-                service.create_collaboration(
-                    make_create_command(method_kind=method_kind), make_actor()
-                )
+        with pytest.raises(ContextCollabValidationError, match="top-level"):
+            service.create_collaboration(
+                make_create_command(method_kind="Group"), make_actor()
+            )
         # 白名单内产品形态照常通过 G1 create 裁决(含 2026-11-13 新入的
         # 顶层单值 Open——任务代办产品的方法形态,spec 裁决 B)。
         service.create_collaboration(

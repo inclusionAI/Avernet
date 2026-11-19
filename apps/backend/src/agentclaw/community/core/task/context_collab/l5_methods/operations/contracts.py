@@ -200,7 +200,7 @@ class SwarmPlanCandidateCommand:
 
 @dataclass
 class SwarmPlanOpCommand:
-    """Swarm 计划状态机操作共用命令(spec §4.3):adopt/start/pause/resume/terminate_plan。"""
+    """Swarm 计划状态机操作共用命令(spec §4.3):adopt/start/pause/resume/terminate/complete_plan。"""
 
     reason: str = ""
 
@@ -225,6 +225,7 @@ class SwarmStageOutcomeCommand:
 
     allocation_refs: list[str] = field(default_factory=list)
     reason: str = ""
+    artifact_refs: tuple[str, ...] = ()
 
 
 @dataclass
@@ -518,7 +519,7 @@ class GroupMethodOpsServiceProtocol(Protocol):
 
 @runtime_checkable
 class SwarmMethodOpsServiceProtocol(Protocol):
-    """Swarm 权威面操作协议,11 操作(spec §4.3);Computation Plane 派发不在本协议(P2)。"""
+    """Swarm 权威面操作协议;外部计划/执行计算不在本协议中。"""
 
     def declare_execution_profile(
         self,
@@ -588,6 +589,17 @@ class SwarmMethodOpsServiceProtocol(Protocol):
         command: SwarmAllocateCommand,
         context: ActorContext,
     ) -> ProfileOpAcceptedResult: ...
+    def complete_plan(
+        self,
+        collab_context_id: str,
+        method_binding_id: str,
+        swarm_plan_id: str,
+        command: SwarmPlanOpCommand,
+        context: ActorContext,
+    ) -> ProfileOpAcceptedResult:
+        """G4 completes only a nonempty plan with succeeded, evidenced stages and done child Tasks."""
+        ...
+
     def complete_stage(
         self,
         collab_context_id: str,
@@ -656,6 +668,7 @@ class OpenMethodOpsServiceProtocol(Protocol):
         The accepted result identifies the resolved binding for later operations.
         """
         ...
+
     def pause_opportunity(
         self,
         collab_context_id: str,
@@ -683,9 +696,7 @@ class OpenMethodOpsServiceProtocol(Protocol):
     def submit_application(
         self, command: OpenApplicationCommand
     ) -> ProfileOpAcceptedResult: ...
-    def screen(
-        self, command: OpenScreenCommand
-    ) -> ProfileOpAcceptedResult: ...
+    def screen(self, command: OpenScreenCommand) -> ProfileOpAcceptedResult: ...
     def reject(
         self,
         collab_context_id: str,
@@ -702,9 +713,7 @@ class OpenMethodOpsServiceProtocol(Protocol):
         command: OpenDecisionOpCommand,
         context: ActorContext,
     ) -> ProfileOpAcceptedResult: ...
-    def admit(
-        self, command: OpenAdmitCommand
-    ) -> ProfileOpAcceptedResult: ...
+    def admit(self, command: OpenAdmitCommand) -> ProfileOpAcceptedResult: ...
     def revoke_admission(
         self,
         collab_context_id: str,

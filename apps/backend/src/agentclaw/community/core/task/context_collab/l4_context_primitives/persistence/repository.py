@@ -4,7 +4,7 @@ No catalog, ProductInstance, Profile or Binding is imported here. Read codecs
 validate optional deployment metadata at the storage boundary; creation is
 self-contained and writes only Collet. Work.start can atomically create the
 root Task, both creation/start Events and their Collet revisions. Explicit
-existing-Work creation remains available for compatibility.
+Task creation also supports already-bound Collets without starting Work.
 """
 
 from __future__ import annotations
@@ -133,11 +133,24 @@ class ContextCollabRepository(Generic[StateT]):
                     "only the Collet initiator may create its Task"
                 )
             existing, _ = load_tasks(db, row)
-            if existing is not None or json.loads(row.creation_facts) != {}:
-                raise ContextCollabValidationError(
-                    "root Task already exists or product is selected"
+            if existing is not None:
+                raise ContextCollabValidationError("root Task already exists")
+            binding_rows = (
+                db.query(ContextCollabEventModel)
+                .filter(
+                    ContextCollabEventModel.collab_context_id == collab_context_id,
+                    ContextCollabEventModel.env == get_current_env(),
                 )
-            facts = {"objective": command.objective, "executor_refs": []}
+                .order_by(ContextCollabEventModel.id.asc())
+                .all()
+            )
+            executors = initial_executor_refs(
+                [_event_from_row(event) for event in binding_rows]
+            )
+            facts = {
+                "objective": command.objective,
+                "executor_refs": [ref.to_dict() for ref in executors],
+            }
             now = datetime.now(timezone.utc)
             updated_collet = replace(
                 collet,
@@ -154,6 +167,7 @@ class ContextCollabRepository(Generic[StateT]):
                 command.completion_conditions,
                 occurred_at=now,
             )
+            record.task = replace(record.task, executor_refs=executors)
             db.add(self._task_row(record.task, now=now))
             db.add(self._event_row(record.initial_event, now=now))
             count = (
@@ -167,7 +181,11 @@ class ContextCollabRepository(Generic[StateT]):
                 .update(
                     {
                         "root_task_ref": record.task.task_id,
-                        "creation_facts": _dump_json(facts),
+                        # Selection metadata is opaque to L4 and must survive
+                        # explicit Task creation unchanged after instantiation.
+                        "creation_facts": row.creation_facts
+                        if json.loads(row.creation_facts)
+                        else _dump_json(facts),
                         "context_version": updated_collet.version,
                         "gmt_modified": now,
                         "collet_metadata": _dump_json(updated_collet.metadata.to_dict())
@@ -240,6 +258,7 @@ class ContextCollabRepository(Generic[StateT]):
             previous = _collet_from_row(row)
             self._record_decoder.validate(row.creation_facts)
             previous_task, _tasks = load_tasks(db, row)
+            root_task = previous_task
             if previous_task is not None and row.root_task_ref is None:
                 old_rows = (
                     db.query(ContextCollabEventModel)
@@ -257,16 +276,27 @@ class ContextCollabRepository(Generic[StateT]):
             now = datetime.now(timezone.utc)
             creating = request.task_creation
             if creating is not None:
+                child = creating.parent_task_ref is not None
+                parent = next(
+                    (t for t in _tasks if t.task_id == creating.parent_task_ref), None
+                )
                 if (
-                    previous_task is not None
+                    (previous_task is not None and not child)
+                    or (
+                        child
+                        and (
+                            parent is None
+                            or creating.principal_ref != parent.principal_ref
+                        )
+                    )
+                    or any(t.task_id == creating.task_id for t in _tasks)
                     or request.event_kind != "task.started"
                     or request.primitive_type != "Task"
                     or request.task_update is None
                     or creating.collet_ref != collab_context_id
-                    or creating.parent_task_ref is not None
                     or creating.status != "created"
                     or creating.version != 1
-                    or creating.principal_ref != previous.initiator_ref
+                    or (not child and creating.principal_ref != previous.initiator_ref)
                     or creating.created_event_ref != creating.last_event_ref
                     or creating.legacy_context_version is not None
                 ):
@@ -280,7 +310,7 @@ class ContextCollabRepository(Generic[StateT]):
                     .order_by(ContextCollabEventModel.id.asc())
                     .all()
                 )
-                if creating.executor_refs != initial_executor_refs(
+                if not child and creating.executor_refs != initial_executor_refs(
                     [_event_from_row(e) for e in binding_rows]
                 ):
                     raise ContextCollabValidationError(
@@ -329,6 +359,14 @@ class ContextCollabRepository(Generic[StateT]):
                 raise ContextCollabValidationError(
                     "Work append requires a versioned TaskUpdate"
                 )
+            if request.task_update is not None and creating is None:
+                previous_task = next(
+                    (t for t in _tasks if t.task_id == request.task_update.task_ref),
+                    previous_task
+                    if previous_task is not None
+                    and previous_task.task_id == request.task_update.task_ref
+                    else None,
+                )
             new_task = previous_task
             if request.task_update is not None:
                 if previous_task is None:
@@ -352,7 +390,7 @@ class ContextCollabRepository(Generic[StateT]):
                     task_version_after=new_task.version,
                 )
             if new_task is not None:
-                if row.root_task_ref is None:
+                if row.root_task_ref is None or creating is not None:
                     db.add(self._task_row(new_task, now=now))
                 elif request.task_update is not None:
                     updated = (
@@ -397,7 +435,9 @@ class ContextCollabRepository(Generic[StateT]):
                 .update(
                     {
                         "current_snapshot": None,
-                        "root_task_ref": new_task.task_id if new_task else None,
+                        "root_task_ref": root_task.task_id
+                        if root_task
+                        else (new_task.task_id if new_task else None),
                         "context_version": context_version,
                         "collet_metadata": (
                             _dump_json(updated_collet.metadata.to_dict())

@@ -165,6 +165,7 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.record
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
+from agentclaw.community.di.modules.swarm_runtime import SwarmRuntimeModule
 from agentclaw.community.di.modules.task_commission_authorization import (
     TaskMethodOpsAuthorizer,
 )
@@ -338,6 +339,7 @@ class TaskModule(Module):
         # Todo is a Task subdomain, like BBS/forum. Keep its bindings behind
         # the Task composition boundary instead of installing a peer module.
         binder.install(TaskTodoBindings())
+        binder.install(SwarmRuntimeModule())
         # TaskGraphService remains directly constructible for lightweight test
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.

@@ -1,17 +1,17 @@
 """L5 Swarm 服务计划面操作切片(spec §4.3):profile 声明、计划提交、
 结构校验报告与七节点计划状态机。
 
-八个用例:``declare_execution_profile`` / ``submit_plan_candidate`` /
+计划用例:``declare_execution_profile`` / ``submit_plan_candidate`` /
 ``validate_plan`` / ``adopt_plan`` / ``start_plan`` / ``pause_plan`` /
-``resume_plan`` / ``terminate_plan``。状态转换一律经 G4 声明式机器
+``resume_plan`` / ``terminate_plan`` / ``complete_plan``。状态转换一律经 G4 声明式机器
 (``METHOD_MACHINE_REGISTRY["swarm_plan"]``,``resolve_transition``
-同构)裁决;计划状态机 COMPLETED / FAILED 两态无对应 P1 操作
-(swarm.plan.complete / fail 事件留给 P2 执行面回写),词汇按机器保留。
+同构)裁决;complete_plan 核验阶段产物、独立子 Task 和 allocation 后
+经 swarm.plan.complete 迁移;FAILED 仍无对应执行面操作。
 结构校验单点在值对象模块 ``swarm_profile.structural_violations``,
 ``ValidatePlan`` 出报告不动状态、``AdoptPlan`` 重跑同一份裁决
 ("未 Validate 通过的拒绝")。
 
-双平面边界(spec §2):Computation Plane 派发 P1 不实现。
+双平面边界(spec §2):外部计算不在计划权威面实现。
 ``SubmitPlanCandidate`` 自建一行 provenance ``SwarmExecutionRecord``
 (operation_ref 指向本次提交、external_execution_id 即来源操作审计
 标识、state=SUBMITTED,作者裁决),record 只增不改、永不触碰权威行。
@@ -109,7 +109,7 @@ def _resolve_plan_state(from_state: str, event: str) -> str:
 
 
 class SwarmPlanOpsMixin(SwarmMethodServiceBase):
-    """计划面八操作(plan 机器裁决 + 结构校验单点 + provenance 行)。"""
+    """计划面操作(plan 机器裁决 + 结构校验单点 + provenance 行)。"""
 
     def _transition_plan(
         self,
@@ -122,7 +122,7 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
         command: SwarmPlanOpCommand,
         event: str,
     ) -> ProfileOpAcceptedResult:
-        """adopt/start/pause/resume/terminate 四态机操作共用编排:
+        """adopt/start/pause/resume/terminate/complete 状态机操作共用编排:
         加载 → 机器裁决 → 换新冻结实例(审计四字段)→ 覆写一次。"""
         plan = self._require_plan(
             axes, collab_context_id, method_binding_id, swarm_plan_id
@@ -145,6 +145,65 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
             object_kind="swarm_plan",
             object_id=swarm_plan_id,
             state=new_state,
+        )
+
+    def complete_plan(
+        self,
+        collab_context_id: str,
+        method_binding_id: str,
+        swarm_plan_id: str,
+        command: SwarmPlanOpCommand,
+        context: ActorContext,
+    ) -> ProfileOpAcceptedResult:
+        """A planner's finished decision is a proposal, never completion authority.
+
+        Require every Stage to have artifacts and an independently done child
+        Task, no live allocation, and a nonempty termination contract. Product
+        root Work acceptance remains a separate G1/G4 operation.
+        """
+        axes = self._gate(
+            "complete_plan", collab_context_id, method_binding_id, context
+        )
+        plan = self._require_plan(
+            axes, collab_context_id, method_binding_id, swarm_plan_id
+        )
+        stages = self._plan_stages(
+            axes, collab_context_id, method_binding_id, swarm_plan_id
+        )
+        record = self._collab_repo.get_current_status(collab_context_id)
+        tasks = {t.task_id: t for t in record.tasks} if record is not None else {}
+        if (
+            not plan.termination_condition
+            or not stages
+            or len({s.task_ref for s in stages}) != len(stages)
+            or any(
+                s.state is not StageState.SUCCEEDED
+                or not s.output_artifact_refs
+                or s.task_ref not in tasks
+                or tasks[s.task_ref].status != "done"
+                or tasks[s.task_ref].parent_task_ref != plan.task_ref
+                for s in stages
+            )
+            or any(
+                a.stage_ref in {s.stage_id for s in stages}
+                and a.state.value == "ACTIVE"
+                for a in self._store.list_allocations(
+                    axes, method_binding_id, collab_context_id
+                )
+            )
+        ):
+            raise ContextCollabValidationError(
+                "Swarm completion requires succeeded evidenced Stages and done child Tasks"
+            )
+        return self._transition_plan(
+            "complete_plan",
+            collab_context_id,
+            method_binding_id,
+            swarm_plan_id,
+            axes,
+            context,
+            command,
+            "swarm.plan.complete",
         )
 
     def declare_execution_profile(
@@ -264,7 +323,7 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
                     {
                         "stage_id": entry.get("stage_id"),
                         "swarm_plan_ref": plan_id,
-                        "task_ref": command.task_ref,
+                        "task_ref": entry.get("task_ref", command.task_ref),
                         "name": entry.get("name"),
                         "dependency_stage_refs": list(
                             entry.get("dependency_stage_refs", [])

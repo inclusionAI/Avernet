@@ -2,8 +2,8 @@
 
 BBS 公开讨论使用 ``Open + Group``,团队代办使用 ``Single``,
 公开申请代办使用 ``Open + Single``;
-``Group`` / ``Open`` / ``Swarm`` 为核心方法单值,按 spec §12.4 仅经嵌套
-bind 进入(顶层 wire 拒绝在 G1 接缝裁决),G3 演进对象暂不引入,
+``Group`` / ``Open`` / ``Swarm`` 为核心方法单值;Open 和 Swarm 可在顶层
+绑定,Group 当前仅经嵌套 bind 进入(由 G1 接缝裁决),G3 演进对象暂不引入,
 未知 wire 值抛 ``ContextCollabValidationError``。
 
 ``MethodBinding`` 是方法绑定的冻结值对象(spec §3.2 字段 + §12 + §6.3
@@ -34,7 +34,7 @@ class MethodKind(str, Enum):
     # 产品声明的复合 wire 值;按现有复合顶层绑定表达。
     OPEN_GROUP = "Open + Group"
     OPEN_SINGLE = "Open + Single"
-    # 核心方法单值(ACCS-301–304),嵌套绑定使用。
+    # 核心方法单值(ACCS-301–304),可嵌套绑定;顶层准入由 G1 裁决。
     GROUP = "Group"
     OPEN = "Open"
     SWARM = "Swarm"

@@ -251,6 +251,7 @@ _STAGE_FIELDS = (
     "requirement_refs",
     "input_artifact_refs",
     "output_artifact_roles",
+    "output_artifact_refs",
     "completion_condition",
     "state",
     "transitioned_from",
@@ -426,6 +427,7 @@ class Stage:
     transition_reason: str = ""
     transitioned_by: str = ""
     transitioned_at: str = ""
+    output_artifact_refs: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict) -> "Stage":
@@ -446,6 +448,7 @@ class Stage:
                 f"unknown field(s) in Stage: {sorted(unknown)}"
             )
         return cls(
+            output_artifact_refs=_str_tuple(data, "output_artifact_refs", "Stage"),
             stage_id=_required_str(data, "stage_id", "Stage"),
             swarm_plan_ref=_required_str(data, "swarm_plan_ref", "Stage"),
             task_ref=_required_str(data, "task_ref", "Stage"),
@@ -482,6 +485,7 @@ class Stage:
             "requirement_refs": list(self.requirement_refs),
             "input_artifact_refs": list(self.input_artifact_refs),
             "output_artifact_roles": list(self.output_artifact_roles),
+            "output_artifact_refs": list(self.output_artifact_refs),
             "completion_condition": self.completion_condition,
             "state": self.state.value,
             "transitioned_from": self.transitioned_from,

@@ -59,6 +59,8 @@ class ProductProfileCreateCommand:
     workflow: WorkflowProfile | None = None
     task_contract_ref: VersionedProfileRef | None = None
     participant_scope: ParticipantScope = ParticipantScope()
+    # None explicitly means no autonomous Swarm coordination capability.
+    swarm_plan_service_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -162,9 +164,9 @@ class ProductInstantiationServiceProtocol(Protocol):
         Initial participants/roles and input resource references are bound at
         Collet scope in the same SQL transaction as the selection, without
         creating a Task or granting resource access. A binding Event advances
-        Collet; root_task_ref stays None until Work.start. For pre-existing
-        untouched Work, preserve its initial evidence
-        and advance Task/Collet when assigning. SQL selection and MethodStore
+        Collet; root_task_ref stays None until explicit L4 create_task or Work.start.
+        For pre-existing untouched Work, preserve its initial evidence and advance
+        Task/Collet when assigning. SQL selection and MethodStore
         remain separate transactions;
         binding errors propagate and existing recovery repairs missing bindings.
         """

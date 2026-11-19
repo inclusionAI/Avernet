@@ -221,6 +221,8 @@ class ProductProfileDefinition:
     # With a legacy workflow, None preserves its existing Task/action contract.
     task_contract_ref: VersionedProfileRef | None = None
     participant_scope: ParticipantScope = ParticipantScope()
+    # None explicitly means no autonomous Swarm coordination capability.
+    swarm_plan_service_ref: str | None = None
 
 
 @dataclass(frozen=True)

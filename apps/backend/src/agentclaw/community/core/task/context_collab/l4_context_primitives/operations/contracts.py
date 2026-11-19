@@ -59,7 +59,7 @@ class ColletCreateCommand:
 
 @dataclass(frozen=True)
 class TaskCreateCommand:
-    """Explicit root Work creation in an existing Collet, without assignment."""
+    """Create unstarted root Work; inherit any existing Collet executor bindings."""
 
     expected_version: int
     principal_ref: PrincipalRef
@@ -131,11 +131,15 @@ class AppendEventRecordRequest:
     visibility: str
     payload: dict
     task_update: TaskUpdate | None = None
-    # Internal L4-only draft, persisted atomically with task.created + task.started.
+    # Internal authorized root/child draft; atomic task.created + task.started.
     task_creation: Task | None = None
 
 
 class CollaborationRecord(Protocol):
+    @property
+    def tasks(self) -> tuple[Task, ...]: ...
+    @property
+    def events(self) -> list[EventRecord]: ...
     @property
     def collet(self) -> Collet: ...
     @property
