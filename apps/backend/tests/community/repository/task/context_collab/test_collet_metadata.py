@@ -270,16 +270,20 @@ def test_unknown_retired_schema_marker_still_fails_without_writes(
 
 
 def test_collaboration_intent_persists_through_read_and_audit_append(repository, db):
-    original = create(repository).collet
-    metadata = replace(
-        original.metadata,
+    command = ColletCreateCommand(
+        RESPONSIBLE,
         objective="实现计算器求和并提交 PR 草稿",
         acceptance_criteria="求和功能正确；单元测试通过；PR 草稿包含测试结果",
     )
+    original = repository.create_l4_collet(command, CREATOR).collet
+    metadata = original.metadata
+    assert metadata.objective == command.objective
+    assert metadata.acceptance_criteria == command.acceptance_criteria
     with db.orm_session() as session:
-        session.query(ContextCollabColletModel).one().collet_metadata = json.dumps(
-            metadata.to_dict()
+        stored = json.loads(
+            session.query(ContextCollabColletModel).one().collet_metadata
         )
+        assert stored == metadata.to_dict()
     current = repository.get_current_status(original.collet_id).collet
     assert current.metadata == metadata
     saved = repository.append_event(original.collet_id, message()).collet

@@ -102,8 +102,8 @@ class Collet:
     and Task-to-Collet aggregation do not populate it yet. Empty artifacts are
     omitted from the representation to preserve existing shapes and ETags.
     resources contains L4 ResourceBinding values, not resource bodies or Grants.
-    It is model-only, defaults to empty and is also omitted when empty; existing
-    event-based resource binding facts do not populate it automatically.
+    It defaults to empty and is omitted when empty. Explicit Collet creation can
+    supply it; existing event-based binding facts do not populate it automatically.
     """
 
     collet_id: str

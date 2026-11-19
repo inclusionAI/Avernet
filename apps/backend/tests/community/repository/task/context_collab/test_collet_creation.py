@@ -77,7 +77,13 @@ def test_create_only_context_without_work_or_upper_access(runtime, db):
         "initiator_ref",
         "title",
         "description",
+        "objective",
+        "acceptance_criteria",
+        "resources",
     }
+    assert command.resources == collet.resources == ()
+    assert command.objective == command.acceptance_criteria == ""
+    assert collet.metadata.objective == collet.metadata.acceptance_criteria == ""
     assert record.collet == collet and collet.version == 1 and collet.scope is None
     assert record.task is None and record.tasks == () and record.events == []
     assert record.creation_facts == {} and record.product_instance is None
@@ -163,6 +169,19 @@ def test_invalid_executor_collection_rejected(refs):
         _command(executor_refs=refs)
 
 
+@pytest.mark.parametrize("name", ["objective", "acceptance_criteria"])
+@pytest.mark.parametrize("value", [None, 1, False, [], {}, ("criterion",)])
+def test_collet_command_rejects_non_string_intent(name, value):
+    with pytest.raises(ContextCollabValidationError, match=name):
+        _command(**{name: value})
+
+
+@pytest.mark.parametrize("name", ["objective", "acceptance_criteria"])
+@pytest.mark.parametrize("value", ["", "  ", "实现计算器求和并通过测试"])
+def test_collet_command_accepts_string_intent(name, value):
+    assert getattr(_command(**{name: value}), name) == value
+
+
 @pytest.mark.parametrize("objective", [None, "", "  ", 1])
 def test_objective_required(objective):
     with pytest.raises(ContextCollabValidationError, match="objective"):
@@ -173,7 +192,7 @@ def test_objective_required(objective):
     "extra",
     [
         "to_space",
-        "objective",
+        "completion_conditions",
         "product_profile_ref",
         "profile_id",
         "method_kind",
@@ -426,14 +445,23 @@ def test_task_creation_preserves_responsible_principal_and_completion_conditions
     runtime,
 ):
     service, repo = runtime
-    collet = service.create_collet(_command(), OWNER)
+    collet = service.create_collet(
+        _command(objective="协作目标", acceptance_criteria="协作验收标准"), OWNER
+    )
+    before = repo.get_current_status(collet.collet_id)
+    assert before.task is None and before.tasks == () and before.events == []
+    assert before.collet.metadata.objective == "协作目标"
+    assert before.collet.metadata.acceptance_criteria == "协作验收标准"
     responsible = PrincipalRef("human", "responsible")
     command = TaskCreateCommand(1, responsible, "Deliver work", ("Owner accepts",))
     task = service.create_task(collet.collet_id, command, OWNER)
     record = repo.get_current_status(collet.collet_id)
     assert record.task == task
     assert task.principal_ref == responsible != collet.initiator_ref
+    assert task.objective == "Deliver work"
     assert task.completion_conditions == ("Owner accepts",)
+    assert record.collet.metadata.objective == "协作目标"
+    assert record.collet.metadata.acceptance_criteria == "协作验收标准"
     assert task.executor_refs == ()
     assert record.events[0].actor_ref == OWNER.actor
 

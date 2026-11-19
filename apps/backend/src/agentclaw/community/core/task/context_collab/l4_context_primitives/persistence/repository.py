@@ -544,6 +544,11 @@ class ContextCollabRepository(Generic[StateT]):
                 if collet.metadata is not None
                 else None
             ),
+            resources=json.dumps(
+                [resource.to_dict() for resource in collet.resources],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
             creation_facts=creation_facts_json,
             current_snapshot=None,
             root_task_ref=task.task_id if task else None,

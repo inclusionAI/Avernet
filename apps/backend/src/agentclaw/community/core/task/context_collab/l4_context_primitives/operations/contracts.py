@@ -18,6 +18,9 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    ResourceRef,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
@@ -27,6 +30,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_m
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.resource_binding import (
+    ResourceBinding,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
@@ -38,14 +44,20 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
 class ColletCreateCommand:
     """Create only a bounded context; no Space, Work or product selection.
 
-    title/description describe the context. Schema/revision/audit are server-owned.
-    Task objectives belong to Work.start (or explicit existing-Work creation);
-    participants and scoped role bindings come from Product Instantiate.
+    title/description describe the context; objective/acceptance_criteria describe
+    collaboration intent without initializing Work. resources supplies typed context
+    references, not Grants. Revision/audit are server-owned.
+    Task objectives and completion conditions are supplied independently through
+    Work.start or explicit Task creation. Participants and scoped role bindings
+    come from Product Instantiate.
     """
 
     initiator_ref: PrincipalRef
     title: str | None = field(default=None, kw_only=True)
     description: str | None = field(default=None, kw_only=True)
+    objective: str = field(default="", kw_only=True)
+    acceptance_criteria: str = field(default="", kw_only=True)
+    resources: tuple[ResourceBinding, ...] = field(default=(), kw_only=True)
 
     def __post_init__(self) -> None:
         if not isinstance(self.initiator_ref, PrincipalRef):
@@ -55,6 +67,19 @@ class ColletCreateCommand:
         PrincipalRef.from_dict(self.initiator_ref.to_dict())
         validate_collet_text(self.title, "title")
         validate_collet_text(self.description, "description")
+        for name in ("objective", "acceptance_criteria"):
+            if not isinstance(getattr(self, name), str):
+                raise ContextCollabValidationError(f"Collet.{name} must be a string")
+        if not isinstance(self.resources, tuple) or any(
+            not isinstance(resource, ResourceBinding)
+            or not isinstance(resource.resource_ref, ResourceRef)
+            for resource in self.resources
+        ):
+            raise ContextCollabValidationError(
+                "Collet.resources must be a tuple of L4 ResourceBinding values"
+            )
+        for resource in self.resources:
+            ResourceBinding.from_dict(resource.to_dict())
 
 
 @dataclass(frozen=True)
@@ -110,7 +135,7 @@ class ColletWriter(Protocol):
     def create_l4_collet(
         self, command: ColletCreateCommand, actor_ref: PrincipalRef
     ) -> CreatedCollet:
-        """Persist only Collet identity/description/audit, without Work or bindings."""
+        """Persist Collet identity/description/intent/audit, without Work or bindings."""
         ...
 
 
