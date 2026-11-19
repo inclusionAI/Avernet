@@ -44,6 +44,10 @@ from agentclaw.community.core.task.context_collab.l6_products.participant_scope 
 class ProductProfileCreateCommand:
     """Author an exact immutable definition; domain/orchestration are optional.
 
+    Omitted scenario_roles (empty tuple) resolve standard ownership/execution
+    roles at authoring time. Governance and compatibility default to the fixed
+    local G1-G4 / ACCS 0.2 L2-L5 contracts, never to disabled checks. Explicit
+    values retain their existing validation; None is not a valid replacement.
     Without workflow, a fixed versioned standard Task contract still applies.
     ``domain=None`` uses standard L3/L4 terms. Method-specific product policies
     belong to each ``MethodTemplate.policy``; omission declares none.
@@ -55,10 +59,18 @@ class ProductProfileCreateCommand:
     # Empty means standard roles resolved during authoring, never no authorization.
     scenario_roles: tuple[ScenarioRole, ...] = ()
     governance: GovernanceRequirements = GovernanceRequirements(
-        "g1.structural/1", "g2.optimistic-version/1", "g3.event-projection/1", "g4.product-contract/1"
+        "g1.structural/1",
+        "g2.optimistic-version/1",
+        "g3.event-projection/1",
+        "g4.product-contract/1",
     )
     compatibility: CompatibilityRequirements = CompatibilityRequirements(
-        "0.2", ("L2", "L3", "L4", "L5"), (), (), "reject_missing_required", "new_instances_only"
+        "0.2",
+        ("L2", "L3", "L4", "L5"),
+        (),
+        (),
+        "reject_missing_required",
+        "new_instances_only",
     )
     domain: DomainProfile | None = None
     workflow: WorkflowProfile | None = None

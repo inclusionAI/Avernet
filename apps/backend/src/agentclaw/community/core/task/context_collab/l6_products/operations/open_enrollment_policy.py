@@ -3,6 +3,18 @@
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     ContextCollabAuthorizerProtocol,
 )
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    EventAppendCommand,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.service_ports import (
+    WorkLifecycle,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
+    ContextStatusRecord,
+)
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
@@ -27,7 +39,12 @@ class OpenEnrollmentCollaborationPolicy(ProductCollaborationPolicy):
         super().__init__(catalog, authorizer)
         self.store = store
 
-    def validate_append(self, state, command, context):
+    def validate_append(
+        self,
+        state: ContextStatusRecord,
+        command: EventAppendCommand,
+        context: ActorContext,
+    ) -> WorkLifecycle:
         if command.event_kind in {
             "task.started",
             "task.progress.updated",

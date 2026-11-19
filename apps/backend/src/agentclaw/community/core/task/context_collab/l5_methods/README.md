@@ -183,14 +183,33 @@ review alone grants no participation. Capacity covers all seven simultaneous
 applications, not just the five eventual admissions. Admission creates correlated
 scoped Participant/Decision evidence, not a placeholder Swarm allocation.
 
-The existing L4 worker roles must still be supplied at Instantiate. They are not
-proof of Open admission, and Open does not dynamically create Swarm role facts.
-This journey explicitly checks the five admissions before creating unstarted
-root Work and waking the Driver; generic SwarmDriver does not add an automatic
-Open admission guard. It verifies every executed worker against admission
-evidence, each Stage and child Task's artifacts, released allocations and completed
-Swarm. Root submission and owner acceptance remain separate operations.
-Planning and worker computation remain local doubles; the verification worker runs real unittest cases. No live Bot/LLM/PR is exercised.
+The product does not preassign these applicants or their worker roles at
+Instantiate. It omits scenario-role/governance/compatibility boilerplate and uses
+safe resolved L6 defaults. At runtime, published role requirements and actual
+admission supply the recruited team's L4 facts through bounded
+[L6 pre-Work enrollment](../l6_products/README.md#runtime-open-enrollment-for-swarm).
+Open.admit itself still creates scoped participation evidence, not a Swarm
+allocation, resource Grant or Task. Initial ProductInstance role refs stay pinned;
+current L4 participation includes the append-only enrollment delta.
+
+[`operations/open/participation.py`](operations/open/participation.py) rechecks
+the current ACTIVE Open binding, ADMITTED application, correlated decision and
+scoped participant before enrolled Swarm planning, role-based allocation and
+worker reports. Revocation cannot be bypassed using retained role facts. This
+L5-owned validation never imports L6; fixed-team Swarms without enrollment retain
+their original behavior. The product-aware L4 policy independently guards root
+start/progress/submission. SQL and MethodStore still have no distributed
+transaction, and typed AgentRef mapping does not verify remote identity.
+
+After recruitment/enrollment, explicit L4 creation leaves root Work unstarted;
+Driver wake performs the real L4/G1/G4 start. The journey verifies every executed
+worker against admission evidence, each Stage and child Task's artifacts,
+released allocations and completed Swarm. Root submission and owner acceptance
+remain separate operations. Planning and worker computation remain local doubles;
+the verification worker runs real unittest cases. No live Bot/LLM/PR is exercised.
+[Enrollment regressions](../../../../../../../tests/community/core/task/context_collab/products/test_open_swarm_enrollment.py)
+cover late-bound identities, authorization/evidence rejection, revocation and
+pre-Work/write-failure fences.
 
 ## Bounded Swarm coordination
 

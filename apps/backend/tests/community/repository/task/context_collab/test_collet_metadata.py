@@ -12,9 +12,6 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
-    COLLET_SCHEMA_VERSION,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     AppendEventRecordRequest,
     ColletCreateCommand,
@@ -75,7 +72,7 @@ def test_creation_persists_complete_metadata_separate_from_task_and_product_fact
     assert not hasattr(record, "task")
     assert before <= collet.created_at == collet.updated_at <= after
     assert collet.version == 1
-    assert collet.schema_version == COLLET_SCHEMA_VERSION
+    assert "schema_version" not in collet.to_dict()
     assert collet.title == "协作上下文"
     assert collet.description == "一次有界的交付与验收协作"
     state = repository.get_current_status(collet.collet_id)
@@ -110,7 +107,6 @@ def test_append_updates_audit_atomically_but_preserves_creation_and_task(
     assert (
         current.title == original.title and current.description == original.description
     )
-    assert current.schema_version == original.schema_version
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
         assert json.loads(row.collet_metadata) == current.metadata.to_dict()
@@ -226,3 +222,87 @@ def test_corrupt_or_partial_metadata_fails_read_and_append_without_writes(
         row = session.query(ContextCollabColletModel).one()
         assert row.context_version == 1 and row.root_task_ref is None
         assert row.collet_metadata == bad
+
+
+def test_retired_schema_marker_reads_without_rewrite_and_is_removed_on_append(
+    repository, db
+):
+    original = create(repository).collet
+    legacy_metadata = {**original.metadata.to_dict(), "schema_version": "1.1"}
+    stored = json.dumps(legacy_metadata)
+    with db.orm_session() as session:
+        session.query(ContextCollabColletModel).one().collet_metadata = stored
+
+    current = repository.get_current_status(original.collet_id).collet
+    assert current == original
+    assert "schema_version" not in current.to_dict()
+    with db.orm_session() as session:
+        assert session.query(ContextCollabColletModel).one().collet_metadata == stored
+
+    saved = repository.append_event(original.collet_id, message()).collet
+    assert saved.created_at == original.created_at
+    assert saved.created_by == original.created_by
+    assert saved.version == original.version + 1
+    with db.orm_session() as session:
+        metadata = json.loads(
+            session.query(ContextCollabColletModel).one().collet_metadata
+        )
+        assert metadata == saved.metadata.to_dict()
+        assert "schema_version" not in metadata
+
+
+@pytest.mark.parametrize("value", [None, 1.1, "unknown"])
+def test_unknown_retired_schema_marker_still_fails_without_writes(
+    repository, db, value
+):
+    original = create(repository).collet
+    stored = json.dumps({**original.metadata.to_dict(), "schema_version": value})
+    with db.orm_session() as session:
+        session.query(ContextCollabColletModel).one().collet_metadata = stored
+    with pytest.raises(ContextCollabValidationError, match="collet_metadata"):
+        repository.get_current_status(original.collet_id)
+    with pytest.raises(ContextCollabValidationError, match="collet_metadata"):
+        repository.append_event(original.collet_id, message())
+    with db.orm_session() as session:
+        row = session.query(ContextCollabColletModel).one()
+        assert row.collet_metadata == stored
+        assert row.context_version == original.version
+
+
+def test_collaboration_intent_persists_through_read_and_audit_append(repository, db):
+    original = create(repository).collet
+    metadata = replace(
+        original.metadata,
+        objective="实现计算器求和并提交 PR 草稿",
+        acceptance_criteria="求和功能正确；单元测试通过；PR 草稿包含测试结果",
+    )
+    with db.orm_session() as session:
+        session.query(ContextCollabColletModel).one().collet_metadata = json.dumps(
+            metadata.to_dict()
+        )
+    current = repository.get_current_status(original.collet_id).collet
+    assert current.metadata == metadata
+    saved = repository.append_event(original.collet_id, message()).collet
+    assert saved.metadata.objective == metadata.objective
+    assert saved.metadata.acceptance_criteria == metadata.acceptance_criteria
+    assert saved.created_at == original.created_at
+    assert saved.updated_by == REPORTER
+    with db.orm_session() as session:
+        stored = json.loads(
+            session.query(ContextCollabColletModel).one().collet_metadata
+        )
+        assert stored == saved.metadata.to_dict()
+
+
+def test_stored_metadata_without_collaboration_intent_remains_readable(repository, db):
+    original = create(repository).collet
+    legacy = original.metadata.to_dict()
+    del legacy["objective"], legacy["acceptance_criteria"]
+    stored = json.dumps(legacy)
+    with db.orm_session() as session:
+        session.query(ContextCollabColletModel).one().collet_metadata = stored
+    current = repository.get_current_status(original.collet_id).collet
+    assert current.metadata.objective == current.metadata.acceptance_criteria == ""
+    assert current.created_at == original.created_at
+    with db.orm_session() as session:
+        assert session.query(ContextCollabColletModel).one().collet_metadata == stored

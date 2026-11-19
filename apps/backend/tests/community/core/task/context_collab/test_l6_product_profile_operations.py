@@ -629,3 +629,88 @@ def test_optional_policy_is_co_located_but_not_selected(command):
     assert profile.composition.optional_methods[0] is optional
     with pytest.raises(ContextCollabValidationError, match="exactly one Swarm"):
         profile.composition.require_policy("Swarm")
+
+
+def test_authoring_can_omit_roles_governance_and_compatibility():
+    profile = create_product_profile(
+        ProductProfileCreateCommand(
+            ref=VersionedProfileRef("minimal_swarm", 1),
+            composition=MethodCompositionTemplate(
+                (MethodTemplate(get_profile("Swarm", "0.2")),)
+            ),
+        )
+    )
+    assert {(r.l4_role, r.participant_source) for r in profile.scenario_roles} == {
+        (ROLE_RESPONSIBLE_USER, "principal_ref"),
+        (ROLE_SELECTED_AGENT, "executor_ref"),
+    }
+    assert profile.governance == GovernanceRequirements(
+        "g1.structural/1",
+        "g2.optimistic-version/1",
+        "g3.event-projection/1",
+        "g4.product-contract/1",
+    )
+    assert profile.compatibility == CompatibilityRequirements(
+        "0.2",
+        ("L2", "L3", "L4", "L5"),
+        (),
+        (),
+        "reject_missing_required",
+        "new_instances_only",
+    )
+    catalog = ProductCatalog((profile,))
+    offer = catalog.capabilities()
+    assert negotiate(profile, offer).accepted
+    assert not negotiate(profile, replace(offer, governance=())).accepted
+    assert not negotiate(profile, replace(offer, layers=())).accepted
+
+
+def test_default_open_roles_use_policy_names_and_defer_real_applicants():
+    command = ProductProfileCreateCommand(
+        ref=VersionedProfileRef("minimal_open", 1),
+        composition=MethodCompositionTemplate(
+            (
+                MethodTemplate(
+                    get_profile("Open", "0.2"), OpenMethodPolicy(_publication())
+                ),
+            )
+        ),
+    )
+    profile = create_product_profile(command)
+    assert [(r.name, r.participant_source) for r in profile.scenario_roles] == [
+        ("owner", "principal_ref"),
+        ("assignee", "open_admission"),
+    ]
+    assert all(r.agent_ref is None for r in profile.scenario_roles)
+    assert profile.composition == command.composition
+
+
+def test_default_self_application_roles_keep_designated_executor():
+    command = ProductProfileCreateCommand(
+        ref=VersionedProfileRef("minimal_self_application", 1),
+        composition=MethodCompositionTemplate(
+            (
+                MethodTemplate(
+                    get_profile("Open", "0.2"),
+                    OpenMethodPolicy(
+                        OpenPublicationProfile(
+                            BotSelfApplicationAdmission(
+                                applicant_role="assignee",
+                                accountable_role="owner",
+                                participation_type=ParticipationType.COLLET_PARTICIPANT,
+                                capacity=1,
+                            )
+                        )
+                    ),
+                ),
+            )
+        ),
+    )
+    profile = create_product_profile(command)
+    assert profile.scenario_roles[1].participant_source == "executor_ref"
+
+
+@pytest.mark.parametrize("field", ["scenario_roles", "governance", "compatibility"])
+def test_omission_defaults_do_not_make_explicit_none_valid(command, field):
+    with pytest.raises(ContextCollabValidationError):
+        create_product_profile(replace(command, **{field: None}))

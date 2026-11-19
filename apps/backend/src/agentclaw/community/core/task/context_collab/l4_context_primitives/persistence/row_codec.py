@@ -48,7 +48,14 @@ def _collet_from_row(
     metadata = None
     if row.collet_metadata is not None:
         try:
-            metadata = ColletMetadata.from_dict(json.loads(row.collet_metadata))
+            data = json.loads(row.collet_metadata)
+            # Retired marker is accepted only at the stored-row boundary.
+            if isinstance(data, dict) and "schema_version" in data:
+                if data.pop("schema_version") != "1.1":
+                    raise ContextCollabValidationError(
+                        "unsupported legacy Collet schema_version"
+                    )
+            metadata = ColletMetadata.from_dict(data)
         except (json.JSONDecodeError, ContextCollabValidationError) as error:
             raise ContextCollabValidationError(
                 f"collaboration context {row.collab_context_id!r} has invalid "

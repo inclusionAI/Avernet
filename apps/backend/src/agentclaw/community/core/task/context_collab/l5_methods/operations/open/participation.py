@@ -1,5 +1,16 @@
 """Read-only correlation of Open admission and retained runtime role evidence."""
 
+from typing import Sequence
+
+from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
+    EventRecord,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    ScopedParticipantBinding,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
+)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
@@ -10,6 +21,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
     BindingState,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    AdmissionDecision,
+    OpenOpportunity,
+    ParticipationApplication,
     ApplicationState,
     ParticipationType,
 )
@@ -18,7 +32,18 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 )
 
 
-def require_admission_evidence(store, collet_id, binding_id, application_ref, agent_id):
+def require_admission_evidence(
+    store: MethodStoreProtocol,
+    collet_id: str,
+    binding_id: str,
+    application_ref: str,
+    agent_id: str,
+) -> tuple[
+    ParticipationApplication,
+    OpenOpportunity,
+    AdmissionDecision,
+    ScopedParticipantBinding,
+]:
     """Neither an application state nor a scoped binding alone grants authority."""
     axes = current_axes()
     binding = store.get_binding(axes, binding_id, collet_id)
@@ -74,7 +99,9 @@ def require_admission_evidence(store, collet_id, binding_id, application_ref, ag
     return application, opportunity, decision, participant
 
 
-def validate_enrolled_participation(collet_id, events, store) -> None:
+def validate_enrolled_participation(
+    collet_id: str, events: Sequence[EventRecord], store: MethodStoreProtocol
+) -> None:
     """Recheck live admission before Swarm planning, execution and worker reports.
 
     Fixed-team Swarms have no enrollment event and retain existing behavior.
