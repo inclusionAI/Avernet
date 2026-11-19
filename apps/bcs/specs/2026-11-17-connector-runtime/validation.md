@@ -124,6 +124,30 @@ Fixed with a test: a rejection of a resend, after a start whose outcome was
 unknown, leaves the call unresolved instead of failing it; the rejection says
 nothing about the earlier send.
 
+## Rebase onto the Worker and Gateway changes (2026-11-19)
+
+`dev` gained the Gateway (`bcs-service-api` 7.0.0), the Worker coordination
+provider and the Worker's facade. Adapted here:
+
+- `bcs-service-api` is 7.1.0 for the Connector core contract (planned as
+  6.2.0; the plan foresaw this case).
+- `MembershipPort` changed: `register` takes a control address, `retire` is
+  new, `members` returns `MemberRecord`. The engine passes the new
+  `ConnectorConfig::control_address` (empty until a control endpoint is
+  wired). `retire` is not called by the Connector yet.
+- A real membership provider now exists (`bcs_dist_store::coordination`).
+  `PendingMembership` stays as the stub a Connector runs with when the
+  composition injects none; this change does not wire the real one.
+- `bcs-app-dist-runtime` now holds the Worker's facade in `lib.rs`; the
+  Connector's stays in `connector.rs` beside it.
+- The shared inbox provider needs a document store; the test store wrapper
+  implements it.
+
+Tests after the rebase: `bcs-dist-connector` 77, `bcs-dist-connector-store`
+48, and the suites of `bcs-a2a-http`, `bcs-dist-store`,
+`bcs-app-dist-runtime`, `bcs-service-api`, `bcs-test-support` pass;
+`cargo check --locked --workspace` passes.
+
 ## Not run, and why
 
 - `cargo nextest` and the coverage gates (changed-line > 85 %, singlebox E2E):
