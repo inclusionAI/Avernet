@@ -437,8 +437,13 @@ impl DistGatewayService for Script {
         self.call("DistGatewayService::submit", (caller, request))
     }
 
-    async fn get_task(&self, caller: &GatewayCaller, tid: &Tid) -> Result<TaskView, GatewayError> {
-        self.call("DistGatewayService::get_task", (caller, tid))
+    async fn get_task(
+        &self,
+        caller: &GatewayCaller,
+        group: &GroupId,
+        tid: &Tid,
+    ) -> Result<TaskView, GatewayError> {
+        self.call("DistGatewayService::get_task", (caller, group, tid))
     }
 
     async fn subscribe(
@@ -447,6 +452,14 @@ impl DistGatewayService for Script {
         request: SubscribeTask,
     ) -> Result<TaskSubscription, GatewayError> {
         self.call("DistGatewayService::subscribe", (caller, request))
+    }
+
+    async fn wait_task(
+        &self,
+        caller: &GatewayCaller,
+        request: WaitTask,
+    ) -> Result<TaskView, GatewayError> {
+        self.call("DistGatewayService::wait_task", (caller, request))
     }
 
     async fn cancel(
@@ -496,6 +509,14 @@ impl DistGatewayCoreService for Script {
         command: AdmitTaskCommand,
     ) -> Result<CoreAdmission, DistGatewayCoreError> {
         self.call("DistGatewayCoreService::admit", (scope, command))
+    }
+
+    async fn session_group(
+        &self,
+        scope: &TaskScope,
+        sid: &Sid,
+    ) -> Result<GroupId, DistGatewayCoreError> {
+        self.call("DistGatewayCoreService::session_group", (scope, sid))
     }
 
     async fn restore_task(

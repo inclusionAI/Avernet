@@ -42,7 +42,9 @@ database calls. The total remains 23 service/port traits.
 
 Successful `admit` means all required facts are recoverable: immutable session
 definition if new, initial Submitted task if new, the logical input and durable
-activation. A retry repairs an unfinished admission before returning Duplicate.
+activation. A retry repairs an unfinished admission before returning Accepted;
+an input already admitted with the same digest is Accepted too, with no
+separate duplicate outcome.
 The provider owns the atomic transaction or durable reconciliation protocol.
 Initial task creation is create-once as part of Gateway admission; a delayed
 retry must not replace a task already advanced by Worker. Session specification

@@ -9,11 +9,9 @@ pub struct AdmitTaskCommand {
     pub create_task: Option<TaskSnapshot>,
 }
 
+/// The input is admitted, whether by this call or an earlier one.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CoreAdmission {
-    Accepted(AdmissionReceipt),
-    Duplicate(AdmissionReceipt),
-}
+pub struct CoreAdmission(pub AdmissionReceipt);
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DistGatewayCoreError {
@@ -78,6 +76,13 @@ pub trait DistGatewayCoreService: Send + Sync {
         scope: &TaskScope,
         command: AdmitTaskCommand,
     ) -> Result<CoreAdmission, DistGatewayCoreError>;
+    /// The group a session was frozen for at admission. NotFound when the
+    /// session is absent or belongs to another scope.
+    async fn session_group(
+        &self,
+        scope: &TaskScope,
+        sid: &Sid,
+    ) -> Result<GroupId, DistGatewayCoreError>;
     async fn restore_task(
         &self,
         scope: &TaskScope,

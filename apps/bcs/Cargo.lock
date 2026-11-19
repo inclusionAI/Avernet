@@ -679,6 +679,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-app-dist-gateway"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-gateway",
+ "bcs-dist-gateway-store",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "futures",
+ "hex",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-app-dist-runtime"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1458,6 +1478,64 @@ dependencies = [
  "bcs-db-api",
  "bcs-test-support",
  "mysql_async",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "bcs-dist-gateway"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-gateway-store",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "futures",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "bcs-dist-gateway-http"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "bcs-app-dist-gateway",
+ "bcs-dist-gateway",
+ "bcs-dist-gateway-store",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
+name = "bcs-dist-gateway-store"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "futures",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -2341,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "6.1.0"
+version = "7.0.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",

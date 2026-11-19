@@ -17,7 +17,7 @@ fn producer_script() -> (Script, AdmitRequest, AdmitRequest) {
         .expect(
             "InboxProducerPort::admit",
             (&fresh,),
-            ok(AdmitOutcome::Duplicate(receipt())),
+            ok(AdmitOutcome::Accepted(receipt())),
         )
         .expect(
             "InboxProducerPort::admit",
@@ -36,10 +36,13 @@ async fn producer_checks_replay_identity_and_content_conflict() -> ContractResul
 }
 
 #[tokio::test]
-async fn producer_rejects_a_second_fresh_admission_and_changed_content_success() {
+async fn producer_rejects_a_changed_retry_receipt_and_changed_content_success() {
     for index in [1, 2] {
         let (script, fresh, changed) = producer_script();
-        script.replace(index, ok(AdmitOutcome::Accepted(receipt())));
+        // A retry must answer with the same receipt; changed content must not succeed.
+        let mut other = receipt();
+        other.tid = Tid("another-task".into());
+        script.replace(index, ok(AdmitOutcome::Accepted(other)));
         rejects(
             inbox_producer_port_contract_tests(&script, fresh, changed),
             "assertion",

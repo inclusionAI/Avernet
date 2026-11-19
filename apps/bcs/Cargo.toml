@@ -9,6 +9,7 @@ members = [
     # adapters
     "crates/adapters/http/bcs-dist-worker-http",
     "crates/adapters/http/bcs-api-http",
+    "crates/adapters/http/bcs-dist-gateway-http",
     "crates/adapters/http/bcs-http",
     "crates/adapters/http/bcs-provider-http",
     "crates/external-clients/bcs-a2a-http",
@@ -25,6 +26,8 @@ members = [
     "crates/services/bcs-dist-store",
     "crates/services/bcs-dist-worker",
     "crates/application/bcs-app-dist-runtime",
+    "crates/services/bcs-dist-gateway-store",
+    "crates/services/bcs-dist-gateway",
     "crates/services/bcs-config",
     "crates/services/bcs-db-migrations",
     "crates/services/bcs-eventing",
@@ -46,6 +49,7 @@ members = [
     "crates/services/bcs-organization-store",
     "crates/services/bcs-bot",
     "crates/application/bcs-app-a2a-bot",
+    "crates/application/bcs-app-dist-gateway",
     "crates/services/bcs-bot-store",
     "crates/services/bcs-chat-run-store",
     "crates/services/bcs-channel-store",
@@ -157,6 +161,8 @@ bcs-dist-store = { path = "crates/services/bcs-dist-store" }
 bcs-dist-worker = { path = "crates/services/bcs-dist-worker" }
 bcs-dist-worker-client = { path = "crates/external-clients/bcs-dist-worker-client" }
 bcs-app-dist-runtime = { path = "crates/application/bcs-app-dist-runtime" }
+bcs-dist-gateway-store = { path = "crates/services/bcs-dist-gateway-store" }
+bcs-dist-gateway = { path = "crates/services/bcs-dist-gateway" }
 bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
 bcs-app-identity-api = { path = "crates/plugin-api/bcs-app-identity-api" }
 bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
@@ -331,6 +337,8 @@ bcs-config-api   = { path = "crates/service-api/bcs-config-api" }
 bcs-test-support = { path = "crates/test-support/bcs-test-support" }
 bcs-http         = { path = "crates/adapters/http/bcs-http" }
 bcs-app-a2a-bot = { path = "crates/application/bcs-app-a2a-bot" }
+bcs-app-dist-gateway = { path = "crates/application/bcs-app-dist-gateway" }
+bcs-dist-gateway-http = { path = "crates/adapters/http/bcs-dist-gateway-http" }
 bcs-a2a-http = { path = "crates/external-clients/bcs-a2a-http" }
 bcs-provider-http = { path = "crates/adapters/http/bcs-provider-http" }
 bcs-ws           = { path = "crates/adapters/ws/bcs-ws" }

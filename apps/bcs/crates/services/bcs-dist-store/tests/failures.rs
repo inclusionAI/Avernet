@@ -60,14 +60,16 @@ async fn the_merged_port_harness_passes() {
 
 #[tokio::test]
 async fn admit_reports_a_definite_error_only_before_the_first_write() {
-    // New-session writes: 1 spec, 2 task, 3 inbox, 4 active, 5 wake, 6 trim, 7 admit.
+    // New-session writes: 1 spec, 2 task, 3 task index, 4 inbox, 5 active,
+    // 6 wake, 7 trim, 8 admit.
     let expected = [
         (1, Err(definite())),
         (2, Err(unknown("adm-1"))),
         (3, Err(unknown("adm-1"))),
         (4, Err(unknown("adm-1"))),
         (5, Err(unknown("adm-1"))),
-        (7, Err(unknown("adm-1"))),
+        (6, Err(unknown("adm-1"))),
+        (8, Err(unknown("adm-1"))),
     ];
     for (step, want) in expected {
         let store = Arc::new(Recorder::default());
@@ -77,7 +79,7 @@ async fn admit_reports_a_definite_error_only_before_the_first_write() {
     }
     // The wake trim is best effort.
     let store = Arc::new(Recorder::default());
-    store.fail_write(6);
+    store.fail_write(7);
     let got = producer(&store).admit(new_session("adm-1", "hello")).await;
     assert!(matches!(got, Ok(AdmitOutcome::Accepted(_))));
 }

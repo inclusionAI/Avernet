@@ -23,6 +23,8 @@ pub struct SubmitInput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CancelTask {
+    /// The group the request was addressed to; must be the task's session's.
+    pub group: GroupId,
     pub tid: Tid,
     pub request_id: RequestId,
     pub reason: Option<String>,
@@ -36,6 +38,8 @@ pub enum SubscribeMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscribeTask {
+    /// The group the request was addressed to; must be the task's session's.
+    pub group: GroupId,
     pub tid: Tid,
     pub mode: SubscribeMode,
 }
@@ -59,10 +63,33 @@ pub type TaskSubscription = BoxStream<'static, Result<TaskStreamItem, GatewayErr
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListTasks {
+    /// The group the request was addressed to; must be the listed session's.
+    pub group: GroupId,
     pub session: Option<Sid>,
     pub statuses: Vec<TaskStatus>,
     pub after: Option<PageToken>,
     pub limit: std::num::NonZeroU32,
+}
+
+/// The task state a wait ends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitUntil {
+    /// The task asks for input or authorization, or is finished.
+    InputOrFinal,
+    /// The task is finished.
+    Final,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaitTask {
+    /// The group the request was addressed to; must be the task's session's.
+    pub group: GroupId,
+    pub tid: Tid,
+    pub until: WaitUntil,
+    /// Coverage seen before the admission this wait follows. States at or
+    /// before it don't end the wait (e.g. the question a reply answers).
+    pub after: Option<EventId>,
+    pub timeout: std::time::Duration,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +106,8 @@ pub enum GatewayError {
     NotFound,
     #[error("request identity/content conflict")]
     Conflict,
+    #[error("task is finished and cannot be canceled")]
+    NotCancelable,
     #[error("session quarantined")]
     Quarantined,
     #[error("invalid input: {code}")]
@@ -97,14 +126,30 @@ pub trait DistGatewayService: Send + Sync {
         caller: &GatewayCaller,
         request: SubmitInput,
     ) -> Result<AdmissionReceipt, GatewayError>;
-    async fn get_task(&self, caller: &GatewayCaller, tid: &Tid) -> Result<TaskView, GatewayError>;
+    /// A session or task is reached only through the group it was created for:
+    /// here and in every request that names an existing session or task, another
+    /// group is answered as NotFound.
+    async fn get_task(
+        &self,
+        caller: &GatewayCaller,
+        group: &GroupId,
+        tid: &Tid,
+    ) -> Result<TaskView, GatewayError>;
     /// Snapshot@H continues at H; resume@C never follows an unrelated newer snapshot.
     async fn subscribe(
         &self,
         caller: &GatewayCaller,
         request: SubscribeTask,
     ) -> Result<TaskSubscription, GatewayError>;
+    /// Returns once the task reaches the requested state and the stored view
+    /// covers that event; at the timeout returns the current view.
+    async fn wait_task(
+        &self,
+        caller: &GatewayCaller,
+        request: WaitTask,
+    ) -> Result<TaskView, GatewayError>;
     /// Receipt acknowledges a durable cancellation request, not remote cancellation.
+    /// A finished task is refused with NotCancelable.
     async fn cancel(
         &self,
         caller: &GatewayCaller,
