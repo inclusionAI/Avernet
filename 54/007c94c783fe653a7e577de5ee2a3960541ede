@@ -1,0 +1,19 @@
+apps/bcs/scripts/e2e-test/a2a_test_user_story.py
+  s_405f6041118eb1::t_0f419c1a8cb377 148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "54007c94c783fe653a7e577de5ee2a3960541ede",
+  "prompts": {},
+  "sessions": {
+    "s_405f6041118eb1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4a4-3df3-7910-8f9f-0ef7f4920a3e",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
