@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/aistudio-train-watch-repository.test.ts
+  h_bb3ca6fb13c5df 5,65-66,71,73-74,79-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "18422d68164cacbdf2f5bb7fe1e5c0f6f0a0e82c",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

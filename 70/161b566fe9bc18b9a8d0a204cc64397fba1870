@@ -1,0 +1,43 @@
+apps/bcs/crates/services/bcs-channel/src/speech_scope.rs
+  s_d2bf2069ff97fe::t_78e0f5819d67ab 1-9,11-30,33-52,57-58,71-72
+  s_d2bf2069ff97fe::t_6bebaccb43e986 10,59-70
+  s_d2bf2069ff97fe::t_76e2342e573770 31-32,53-56
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/web_send.rs
+  s_d2bf2069ff97fe::t_6bebaccb43e986 186-189,437-443
+apps/bcs/crates/services/bcs-message-flow/tests/cases/speaking_lease_web_send_contract.rs
+  s_d2bf2069ff97fe::t_9082fd5431d812 94,98,239,244-295
+  s_d2bf2069ff97fe::t_56b1419874b513 296-297
+apps/bcs/crates/services/bcs-channel/src/tests/sessions.rs
+  s_d2bf2069ff97fe::t_dad6a117e130f5 328-329
+  s_d2bf2069ff97fe::t_bd13af6cbfbfb1 315-327,330-345
+  s_d2bf2069ff97fe::t_4d89596a5594f2 314
+apps/bcs/docs/caller-execution.md
+  s_d2bf2069ff97fe::t_bd13af6cbfbfb1 10-15
+apps/bcs/crates/services/bcs-message-flow/src/group_flow.rs
+  s_d2bf2069ff97fe::t_6bebaccb43e986 841-851,854,876,884
+apps/bcs/crates/services/bcs-channel/src/lib.rs
+  s_d2bf2069ff97fe::t_78e0f5819d67ab 8
+apps/bcs/crates/service-api/bcs-service-api/src/application/channel.rs
+  s_d2bf2069ff97fe::t_78e0f5819d67ab 170-171,174-181
+  s_d2bf2069ff97fe::t_6bebaccb43e986 172-173
+apps/bcs/crates/services/bcs-channel/src/service.rs
+  s_d2bf2069ff97fe::t_78e0f5819d67ab 34-41
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/channel_speech.rs
+  s_d2bf2069ff97fe::t_6bebaccb43e986 1-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "70161b566fe9bc18b9a8d0a204cc64397fba1870",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
