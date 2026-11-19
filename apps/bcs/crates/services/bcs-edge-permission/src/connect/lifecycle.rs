@@ -662,6 +662,14 @@ impl ConnectService for DbConnectService {
         Ok(FriendEntriesPage { items, total: page.total })
     }
 
+    async fn find_human_friend_bots(
+        &self,
+        human_id: &str,
+        bot_ids: &[String],
+    ) -> ServiceResult<HashSet<String>> {
+        self.edge_grants.find_human_friend_bots(human_id, &self.env, bot_ids).await
+    }
+
     async fn list_requests(
         &self,
         actor: &str,

@@ -15,8 +15,8 @@ pub(super) struct UseCaseBundle {
     pub(super) bot_discovery: Arc<dyn bcs_service_api::BotDiscoveryService>,
     pub(super) group_management: Arc<dyn bcs_service_api::GroupManagementService>,
     /// Dedicated `for_v1_openapi` twin of `group_management`, wired only into
-    /// the OpenAPI V1 facade so V1 create-group runs the driver-anchored
-    /// core branch while legacy HTTP keeps the legacy branch.
+    /// the OpenAPI V1 facade so Bot-originated create uses V1 reachability
+    /// while legacy HTTP keeps its existing Bot reachability rules.
     pub(super) group_management_v1: Arc<dyn bcs_service_api::GroupManagementService>,
     pub(super) group_query: Arc<dyn bcs_service_api::GroupQueryService>,
     pub(super) workbench_sessions: Arc<dyn bcs_service_api::WorkbenchSessionService>,
@@ -143,6 +143,7 @@ pub(super) fn build_use_case_bundle(
             session_management.clone(),
             system_message.clone(),
         )
+        .with_friend_connect(connect.clone())
         .with_channel_binding_cleanup(channel_binding_cleanup)
         .with_participant_view_bindings(participant_view_bindings)
         .with_bot_runtime(bot_use_cases.clone())

@@ -271,6 +271,49 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         Ok(FriendIdsPage { items, total })
     }
 
+    async fn find_human_friend_bots(
+        &self,
+        human_id: &str,
+        env: &str,
+        bot_ids: &[String],
+    ) -> ServiceResult<HashSet<String>> {
+        let mut seen = HashSet::new();
+        let ids: Vec<_> = bot_ids.iter().map(String::as_str)
+            .filter(|id| seen.insert(*id)).collect();
+        let mut friends = HashSet::new();
+        for batch in ids.chunks(100) {
+            let placeholders = vec!["?"; batch.len()].join(", ");
+            let mut params = vec![DbValue::from(human_id), DbValue::from(env)];
+            params.extend(batch.iter().map(|id| DbValue::from(*id)));
+            // Use indexed identity predicates plus an exact residual for
+            // retained MySQL collations (case and trailing spaces matter).
+            let (peer, exact) = match self.flavor {
+                EdgeGrantSqlFlavor::Sqlite => ("g.to_id COLLATE BINARY", String::new()),
+                EdgeGrantSqlFlavor::Mysql => {
+                    let binary_ids = vec!["CAST(? AS BINARY)"; batch.len()].join(", ");
+                    params.push(DbValue::from(human_id));
+                    params.extend(batch.iter().map(|id| DbValue::from(*id)));
+                    ("CAST(g.to_id AS BINARY)", format!(
+                        " AND CAST(g.from_id AS BINARY) = CAST(? AS BINARY) \
+                         AND CAST(g.to_id AS BINARY) IN ({binary_ids})"
+                    ))
+                }
+            };
+            let statement = DbStatement::with_params(format!(
+                "SELECT DISTINCT {peer} AS peer_id FROM edge_grants g \
+                 JOIN permission_profiles p ON p.id = g.grant_ref_id \
+                   AND p.bot_id = g.to_id AND p.env = g.env \
+                   AND p.is_default = 1 AND p.status = 'active' \
+                 WHERE g.from_id = ? AND g.env = ? AND g.to_id IN ({placeholders}) \
+                   AND g.status = 'approved' AND g.grant_kind = 'permission_profile'{exact}"
+            ), params);
+            for row in self.query("find_human_friend_bots", statement).await? {
+                friends.insert(required_string(&row, "peer_id")?);
+            }
+        }
+        Ok(friends)
+    }
+
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
         let EdgeGrant {
             edge_id: _,
