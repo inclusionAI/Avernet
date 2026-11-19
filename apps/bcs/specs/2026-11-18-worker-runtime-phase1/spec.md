@@ -12,6 +12,11 @@ and the acceptance matrix remove output-body byte quotas and integrate Gateway
 admission and independent output formatting. See the [current integration evidence](../2026-11-19-gateway-worker-admission/verification.md). Original proposal status
 and pinned history below are not current implementation acceptance claims.
 
+> Membership amendment (2026-11-20):
+> [RetainedLease](../2026-11-20-retained-membership-lease/spec.md) replaces the
+> earlier StrictLease/time/permanent-tombstone requirements. Earlier verification
+> below records the implementation tested then; it is not evidence for the new provider.
+
 ## 1. 状态、目标与基线
 
 本稿定义 Worker 的通用执行与恢复闭环，供实现前评审。本次仅提交 SPEC 和导航，不修改 Rust 契约、运行时、插件、配置或数据库迁移；文档合入不代表功能实现、测试通过或部署完成。

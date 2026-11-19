@@ -124,8 +124,8 @@ impl CoordinationStore {
                 "document_cas_required",
             ),
             (
-                leases.supports(StoreCapability::StrictLease),
-                "strict_lease_required",
+                leases.supports(StoreCapability::RetainedLease),
+                "retained_lease_required",
             ),
             (index.supports(StoreCapability::ZSet), "zset_required"),
         ] {

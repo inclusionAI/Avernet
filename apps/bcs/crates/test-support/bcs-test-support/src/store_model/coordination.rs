@@ -44,10 +44,15 @@ pub(super) struct LeaseRecord {
     version: Version,
     deadline: u64,
     terminated: bool,
+    retained_until: u64,
 }
 impl LeaseRecord {
     fn expire(&mut self, now: u64) {
-        self.terminated |= now >= self.deadline;
+        if !self.terminated && now >= self.deadline {
+            self.terminated = true;
+            self.version.0 += 1;
+            self.retained_until = now + LEASE_RETENTION.as_millis() as u64;
+        }
     }
     fn snapshot(&self, now: u64) -> LeaseSnapshot {
         LeaseSnapshot {
@@ -57,7 +62,13 @@ impl LeaseRecord {
         }
     }
 }
+fn collect_lease(state: &mut State, key: &str, now: u64) {
+    if state.leases.get(key).is_some_and(|r| now >= r.retained_until) {
+        state.leases.remove(key);
+    }
+}
 fn deadline(ttl: Duration, now: u64) -> StoreResult<u64> {
+    if ttl > LEASE_RETENTION { return Err(invalid("lease duration exceeds retention")); }
     expiry(None, Expiry::After(ttl), now)?.ok_or_else(|| invalid("missing deadline"))
 }
 #[async_trait]
@@ -70,6 +81,7 @@ impl LeaseStorePlugin for Model {
     ) -> StoreResult<LeaseRegistration> {
         let mut state = self.state.lock().unwrap();
         let now = self.time();
+        collect_lease(&mut state, key, now);
         let end = deadline(ttl, now)?;
         let record = state
             .leases
@@ -80,6 +92,7 @@ impl LeaseStorePlugin for Model {
                 version: Version(1),
                 deadline: end,
                 terminated: false,
+                retained_until: now + LEASE_RETENTION.as_millis() as u64,
             });
         record.expire(now);
         self.finish(if record.terminated {
@@ -93,9 +106,12 @@ impl LeaseStorePlugin for Model {
     async fn read_lease(&self, key: &str) -> StoreResult<LeaseState> {
         let mut state = self.state.lock().unwrap();
         let now = self.time();
-        Ok(match state.leases.get_mut(key) {
+        collect_lease(&mut state, key, now);
+        let mut wrote = false;
+        let result = match state.leases.get_mut(key) {
             None => LeaseState::Absent,
             Some(record) => {
+                wrote = !record.terminated && now >= record.deadline;
                 record.expire(now);
                 if record.terminated {
                     LeaseState::Terminated
@@ -103,7 +119,8 @@ impl LeaseStorePlugin for Model {
                     LeaseState::Alive(record.snapshot(now))
                 }
             }
-        })
+        };
+        if wrote { self.finish(result) } else { Ok(result) }
     }
     async fn update_lease(
         &self,
@@ -114,17 +131,18 @@ impl LeaseStorePlugin for Model {
     ) -> StoreResult<LeaseWrite> {
         let mut state = self.state.lock().unwrap();
         let now = self.time();
+        collect_lease(&mut state, key, now);
         let end = ttl.map(|ttl| deadline(ttl, now)).transpose()?;
         let Some(record) = state.leases.get_mut(key) else {
             return Ok(LeaseWrite::ConditionNotMet);
         };
-        record.expire(now);
         if record.terminated {
             return Ok(LeaseWrite::Terminated);
         }
         if record.version != expected {
             return Ok(LeaseWrite::ConditionNotMet);
         }
+        if record.version.0 >= u64::MAX - 1 { return Err(StoreError::VersionExhausted); }
         let version = record
             .version
             .0
@@ -132,6 +150,7 @@ impl LeaseStorePlugin for Model {
             .ok_or(StoreError::VersionExhausted)?;
         record.version = Version(version);
         record.value = value.into();
+        record.retained_until = now + LEASE_RETENTION.as_millis() as u64;
         if let Some(end) = end {
             record.deadline = end;
         }
@@ -139,17 +158,17 @@ impl LeaseStorePlugin for Model {
     }
     async fn retire_lease(&self, key: &str) -> StoreResult<()> {
         let mut state = self.state.lock().unwrap();
-        state
-            .leases
-            .entry(key.into())
-            .or_insert_with(|| LeaseRecord {
-                initial: vec![],
-                value: vec![],
-                version: Version(1),
-                deadline: 0,
-                terminated: true,
-            })
-            .terminated = true;
+        let now = self.time();
+        collect_lease(&mut state, key, now);
+        let record = state.leases.entry(key.into()).or_insert_with(|| LeaseRecord {
+            initial: vec![], value: vec![], version: Version(1), deadline: 0,
+            terminated: true, retained_until: now + LEASE_RETENTION.as_millis() as u64,
+        });
+        if !record.terminated {
+            record.version.0 += 1;
+            record.terminated = true;
+            record.retained_until = now + LEASE_RETENTION.as_millis() as u64;
+        }
         self.finish(())
     }
 }
@@ -162,10 +181,10 @@ impl Model {
         assert!(state.json.contains_key(key), "seed document before exhausting its version");
         state.versions.insert(key.into(), Version(u64::MAX));
     }
-    /// Test fixture injection for StrictLease failure atomicity.
+    /// Test fixture injection for RetainedLease failure atomicity.
     pub fn exhaust_lease_version(&self, key: &str) {
         self.state.lock().unwrap().leases.get_mut(key)
-            .expect("seed lease before exhausting its version").version = Version(u64::MAX);
+            .expect("seed lease before exhausting its version").version = Version(u64::MAX - 1);
     }
 }
 

@@ -92,7 +92,7 @@ FO claims and session acquisitions are registered before I/O and retained when
 results are unknown. Drain cannot report success while they remain unresolved.
 At an exhausted deadline with unfinished work, the runtime stops renewals and
 returns `DeadlineReached`; it does not claim retirement while an embedding
-processor may still be executing. The successor relies on strict expiry, session
+processor may still be executing. The successor relies on CAS-confirmed termination, session
 fencing, and effect idempotency. A fully quiescent drain confirms retirement
 before returning `Drained`.
 
@@ -158,6 +158,7 @@ share the quiescent unwatch/cache-release path; cleanup failures retain local
 responsibility. Feeds close once no local Session or acquisition needs them; shard ownership alone does not retain a reader.
 
 `heartbeat_interval + request_timeout` must be strictly less than `lease_ttl`,
+with additional deployment margin for synchronized client clock skew/steps;
 using checked arithmetic. `exit_margin` reserves final confirmation/retirement
 time; no new handoff starts without a remaining request budget. `drain(0)` is
 valid and returns `DeadlineReached` when a graceful drain cannot be confirmed.
@@ -170,7 +171,7 @@ unknown RPC outcomes, pending scheduling fences, delayed claim/shutdown races,
 retirement, stale incarnation checks, and session lifecycle completion proofs.
 They use the public in-memory conformance model and do not prove real-provider
 lease timing, persistence, or failover. Production composition still requires a
-strict-lease provider, explicit Runner and the complete public provider composition.
+retained membership provider, explicit Runner and the complete public provider composition.
 The default page and resident Session bounds are both 128. Coordination-only
 large-capacity tests configure their separate limits explicitly; they do not
 establish phase-one production capacity.
