@@ -133,9 +133,15 @@ async def yuque_books(
     q: str = Query("", max_length=256),
     offset: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    pagination: Literal["cursor"] | None = Query(None),
+    cursor: str | None = Query(None, max_length=4096),
     ctx=Depends(context),
 ):
     options = {"source": source} if source else {}
+    if pagination is not None:
+        options["pagination"] = pagination
+    if cursor is not None:
+        options["cursor"] = cursor
     return await ctx.call("yuque_books", query=q, offset=offset, limit=limit, **options)
 
 
