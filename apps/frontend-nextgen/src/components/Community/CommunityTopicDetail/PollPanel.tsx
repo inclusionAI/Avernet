@@ -1,3 +1,4 @@
+import './PollPanel.css';
 import { Badge } from '@/components/ui/Badge';
 import type {
   CommunityPoll,
@@ -12,6 +13,8 @@ interface PollPanelProps {
   status: CommunityTopicStatus;
   poll?: CommunityPoll;
   pollStats?: CommunityPollStats;
+  viewer?: { hasVoted: boolean; pollSelection?: number[] };
+  onPick?: (index: number) => void;
 }
 
 function pollState(status: CommunityTopicStatus, deadlineAt?: string) {
@@ -23,59 +26,59 @@ function pollState(status: CommunityTopicStatus, deadlineAt?: string) {
     : `进行中，截止：${formatDateTime(deadlineAt)}`;
 }
 
-/** Read-only Topic-level poll presentation. Humans do not vote from the UI. */
-export function PollPanel({ topicType, status, poll, pollStats }: PollPanelProps) {
+export function PollPanel({ topicType, status, poll, pollStats, viewer, onPick }: PollPanelProps) {
   if (topicType !== 'poll') return null;
-
-  if (!poll) {
-    return (
-      <section aria-label="投票配置" className="rounded-xl border border-border bg-card px-4 py-3">
-        <header className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">投票</span>
-        </header>
-        <p className="m-0 mt-2 text-xs text-muted-foreground">该投票主题未返回配置，暂无法展示选项。</p>
-      </section>
-    );
-  }
-
-  const statsByLabel = new Map(pollStats?.options.map((option) => [option.label, option]) ?? []);
-
+  const state = pollState(status, poll?.deadlineAt);
+  const ended = state === '已截止' || state === '已结帖';
+  const results = ended || viewer?.hasVoted === true;
   return (
-    <section aria-label="投票配置" className="rounded-xl border border-border bg-card px-4 py-3">
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">投票</span>
-          <Badge tone="outline">{poll.selection === 'multi' ? '多选' : '单选'}</Badge>
-        </div>
-        <span className="text-xs text-muted-foreground">{pollState(status, poll.deadlineAt)}</span>
+    <section aria-label="投票配置" className="community-poll mt-3">
+      <header className="flex items-center gap-2">
+        <strong className="text-sm">投票选项</strong>
+        {poll && <Badge tone="neutral">{poll.selection === 'multi' ? '多选' : '单选'}</Badge>}
+        {state !== '进行中' && <span className="ml-auto text-xs text-muted-foreground">{state}</span>}
       </header>
-      <ul className="mt-3 flex list-none flex-col gap-2 p-0">
-        {poll.options.map((option, index) => {
-          const stat = statsByLabel.get(option);
-          return (
-            <li
-              key={`${option}-${index}`}
-              className="flex h-auto w-full items-start justify-start gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-left text-sm"
-            >
-              <Badge tone="neutral" className="shrink-0">
-                {String.fromCharCode(65 + index)}
-              </Badge>
-              <span className="min-w-0 flex-1 break-words text-foreground">{option}</span>
-              {pollStats && stat && (
-                <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
-                  {stat.votes}票 · {stat.percent}%
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-      {pollStats ? (
-        <p className="m-0 mt-3 text-xs text-muted-foreground">
-          {`${poll.selection === 'multi' ? '多选' : '单选'} • ${pollStats.participantCount} 位参与者 • 共${pollStats.totalVotes}票`}
-        </p>
+      {!poll ? (
+        <p>该投票主题未返回配置，暂无法展示选项。</p>
       ) : (
-        <p className="m-0 mt-3 text-xs text-muted-foreground">投票结果由后台任务增量统计。</p>
+        <>
+          <ul className="m-0 grid list-none gap-2 px-0 pt-3">
+            {poll.options.map((label, index) => {
+              const selected = viewer?.hasVoted && viewer.pollSelection?.includes(index);
+              const stat = pollStats?.options.find((option) => option.label === label);
+              const Row = results || !onPick ? 'div' : 'button';
+              return (
+                <li key={index}>
+                  <Row
+                    onClick={Row === 'button' ? () => onPick?.(index) : undefined}
+                    className="community-poll__row text-sm"
+                    data-state={ended ? 'closed' : selected ? 'selected' : results ? 'voted' : 'initial'}
+                  >
+                    {results && stat && (
+                      <span
+                        aria-hidden
+                        className="community-poll__fill"
+                        style={{ width: `${Math.max(0, Math.min(100, stat.percent))}%` }}
+                      />
+                    )}
+                    <span className="community-poll__letter relative inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs">
+                      {String.fromCharCode(65 + index)}
+                    </span>
+                    <span className="relative min-w-0 flex-1 break-words">{label}</span>
+                    {results && (
+                      <span className="community-poll__result relative shrink-0 text-xs text-muted-foreground">
+                        {stat ? `${stat.votes}票 · ${stat.percent}%` : '—'}
+                      </span>
+                    )}
+                  </Row>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mb-0 mt-3 text-xs text-muted-foreground">
+            {pollStats ? `${pollStats.participantCount} 位参与者` : '参与人数待统计'}
+          </p>
+        </>
       )}
     </section>
   );

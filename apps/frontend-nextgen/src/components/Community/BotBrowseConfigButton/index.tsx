@@ -1,41 +1,35 @@
 import { Button } from '@/components/ui/Button';
-import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
-import { Settings } from 'lucide-react';
+import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle, ModalTrigger } from '@/components/ui/Modal';
 import { useState } from 'react';
 import { BotBrowseConfigPanel } from './BotBrowseConfigPanel';
 
-/**
- * 社区右上角齿轮按钮 → 「Bot 访问社区配置」抽屉。
- * 按钮本身无文字标签（仅 gear 图标 + aria-label），置于实验室落地页『社区』卡右上角（进入社区前可见，
- * 便于在进入社区前先配置各 Bot 的周期性逛社区开关与备注）。
- * 抽屉打开时挂载 Panel（Radix Portal 仅开时渲染），闭卸载，避免常驻轮询。
- */
+/** 实验室社区卡设置：居中配置弹窗，仅打开时加载 Bot 与订阅。 */
 export function BotBrowseConfigButton() {
   const [open, setOpen] = useState(false);
   return (
-    <>
-      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="设置 Bot 访问社区">
-        <Settings className="size-4" aria-hidden />
-      </Button>
-      <Drawer open={open} onOpenChange={setOpen}>
-        <DrawerContent
-          side="right"
-          size="md"
-          showClose
-          closeLabel="关闭 Bot 访问社区配置"
-          bodyClassName="flex flex-col"
-        >
-          <DrawerHeader>
-            <DrawerTitle>Bot 访问社区配置</DrawerTitle>
-            <DrawerDescription>
-              可为你的每个 Bot 单独开启「周期性逛社区」；开启后后端会生成定时调度任务，关闭则取消。
-            </DrawerDescription>
-          </DrawerHeader>
-          <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-            <BotBrowseConfigPanel />
-          </div>
-        </DrawerContent>
-      </Drawer>
-    </>
+    <Modal open={open} onOpenChange={setOpen}>
+      <ModalTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-6" aria-label="设置 Bot 访问社区">
+          <svg className="size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+            <path d="M7 3.5h10L22 12l-5 8.5H7L2 12Z" />
+            <circle cx="12" cy="12" r="2.5" />
+          </svg>
+        </Button>
+      </ModalTrigger>
+      <ModalContent
+        className="flex max-h-[calc(100dvh-2rem)] max-w-[480px] flex-col gap-5 overflow-hidden rounded-xl p-5"
+        closeLabel="关闭 Bot 访问社区配置"
+      >
+        <ModalHeader className="shrink-0 space-y-1">
+          <ModalTitle className="text-base font-medium leading-[22px]">Bot 访问社区配置</ModalTitle>
+          <ModalDescription className="text-[13px] leading-[18px]">
+            开关开启后，Bot 能够自主访问社区并回贴。
+          </ModalDescription>
+        </ModalHeader>
+        <div className="app-scrollbar min-h-0 max-h-[317px] overflow-y-auto">
+          <BotBrowseConfigPanel />
+        </div>
+      </ModalContent>
+    </Modal>
   );
 }
