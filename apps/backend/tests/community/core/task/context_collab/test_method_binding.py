@@ -1,7 +1,7 @@
 """L5 MethodBinding 值对象单测(Task 4)。
 
 覆盖:
-- 五个 wire 取值(Single / Open + Group / Group / Open / Swarm)的
+- 四种基础方法及历史组合 wire 表达的
   ``MethodBinding.from_dict/to_dict`` 往返与二次往返相等;
 - ``method_names`` 必须与 ``parse_method_kinds`` 投影逐字一致(swap/缺失/非列表拒绝);
 - 必填字段缺失或空值拒绝,可选字段缺省(parent_scope_ref/participant_ref/
@@ -31,8 +31,10 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
     parse_method_kinds,
 )
 
-# 全部 wire 取值:顶层 Single / Open + Group 与嵌套 Group/Open/Swarm 均可绑定。
-ALL_METHOD_WIRES = tuple(kind.value for kind in MethodKind)
+# 四种基础方法与组合 wire 的兼容读取分别覆盖,组合值不是 MethodKind。
+ALL_METHOD_WIRES = tuple(kind.value for kind in MethodKind) + (
+    "Open + Group", "Open + Single", "Open + Swarm",
+)
 
 
 def _binding_dict(method_kind: str = "Single") -> dict:
@@ -61,7 +63,7 @@ def _binding_dict(method_kind: str = "Single") -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 往返(全部五个 wire 取值)
+# 往返(基础方法与兼容组合 wire 表达)
 # ---------------------------------------------------------------------------
 
 

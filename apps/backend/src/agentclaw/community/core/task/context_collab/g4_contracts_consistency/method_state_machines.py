@@ -54,6 +54,7 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state
     _validate_reachability,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    METHOD_COMPOSITION_WIRES,
     MethodKind,
 )
 
@@ -154,7 +155,7 @@ METHOD_STATE_GOVERNANCE: dict[str, str] = {
 
 def _validate_states(d: StateMachineDefinition) -> dict[str, StateDefinition]:
     """状态词汇闭合 + 治理类别 Vocabulary + Method 兼容(L5 特化三点之一)。"""
-    known_methods = {kind.value for kind in MethodKind}
+    known_methods = {kind.value for kind in MethodKind} | METHOD_COMPOSITION_WIRES
     states: dict[str, StateDefinition] = {}
     for state in d.states:
         _check_str(state.name, "state name")

@@ -30,6 +30,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
     Task,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    METHOD_COMPOSITION_WIRES,
     MethodKind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.instance import (
@@ -44,11 +45,9 @@ TOP_LEVEL_METHOD_KINDS = frozenset(
     {
         MethodKind.SINGLE.value,
         MethodKind.SWARM.value,
-        MethodKind.OPEN_GROUP.value,
-        MethodKind.OPEN_SINGLE.value,
         MethodKind.OPEN.value,
     }
-)
+) | METHOD_COMPOSITION_WIRES
 
 
 @runtime_checkable
@@ -92,7 +91,7 @@ def _is_executor(task: Task | None, actor: ActorContext) -> bool:
 
 def _is_public_open_message(creation_facts: dict, command) -> bool:
     return (
-        creation_facts.get("method_kind") == MethodKind.OPEN_GROUP.value
+        creation_facts.get("method_kind") == "Open + Group"
         and command.event_kind == "user_interaction.posted"
         and command.primitive_type == "Message"
         and command.visibility == VISIBILITY_PUBLIC

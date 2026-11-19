@@ -119,10 +119,11 @@ def test_status_vocabulary_matches_api_examples():
     ]
 
 
-def test_creation_facts_normalize_with_none_executor_ref():
-    facts = decode_creation_facts(CREATION_FACTS)
+@pytest.mark.parametrize("composition", ["Open + Group", "Open + Single", "Open + Swarm"])
+def test_creation_facts_normalize_with_none_executor_ref(composition):
+    facts = decode_creation_facts({**CREATION_FACTS, "method_kind": composition})
     assert facts["executor_ref"] is None
-    assert facts["method_kind"] == "Open + Group"
+    assert facts["method_kind"] == composition
     assert facts["resource_refs"] == CREATION_FACTS["resource_refs"]
     assert facts["product_profile_ref"] is None
     assert decode_creation_facts(facts) == facts
@@ -148,6 +149,8 @@ def test_creation_facts_normalize_with_executor_and_profile():
         {**CREATION_FACTS, "unknown": True},
         {**CREATION_FACTS, "method_kind": "swarm"},
         {**CREATION_FACTS, "method_kind": ""},
+        {**CREATION_FACTS, "method_kind": None},
+        {**CREATION_FACTS, "method_kind": "Swarm + Open"},
         {**CREATION_FACTS, "objective": ""},
         {**CREATION_FACTS, "resource_refs": "topic_001"},
         {**CREATION_FACTS, "executor_ref": "bot_coding_001"},

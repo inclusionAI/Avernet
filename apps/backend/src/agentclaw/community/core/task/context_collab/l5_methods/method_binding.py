@@ -1,14 +1,11 @@
-"""L5 Methods:ACCS-105 wire 权威的协作方法枚举、投影与 MethodBinding 值对象。
+"""L5 四种基础方法与 MethodBinding 值对象。
 
-BBS 公开讨论使用 ``Open + Group``,团队代办使用 ``Single``,
-公开申请代办使用 ``Open + Single``;
-``Group`` / ``Open`` / ``Swarm`` 为核心方法单值;Open 和 Swarm 可在顶层
-绑定,Group 当前仅经嵌套 bind 进入(由 G1 接缝裁决),G3 演进对象暂不引入,
-未知 wire 值抛 ``ContextCollabValidationError``。
+``MethodKind`` 只包含 Single / Group / Swarm / Open。产品组合不是新的
+方法种类;产品选择及历史绑定中的组合 wire 字符串由 ``parse_method_kinds``
+单独校验、投影,新组合拓扑通过独立 MethodBinding 与组合边表达。
 
 ``MethodBinding`` 是方法绑定的冻结值对象(spec §3.2 字段 + §12 + §6.3
-审计四字段):``method_kind`` 经 ``MethodKind.from_wire`` 校验,
-``method_names`` 必须与 ``parse_method_kinds`` 投影逐字一致,
+审计四字段):``method_names`` 必须与 ``parse_method_kinds`` 投影逐字一致,
 ``profile_versions`` 键集与 method_names 集合相等;``config`` 只做
 str 键与 ``max_compose_depth`` 1..64 整型校验,缺省深度 8 由服务构造层
 注入,读取侧经 ``effective_max_compose_depth`` 取生效上限(§12 第 3 条)。
@@ -28,16 +25,12 @@ _COMPOSITE_SEPARATOR = " + "
 
 
 class MethodKind(str, Enum):
-    """L5 方法取值;wire 值与三个北向 API 的 ``method_kind`` 字段逐字一致。"""
+    """L5 的四种基础方法;产品组合不能成为枚举成员。"""
 
     SINGLE = "Single"
-    # 产品声明的复合 wire 值;按现有复合顶层绑定表达。
-    OPEN_GROUP = "Open + Group"
-    OPEN_SINGLE = "Open + Single"
-    # 核心方法单值(ACCS-301–304),可嵌套绑定;顶层准入由 G1 裁决。
     GROUP = "Group"
-    OPEN = "Open"
     SWARM = "Swarm"
+    OPEN = "Open"
 
     @staticmethod
     def from_wire(value: str) -> "MethodKind":
@@ -50,20 +43,24 @@ class MethodKind(str, Enum):
             ) from None
 
 
-def parse_method_kinds(wire: str) -> tuple[MethodKind, ...]:
-    """把 ``method_kind`` wire 值投影为核心方法元组(spec §3.1)。
+# 产品选择/历史绑定可使用的组合 wire 表达,不是 MethodKind。
+# 独立绑定的组合拓扑通过 required_methods 与 relations 声明。
+METHOD_COMPOSITION_WIRES: frozenset[str] = frozenset(
+    {"Open + Group", "Open + Single", "Open + Swarm"}
+)
 
-    单值直接映射 ``MethodKind``;复合值必须是产品声明的 wire 组合
-    (即枚举中带 ``" + "`` 的取值,包括 ``Open + Group`` / ``Open + Single``),按分隔符
-    拆分后逐项映射;未声明的组合或未知片段抛
-    ``ContextCollabValidationError``。
+
+def parse_method_kinds(wire: str) -> tuple[MethodKind, ...]:
+    """把基础方法或受支持的产品组合 wire 投影为基础方法元组。
+
+    组合名称与基础方法枚举分开校验;未声明的组合、未知片段及非规范
+    拼写均拒绝。返回值永远只包含四种基础 ``MethodKind``。
     """
+    if not isinstance(wire, str):
+        raise ContextCollabValidationError(f"unknown method_kind wire value: {wire!r}")
     if _COMPOSITE_SEPARATOR not in wire:
         return (MethodKind.from_wire(wire),)
-    declared_composites = {
-        kind.value for kind in MethodKind if _COMPOSITE_SEPARATOR in kind.value
-    }
-    if wire not in declared_composites:
+    if wire not in METHOD_COMPOSITION_WIRES:
         raise ContextCollabValidationError(f"unknown method_kind wire value: {wire!r}")
     return tuple(
         MethodKind.from_wire(part) for part in wire.split(_COMPOSITE_SEPARATOR)
@@ -245,7 +242,7 @@ class MethodBinding:
         """从 dict 恢复;字段集封闭(未知字段拒绝),校验规则:
 
         - ``method_binding_id`` / ``collab_context_id`` 非空;
-        - ``method_kind`` 经 ``MethodKind.from_wire``;
+        - ``method_kind`` 经 ``parse_method_kinds``(兼容历史组合绑定);
         - ``method_names`` 必须与 ``parse_method_kinds`` 投影逐字一致;
         - ``profile_versions`` 键集 == method_names 集,值非空;
         - ``state`` 经 ``BindingState.from_wire``;``version`` 正整数;
@@ -262,9 +259,7 @@ class MethodBinding:
             raise ContextCollabValidationError(
                 f"unknown field(s) in MethodBinding: {sorted(unknown)}"
             )
-        method_kind = MethodKind.from_wire(
-            _required_str(data, "method_kind", "MethodBinding")
-        ).value
+        method_kind = _required_str(data, "method_kind", "MethodBinding")
         expected_names = tuple(kind.value for kind in parse_method_kinds(method_kind))
         raw_names = data.get("method_names")
         if not isinstance(raw_names, list) or not all(

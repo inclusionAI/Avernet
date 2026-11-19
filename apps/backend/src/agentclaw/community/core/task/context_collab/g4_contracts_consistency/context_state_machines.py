@@ -60,6 +60,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    METHOD_COMPOSITION_WIRES,
     MethodKind,
 )
 
@@ -94,7 +95,7 @@ COLLET_STATE_GOVERNANCE: dict[str, str] = {
 
 def _validate_states(d: StateMachineDefinition) -> dict[str, StateDefinition]:
     """状态词汇闭合 + 治理类别 Vocabulary + Method 兼容(Collet 特化三点之一)。"""
-    known_methods = {kind.value for kind in MethodKind}
+    known_methods = {kind.value for kind in MethodKind} | METHOD_COMPOSITION_WIRES
     known_states = {s.value for s in ColletState}
     states: dict[str, StateDefinition] = {}
     for state in d.states:

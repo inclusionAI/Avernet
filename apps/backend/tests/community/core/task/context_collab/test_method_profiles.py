@@ -27,11 +27,12 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
 def test_parse_method_kinds_composite_and_single():
     assert parse_method_kinds("Open + Group") == (MethodKind.OPEN, MethodKind.GROUP)
     assert parse_method_kinds("Open + Single") == (MethodKind.OPEN, MethodKind.SINGLE)
+    assert parse_method_kinds("Open + Swarm") == (MethodKind.OPEN, MethodKind.SWARM)
     assert parse_method_kinds("Single") == (MethodKind.SINGLE,)
 
 
 def test_parse_method_kinds_maps_core_single_values():
-    # Group/Open/Swarm 裸值合法,但仅经嵌套 bind 进入(顶层拒绝在 G1 接缝落)。
+    # 基础方法裸值合法;顶层准入限制由 G1 接缝裁决。
     assert parse_method_kinds("Group") == (MethodKind.GROUP,)
     assert parse_method_kinds("Open") == (MethodKind.OPEN,)
     assert parse_method_kinds("Swarm") == (MethodKind.SWARM,)
@@ -39,10 +40,10 @@ def test_parse_method_kinds_maps_core_single_values():
 
 @pytest.mark.parametrize(
     "wire",
-    ["Swarm + Group", "Open + Swarm"],
+    ["Swarm + Group", "Swarm + Open", "Open + Team", "Open+Swarm", "", None],
 )
 def test_parse_method_kinds_rejects_unknown(wire):
-    # 未声明的复合 wire 值一律拒绝,含以 Open 开头的组合。
+    # 未声明的复合 wire 值一律拒绝，不能交换已声明组合的顺序。
     with pytest.raises(ContextCollabValidationError):
         parse_method_kinds(wire)
 
