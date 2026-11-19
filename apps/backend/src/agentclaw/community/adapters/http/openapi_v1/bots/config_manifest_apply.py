@@ -103,16 +103,14 @@ async def apply_bot_config_manifest(
         Query(
             description="Return the plan without performing it. Synchronous; it "
             "applies no part of your manifest and writes no apply record, so it "
-            "mints no `apply_id` and appears in no history. Two caveats, both "
-            "by design: a declared source MAY really be fetched (a preview "
+            "mints no `apply_id` and appears in no history. A declared source "
+            "may be fetched (a preview "
             "that cannot tell you whether your sources are reachable and your "
             "digests match is a weak preview), bounded by the same per-apply "
             "fetch ledger a real apply uses — and the bytes acquired are kept "
             "as the platform's own copy, because that audit trail records "
-            "acquisition, not delivery; and reading a bot's installed MCP set "
-            "reconciles platform-managed installation rows against SkillSet "
-            "membership, which any read of that state does. Nothing your "
-            "manifest declares is applied to the bot."
+            "acquisition. The Apply snapshot reads MCP installations and SkillSet "
+            "membership without reconciliation."
         ),
     ] = False,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
