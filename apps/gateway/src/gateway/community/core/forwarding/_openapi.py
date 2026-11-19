@@ -102,7 +102,16 @@ def _isolate_conflicting_schemas(
 
     def rewrite(node: Any) -> Any:
         if isinstance(node, dict):
-            return {key: rewrite(value) for key, value in node.items()}
+            result = {key: rewrite(value) for key, value in node.items()}
+            discriminator = node.get("discriminator")
+            if isinstance(discriminator, dict) and isinstance(
+                discriminator.get("mapping"), dict
+            ):
+                mapping = result["discriminator"]["mapping"]
+                for key, value in discriminator["mapping"].items():
+                    if isinstance(value, str) and value in names:
+                        mapping[key] = names[value]
+            return result
         if isinstance(node, list):
             return [rewrite(value) for value in node]
         prefix = "#/components/schemas/"
@@ -255,6 +264,18 @@ def _collect_refs(node: Any, acc: set[str]) -> None:
     # inclusion is harmless (an unused schema is kept); a missed ref would leave
     # the served doc with a dangling reference.
     if isinstance(node, dict):
+        discriminator = node.get("discriminator")
+        if isinstance(discriminator, dict) and isinstance(
+            discriminator.get("mapping"), dict
+        ):
+            for value in discriminator["mapping"].values():
+                if (
+                    isinstance(value, str)
+                    and value
+                    and "/" not in value
+                    and "#" not in value
+                ):
+                    acc.add(f"#/components/schemas/{value}")
         for value in node.values():
             _collect_refs(value, acc)
     elif isinstance(node, list):

@@ -18,6 +18,7 @@ from gateway.community.core.forwarding import (
     build_combined_openapi,
     build_served_openapi,
 )
+from gateway.community.core.forwarding._openapi import _isolate_conflicting_schemas
 
 _FIXTURE = Path(__file__).resolve().parents[3] / "fixtures" / "bots.openapi.json"
 _BAAS_ARTIFACT = (
@@ -36,6 +37,67 @@ _SHIPPED_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application
 _METHODS = {"get", "post", "put", "delete", "patch"}
 _RULES = RouteSecurity.from_table({"/**": {"user": "optional", "app": "optional"}})
 _SHIPPED_RULES = RouteSecurity.from_yaml(_SHIPPED_CONFIG)
+
+
+def test_isolated_schema_names_avoid_existing_names_and_rewrite_lists() -> None:
+    doc = {
+        "components": {"schemas": {"Cat": {"type": "string"}}},
+        "items": [{"$ref": "#/components/schemas/Cat"}],
+    }
+    existing = {"schemas": {"Cat": {"type": "number"}, "pets__Cat": {}}}
+    result = _isolate_conflicting_schemas(doc, existing, "pets")
+    assert result["items"][0]["$ref"] == "#/components/schemas/pets__Cat_"
+    assert "pets__Cat_" in result["components"]["schemas"]
+
+
+def test_conflicting_discriminator_mapping_preserves_target_schemas() -> None:
+    def doc(domain: str, field: str) -> dict[str, Any]:
+        return {
+            "paths": {
+                f"/openapi/v1/{domain}": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {"$ref": "#/components/schemas/Pet"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "components": {
+                "schemas": {
+                    "Pet": {
+                        "discriminator": {
+                            "propertyName": "kind",
+                            "mapping": {
+                                "cat": "Cat",
+                                "dog": "#/components/schemas/Dog",
+                                "remote": "https://example.com/Pet",
+                            },
+                        }
+                    },
+                    "Cat": {"properties": {field: {"type": "string"}}},
+                    "Dog": {"properties": {field: {"type": "string"}}},
+                }
+            },
+        }
+
+    source = {"one": doc("one", "one"), "two": doc("two", "two")}
+    result = build_served_openapi(
+        source, source.__getitem__, _RULES, title="gateway", version="1"
+    )
+    schemas = result["components"]["schemas"]
+    mapping = schemas["two__Pet"]["discriminator"]["mapping"]
+    assert mapping == {
+        "cat": "two__Cat",
+        "dog": "#/components/schemas/two__Dog",
+        "remote": "https://example.com/Pet",
+    }
+    assert "two" in schemas["two__Cat"]["properties"]
 
 
 def test_conflicting_domain_schemas_keep_their_own_references() -> None:

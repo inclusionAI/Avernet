@@ -12,6 +12,7 @@ from gateway.community.plugin_registry import (
     has_enterprise_plugins,
     register_plugin_option,
     register_plugin_option_provider,
+    register_schema_catalog_provider,
 )
 
 
@@ -30,6 +31,22 @@ def _reset_registry() -> None:
 
 
 class TestRegisterPluginOption:
+    def test_register_and_inject_schema_catalog_provider(self) -> None:
+        from dependency_injector import providers
+
+        from gateway.community.bootstrap._container import ApplicationContainer
+        from gateway.community.plugin_registry import inject_into_plugin_container
+
+        sentinel = object()
+        register_schema_catalog_provider(
+            "example", lambda _root: providers.Object(sentinel)
+        )
+        assert has_enterprise_plugins()
+        container = ApplicationContainer()
+        inject_into_plugin_container(container)
+        inject_into_plugin_container(container)
+        assert container.plugins().schema_catalogs.kwargs["example"]() is sentinel
+
     def test_initially_no_enterprise_plugins(self) -> None:
         assert has_enterprise_plugins() is False
 

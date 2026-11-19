@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from gateway.community.config import Config, UserConfig
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import DomainMap, Forwarding
@@ -365,6 +367,30 @@ class TestTagsPreservedFromCombinedCatalogs:
 
 
 class TestBuildForwardingWithMixedSources:
+    def test_unknown_schema_source_is_rejected(self, tmp_path: Path) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        domain_map = _domain_map(bots=("backend", "unknown", ""))
+        with (
+            patch(
+                "gateway.community.config.ConfigLoader.load",
+                return_value=Config(config_dir=tmp_path),
+            ),
+            patch(
+                "gateway.community.bootstrap._forwarding._load_domain_map",
+                return_value=domain_map,
+            ),
+            pytest.raises(ValueError, match="unsupported schema source"),
+        ):
+            build_forwarding(
+                schema_catalogs={
+                    "file": FileSchemaCatalog(),
+                    "http": HttpSchemaCatalog(),
+                },
+                forwarder=MagicMock(spec=Forwarder),
+                ws_forwarder=MagicMock(spec=WebSocketForwarder),
+            )
+
     def test_registered_extra_catalog_receives_its_domain(self, tmp_path: Path) -> None:
         from gateway.community.bootstrap._forwarding import build_forwarding
 
