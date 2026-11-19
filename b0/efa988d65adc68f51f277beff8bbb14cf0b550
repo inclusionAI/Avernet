@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/docs/run-detail-runtime-metadata.md
+  h_5f06d4d8b4bdd5 1-23
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-guard.test.ts
+  h_5f06d4d8b4bdd5 24,39,41,48-49,93,196-215
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-routes.test.ts
+  h_5f06d4d8b4bdd5 27-30,39-40,43-44,57-70,74-78
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_5f06d4d8b4bdd5 565
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-read-projection.ts
+  h_5f06d4d8b4bdd5 9,17-20
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-guard.ts
+  h_5f06d4d8b4bdd5 10-11,32,38,42-52,62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b0efa988d65adc68f51f277beff8bbb14cf0b550",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

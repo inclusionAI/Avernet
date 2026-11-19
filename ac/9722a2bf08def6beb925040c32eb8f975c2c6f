@@ -1,0 +1,19 @@
+apps/bcs/scripts/e2e-test/a2a_test_user_story.py
+  s_257b4c26393128::t_b4583ef9c868e0 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ac9722a2bf08def6beb925040c32eb8f975c2c6f",
+  "prompts": {},
+  "sessions": {
+    "s_257b4c26393128": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f292-a423-71b0-9d30-cfb5b4573a1e",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

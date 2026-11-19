@@ -1,0 +1,14 @@
+apps/frontend-nextgen/scripts/public-tests.list
+  h_5f06d4d8b4bdd5 348-354
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b8ffc8309177169be9172ccb4cfe638d8c3e56e7",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

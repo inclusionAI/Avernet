@@ -1,0 +1,21 @@
+apps/backend/specs/dingtalk-caller-token/001-spec-output.md
+  s_5c173f6b8a3b51::t_f0303cee116792 9
+apps/backend/specs/dingtalk-caller-token/002-code-report.md
+  s_5c173f6b8a3b51::t_f0303cee116792 16-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f45615d4de1c376abdb94f14d18f52e18e5e6c69",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

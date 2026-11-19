@@ -1,0 +1,20 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/agentbase_remote_chat/provider.rs
+  s_19c0e6699afcd7::t_af5c0a72f5f5b5 34-48,296,299,301-304,311-315,318-341,765-770,1001-1040
+  s_19c0e6699afcd7::t_7f7990f923d909 1041
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "099887c3d3443ac0e900993070348ebce6daa0d8",
+  "prompts": {},
+  "sessions": {
+    "s_19c0e6699afcd7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3be-3a1a-7b13-9090-e1745ea29304",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

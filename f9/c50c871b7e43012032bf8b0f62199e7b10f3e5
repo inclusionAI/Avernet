@@ -1,0 +1,32 @@
+apps/bcs-internal/bcn-configs/agentbase-sofarpc.toml
+  h_fa66fe7c023b4b 5-11,13-14,19-21,23-25,29,38-40
+apps/bcs-internal/configs/agentbase-sofarpc.toml
+  h_fa66fe7c023b4b 5-11,13-14,19-21,23-25,29,38-40
+apps/bcs-internal/contracts/alipayagentbase/README.md
+  h_fa66fe7c023b4b 40-44,46-52,55,59-60
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  h_fa66fe7c023b4b 142-154,454,457-459
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  h_fa66fe7c023b4b 948-956,1112-1127,1136-1137
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/config.rs
+  h_fa66fe7c023b4b 6-12,20,52-59,71-77,100,121-123,209-214,246,252-256,262,266-271,295-320,338-358,363-366,378-379,382-420,422-430,433-435,456-460,491-503,510,514-521,525-537,540-559,564-575,577-608,611,613,620-668,670-674,710-713,735-737,751
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/contract.rs
+  h_fa66fe7c023b4b 117-122
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/identity.rs
+  h_fa66fe7c023b4b 28-34
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/config_fail_closed.rs
+  h_fa66fe7c023b4b 27,29-31,94,97-101,104-129,132,147-152,154,161,163,174,195,204,210,214,220-222,224,226,230,232-250,259-274,280-284,292-295,298-302,310-313,321,330-334,340-344,524-529,536-538,540-545,547-548,571,574,584-585
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 385,390-401
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f9c50c871b7e43012032bf8b0f62199e7b10f3e5",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

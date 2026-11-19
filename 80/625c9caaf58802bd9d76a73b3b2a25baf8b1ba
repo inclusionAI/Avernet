@@ -1,0 +1,21 @@
+apps/bcs-internal/docs/observability-logging.md
+  s_e7bb6e0c75e55c::t_e13ca7a6e88aa3 111-112,123,155-156,158-159,185,188
+  s_e7bb6e0c75e55c::t_8bd76dd2fa5779 113-117
+  s_e7bb6e0c75e55c::t_647d2b42cef87f 118-122,124-154,157,160-184,186-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "80625c9caaf58802bd9d76a73b3b2a25baf8b1ba",
+  "prompts": {},
+  "sessions": {
+    "s_e7bb6e0c75e55c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c418-8825-7dc3-b2d3-634959f22c9b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": null
+    }
+  }
+}

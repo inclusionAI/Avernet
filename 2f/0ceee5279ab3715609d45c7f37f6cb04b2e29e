@@ -1,0 +1,27 @@
+apps/bcs-internal/bcn-configs/README.md
+  s_5a886b46403e7c::t_de2b4dfa9dd121 27
+apps/bcs-internal/crates/bootstrap/bcs-internal/tests/v1_cookie_config.rs
+  s_5a886b46403e7c::t_de2b4dfa9dd121 559
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/CONTEXT.md
+  s_5a886b46403e7c::t_de2b4dfa9dd121 58-59
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/v1_config_tests.rs
+  s_5a886b46403e7c::t_de2b4dfa9dd121 389,424,429-431,434,438-440
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/v1_config.rs
+  s_5a886b46403e7c::t_de2b4dfa9dd121 234-236,251-253,255,332
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2f0ceee5279ab3715609d45c7f37f6cb04b2e29e",
+  "prompts": {},
+  "sessions": {
+    "s_5a886b46403e7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfe7-6471-7a70-90de-e0018bca400d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+submodules/avernet
+  s_c980b83a9ffe7f::t_fe8c7bf8f64cfc 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "46e9fe2b49289ef43d207691c125e3d03436cd20",
+  "prompts": {},
+  "sessions": {
+    "s_c980b83a9ffe7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e84e-8cc0-72b0-848b-eae19b4ed413",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/bcsfuse/docs/deployment/tc-card-storage.md
+  s_ce84d91f3d35be::t_ab29df8fcc8d71 3-4,6,89
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/tc.py
+  s_ce84d91f3d35be::t_039442aa841f71 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aea58059615b46e5ed4fc7668458cea452b0c181",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

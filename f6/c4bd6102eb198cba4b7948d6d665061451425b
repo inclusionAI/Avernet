@@ -1,0 +1,39 @@
+apps/bcs-internal/.aci.yml
+  s_cc6f48e2a8273e::t_20bf72b3649cde 123
+apps/bcs-internal/.aci/bcs-pre-deploy.aci.yml
+  s_cc6f48e2a8273e::t_3eaabc44eecb89 64
+apps/bcs-internal/bcn-configs/README.md
+  s_cc6f48e2a8273e::t_6886cac64543a6 9,11-15
+apps/bcs-internal/bcn-configs/agentbase-sofarpc.toml
+  s_cc6f48e2a8273e::t_a496da40282ae6 1-27
+apps/bcs-internal/configs/agentbase-sofarpc.toml
+  s_cc6f48e2a8273e::t_a9c2f663b2abd6 4
+apps/bcs-internal/contracts/alipayagentbase/README.md
+  s_cc6f48e2a8273e::t_a7c09302ad41c6 37-41
+apps/bcs-internal/contracts/alipayagentbase/SOURCE-BASELINE.md
+  s_cc6f48e2a8273e::t_64a18e6f6d4537 12-13
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/README.md
+  s_cc6f48e2a8273e::t_d6194b6b1bea5d 45-51
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/config_fail_closed.rs
+  s_cc6f48e2a8273e::t_e5ca5632b23e86 308-312
+apps/bcs-internal/docs/sofa-rpc/alipayagentbase-a2a-remote-server-contract.md
+  s_cc6f48e2a8273e::t_a56b6f94713f8b 25-28
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_cc6f48e2a8273e::t_86644945e1a482 291,293-299,301,305,307-328,332,334-336,338,343-345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f6c4bd6102eb198cba4b7948d6d665061451425b",
+  "prompts": {},
+  "sessions": {
+    "s_cc6f48e2a8273e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4b9-052c-73e1-aceb-b6b395cd56fe",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

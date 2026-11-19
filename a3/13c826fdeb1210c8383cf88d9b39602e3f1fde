@@ -1,0 +1,45 @@
+apps/bcs-internal/.aci.yml
+  s_cc6f48e2a8273e::t_ce8d8aef1baa0a 123
+apps/bcs-internal/.aci/bcs-pre-deploy.aci.yml
+  s_cc6f48e2a8273e::t_57de1fc910c294 64
+apps/bcs-internal/bcn-configs/README.md
+  s_cc6f48e2a8273e::t_186a28c9d88dbc 9-18
+apps/bcs-internal/bcn-configs/agentbase-sofarpc.toml
+  s_cc6f48e2a8273e::t_23124c87595416 1
+apps/bcs-internal/configs/agentbase-sofarpc.toml
+  s_cc6f48e2a8273e::t_0b88b38701fb49 4-5
+apps/bcs-internal/contracts/alipayagentbase/README.md
+  s_cc6f48e2a8273e::t_dae13e2b46079e 37-39
+apps/bcs-internal/contracts/alipayagentbase/SOURCE-BASELINE.md
+  s_cc6f48e2a8273e::t_21c40bd519a297 12
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/README.md
+  s_cc6f48e2a8273e::t_5fc7a97feed120 45-47
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  s_cc6f48e2a8273e::t_e16767160d769c 1046-1048
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/config_fail_closed.rs
+  s_cc6f48e2a8273e::t_a260e4111d455c 11-12,14-18,82-85,92-94,96-107,112-115,117-121,123-125,308
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/triple_pojo/channel.rs
+  s_cc6f48e2a8273e::t_47093c5ae3e51b 1118
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/triple_pojo_channel.rs
+  s_cc6f48e2a8273e::t_870160cbdaefe6 40,277,365
+apps/bcs-internal/docs/sofa-rpc/alipayagentbase-a2a-remote-server-contract.md
+  s_cc6f48e2a8273e::t_3ed8d2047c9c83 25-27
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_cc6f48e2a8273e::t_2db0082004b3d8 3,291-337,356-359
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a313c826fdeb1210c8383cf88d9b39602e3f1fde",
+  "prompts": {},
+  "sessions": {
+    "s_cc6f48e2a8273e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4b9-052c-73e1-aceb-b6b395cd56fe",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/build.rs
+  h_fa66fe7c023b4b 26-33
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/demo/v1/ping.proto
+  h_fa66fe7c023b4b 1-29
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/lib.rs
+  h_fa66fe7c023b4b 4,25-30
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ping/mod.rs
+  h_fa66fe7c023b4b 1-19
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ping/provider.rs
+  h_fa66fe7c023b4b 1-129
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ping/validation.rs
+  h_fa66fe7c023b4b 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "44b6096c9838cd9961f38f95d0f26f16e5372751",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

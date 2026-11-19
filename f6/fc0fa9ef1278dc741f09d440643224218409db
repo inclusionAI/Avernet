@@ -1,0 +1,20 @@
+apps/backend/tests/corp/e2e/test_manifest_mcp_full_replace_flow.py
+  s_45f5dc83f7ac50::t_8bc1436e14ad4c 118-126,129,159-167,171,337,340,455-457
+  s_45f5dc83f7ac50::t_fa606d8616e748 352-356
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f6fc0fa9ef1278dc741f09d440643224218409db",
+  "prompts": {},
+  "sessions": {
+    "s_45f5dc83f7ac50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea50-1141-7730-93e2-7477d4e77f5a",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
