@@ -1,10 +1,10 @@
 // 工单类型→颜色/标签/分类 单一真相源（admin 视觉交互指南 §2.2）。
-// 组件只消费 mapper 输出的 typeLabel/typeTone/statusLabel，禁止自定类型颜色。
+// 事件元数据供 mapper 使用；通知中心分类展示由 workOrderCategoryLabel 统一，不按事件着色。
 // 审批类按 PRD：申请加入团队=橙 / 申请管理权限=蓝 / 好友申请=绿；
 // 通知类统一二分（noticeTypeMeta）：审批类=绿 / 通知=蓝；公开工单=紫（兜底）。
 // 全量事件与后端契约 §4.2 一一对应，基线锁在 test/domain/admin/workOrderMeta.test.ts。
 
-import type { WorkOrderStatus } from './models';
+import type { WorkOrder, WorkOrderStatus } from './models';
 
 export type WorkOrderTone = 'blue' | 'green' | 'orange' | 'purple';
 export type WorkOrderCategoryCode = 'APPROVAL' | 'NOTICE';
@@ -66,4 +66,13 @@ export function resolveWorkOrderType(
     return { label: '审批类', tone: 'blue', category: 'APPROVAL' };
   }
   return DEFAULT_META;
+}
+
+/** 展示分类独立于处理状态；审批结果仍是通知，不因此获得审批权限。 */
+export function workOrderCategoryLabel(
+  workOrder: Pick<WorkOrder, 'itemType' | 'notificationCategory'>,
+): '审批类' | '通知类' {
+  return workOrder.itemType === 'APPROVAL' || workOrder.notificationCategory?.toUpperCase() === 'APPROVAL'
+    ? '审批类'
+    : '通知类';
 }

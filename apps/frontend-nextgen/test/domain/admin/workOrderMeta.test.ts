@@ -1,5 +1,10 @@
 import type { WorkOrderTypeMeta } from '@/domain/admin/workOrderMeta';
-import { resolveWorkOrderType, WORK_ORDER_STATUS_LABEL, WORK_ORDER_TYPE_META } from '@/domain/admin/workOrderMeta';
+import {
+  resolveWorkOrderType,
+  WORK_ORDER_STATUS_LABEL,
+  WORK_ORDER_TYPE_META,
+  workOrderCategoryLabel,
+} from '@/domain/admin/workOrderMeta';
 import { describe, expect, it } from '@jest/globals';
 
 /**
@@ -101,5 +106,16 @@ describe('WORK_ORDER_STATUS_LABEL', () => {
     expect(WORK_ORDER_STATUS_LABEL.APPROVED).toBe('已通过');
     expect(WORK_ORDER_STATUS_LABEL.REJECTED).toBe('已驳回');
     expect(WORK_ORDER_STATUS_LABEL.UNKNOWN).toBe('未知');
+  });
+});
+
+describe('workOrderCategoryLabel', () => {
+  it('审批工单与审批结果通知共享展示分类，但不改写通知身份', () => {
+    expect(workOrderCategoryLabel({ itemType: 'APPROVAL' })).toBe('审批类');
+    const notification = { itemType: 'NOTIFICATION' as const, notificationCategory: 'approval' };
+    expect(workOrderCategoryLabel(notification)).toBe('审批类');
+    expect(notification.itemType).toBe('NOTIFICATION');
+    expect(workOrderCategoryLabel({ itemType: 'NOTIFICATION', notificationCategory: 'NOTICE' })).toBe('通知类');
+    expect(workOrderCategoryLabel({ itemType: 'NOTIFICATION' })).toBe('通知类');
   });
 });

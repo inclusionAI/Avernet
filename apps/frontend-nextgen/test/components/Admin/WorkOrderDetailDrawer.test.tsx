@@ -49,7 +49,7 @@ describe('WorkOrderDetailDrawer 审批类补充字段', () => {
       review_remark: '同意申请',
     });
     render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
-    expect(screen.getByText('申请编辑权限')).toBeInTheDocument();
+    expect(screen.getByText('审批类')).toHaveClass('bg-muted', 'text-muted-foreground');
     expect(screen.getByText('申请理由')).toBeInTheDocument();
     expect(screen.getByText('同意申请')).toBeInTheDocument();
     expect(screen.queryByText(/此通知/)).not.toBeInTheDocument();

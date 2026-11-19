@@ -2,7 +2,7 @@
 // / 通知类（未读显示查看，已读直接显示已查看；查看进入 Drawer 详情）。
 // 通知类未读提供查看入口；审批类通过操作按钮或状态文字表达当前状态，详情仍可通过整行点击进入。
 // 视觉对齐 admin 视觉交互指南 §7.3：无外框列表行，底分割线 border-border，hover bg-muted/50，次行 content+内联时间。
-// 类型 Tag 颜色取自 domain 单一映射（wo.typeTone/typeLabel），禁止硬编码。
+// 类型 Tag 与详情共用 WorkOrderCategoryTag，待处理/已处理均使用中性分类标签。
 // 驳回走 Modal+Textarea 收集 review_remark（后端 reject 要求非空，否则 422）。
 import { Button, Card, Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle, Textarea } from '@/components/ui';
 import type { WorkOrder } from '@/domain/admin/models';
@@ -12,7 +12,7 @@ import { cn } from '@/utils/cn';
 import { formatNotificationTime } from '@/utils/notificationTime';
 import { Tracert } from '@/utils/tracert';
 import { useState } from 'react';
-import { Tag } from '../Tag';
+import { WorkOrderCategoryTag } from '../WorkOrderCategoryTag';
 
 export interface WorkOrderCardProps {
   workOrder: WorkOrder;
@@ -85,9 +85,10 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
         )}
         onClick={() => onView?.(wo)}
       >
-        <Tag className="mt-0.5 h-6 shrink-0 rounded-full px-2 text-[11px] font-normal">
-          {isApproval ? '审批' : '通知'}
-        </Tag>
+        <WorkOrderCategoryTag
+          workOrder={wo}
+          className="mt-0.5 h-6 shrink-0 rounded-full px-2 text-[11px] font-normal"
+        />
         <div className="min-w-0 flex-1">
           <span className="block break-words text-[13px] font-medium text-foreground">{wo.title}</span>
           {wo.content ? (

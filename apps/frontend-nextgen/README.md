@@ -230,13 +230,20 @@ on approval status, read state or the user's current approval permission.
 Approval-result notifications display the category label “审批类”, rather than
 “审批通知”; this presentation choice does not turn a notification into an
 approvable work order or change its read state.
-The shared event catalogue also recognizes Skill editor requests.
+The [shared category tag](src/components/Admin/WorkOrderCategoryTag.tsx) is used
+by list rows and detail drawers in every view, including pending and processed.
+Approval work orders and approval-result notifications display “审批类”; other
+notifications display “通知类”. All category tags use the same neutral semantic
+colors, independent of event type, read state or processing status. Approval
+status/action colors are unchanged. The shared event catalogue still recognizes
+Skill editor requests for domain metadata.
 
 Regression coverage lives in
 [workOrderService.api.test.ts](test/services/admin/workOrderService.api.test.ts),
 [notificationService.test.ts](test/services/admin/notificationService.test.ts),
 [workOrderMeta.test.ts](test/domain/admin/workOrderMeta.test.ts) and
-[WorkOrderDetailDrawer.test.tsx](test/components/Admin/WorkOrderDetailDrawer.test.tsx).
+[WorkOrderDetailDrawer.test.tsx](test/components/Admin/WorkOrderDetailDrawer.test.tsx) and
+[WorkOrderCategoryTag.test.tsx](test/components/Admin/WorkOrderCategoryTag.test.tsx).
 
 ## Source synchronization
 
