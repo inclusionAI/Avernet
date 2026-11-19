@@ -52,6 +52,7 @@ from agentclaw.community.core.task.context_collab.l6_products.operations.collabo
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
     ProductInstantiateCommand,
+    ProductInstantiateNewCommand,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     ensure_top_level_binding,
@@ -506,3 +507,31 @@ def test_resource_input_list_is_normalized_without_retaining_mutable_input(runti
     inputs.clear()
     assert isinstance(supplied.resource_refs, tuple)
     assert supplied.resource_refs == INPUT_RESOURCES
+
+
+def test_new_instantiation_preserves_explicit_collet_intent_and_resources(runtime):
+    service, repo, _, _, existing = runtime
+    resources = (ResourceBinding(ResourceRef("document", "design", "v2")),)
+    command = ProductInstantiateNewCommand(
+        collet=ColletCreateCommand(
+            OWNER.actor,
+            objective="实现计算器求和",
+            acceptance_criteria="单元测试通过并提交 PR 草稿",
+            resources=resources,
+        ),
+        profile_ref=existing.profile_ref,
+        participant_refs=(BOT,),
+        resource_refs=INPUT_RESOURCES,
+    )
+    instance = service.instantiate(command, OWNER)
+    record = repo.get_current_status(instance.collet_ref)
+    assert record.collet.metadata.objective == command.collet.objective
+    assert (
+        record.collet.metadata.acceptance_criteria == command.collet.acceptance_criteria
+    )
+    assert record.collet.resources == resources
+    assert record.task is None and record.tasks == ()
+    assert instance.root_task_ref is None
+    assert resource_bindings_from_initial_event(record.events[-1]) == tuple(
+        ResourceBinding(ref) for ref in INPUT_RESOURCES
+    )

@@ -34,6 +34,7 @@ def test_collet_columns_match_ddl(engine):
         "actor_ref",
         "scope",
         "collet_metadata",
+        "resources",
         "creation_facts",
         "current_snapshot",
         "root_task_ref",

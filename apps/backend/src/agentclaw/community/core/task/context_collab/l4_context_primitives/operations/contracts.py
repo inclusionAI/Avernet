@@ -135,7 +135,7 @@ class ColletWriter(Protocol):
     def create_l4_collet(
         self, command: ColletCreateCommand, actor_ref: PrincipalRef
     ) -> CreatedCollet:
-        """Persist Collet identity/description/intent/audit, without Work or bindings."""
+        """Persist Collet including intent/resources; no Work or participant binding."""
         ...
 
 
