@@ -150,6 +150,11 @@ class Story:
         })
         self.registration = self.request('POST', '/providers', {
             'name': 'Caller E2E', 'auth': {'mode': 'static_bearer'}, 'protocol_version': '2.0',
+            'caller_capabilities': {
+                'container_routing': 'ensure', 'supports_caller': True,
+                'supports_isolation_binding': True, 'supports_observe_inject': False,
+                'token_visibility': 'runtime_only',
+            },
             'webhook_url': f'http://127.0.0.1:{self.provider.server_port}/callback?{trace_query}'})
         bot = self.request('POST', '/providers/' + self.registration['provider_id'] + '/bots', {
             'name': 'Caller E2E Bot', 'owners': ['callere2eowner'], 'provider_bot_ref': 'caller-bot'},
