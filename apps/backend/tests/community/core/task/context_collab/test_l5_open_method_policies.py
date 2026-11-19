@@ -210,3 +210,29 @@ def test_old_policy_imports_are_identity_reexports_of_l5():
         assert canonical.__module__.startswith(
             "agentclaw.community.core.task.context_collab.l5_methods."
         )
+
+
+def test_required_capabilities_are_immutable_and_optional_for_existing_policies(
+    admission,
+):
+    assert admission.required_capabilities == ()
+    configured = replace(
+        admission,
+        decision_rule="capability_evidence",
+        required_capabilities=("capability://coding", "capability://testing"),
+    )
+    assert configured.required_capabilities == (
+        "capability://coding",
+        "capability://testing",
+    )
+    with pytest.raises(FrozenInstanceError):
+        configured.required_capabilities = ()
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [None, "coding", ["coding"], ("",), (" ",), (1,), ("coding", "coding")],
+)
+def test_admission_rejects_invalid_required_capabilities(admission, capabilities):
+    with pytest.raises(ContextCollabValidationError, match="required_capabilities"):
+        replace(admission, required_capabilities=capabilities)

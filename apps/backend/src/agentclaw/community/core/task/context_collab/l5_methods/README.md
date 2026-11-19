@@ -86,6 +86,14 @@ including reversed `Swarm + Open`.
   These declarations do not bypass L5 G1/G4 execution: product composition must
   authorize and orchestrate the configured Agent's explicit `screen`/`admit`
   calls.
+- `required_capabilities` is an immutable, keyword-only tuple of capability
+  declaration refs needed by the recruiting product. It defaults to empty to
+  preserve existing policies; non-string, blank or duplicate refs are rejected.
+  This field declares matching input, not an automatic evaluator or permission
+  grant. The product reviewer must explicitly consume it. The local Open + Swarm
+  reviewer below accepts an application when any exact declared capability ref
+  matches the needs; empty needs or declarations produce no match. It does not
+  require every Bot to cover every Swarm stage.
 - `AdmissionRole` is L5's read-only structural view of role name, requiredness
   and participant source. L6 `ScenarioRole` satisfies it without an upward
   import, including in type-checking-only annotations.
@@ -159,8 +167,19 @@ Swarm --support--> Open edge; it does not change installed product defaults.
 
 The Profile uses an OPEN participant scope and general `OpenAdmissionPolicy`,
 not the capacity-1 `BotSelfApplicationAdmission`. Seven local Bots discover and
-apply; the accountable owner reviews role/capability evidence, rejects two and
-admits the original five coding workers. Capacity covers all seven simultaneous
+apply; the accountable owner calls the test-local
+[capability reviewer](../../../../../../../tests/community/core/task/context_collab/products/open_admission_support.py)
+with the pinned `OpenAdmissionPolicy` and each submitted application. The Profile
+explicitly lists five `required_capabilities`. The Bots submit capability refs
+as self-declarations through the existing `capability_evidence_refs`; the reviewer
+uses exact set intersection, not applicant IDs or preassigned roles. Five Bots
+match, one declares unrelated copywriting ability and one declares nothing.
+The case checks that all seven applications reach the reviewer; separate
+[reviewer regressions](../../../../../../../tests/community/core/task/context_collab/products/test_open_capability_admission.py)
+check configuration changes, different Bot identities and empty/unmatched input.
+These local declarations are not remotely verified evidence or proof of actual
+capability. The owner still explicitly calls L5 `screen` and `admit`/`reject`;
+review alone grants no participation. Capacity covers all seven simultaneous
 applications, not just the five eventual admissions. Admission creates correlated
 scoped Participant/Decision evidence, not a placeholder Swarm allocation.
 

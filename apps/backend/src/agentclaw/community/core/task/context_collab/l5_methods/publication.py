@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from agentclaw.community.core.task.context_collab.errors import (
@@ -50,6 +50,10 @@ class OpenAdmissionPolicy:
     decision_agent_ref: AgentRef | None = None
     # The rule is a bounded strategy identifier, not an inline algorithm.
     decision_rule: str = "product_policy"
+    # Capability declaration refs wanted by the recruiting product. An immutable,
+    # keyword-only tuple preserves existing policies and subclass positional args.
+    # The caller's reviewer interprets these refs; this value does not run review.
+    required_capabilities: tuple[str, ...] = field(default=(), kw_only=True)
 
     def __post_init__(self) -> None:
         if any(
@@ -73,6 +77,17 @@ class OpenAdmissionPolicy:
             raise ContextCollabValidationError("unsupported admission decision actor")
         if self.decision_rule not in _DECISION_RULES:
             raise ContextCollabValidationError("unsupported admission decision rule")
+        if not isinstance(self.required_capabilities, tuple) or any(
+            not isinstance(capability, str) or not capability.strip()
+            for capability in self.required_capabilities
+        ):
+            raise ContextCollabValidationError(
+                "admission required_capabilities must be a tuple of non-empty refs"
+            )
+        if len(set(self.required_capabilities)) != len(self.required_capabilities):
+            raise ContextCollabValidationError(
+                "admission required_capabilities must not contain duplicates"
+            )
         if self.decision_actor == "configured_agent":
             if not isinstance(self.decision_agent_ref, AgentRef):
                 raise ContextCollabValidationError(
