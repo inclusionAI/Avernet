@@ -1,0 +1,19 @@
+apps/bcs/scripts/e2e-test/caller_execution_story.py
+  s_d2bf2069ff97fe::t_822a4e3d5c8ec3 153-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5c1bd6b26e9637f3360577a6ce6646038b5a7062",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
