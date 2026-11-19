@@ -9,6 +9,7 @@
 
 pub mod actors;
 pub mod application;
+pub use bcs_config_api::a2a_test_user;
 pub mod bot_runtime_use_cases;
 pub mod bot_use_cases;
 pub mod core;

@@ -121,6 +121,7 @@ async fn send(transport: &HttpProviderTransport, target: &BotDeliveryTarget, dow
     match downlink {
         Downlink::Ordinary => {
             let result = transport.deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: target.clone(), run_id: "run-1".into(),
                 frame: BcsFrame::Request(RequestFrame::new("run-1", "chat.send", Some(json!({
                     "bcs_session_id": "session-1", "message": {"text": "hello"},

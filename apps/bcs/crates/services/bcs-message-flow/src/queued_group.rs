@@ -932,6 +932,7 @@ async fn prepare_queued_group_bounded(
     transport_json["context_selection"] = serde_json::to_value(payload.selection).map_err(|_| invalid("queue selection encoding failed"))?;
     Ok(PreparedManagedDelivery {
         command: BotDeliveryCommand {
+            a2a_test_user: None,
             target: delivery_target,
             run_id: run_id.clone(),
             frame,

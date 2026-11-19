@@ -355,12 +355,12 @@ impl CollaborationRuntime {
                     }
                 }
                 bcs_service_api::port::OrchestrationAssigneeResolution::Ordinary => {
-                    self.bot_delivery.deliver(BotDeliveryCommand { target, run_id: p.delivery_request_id.clone(), frame,
+                    self.bot_delivery.deliver(BotDeliveryCommand { a2a_test_user: None, target, run_id: p.delivery_request_id.clone(), frame,
                         delivery_kind: BotDeliveryKind::TaskDispatch, provider_transport: bcs_service_api::ProviderTransportPreference::SseFirst, provider_bypass_headers: Vec::new() }).await
                 }
             }
         } else {
-            self.bot_delivery.deliver(BotDeliveryCommand { target, run_id: p.delivery_request_id.clone(), frame,
+            self.bot_delivery.deliver(BotDeliveryCommand { a2a_test_user: None, target, run_id: p.delivery_request_id.clone(), frame,
                 delivery_kind: BotDeliveryKind::TaskDispatch, provider_transport: bcs_service_api::ProviderTransportPreference::SseFirst, provider_bypass_headers: Vec::new() }).await
         };
         let (target_bot, accepted, error) = match &delivered {

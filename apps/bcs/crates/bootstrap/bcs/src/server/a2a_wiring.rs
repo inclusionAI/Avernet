@@ -36,16 +36,21 @@ pub(super) fn build_card_management(
 
 pub(super) fn build_delivery(
     db: Arc<dyn DbPlugin>, flavor: bcs_db_api::DbSqlFlavor,
-    credentials: Arc<dyn bcs_service_api::ProviderCredentialRepoPort>, guard: OutboundUrlGuard, grpc: Option<&bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
-    identity: Option<&bcs_app_identity_api::OutboundAppIdentityConfig>,
+    credentials: Arc<dyn bcs_service_api::ProviderCredentialRepoPort>, guard: OutboundUrlGuard, config: &crate::BcsConfig,
 ) -> crate::Result<Arc<bcs_a2a_http::delivery::A2aHttpTransport>> {
     let runs = Arc::new(bcs_chat_run_store::a2a::DbA2aRunStore::new(db, crate::env::resolve_env(), flavor));
     let mut transport=bcs_a2a_http::delivery::A2aHttpTransport::new(guard, runs, credentials);
-    if let Some(grpc)=grpc {transport=transport.with_grpc_mesh(grpc.clone())?;}
-    if let Some(identity) = identity {
+    if let Some(grpc)=&config.a2a_grpc {transport=transport.with_grpc_mesh(grpc.clone())?;}
+    if let Some(identity) = &config.a2a_http_identity {
         let plugin = bcs_app_identity_api::build_outbound_app_identity(identity)
             .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?;
         transport = transport.with_app_identity(plugin)?;
+    }
+    if let Some(test_user) = &config.a2a_test_user {
+        if crate::config_loader::Environment::resolve() != crate::config_loader::Environment::Pre {
+            return Err(crate::BcsError::InvalidConfig("a2a_test_user is pre-release only".into()));
+        }
+        transport = transport.with_test_user(test_user.clone())?;
     }
     Ok(Arc::new(transport))
 }

@@ -45,6 +45,7 @@ fn staff_authority_default() -> Arc<LazySeedAuthorityHook> {
 
 fn chat_command(target_bot_id: &str) -> A2aChatCommand {
     A2aChatCommand {
+        a2a_test_user: None,
         caller: CallerContext::Bot(BotActor {
             bot_uuid: "bot-source".to_string(),
         }),
@@ -192,6 +193,7 @@ fn ping_event() -> String {
 
 fn detached_async_command(run_id: &str) -> AsyncA2aChatCommand {
     AsyncA2aChatCommand {
+        a2a_test_user: None,
         caller: CallerContext::Bot(BotActor {
             bot_uuid: "bot-source".to_string(),
         }),

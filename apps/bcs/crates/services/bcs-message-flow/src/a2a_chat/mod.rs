@@ -304,6 +304,14 @@ impl A2aChatRunService for A2aChat {
         dispatch::validate_message(&cmd.message)?;
         let (response_tx, response_rx) = mpsc::channel::<String>(64);
         let queued = self.queue_enabled(&cmd.target_bot_id).await;
+        if let Some(selection) = &cmd.a2a_test_user {
+            if !matches!(&cmd.caller, CallerContext::Bot(actor) if actor.bot_uuid == selection.caller_bot_id) {
+                return Err(ServiceError::Forbidden("A2A test user selection denied".into()));
+            }
+            if !queued {
+                return Err(ServiceError::Conflict("A2A test user selection requires queued direct chat".into()));
+            }
+        }
         if !queued {
         bcs_observability::observe_value("chat.channel.register", self.chat_run_events
             .register(
@@ -319,6 +327,7 @@ impl A2aChatRunService for A2aChat {
         let expires_at_ms = now_ms().saturating_add(cmd.timeout_ms);
         let chat_result = bcs_observability::observe_result("chat.prepare_and_deliver", self
             .chat_with_queue_mode(A2aChatCommand {
+                a2a_test_user: cmd.a2a_test_user,
                 caller: cmd.caller,
                 target_bot_id: cmd.target_bot_id.clone(),
                 message: cmd.message,

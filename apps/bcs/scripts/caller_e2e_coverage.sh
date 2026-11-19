@@ -33,3 +33,12 @@ LLVM_PROFILE_FILE="$cov_runtime/grpc-binding-%m-%p.profraw" \
     --binary "$cov_runtime/debug/bcs-caller-e2e" \
     --grpc-peer-binary "$cov_runtime/debug/bcs-a2a-grpc-peer" \
     --diagnostics-dir "${BCS_E2E_DIAGNOSTICS_DIR:-$bcs_dir/target/cov-e2e/grpc-binding}"
+
+# The Linux rustls platform verifier reads the process-local SSL_CERT_FILE.
+if [[ "$(uname -s)" == Linux ]]; then
+  LLVM_PROFILE_FILE="$cov_runtime/a2a-test-user-%m-%p.profraw" \
+    python3 "$bcs_dir/scripts/e2e-test/a2a_test_user_story.py" \
+      --binary "$cov_runtime/debug/bcs-caller-e2e"
+else
+  echo "A2A test-user HTTPS story requires the Linux process-local CA store"
+fi

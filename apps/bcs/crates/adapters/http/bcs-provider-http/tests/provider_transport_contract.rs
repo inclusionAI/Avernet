@@ -331,6 +331,7 @@ async fn provider_delivery_injects_current_gateway_span_context() {
 
     HttpProviderTransport::allowing_private_networks_for_tests()
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target(webhook_url),
             run_id: "run-traced".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -369,6 +370,7 @@ async fn provider_delivery_applies_configured_bypass_headers() {
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target(webhook_url),
             run_id: "run-bypass".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -408,6 +410,7 @@ async fn provider_delivery_ignores_reserved_bypass_headers() {
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target(webhook_url),
             run_id: "run-reserved-bypass".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -549,6 +552,7 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
         .with_chat_run_timeout_ms(42_000);
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target(webhook_url),
             run_id: "run-1".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -689,6 +693,7 @@ async fn provider_delivery_forwards_extensions_when_present() {
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
     transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target(webhook_url),
             run_id: "run-detached".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -732,6 +737,7 @@ async fn provider_delivery_rejects_private_webhook_url_before_request() {
     let transport = HttpProviderTransport::new();
     let err = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target("http://127.0.0.1:1/webhook".to_string()),
             run_id: "run-private-url".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -765,6 +771,7 @@ async fn provider_delivery_logs_policy_rejection_with_provider_url_ip_and_reason
     let transport = HttpProviderTransport::new();
     let err = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target("http://127.0.0.1:1/webhook".to_string()),
             run_id: "run-private-log".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -832,6 +839,7 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
     transport.set_ingest(message_flow.clone(), run_context.clone());
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target_with_protocol(webhook_url, "2.0"),
             run_id: "run-sse".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -925,6 +933,7 @@ async fn provider_delivery_protocol2_task_kinds_sse_ingest_events() {
         let result = tokio::time::timeout(
             Duration::from_secs(2),
             transport.deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: provider_target_with_protocol(webhook_url.clone(), "2.0"),
                 run_id: run_id.clone(),
                 frame: BcsFrame::Request(RequestFrame::new(
@@ -987,6 +996,7 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
         .with_chat_run_timeout_ms(7_200_000);
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target(webhook_url),
             run_id: "run-actor-id".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -1209,6 +1219,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
         .with_chat_run_timeout_ms(42_000);
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target(webhook_url),
             run_id: "logical-inject-run".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -1275,6 +1286,7 @@ async fn provider_delivery_maps_attempt_frame_id_to_canonical_run_id() {
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target(webhook_url),
             run_id: "run-1".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -1311,6 +1323,7 @@ async fn provider_delivery_rejects_empty_canonical_run_before_network_io() {
     let (webhook_url, server) = spawn_server(app).await;
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
     let error = transport.deliver(BotDeliveryCommand {
+        a2a_test_user: None,
         target: provider_target(webhook_url),
         run_id: String::new(),
         frame: BcsFrame::Request(RequestFrame::new("attempt-1", "chat.send", Some(json!({})))),
@@ -1330,6 +1343,7 @@ async fn invalid_request_headers_are_definitely_not_sent() {
     let (webhook_url, server) = spawn_server(app).await;
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
     let error = transport.deliver(BotDeliveryCommand {
+        a2a_test_user: None,
         target: provider_target(webhook_url), run_id: "invalid-header-run".into(),
         frame: BcsFrame::Request(RequestFrame::new("attempt", "chat.send", Some(json!({})))),
         delivery_kind: BotDeliveryKind::Send, provider_transport: Default::default(),
@@ -1528,6 +1542,7 @@ fn provider_target(webhook_url: String) -> BotDeliveryTarget {
 
 fn provider_send_command(target: BotDeliveryTarget, run_id: &str) -> BotDeliveryCommand {
     BotDeliveryCommand {
+        a2a_test_user: None,
         target,
         run_id: run_id.to_string(),
         frame: BcsFrame::Request(RequestFrame::new(
@@ -1736,6 +1751,7 @@ async fn provider_delivery_2_0_inject_accepts_json_ack() {
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target_v2(webhook_url),
             run_id: "run-inj".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -1782,6 +1798,7 @@ async fn provider_delivery_2_0_chat_send_advertises_sse_and_binds_json_fallback(
     transport.set_ingest(message_flow, run_context.clone());
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target_v2(webhook_url),
             run_id: "run-sse".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -1831,6 +1848,7 @@ async fn provider_delivery_2_0_chat_send_honors_callback_preference() {
     transport.set_ingest(message_flow, run_context.clone());
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target_v2(webhook_url),
             run_id: "run-callback".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -1877,6 +1895,7 @@ async fn provider_delivery_invalid_json_ack_fails_without_second_post() {
 
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target_v2(webhook_url),
             run_id: "run-invalid-ack".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
@@ -1922,6 +1941,7 @@ async fn provider_delivery_2_0_task_kinds_accept_json_callback_fallback() {
         let run_id = format!("task-{suffix}-json-fallback");
         let result = transport
             .deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: provider_target_v2(webhook_url.clone()),
                 run_id: run_id.clone(),
                 frame: BcsFrame::Request(RequestFrame::new(
@@ -1967,6 +1987,7 @@ async fn provider_delivery_2_0_inject_propagates_json_rejection() {
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
     let result = transport
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target_v2(webhook_url),
             run_id: "run-inj2".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(

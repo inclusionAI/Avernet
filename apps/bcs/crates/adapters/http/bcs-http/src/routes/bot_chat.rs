@@ -119,6 +119,17 @@ pub async fn bot_chat_async(
     uri: Uri,
     Json(req): Json<ChatRequest>,
 ) -> Result<(StatusCode, Json<Value>), LegacyChatError> {
+    submit_async_chat(state, bot_uuid, headers, uri, req, None).await
+}
+
+pub(super) async fn submit_async_chat(
+    state: HttpAppState,
+    bot_uuid: String,
+    headers: HeaderMap,
+    uri: Uri,
+    req: ChatRequest,
+    a2a_test_user: Option<bcs_service_api::a2a_test_user::A2aTestUserSelection>,
+) -> Result<(StatusCode, Json<Value>), LegacyChatError> {
     let started = Instant::now();
     let message_len = req.message.len();
     let client_identity = headers
@@ -156,8 +167,9 @@ pub async fn bot_chat_async(
 
     let run_id = uuid::Uuid::new_v4().to_string();
     let trace_request = req.clone();
+    let test_session = a2a_test_user.as_ref().map(|_| format!("a2a-test:{run_id}"));
     let session_key = match resolve_session_key(
-        req.session_id.as_deref(),
+        test_session.as_deref().or(req.session_id.as_deref()),
         &run_id,
         client_identity.as_deref(),
         &from_bot_id,
@@ -200,6 +212,7 @@ pub async fn bot_chat_async(
         .services
         .a2a_chat_runs
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: from_bot_id.clone(),
             }),

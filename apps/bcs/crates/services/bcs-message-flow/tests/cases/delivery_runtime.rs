@@ -86,6 +86,7 @@ impl ManagedDeliveryPreparationService for RecordingIo {
     ) -> ServiceResult<PreparedManagedDelivery> {
         Ok(PreparedManagedDelivery {
             command: BotDeliveryCommand {
+                a2a_test_user: None,
                 target: BotDeliveryTarget::WebSocket {
                     bot_id: row.target_bot_id.clone(),
                 },

@@ -171,7 +171,7 @@ async fn fixture_with_identity_failure(batch:usize,confirm:bool,wait_ms:u64,fail
     contexts.put_context(BotRunContext {run_id:run.clone(),bot_id:"bot".into(),group_id:"group".into(),bcs_session_id:Some("session".into()),deadline_ms:deadline,terminal:false}).await;
     contexts.register_active_run(ActiveBotRunContext {canonical_run_id:run.clone(),downstream_run_id:run.clone(),downstream_session_key:Some("session".into()),
         scope:BotRunScope {bot_id:"bot".into(),group_id:"group".into(),session_id:"session".into()},transport_owner:BotRunTransportOwner::from_target(&target),provider_bypass_headers:vec![],deadline_ms:deadline}).await.unwrap();
-    let delivered=transport.deliver(BotDeliveryCommand {target:target.clone(),run_id:run.clone(),frame:BcsFrame::Request(RequestFrame::new("attempt","chat.send",Some(json!({"bcs_session_id":"session",
+    let delivered=transport.deliver(BotDeliveryCommand { a2a_test_user: None,target:target.clone(),run_id:run.clone(),frame:BcsFrame::Request(RequestFrame::new("attempt","chat.send",Some(json!({"bcs_session_id":"session",
         "message":{"role":"user","content":[{"type":"text","text":"查询订单"}],"timestamp":1}})))),delivery_kind:BotDeliveryKind::Send,provider_transport:Default::default(),provider_bypass_headers:vec![]}).await;
     if fail_identity {assert!(delivered.is_err());} else {delivered.unwrap();}
     Fixture {transport,target,interactions,frontend,contexts,runs,managed,agent,ingest,run,deadline,server}

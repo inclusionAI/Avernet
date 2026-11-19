@@ -465,6 +465,7 @@ async fn dispatch(flow: &BcsMessageFlow, mut cmd: TaskDispatchCommand, native: b
     let result = match flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: delivery_target,
             run_id: effective_task_id.clone(),
             frame,

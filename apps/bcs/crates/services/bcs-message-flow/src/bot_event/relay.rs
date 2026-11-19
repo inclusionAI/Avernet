@@ -454,6 +454,7 @@ pub(super) async fn relay_final_chat_event(
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: delivery_target,
                 run_id: run_id.clone(),
                 frame,
