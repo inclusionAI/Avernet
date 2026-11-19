@@ -45,8 +45,10 @@ it.each(['draft', 'verify', 'online', undefined] as const)(
     const context = await load(stage);
     expect(containerCalled()).toBe(true);
     expect(context.environments[2].instances).toEqual(['c1', 'c2']);
-    // 草稿/预发从未获得这份清单：线上 UUID 不得复用给其他环境。
-    if (stage !== 'online') expect(context.environments[0].instances).toEqual([]);
+    // 草稿/预发从未获得这份清单：线上 UUID 不得复用给其他环境。线上场景
+    // 已由上面的 online 断言覆盖，这里用空数组占位以保持断言无条件执行。
+    const nonOnlineInstances = stage === 'online' ? [] : context.environments[0].instances;
+    expect(nonOnlineInstances).toEqual([]);
   },
 );
 
