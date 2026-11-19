@@ -161,6 +161,7 @@ pub use caller_container::{CallerObserveTarget,
     EnsureCallerContainer, EnsureCreateMode,
 };
 pub mod dist_agent;
+pub mod dist_output;
 pub mod dist_runtime;
 
 pub mod provider_request_headers;

@@ -278,6 +278,11 @@ impl StoreInboxProducer {
 }
 #[async_trait]
 impl InboxProducerPort for StoreInboxProducer {
+    async fn lookup(&self, scope: &TaskScope, id: &InputId) -> Result<Option<AdmitRequest>, StoreError> {
+        let key = self.inner.layout.canonical_admission(scope, id)?;
+        self.canonical(&key).await.map(|record| record.map(|(_, c)| c.intent.request))
+    }
+
     fn scan_budget_profile(
         &self,
     ) -> Option<bcs_service_api::port::repo::distributed::budget::ScanBudgetProfile> {

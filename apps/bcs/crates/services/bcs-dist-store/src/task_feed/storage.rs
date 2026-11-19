@@ -117,13 +117,9 @@ impl StoreTaskFeed {
     pub(super) async fn payload(
         &self,
         payload: &Payload,
-        maximum: usize,
     ) -> Result<serde_json::Value, StoreError> {
         match payload {
-            Payload::Inline(value) => {
-                bounded_bytes(value, maximum)?;
-                Ok(value.clone())
-            }
+            Payload::Inline(value) => Ok(value.clone()),
             Payload::Ref(reference) => {
                 if reference.key.len() > 1024 || reference.digest.0.len() > 256 {
                     return Err(invalid("output_reference"));
@@ -132,18 +128,11 @@ impl StoreTaskFeed {
                     .io(self.stores.blobs.get(reference))
                     .await?
                     .ok_or_else(|| unavailable("output_blob_missing"))?;
-                if bytes.len() > maximum
-                    || crate::archive::blob_reference(&reference.key, &bytes).digest
-                        != reference.digest
-                {
-                    return Err(invalid("output_blob_digest_or_size"));
+                if crate::archive::blob_reference(&reference.key, &bytes).digest != reference.digest {
+                    return Err(invalid("output_blob_digest"));
                 }
                 let value: serde_json::Value =
                     serde_json::from_slice(&bytes).map_err(|_| invalid("output_blob_json"))?;
-                // Legal noncanonical JSON (for example exponent-form numbers)
-                // can grow after parsing. Quotas use the same public encoding as
-                // inline values and the pure projection, not just stored bytes.
-                bounded_bytes(&value, maximum)?;
                 Ok(value)
             }
         }
@@ -157,8 +146,7 @@ impl StoreTaskFeed {
             .validate_limits(limits)
             .map_err(|_| invalid("output_limits"))?;
         let snapshot = serde_json::from_value(
-            self.payload(content, limits.max_snapshot_bytes as usize)
-                .await?,
+            self.payload(content).await?,
         )
         .map_err(|_| invalid("display_decode"))?;
         self.projection

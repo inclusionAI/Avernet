@@ -70,7 +70,7 @@ async fn real_providers_archive_then_publish_terminal_before_starting_next_task(
 #[tokio::test]
 async fn lost_commit_response_keeps_the_decision_and_large_blob_identity() {
     let runner = Arc::new(FinishingRunner {
-        text: 300000,
+        text: 9 * 1024 * 1024,
         ..Default::default()
     });
     let f = Fixture::new(runner.clone()).await;
@@ -136,53 +136,43 @@ async fn lost_commit_response_keeps_the_decision_and_large_blob_identity() {
             .unwrap()
             .record
     );
+    use bcs_service_api::port::repo::distributed::task_feed::{RestoredTask, TaskReaderPort};
+    let Some(RestoredTask::Final(view)) = f.feed.restore(&spec().scope, &tid).await.unwrap() else {
+        panic!("final output")
+    };
+    let Payload::Inline(value) = view.content.snapshot else {
+        panic!("resolved snapshot")
+    };
+    let display: DisplaySnapshot = serde_json::from_value(value).unwrap();
+    assert_eq!(display.units[0].content.as_str().unwrap().len(), 9 * 1024 * 1024);
+
 }
 
 #[tokio::test]
-async fn output_quota_discards_the_entire_decision_and_does_not_poison_next_task() {
+async fn output_above_the_former_unit_quota_completes_and_leaves_the_next_task_healthy() {
     let runner = Arc::new(FinishingRunner {
         text: 1_048_575,
         ..Default::default()
     });
     let f = Fixture::new(runner.clone()).await;
-    let first = f.admit("over-quota").await;
+    let first = f.admit("large-output").await;
     let second = f.admit("next").await;
     f.warm().await;
     for _ in 0..100 {
         f.step().await.unwrap();
-        if f.snapshot(&second).await.content.status == TaskStatus::Failed {
+        if f.snapshot(&second).await.content.status == TaskStatus::Completed {
             break;
         }
     }
     assert_eq!(runner.calls.load(Ordering::SeqCst), 2);
     for tid in [first, second] {
         let snapshot = f.snapshot(&tid).await;
-        assert_eq!(snapshot.content.status, TaskStatus::Failed);
-        assert_eq!(snapshot.output_usage, OutputUsage::default());
-        assert_eq!(
-            snapshot.content.snapshot,
-            Payload::Inline(serde_json::json!({"format_version":1,"units":[]}))
-        );
-        let record = f
-            .archive
-            .get_final(&spec().scope, &tid)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            record.result,
-            Payload::Inline(serde_json::json!({"code":"OutputQuotaExceeded"}))
-        );
+        assert_eq!(snapshot.content.status, TaskStatus::Completed);
+        assert_eq!(snapshot.output_usage.cumulative_bytes, 1_048_577);
+        let record = f.archive.get_final(&spec().scope, &tid).await.unwrap().unwrap();
+        assert_eq!(record.result, Payload::Inline(serde_json::json!({"finished":true})));
     }
-    assert!(
-        !f.coordination
-            .load(&spec().sid)
-            .await
-            .unwrap()
-            .unwrap()
-            .recovery
-            .quarantined
-    );
+    assert!(!f.coordination.load(&spec().sid).await.unwrap().unwrap().recovery.quarantined);
 }
 
 #[tokio::test]

@@ -1,20 +1,19 @@
 //! Gateway core service of the distributed executor plane.
 //!
-//! [`DistGatewayCore`] implements `DistGatewayCoreService` over the repository
-//! ports only: it checks the resolved scope, the frozen session and the task's
-//! state before an input is admitted, and turns port results into core results.
-//! It holds no storage code and no transport types.
+//! [`DistGatewayCore`] implements `DistGatewayCoreService` over injected Worker
+//! admission/output facades and the session specification port. It checks the
+//! resolved scope and maps results, forwarding already formatted output views.
+//! It holds no storage code, output conversion rules or transport types.
 
 mod admission;
-mod content;
 mod error;
 
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_service_api::core::dist_gateway::*;
+use bcs_service_api::core::dist_admission::TaskAdmissionCoreService;
+use bcs_service_api::port::dist_output::{DistTaskOutputReaderPort, FormattedFollowItem};
 use bcs_service_api::port::repo::distributed::common::PageRequest;
-use bcs_service_api::port::repo::distributed::inbox::InboxProducerPort;
-use bcs_service_api::port::repo::distributed::result::BlobStorePort;
 use bcs_service_api::port::repo::distributed::session::SessionStorePort;
 use bcs_service_api::port::repo::distributed::task_feed::*;
 use error::read_error;
@@ -23,24 +22,21 @@ use futures::stream::BoxStream;
 use std::sync::Arc;
 
 pub struct DistGatewayCore {
-    inbox: Arc<dyn InboxProducerPort>,
-    tasks: Arc<dyn TaskReaderPort>,
+    inbox: Arc<dyn TaskAdmissionCoreService>,
+    tasks: Arc<dyn DistTaskOutputReaderPort>,
     sessions: Arc<dyn SessionStorePort>,
-    blobs: Arc<dyn BlobStorePort>,
 }
 
 impl DistGatewayCore {
     pub fn new(
-        inbox: Arc<dyn InboxProducerPort>,
-        tasks: Arc<dyn TaskReaderPort>,
+        inbox: Arc<dyn TaskAdmissionCoreService>,
+        tasks: Arc<dyn DistTaskOutputReaderPort>,
         sessions: Arc<dyn SessionStorePort>,
-        blobs: Arc<dyn BlobStorePort>,
     ) -> Self {
         Self {
             inbox,
             tasks,
             sessions,
-            blobs,
         }
     }
 }
@@ -72,12 +68,11 @@ impl DistGatewayCoreService for DistGatewayCore {
         scope: &TaskScope,
         tid: &Tid,
     ) -> Result<RestoredTaskCut, DistGatewayCoreError> {
-        let (mut view, cursor) = match self.tasks.restore(scope, tid).await.map_err(read_error)? {
+        let (view, cursor) = match self.tasks.restore(scope, tid).await.map_err(read_error)? {
             None => return Err(DistGatewayCoreError::NotFound),
             Some(RestoredTask::Final(view)) => (view, None),
             Some(RestoredTask::Live { view, cursor }) => (view, Some(cursor)),
         };
-        view.content.snapshot = content::inline(self.blobs.as_ref(), view.content.snapshot).await?;
         Ok(RestoredTaskCut { view, cursor })
     }
 
@@ -100,23 +95,13 @@ impl DistGatewayCoreService for DistGatewayCore {
         scope: TaskScope,
         cursor: TaskCursor,
     ) -> BoxStream<'static, Result<CoreFollowItem, DistGatewayCoreError>> {
-        let blobs = self.blobs.clone();
         self.tasks
             .follow(scope, cursor)
-            .then(move |item| {
-                let blobs = blobs.clone();
-                async move {
-                    match item.map_err(read_error)? {
-                        FollowItem::Gap => Ok(CoreFollowItem::Gap),
-                        FollowItem::Events { items, next } => {
-                            let mut events = Vec::with_capacity(items.len());
-                            for event in items {
-                                events.push(content::inline_event(blobs.as_ref(), event).await?);
-                            }
-                            Ok(CoreFollowItem::Events { events, next })
-                        }
-                    }
-                }
+            .map(|item| {
+                Ok(match item.map_err(read_error)? {
+                    FormattedFollowItem::Gap => CoreFollowItem::Gap,
+                    FormattedFollowItem::Events { events, next } => CoreFollowItem::Events { events, next },
+                })
             })
             .boxed()
     }

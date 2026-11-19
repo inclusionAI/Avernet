@@ -42,6 +42,12 @@ run_case adapter_core 1 crates/adapters/ws/fixture/src/lib.rs \
   'use bcs_service_api::core::GroupCoreService;'
 run_case adapter_port 1 crates/adapters/ws/fixture/src/lib.rs \
   'use bcs_service_api::port::BotDeliveryPort;'
+run_case output_adapter_port 0 crates/adapters/output/fixture/src/lib.rs \
+  'use bcs_service_api::port::dist_output::DistOutputAdapterPort;'
+run_case output_adapter_other_port 1 crates/adapters/output/fixture/src/lib.rs \
+  'use bcs_service_api::port::repo::distributed::task_feed::TaskReaderPort;'
+run_case output_adapter_core 1 crates/adapters/output/fixture/src/lib.rs \
+  'use bcs_service_api::core::dist_projection::OutputProjectionCoreService;'
 run_case client_core 1 crates/external-clients/fixture/src/lib.rs \
   'use bcs_service_api::core::GroupCoreService;'
 run_case client_application 1 crates/external-clients/fixture/src/lib.rs \

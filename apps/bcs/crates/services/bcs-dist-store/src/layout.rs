@@ -129,11 +129,6 @@ impl KeyLayout {
     pub fn task(&self, tid: &Tid) -> Result<String, StoreError> {
         self.by_prefixed_id("task", &tid.0)
     }
-    /// Per-session task index (sorted set: member = task id, score = creation
-    /// time in ms), written only by Gateway admission: `…:tasks:<sid>`.
-    pub fn session_tasks(&self, sid: &Sid) -> Result<String, StoreError> {
-        self.by_session("tasks", sid)
-    }
     pub fn task_terminal_append(&self, tid: &Tid) -> Result<String, StoreError> {
         self.by_prefixed_id("task-terminal-append", &tid.0)
     }

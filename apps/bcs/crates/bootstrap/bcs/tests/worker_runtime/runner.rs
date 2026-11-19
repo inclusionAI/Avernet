@@ -9,6 +9,7 @@
 mod assembly;
 mod commands;
 mod dispatch;
+mod gateway;
 mod storage;
 use bcs_dist_test_runner as workload;
 use clap::Parser;

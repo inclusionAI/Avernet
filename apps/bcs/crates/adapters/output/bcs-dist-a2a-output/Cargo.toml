@@ -1,0 +1,20 @@
+[package]
+name = "bcs-dist-a2a-output"
+description = "Pure A2A output formatting for the distributed Worker display model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+a2a = { package = "a2a-lf", version = "=0.4.2" }
+bcs-dist-model = { workspace = true }
+bcs-service-api = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+
+[lints]
+workspace = true

@@ -10,13 +10,7 @@ use bcs_db_api::DbPlugin;
 use bcs_dist_model::*;
 use bcs_service_api::port::repo::distributed::{common::*, result::*, session::EffectKind};
 use bcs_store_api::document::DocumentStorePlugin;
-use serde::Serialize;
-use std::{io::Write, sync::Arc};
-
-/// Stable format bounds for phase 1. Host configuration cannot lower these for
-/// existing namespaces; task output quotas remain frozen in TaskSnapshot.
-pub const MAX_BLOB_BYTES: usize = 8 * 1024 * 1024 + 64 * 1024;
-pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024 + 64 * 1024;
+use std::sync::Arc;
 
 pub struct DbArchiveStore {
     db: Arc<dyn DbPlugin>,
@@ -68,8 +62,8 @@ impl BlobStorePort for DbArchiveStore {
         bytes: Vec<u8>,
     ) -> Result<IdempotentWrite, StoreError> {
         validate_key(&identity.key)?;
-        if identity.key.starts_with("result:") || bytes.len() > MAX_BLOB_BYTES {
-            return Err(invalid("blob_identity_or_size"));
+        if identity.key.starts_with("result:") {
+            return Err(invalid("blob_identity"));
         }
         if blob_reference(&identity.key, &bytes).digest != identity.digest {
             return Err(invalid("blob_digest"));
@@ -112,7 +106,7 @@ impl ResultStorePort for DbArchiveStore {
         {
             return Err(invalid("result_source"));
         }
-        let bytes = bounded_json(&record, MAX_RECORD_BYTES)?;
+        let bytes = serde_json::to_vec(&record).map_err(|_| invalid("archive_encoding"))?;
         let reference = blob_reference(&result_key(&record.scope, &record.tid)?, &bytes);
         let provenance = completion_identity(&source)?;
         if provenance.len() > 16 * 1024 {
@@ -240,29 +234,4 @@ fn unknown(key: &str) -> StoreError {
     StoreError::OutcomeUnknown {
         operation_id: object_hash(key),
     }
-}
-
-fn bounded_json(value: &impl Serialize, maximum: usize) -> Result<Vec<u8>, StoreError> {
-    struct Bounded {
-        bytes: Vec<u8>,
-        maximum: usize,
-    }
-    impl Write for Bounded {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if bytes.len() > self.maximum.saturating_sub(self.bytes.len()) {
-                return Err(std::io::Error::other("encoded archive size exceeded"));
-            }
-            self.bytes.extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut writer = Bounded {
-        bytes: Vec::new(),
-        maximum,
-    };
-    serde_json::to_writer(&mut writer, value).map_err(|_| invalid("archive_encoded_size"))?;
-    Ok(writer.bytes)
 }

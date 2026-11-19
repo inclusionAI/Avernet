@@ -49,6 +49,8 @@ impl DistRunnerCoreService for Runner {
                 payload: Payload::Inline(value),
             } = input
             {
+                // The Gateway story supplies its deterministic workload as an A2A DataPart.
+                let value = value.get("parts").and_then(|parts| parts.as_array()).and_then(|parts| parts.first()).and_then(|part| part.get("data")).unwrap_or(value);
                 let mode = value["mode"].as_str().unwrap_or("finish");
                 next_state.value = serde_json::json!({"mode": mode});
                 match mode {

@@ -3,6 +3,7 @@ use super::principal::CallerContext;
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use futures::stream::BoxStream;
+pub use crate::port::dist_output::{FormattedOutputBody, FormattedOutputEvent};
 
 /// Built by trusted authentication/tenant resolution, never deserialized from body.
 #[derive(Debug, Clone)]
@@ -54,7 +55,7 @@ pub enum TaskStreamItem {
         cursor: TaskCursor,
     },
     Events {
-        events: Vec<OutputEvent>,
+        events: Vec<FormattedOutputEvent>,
         cursor: TaskCursor,
     },
 }

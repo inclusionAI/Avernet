@@ -1,13 +1,9 @@
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use futures::stream::BoxStream;
+use crate::port::dist_output::FormattedOutputEvent;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct AdmitTaskCommand {
-    pub input: InputEnvelope,
-    pub create_session: Option<SessionSpec>,
-    pub create_task: Option<TaskSnapshot>,
-}
+pub use super::dist_admission::TaskAdmissionCommand as AdmitTaskCommand;
 
 /// The input is admitted, whether by this call or an earlier one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +36,7 @@ pub struct RestoredTaskCut {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CoreFollowItem {
     Events {
-        events: Vec<OutputEvent>,
+        events: Vec<FormattedOutputEvent>,
         next: TaskCursor,
     },
     Gap,

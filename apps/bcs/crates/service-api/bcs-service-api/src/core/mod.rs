@@ -43,3 +43,5 @@ pub mod dist_connector;
 pub mod dist_gateway;
 pub mod dist_runner;
 pub mod dist_projection;
+
+pub mod dist_admission;

@@ -35,6 +35,7 @@ fn field<'a>(v: &'a Value, key: &str) -> anyhow::Result<&'a str> {
 impl Host {
     pub async fn command(&mut self, request: Value) -> anyhow::Result<Value> {
         match field(&request, "op")? {
+            "gateway_listen" => Ok(json!(self.gateway_listen().await?)),
             "admit" => {
                 let sid = Sid(field(&request, "sid")?.into());
                 let tid = Tid(field(&request, "tid")?.into());

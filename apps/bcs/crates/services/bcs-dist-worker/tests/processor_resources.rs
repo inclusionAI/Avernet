@@ -597,10 +597,10 @@ async fn authoritative_acquisition_respects_the_shared_session_quota() {
 }
 
 #[tokio::test]
-async fn output_snapshot_quota_does_not_change_the_input_capacity() {
+async fn output_inline_threshold_does_not_change_the_input_capacity() {
     let f = Fixture::new(Arc::new(FinishingRunner::default())).await;
     let mut initial = metadata();
-    initial.output_limits.max_snapshot_bytes = 128;
+    initial.output_limits.inline_threshold_bytes = 128;
     let tid = initial.tid.clone();
     f.inbox
         .admit(AdmitRequest {

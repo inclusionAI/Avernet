@@ -161,7 +161,7 @@ async fn thinking_is_delivered_once_without_runner_snapshot_or_usage_changes() {
 }
 
 #[tokio::test]
-async fn oversized_thinking_does_not_block_the_session() {
+async fn thinking_above_the_inline_threshold_does_not_block_the_session() {
     let runner = Arc::new(WaitingRunner(AtomicUsize::new(0)));
     let f = Fixture::new(runner.clone()).await;
     let mut definition = spec();
@@ -184,7 +184,6 @@ async fn oversized_thinking_does_not_block_the_session() {
         },
     });
     let mut initial = metadata();
-    initial.output_limits.max_unit_bytes = 128;
     initial.output_limits.inline_threshold_bytes = 128;
     let tid = initial.tid.clone();
     f.inbox

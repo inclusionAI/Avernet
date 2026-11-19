@@ -17,7 +17,7 @@ fn producer_script() -> (Script, AdmitRequest, AdmitRequest) {
         .expect(
             "InboxProducerPort::admit",
             (&fresh,),
-            ok(AdmitOutcome::Accepted(receipt())),
+            ok(AdmitOutcome::Duplicate(receipt())),
         )
         .expect(
             "InboxProducerPort::admit",

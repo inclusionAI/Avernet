@@ -15,9 +15,24 @@ impl References {
         payload: &Payload,
         maximum: usize,
     ) -> Result<serde_json::Value, StoreError> {
+        self.resolve_value(payload, Some(maximum)).await
+    }
+    pub(super) async fn resolve_output(
+        &self,
+        payload: &Payload,
+    ) -> Result<serde_json::Value, StoreError> {
+        self.resolve_value(payload, None).await
+    }
+    async fn resolve_value(
+        &self,
+        payload: &Payload,
+        maximum: Option<usize>,
+    ) -> Result<serde_json::Value, StoreError> {
         match payload {
             Payload::Inline(value) => {
-                bounded(value, maximum)?;
+                if let Some(maximum) = maximum {
+                    bounded(value, maximum)?;
+                }
                 Ok(value.clone())
             }
             Payload::Ref(reference) => {
@@ -26,14 +41,16 @@ impl References {
                     .await
                     .map_err(|_| unavailable("blob_read_timeout"))??
                     .ok_or_else(|| unavailable("blob_missing"))?;
-                if bytes.len() > maximum
+                if maximum.is_some_and(|maximum| bytes.len() > maximum)
                     || blob_reference(&reference.key, &bytes).digest != reference.digest
                 {
                     return Err(invalid("blob_digest_or_size"));
                 }
                 let value: serde_json::Value =
                     serde_json::from_slice(&bytes).map_err(|_| invalid("blob_json"))?;
-                bounded(&value, maximum)?;
+                if let Some(maximum) = maximum {
+                    bounded(&value, maximum)?;
+                }
                 Ok(value)
             }
         }
@@ -149,8 +166,7 @@ impl References {
         let Payload::Inline(value) = payload else {
             return Ok(false);
         };
-        let size = bounded(value, PHASE_ONE_OUTPUT_LIMITS.max_snapshot_bytes as usize)?;
-        if size <= threshold {
+        if encoded_size(value, threshold).is_some() {
             return Ok(false);
         }
         let bytes = serde_json::to_vec(value).map_err(|_| invalid("blob_encoding"))?;

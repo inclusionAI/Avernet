@@ -256,7 +256,7 @@ fn dispatch(
 }
 fn payload(payload: &Payload, limits: &OutputLimits) -> Result<(), DecisionFailure> {
     let valid = match payload {
-        Payload::Inline(value) => encoded_size(value, limits.max_snapshot_bytes as usize).is_some(),
+        Payload::Inline(_) => true,
         Payload::Ref(reference) => {
             encoded_size(reference, limits.max_reference_metadata_bytes as usize).is_some()
         }
