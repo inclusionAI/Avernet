@@ -1,0 +1,19 @@
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_ad0fbd97cedc90::t_228e2a225874a6 186-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "38d6e56bcdecb3eee1c3bb9eb09d0d4ce0079e29",
+  "prompts": {},
+  "sessions": {
+    "s_ad0fbd97cedc90": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c937-6a91-7c43-9e32-8c272e10e7e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

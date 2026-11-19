@@ -1,0 +1,74 @@
+apps/bcs-internal/bcn-configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 23,26
+apps/bcs-internal/bcn-configs/sofa-rpc-gray.toml
+  h_fa66fe7c023b4b 32,35
+apps/bcs-internal/bcn-configs/sofa-rpc-pre.toml
+  h_fa66fe7c023b4b 31,34
+apps/bcs-internal/bcn-configs/sofa-rpc-prod.toml
+  h_fa66fe7c023b4b 32,35
+apps/bcs-internal/bcn-configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 70,73
+apps/bcs-internal/configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 23,26
+apps/bcs-internal/configs/sofa-rpc-gray.toml
+  h_fa66fe7c023b4b 24,27
+apps/bcs-internal/configs/sofa-rpc-local.toml
+  h_fa66fe7c023b4b 23,26
+apps/bcs-internal/configs/sofa-rpc-pre.toml
+  h_fa66fe7c023b4b 23,26
+apps/bcs-internal/configs/sofa-rpc-prod.toml
+  h_fa66fe7c023b4b 24,27
+apps/bcs-internal/configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 63,66
+apps/bcs-internal/crates/plugins/bcs-sofa-services/build.rs
+  h_fa66fe7c023b4b 4-6,8-14,16-25
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/agent_card_management/v1/agent_card_management.proto
+  h_fa66fe7c023b4b 3,5
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/ucs_render/v1/ucs_render.proto
+  h_fa66fe7c023b4b 3,5
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/a2a/mapping.rs
+  h_fa66fe7c023b4b 7
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/a2a/mod.rs
+  h_fa66fe7c023b4b 5-6
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/a2a/provider.rs
+  h_fa66fe7c023b4b 1,9
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa.rs
+  h_fa66fe7c023b4b 19,25
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_tonic.rs
+  h_fa66fe7c023b4b 4-5
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/lib.rs
+  h_fa66fe7c023b4b 10-11,13-15,17-18,20-23
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/mapping.rs
+  h_fa66fe7c023b4b 4,10
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/mod.rs
+  h_fa66fe7c023b4b 8-9
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/ucs/provider.rs
+  h_fa66fe7c023b4b 4
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  h_fa66fe7c023b4b 27,29,158,163,165,168,172,270-271,478
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/contracts.rs
+  h_fa66fe7c023b4b 5,44-46,53-55,72
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/provider_host.rs
+  h_fa66fe7c023b4b 6
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/roundtrip.rs
+  h_fa66fe7c023b4b 13
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/sofa_provider_host.rs
+  h_fa66fe7c023b4b 13
+apps/bcs-internal/tests/fixtures/sofa_rpc_cd_json_baseline.json
+  h_fa66fe7c023b4b 22,25,28,31
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 353-354
+apps/bcs-internal/tests/test_sofa_rpc_process.py
+  h_fa66fe7c023b4b 27-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "362f9e131c77e28703158aef3c6bccc963a9d0cd",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

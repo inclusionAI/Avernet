@@ -1,0 +1,26 @@
+apps/frontend-nextgen/tsconfig.json
+  s_2a8abdc9af1170::t_e9918d4bc38fe0 22-27
+apps/frontend-nextgen/scripts/public-tests.list
+  s_2a8abdc9af1170::t_fb72023b5014db 62-72,74-107
+  s_2a8abdc9af1170::t_e8a4fe2749f45c 153-154
+apps/frontend-nextgen/scripts/assemble-internal.sh
+  s_2a8abdc9af1170::t_c14b7a35466fe6 209-219
+apps/frontend-nextgen/jest.config.cjs
+  s_2a8abdc9af1170::t_1efe497abb8a3c 22-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c3f982bc87308bd6f7ef406160eda1ba7de24224",
+  "prompts": {},
+  "sessions": {
+    "s_2a8abdc9af1170": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "b7903c3f-dab3-4e7d-87b3-7d23f3d7a102",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

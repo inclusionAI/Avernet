@@ -1,0 +1,49 @@
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/materialization.py
+  s_89ee1c722ef961::t_239d6e06941cdb 85-86
+apps/bcsfuse/tests/alipay/test_card_rebuild.py
+  s_89ee1c722ef961::t_239d6e06941cdb 111-116
+apps/bcsfuse/docs/architecture/alipay-index-rebuild-minimal.md
+  s_89ee1c722ef961::t_65232315f6d53d 144
+  s_89ee1c722ef961::t_7666bf6c38a50c 128-137,146
+apps/bcsfuse/tests/alipay/test_card_management_boundary.py
+  s_89ee1c722ef961::t_239d6e06941cdb 184,193-194,196-198,211
+  s_89ee1c722ef961::t_3383d70748f8e0 58
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_89ee1c722ef961::t_7666bf6c38a50c 115
+apps/bcsfuse/tests/alipay/test_document_catalog.py
+  s_89ee1c722ef961::t_239d6e06941cdb 180
+apps/bcsfuse/docs/architecture/alipay-catalog.md
+  s_89ee1c722ef961::t_7666bf6c38a50c 10,21-23
+apps/bcsfuse/tests/alipay/test_catalog_http.py
+  s_89ee1c722ef961::t_7666bf6c38a50c 92-95
+apps/bcsfuse/tests/alipay/test_result_limit.py
+  s_89ee1c722ef961::t_3383d70748f8e0 208-211
+apps/bcsfuse/internal/zbcsfuse_internal/providers/card_schema.py
+  s_89ee1c722ef961::t_7666bf6c38a50c 36-39
+  s_89ee1c722ef961::t_35efebb11f9157 35,40,43,45,49-50
+apps/bcsfuse/tests/alipay/test_mysql_catalog_schema.py
+  s_89ee1c722ef961::t_7666bf6c38a50c 308-341,345-415
+  s_89ee1c722ef961::t_3383d70748f8e0 342-344
+apps/bcsfuse/internal/zbcsfuse_internal/providers/card_repository.py
+  s_89ee1c722ef961::t_4dcbe7f1e1e05b 18,21
+apps/bcsfuse/scripts/sql/init_bcsfuse_agent_cards.sql
+  s_89ee1c722ef961::t_59f5f4cdb8e213 16-18
+apps/bcsfuse/scripts/sql/upgrade_card_deletion_metadata.sql
+  s_89ee1c722ef961::t_2e9f7f4793e98a 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "61f7fed614e82e9c484b62a9593214ccb2892693",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

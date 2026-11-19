@@ -1,0 +1,24 @@
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/Cargo.toml
+  h_fa66fe7c023b4b 15
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  h_fa66fe7c023b4b 43,189
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/config.rs
+  h_fa66fe7c023b4b 20,183
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/contract.rs
+  h_fa66fe7c023b4b 1-140
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/lib.rs
+  h_fa66fe7c023b4b 36
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/config_fail_closed.rs
+  h_fa66fe7c023b4b 7,317-358
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "89e4279eddb067b8d9ebdf21918779292ed8844c",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,173 @@
+.aci/bcsfuse/bcsfuse-pre-deploy.aci.yml
+  s_22cccde0690c58::t_22c416ae9f87ed 79
+.aci/zbcsfuse/zbcsfuse-dev-ci.aci.yml
+  s_22cccde0690c58::t_9b01bd50bb52e3 66
+.aci/zbcsfuse/zbcsfuse-pre-deploy.aci.yml
+  s_22cccde0690c58::t_c4971294d82e72 69
+apps/bcsfuse/README.md
+  s_22cccde0690c58::t_ee06d449ee4e55 30,41,49-58,65-66,85,88,90-91
+apps/bcsfuse/configs/zbcsfuse/application.yaml
+  s_22cccde0690c58::t_58124a156543ab 52,55
+apps/bcsfuse/conftest.py
+  s_22cccde0690c58::t_1b1b8a2ae61981 1-40
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_22cccde0690c58::t_7d49fd3a29a7d3 47,114
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_22cccde0690c58::t_da5a623dd7cd2d 34-36,75,78,98,106-108,129-135,143,194,212-214,224,271-272
+apps/bcsfuse/docs/architecture/alipay-index-rebuild-minimal.md
+  s_22cccde0690c58::t_f5806008e9e2ea 31-32,69,85
+apps/bcsfuse/docs/architecture/alipay-retrieval-runtime.md
+  s_22cccde0690c58::t_954e9512898f5a 53-58
+apps/bcsfuse/docs/architecture/search-application-architecture.md
+  s_22cccde0690c58::t_2b451b53df0a3a 4
+apps/bcsfuse/docs/deployment/tc-card-storage.md
+  s_22cccde0690c58::t_0c490f36fdd234 3-4,6,89
+apps/bcsfuse/docs/deployment/tc-qdrant.md
+  s_22cccde0690c58::t_b055fbfe9e9327 49,59-64
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_22cccde0690c58::t_a10b8f604264f6 78,86,88-90,103-105,173,177-179,181,306-320
+apps/bcsfuse/docs/deployment/zbcsfuse-sre-tr-load-test.md
+  s_22cccde0690c58::t_9ce6e97ea54bca 78,172-174,186
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay_local.py
+  s_22cccde0690c58::t_9845f9e312106e 173-174
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/tc.py
+  s_22cccde0690c58::t_f07dcb6f0e654b 28
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_22cccde0690c58::t_1fd7cb369afcaf 186-193,267-271,273-274
+apps/bcsfuse/internal/bcsfuse_internal/config/alipay_search.py
+  s_22cccde0690c58::t_1b9f5f799d2c7b 11-13
+apps/bcsfuse/internal/bcsfuse_internal/providers/discover_tr.py
+  s_22cccde0690c58::t_32512277ba0f38 1,21,41,49,66
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/search_response.py
+  s_22cccde0690c58::t_2b8dc32283b7ae 5,28,60
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_card.py
+  s_22cccde0690c58::t_164ea1a75be13d 3,18-38,57
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_22cccde0690c58::t_e2dce7dccb5a4f 1,26,98-103,179-180,185,188-195,199,209,223-227,242,249
+apps/bcsfuse/internal/zbcsfuse_internal/application/card_metadata.py
+  s_22cccde0690c58::t_c93dec15d397bb 40-62,71
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/materialization.py
+  s_22cccde0690c58::t_7b195393d85e3b 44
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/resource_cards.py
+  s_22cccde0690c58::t_9c7d0a5839ecb1 121-129
+apps/bcsfuse/internal/zbcsfuse_internal/generated/AgentDiscoverFacade.py
+  s_22cccde0690c58::t_e364aff2d14ec3 78,91,93,102
+apps/bcsfuse/internal/zbcsfuse_internal/providers/card_repository.py
+  s_22cccde0690c58::t_2e15674cdff356 11,18-33,49-50
+apps/bcsfuse/pyproject.toml
+  s_22cccde0690c58::t_e070716a3f51c5 25-27,40-41
+apps/bcsfuse/requirements.txt
+  s_22cccde0690c58::t_fb3db450d90253 8-11,28
+apps/bcsfuse/scripts/ci/with_qdrant.sh
+  s_22cccde0690c58::t_f8422fe68dda3d 1-59
+apps/bcsfuse/scripts/sql/add_card_changes_index.sql
+  s_22cccde0690c58::t_9b669d1eb1a327 1-5
+apps/bcsfuse/scripts/sql/init_alipay_agent_cards.sql
+  s_22cccde0690c58::t_079ff1b685955f 23-24
+apps/bcsfuse/scripts/sql/init_bcsfuse_agent_cards.sql
+  s_22cccde0690c58::t_7a0d29cc4f68d2 45-46
+apps/bcsfuse/tests/alipay/test_application.py
+  s_22cccde0690c58::t_495e3923797eb0 3-4,173-177
+apps/bcsfuse/tests/alipay/test_bcn_metadata.py
+  s_22cccde0690c58::t_baddbeda5e2a6f 282-335
+apps/bcsfuse/tests/alipay/test_card_mapping.py
+  s_22cccde0690c58::t_9bcf1d8c1775a2 3-4,136-140,192-196
+apps/bcsfuse/tests/alipay/test_card_rebuild.py
+  s_22cccde0690c58::t_fab8498e152043 3-4,43-47,288-311
+apps/bcsfuse/tests/alipay/test_card_wire_validation.py
+  s_22cccde0690c58::t_f0a995c02a9569 9,14,64-136
+apps/bcsfuse/tests/alipay/test_catalog_http.py
+  s_22cccde0690c58::t_7e65482a086d06 3-4,53-57,92-96,141-145
+apps/bcsfuse/tests/alipay/test_catalog_retrieval.py
+  s_22cccde0690c58::t_e65be0304c2028 3-4,69-73
+apps/bcsfuse/tests/alipay/test_catalog_updates.py
+  s_22cccde0690c58::t_9e7db2e07355b8 121-125,139-141
+apps/bcsfuse/tests/alipay/test_central_preparation.py
+  s_22cccde0690c58::t_f636ac6d7f5b81 312,314-316,347-348
+apps/bcsfuse/tests/alipay/test_default_candidates.py
+  s_22cccde0690c58::t_67fbef3c50e1ed 3-4,274-278
+apps/bcsfuse/tests/alipay/test_default_index.py
+  s_22cccde0690c58::t_6ca831d7a4568d 3-4,31-35,49-51
+apps/bcsfuse/tests/alipay/test_document_catalog.py
+  s_22cccde0690c58::t_210c810d134c1d 161,165-168,187
+apps/bcsfuse/tests/alipay/test_document_filters.py
+  s_22cccde0690c58::t_0534e786aa4749 19
+apps/bcsfuse/tests/alipay/test_document_search.py
+  s_22cccde0690c58::t_35d139f0fc1562 3-4,31-35,155-159
+apps/bcsfuse/tests/alipay/test_emergency.py
+  s_22cccde0690c58::t_1d89cd3d71e712 11-12,42-44,157-168,182-184,233-242
+apps/bcsfuse/tests/alipay/test_index_build_http.py
+  s_22cccde0690c58::t_6bf8edf88f2404 16,44-46,52-56,58-62,79-93,104
+apps/bcsfuse/tests/alipay/test_index_build_reuse.py
+  s_22cccde0690c58::t_dd303429274629 3-4,25-29,52-56
+apps/bcsfuse/tests/alipay/test_index_builds.py
+  s_22cccde0690c58::t_1f4d73ddaf57fc 3-4,191-195
+apps/bcsfuse/tests/alipay/test_index_sync_policy.py
+  s_22cccde0690c58::t_e2e8781f3373c0 91
+apps/bcsfuse/tests/alipay/test_local_app.py
+  s_22cccde0690c58::t_78453ea67ed7a4 6,18-20,23-24,32-34,44-46,62
+apps/bcsfuse/tests/alipay/test_minimal_http_contract.py
+  s_22cccde0690c58::t_6285a452d21576 3-4,33-37
+apps/bcsfuse/tests/alipay/test_mysql_catalog_schema.py
+  s_22cccde0690c58::t_dbc03dba102fe1 447-521
+apps/bcsfuse/tests/alipay/test_resource_cards.py
+  s_22cccde0690c58::t_d9e40df2364491 3-4
+apps/bcsfuse/tests/alipay/test_resource_types.py
+  s_22cccde0690c58::t_633a74cbf4f9b5 81
+apps/bcsfuse/tests/alipay/test_result_limit.py
+  s_22cccde0690c58::t_df6b6b121816d9 3-4,195-199,228-231,238-244
+apps/bcsfuse/tests/alipay/test_search_cache.py
+  s_22cccde0690c58::t_b5cddd2a435d47 3-4,69-71
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_22cccde0690c58::t_fad779df1e4dce 59-92,462-531
+apps/bcsfuse/tests/alipay/test_tr_server.py
+  s_22cccde0690c58::t_06c6937c1f752e 4,6-7,48-56,65,77,79-88,94-96,126,139,144-150,194,208-214
+apps/bcsfuse/tests/alipay/test_v2_visibility_labels.py
+  s_22cccde0690c58::t_6dd3669381f53e 210-291
+apps/bcsfuse/tests/ci/test_zbcsfuse_coverage.py
+  s_22cccde0690c58::t_1e5082703f26fe 5,35-37,75,77-79
+apps/bcsfuse/tests/composition/test_internal_shadow_app.py
+  s_22cccde0690c58::t_c2121a8fc9c5d4 1,38
+apps/bcsfuse/tests/composition/test_tc_card_storage.py
+  s_22cccde0690c58::t_d671714a242e16 3-4,228
+apps/bcsfuse/tests/contracts/test_zdas_worker_vector_lookup.py
+  s_22cccde0690c58::t_9256a151759516 3-4,76-79,112-115
+apps/bcsfuse/tests/deployment/test_index_version_startup.py
+  s_22cccde0690c58::t_888891225f65d7 6,107-111
+apps/bcsfuse/tests/deployment/test_zbcsfuse_dev_credentials.py
+  s_22cccde0690c58::t_d41e379bac05ac 17
+apps/bcsfuse/tests/deployment/test_zbcsfuse_runtime.py
+  s_22cccde0690c58::t_83438684016711 7,279-283
+apps/bcsfuse/tests/qdrant_support.py
+  s_22cccde0690c58::t_4457e57a3fb2dd 1-23
+apps/bcsfuse/tr/java/pom.xml
+  s_22cccde0690c58::t_eca55175a9e515 9
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/CardInterface.java
+  s_22cccde0690c58::t_5ebf3f1d6db3b0 24-25,57-64
+apps/bcsfuse/tr/rpc.proto
+  s_22cccde0690c58::t_1dec8823e4cd1b 3,101
+apps/bcsfuse/uv.lock
+  s_22cccde0690c58::t_30101d6f636e4d 169,171,173,178,185,187,192,198,200-201,205,207,282,288,297,299,313-314,320,331-332,334,1137,1152,1154,2037,2048,2050,2094-2102,2475-2483
+singlebox/modules/bcs.sh
+  s_22cccde0690c58::t_39c5991d82fcad 456-461
+singlebox/modules/bcsfuse.sh
+  s_22cccde0690c58::t_e1fac6a719256e 11-19,28-30,63-69,81-83,94-97,100-109,111-114
+singlebox/verify/test_bcsfuse_module.sh
+  s_22cccde0690c58::t_2f41940e30fedb 1-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ead145dc2cf94f6093f8027e8dbfddba29aa81b8",
+  "prompts": {},
+  "sessions": {
+    "s_22cccde0690c58": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce71-22a8-72b1-b8b4-de76edde761c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
