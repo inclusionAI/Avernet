@@ -205,7 +205,25 @@ async fn an_uncertain_registration_is_asked_again_before_any_claim() {
     until("accepted", || async { rig.phase().await == "accepted" }).await;
     let registrations = leases.calls.lock().unwrap().iter().filter(|call| call.starts_with("register")).count();
     assert_eq!(registrations, 3, "asked again until it answered");
-    until("the lease is renewed", || async { leases.renewals.load(Ordering::SeqCst) >= 1 }).await;
+    assert!(leases.renewals.load(Ordering::SeqCst) >= 1, "a late registration is renewed before claiming");
+}
+
+#[tokio::test]
+async fn a_registration_not_confirmed_within_its_lifetime_fails_the_start() {
+    let mut rig = Rig::new();
+    rig.config.membership_ttl = Duration::from_millis(40);
+    // The first answer is lost; the lifetime then runs out unrenewed and the
+    // provider refuses this incarnation for good.
+    let mut answers = vec![StoreError::OutcomeUnknown { operation_id: "register".into() }];
+    answers.extend((0..200).map(|_| StoreError::NotApplied { code: "registration_terminated".into() }));
+    let leases = Arc::new(Leases { lose_after: usize::MAX, register_errors: Mutex::new(answers), ..Leases::default() });
+    rig.membership = leases.clone();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let engine = ConnectorEngine::new(rig.config.clone(), rig.ports()).unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(5), engine.run()).await.expect("the start must not hang");
+    assert_eq!(ended.unwrap_err().code, "membership_lost");
+    assert_eq!(rig.phase().await, "created");
 }
 
 #[tokio::test]

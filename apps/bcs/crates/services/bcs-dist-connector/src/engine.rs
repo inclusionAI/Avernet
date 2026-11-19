@@ -328,12 +328,19 @@ impl ConnectorEngine {
     /// the start. Any other failure may have applied the registration, so it
     /// is asked again (an identical registration is idempotent) until it
     /// answers: claiming without a lease that is renewed would let the
-    /// registration expire under running calls.
+    /// registration expire under running calls. The retries end with the
+    /// registration's lifetime: an applied registration nobody renewed has
+    /// expired by then and this incarnation cannot register again.
     async fn register(&self) -> Result<(), RuntimeError> {
         let inner = &self.inner;
         let config = &inner.config;
         let mut backoff = Backoff::new(config);
+        let started = Instant::now();
+        let mut retried = false;
         loop {
+            if inner.draining.load(Ordering::SeqCst) {
+                return Ok(());
+            }
             let registered = inner
                 .ports
                 .membership
@@ -347,6 +354,11 @@ impl ConnectorEngine {
             match registered {
                 Ok(lease) => {
                     *lock(&inner.lease) = Some(lease);
+                    // A registration confirmed late keeps the lifetime of its
+                    // first attempt: renew at once instead of a period later.
+                    if retried && !self.renew().await {
+                        return Err(failed("membership_lost"));
+                    }
                     return Ok(());
                 }
                 Err(StoreError::NotApplied { code }) if code == crate::delayed::NEED_CONTRACT => {
@@ -358,11 +370,13 @@ impl ConnectorEngine {
                     return Err(failed("membership_registration_refused"));
                 }
                 Err(error) => {
+                    if started.elapsed() >= config.membership_ttl {
+                        tracing::error!(?error, "membership registration not confirmed within its lifetime");
+                        return Err(failed("membership_lost"));
+                    }
                     tracing::warn!(?error, "membership registration failed; retrying before any claim");
+                    retried = true;
                 }
-            }
-            if inner.draining.load(Ordering::SeqCst) {
-                return Ok(());
             }
             tokio::select! {
                 () = backoff.wait() => {}
