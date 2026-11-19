@@ -1593,6 +1593,69 @@ class TestTaskProcessor:
 
         assert "missing 'data' field" in str(exc_info.value)
 
+    # ── to_task_executed progress persistence ──────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_to_task_executed_persists_intermediate_progress_on_change(
+        self, processor, mock_repo, mock_masa_eval_http
+    ):
+        """非终态且进度发生变化时持久化中间进度，任务快照才能透出进度。"""
+        task = make_task(
+            id=1,
+            status="task_created",
+            bot_id="test-bot-id",
+            ext={"set_task_uuid": "set-1"},
+        )
+        mock_repo.get_by_id.return_value = task
+        progress_payload = {
+            "set_task_uuid": "set-1",
+            "status": "running",
+            "executed_count": 3,
+            "total_count": 10,
+        }
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "{}"
+        mock_response.json.return_value = {"success": True, "data": progress_payload}
+        mock_masa_eval_http.get.return_value = mock_response
+
+        result = processor.to_task_executed(1)
+
+        assert result.status == "task_created"
+        mock_repo.update_ext.assert_called_once()
+        assert mock_repo.update_ext.call_args.args[0] == 1
+        assert mock_repo.update_ext.call_args.args[1]["eval_progress"] == progress_payload
+
+    @pytest.mark.asyncio
+    async def test_to_task_executed_skips_db_write_when_progress_unchanged(
+        self, processor, mock_repo, mock_masa_eval_http
+    ):
+        """非终态且 MASA 进度与已落库值一致时不重复写库，避免长评测期间写放大。"""
+        progress_payload = {
+            "set_task_uuid": "set-1",
+            "status": "running",
+            "executed_count": 3,
+            "total_count": 10,
+        }
+        task = make_task(
+            id=1,
+            status="task_created",
+            bot_id="test-bot-id",
+            ext={"set_task_uuid": "set-1", "eval_progress": progress_payload},
+        )
+        mock_repo.get_by_id.return_value = task
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "{}"
+        mock_response.json.return_value = {"success": True, "data": dict(progress_payload)}
+        mock_masa_eval_http.get.return_value = mock_response
+
+        result = processor.to_task_executed(1)
+
+        assert result.status == "task_created"
+        mock_repo.update_ext.assert_not_called()
+        mock_repo.update_status.assert_not_called()
+
     # ── update_status failure handling ────────────────────────────────────────
 
     @pytest.mark.asyncio

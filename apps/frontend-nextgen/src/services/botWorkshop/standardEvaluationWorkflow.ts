@@ -37,8 +37,11 @@ export const STANDARD_EVALUATION_STEPS: StandardEvaluationStep[] = [
 export const TERMINAL_TASK_STATUSES = new Set(['success', 'failed']);
 
 export const EVALUATION_GOAL_INPUT_ENABLED = false;
-export const STANDARD_EVALUATION_POLL_MS = 3000;
-export const STANDARD_EVALUATION_TIMEOUT_MS = 30 * 60 * 1000;
+// 长时评测不再设前端硬超时：错误态只跟随后端任务快照（FAILED/TIMEOUT 等）。
+// 快照轮询放宽到 10s，避免小时级评测期间无效请求压力。
+export const STANDARD_EVALUATION_POLL_MS = 10000;
+// 环境构建发生在任务创建前（B5 异步构建），没有任务快照失败信号可跟随，保留兜底超时。
+export const STANDARD_ENVIRONMENT_READY_TIMEOUT_MS = 30 * 60 * 1000;
 
 export function createInitialEvaluationSteps(): StandardEvaluationStepState[] {
   return STANDARD_EVALUATION_STEPS.map((step) => ({ ...step, status: 'pending' as const, error: '' }));
@@ -76,7 +79,7 @@ export async function waitForStandardEnvironmentReady({
   onEnvironmentUpdate(environment);
 
   if (environment.supported === false) return environment;
-  const environmentDeadline = Date.now() + STANDARD_EVALUATION_TIMEOUT_MS;
+  const environmentDeadline = Date.now() + STANDARD_ENVIRONMENT_READY_TIMEOUT_MS;
 
   while (environment.build_status !== 'active') {
     if (isFailedEnvironment(environment.build_status)) {
@@ -144,14 +147,13 @@ async function waitForEvaluationTaskSettled({
   onTaskUpdate: (task: StandardQualityTask) => void;
 }): Promise<StandardQualityTask> {
   let task = initialTask;
-  const deadline = Date.now() + STANDARD_EVALUATION_TIMEOUT_MS;
 
+  // 不设前端硬超时：评测可达小时级，等待仅由 isAlive（页面存活）与后端快照终态驱动。
   while (isAlive()) {
     onTaskUpdate(task);
     const saveStatus = getEvaluationTaskSaveStatus(task);
     if (saveStatus === 'DONE' || saveStatus === 'FAILED') return task;
     if (TERMINAL_TASK_STATUSES.has(task.status) && saveStatus === undefined) return task;
-    if (Date.now() >= deadline) return task;
 
     await sleep(STANDARD_EVALUATION_POLL_MS);
     task = await getTask();
@@ -280,8 +282,12 @@ export async function startStandardEvaluationTask(
   });
 
   const saveStatus = getEvaluationTaskSaveStatus(task);
+  if (saveStatus === 'FAILED') {
+    throw new Error(getEvaluationTaskError(task) || '评测结果保存失败');
+  }
   if (saveStatus !== 'DONE') {
-    throw new Error(saveStatus === 'FAILED' ? getEvaluationTaskError(task) || '评测结果保存失败' : '等待标准评测完成超时');
+    // 未落终态：任务仍由服务端驱动，页面可用性或快照异常不应被包装成“超时失败”。
+    throw new Error(getEvaluationTaskError(task) || '评测仍在后台执行，可稍后在评测记录中查看结果');
   }
   return task;
 }
@@ -323,8 +329,11 @@ async function runEvaluationAndRelease(
   });
 
   const saveStatus = getEvaluationTaskSaveStatus(settledTask);
+  if (saveStatus === 'FAILED') {
+    throw new Error(getEvaluationTaskError(settledTask) || '评测结果保存失败');
+  }
   if (saveStatus !== 'DONE') {
-    throw new Error(saveStatus === 'FAILED' ? getEvaluationTaskError(settledTask) || '评测结果保存失败' : '等待标准评测完成超时');
+    throw new Error(getEvaluationTaskError(settledTask) || '评测仍在后台执行，可稍后在评测记录中查看结果');
   }
   if (settledTask.status !== 'success') {
     throw new Error(getEvaluationTaskError(settledTask) || '评测未通过，已按 BLOCKED 保存门禁结果');

@@ -324,6 +324,12 @@ class TaskProcessor:
         logger.info("[to_task_executed] Got progress status=%s", status)
 
         if status not in _TERMINAL_STATUSES:
+            # 长时评测期间避免写放大：仅当 MASA 进度与已落库值不同才持久化中间进度，
+            # 其余轮询保持只读；变化时写入，任务快照才能向前端透出中间进度。
+            previous_ext = task.ext if isinstance(task.ext, dict) else {}
+            previous_progress = previous_ext.get("eval_progress")
+            if not isinstance(previous_progress, dict) or previous_progress != progress:
+                self._repository.update_ext(id, ext)
             return task
 
         self._transition_to(id, TaskStatus.TASK_CREATED.value, TaskStatus.TASK_EXECUTED.value, ext)
