@@ -31,6 +31,7 @@ function createGateway(overrides: Partial<CollaborationSquareGateway> = {}): Col
       skills: [],
     })),
     requestBotFriendship: jest.fn(async () => ({ status: 'applying' as const })),
+    cancelBotFriendRequest: jest.fn(async () => undefined),
     openBotConversation: jest.fn(async () => ({ sessionId: 'bot-session' })),
     listGroupPage: jest.fn(async () => ({ items: [], total: 0 })),
     listGroups: jest.fn(async () => []),
@@ -51,6 +52,15 @@ function createGateway(overrides: Partial<CollaborationSquareGateway> = {}): Col
 }
 
 describe('collaboration square service', () => {
+  test('取消好友申请透传申请单号（重新申请自救入口第一步）', async () => {
+    const cancelBotFriendRequest = jest.fn(async () => undefined);
+    const service = new CollaborationSquareService(createGateway({ cancelBotFriendRequest }));
+
+    await service.cancelBotFriendRequest('request-1');
+
+    expect(cancelBotFriendRequest).toHaveBeenCalledWith('request-1');
+  });
+
   test('好友申请按服务端结果更新关系且范围拒绝不伪造 applying', async () => {
     const denied = new CollaborationSquareService(
       createGateway({

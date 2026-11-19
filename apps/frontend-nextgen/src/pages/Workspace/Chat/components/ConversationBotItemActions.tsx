@@ -14,7 +14,7 @@ import type { ConversationOrigin, ConversationSessionScope } from '@/domain/conv
 import { IconButton } from '@/components/ui';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { Bot, ChevronDown, Plus } from 'lucide-react';
+import { Bot, ChevronDown, Plus, UserMinus } from 'lucide-react';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 import { ConversationOriginFilter } from './ConversationOriginFilter';
@@ -60,6 +60,10 @@ export interface ConversationBotItemActionsProps {
   showMenu: boolean;
   /** 「Bot 管理」入口回调:跳转该 Bot 所属空间的 Bot 管理页,带 Bot 名称过滤定位该 Bot。 */
   onOpenBotManagement?(bot: ChatBotView): void;
+  /** 「移除好友」警示入口渲染开关(父级计算):仅好友分组;移除不依赖 Bot 服务可用性,含不可用 Bot。 */
+  showRemoveFriend: boolean;
+  /** 「移除好友」入口回调:打开移除确认弹窗(危险操作经二次确认,PRD R5)。 */
+  onRemoveFriend?(bot: ChatBotView): void;
 }
 
 /** Bot 行 hover 操作区:显隐由行容器的 group-hover/聚焦/钉住类驱动(相对行绝对定位)。 */
@@ -88,6 +92,8 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
     onSearchToggle,
     showMenu,
     onOpenBotManagement,
+    showRemoveFriend,
+    onRemoveFriend,
   } = props;
   // icon 级显隐群发类(2026-11-04 重构):与原容器级语义逐项等价——
   // 行 hover/行内键盘聚焦/触屏,以及筛选菜单打开期间(data-state=open,鼠标
@@ -178,6 +184,25 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
           onClick={(event) => {
             event.stopPropagation();
             onOpenBotManagement(bot);
+          }}
+        />
+      )}
+      {/* 「移除好友」警示入口(仅好友分组;红色 UserMinus):解除好友关系经确认弹窗二次确认
+          (R5),移除只作用于好友关系维度、不依赖 Bot 服务可用性(R17),不可用 Bot 常驻显示
+          (与「Bot 管理」运维直达同款,避免不可用好友 Bot 无任何可达入口)。 */}
+      {showRemoveFriend && onRemoveFriend && (
+        <IconButton
+          label="移除好友"
+          size="sm"
+          icon={<UserMinus className="h-3.5 w-3.5" />}
+          className={cn(
+            'h-6 w-6 rounded-md text-destructive hover:bg-destructive/10 hover:text-destructive',
+            iconVisibility,
+            unavailable && 'opacity-100',
+          )}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemoveFriend(bot);
           }}
         />
       )}
