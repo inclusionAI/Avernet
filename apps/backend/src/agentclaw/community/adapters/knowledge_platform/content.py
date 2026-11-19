@@ -173,6 +173,8 @@ class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
         offset: int,
         limit: int,
         source: Literal["personal", "team"] | None = None,
+        pagination: Literal["cursor"] | None = None,
+        cursor: str | None = None,
     ):
         return await self.client.call(
             "GET",
@@ -183,6 +185,8 @@ class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
                 "offset": offset,
                 "limit": limit,
                 **({"source": source} if source else {}),
+                **({"pagination": pagination} if pagination is not None else {}),
+                **({"cursor": cursor} if cursor is not None else {}),
             },
         )
 
