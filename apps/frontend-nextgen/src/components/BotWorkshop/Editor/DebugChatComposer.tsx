@@ -20,6 +20,10 @@ interface DebugChatComposerProps {
   fileChip?: FileChipConfig;
   senderRef?: RefObject<SenderRef | null>;
   onUpload?: () => void;
+  /** 外部整体禁用输入区（如查看正式运行服务 Bot 时禁止在调试面板发言）。 */
+  composerDisabled?: boolean;
+  /** composerDisabled 生效时替换默认命令提示的指引文案。 */
+  composerDisabledPlaceholder?: string;
   onSend: (content: string, options?: SendFileRefs) => void;
   onStop: () => void;
 }
@@ -54,13 +58,15 @@ export function DebugChatComposer({
   fileChip,
   senderRef,
   onUpload,
+  composerDisabled = false,
+  composerDisabledPlaceholder,
   onSend,
   onStop,
 }: DebugChatComposerProps) {
   const [draft, setDraft] = useState('');
   const localSenderRef = useRef<SenderRef | null>(null);
   const inputRef = senderRef ?? localSenderRef;
-  const disabled = !session || !userId || isRequesting;
+  const disabled = !session || !userId || isRequesting || composerDisabled;
 
   const send = (message: string, context: SubmitContext = { commands: [], mentions: [] }) => {
     const content = context.resolvedContent ?? message;
@@ -94,9 +100,11 @@ export function DebugChatComposer({
             disabled={disabled}
             loading={isRequesting}
             submitType="enter"
-            placeholder={composer.placeholder ?? (fileChip
-              ? '可使用 /file 引用文件、/skill 调用能力、/clear 清空上下文'
-              : '可使用 /skill 调用能力、/clear 清空上下文')}
+            placeholder={composerDisabled && composerDisabledPlaceholder
+              ? composerDisabledPlaceholder
+              : composer.placeholder ?? (fileChip
+                ? '可使用 /file 引用文件、/skill 调用能力、/clear 清空上下文'
+                : '可使用 /skill 调用能力、/clear 清空上下文')}
             command={composer.command}
             slots={{ header: composer.header }}
             fileChip={fileChip}

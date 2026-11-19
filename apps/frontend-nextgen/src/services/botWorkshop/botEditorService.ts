@@ -54,6 +54,8 @@ export const botEditorService = {
     const response = await botEditorController.getCallerContext(botId, ownerId);
     return {
       editable: response.data?.editable ?? false,
+      // 聚合 Caller 判定透传(openspec add-session-files-caller-runtime-target D6);缺省 undefined=非 caller
+      botCallType: response.data?.bot_call_type,
       mcpCallTypes: response.data?.mcp_call_types ?? {},
       cliCallTypes: response.data?.cli_call_types ?? {},
     };

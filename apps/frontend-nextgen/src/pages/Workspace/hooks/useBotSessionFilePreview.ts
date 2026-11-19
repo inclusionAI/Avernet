@@ -63,6 +63,7 @@ export function useBotSessionFilePreview(
       setState({ ...initialState, kind });
       return;
     }
+    // 显式位参(2026-11-19 勘误):条件 spread 会让缺省位被后值顶替,undefined 占位等价省略。
     const contentUrl = botSessionFileService.resolveContentUrl(
       botId,
       sessionId,
@@ -70,11 +71,9 @@ export function useBotSessionFilePreview(
       userId,
       ownerId,
       'inline',
-      ...(stage ? ([stage] as const) : []),
-      // 多实例选中实例定位(openspec add-session-files-device-uuid 扩展段),缺省不携带
-      ...(deviceUuid ? ([deviceUuid] as const) : []),
-      // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带
-      ...(callerRuntimeTarget ? ([callerRuntimeTarget] as const) : []),
+      stage,
+      deviceUuid,
+      callerRuntimeTarget,
     );
     if (kind === 'text') {
       // 文本类走自绘：fetch 字节（512KB 截断）转文本渲染，与群聊侧同构。
@@ -88,9 +87,9 @@ export function useBotSessionFilePreview(
           userId,
           ownerId,
           'inline',
-          ...(stage ? [stage] as const : []),
-          ...(deviceUuid ? [deviceUuid] as const : []),
-          ...(callerRuntimeTarget ? [callerRuntimeTarget] as const : []),
+          stage,
+          deviceUuid,
+          callerRuntimeTarget,
         )
         .then(async (result) => {
           if (cancelled) return;

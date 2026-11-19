@@ -36,11 +36,11 @@ it.each(['online', undefined] as const)('文件列表/删除/下载/预览 stage
   await act(async () => {
     await result.current.refresh();
   });
-  expect(service.loadReady).toHaveBeenCalledWith('bot', 's1', 'viewer', 'entity', undefined, ...args);
+  expect(service.loadReady).toHaveBeenCalledWith('bot', 's1', 'viewer', 'entity', undefined, stage, undefined, undefined);
   await act(async () => {
     await result.current.deleteFile(file);
   });
-  expect(service.remove).toHaveBeenCalledWith('bot', 's1', 'r1', 'viewer', 'entity', ...args);
+  expect(service.remove).toHaveBeenCalledWith('bot', 's1', 'r1', 'viewer', 'entity', stage, undefined, undefined);
   await act(async () => {
     await result.current.downloadFile(file);
   });
@@ -51,17 +51,19 @@ it.each(['online', undefined] as const)('文件列表/删除/下载/预览 stage
     'viewer',
     'entity',
     'attachment',
-    ...args,
+    stage,
+    undefined,
+    undefined,
   );
   await act(async () => {
     await result.current.previewFile(file);
   });
-  expect(service.resolveContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', ...args);
+  expect(service.resolveContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', stage, undefined, undefined);
   jest.mocked(isLargeBotSessionFile).mockReturnValue(true);
   await act(async () => {
     await result.current.downloadFile(file);
   });
-  expect(service.resolveExternalDownloadUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', ...args);
+  expect(service.resolveExternalDownloadUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', stage, undefined, undefined);
 });
 
 it('文件预览内容 URL 与文本读取均使用 online', async () => {
@@ -77,6 +79,6 @@ it('文件预览内容 URL 与文本读取均使用 online', async () => {
     }),
   );
   await waitFor(() => expect(result.current.status).toBe('ready'));
-  expect(service.resolveContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', 'online');
-  expect(service.fetchBlob).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', 'online');
+  expect(service.resolveContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', 'online', undefined, undefined);
+  expect(service.fetchBlob).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', 'online', undefined, undefined);
 });

@@ -5,7 +5,8 @@ import type { ComponentProps } from 'react';
 import { useEffect, useRef } from 'react';
 
 type Props = Pick<ComponentProps<typeof DebugChatComposer>,
-  'bot' | 'session' | 'userId' | 'isRequesting' | 'modelSelector' | 'onSend' | 'onStop'
+  'bot' | 'session' | 'userId' | 'isRequesting' | 'modelSelector' | 'composerDisabled'
+  | 'composerDisabledPlaceholder' | 'onSend' | 'onStop'
 > & { onClear: () => Promise<void> };
 
 /** Panel keys this entire input scope, including the release upload/file overlays. */
