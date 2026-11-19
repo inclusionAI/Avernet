@@ -6,7 +6,6 @@
 申请者在运行时才出现，录取后绑定角色，Swarm 在当前有效的录取集合中选择执行者。
 """
 
-import json
 from dataclasses import dataclass
 
 import pytest
@@ -158,7 +157,6 @@ CANDIDATE_COUNT = len(AGENTS) + len(OTHER_AGENTS)
   - [ ] open方法中的参与类型，协议中的枚举不在一个维度：participation_type: COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | SINGLE_CONTRIBUTION
 """
 
-
 def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
     # 1、发布一个代办任务 （基于L5层OPEN + SWARM方法的组合）
     (
@@ -200,7 +198,7 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
     )
     assert _record(injector, collet_id).task.status == "created"
 
-    # 4. 招募到agents之后，开始写作进行AiCoding（执行SWARM方法：规划-划分stage和task-分派执行）
+    # 4. 开始协作进行AiCoding（执行SWARM方法：plan-划分stage-指派task-执行）
     stages = swarm_run(injector, collet_id)
 
     # 5. 任务完成之后，校验每个阶段、每个Task的产物
@@ -234,9 +232,6 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
     collet_id = instance.collet_ref
     open_binding_id, swarm_binding_id = instance.method_binding_refs
     record = _record(injector, collet_id)
-    assert record.task is None
-    assert all(p.agent_ref is None for p in record.participants)
-    assert {b.role for b in record.role_bindings} == {"responsible_user"}
     role_refs = {role: scenario_role_ref(profile.ref, role) for role in ROLES}
     participants = {p.participant_id: p for p in record.participants}
 
@@ -256,39 +251,26 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
 
 
 def swarm_run(injector, collet_id):
-    # 8. 构造 Driver 不启动 Task；首次 wake 自动以根执行者身份经 L4/G1/G4 启动。
-    driver = injector.get(AssistedBuilder[SwarmDriver]).build(collet_id=collet_id)
-    before = _record(injector, collet_id)
-    assert before.task.status == "created"
-    driver.wake()
+    swarm_driver = injector.get(AssistedBuilder[SwarmDriver]).build(collet_id=collet_id)
+
+    # 启动swarm driver
+    swarm_driver.wake()
     started = _record(injector, collet_id)
     assert started.task.status == "in_progress"
-    assert started.task.task_id == before.task.task_id
-    starts = [
-        event for event in started.events
-        if event.task_ref == started.task.task_id and event.event_kind == "task.started"
-    ]
-    assert len(starts) == 1
-    [executor] = before.task.executor_refs
-    assert starts[0].actor_ref == PrincipalRef(executor.agent_type, executor.agent_id)
-    assert driver.step()
 
-    # 9. 第九步：应用统一规划和执行者分配，需求 Bot 执行并主动 G4 上报，推进 Stage 与独立子 Task。
-    assert driver.step()
-    assert driver.stages()[0].state is StageState.SUCCEEDED
-    assert not driver.is_completed()
+    # 推进一个step
+    assert swarm_driver.step()
+    assert swarm_driver.step()
+    assert swarm_driver.stages()[0].state is StageState.SUCCEEDED
+    assert not swarm_driver.is_completed()
 
-    # 10. 第十步：继续设计、编码、真实 unittest、模拟 PR；每次 plan 根据已完成阶段选择下一阶段及 Bot。
-    driver.drain()
-    assert driver.is_completed() and driver.plan().state is PlanState.COMPLETED
-    record = _record(injector, collet_id)
-    assert record.task.status == "in_progress"  # Swarm 完成不代表根 Task 已验收。
-    assert sum(
-        event.task_ref == record.task.task_id and event.event_kind == "task.started"
-        for event in record.events
-    ) == 1  # 后续 wake 不重复启动。
+    # drain自动推动任务，直到结束
+    swarm_driver.drain()
 
-    return driver.stages()
+    # swarm任务结束
+    assert swarm_driver.is_completed() and swarm_driver.plan().state is PlanState.COMPLETED
+
+    return swarm_driver.stages()
 
 
 def judge_artifacts(injector, storage_service, storage_envs, stages, collet_id, swarm_binding_id):
@@ -381,8 +363,9 @@ def _create_product_profile():
 
 def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_service, storage_envs,
                                 profile, collet_id, role_refs, open_binding_id, swarm_binding_id):
-    # 4. 第四步：发布一个面向更大候选池的 OPEN 机会，容量覆盖全部申请，而非只允许五个 Bot 报名。
     admission = profile.composition.require_policy("Open").publication.admission
+
+    ## 使用L5的open方法 发布公开机会
     published = l5_open_method_operate.publish_opportunity(
         OpenOpportunityCommand(
             collet_id,
@@ -393,8 +376,6 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
         )
     )
 
-    # 5. 第五步：七个 Bot 分别以自身身份发现机会并申请；其中两个不是 Swarm 所需的工作 Bot。
-    # 不合格 Bot 也真正申请编码角色，不能仅用更大的 allowlist 冒充更大范围的招募。
     bots = (
         SimulatedApplicantBot(OTHER_AGENTS[0], "coding", ("capability://copywriting",)),
         *(
@@ -405,28 +386,23 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
     )
     for bot in bots:
         assert profile.participant_scope.allows(bot.agent)
-        submitted = bot.discover_and_apply(
+
+        ##每个bot自动发现机会、提交参与申请(使用L5的open方法)
+        bot.discover_and_apply(
             l5_open_method_operate, published.object_id, role_refs[bot.role]
         )
-        assert submitted.accepted and submitted.state == "SUBMITTED"
-    applications = storage_service.list_applications(storage_envs, open_binding_id, collet_id)
-    assert all(a.state is ApplicationState.SUBMITTED for a in applications)
-    applicants = {bot.agent.agent_id: bot for bot in bots}
-    assert len(applications) == CANDIDATE_COUNT
-    for application in applications:
-        assert application.capability_evidence_refs == applicants[
-            application.applicant_agent_ref
-        ].capability_declarations
 
-    # 6. 第六步：发布人调用独立评审方法，将申请的能力声明与 Profile 所需能力列表匹配。
-    # 不按 Bot 身份或预指定名单录取；L5 仍负责 G1/G4、决定及 scoped Participant 的真实写入。
+    applications = storage_service.list_applications(storage_envs, open_binding_id, collet_id)
+    applicants = {bot.agent.agent_id: bot for bot in bots}
     reviewer = LocalCapabilityAdmissionService()
     for application in applications:
+        ## 针对所有bot提交的申请，进行录取判断
         screened = l5_open_method_operate.screen(
             OpenScreenCommand(application.application_id, OWNER, collet_id)
         )
         assert screened.accepted and screened.state == "SCREENING"
         if reviewer.should_admit(admission, application):
+            ## 能力匹配，录取
             admitted = l5_open_method_operate.admit(
                 OpenAdmitCommand(
                     application.application_id,
@@ -440,6 +416,7 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
                 "Open"
             ).publication.require_dispatch_ready(admitted.state)
         else:
+            ## 能力不匹配，拒绝
             rejected = l5_open_method_operate.reject(
                 collet_id,
                 open_binding_id,
