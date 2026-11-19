@@ -22,7 +22,7 @@ provides:
   - OpenMethodOpsServiceProtocol
   - SwarmMethodOpsServiceProtocol
   - stage_role_candidates
-  - SwarmController
+  - SwarmDriver
 consumes:
   - MethodStoreProtocol
   - CollaborationReader
@@ -138,8 +138,8 @@ Evidence:
 
 ## Bounded Swarm coordination
 
-[`SwarmController`](swarm_controller.py) owns an in-process loop. The caller
-supplies only `collet_id` through DI's `AssistedBuilder[SwarmController].build`;
+[`SwarmDriver`](swarm_driver.py) owns an in-process loop. The caller
+supplies only `collet_id` through DI's `AssistedBuilder[SwarmDriver].build`;
 ports are constructor-injected, not obtained from a global injector/registry.
 The composition adapter resolves the pinned ProductProfile's explicit
 `swarm_plan_service_ref` and the one ACTIVE Swarm binding. An omitted or unknown
@@ -153,7 +153,7 @@ IN_PROGRESS and makes no Work transition. The initial `wake()` starts CREATED ro
 injected L4 `ContextServiceProtocol.start` (G1/G4 and SQL CAS), preserving its
 identity/objective, then enqueues unified planning. Subsequent wakes reconcile
 already-started Work without another start; pending wakes coalesce. Start errors
-propagate before planning is queued. This explicit controller entrypoint does
+propagate before planning is queued. This explicit driver entrypoint does
 not add automatic dispatch to the generic L4 Work.start contract.
 
 The outbound [`SwarmPlanningService`](../swarm_planning.py)
@@ -162,12 +162,12 @@ Agent Participant plus I/O contracts; the first decision also supplies the DAG.
 Every call receives fresh authoritative Stage states, output refs and L4
 participation. There is no separate MATCH interface. A read-only role helper
 still serves validation, not an independent decision service. Decisions confer
-no authority. The controller fences stale results, validates/submits/adopts the
+no authority. The driver fences stale results, validates/submits/adopts the
 initial DAG, and checks READY/dependencies/roles before generating the selected
 worker's runtime execution profile and allocating. Authoring/instantiation and
 external planning never call `declare_execution_profile`.
 
-Each controller Stage has a distinct L4 child Task under root Work. Dispatch
+Each driver Stage has a distinct L4 child Task under root Work. Dispatch
 creates/starts it with the selected executor through G4 and atomic L4 SQL
 creation/event/CAS. The worker actively calls
 [`StageReportProtocol`](../g4_contracts_consistency/execution_report.py), carrying
@@ -191,7 +191,7 @@ Root submission/user acceptance remain separate G1/G4 operations. Arbitrary
 product termination-condition expressions are not evaluated by a new DSL.
 
 Calls/exceptions are synchronous and propagate. The queue and MethodStore are
-in-process, not durable; a remote completion needs a controller wake after its
+in-process, not durable; a remote completion needs a driver wake after its
 report. There is no production scheduler, transport adapter, automatic retry or
 replanning, persisted Decision API or distributed SQL/MethodStore transaction.
 SQL child Work uses CAS; a failure between SQL and Method completion propagates,

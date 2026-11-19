@@ -23,7 +23,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
 from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.report import (
     SwarmStageReportService,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.swarm_controller_contracts import (
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_driver_contracts import (
     SwarmRuntimeResolver,
     SwarmRuntimeConfiguration,
 )
@@ -72,7 +72,7 @@ class ProductSwarmRuntimeResolver:
             )
         return SwarmRuntimeConfiguration(
             self.capabilities.services[service_ref],
-            ActorContext(record.task.principal_ref, source="swarm_controller"),
+            ActorContext(record.task.principal_ref, source="swarm_driver"),
         )
 
 

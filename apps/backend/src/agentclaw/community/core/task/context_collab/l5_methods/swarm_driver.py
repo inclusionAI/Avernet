@@ -41,7 +41,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.ma
 from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.report import (
     SwarmStageReportService,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.swarm_controller_contracts import (
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_driver_contracts import (
     StageExecutionService,
     SwarmRuntimeResolver,
 )
@@ -70,7 +70,7 @@ class _Computed:
     ]
 
 
-class SwarmController:
+class SwarmDriver:
     @inject
     def __init__(
         self,
@@ -97,7 +97,7 @@ class SwarmController:
         ]
         if len(bindings) != 1:
             raise ContextCollabValidationError(
-                "controller requires exactly one ACTIVE Swarm binding"
+                "driver requires exactly one ACTIVE Swarm binding"
             )
         self.binding_id = bindings[0].method_binding_id
         record = reader.get_current_status(collet_id)
@@ -107,7 +107,7 @@ class SwarmController:
             or record.task.status not in {"created", "in_progress"}
         ):
             raise ContextCollabValidationError(
-                "controller requires created or in-progress root Work"
+                "driver requires created or in-progress root Work"
             )
         self.task_ref = record.task.task_id
         self.queue: deque[None | _Computed] = deque()
@@ -231,7 +231,7 @@ class SwarmController:
         for _ in range(100):
             if not self.step():
                 return
-        raise RuntimeError("Swarm controller exceeded event budget")
+        raise RuntimeError("Swarm driver exceeded event budget")
 
     def _apply(self, decision: PlanningDecision) -> None:
         if decision.finished:
