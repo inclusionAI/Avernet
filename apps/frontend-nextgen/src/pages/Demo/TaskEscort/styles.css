@@ -1,0 +1,155 @@
+.task-escort-demo-host {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.task-escort-demo-nav {
+  display: flex;
+  flex: 0 0 88px;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.task-escort-demo-sessions {
+  display: flex;
+  flex: 0 0 248px;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.task-escort-demo-chat {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.task-escort-demo-chat-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-escort-demo-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.task-escort-demo-message-column {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px 32px;
+  overflow-wrap: anywhere;
+}
+
+.task-escort-demo-composer {
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 12px 32px 16px;
+}
+
+.task-escort-demo-context {
+  position: absolute;
+  z-index: 30;
+  inset: 0 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, 100%);
+  min-height: 0;
+}
+
+/* 仅独立宿主并排预留抽屉宽度，生产聊天仍沿用 overlay；767px 以下是全屏抽屉。 */
+@media (min-width: 768px) {
+  .task-escort-demo-host[data-escort-open='true'] {
+    padding-right: min(1040px, 72vw);
+  }
+
+  .task-escort-demo-host[data-escort-open='true'] .task-escort-demo-chat-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .task-escort-demo-host[data-escort-open='true'] .task-escort-demo-chat-header > :last-child {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .task-escort-demo-host[data-escort-open='true'] .task-escort-demo-message-column {
+    gap: 16px;
+    padding: 16px 12px;
+  }
+
+  .task-escort-demo-host[data-escort-open='true'] .task-escort-demo-composer {
+    padding: 8px 12px 12px;
+  }
+}
+
+/* 1280 × 720 验收时给 72vw 护航抽屉留下可辨认的一级导航与聊天上下文。 */
+@media (max-width: 1440px) {
+  .task-escort-demo-host[data-escort-open='true'] .task-escort-demo-sessions {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .task-escort-demo-sessions {
+    flex-basis: 208px;
+  }
+
+  .task-escort-demo-chat-header {
+    flex-wrap: wrap;
+  }
+
+  .task-escort-demo-message-column {
+    padding: 20px 16px;
+  }
+
+  .task-escort-demo-composer {
+    padding: 12px 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  .task-escort-demo-nav {
+    flex-basis: 64px;
+  }
+
+  .task-escort-demo-sessions {
+    display: none;
+  }
+
+  .task-escort-demo-chat-header {
+    padding: 12px;
+  }
+
+  .task-escort-demo-message-column {
+    gap: 20px;
+    padding: 16px 12px;
+  }
+
+  .task-escort-demo-composer {
+    padding: 8px 12px 12px;
+  }
+}

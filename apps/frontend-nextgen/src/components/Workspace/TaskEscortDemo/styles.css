@@ -1,0 +1,46 @@
+.task-escort-demo-panel {
+  width: min(1040px, 72vw);
+  container-type: inline-size;
+  container-name: task-escort-demo;
+}
+.task-escort-demo-panel[data-expanded='true'] {
+  width: calc(100vw - 24px);
+}
+@media (max-width: 767px) {
+  .task-escort-demo-panel {
+    width: calc(100vw - 12px);
+  }
+}
+.task-escort-demo-panel .escort-canvas {
+  background-color: hsl(var(--muted) / 0.2);
+  background-image: radial-gradient(hsl(var(--border)) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.task-escort-demo-panel .escort-node {
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.task-escort-demo-panel .escort-node[aria-pressed='true'] {
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-escort-demo-panel,
+  .task-escort-demo-panel .escort-node {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@container task-escort-demo (max-width: 800px) {
+  .escort-editor-columns {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .escort-node-library-items {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .escort-node-library-items > * {
+    margin-block: 0;
+  }
+}
