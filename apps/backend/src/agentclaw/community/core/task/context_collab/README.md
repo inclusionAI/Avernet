@@ -485,7 +485,7 @@ compatible and share the same L4 preparation/commit machinery.
 | Object | Authority and current implementation |
 | --- | --- |
 | [Collet](l4_context_primitives/collet.py) | Bounded context identity, initiator, governance scope, lifecycle vocabulary and context revision (no current-event pointer), with optional title/description and versioned audit metadata for new records. This is a local representation, not an exhaustive ACCS schema. The SQL reader still seeds `ACTIVE`; the separate Collet lifecycle path is not unified by this change. |
-| [Task](l4_context_primitives/task.py) | Independent L4 work-item ID, Collet/parent links, objective, completion conditions, responsible principal, designated executor set, status, Task revision and event provenance. Not an A2A Task/execution attempt. |
+| [Task](l4_context_primitives/task.py) | Independent L4 work-item ID, Collet/parent links, objective, completion conditions, responsible principal, designated executor set, typed L4 output artifacts (`artifacts`), status, Task revision and event provenance. Not an A2A Task/execution attempt. |
 | [ScopedParticipantBinding](l4_context_primitives/participants.py) | Immutable task-scoped identity evidence created by Open COLLET_PARTICIPANT admission; validity derives from its admission application/decision and Method lifecycle, not an independent Group membership machine. |
 | [MethodProfile / MethodProfileRef](l5_methods/method_profile.py) | L5 versioned Method contract and its compact exact-version reference. L6 composition templates use the contract; negotiation and ProductInstance retain references rather than duplicate definitions. |
 | [MethodBinding](l5_methods/method_binding.py) | L5 Method identity, scope and runtime facts. Neither creation facts nor ProductInstance substitutes for Method state. |
@@ -570,6 +570,12 @@ Collet.root_task_ref ──→ Task.task_id
   NULL is reserved for unknown legacy metadata; it is not automatically
   backfilled. L6 may update composition facts on the same row without changing
   the Collet representation, so `gmt_modified` is not Collet's audit authority.
+- Task `artifacts` is an immutable tuple of existing L4
+  [Artifact](l4_context_primitives/artifact.py) values, serialized as a JSON list
+  of objects using Artifact's ResourceBinding/ResourceRef contract, not strings
+  or resource bodies. It defaults to empty, including for older records without
+  this field. This is a model-only declaration: Work/report handling,
+  Stage output propagation and root Task aggregation do not populate it yet.
 - New Task JSON stores `executor_refs` as a list of typed references. The explicit
   legacy decoder accepts the old nullable `executor_ref`; mixed singular/plural
   storage is rejected. The singular read property returns the sole executor only,

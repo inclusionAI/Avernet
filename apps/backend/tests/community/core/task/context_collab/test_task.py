@@ -1,5 +1,6 @@
 """Independent L4 Task contract, distinct from response projections."""
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -10,6 +11,13 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
     PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    ResourceRef,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact import (
+    Artifact,
+    ResourceBinding,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
@@ -109,3 +117,97 @@ def test_import_baseline_is_explicit_not_a_fabricated_task_revision():
 def test_task_update_rejects_invalid_fence(values):
     with pytest.raises(ContextCollabValidationError):
         TaskUpdate(*values)
+
+
+def test_task_artifacts_default_empty_and_read_older_records():
+    initial = task()
+    assert initial.artifacts == ()
+    data = initial.to_dict()
+    assert data.pop("artifacts") == []
+    assert Task.from_dict(data) == initial
+
+
+def test_task_artifacts_roundtrip_without_changing_work_reporting():
+    artifacts = (
+        Artifact(
+            "requirements",
+            ResourceBinding(
+                ResourceRef("document", "requirements.md", "v1"), "grant-1"
+            ),
+        ),
+        Artifact(
+            "code",
+            ResourceBinding(ResourceRef("file", "calculator.py", None), None),
+        ),
+    )
+    initial = replace(task(), artifacts=artifacts)
+    data = initial.to_dict()
+    assert data["artifacts"] == [
+        {
+            "artifact_id": "requirements",
+            "resource_binding": {
+                "resource_ref": {
+                    "resource_type": "document",
+                    "resource_id": "requirements.md",
+                    "revision": "v1",
+                },
+                "grant_ref": "grant-1",
+            },
+        },
+        {
+            "artifact_id": "code",
+            "resource_binding": {
+                "resource_ref": {
+                    "resource_type": "file",
+                    "resource_id": "calculator.py",
+                    "revision": None,
+                },
+                "grant_ref": None,
+            },
+        },
+    ]
+    restored = Task.from_dict(json.loads(json.dumps(data)))
+    assert restored == initial
+    assert all(isinstance(artifact, Artifact) for artifact in restored.artifacts)
+    assert isinstance(restored.artifacts[0].resource_binding, ResourceBinding)
+    assert isinstance(restored.artifacts[0].resource_binding.resource_ref, ResourceRef)
+    updated = TaskUpdate(initial.task_id, 1, "reviewing").apply(
+        initial,
+        event_id="event-2",
+        event_kind="task.submitted",
+        payload={"artifacts": ["artifact://new-report"]},
+    )
+    assert updated.artifacts == initial.artifacts
+    assert initial.version == 1
+
+
+@pytest.mark.parametrize(
+    "artifacts", [None, "artifact://one", [], ("artifact://one",), ({},), (1,)]
+)
+def test_task_rejects_untyped_artifacts(artifacts):
+    with pytest.raises(ContextCollabValidationError, match="artifacts"):
+        replace(task(), artifacts=artifacts)
+
+
+@pytest.mark.parametrize("artifacts", [None, "artifact://one", (), [""], [1]])
+def test_task_rejects_invalid_serialized_artifacts(artifacts):
+    data = task().to_dict()
+    data["artifacts"] = artifacts
+    with pytest.raises(ContextCollabValidationError, match="artifacts"):
+        Task.from_dict(data)
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        {},
+        {"artifact_id": "", "resource_binding": {}},
+        {"artifact_id": "output", "resource_binding": "resource://output"},
+        {"artifact_id": "output", "resource_binding": {"resource_ref": {}}},
+    ],
+)
+def test_task_decodes_artifacts_with_the_l4_artifact_contract(artifact):
+    data = task().to_dict()
+    data["artifacts"] = [artifact]
+    with pytest.raises(ContextCollabValidationError):
+        Task.from_dict(data)
