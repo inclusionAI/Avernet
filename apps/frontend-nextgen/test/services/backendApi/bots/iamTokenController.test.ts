@@ -97,14 +97,14 @@ describe('iamTokenController OpenAPI contract', () => {
   //   const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
   //     ok: true,
   //     headers: new Headers({ 'content-type': 'application/json' }),
-  //     json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'caller-token' } }),
+  //     json: async () => ({ code: 200000, message: 'OK', data: { iam_token: '<caller-result>' } }),
   //   } as Response);
   //   await expect(
   //     getBotIamToken('bot-1', 'u1', 'owner-1', 'online', {
   //       sessionKey: 'online-session',
   //       callerRuntimeTarget: 'service',
   //     }),
-  //   ).resolves.toBe('caller-token');
+  //   ).resolves.toBe('<caller-result>');
   //   expect(fetch).toHaveBeenCalledWith(
   //     '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online&caller_runtime_target=service&session_key=online-session',
   //     expect.objectContaining({ method: 'POST' }),
@@ -114,7 +114,7 @@ describe('iamTokenController OpenAPI contract', () => {
   //   const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
   //     ok: true,
   //     headers: new Headers({ 'content-type': 'application/json' }),
-  //     json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'friend-token' } }),
+  //     json: async () => ({ code: 200000, message: 'OK', data: { iam_token: '<friend-result>' } }),
   //   } as Response);
   //   await expect(
   //     getBotIamToken('bot-1', 'u1', 'entity-1', 'online', {
@@ -123,7 +123,7 @@ describe('iamTokenController OpenAPI contract', () => {
   //       ownerId: 'owner-1',
   //       callerRuntimeTarget: 'caller_instance',
   //     }),
-  //   ).resolves.toBe('friend-token');
+  //   ).resolves.toBe('<friend-result>');
   //   expect(fetch).toHaveBeenCalledWith(
   //     '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=entity-1&stage=online&caller_runtime_target=caller_instance&owner_id=owner-1&f_user_id=u1&session_id=friend-session',
   //     expect.objectContaining({ method: 'POST' }),
@@ -133,7 +133,7 @@ describe('iamTokenController OpenAPI contract', () => {
   //   const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
   //     ok: true,
   //     headers: new Headers({ 'content-type': 'application/json' }),
-  //     json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'pair-token' } }),
+  //     json: async () => ({ code: 200000, message: 'OK', data: { iam_token: '<pair-result>' } }),
   //   } as Response);
   //   await getBotIamToken('bot-1', 'u1', 'owner-1', 'online', {
   //     sessionKey: 'online-session',
