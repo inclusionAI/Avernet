@@ -177,3 +177,17 @@ filter lifecycle states, read a clock or infer cancellation from `can_manage`.
 The provider owns Owner/deadline checks and excludes permanently deleted KBs.
 Seeing pending management metadata does not grant content/retrieval/Bot access.
 No extra provider request, local lifecycle state or database change is added.
+
+
+### Opt-in Yuque catalog browsing
+
+`GET .../yuque/books` additionally accepts `pagination=cursor` and optional
+`cursor` (up to 4096 characters). Both are forwarded only when supplied. The
+provider owns cursor authentication, source/query compatibility, page bounds and
+`{items,next_cursor}` response semantics. The adapter never decodes the bookmark
+or stores a query session. No total is synthesized. Clients must use the
+provider continuation, including on a short or empty page.
+
+Omitting the mode retains the existing q/source/offset/limit request unchanged.
+Global name and URL search stays on that full-catalog path, not on a partially
+loaded page. No import, synchronization, deletion or scheduler behavior changes.
