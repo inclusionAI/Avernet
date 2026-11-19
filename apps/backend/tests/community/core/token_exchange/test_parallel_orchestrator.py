@@ -16,7 +16,11 @@ from tests.community.core.token_exchange.test_pipeline import _Appender, _Plugin
 
 @pytest.fixture
 def setup():
-    caller = SimpleNamespace(get_iam_token=AsyncMock(return_value=CallerIamTokenOutcome(iam_token="original")))
+    caller = SimpleNamespace(
+        get_iam_token=AsyncMock(
+            return_value=CallerIamTokenOutcome(iam_token="<original-result>")
+        )
+    )
     pipeline = SimpleNamespace(run=AsyncMock(return_value=[]))
     bots = MagicMock()
     bots.get_by_id_and_entity.return_value = {"owner_id": "owner", "bot_type": "service", "env": "pre"}

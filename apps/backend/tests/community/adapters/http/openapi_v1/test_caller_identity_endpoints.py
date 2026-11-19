@@ -21,10 +21,14 @@ from agentclaw.community.adapters.http.openapi_v1.caller_identity.schemas import
     McpCallTypeUpdate,
 )
 from agentclaw.community.api.caller_identity_service import (
+    CallerIdentityPermissionError,
     CallerIdentityStage,
     McpCallType,
     McpCallTypeUpdateResult,
     CliCallTypeUpdateResult,
+)
+from agentclaw.community.core.bot_chat.bcn_friendship import (
+    FriendshipSourceUnavailableError,
 )
 
 
@@ -36,7 +40,7 @@ def _request(entity_id: str = "owner") -> Request:
     app = FastAPI()
     app.state.injector = SimpleNamespace(get=lambda _contract: repository)
     request = Request({"type": "http", "method": "PATCH", "path": "/",
-                       "app": app, "query_string": b""})
+                       "app": app, "query_string": b"", "headers": []})
     request.state.trace_id = "trace-caller"
     return request
 
@@ -100,6 +104,69 @@ async def test_context_returns_cli_and_mcp_caller_overrides() -> None:
 
     assert response.data.mcp_call_types == {"mcp.calendar": CallerCallType.CALLER}
     assert response.data.cli_call_types == {"dataphin": CallerCallType.CALLER}
+
+
+@pytest.mark.asyncio
+async def test_context_returns_only_aggregate_call_type_to_authorized_friend() -> None:
+    service = Mock()
+    service.get_context.side_effect = CallerIdentityPermissionError()
+    service.get_bot_call_type.return_value = McpCallType.CALLER
+    friendships = Mock()
+    friendships.is_friend.return_value = True
+
+    response = await get_caller_context(
+        "bot-1",
+        _request(),
+        "friend-1",
+        "owner",
+        RuntimeStage.DRAFT,
+        None,
+        service,
+        friendships,
+    )
+
+    assert response.data.bot_call_type is CallerCallType.CALLER
+    assert response.data.mcp_call_types == {}
+    assert response.data.cli_call_types == {}
+    assert response.data.editable is False
+    friendships.is_friend.assert_called_once_with(
+        human_id="friend-1",
+        bot_id="bot-1",
+        owner_id="owner",
+        request_headers={},
+    )
+    service.get_bot_call_type.assert_called_once_with(
+        "bot-1", CallerIdentityStage.DRAFT, None, "owner"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("friendship_result", [False, FriendshipSourceUnavailableError()])
+async def test_context_masks_non_friend_or_unavailable_friendship_source(
+    friendship_result,
+) -> None:
+    service = Mock()
+    denied = CallerIdentityPermissionError()
+    service.get_context.side_effect = denied
+    friendships = Mock()
+    if isinstance(friendship_result, Exception):
+        friendships.is_friend.side_effect = friendship_result
+    else:
+        friendships.is_friend.return_value = friendship_result
+
+    response = await get_caller_context(
+        "bot-1",
+        _request(),
+        "stranger",
+        "owner",
+        RuntimeStage.DRAFT,
+        None,
+        service,
+        friendships,
+    )
+
+    assert response.status_code == 404
+    service.get_bot_call_type.assert_not_called()
 
 
 @pytest.mark.asyncio

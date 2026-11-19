@@ -431,26 +431,33 @@ def test_friend_file_list_rejects_verify_before_reading_resources(friend_client,
     ("/sr_1", "delete", None),
     ("/upload-intents", "post", {"files": [{"filename": "report.txt"}]}),
 ])
-def test_friend_file_mutations_require_caller_instance(
-    friend_client, resources, suffix, method, body,
+def test_friend_file_mutations_accept_auto_runtime_target(
+    friend_client, resources, runtime_bindings, suffix, method, body,
 ):
     response = getattr(friend_client, method)(
         _base() + suffix,
         params={"owner_id": OWNER, "f_user_id": "friend-1"},
         **({"json": body} if body is not None else {}),
     )
-    assert response.status_code == 404
-    assert resources.calls == []
+    assert response.status_code in {200, 201}, response.text
+    binding_requests = runtime_bindings.requests + resources.binding_requests
+    assert binding_requests[0].target is RuntimeBindingTarget.AUTO
 
 
-def test_friend_can_upload_complete_poll_and_delete_own_non_teclaw_session(
-    friend_client, resources, runtime_bindings, expert,
+@pytest.mark.parametrize("selector", [None, "caller_instance"])
+def test_friend_file_routes_by_trusted_bot_call_type(
+    friend_client, resources, runtime_bindings, expert, selector,
 ):
     common = {
         "owner_id": OWNER,
         "stage": "online",
-        "caller_runtime_target": "caller_instance",
+        "f_user_id": "friend-1",
     }
+    if selector is not None:
+        common["caller_runtime_target"] = selector
+
+    listed = friend_client.get(_base(), params=common)
+    content = friend_client.get(_base() + "/sr_1/content", params=common)
 
     intent = friend_client.post(
         _base() + "/upload-intents",
@@ -468,17 +475,27 @@ def test_friend_can_upload_complete_poll_and_delete_own_non_teclaw_session(
     )
     removed = friend_client.delete(
         _base() + "/sr_1",
-        params={**common, "f_user_id": "friend-1"},
+        params=common,
     )
 
+    assert listed.status_code == 200, listed.text
+    assert content.status_code == 200, content.text
     assert intent.status_code == 201, intent.text
     assert completed.status_code == 200, completed.text
     assert status.status_code == 200, status.text
     assert removed.status_code == 200, removed.text
-    assert runtime_bindings.requests[0].target is RuntimeBindingTarget.CALLER_INSTANCE
-    assert runtime_bindings.requests[0].actor_user_id == "friend-1"
+    # The public caller_instance selector means "the friend's chat runtime".
+    # AUTO preserves an independent Caller for call_type=caller and selects the
+    # shared publish binding for call_type=owner, which has no instance row.
+    binding_requests = runtime_bindings.requests + resources.binding_requests
+    assert len(binding_requests) == 4
+    assert all(
+        request.target is RuntimeBindingTarget.AUTO
+        and request.actor_user_id == "friend-1"
+        for request in binding_requests
+    )
     owned_calls = [call for call in expert.calls if call[0] == "get_owned_chat_session"]
-    assert len(owned_calls) == 4
+    assert len(owned_calls) == 6
 
 
 def test_friend_upload_refuses_teclaw_before_creating_resource(
