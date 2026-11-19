@@ -137,8 +137,15 @@ class BcsClientPort(Protocol):
     async def get_group(self, group_id: str) -> dict[str, Any]: ...
     async def get_session_messages(
         self, session_id: str, *, limit: int = 50, since_msg_id: str | None = None,
-        caller_bearer: str | None = None,
+        caller_bearer: str | None = None, include_pending: bool = False,
+        before: int | None = None,
     ) -> list[Any]: ...
+    async def query_message_deliveries(
+        self, session_id: str, *, message_ids: list[str],
+        caller_bearer: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read existing delivery facts as the same authenticated participant."""
+        ...
     # ``caller_bearer``:会话历史读口有参与者级 ACL("valid Human identity or
     # Bot token is required")——服务 HMAC 签名不足。传入持有者 bot 的
     # session_token 时 HTTP 实现携带 ``Authorization: Bearer``(同 ``create_group``

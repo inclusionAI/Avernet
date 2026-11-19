@@ -2,8 +2,9 @@
 
 ## Scope and ownership
 
-Task Harness observes live Bot activity without reading event bodies or opening
-an execution/recovery channel. Backend owns the silence policy; SecBaaS owns Bot
+Task Harness observes live single-Bot activity without reading event bodies or
+opening an execution/recovery channel. Manager-worker collaboration sessions use
+the existing BCS message and delivery observation APIs described below. Backend owns the silence policy; SecBaaS owns Bot
 authorization, lifecycle and instance routing; Engine owns the run observation.
 Relay reports, task transitions and task-loop are unchanged.
 
@@ -51,8 +52,34 @@ Relay reports, task transitions and task-loop are unchanged.
 - Event sequence includes forwarded tool/model events, not just visible text.
   Activity is not evidence of business progress. A single long-running call can
   remain silent; this API does not add a tool-duration heartbeat or cancellation.
-- Non-session legacy run probes and group probes retain their existing behavior.
-  Existing messages APIs remain unchanged. No cross-ARCA recovery is introduced.
+- Non-session legacy run probes and state-machine group probes retain their
+  existing behavior. No cross-ARCA recovery is introduced.
+
+## Manager-worker collaboration sessions
+
+Backend reuses the current participant Bot's Bearer token for BCS history reads
+(with pending inputs) and the existing
+`POST /openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query`.
+Only the coordinator's `send` delivery can establish execution failure; group
+lifecycle, worker failures and `STREAM_ERROR` text alone cannot establish it.
+
+The probe associates source input messages with deliveries and orders history by
+BCS timestamps rather than UUIDs. It can walk up to eight 100-message pages to
+locate a trimmed source, then persists the association for subsequent polls.
+Ambiguous/missing sources, newer unresolved inputs, newer runs, queued admissions
+and unavailable/denied queries fence old failures instead of triggering recovery.
+
+Harness requires the same node generation, run, delivery and activity cursor to
+remain failed across two consecutive polling intervals before resuming the
+original session. A new execution or activity restarts confirmation. After the
+async probe it rechecks that the node is still running in the same generation.
+A valid coordinator `queue_admission` is accepted even when `delivered=false`;
+its source message and run are retained so pending recovery is not sent again.
+Runtime completion never substitutes for the task's accepted Relay reports.
+
+Existing recovery budgets, quiet windows and per-process serialization remain.
+There is no distributed recovery claim or cross-process exactly-once guarantee;
+this change does not add a lock or change the Relay public protocol.
 
 ## Rollout and verification
 

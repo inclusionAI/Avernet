@@ -137,7 +137,7 @@ def _message_sort_key(entry: tuple[int, dict[str, Any]]) -> tuple[Any, ...]:
     source = ""
     for key in (
         "seq", "gmt_seq", "version", "updated_at", "gmt_modified",
-        "created_at", "gmt_create", "message_id", "id",
+        "timestamp", "created_at", "gmt_create", "message_id", "id",
     ):
         value = _message_order_value(message.get(key))
         # Prefer the highest independently comparable field. Multiple equal
@@ -312,7 +312,7 @@ class TaskRuntimeLivenessProbe:
         if group_id:
             return await self._probe_group(
                 node=node,
-                run_id=run_id,
+                run_id=None if props.get("relay_harness_resume_message_id") else run_id,
                 group_id=group_id,
                 session_id=session_id,
                 previous_cursor=previous_cursor,
@@ -563,14 +563,15 @@ class TaskRuntimeLivenessProbe:
         group_status = _normalized_status((group or {}).get("status"))
         group_state = _classify_status(group_status)
         session_state = _classify_status(session_status)
-        if group_state == "terminal_failed" or session_state == "terminal_failed":
+        managed = (group or {}).get("group_strategy") == "manager_worker"
+        if not managed and (group_state == "terminal_failed" or session_state == "terminal_failed"):
             return RuntimeProbeResult(
                 state="terminal_failed",
                 source="bcs.group",
                 status=group_status or session_status,
                 detail={"group_id": group_id, "run_error": run_error},
             )
-        if group_state == "terminal_success" or session_state == "terminal_success":
+        if not managed and (group_state == "terminal_success" or session_state == "terminal_success"):
             return RuntimeProbeResult(
                 state="terminal_success",
                 source="bcs.group",
@@ -600,6 +601,11 @@ class TaskRuntimeLivenessProbe:
                 detail={"run_error": run_error, "group_id": group_id},
             )
 
+        if managed and not session_id:
+            return RuntimeProbeResult(
+                state="activity_unknown", source="bcs.delivery",
+                detail={"reason": "missing_session_id"},
+            )
         cursor_value = _group_cursor(group)
         message_error: str | None = None
         if session_id:
@@ -609,16 +615,32 @@ class TaskRuntimeLivenessProbe:
                     group=group,
                     node=node,
                 )
+                managed = group.get("group_strategy") == "manager_worker"
                 messages = await self._bcs.get_session_messages(
                     session_id,
-                    limit=20,
+                    limit=100 if managed else 20,
                     caller_bearer=caller_bearer,
+                    **({"include_pending": True} if managed else {}),
                 )
+                if group.get("group_strategy") == "manager_worker":
+                    from agentclaw.community.core.task.task_harness.group_delivery_probe import probe_group_deliveries
+
+                    return await probe_group_deliveries(
+                        self._bcs, node, messages=messages, caller_bearer=caller_bearer,
+                        driver=str(group.get("driver_bot_id") or group.get("driver_bot") or ""),
+                        previous_cursor=previous_cursor,
+                    )
                 cursor_value = (
                     cursor_value,
                     _last_message_cursor(messages),
                 )
             except Exception as exc:  # noqa: BLE001 - heartbeat read is optional
+                if group.get("group_strategy") == "manager_worker":
+                    return RuntimeProbeResult(
+                        state="activity_unknown", source="bcs.delivery",
+                        error=f"{type(exc).__name__}: {exc}"[:500],
+                        detail={"reason": "delivery_observation_unavailable"},
+                    )
                 message_error = f"{type(exc).__name__}: {exc}"[:500]
         cursor = _join_cursors(cursor_value)
         return self._active_result(
