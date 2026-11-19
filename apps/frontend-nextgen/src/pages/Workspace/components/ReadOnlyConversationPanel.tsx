@@ -13,6 +13,7 @@ import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import type { ChatMessage } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { History } from 'lucide-react';
+import { useSessionInitiators } from '../Chat/hooks/useSessionInitiators';
 
 export interface ReadOnlyConversationPanelProps {
   bot: Pick<ChatBotView, 'displayName' | 'avatarUrl'> | null;
@@ -43,6 +44,8 @@ export function ReadOnlyConversationPanel({
   onLoadMore,
   onOpenSessionList,
 }: ReadOnlyConversationPanelProps) {
+  const initiatorFor = useSessionInitiators(session ? [session.sessionId] : []);
+  const initiator = session ? initiatorFor(session.sessionId) : undefined;
   const interactions = useMessageInteractions({
     sessionId: session?.sessionId,
     messages,
@@ -78,10 +81,15 @@ export function ReadOnlyConversationPanel({
     );
   }
 
-  const senderName = friend?.displayName ?? '会话发起人';
+  const friendName = friend?.displayName?.trim();
+  const friendMatches = !initiator || initiator.userId === friend?.userId;
+  const senderName =
+    initiator?.displayName ||
+    (friendMatches && friendName !== friend?.userId ? friendName : undefined) ||
+    '用户';
   const target: ConversationTarget = {
     id: session.sessionId,
-    name: friend?.displayName ?? bot.displayName,
+    name: initiator ? bot.displayName : friend?.displayName ?? bot.displayName,
     avatar: senderName.charAt(0) || '人',
     engine: 'OpenClaw',
     status: 'available',
@@ -98,7 +106,7 @@ export function ReadOnlyConversationPanel({
         }
       : {
           name: senderName,
-          avatar: <Avatar name={senderName} size={24} />,
+          avatar: <Avatar key={initiator?.avatarUrl ?? senderName} name={senderName} src={initiator?.avatarUrl} size={24} />,
         };
 
   return (

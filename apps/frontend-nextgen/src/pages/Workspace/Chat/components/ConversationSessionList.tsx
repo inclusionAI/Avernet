@@ -1,15 +1,17 @@
+import { sessionInitiatorId, type SessionInitiator } from '@/domain/conversation/sessionInitiator';
 import type { ConversationSessionListState } from '@/domain/conversation/types';
 import { Points } from '@/tracking/points';
 import { TrackExpo } from '@/tracking/TrackExpo';
 import { Tracert } from '@/utils/tracert';
 import { ListErrorState } from '../../components/ListErrorState';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
+import { useSessionInitiators } from '../hooks/useSessionInitiators';
 import { ConversationLoadMore } from './ConversationLoadMore';
 import { ConversationSessionRow } from './ConversationSessionRow';
 import { ConversationSessionRowsSkeleton } from './ConversationSkeletons';
 
 /** 我发起 / 好友 Bot 的交互式 Session 列表(选中 / 加载更多均来自 Hook 模型)。 */
-export function ConversationSessionList(props: {
+interface ConversationSessionListProps {
   actions?: ConversationSessionListActions;
   sessions: ConversationSessionListState | undefined;
   selectedSessionId: string | null;
@@ -21,6 +23,11 @@ export function ConversationSessionList(props: {
   replyingSessionId?: string | null;
   emptyTitle?: string;
   showCreateHint?: boolean;
+  showInitiator?: boolean;
+}
+
+function ConversationSessionListContent(props: ConversationSessionListProps & {
+  initiatorFor?: (sessionId: string) => SessionInitiator | undefined;
 }) {
   const {
     actions,
@@ -33,6 +40,8 @@ export function ConversationSessionList(props: {
     replyingSessionId,
     emptyTitle = '还没有会话',
     showCreateHint = true,
+    showInitiator = false,
+    initiatorFor,
   } = props;
   // 未加载 ≠ 空列表:无缓存、或首拉在途(loading 且尚无 items)都只给行骨架,
   // 不闪「暂无会话」;已在途刷量(loading 但保留旧 items)继续展示旧行。
@@ -71,6 +80,9 @@ export function ConversationSessionList(props: {
               key={session.sessionId}
               session={session}
               selected={selected}
+              showInitiator={showInitiator}
+              readOnly={showInitiator}
+              initiator={initiatorFor?.(session.sessionId)}
               onSelect={() => {
                 Tracert.click(Points.workspaceChat.switchSession, { bot_id: session.botId });
                 onSelectSession(session.sessionId);
@@ -111,5 +123,19 @@ export function ConversationSessionList(props: {
       )}
       {sessions.loadMoreError && <ListErrorState message={sessions.loadMoreError} onRetry={onLoadMore} />}
     </>
+  );
+}
+
+function InitiatorSessionList(props: ConversationSessionListProps) {
+  const initiatorFor = useSessionInitiators(props.sessions?.items.map((item) => item.sessionId) ?? []);
+  return <ConversationSessionListContent {...props} initiatorFor={initiatorFor} />;
+}
+
+export function ConversationSessionList(props: ConversationSessionListProps) {
+  // Normal mine/collab lists and opaque sessions need no identity/name subscription.
+  return props.showInitiator && props.sessions?.items.some((item) => sessionInitiatorId(item.sessionId)) ? (
+    <InitiatorSessionList {...props} />
+  ) : (
+    <ConversationSessionListContent {...props} />
   );
 }
