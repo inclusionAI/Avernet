@@ -38,8 +38,14 @@ jest.mock('@/services/workspace/botSessionService', () => ({
   ...jest.requireActual('@/services/workspace/botSessionService'),
   botSessionService: { listSessions: jest.fn(), listModels: jest.fn() },
 }));
+let mockComposerDisabled: boolean | undefined;
+let mockComposerPlaceholder: string | undefined;
 jest.mock('@/components/BotWorkshop/Editor/DebugChatComposer', () => ({
-  DebugChatComposer: () => <div data-testid="composer" />,
+  DebugChatComposer: (props: Record<string, unknown>) => {
+    mockComposerDisabled = props.composerDisabled as boolean | undefined;
+    mockComposerPlaceholder = props.composerDisabledPlaceholder as string | undefined;
+    return <div data-testid="composer" />;
+  },
 }));
 beforeEach(() => {
   jest.clearAllMocks();
@@ -73,4 +79,21 @@ it.each<[string, BotLifecycle, BotRuntimeStage | undefined, BotRuntimeStage]>([
     expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }),
     expect.objectContaining({ sessionId: 'debug-session' }), 'viewer', expect.any(Function), expected,
   );
+});
+
+it('查看 online 运行态时全面禁用调试输入并提示改走对话页', async () => {
+  mockLifecycle = 'running';
+  mockSearch = '?id=bot&type=view&runtime_stage=online';
+  render(<Page />);
+  expect(await screen.findByTestId('composer')).toBeInTheDocument();
+  expect(mockComposerDisabled).toBe(true);
+  expect(mockComposerPlaceholder).toBe('正式运行的服务Bot请在“对话”中使用');
+});
+
+it('编辑模式与线上路由组合不触发调试输入禁用', async () => {
+  mockLifecycle = 'running';
+  mockSearch = '?id=bot&type=edit&runtime_stage=online';
+  render(<Page />);
+  expect(await screen.findByTestId('composer')).toBeInTheDocument();
+  expect(mockComposerDisabled).toBe(false);
 });
