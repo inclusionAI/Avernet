@@ -435,11 +435,14 @@ class TestBuildForwardingWithMixedSources:
             "servers": {"baas": {"base_url": "http://baas:9090"}},
         }
 
-        with patch(
-            "gateway.community.bootstrap._forwarding._load_domain_map"
-        ) as mock_dm, patch(
-            "gateway.community.config.ConfigLoader.load",
-            return_value=Config(config_dir=tmp_path),
+        with (
+            patch(
+                "gateway.community.bootstrap._forwarding._load_domain_map"
+            ) as mock_dm,
+            patch(
+                "gateway.community.config.ConfigLoader.load",
+                return_value=Config(config_dir=tmp_path),
+            ),
         ):
             mock_dm.return_value = DomainMap.from_config(config_data, variables={})
 
