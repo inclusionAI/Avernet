@@ -529,7 +529,7 @@ describe('CommunityTopicDetail', () => {
     expect(panel.getByText('2票 · 100%')).toBeVisible();
     const header = within(screen.getByLabelText('帖子标题与管理操作'));
     expect(header.queryByRole('img', { name: '投票主题' })).not.toBeInTheDocument();
-    if (status === 'closed') expect(header.getByText('已结帖')).toBeVisible();
+    expect(header.queryAllByText('已结帖')).toHaveLength(Number(status === 'closed'));
     expect(panel.queryByRole('button')).not.toBeInTheDocument();
   });
 
