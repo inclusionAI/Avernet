@@ -4,6 +4,7 @@ import React, { useEffect } from 'react';
 
 import { BotSubpageShell } from '@/components/BotWorkshop/BotSubpageShell';
 import { HealthCheckView } from '@/components/BotWorkshop/BotHealthCheckDrawer/HealthCheckView';
+import { PatchPreviewModal } from '@/components/BotWorkshop/BotHealthCheckDrawer/components/PatchPreviewModal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
@@ -128,9 +129,19 @@ const BotHealthCheckPage: React.FC = () => {
             loading={healthCheck.loading}
             checking={healthCheck.checking}
             onReDiagnose={healthCheck.runDiagnose}
+            onApplyPatch={healthCheck.openPatchFix}
+            applyingPatch={healthCheck.applying}
           />
         </div>
       )}
+
+      <PatchPreviewModal
+        request={healthCheck.patchFix}
+        loading={healthCheck.previewLoading}
+        applying={healthCheck.applying}
+        onConfirm={healthCheck.confirmPatchFix}
+        onOpenChange={(open) => !open && healthCheck.closePatchFix()}
+      />
     </BotSubpageShell>
   );
 };

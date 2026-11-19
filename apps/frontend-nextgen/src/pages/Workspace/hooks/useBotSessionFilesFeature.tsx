@@ -96,6 +96,10 @@ export function useBotSessionFilesFeature(
       ? ('caller_instance' as const)
       : ('service' as const);
 
+  // 好友会话身份(2026-11-19 需求追加):好友 Bot 全链文件接口携带 f_user_id(与 user_id 同值);
+  // 单一收口,列表/上传/删除/预览/下载全链同源同值,非好友不携带。
+  const friendUserId = bot?.isFriendBot ? userId ?? undefined : undefined;
+
   // 显式位参(2026-11-19 勘误):条件 spread 让缺省位被后值顶替(device_uuid 槽吃 caller 值),
   // 全量位参各归其位;undefined 占位等价可选参数省略。
   const files = useBotSessionFiles(
@@ -103,7 +107,7 @@ export function useBotSessionFilesFeature(
     sessionId,
     userId,
     ownerId,
-    bot?.isFriendBot ? userId ?? undefined : undefined,
+    friendUserId,
     stage,
     deviceUuid,
     callerRuntimeTarget,
@@ -113,6 +117,7 @@ export function useBotSessionFilesFeature(
     sessionId,
     userId,
     ownerId,
+    friendUserId,
     stage,
     deviceUuid,
     callerRuntimeTarget,
@@ -208,6 +213,7 @@ export function useBotSessionFilesFeature(
       stage={stage}
       deviceUuid={deviceUuid}
       callerRuntimeTarget={callerRuntimeTarget}
+      friendUserId={friendUserId}
       files={files}
       upload={upload}
       drawerOpen={drawerOpen}

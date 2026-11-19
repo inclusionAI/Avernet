@@ -173,7 +173,7 @@ export function RoutineFormDialog({
                     </Select>
                   </div>
                 )}
-                {!original && form.runtime_stage && instanceMode !== 'unknown' && targetError && (
+                {!original && targetError && (
                   <p className="text-xs text-destructive sm:col-span-2" role="status">
                     {targetError}
                   </p>
