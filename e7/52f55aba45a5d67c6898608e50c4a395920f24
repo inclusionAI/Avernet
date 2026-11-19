@@ -1,0 +1,16 @@
+apps/backend/tests/community/core/task/context_collab/products/test_open_swarm_enrollment.py
+  h_059e888e5e4e82 78,81
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_open_swarm.py
+  h_059e888e5e4e82 353-355
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e752f55aba45a5d67c6898608e50c4a395920f24",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
