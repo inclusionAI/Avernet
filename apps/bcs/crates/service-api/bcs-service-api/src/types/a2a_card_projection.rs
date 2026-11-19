@@ -270,14 +270,15 @@ mod tests {
         }));
         assert!(bcs_domain::a2a_management::validate_management_card(&absent).is_ok());
         assert!(project_agent_card_capabilities(Some(&absent)).is_ok());
-        // A scoped entry must keep its scopes through projection, not merely
-        // fail to error.
+        // Verbatim projection (no cross-field derivation): scopes only come
+        // from the Card's own `scopes` field — securityRequirements scopes are
+        // never derived into it.
         let scoped = anonymous_admission_card(json!({
             "securityRequirements": [scoped_scheme, {}],
             "skills": []
         }));
         let projected = project_agent_card_capabilities(Some(&scoped)).unwrap();
-        assert_eq!(projected.scopes, Some(vec!["orders:read".into()]));
+        assert_eq!(projected.scopes, None);
     }
 
     /// Minimal AgentCard that passes management admission: every field the

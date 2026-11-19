@@ -191,10 +191,12 @@ class Story:
         caller, auth = self.register("Card caller", self.owner + "caller")
         stranger, _ = self.register("Card stranger", self.owner + "stranger")
         self.profile(target, name="Card target", summary="Invoices", domains=["billing"],
-                     skills=[{"name": "invoice", "description": "Invoice lookup", "tags": ["invoicing"]}])
+                     skills=[{"name": "invoice", "description": "Invoice lookup"}])
         card = self.wait_card(target, lambda c: c["card"]["description"] == "Invoices")
         assert card["resource_type"] == "agent"
-        assert card["card"]["skills"][0]["tags"] == ["invoicing"]
+        # The profile path carries no skill tags (the onboard wire protocol
+        # has no tags field), and domains-stuffing is gone: tags stay empty.
+        assert card["card"]["skills"][0]["tags"] == []
         assert "visibility" not in card["card"] and token not in json.dumps(card)
         # Every bot/user visibility combination is publishable.
         for visibility in ("public", "protected", "private"):
