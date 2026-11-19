@@ -169,3 +169,29 @@ entries from this change. Reconstructed readers use the same conformance harness
 Production failover durability and real host database verification remain distinct;
 the latter was explicitly deferred. GitHub publication, internal mirror availability,
 OCB gitlink integration and deployment are separate delivery states.
+
+
+## Original SPEC re-audit and Singlebox verification
+
+The [clause-by-clause audit](spec-audit.md) uses the original #4144 commit, rather
+than silently replacing its requirements with the implementation copy. Current
+follow-up changes include fail-closed checkpoint capacity declarations, actual
+maximum-candidate startup checks, one SetStatus per Decision, bounded legacy
+recovery metadata, a 5-second retry ceiling, and ordinary-pool congestion gating
+for new Start only. Existing pending identities and critical controls retain
+recovery access. Production behavior remains in Avernet; transport observations
+and provider envelope proofs belong to the host.
+
+The opt-in [Worker companion](../../crates/bootstrap/bcs/tests/worker_runtime/README.md)
+uses the user's selected memory Store mock and existing SQLite archives. Its
+external process story passes twelve functional categories. Local changed-line
+coverage is 9118/11983 (76.09%) with the unchanged 65% threshold; complete
+Singlebox totals and GitHub CI remain pending until new publication. The Singlebox gate
+requires its fresh report and joins its process before aggregation, preserving
+all existing thresholds. Lifecycle follow-up evidence is tracked in the audit;
+no aggregate count is a substitute for each clause's evidence.
+
+Local stress testing is explicitly out of scope under the latest user direction.
+DEV timing is diagnostic only. Storage-node HA is a user-confirmed platform
+prerequisite, not a node-failover test performed by this change. Real OB acceptance
+remains deferred. Persistent-provider functional verification continues via PROXY.

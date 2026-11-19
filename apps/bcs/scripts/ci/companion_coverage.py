@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build once, then supervise isolated Caller/OAuth producers before aggregation.
+"""Build once, then supervise isolated Caller/OAuth/Worker producers before aggregation.
 
 Every subprocess has an owned process group. Cancellation terminates those
 children (including test servers), never the canonical Singlebox stack. Logs
@@ -38,6 +38,7 @@ def supervise(bcs_dir: Path, report_dir: Path) -> int:
     oauth_report = bcs_dir / 'target/cov-e2e/oauth_e2e.json'
     oauth_report.parent.mkdir(parents=True, exist_ok=True)
     oauth_report.write_text('{"status":"failed","scenarios":[],"checks":[]}\n')
+    (oauth_report.parent / 'worker_e2e.json').write_text('{"status":"failed","checks":[]}\n')
     result = {'status': 'failed', 'phases': {}}
     processes = []
     logs = []
@@ -68,9 +69,9 @@ def supervise(bcs_dir: Path, report_dir: Path) -> int:
             return code
         pending = {
             name: start(name, ['bash', str(bcs_dir / f'scripts/{name}_e2e_coverage.sh'), '--run-only'])
-            for name in ('caller', 'oauth')
+            for name in ('caller', 'oauth', 'worker')
         }
-        # Poll both so timing reflects actual completion, not sequential wait
+        # Poll all producers so timing reflects actual completion, not sequential wait
         # order. A failure never cancels the other producer's diagnostic run.
         while pending:
             for name, process in list(pending.items()):
@@ -80,7 +81,8 @@ def supervise(bcs_dir: Path, report_dir: Path) -> int:
                     del pending[name]
             if pending:
                 time.sleep(0.1)
-        code = result['phases']['caller']['exit_code'] or result['phases']['oauth']['exit_code']
+        code = next((result['phases'][name]['exit_code'] for name in ('caller', 'oauth', 'worker')
+                     if result['phases'][name]['exit_code']), 0)
         if code == 0:
             result['status'] = 'passed'
         return code

@@ -32,6 +32,7 @@ REQUIRED_FILES = (
     "html/baas/index.html",
     "bcs/e2e.log",
     "bcs/oauth_e2e.json",
+    "bcs/worker_e2e.json",
     "bcs/cobertura.xml",
     "bcs/coverage.txt",
     "bcs/summary.json",
@@ -208,12 +209,40 @@ def validate_oauth_e2e(reports_dir: Path, errors: list[str]) -> None:
         errors.append("BCS OAuth E2E did not exercise the external provider boundary")
 
 
+def validate_worker_e2e(reports_dir: Path, errors: list[str]) -> None:
+    report = load_json(reports_dir / "bcs/worker_e2e.json", errors)
+    if report.get("status") != "passed":
+        errors.append("BCS Worker E2E did not pass")
+    if report.get("store") != "memory_mock" or report.get("durable_store") is not False:
+        errors.append("BCS Worker E2E must identify its memory-only Store boundary")
+    if report.get("archive") != "sqlite":
+        errors.append("BCS Worker E2E did not use the existing SQLite archive")
+    required = {
+        "document_projection_atomic_patch_and_unknown",
+        "finish_archive_restore_and_late_cancel", "append_archive_restore_and_late_cancel",
+        "cancel_independent_of_runner", "quarantine_and_control_authorization",
+        "blocked_and_control_authorization", "memory_store_worker_takeover",
+        "graceful_handoff_preserves_pending_task",
+        "human_reply_dispatch_input_once",
+        "holder_input_acceptance_and_cancel_unknown",
+        "live_follow_snapshot_trim_gap_restore",
+        "sending_unknown_late_evidence_without_rerun",
+
+    }
+    checks = report.get("checks")
+    if not isinstance(checks, list) or not required.issubset(
+        item for item in checks if isinstance(item, str)
+    ):
+        errors.append("BCS Worker E2E is missing required live-process scenarios")
+
+
 def validate_bcs_artifacts(
     reports_dir: Path,
     args: argparse.Namespace,
     errors: list[str],
 ) -> tuple[float, float, float, float]:
     validate_oauth_e2e(reports_dir, errors)
+    validate_worker_e2e(reports_dir, errors)
     bcs_dir = reports_dir / "bcs"
     summary = load_json(bcs_dir / "summary.json", errors)
     totals = get_nested(summary, ("data",))
