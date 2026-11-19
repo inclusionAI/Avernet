@@ -13,6 +13,7 @@ from regressions import (default_environment, rollback_modes,
                          invite_code_issuance_requires_authorization)
 from flows import lifecycle, browser_binding, rejection_and_precedence, compatibility, concurrent_refresh, pending_capacity
 from friend_surface import friend_connect_surface
+from human_friend_group import human_friend_group_creation
 
 
 def main():
@@ -36,7 +37,10 @@ def main():
                         concurrent_refresh(env, base)
                         browser_binding(env, base)
                         rejection_and_precedence(env, base)
-                    result['scenarios'].append('mixed-' + ('memory' if memory else 'sqlite'))
+                        storage = 'memory' if memory else 'sqlite'
+                        result['scenarios'].append('mixed-' + storage)
+                        human_friend_group_creation(env, base)
+                        result['scenarios'].append('human-friend-group-creation-' + storage)
                 # Friend-connect full link on the in-memory composition root:
                 # the only e2e runtime whose edge-permission stores are the
                 # in-memory implementations behind the real connect service.
