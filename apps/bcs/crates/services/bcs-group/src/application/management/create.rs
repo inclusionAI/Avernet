@@ -49,7 +49,13 @@ impl GroupManagement {
                 .await?;
         }
 
-        let is_human_originator = originator.starts_with("human_");
+        let human_staff_no = originator.strip_prefix("human_");
+        // Legacy callers may designate another Human as originator. A
+        // friendship only sponsors creation by that authenticated Human.
+        let friend_connect = self.friend_connect.as_ref().filter(|_| {
+            cmd.caller_actor_id.as_deref() == Some(originator.as_str())
+                && cmd.visibility.as_deref().unwrap_or("private") == "private"
+        });
 
         let group_id = cmd
             .group_id
@@ -87,6 +93,7 @@ impl GroupManagement {
         let mut participants = Vec::with_capacity(requested.len());
         let mut participant_ids = Vec::with_capacity(requested.len());
         let mut subscription_targets = Vec::new();
+        let mut friend_candidates = Vec::new();
         for (bot_id, role, tags, message_view_scope) in requested {
             if !seen.insert(bot_id.clone()) {
                 continue;
@@ -97,65 +104,31 @@ impl GroupManagement {
                 self.registry.get(&bot_id).await
             }
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
-            if bot.actor_kind == ActorKind::Bot {
-                if self.v1_openapi_create_policy {
-                    // Originator-anchored (aligned with legacy): every Bot
-                    // participant except the originator itself — including the
-                    // driver when it differs from the originator — must be
-                    // reachable from the originator. A Human originator reaches
-                    // a bot via public visibility or ownership (`created_by`);
-                    // a Bot originator reaches it via public visibility or
-                    // friendship.
-                    if bot_id != originator {
-                        if is_human_originator {
-                            // Row 16 (spec §8.1): the Human
-                            // may bring a controlled, non-hidden
-                            // Bot into a non-public Group WITHOUT
-                            // friendship — through its CURRENT
-                            // `can_manage` edge; public Groups
-                            // still only accept public Bots. The
-                            // historical `created_by` is not the
-                            // sponsor fact.
-                            let staff_no = originator.trim_start_matches("human_");
-                            if bot.capabilities.visibility != "public"
-                                && !self
-                                    .human_controls_bot(staff_no, &bot_id)
-                                    .await?
-                            {
-                                return Err(GroupUseCaseError::Forbidden(format!(
-                                    "Bot '{}' is neither public nor owned by human '{}'",
-                                    bot_id, staff_no
-                                )));
-                            }
-                        } else {
-                            self.ensure_v1_reachable(&originator, &bot).await?;
-                        }
-                        if bot.capabilities.visibility == "public" {
-                            subscription_targets.push(bot.clone());
-                        }
-                    }
-                } else if bot_id != originator {
-                    if is_human_originator {
-                        // Row 16 (spec §8.1): same CURRENT
-                        // `can_manage` sponsorship waiver as
-                        // the V1 policy path above.
-                        let staff_no = originator.trim_start_matches("human_");
-                        if bot.capabilities.visibility != "public"
-                            && !self
-                                .human_controls_bot(staff_no, &bot_id)
-                                .await?
+            if bot.actor_kind == ActorKind::Bot && bot_id != originator {
+                if let Some(staff_no) = human_staff_no {
+                    // Management sponsorship uses current can_manage, not created_by.
+                    if bot.capabilities.visibility != "public"
+                        && !self.human_controls_bot(staff_no, &bot_id).await?
+                    {
+                        if friend_connect.is_some()
+                            && bot.status != ActorStatus::Hidden
+                            && matches!(bot.capabilities.visibility.as_str(), "protected" | "private")
                         {
+                            friend_candidates.push(bot_id.clone());
+                        } else {
                             return Err(GroupUseCaseError::Forbidden(format!(
-                                "Bot '{}' is neither public nor owned by human '{}'",
+                                "Bot '{}' is neither public nor managed by human '{}'",
                                 bot_id, staff_no
                             )));
                         }
-                    } else {
-                        self.ensure_reachable(&originator, &bot_id).await?;
                     }
-                    if bot.capabilities.visibility == "public" {
-                        subscription_targets.push(bot.clone());
-                    }
+                } else if self.v1_openapi_create_policy {
+                    self.ensure_v1_reachable(&originator, &bot).await?;
+                } else {
+                    self.ensure_reachable(&originator, &bot_id).await?;
+                }
+                if bot.capabilities.visibility == "public" {
+                    subscription_targets.push(bot.clone());
                 }
             }
             let role = participant_role(role.as_deref(), bot_id == cmd.driver_bot_id)?;
@@ -180,6 +153,25 @@ impl GroupManagement {
                 message_view_scope,
             });
             participant_ids.push(bot_id);
+        }
+        if let Some(connect) = friend_connect.filter(|_| !friend_candidates.is_empty()) {
+            self.ensure_member_limit(participant_ids.len())?;
+            // A registered Bot cannot use a Human-shaped ID to borrow the
+            // Human exception. Legacy authenticated Humans can lack a row.
+            if self.registry.try_get(&originator).await?
+                .is_some_and(|actor| actor.actor_kind != ActorKind::Human)
+            {
+                return Err(GroupUseCaseError::Forbidden(
+                    "Only a Human originator may use Human friend admission".into(),
+                ));
+            }
+            let friends = connect.find_human_friend_bots(&originator, &friend_candidates).await?;
+            if let Some(bot_id) = friend_candidates.iter().find(|id| !friends.contains(*id)) {
+                return Err(GroupUseCaseError::Forbidden(format!(
+                    "Human '{}' does not manage or have an active friendship with non-public Bot '{}'",
+                    originator, bot_id
+                )));
+            }
         }
         let requested_strategy = cmd.group_strategy.unwrap_or_default();
         if let Some(opening_message) = &cmd.opening_message {

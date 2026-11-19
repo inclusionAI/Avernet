@@ -1,6 +1,7 @@
 use super::*;
 use bcs_db_local::LocalSqliteDbPlugin;
 
+mod human_friend_bots;
 mod mapping_branches;
 
 #[test]

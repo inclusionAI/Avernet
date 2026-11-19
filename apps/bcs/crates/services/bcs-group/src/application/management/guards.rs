@@ -26,18 +26,22 @@ impl GroupManagement {
         )))
     }
 
+    pub(crate) fn ensure_member_limit(&self, count: usize) -> Result<(), GroupUseCaseError> {
+        if count > self.config.max_group_members {
+            return Err(GroupUseCaseError::InvalidProposal(format!(
+                "Group would have {} members, exceeding the limit of {}",
+                count, self.config.max_group_members
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn ensure_limits(
         &self,
         driver_bot_id: &str,
         participant_ids: &[String],
     ) -> Result<(), GroupUseCaseError> {
-        if participant_ids.len() > self.config.max_group_members {
-            return Err(GroupUseCaseError::InvalidProposal(format!(
-                "Group would have {} members, exceeding the limit of {}",
-                participant_ids.len(),
-                self.config.max_group_members
-            )));
-        }
+        self.ensure_member_limit(participant_ids.len())?;
 
         let driver_active_count = self
             .groups_for_quota(driver_bot_id)

@@ -91,6 +91,17 @@ chain, captures generated statements, checks identity index key parts on a
 20,000-Bot dataset and checks current/legacy collation behavior. No new cache,
 write, lock, transaction, schema, or migration is added to the read path.
 
+### Human friend Bot lookup
+
+Group creation queries only non-public requested Bots that did not pass the
+existing management check. For B distinct candidate IDs, SQL uses
+`ceil(B/100)` reads and returns at most B IDs using the current approved
+Human-to-Bot grants on active default profiles. Empty input adds no read;
+errors stop the operation. MySQL uses indexed identity prefilters and a
+byte-exact identity check (at most 203 bound values per batch). No full friend
+list scan, new cache, write, or lock is added to Group creation. This is not a
+MySQL query-plan or contention measurement.
+
 ## Runtime ownership
 
 Ownership sync guards both the target's and previous owner's approved manager

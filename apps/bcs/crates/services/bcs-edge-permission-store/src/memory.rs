@@ -354,6 +354,30 @@ impl EdgeGrantRepoPort for MemoryEdgeGrantStore {
         Ok(FriendIdsPage { items, total })
     }
 
+    async fn find_human_friend_bots(
+        &self,
+        human_id: &str,
+        env: &str,
+        bot_ids: &[String],
+    ) -> ServiceResult<HashSet<String>> {
+        if bot_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let requested: HashSet<_> = bot_ids.iter().map(String::as_str).collect();
+        let defaults: HashMap<_, _> = self.profiles.profiles.read().await.iter()
+            .filter(|profile| profile.env == env && profile.is_default
+                && profile.status == ProfileStatus::Active
+                && requested.contains(profile.bot_id.as_str()))
+            .map(|profile| (profile.bot_id.clone(), profile.permission_profile_id))
+            .collect();
+        Ok(self.grants.read().await.iter().filter(|grant| {
+            grant.from_id == human_id && grant.env == env
+                && grant.status == EdgeStatus::Approved
+                && grant.grant_kind == GrantKind::PermissionProfile
+                && defaults.get(&grant.to_id) == Some(&grant.grant_ref_id)
+        }).map(|grant| grant.to_id.clone()).collect())
+    }
+
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
         let mut grants = self.grants.write().await;
         let existing = grants.iter_mut().find(|existing| {
