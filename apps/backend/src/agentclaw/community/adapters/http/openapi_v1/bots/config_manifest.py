@@ -17,7 +17,9 @@ bot lookup takes the owner.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -43,12 +45,14 @@ from agentclaw.community.api.apply_run_service import (
     ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
+    MANIFEST_STATE,
     BotConfigManifestServiceProtocol,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.di import Injected
 
 from .config_manifest_support import (
+    apply_payload,
     delivery_or_none,
     put_warnings,
     start_put_apply,
@@ -58,6 +62,7 @@ from .config_manifest_support import (
     manifest_target,
 )
 from .schemas import ConfigManifest, ConfigManifestCapabilities, ConfigManifestWrite
+from .schemas_config_manifest_apply import ConfigManifestApply
 
 
 router = APIRouter(
@@ -100,8 +105,14 @@ async def get_bot_config_manifest(
 
 @router.put(
     "/config-manifest",
-    response_model=Envelope[ConfigManifest],
-    responses=CONFIG_MANIFEST_WRITE_RESPONSES,
+    response_model=Envelope[ConfigManifest | ConfigManifestApply],
+    responses={
+        **CONFIG_MANIFEST_WRITE_RESPONSES,
+        200: {
+            "description": "Stored manifest by default; complete plan for the "
+            "submitted document when dry_run=true.",
+        },
+    },
     operation_id="update_bot_config_manifest",
 )
 @envelope_errors
@@ -112,6 +123,10 @@ async def update_bot_config_manifest(
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     caller: ActingCallerDep,
+    dry_run: Annotated[
+        bool,
+        Query(description="Preview the submitted document without saving or applying it."),
+    ] = False,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     manifest_service: BotConfigManifestServiceProtocol = Injected(
         BotConfigManifestServiceProtocol
@@ -119,8 +134,12 @@ async def update_bot_config_manifest(
     apply_service: ApplyRunServiceProtocol = Injected(
         ApplyRunServiceProtocol
     ),
-) -> Envelope[ConfigManifest]:
+) -> Envelope[ConfigManifest | ConfigManifestApply]:
     """Set or replace a bot's configuration manifest, and apply it.
+
+    With `dry_run=true`, validate and preview the submitted document and return
+    the complete plan synchronously. The preview may fetch and cache sources.
+    It creates no Apply history and leaves the stored manifest untouched.
 
     **All-or-nothing.** A document is stored only if every part of it is valid
     and supported for this bot: one unsupported category refuses the whole
@@ -149,6 +168,18 @@ async def update_bot_config_manifest(
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # addressed owner/tenant guard
     entity_id = manifest_target(bot)
+    if dry_run:
+        report = await apply_service.dry_run(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            bot=bot,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            state=MANIFEST_STATE,
+            submitted_document=body.document,
+        )
+        return envelope(apply_payload(report), request)
+
     audit = audit_actor(caller, actor_id)
     result = manifest_service.put(
         entity_id=entity_id,

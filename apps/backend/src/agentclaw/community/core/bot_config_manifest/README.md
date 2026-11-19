@@ -431,7 +431,7 @@ the store carries its files: the next apply's redeliver asserts `platform`
 for every category, and an empty prefix under an asserted category means
 "remove the area" to an engine that honours the map.
 
-**`PUT` starts an apply** (§2.6): the document is stored and validated exactly
+**Ordinary `PUT` starts an apply** (§2.6): the document is stored and validated exactly
 as before, then both phases are started under trigger `put`; the response's
 `apply` field says `RUNNING` with the id or `NOT_STARTED` with why, and the
 write is a `200` either way. `warnings` carries the script delivery note and,
@@ -439,6 +439,12 @@ on a bot that is not `ACTIVE` whose strategy has container-bound constructs,
 the note that those will be recorded as failed. Restart and republish are
 **not** apply points in this iteration (spec D-1): a change to the git repo a
 manifest ref points at is picked up by an explicit apply or the next `PUT`.
+
+`PUT …/config-manifest?dry_run=true` validates the submitted YAML and invokes
+the same compiler and planner as stored-document preview. The request owns the
+YAML for the lifetime of the preview. The planner reads current target state
+without taking the Apply lock, so a later Apply can observe different state.
+The preview can fetch and cache sources and finishes before any Apply write.
 
 **The legacy `…/startup-script` routes are untouched.** The manifest is a
 layer the startup script does not know about (review decision on
@@ -519,10 +525,10 @@ below.
 ## Context Boundary
 
 ```yaml
-purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, the compiler that turns the stored document into the apply engine's typed DesiredState (grammar, named sources, the fetch funnel, filing bytes in the content store), and the creation flow that applies a document in two phases around container provisioning. What happens after a desired state exists — materialisers, orchestrator, delivery, the apply run — is core.apply_engine's.
+purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, the compiler that turns the stored or submitted document into the apply engine's typed DesiredState (grammar, named sources, the fetch funnel, filing bytes in the content store), and the creation flow that applies a document in two phases around container provisioning. What happens after a desired state exists — materialisers, orchestrator, delivery, the apply run — is core.apply_engine's.
 provides:
   - FetchContext  # exactly what a fetch reads off its caller's context (W9 gave it a second caller)
-  - ManifestCompiler  # the DesiredStateCompiler for MANIFEST_STATE (kind "manifest"): the stored document → the apply engine's DesiredState
+  - ManifestCompiler  # the DesiredStateCompiler for MANIFEST_STATE (kind "manifest"): the stored or submitted document → the apply engine's DesiredState
   - CompileSession
   - declared_entries
   - BotCreationManifestSeam (the ManifestCreationSeam implementation; only DI names it)

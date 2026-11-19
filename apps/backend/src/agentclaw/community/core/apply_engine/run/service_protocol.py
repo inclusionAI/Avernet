@@ -168,11 +168,13 @@ class ApplyRunServiceProtocol(Protocol):
         owner_id: str,
         actor_id: str,
         state: StateRef,
+        submitted_document: str | None = None,
     ) -> ApplyReport:
-        """Compute the plan and return it. Writes no bot state; mints no id.
+        """Compute the plan synchronously without entering the apply write stage.
 
-        ``state`` is what :meth:`start_apply` takes: the preview compiles the
-        same reference through the same compiler.
+        With no submitted document, the preview compiles the stored reference.
+        With a submitted document, the compiler validates and compiles those
+        bytes for this request, without replacing the stored input.
 
         Synchronous, unlike :meth:`start_apply`, because a preview whose answer
         arrives later by polling is not a preview. W5 revisited it, as the
@@ -181,9 +183,9 @@ class ApplyRunServiceProtocol(Protocol):
         **may really be fetched** (bounded by the same per-apply ledger a
         real apply uses) — and the bytes the platform acquires on the bot's
         behalf are filed as the platform's own copy, because §2.8's audit
-        trail is a fact about acquisition, not delivery. What a dry run
-        never touches: any write path — nothing is materialised, activated,
-        removed, or answered async.
+        trail is a fact about acquisition, not delivery. Dry runs skip
+        materialisation, activation and removal. The Apply capability
+        snapshot reads MCP installations without reconciliation.
         """
         ...
 

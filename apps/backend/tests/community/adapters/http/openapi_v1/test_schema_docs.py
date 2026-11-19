@@ -200,3 +200,19 @@ def test_manifest_discovery_documents_skill_references_separately_from_transport
     assert "capabilities" in {row["name"] for row in example["constructs"]}
     assert not {"skills", "mcp"} & {row["name"] for row in example["constructs"]}
     assert not {"skills", "mcp"} & {row["category"] for row in example["source_matrix"]}
+
+
+def test_manifest_put_publishes_both_success_shapes():
+    document = _document()
+    operation = document["paths"]["/openapi/v1/bots/{bot_id}/config-manifest"]["put"]
+    parameter = next(item for item in operation["parameters"] if item["name"] == "dry_run")
+    assert parameter["in"] == "query"
+    assert parameter["required"] is False
+    assert parameter["schema"]["default"] is False
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    envelope = _schemas(document)[response["$ref"].rsplit("/", 1)[-1]]
+    assert envelope["properties"]["data"]["anyOf"] == [
+        {"$ref": "#/components/schemas/ConfigManifest"},
+        {"$ref": "#/components/schemas/ConfigManifestApply"},
+        {"type": "null"},
+    ]
