@@ -5,12 +5,18 @@ import { backendRequest } from '@/services/backendApi/httpClient';
 import { workflowAuthoringService } from '@/services/taskEscortParity/workflowAuthoringService';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { installReactFlowGeometry } from '../mocks/reactFlowGeometry';
 
 jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
 jest.mock('@umijs/max', () => ({ history: jest.requireActual('history').createMemoryHistory() }));
 jest.mock('@/services/taskEscortParity/workflowAuthoringService', () => ({
   workflowAuthoringService: { readBaseline: jest.fn() },
 }));
+let restoreGeometry: () => void;
+beforeAll(() => {
+  restoreGeometry = installReactFlowGeometry();
+});
+afterAll(() => restoreGeometry());
 const request = backendRequest as jest.Mock;
 const spec = {
   id: 'wf',
@@ -97,18 +103,21 @@ it('renders real graph, node selections and preserved advanced/raw fields with p
   render(<WorkflowEditorPage context={context} />);
   fireEvent.click(await screen.findByRole('button', { name: /准备数据.*cli-script/ }));
   const inspector = screen.getByRole('complementary', { name: '节点属性' });
-  expect(within(inspector).getByText('scripts/a.sh')).toBeInTheDocument();
-  fireEvent.click(within(inspector).getByText('高级配置'));
-  expect(inspector).toHaveTextContent('timeoutMs');
-  expect(inspector).toHaveTextContent('2500');
-  fireEvent.click(within(inspector).getByText('完整节点 JSON'));
-  expect(inspector).toHaveTextContent('vendorExtension');
+  expect(within(inspector).getByDisplayValue('scripts/a.sh')).toBeInTheDocument();
+  fireEvent.click(within(inspector).getByText('高级配置 / 完整节点 JSON'));
+  const rawNode = within(inspector).getByRole('textbox', { name: '完整节点 JSON' });
+  expect((rawNode as HTMLTextAreaElement).value).toContain('timeoutMs');
+  expect((rawNode as HTMLTextAreaElement).value).toContain('2500');
+  expect((rawNode as HTMLTextAreaElement).value).toContain('vendorExtension');
   expect(context.navigate).toHaveBeenCalledWith('editor', expect.objectContaining({ nodeId: 'a' }));
   fireEvent.click(screen.getByRole('button', { name: /结果审核.*approval/ }));
   expect(inspector).toHaveTextContent('结果审核');
   for (const name of ['保存工作流', '发布工作流', 'AI 修改'])
     expect(screen.getByRole('button', { name })).toBeEnabled();
-  expect(screen.getByRole('button', { name: '添加节点' })).toBeDisabled();
+  const add = screen.getByRole('button', { name: '添加AI 处理' });
+  expect(add).toBeEnabled();
+  fireEvent.click(add);
+  expect(await screen.findByRole('button', { name: 'AI 处理 · embedded-agent' })).toBeInTheDocument();
   expect(screen.queryByText(/本轮只读|本轮未接入保存/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
   expect((screen.getByLabelText('工作流 YAML') as HTMLTextAreaElement).value).toContain('vendorExtension:');
@@ -162,6 +171,9 @@ it('preserves 403/malformed states, prevents scripts reads without edit access, 
   await screen.findByRole('button', { name: /准备数据.*cli-script/ });
   for (const name of ['保存工作流', '发布工作流', 'AI 修改'])
     expect(screen.getByRole('button', { name })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '添加AI 处理' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '添加AI 处理' }));
+  expect(screen.queryByRole('button', { name: 'AI 处理 · embedded-agent' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
   expect(screen.queryByRole('textbox', { name: '工作流 YAML' })).not.toBeInTheDocument();
   expect(screen.getByLabelText('工作流 YAML')).toHaveTextContent('vendorExtension');
@@ -244,7 +256,7 @@ it('uses the source two-workspace structure, toolbar history dialog and desktop 
   render(<WorkflowEditorPage context={context} />);
   await screen.findByRole('button', { name: /准备数据.*cli-script/ });
   const inspector = screen.getByRole('complementary', { name: '节点属性' });
-  expect(inspector.parentElement).toHaveClass('xl:grid-cols-[minmax(0,1fr)_320px]');
+  expect(inspector.parentElement).toHaveClass('editor-workspace-panes');
   const workspace = screen.getByRole('group', { name: '编辑器工作区' });
   expect(within(workspace).getAllByRole('button')).toHaveLength(2);
   expect(within(workspace).getByRole('button', { name: '工作流编排' })).toBeInTheDocument();

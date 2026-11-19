@@ -11,14 +11,15 @@ import { WorkflowCreationAiPreview } from './WorkflowCreationAiPreview';
 interface Props {
   context: TaskEscortParityContext;
   onClose: () => void;
+  initialSource?: WorkflowCreationSource;
 }
 const modes: { value: WorkflowCreationSource; label: string }[] = [
   { value: 'blank', label: '空白工作流' },
   { value: 'existing', label: '基于已有工作流' },
   { value: 'ai', label: 'AI 生成' },
 ];
-export function WorkflowCreationDialog({ context, onClose }: Props) {
-  const creation = useWorkflowCreation(context, onClose);
+export function WorkflowCreationDialog({ context, onClose, initialSource = 'blank' }: Props) {
+  const creation = useWorkflowCreation(context, onClose, initialSource);
   const id = useId();
   const titleId = useId();
   const helpId = useId();
