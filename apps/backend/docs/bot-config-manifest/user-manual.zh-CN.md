@@ -230,8 +230,9 @@ GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply
 ### 2.4 想手工触发一次 / 先看看会发生什么
 
 ```text
+PUT  /openapi/v1/bots/{bot_id}/config-manifest?dry_run=true       ← 预览提交的清单
 POST /openapi/v1/bots/{bot_id}/config-manifest/apply              ← 202 + apply_id，后台执行
-POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true ← 同步返回计划，不动手
+POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true ← 预览已保存的清单
 GET  /openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id} ← 轮询这一次
 GET  /openapi/v1/bots/{bot_id}/config-manifest/last-apply         ← 最近一次
 ```
@@ -246,11 +247,12 @@ apply 要写设备，将来（W5）还要走网络取源，让调用方举着一
 「其实没跑起来」的 id。**
 
 `dry_run` 是**同步**的，计划直接在响应体里——一个要靠轮询才知道结果的预览不叫预览。
-它什么都不写，连报告行都不写，所以也不发 `apply_id`、不出现在历史里。**上线前先
-dry_run** 是推荐动作，尤其是第一次声明 `skills` 或 `resources` 的时候（原因见 §8）。
+它不修改 bot 配置或写报告行，所以也不发 `apply_id`、不出现在历史里；预览可能
+拉取并缓存源内容。**上线前先 dry_run** 是推荐动作，尤其是第一次声明 `skills`
+或 `resources` 的时候（原因见 §8）。
 这几个都需要 bot 已存在——**路径 A 的人在创建请求里就完成了同样的校验**（第 2 步）。
 
-> 这四个端点逐字段的出入参（含 `409` / `422` 分别在什么时候出现）见**附录 B.2**。
+> PUT 预览的逐字段说明见**附录 B.1.2**，apply 与 POST 预览见**附录 B.2**。
 
 ### 2.5 本特性一共有哪些端点
 
@@ -585,7 +587,7 @@ POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true  预览 bot �
 更改运行配置或写入 Apply 历史。预览可能拉取并缓存源内容。`POST` 则不接收新
 清单，使用 bot 当前保存的原文。
 
-两种 dry-run 都同步返回报告：HTTP 200 的 `data` 是 B.2.1 的报告形状，
+两种 dry-run 都同步返回报告：HTTP 200 的 `data` 是 B.2.5 的报告形状，
 `trigger=dry_run`、`apply_id` 为空；检查 `result` 和各条目的错误，不需要轮询，
 `last-apply` 也不会改变。校验不通过返回 422；resolve/plan 失败也应查看报告，
 不能仅凭 HTTP 200 判断计划成功。确认计划后，再用普通 PUT 保存并自动 apply。
@@ -1638,7 +1640,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | `document` | ✅ | string | 清单文档全文（YAML）。**原样存、原样读回**。校验规则见 §5–§6 与附录 E |
 
 **可选 query 参数**：`dry_run=true` 时，仅预览本次请求中的 `document`，不保存或
-启动 apply。HTTP 200 的 `data` 是 B.2.1 的 Apply 报告，而不是 B.1.1 的清单对象；
+启动 apply。HTTP 200 的 `data` 是 B.2.5 的 Apply 报告，而不是 B.1.1 的清单对象；
 `trigger=dry_run`，`apply_id` 为空。预览可能拉取并缓存源内容。省略参数或传
 `false` 时执行下面的正常保存路径。完整示例见 §4.4。
 
@@ -1818,7 +1820,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 
 #### B.2.5 apply 报告对象
 
-B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都是这个形状。
+B.1.2 / B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都是这个形状。
 
 > ⚠️ **先看这条，它影响你怎么写分支。**「空报告」是一个正常响应，不是错误——`last-apply`
 > 读一个从没 apply 过的 bot，或 `applies/{apply_id}` 读一个不存在、或属于别的 bot 的
@@ -2297,7 +2299,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | --- | --- | --- |
 | `""`（空串） | 空报告，没有哪次 apply 可说（见上） | —— |
 | `explicit` | `POST …/config-manifest/apply` | ✅ |
-| **`dry_run`** | **`POST …/apply?dry_run=true` 的预览报告**。它不落库、不进 `last-apply`，但**返回给你的那份报告里 `trigger` 就是这个值**——按 `trigger` 穷举分支时别漏了它 | ❌ |
+| **`dry_run`** | **`PUT …/config-manifest?dry_run=true` 或 `POST …/apply?dry_run=true` 的预览报告**。它不落库、不进 `last-apply`，但**返回给你的那份报告里 `trigger` 就是这个值**——按 `trigger` 穷举分支时别漏了它 | ❌ |
 | `put` | `PUT …/config-manifest` 之后自动跟的那一次 | ✅ |
 | `create:pre_container` | 用清单创建 bot 的**容器前**阶段 | ✅ |
 | `create:on_container` | 用清单创建 bot 的**容器后**阶段 | ✅ |
