@@ -19,6 +19,17 @@ from agentclaw.community.core.skill_center.skill_set_apply import (
 
 
 @dataclass(frozen=True)
+class FromBotSource:
+    """Identity of a ``from: from_bot`` local skill whose package arrives via
+    ``BOT_FILE_SYNC``. Carried through ``resolve`` → ``plan`` so the capabilities
+    **writer** can register the dst ``ac_skill`` row — ``resolve`` is read-only and
+    must not persist (a ``dry_run`` stops after ``plan``, before any write)."""
+
+    source_bot_id: str
+    source_owner_id: str
+
+
+@dataclass(frozen=True)
 class Skill:
     name: str
     key: str
@@ -27,6 +38,11 @@ class Skill:
     package: bytes | None = None
     preview: PublicSkillPreview | None = None
     note: str | None = None
+    # Set only for a ``BotSyncedLocalSkill`` whose dst row the writer registers;
+    # ``None`` for every package/center/repo source. ``resolve`` never persists
+    # this case — it leaves ``skill_id`` on the existing snapshot row (or
+    # ``None`` when none exists) and defers the create-or-replace to ``write``.
+    from_bot: FromBotSource | None = None
 
 
 @dataclass(frozen=True)

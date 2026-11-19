@@ -1,12 +1,14 @@
 """``BotSyncedLocalSkill`` resolve: a ``from: from_bot`` local skill.
 
-The new source type carries only ``(source_bot_id, source_owner_id)`` — no
-``ContentRef``, no package bytes. ``resolve_skill`` calls
-``SkillPackageUploadPort.ensure_dst_local_skill_asset`` to register the dst
-``ac_skill`` row (reverse-lookup source, recompute dst git_path, skip the
-package write that file-sync already owns), and returns a ``Skill`` with
-``package=None`` so the capabilities writer takes the prepared-id branch and
-only runs the activation claim.
+The source type carries only ``(source_bot_id, source_owner_id)`` — no
+``ContentRef``, no package bytes, no snapshot read. ``resolve`` is read-only:
+it returns a deferred ``Skill`` carrying a :class:`FromBotSource` and
+``skill_id=None`` (``key="local:<name>"``) — it does **not** call
+``SkillPackageUploadPort.ensure_dst_local_skill_asset`` and does not read the
+existing dst row. Registration is the capabilities **writer's** job, so a
+``dry_run`` (which stops after ``plan``) leaves the dst ``ac_skill`` table
+untouched, satisfying the apply-engine's resolve-is-read-only / dry-run-stops-
+before-write contract.
 """
 
 from __future__ import annotations
@@ -20,10 +22,25 @@ from agentclaw.community.core.apply_engine.capabilities import (
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.desired_state import (
     BotSyncedLocalSkill,
+    DesiredCapabilities,
     DesiredSkill,
 )
 from agentclaw.community.core.apply_engine.materialisers.capabilities_skills import (
     resolve_skill,
+)
+from agentclaw.community.core.apply_engine.materialisers.capabilities_types import (
+    CapabilityPlan,
+    FromBotSource,
+    Resolved,
+    Skill,
+)
+from agentclaw.community.core.apply_engine.materialisers.capabilities_write import (
+    write_capabilities,
+)
+from agentclaw.community.core.apply_engine.outcomes import EntryOutcome
+from agentclaw.community.core.apply_engine.registry import (
+    Intent,
+    PlannedEntry,
 )
 from agentclaw.community.core.skill_center.skill_set_apply import (
     BotCapabilityScope,
@@ -57,8 +74,8 @@ def _ctx(*, bot_type: str = "teclaw") -> ApplyContext:
     )
 
 
-def _empty_snapshot() -> SkillSetApplySnapshot:
-    scope = BotCapabilityScope(
+def _scope() -> BotCapabilityScope:
+    return BotCapabilityScope(
         bot_id="dst-bot",
         owner_id="dst-owner",
         engine_type="moltis",
@@ -66,8 +83,11 @@ def _empty_snapshot() -> SkillSetApplySnapshot:
         tenant="default",
         env="dev",
     )
+
+
+def _empty_snapshot() -> SkillSetApplySnapshot:
     return SkillSetApplySnapshot(
-        scope=scope,
+        scope=_scope(),
         sets=(),
         skill_exclusions=frozenset(),
         mcp_exclusions=frozenset(),
@@ -79,8 +99,34 @@ def _empty_snapshot() -> SkillSetApplySnapshot:
     )
 
 
+def _snapshot_with_existing_local(*, skill_id: int, name: str) -> SkillSetApplySnapshot:
+    """A snapshot whose ``skills`` catalog already carries one local-owned dst
+    row — the read-only state a re-apply sees. Metadata only: no package, no
+    SKILL.md read (file-sync owns the bytes)."""
+    return SkillSetApplySnapshot(
+        scope=_scope(),
+        sets=(),
+        skill_exclusions=frozenset(),
+        mcp_exclusions=frozenset(),
+        installed_skill_ids=frozenset({skill_id}),
+        installed_mcp_codes=frozenset(),
+        platform_default_codes=frozenset(),
+        skills=(
+            {
+                "id": skill_id,
+                "name": name,
+                "git_path": f"local://skills-local/{name}",
+                "user_id": "dst-owner",
+                "bolt_id": "dst-bot",
+                "mcp_codes": (),
+            },
+        ),
+        mcp_overrides={},
+    )
+
+
 class _EnsurePort:
-    """A ``SkillPackageUploadPort`` stand-in: only the new method runs here."""
+    """A ``SkillPackageUploadPort`` stand-in recording the dst registration."""
 
     def __init__(self, *, rows_by_name: dict[str, dict[str, Any]] | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -123,11 +169,37 @@ class _Materialiser:
         self._uploads = uploads
 
 
+class _Activation:
+    """Records the activation claim so the writer's prepared id is observable."""
+
+    def __init__(self) -> None:
+        self.claims: list[dict[str, Any]] = []
+
+    async def claim_apply_skill(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        skill_id: str, apply_id: str | None,
+    ) -> dict[str, Any]:
+        self.claims.append({"skill_id": skill_id, "apply_id": apply_id})
+        return {"outcome": "created", "changed": True}
+
+
+class _WriteOwner:
+    """The slice of ``CapabilitiesMaterialiser`` ``write_capabilities`` touches
+    for a single deferred ``from_bot`` Direct skill (no sets, no MCP)."""
+
+    def __init__(self, uploads: _EnsurePort, activation: _Activation) -> None:
+        self._uploads = uploads
+        self._activation = activation
+
+    def _snapshot(self, ctx: ApplyContext) -> SkillSetApplySnapshot:
+        return _empty_snapshot()
+
+
 def _run(coro):
     return asyncio.run(coro)
 
 
-def test_bot_synced_local_skill_resolve_calls_ensure_dst_and_returns_no_package():
+def test_bot_synced_local_skill_resolve_defers_registration_and_writes_nothing():
     uploads = _EnsurePort()
     materialiser = _Materialiser(uploads)
     ctx = _ctx()
@@ -142,51 +214,29 @@ def test_bot_synced_local_skill_resolve_calls_ensure_dst_and_returns_no_package(
 
     resolved = _run(resolve_skill(materialiser, ctx, snapshot, entry))
 
-    # One call to the upload-port method, addressed exactly as the spec
-    # spells out: dst bot/owner/actor from the apply context, source bot/owner
-    # straight off the source tag, name straight off the entry.
-    assert uploads.calls == [
-        {
-            "bot_id": "dst-bot",
-            "owner_id": "dst-owner",
-            "actor_id": "dst-actor",
-            "source_bot_id": "src-bot",
-            "source_owner_id": "src-owner",
-            "name": "quality-check",
-        }
-    ]
-    # The registered dst row's id drives both the key and the prepared skill
-    # id the capabilities writer takes (package is None → no upload, no
-    # replace path).
-    assert resolved.name == "quality-check"
-    assert resolved.skill_id == "9001"
-    # ``asset_key`` of a non-center row → ``"id:<row id>"``.
-    assert resolved.key == "id:9001"
-    # The package bytes never flow through this road; file-sync carries them.
+    # Resolve is read-only: the dst ac_skill row is NOT registered here. The
+    # writer does that; a dry_run never reaches the writer.
+    assert uploads.calls == []
+    # No package bytes flow through this road; file-sync carries them.
     assert resolved.package is None
-    # File-sync carries MCP wiring too: a freshly-registered dst row has none,
-    # and the capabilities writer does not look at this set on the prepared
-    # path anyway.
+    # No row yet, so no id and a logical not-yet-existing key.
+    assert resolved.skill_id is None
+    assert resolved.key == "local:quality-check"
     assert resolved.dependencies == frozenset()
     assert resolved.note is None
+    # The deferred source identity is carried through to the writer.
+    assert resolved.from_bot == FromBotSource("src-bot", "src-owner")
 
 
-def test_bot_synced_local_skill_reapply_reuses_returned_dst_row():
-    # A real second apply: ensure_dst_local_skill_asset returns the existing
-    # dst row (operation="replaced", same id, same git_path). resolve_skill
-    # takes the returned row at face value, the way the upload road does, so
-    # a re-apply reports ``updated`` on the existing id, not a fresh id.
-    existing = {
-        "id": 4242,
-        "name": "quality-check",
-        "git_path": "local://skills-local/quality-check",
-        "description": "synced payload",
-        "mcp_dependencies": (),
-    }
-    uploads = _EnsurePort(rows_by_name={"quality-check": dict(existing)})
+def test_bot_synced_local_skill_reapply_reads_existing_dst_row_from_snapshot_only():
+    """A re-apply sees the existing dst ``ac_skill`` row in the read-only
+    snapshot (metadata only — never the skill file) and carries its id/key
+    forward, deferring the create-or-replace to the writer. ``resolve`` does
+    not call ``ensure_dst_local_skill_asset`` either way."""
+    uploads = _EnsurePort()
     materialiser = _Materialiser(uploads)
     ctx = _ctx()
-    snapshot = _empty_snapshot()
+    snapshot = _snapshot_with_existing_local(skill_id=4242, name="quality-check")
     entry = DesiredSkill(
         "quality-check",
         BotSyncedLocalSkill(
@@ -197,9 +247,53 @@ def test_bot_synced_local_skill_reapply_reuses_returned_dst_row():
 
     resolved = _run(resolve_skill(materialiser, ctx, snapshot, entry))
 
+    # The existing row's identity is read straight off the snapshot; no write,
+    # no upload-port call.
+    assert uploads.calls == []
     assert resolved.skill_id == "4242"
     assert resolved.key == "id:4242"
     assert resolved.package is None
+    assert resolved.from_bot == FromBotSource("src-bot", "src-owner")
+
+
+def test_write_phase_registers_deferred_from_bot_skill_and_claims_returned_id():
+    """The deferred ``from_bot`` Skill is registered in the capabilities writer:
+    ``ensure_dst_local_skill_asset`` runs (with dst bot/owner/actor from the
+    context and source bot/owner from the carried ``FromBotSource``), and the
+    returned dst row id drives the activation claim — never ``None``."""
+    uploads = _EnsurePort()
+    activation = _Activation()
+    owner = _WriteOwner(uploads, activation)
+    ctx = _ctx()
+    skill = Skill(
+        "quality-check",
+        "local:quality-check",
+        None,
+        frozenset(),
+        package=None,
+        from_bot=FromBotSource("src-bot", "src-owner"),
+    )
+    resolved = Resolved(
+        target=DesiredCapabilities(),
+        snapshot=_empty_snapshot(),
+        direct=(skill,),
+    )
+    plan = CapabilityPlan(
+        entries=(
+            PlannedEntry(
+                Intent("skills/quality-check", skill, None),
+                "created",
+                requires_write=True,
+            ),
+        ),
+        resolved=resolved,
+    )
+
+    result = _run(write_capabilities(owner, ctx, plan))
+
+    # One dst registration, addressed exactly as the spec spells out: dst
+    # bot/owner/actor from the apply context, source bot/owner straight off
+    # the carried FromBotSource, name straight off the skill.
     assert uploads.calls == [
         {
             "bot_id": "dst-bot",
@@ -210,3 +304,9 @@ def test_bot_synced_local_skill_reapply_reuses_returned_dst_row():
             "name": "quality-check",
         }
     ]
+    # The registered dst row's id drives the activation claim, not ``None``.
+    assert activation.claims == [{"skill_id": "9001", "apply_id": "apply-1"}]
+    written = next(
+        entry for entry in result.entries if entry.identity == "skills/quality-check"
+    )
+    assert written.outcome is EntryOutcome.CREATED
