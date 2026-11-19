@@ -155,3 +155,20 @@ than reporting false health. Public
 application-grant and chat-access policy; a BaaS service JWT is not a public
 identity exception. Diagnostics identify `app_caller_instance_status` and never
 include the service JWT, signing key or full provider response.
+
+### Independent Caller runtime sessions
+
+Independent Caller sessions are authorized by the authenticated subject's existing
+successful instance binding, selected only after Bot access and online publication
+checks. Lists, details, history, connection, favorites, rename, deletion and history
+clearing do not read or write the Backend-owned session index. Reads never create,
+restart or upgrade an instance. Missing instances yield an empty list; pending or
+failed instances remain pending. Exact operations confirm the session exists in
+that fixed runtime; supplied keys cannot select another user's container.
+
+Runtime lists accept all nonempty session IDs, including ordinary, cron and
+subagent sessions, without a user filter. Results are deduplicated, sorted by
+runtime timestamps with an ID tie break, then paginated. Favorites intersect that
+runtime result. Default-session get/create retain the current-session pointer
+without registering independent sessions in the ownership index. Shared runtimes,
+including Teclaw, retain existing ownership and lifecycle rules.
