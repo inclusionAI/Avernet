@@ -140,6 +140,34 @@ CANDIDATE_COUNT = len(AGENTS) + len(OTHER_AGENTS)
 
 
 def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
+    # 1、发布一个代办任务
+    (profile, injector, l4_context_service, l5_open_method_operate, storage_service, storage_envs,
+     collet_id, open_binding_id, swarm_binding_id, role_refs, participants) \
+        = publish_todo_task(deploy_open_swarm, tmp_path)
+
+    # 3. 公开招募多个Coding Agents
+    recruit_multi_coding_agents(injector, l5_open_method_operate, storage_service, storage_envs, profile,
+                                collet_id, role_refs, open_binding_id, swarm_binding_id)
+
+    # 4. 招募完成之后，通过 L4 创建根 Task，但不启动
+    l4_context_service.create_task(
+        collet_id,
+        TaskCreateCommand(
+            _record(injector, collet_id).collet.version,
+            OWNER.actor,
+            objective=OBJECTIVE,
+        ),
+        OWNER,
+    )
+
+    # 5. 招募到agents之后，开始写作进行AiCoding（执行swarm方法：规划-划分stage和task-分派执行）
+    stages = swarm_run(injector, collet_id)
+
+    # 6. 任务完成之后，校验产物
+    judge_artifacts(injector, storage_service, storage_envs, stages, collet_id, swarm_binding_id)
+
+
+def publish_todo_task(deploy_open_swarm, tmp_path):
     # 1. L6 声明 OPEN + SWARM 产品
     profile = _create_product_profile()
 
@@ -165,27 +193,7 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
     role_refs = {b.role: role_binding_ref(collet_id, b) for b in record.role_bindings}
     participants = {p.participant_id: p for p in record.participants}
 
-    # 3. 公开招募多个Coding Agents
-    recruit_multi_coding_agents(injector, l5_open_method_operate, storage_service, storage_envs, profile, collet_id, role_refs, open_binding_id, swarm_binding_id)
-
-    # 4. 实例化、招募完成之后，通过 L4 创建根 Task，但不启动
-    root = l4_context_service.create_task(
-        collet_id,
-        TaskCreateCommand(
-            _record(injector, collet_id).collet.version,
-            OWNER.actor,
-            objective=OBJECTIVE,
-        ),
-        OWNER,
-    )
-    assert root.status == "created" and root.parent_task_ref is None
-    assert root.executor_refs == (AGENTS[-1],)
-
-    # 5. 招募到agents之后，执行swarm方法：规划-划分stage和task-分派执行
-    stages = swarm_run(injector, collet_id)
-
-    # 6. 校验产物
-    judge_artifacts(injector, storage_service, storage_envs, stages, collet_id, swarm_binding_id)
+    return profile, injector, l4_context_service, l5_open_method_operate, storage_service, storage_envs, collet_id, open_binding_id, swarm_binding_id, role_refs, participants
 
 
 def swarm_run(injector, collet_id):
