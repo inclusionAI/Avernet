@@ -9,6 +9,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     ROLE_SELECTED_AGENT,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    ParticipationType,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     parse_method_kinds,
 )
@@ -21,6 +24,8 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
     MethodProfile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    CompatibilityRequirements,
+    GovernanceRequirements,
     MethodRelationTemplate,
     MethodTemplate,
     ProductProfileDefinition,
@@ -41,6 +46,12 @@ from agentclaw.community.core.task.context_collab.l6_products.task_contracts imp
 
 def validate_product_profile(definition: ProductProfileDefinition) -> None:
     """Reject unsupported composition/role/method-policy contracts without installing."""
+    if not isinstance(definition.governance, GovernanceRequirements) or not isinstance(
+        definition.compatibility, CompatibilityRequirements
+    ):
+        raise ContextCollabValidationError(
+            "governance and compatibility require typed requirements"
+        )
     if not isinstance(definition.participant_scope, ParticipantScope):
         raise ContextCollabValidationError(
             "participant_scope must be a typed ParticipantScope"
@@ -87,12 +98,19 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
             raise ContextCollabValidationError(
                 "agent_ref requires agent_ref participant source"
             )
-    deferred = [r for r in definition.scenario_roles if r.participant_source == "open_admission"]
+    deferred = [
+        r for r in definition.scenario_roles if r.participant_source == "open_admission"
+    ]
     if deferred and not any(
-        d.profile.method_kind == "Open" and isinstance(d.policy, OpenMethodPolicy)
+        d.profile.method_kind == "Open"
+        and isinstance(d.policy, OpenMethodPolicy)
+        and d.policy.publication.admission.participation_type
+        is ParticipationType.COLLET_PARTICIPANT
         for d in methods
     ):
-        raise ContextCollabValidationError("open_admission roles require a required Open policy")
+        raise ContextCollabValidationError(
+            "open_admission roles require a required Open policy"
+        )
     contract = resolve_event_contract(definition)
     if isinstance(contract, TaskLifecycleContract):
         if not any(

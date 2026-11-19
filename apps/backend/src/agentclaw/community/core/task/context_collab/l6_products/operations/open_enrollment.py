@@ -37,6 +37,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
+    MethodBinding,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import (
     require_admission_evidence,
@@ -46,6 +47,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     agent_participant_id,
+)
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    ProductProfileDefinition,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -68,8 +72,15 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 )
 
 
-def enrollment_payload(command, record, profile, store):
+def enrollment_payload(
+    command: OpenEnrollmentCommand,
+    record: ContextStatusRecord,
+    profile: ProductProfileDefinition,
+    store: MethodStoreProtocol,
+) -> tuple[MethodBinding, dict]:
     """Validate current, correlated admission; return exact materialization evidence."""
+    if record.product_instance is None:
+        raise ContextCollabValidationError("enrollment requires an installed product")
     axes = current_axes()
     bindings = [
         b
@@ -173,7 +184,9 @@ def enrollment_payload(command, record, profile, store):
     }
 
 
-def require_current_enrollment(record, catalog, store) -> None:
+def require_current_enrollment(
+    record: ContextStatusRecord, catalog: ProductCatalog, store: MethodStoreProtocol
+) -> None:
     """A retained binding event is evidence, not authority after admission revocation."""
     events = [e for e in record.events if e.event_kind == ADMITTED_BINDING_EVENT]
     if not events:

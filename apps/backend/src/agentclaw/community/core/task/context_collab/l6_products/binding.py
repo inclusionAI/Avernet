@@ -211,8 +211,8 @@ def actor_has_role(
     )
     if scenario_role is None:
         return False
-    if scenario_role.participant_source == "agent_ref":
-        # A literal role is authoritative only with actual L4 participation.
+    if scenario_role.participant_source in {"agent_ref", "open_admission"}:
+        # Literal/deferred roles require actual L4 participation evidence.
         return False
     subject = (
         task.principal_ref

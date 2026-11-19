@@ -61,7 +61,7 @@ class ContextCollabColletModel(Base):
     ``root_task_ref`` selects independent Task storage. ``creation_facts`` retains
     plain creation facts and the optional L6 ProductInstance; it is not mutable
     Task or Method state. ``scope`` anchors L3 governance, not a permission union.
-    ``collet_metadata`` stores the local schema, description and audit separately
+    ``collet_metadata`` stores the description and audit separately
     from composition facts and shared SQL row timestamps.
     Every accepted event advances ``context_version``; only Work advances Task.
     """

@@ -376,7 +376,7 @@ def _create_commission_collet(l4_context_operate):
     assert collet.title == "XX代办任务"
     assert collet.created_by == collet.updated_by == HUMAN.actor
     assert collet.created_at == collet.updated_at
-    assert collet.schema_version is not None and collet.etag
+    assert collet.metadata is not None and collet.etag
 
     return collet
 

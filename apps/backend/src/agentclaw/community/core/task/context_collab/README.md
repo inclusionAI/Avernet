@@ -484,7 +484,7 @@ compatible and share the same L4 preparation/commit machinery.
 
 | Object | Authority and current implementation |
 | --- | --- |
-| [Collet](l4_context_primitives/collet.py) | Bounded context identity, initiator, governance scope, lifecycle vocabulary and context revision (no current-event pointer), with optional title/description, typed L4 output artifacts (`artifacts`) and versioned audit metadata for new records. This is a local representation, not an exhaustive ACCS schema. The SQL reader still seeds `ACTIVE`; the separate Collet lifecycle path is not unified by this change. |
+| [Collet](l4_context_primitives/collet.py) | Bounded context identity, initiator, governance scope, lifecycle vocabulary and context revision (no current-event pointer), with optional title/description, overall objective/acceptance criteria, typed L4 resources (`resources`), output artifacts (`artifacts`) and audit metadata for new records. This is a local representation, not an exhaustive ACCS schema. The SQL reader still seeds `ACTIVE`; the separate Collet lifecycle path is not unified by this change. |
 | [Task](l4_context_primitives/task.py) | Independent L4 work-item ID, Collet/parent links, objective, completion conditions, responsible principal, designated executor set, typed L4 output artifacts (`artifacts`), status, Task revision and event provenance. Not an A2A Task/execution attempt. |
 | [ScopedParticipantBinding](l4_context_primitives/participants.py) | Immutable task-scoped identity evidence created by Open COLLET_PARTICIPANT admission; validity derives from its admission application/decision and Method lifecycle, not an independent Group membership machine. |
 | [MethodProfile / MethodProfileRef](l5_methods/method_profile.py) | L5 versioned Method contract and its compact exact-version reference. L6 composition templates use the contract; negotiation and ProductInstance retain references rather than duplicate definitions. |
@@ -516,18 +516,28 @@ optional legacy L3 governance anchor, **not** the union of accessible Spaces or 
 Resource access grant. `version` is the aggregate revision used for CAS; the read-only `revision`
 property is an alias, not another persisted counter.
 
-New creations also expose `title`, `description`, `schema_version`, `created_at`,
+New creations also expose `title`, `description`, `objective`, `acceptance_criteria`, `created_at`,
 `created_by`, `updated_at`, `updated_by` and a derived `etag`. The immutable
 [ColletMetadata](l4_context_primitives/collet_metadata.py) value object groups
-description/schema/audit internally; `Collet.to_dict()` serializes these fields
-at the top level, not under a second aggregate. Local `schema_version="1.1"`
-identifies this representation, not an ACCS version or an aggregate revision.
+description/audit internally; `Collet.to_dict()` serializes these fields
+at the top level, not under a second aggregate. There is no `schema_version`
+property or wire field. The SQL decoder alone accepts the retired
+`schema_version="1.1"` marker in stored metadata, without rewriting on read;
+the next accepted write stores metadata without it. Other legacy marker values
+remain invalid. Canonical ETags no longer include that field, so tags produced
+before its removal must be refreshed; existing `version`-based CAS is unchanged.
 Audit timestamps are timezone-aware UTC values, normalized without losing
 microseconds. The authenticated creation actor supplies creation/update
 identity; existing initiator-versus-responsible-Task-principal semantics remain
 unchanged. Callers can supply optional nonblank title/description through
 `ColletCreateCommand`, but not server-owned audit fields. Descriptions do not
-replace Task objectives or completion conditions.
+replace Task objectives or completion conditions. Metadata also carries the
+collaboration-level `objective` and `acceptance_criteria`, both `str` with empty
+string defaults for absent legacy values; explicit null or non-string values
+are invalid. Both fields serialize at the Collet top level and participate in
+its ETag, so older tags must be refreshed after adding these fields. This is a
+metadata-only addition: creation commands, Work initialization, Task fields and
+acceptance/transition logic are unchanged; no automatic propagation is added.
 
 Every accepted SQL event append updates `updated_at`/`updated_by` in the same
 Collet CAS transaction as its revision. Creation audit remains fixed.
@@ -538,7 +548,7 @@ advance Collet audit; explicit Task creation and L6 participant binding do. The
 separate in-memory lifecycle service still does not persist lifecycle state/events/audit.
 
 Legacy metadata-less representations remain readable with `metadata=None`; absent
-schema/audit/description values are unknown, not synthesized from SQL row
+audit/description values are unknown, not synthesized from SQL row
 timestamps or deployment time. The removed event-pointer field is not accepted
 in the domain wire shape, and appends do not invent missing creation history. Complete current metadata is
 required when any metadata field is supplied; partial/invalid metadata, unknown
@@ -575,6 +585,15 @@ Collet.root_task_ref ──→ Task.task_id
   included in the Collet ETag; empty values are omitted to preserve existing
   representations and ETags. Missing fields decode as empty. This is model-only:
   no storage mapping, runtime reporting or Task-to-Collet aggregation is added.
+- Collet `resources` is a tuple of L4
+  [ResourceBinding](l4_context_primitives/resource_binding.py) values, each carrying
+  a typed L3 `ResourceRef`; these are not the grant-snapshot bindings nested in
+  Artifact. It defaults to empty, including when the wire field is missing.
+  Non-empty resources serialize as a list of binding objects and participate in
+  the Collet ETag; empty resources are omitted to preserve existing shapes and
+  ETags. This is model-only: no SQL mapping or automatic propagation from L6
+  inputs or initial binding events is added. Existing event-based binding facts
+  remain unchanged, and a resource entry does not grant access.
 - Task `artifacts` is an immutable tuple of existing L4
   [Artifact](l4_context_primitives/artifact.py) values, serialized as a JSON list
   of objects using Artifact's ResourceBinding/ResourceRef contract, not strings

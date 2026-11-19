@@ -22,7 +22,8 @@ itself; the L4 service/repository do not acquire a dependency on L6.
 | ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
 | MethodTemplate / MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional `MethodTemplate(profile, policy=None)` declarations co-locate exact L5 `MethodProfile` contracts with their own typed policies; instantiation binds the new or existing Collet, with no caller-configurable `scope`. Explicit relations instantiate independent Collet-scoped Method bindings and L5 composition edges; empty relations preserve legacy topology. |
 | ParticipantScope | [participant_scope.py](participant_scope.py) | Local typed Profile eligibility contract: OPEN or an explicit AgentRef allowlist. Not membership, admission, selection or permission authority. |
-| ScenarioRole | [binding.py](binding.py) | Maps owner/assignee to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
+| ScenarioRole | [binding.py](binding.py) | Maps initial identities or deferred Open admission to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
+| ProductOpenEnrollmentServiceProtocol | [open_enrollment.py](open_enrollment.py), [implementation](operations/open_enrollment.py) | One-time pre-Work enrollment from correlated, currently ADMITTED Open evidence; appends runtime participation without rewriting ProductInstance creation refs. |
 | DomainProfile | [contracts.py](contracts.py) | Maps product vocabulary to L3 Resource and L4 Collet/Task/Message/Artifact authority, not duplicate product-owned entities. |
 | TaskLifecycleContract / TaskAction | [task_contracts.py](task_contracts.py), [contracts.py](contracts.py) | Reusable, exactly versioned Task lifecycle/action contract, independent of product orchestration. References the existing G4 machine; never executes a Bot plan. |
 | WorkflowProfile | [contracts.py](contracts.py) | Optional product orchestration contract. Existing profiles own their action mappings and reference a versioned G4 machine over L4 Task, or explicitly declare a nontransition event stream. Not required merely to run an autonomous Bot. |
@@ -55,8 +56,8 @@ runtime registry, catalog database or registration API.
 [`create_product_profile(command)`](operations/product_profile.py) is the L6
 library operation for authoring a `ProductProfileDefinition`. Its typed input is
 [`ProductProfileCreateCommand`](operations/contracts.py): exact `ref`, Method
-composition, scenario roles, governance and compatibility requirements, plus
-optional domain, workflow and Task contract selection. L5-owned Method policies
+composition, plus optional scenario-role authoring, governance/compatibility
+requirements, domain, workflow and Task contract selection. L5-owned Method policies
 are selected on each `MethodTemplate.policy`, not a composition-wide policy list
 or the universal ProductProfile. The default `policy=None` declares no
 method-specific product policy, including
@@ -90,16 +91,32 @@ profile = create_product_profile(
                 ),
             ),
         ),
-        scenario_roles=scenario_roles,
-        # Autonomous Bot: no domain/workflow boilerplate.
+        # No scenario_roles, governance or compatibility boilerplate.
+        # Safe authoring defaults are resolved into the immutable definition.
         # Fixed standard_task@1 still governs Task actions and completion.
-        governance=governance,
-        compatibility=compatibility,
     )
 )
 # Installation is a separate, explicit composition-root step:
 catalog = ProductCatalog((profile,))
 ```
+
+Omitting `scenario_roles` (or supplying `()`) resolves the standard responsible
+Principal and selected Agent roles. With a required general Open policy, their
+scenario names come from that policy's `accountable_role` / `applicant_role`;
+the selected Agent is deferred with `participant_source="open_admission"`.
+No worker identities or business-stage role roster is inferred. Without that
+policy, or with designated-executor `BotSelfApplicationAdmission`, the executor
+source remains `executor_ref`. Explicit nonempty scenario roles retain their
+existing validation and are not merged with defaults.
+
+Omitted `governance` resolves to `g1.structural/1`, `g2.optimistic-version/1`,
+`g3.event-projection/1`, and `g4.product-contract/1`. Omitted `compatibility`
+requires ACCS `0.2`, layers L2–L5, `reject_missing_required` and
+`new_instances_only`, with no extra extension/Profile requirements. These are
+fixed authoring defaults, not disabled guards or runtime version negotiation.
+`ProductProfileDefinition` still contains explicit resolved contracts, and
+capability negotiation still rejects missing required layers/governance.
+Explicit `None` for any of these three fields is invalid.
 
 `required_methods` and `optional_methods` contain immutable `MethodTemplate`
 authoring envelopes. Each `.profile` is the actual L5 `MethodProfile` value
@@ -242,8 +259,8 @@ See [scope/storage/security tests](../../../../../../../tests/community/reposito
 - [`standard_task@1`](task_contracts.py) defines `start_task`, `report_progress`,
   `submit_task`, `accept_task`, `reject_task` and `cancel_task` mappings. It reuses
   the existing G4 `task_commission_goal@1` machine (the historical name is kept),
-  not a copied transition table. A required `selected-agent` role must come
-  from `executor_ref`. Executor reporting, public Task controls, artifact guards,
+  not a copied transition table. A required `selected-agent` role comes
+  from `executor_ref` or deferred, evidenced `open_admission`. Executor reporting, public Task controls, artifact guards,
   owner review/cancellation and Collet/Task CAS still apply through both product
   Work and generic append. Progress 100 is not acceptance; submission reaches
   `reviewing`, and owner acceptance reaches `done`.
@@ -937,3 +954,51 @@ use their declared start role (including owner startup). Five workers submit
 their own child Task results. Root submission and principal acceptance are
 separate operations; completing a SwarmPlan alone never accepts root Work or
 completes the Collet.
+
+
+## Runtime Open enrollment for Swarm
+
+The [Open + Swarm journey](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end_open_swarm.py)
+omits `scenario_roles`, `governance`, `compatibility` and `workflow` from the
+profile command. Instantiate binds only the responsible Principal and the
+Method composition; no applicant, root executor or Task is fabricated.
+Business roles are published at runtime as Open opportunity `requirement_refs`,
+using canonical `scenario_role_ref(profile.ref, role)` references. These local
+requirement references are not participant-specific RoleBindings or a new ACCS
+wire schema. Applicants request these roles; the owner screens and admits them
+through real L5 operations before enrollment.
+
+`ProductOpenEnrollmentServiceProtocol.bind(OpenEnrollmentCommand(...), actor)`
+then materializes the recruited team exactly once, before root Work exists.
+The initiator explicitly supplies admitted application/typed AgentRef pairs and
+chooses one admitted root executor. Enrollment validates G1, Collet CAS, pinned
+ACTIVE Open binding, participant eligibility, ADMITTED application, its exact
+admission decision and scoped COLLET_PARTICIPANT evidence. An explicit deferred
+role roster remains strict, including required coverage. When no worker roster
+is authored, canonical published requirements supply business roles instead;
+protected ownership/executor roles cannot be granted by a requirement string.
+
+SQL stores the added Participants, RoleBindings and correlated evidence in one
+internal `collet.admitted_participants_bound` event. Generic append cannot write
+that event. Current participation combines initial and enrolled facts, while
+ProductInstance's creation-time role refs remain pinned and unchanged. Explicit
+L4 `create_task` then inherits the enrolled root executor and leaves Work CREATED;
+only `SwarmDriver.wake()` starts it through L4/G1/G4. Fixed-team Swarm retains its
+initial assignments and needs no enrollment.
+
+Retained role facts alone are not live admission authority. Swarm planning,
+allocation and reports recheck current L5 admission evidence without importing
+L6; the product-aware L4 policy also rechecks root start/progress/submission.
+Revocation or an inactive Open binding blocks those operations. Runtime DI
+assembly lives in
+[`context_collab_runtime.py`](../../../../di/modules/context_collab_runtime.py),
+installed by TaskModule using the same injected catalog, authorizer and store.
+
+This is a bounded local enrollment extension, not a generic join/leave/reassign
+API. It does not create resource Grants, execute workers or atomically transact
+across SQL and MethodStore. Open stores opaque Agent IDs; the coordinator's typed
+AgentRef mapping is not remote identity proof. Repeated enrollment and post-root
+rebinding are rejected. See the
+[enrollment regressions](../../../../../../../tests/community/core/task/context_collab/products/test_open_swarm_enrollment.py)
+for default authoring, real admission/SQL reload, scope/evidence guards, revocation,
+write failures and reuse of the same profile with entirely different applicants.

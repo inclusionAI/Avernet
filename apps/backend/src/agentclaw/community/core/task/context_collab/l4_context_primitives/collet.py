@@ -29,6 +29,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_m
     COLLET_METADATA_KEYS,
     ColletMetadata,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.resource_binding import (
+    ResourceBinding,
+)
 
 
 def _required_str(data: dict, key: str, owner: str) -> str:
@@ -77,6 +80,7 @@ _COLLET_KEYS = (
             "scope",
             "version",
             "artifacts",
+            "resources",
         }
     )
     | COLLET_METADATA_KEYS
@@ -90,13 +94,16 @@ class Collet:
     """L4 bounded context, not a Task or a product execution snapshot.
 
     scope is an optional legacy L3 governance anchor, NOT the union of
-    accessible Spaces, Resources or Grants. version is the aggregate revision,
-    distinct from metadata.schema_version. Missing metadata denotes a legacy
-    representation only; every repository creation writes complete metadata.
+    accessible Spaces, Resources or Grants. version is the aggregate revision.
+    Missing metadata denotes a legacy representation only; every repository
+    creation writes complete metadata.
     The existing authenticated-actor initiator convention remains unchanged.
     artifacts contains L4 Artifact values and defaults to empty; runtime reporting
     and Task-to-Collet aggregation do not populate it yet. Empty artifacts are
     omitted from the representation to preserve existing shapes and ETags.
+    resources contains L4 ResourceBinding values, not resource bodies or Grants.
+    It is model-only, defaults to empty and is also omitted when empty; existing
+    event-based resource binding facts do not populate it automatically.
     """
 
     collet_id: str
@@ -106,6 +113,7 @@ class Collet:
     version: int
     metadata: ColletMetadata | None = None
     artifacts: tuple[Artifact, ...] = ()
+    resources: tuple[ResourceBinding, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.artifacts, tuple) or any(
@@ -114,15 +122,17 @@ class Collet:
             raise ContextCollabValidationError(
                 "Collet.artifacts must be a tuple of L4 Artifact values"
             )
+        if not isinstance(self.resources, tuple) or any(
+            not isinstance(resource, ResourceBinding) for resource in self.resources
+        ):
+            raise ContextCollabValidationError(
+                "Collet.resources must be a tuple of L4 ResourceBinding values"
+            )
 
     @property
     def revision(self) -> int:
         """Common-contract spelling; version remains the compatible wire field."""
         return self.version
-
-    @property
-    def schema_version(self) -> str | None:
-        return self.metadata.schema_version if self.metadata else None
 
     @property
     def title(self) -> str | None:
@@ -199,6 +209,13 @@ class Collet:
             raise ContextCollabValidationError(
                 "Collet artifacts must be a list of objects"
             )
+        resources = data.get("resources", [])
+        if not isinstance(resources, list) or any(
+            not isinstance(resource, dict) for resource in resources
+        ):
+            raise ContextCollabValidationError(
+                "Collet resources must be a list of objects"
+            )
         collet = cls(
             collet_id=_required_str(data, "collet_id", "Collet"),
             initiator_ref=PrincipalRef.from_dict(
@@ -213,6 +230,9 @@ class Collet:
             version=raw_version,
             metadata=metadata,
             artifacts=tuple(Artifact.from_dict(artifact) for artifact in artifacts),
+            resources=tuple(
+                ResourceBinding.from_dict(resource) for resource in resources
+            ),
         )
         if "etag" in data and data["etag"] != collet.etag:
             raise ContextCollabValidationError(
@@ -230,6 +250,11 @@ class Collet:
             **(
                 {"artifacts": [artifact.to_dict() for artifact in self.artifacts]}
                 if self.artifacts
+                else {}
+            ),
+            **(
+                {"resources": [resource.to_dict() for resource in self.resources]}
+                if self.resources
                 else {}
             ),
             **(self.metadata.to_dict() if self.metadata is not None else {}),

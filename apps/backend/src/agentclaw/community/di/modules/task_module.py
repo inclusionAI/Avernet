@@ -88,17 +88,11 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
     MethodOpsAuthorizerProtocol,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
-    ContextService,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
     ColletLifecycleService,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     CollaborationReader,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
-    ContextServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.initialization import (
     TopLevelBindingRecovery,
@@ -121,17 +115,8 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
-    ProductInstantiationServiceProtocol,
-)
 from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     ProductMethodBindingRecovery,
-)
-from agentclaw.community.core.task.context_collab.l6_products.open_enrollment import ProductOpenEnrollmentServiceProtocol
-from agentclaw.community.core.task.context_collab.l6_products.operations.open_enrollment import ProductOpenEnrollmentService
-from agentclaw.community.core.task.context_collab.l6_products.operations.open_enrollment_policy import OpenEnrollmentCollaborationPolicy
-from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
-    ProductInstantiationService,
 )
 from agentclaw.community.core.task.context_collab.l6_products.service_api import (
     ContextCollabServiceProtocol,
@@ -159,6 +144,7 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.record
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
+from agentclaw.community.di.modules.context_collab_runtime import ContextCollabRuntimeModule
 from agentclaw.community.di.modules.swarm_runtime import SwarmRuntimeModule
 from agentclaw.community.di.modules.task_commission_authorization import (
     TaskMethodOpsAuthorizer,
@@ -320,6 +306,7 @@ class TaskModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.install(SwarmRuntimeModule())
+        binder.install(ContextCollabRuntimeModule())
         # TaskGraphService remains directly constructible for lightweight test
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.
@@ -434,15 +421,6 @@ class TaskModule(Module):
         binder.bind(
             ContextCollabServiceProtocol, to=ContextCollabService, scope=singleton
         )
-        binder.bind(
-            ProductInstantiationServiceProtocol,
-            to=ProductInstantiationService,
-            scope=singleton,
-        )
-        binder.bind(
-            ProductOpenEnrollmentServiceProtocol, to=ProductOpenEnrollmentService,
-            scope=singleton,
-        )
         # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
         # backend-owned Bot-side cron manager (openclaw mode). Singletons are also
         # discoverable by the application lifecycle auto-start path.
@@ -462,20 +440,6 @@ class TaskModule(Module):
     ) -> CollaborationReader:
         """Expose the same repository through L4's narrow read contract."""
         return repository
-
-    @singleton
-    @provider
-    def l4_context_service(
-        self,
-        repository: L4ContextCollabRepositoryProtocol[ContextStatusRecord],
-        authorizer: ContextCollabAuthorizerProtocol,
-        catalog: ProductCatalog,
-        store: MethodStoreProtocol,
-    ) -> ContextServiceProtocol:
-        """L4 owns all operations; retain selected G1 admission and G4 contracts."""
-        return ContextService(
-            repository, OpenEnrollmentCollaborationPolicy(catalog, authorizer, store), authorizer
-        )
 
     @singleton
     @provider
