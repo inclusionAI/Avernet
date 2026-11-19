@@ -1,0 +1,28 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/README.md
+  h_059e888e5e4e82 89-96,170-182
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/publication.py
+  h_059e888e5e4e82 5,53-56,80-90
+apps/backend/src/agentclaw/community/di/modules/swarm_runtime.py
+  h_059e888e5e4e82 118-120
+apps/backend/tests/community/core/task/context_collab/products/open_admission_support.py
+  h_059e888e5e4e82 1-38
+apps/backend/tests/community/core/task/context_collab/products/test_open_capability_admission.py
+  h_059e888e5e4e82 1-116
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_open_swarm.py
+  h_059e888e5e4e82 4,118-120,141,352-358,430,432,446,448-450,452-454,460,462-467,478,482-486,488-494,562,580-581
+apps/backend/tests/community/core/task/context_collab/test_l5_open_method_policies.py
+  h_059e888e5e4e82 213-238
+apps/backend/tests/community/di/modules/test_swarm_runtime.py
+  h_059e888e5e4e82 122,132-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0dff448b2fc4c19477ba5bfb97dd49b79f43bce9",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
