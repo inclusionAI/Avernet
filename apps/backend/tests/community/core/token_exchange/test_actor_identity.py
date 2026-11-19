@@ -30,7 +30,7 @@ class _Caller:
     def __init__(self, error=None):
         self.error = error
         self.requests = []
-        self.outcome = CallerIamTokenOutcome(iam_token="synthetic-original-result")
+        self.outcome = CallerIamTokenOutcome(iam_token="<original-result>")
 
     async def get_iam_token(self, **kwargs):
         self.requests.append(kwargs)
@@ -63,7 +63,7 @@ def _service(auth, *, caller_error=None):
 
 def _request(**overrides):
     return {
-        "iam_token": "synthetic-input-secret",
+        "iam_token": "<input-secret>",
         "auth_request": AuthRequestContext(cookies={"opaque": "synthetic-cookie-secret"}),
         "bot_id": "bot-1", "stage": CallerIdentityStage.ONLINE,
         "publish_id": None, "entity_id": "resource-E", "is_test_exchange": False,
@@ -87,7 +87,7 @@ async def test_authenticated_actor_is_separate_from_owner_resource_and_allowlist
     assert "token_plugin_context_built" in caplog.text
     for field in ("entity_id=resource-E", "owner_user_id=owner-O", "actor_user_id=000-B"):
         assert field in caplog.text
-    assert "synthetic-input-secret" not in caplog.text
+    assert "<input-secret>" not in caplog.text
     assert "synthetic-cookie-secret" not in caplog.text
 
 
@@ -117,7 +117,7 @@ async def test_auth_failure_preserves_original_caller_success_or_error(caller_fa
     assert "token_plugin_context_build_failed" in caplog.text
     assert "error_type=ValueError" in caplog.text
     assert "synthetic-auth-secret" not in caplog.text
-    assert "synthetic-input-secret" not in caplog.text
+    assert "<input-secret>" not in caplog.text
     assert "synthetic-cookie-secret" not in caplog.text
 
 
@@ -154,7 +154,7 @@ async def test_non_iam_type_passes_to_caller_without_inventing_jit_identity(toke
         assert await service.get_iam_token(**_request(token_type=token_type)) is caller.outcome
     assert caller.requests[0]["token_type"] == token_type
     assert "reason=non_iam_credential" in caplog.text
-    assert "synthetic-input-secret" not in caplog.text
+    assert "<input-secret>" not in caplog.text
     assert auth.requests == []
     assert pipeline.contexts == []
 
@@ -261,7 +261,10 @@ async def test_http_invalid_selection_preserves_caller_response(selection):
             "/api/v1/token/iam", params={"bot_id": "bot-1", "entity_id": "resource-E", **selection},
         )
     assert response.status_code == 200
-    assert response.json() == {"success": True, "iam_token": caller.outcome.iam_token}
+    assert response.json() == {
+        "success": True,
+        "iam_token": caller.outcome.iam_token,
+    }
     assert len(caller.requests) == 1
     assert {"caller_runtime_target", "device_uuid"}.isdisjoint(caller.requests[0])
     assert pipeline.contexts == []

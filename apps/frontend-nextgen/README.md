@@ -83,6 +83,28 @@ Sidebar and route regressions are covered by
 [useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
 and [useGroupSessionLocation.deepLink.test.tsx](test/pages/Workspace/hooks/useGroupSessionLocation.deepLink.test.tsx).
 
+## Other-initiated conversation labels
+
+The read-only “他人发起” list identifies human initiators only from explicit
+`user:<id>:` prefixes or trailing `:user:<id>` / `:direct:<id>` segments of
+Session IDs. Synthetic member-task and BCS-CLI owner segments are not human
+creator evidence. Unknown IDs never fall back to the Bot owner or current viewer.
+Each row shows a user avatar/icon and name, falling back to the explicit user ID
+or “用户”. History user messages show the matched name/avatar, or “用户” when
+no name is available; Bot messages keep the Bot's identity. Legacy friend-based
+history retains its explicitly resolved friend name. Viewing remains read-only.
+
+Names use the existing human batch-query API asynchronously, independently of
+session/history loading. Batches contain at most 50 unique humans; in-flight
+lookups are shared. Viewer-scoped memory caching is bounded to 500 entries with
+a five-minute name TTL (30 seconds for missing/failed lookups). Late responses
+cannot label a newly selected session or another viewer. No Backend permission,
+session filtering, runtime-stage or chat-send behavior changes.
+
+Regression coverage: [profile service](test/services/workspace/sessionInitiatorService.test.ts),
+[hook and list](test/pages/Workspace/Chat/hooks/useSessionInitiators.test.tsx), and
+[read-only history](test/pages/Workspace/components/ReadOnlyConversationPanel.test.tsx).
+
 ## Discovery public Bots
 
 The [public Bot cursor](src/services/collaborationSquare/publicBotCursor.ts)
