@@ -99,6 +99,52 @@ def test_card_read_only_queries_source_and_does_not_require_artifacts(setup):
     assert client.get(PATH + "/card").status_code == 404
 
 
+def test_labels_replace_omission_preserves_and_empty_clears(setup):
+    _, client = setup
+    labels = {"topic": ["old"], "department": ["billing"]}
+    assert (
+        client.put(PATH, json={"card": {"name": "demo"}, "labels": labels}).status_code
+        == 202
+    )
+    client.put(PATH, json={"card": {"description": "updated"}}).raise_for_status()
+    assert client.get(PATH).json()["labels"] == labels
+    client.put(PATH, json={"labels": {"topic": ["new", "new"]}}).raise_for_status()
+    assert client.get(PATH).json()["labels"] == {"topic": ["new"]}
+    client.put(PATH, json={"labels": {}}).raise_for_status()
+    assert client.get(PATH).json()["labels"] == {}
+    assert client.get(PATH).json()["card"]["description"] == "updated"
+
+
+@pytest.mark.parametrize("replacement", [None, {"topic": ["final"]}, {}])
+def test_labels_retry_preserves_omitted_labels_or_replaces_complete_map(
+    setup, monkeypatch, replacement
+):
+    repo, _ = setup
+    repo.upsert("one", {"name": "old"}, None, {}, labels={"topic": ["old"]})
+    original = repo.save
+    raced = False
+
+    def competing_save(card, revision, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            repo.upsert(
+                "one",
+                {"description": "concurrent"},
+                None,
+                {},
+                labels={"department": ["new"]},
+            )
+        return original(card, revision, **kwargs)
+
+    monkeypatch.setattr(repo, "save", competing_save)
+    saved = repo.upsert("one", {"name": "updated"}, None, {}, labels=replacement)
+    assert saved.card.labels == (
+        {"department": ["new"]} if replacement is None else replacement
+    )
+    assert saved.card.source_card == {"name": "updated", "description": "concurrent"}
+
+
 def test_conflicts_and_failures_do_not_report_success(setup, monkeypatch):
     repo, client = setup
     assert client.put(PATH, json={"card": {"a": 1}}).status_code == 202

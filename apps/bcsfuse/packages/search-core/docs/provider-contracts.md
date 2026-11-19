@@ -109,7 +109,9 @@ and behavior are unchanged.
   exposes a source preparation error only when it belongs to the responding
   instance's index key; other generation failures are queried through build status.
 - HTTP Card writes accept `card`, `labels` and optional `resource_type`; reads return
-  the complete merged business object and system revision. Optional internal
+  the complete merged business object and system revision. Omitted labels preserve
+  existing labels; supplied labels replace the complete map, including removing
+  omitted keys. An empty map clears labels where host validation permits it. Optional internal
   operations settings are not accepted as an HTTP `search_config` field.
 - `CardRecord.prepared` is an optional host artifact-cache value, carried through
   internal writes for compatibility. Public CRUD does not read an artifact table.
@@ -120,7 +122,8 @@ and behavior are unchanged.
 
 Affected consumer: OCB's Card management. No new routes or storage are selected
 for TC; its existing startup remains unchanged. The wire paths, status codes,
-partial-update behavior and SQL table layout are preserved. Public and host
+business-field partial updates and SQL table layout are preserved. Label writers
+submit the complete label set; legacy partial-label callers must be adapted. Public and host
 packages must be released together at compatible revisions; extraction alone
 is not deployment evidence.
 

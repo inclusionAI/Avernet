@@ -1,7 +1,9 @@
 """Durable Card storage consumed by the management service.
 
 Writes commit before returning; failed persistence must raise. Implementations
-own internal conflict retries. Callers do not supply revisions.
+own internal conflict retries. Callers do not supply revisions. Omitted labels
+preserve stored labels; a supplied map replaces them as one field. Hosts validate
+required labels before committing the entire write.
 """
 
 from collections.abc import Callable, Iterator

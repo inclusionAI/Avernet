@@ -167,7 +167,10 @@ class TcCatalog:
             fields,
             resource_type="agent",
             search_config={},
-            labels={"visibility": [fields["availability"]]}
+            labels={
+                **(current.card.labels if current else {}),
+                "visibility": [fields["availability"]],
+            }
             if "availability" in fields
             else None,
         )
@@ -182,7 +185,7 @@ class TcCatalog:
             fields,
             resource_type="agent",
             search_config={},
-            labels={"visibility": [fields["availability"]]}
+            labels={**current.card.labels, "visibility": [fields["availability"]]}
             if "availability" in fields
             else None,
         )

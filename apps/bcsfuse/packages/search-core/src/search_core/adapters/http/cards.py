@@ -18,7 +18,10 @@ CardId = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^\S+$")]
 class CardWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
     card: dict[str, JsonValue] | None = Field(default=None, min_length=1)
-    labels: dict[str, list[str]] | None = None
+    labels: dict[str, list[str]] | None = Field(
+        default=None,
+        description="Omit to preserve labels; supply the complete replacement map. Missing keys are removed; required business labels must remain valid.",
+    )
 
     # Omission preserves an existing type; new resources default to agent.
     resource_type: Literal["agent", "group"] | None = None

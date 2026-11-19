@@ -46,7 +46,8 @@ class CardWrites:
             data = merge_fields(original, fields)
             if not data:
                 raise ValueError("card required for creation")
-            merged = dict(current.card.labels) if active else {}
+            # Omitted labels preserve the snapshot; a supplied map replaces it.
+            merged = dict(current.card.labels) if active and labels is None else {}
             for key, values in (labels or {}).items():
                 if (
                     not is_label_filter("labels." + key)
