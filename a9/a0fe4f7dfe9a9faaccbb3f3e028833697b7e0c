@@ -1,0 +1,35 @@
+apps/frontend-nextgen/test/routes.test.ts
+  s_568f0de0aeb657::t_631c280316318f 67-95
+  s_568f0de0aeb657::t_2fc71994996477 1
+apps/frontend-nextgen/config/config.ts
+  s_568f0de0aeb657::t_168d344609985d 39-42,59-62
+apps/frontend-nextgen/config/internal/mergeRoutes.ts
+  s_568f0de0aeb657::t_050f8029ab8b81 30
+  s_568f0de0aeb657::t_8e84cbeac1eaa4 1-29,31-50
+submodules/avernet
+  s_14f5c8a6a8abfe::t_85c354bf76cd3a 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a9a0fe4f7dfe9a9faaccbb3f3e028833697b7e0c",
+  "prompts": {},
+  "sessions": {
+    "s_14f5c8a6a8abfe": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "2901da25-4c78-4388-91df-d5cca9be2d41",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_568f0de0aeb657": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "908264ee-b019-4514-be34-8ef1b17a4813",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

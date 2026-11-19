@@ -1,0 +1,29 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/mapping.rs
+  s_dace25ecf9484d::t_eb2a99b128d2c1 290-292,333-334,405,442-443,458,461,488,497-498,520,551-557,561,565-571,582,587,590,597-600,606-612,764-769,780-786,800,802,818,823-826,841-844,849,855,882-886,912-913,917-920,926-930,1013,1018,1022,1027,1030,1043
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/README.md
+  s_dace25ecf9484d::t_baaf9f1cd7d7e3 225
+apps/bcs-internal/docs/sofa-rpc/agent-card-management-service-spec.md
+  s_dace25ecf9484d::t_b1752876d51b50 30-31
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/agent_card_management/v1/agent_card_management.proto
+  s_dace25ecf9484d::t_73f2d99f781742 110,152-157,173-177,195-198,213-215,239-241,250-252,261-263,271
+  s_dace25ecf9484d::t_7d821f4e683ba7 270
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  s_dace25ecf9484d::t_06a41dfa175c62 304
+  s_dace25ecf9484d::t_15a104ec1b8603 307-318,402
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ef7a3ef0b1292dc4f794c2447cdb8ee7e74886ce",
+  "prompts": {},
+  "sessions": {
+    "s_dace25ecf9484d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cdb6-465a-7a90-9232-afab9334faca",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

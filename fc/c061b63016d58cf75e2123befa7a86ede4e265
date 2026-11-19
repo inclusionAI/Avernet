@@ -1,0 +1,20 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/agentbase_remote_chat/provider.rs
+  h_fa66fe7c023b4b 10-12,23,95-269,274,284,289,294,299,348-358,389-419,421-422,429,434-445,464-494,496-497,503-507,511-517,534-557,559-560,567,572-579,598-621,623-624,631,636-643,662-688,690-691,700-704,708-714
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/logging.rs
+  h_fa66fe7c023b4b 1-34
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/mod.rs
+  h_fa66fe7c023b4b 7
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/ucs_render/provider.rs
+  h_fa66fe7c023b4b 2,14-54,102-131,133-143,148-159,163-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fcc061b63016d58cf75e2123befa7a86ede4e265",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

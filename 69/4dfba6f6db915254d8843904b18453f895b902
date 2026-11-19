@@ -1,0 +1,95 @@
+apps/bcsfuse/tests/alipay/test_index_rebuild_server.py
+  s_9e428ec8192673::t_81278655eadc3b 106-107,146-147,171
+  s_9e428ec8192673::t_6711240e505cd6 172
+apps/bcsfuse/tests/alipay/test_index_build_http.py
+  s_9e428ec8192673::t_81278655eadc3b 32,38
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_9e428ec8192673::t_81278655eadc3b 24
+apps/bcsfuse/tests/alipay/test_search_response.py
+  s_89ee1c722ef961::t_cb675e52977aeb 141-145
+  s_89ee1c722ef961::t_2475659b928b32 115,138
+apps/bcsfuse/tests/alipay/test_resource_types.py
+  s_9e428ec8192673::t_81278655eadc3b 155,161,274-275
+apps/bcsfuse/tests/alipay/test_emergency.py
+  s_9e428ec8192673::t_81278655eadc3b 86,149
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_9e428ec8192673::t_67f4a534ece3ba 62,73
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay_local.py
+  s_9e428ec8192673::t_67f4a534ece3ba 37
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_89ee1c722ef961::t_65bbe8f5c43f29 291
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_9e428ec8192673::t_abc9da139d791d 192
+apps/bcsfuse/internal/zbcsfuse_internal/application/operated_retrieval.py
+  s_89ee1c722ef961::t_28c0eff96137b8 16,38,40,52,58,74,106,109
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/operations.py
+  s_89ee1c722ef961::t_8e345ecfbf632b 45,51,55,58
+apps/bcsfuse/internal/zbcsfuse_internal/providers/operations_index.py
+  s_89ee1c722ef961::t_d0b0dc2d8b0379 109,113,120,122,124,130,167,173,177,192,211
+apps/bcsfuse/scripts/bench_alipay_fixture.py
+  s_9e428ec8192673::t_5e80edebaa87f9 152
+apps/bcsfuse/scripts/bench_qdrant_filter_indexes.py
+  s_89ee1c722ef961::t_5a742d1cc4f511 100-101,244
+apps/bcsfuse/tests/alipay/test_application.py
+  s_89ee1c722ef961::t_86249b246f1c94 33,39,59,65,71,78,101,148,168-169,175,178
+apps/bcsfuse/tests/alipay/test_cache_drm.py
+  s_9e428ec8192673::t_cbcc106865926f 132
+apps/bcsfuse/tests/alipay/test_cache_races.py
+  s_9e428ec8192673::t_accd155a102ad6 52,113
+apps/bcsfuse/tests/alipay/test_card_management_boundary.py
+  s_9e428ec8192673::t_93df98f238884a 17,134-135
+apps/bcsfuse/tests/alipay/test_card_mapping.py
+  s_9e428ec8192673::t_274eca2de0bdd6 131,192,198-200
+apps/bcsfuse/tests/alipay/test_card_rebuild.py
+  s_9e428ec8192673::t_1c34fe527dbc3b 77,202
+apps/bcsfuse/tests/alipay/test_catalog_http.py
+  s_9e428ec8192673::t_ebc1653d3f706d 24,30
+apps/bcsfuse/tests/alipay/test_catalog_retrieval.py
+  s_89ee1c722ef961::t_12b4cf243c84c2 18,30,36,41-42,44,55,81,88
+apps/bcsfuse/tests/alipay/test_default_candidates.py
+  s_9e428ec8192673::t_be3a27395bb42c 41,88,101-102,156,202,231,264
+apps/bcsfuse/tests/alipay/test_document_filters.py
+  s_9e428ec8192673::t_e2ddaea83198d6 64,66,97,107
+apps/bcsfuse/tests/alipay/test_document_search.py
+  s_89ee1c722ef961::t_9aded1b5793f00 54,61,64,114,160
+apps/bcsfuse/tests/alipay/test_http_admission.py
+  s_9e428ec8192673::t_cb22f63c0808e9 17
+apps/bcsfuse/tests/alipay/test_http_retrieval_options.py
+  s_9e428ec8192673::t_d12eb781727fad 131
+apps/bcsfuse/tests/alipay/test_index_build_reuse.py
+  s_9e428ec8192673::t_4d0988903e3454 65,71
+apps/bcsfuse/tests/alipay/test_operations_http.py
+  s_89ee1c722ef961::t_5d4ec4ac2821b9 27,30,53,103,152
+apps/bcsfuse/tests/alipay/test_result_limit.py
+  s_9e428ec8192673::t_f3b1ec91e3445a 37,119,155
+apps/bcsfuse/tests/alipay/test_search_cache.py
+  s_9e428ec8192673::t_171235cb940d6e 63,147,149,211,216-217,224
+apps/bcsfuse/tests/alipay/test_search_protection.py
+  s_9e428ec8192673::t_57e8eec54d4244 27,44
+apps/bcsfuse/tests/alipay/test_simple_card_api.py
+  s_9e428ec8192673::t_d0113be99bf472 165,210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "694dfba6f6db915254d8843904b18453f895b902",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

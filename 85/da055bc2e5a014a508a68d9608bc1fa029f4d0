@@ -1,0 +1,56 @@
+apps/backend/specs/caller-refresh-db-lock-20261116/001-spec-output.md
+  h_5b2ec9c12c4d18 1-5
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  h_5b2ec9c12c4d18 43-45,76-80,93,95-100
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh.py
+  h_5b2ec9c12c4d18 83-85,136-137,139-168,171-175,181
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh_lifecycle.py
+  h_5b2ec9c12c4d18 29-30,95,115
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  h_5b2ec9c12c4d18 127,129
+apps/backend/tests/corp/core/caller_identity/test_due_caller_refresh.py
+  h_5b2ec9c12c4d18 2,121-223
+apps/backend/tests/corp/core/caller_identity/test_scheduled_refresh_lifecycle.py
+  h_5b2ec9c12c4d18 27,42,67-68,70-71,78,91
+apps/backend/tests/corp/plugins/prod/test_scheduled_caller.py
+  h_5b2ec9c12c4d18 192-193,211,310,325,430
+apps/frontend-nextgen/src/extensions/internal.ts
+  h_5b2ec9c12c4d18 550-552
+apps/frontend-nextgen/src/internal/market/components/McpDetailPage.tsx
+  h_5b2ec9c12c4d18 20,205-218
+apps/frontend-nextgen/src/internal/market/components/McpMarketPanel.tsx
+  h_5b2ec9c12c4d18 9,108-133,135
+apps/frontend-nextgen/src/internal/market/constants.ts
+  h_5b2ec9c12c4d18 21-28,33,42-46
+apps/frontend-nextgen/src/internal/market/hooks/useMarketMcps.ts
+  h_5b2ec9c12c4d18 5,70-77,123,130,135,148,167,184,218,228
+apps/frontend-nextgen/src/internal/market/mappers.ts
+  h_5b2ec9c12c4d18 208-209
+apps/frontend-nextgen/src/internal/market/service.ts
+  h_5b2ec9c12c4d18 224-227
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityPickerModal.openCore.test.tsx
+  h_5b2ec9c12c4d18 22
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityPickerModal.search.test.tsx
+  h_5b2ec9c12c4d18 7-11
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityPickerModal.test.tsx
+  h_5b2ec9c12c4d18 11-12,93-95,110,140-142,159-160,164
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilitySetManager.pickerDetail.test.tsx
+  h_5b2ec9c12c4d18 14-15
+apps/frontend-nextgen/test/internal/market/components/McpDetailPage.test.tsx
+  h_5b2ec9c12c4d18 243-262
+apps/frontend-nextgen/test/internal/market/components/McpMarketPanel.test.tsx
+  h_5b2ec9c12c4d18 77,84-93,120-122,183-185,187-190
+apps/frontend-nextgen/test/internal/market/hooks/useMarketMcps.test.tsx
+  h_5b2ec9c12c4d18 236,239,241,249-254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "85da055bc2e5a014a508a68d9608bc1fa029f4d0",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
