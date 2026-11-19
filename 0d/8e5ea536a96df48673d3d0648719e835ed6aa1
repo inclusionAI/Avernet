@@ -1,0 +1,64 @@
+apps/frontend-nextgen/src/domain/botHealthCheck.ts
+  s_cf55038a305cb3::t_e4f1d35c761bc8 76-81
+apps/frontend-nextgen/src/services/botHealthCheck/botHealthCheckService.ts
+  s_cf55038a305cb3::t_fdf8133326b806 2-7
+  s_cf55038a305cb3::t_6d379298dd0941 99-100,110-119
+apps/frontend-nextgen/src/hooks/useBotHealthCheck.ts
+  s_cf55038a305cb3::t_1490bf828027e7 15
+  s_cf55038a305cb3::t_36dba7e8feafcd 6
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_5e0eab15b95f7c::t_220489d0c81149 173-175,179,182-188,190,192-195
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  s_5e0eab15b95f7c::t_4b010812ca9a7f 53
+  s_5e0eab15b95f7c::t_8379e43cd04757 54-57
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  s_5e0eab15b95f7c::t_597fd3900bee4e 71-73,75,80,85,91-92,96
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_5e0eab15b95f7c::t_8aa5da1231cf0c 291,309-310
+  s_5e0eab15b95f7c::t_8b09b63a427b5e 287-288
+apps/frontend-nextgen/src/services/backendApi/privateChat/iamTokenController.ts
+  s_c276f50f57aefb::t_d0d3c642735551 57-61
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  s_5e0eab15b95f7c::t_c71beace3732ca 393
+  s_5e0eab15b95f7c::t_19b281bb06f3b5 403-404
+  s_5e0eab15b95f7c::t_41b1d4e4976f74 392,405-409
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFilesFeature.test.tsx
+  s_5e0eab15b95f7c::t_7192cc66b195aa 281
+  s_5e0eab15b95f7c::t_6486a646470de0 298,306,309,312,315
+apps/frontend-nextgen/test/services/backendApi/bots/iamTokenController.test.ts
+  s_c276f50f57aefb::t_aa2f6917c5c375 93-147
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  s_5e0eab15b95f7c::t_f5c1e7f9f9471e 549-559
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0d8e5ea536a96df48673d3d0648719e835ed6aa1",
+  "prompts": {},
+  "sessions": {
+    "s_5e0eab15b95f7c": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "44b19073-2adc-4fd7-9499-390aad0a5473",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_c276f50f57aefb": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "823c8e19-3773-48ae-bc93-15bca3b55aca",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_cf55038a305cb3": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "3f4bedf8-2bd7-4776-9d3a-70464c8979ae",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
