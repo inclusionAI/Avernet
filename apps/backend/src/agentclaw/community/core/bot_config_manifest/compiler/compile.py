@@ -117,6 +117,16 @@ class ManifestCompiler(DesiredStateCompiler):
             return Compiled(DesiredState.EMPTY, ())
         return await self.compile_document(ctx, parsed, only=only)
 
+    async def compile_submitted_document(
+        self, ctx: ApplyContext, document: str
+    ) -> Compiled:
+        parsed = self._manifests.validate(
+            document=document,
+            active_engine=ctx.bot.get("active_engine"),
+            bot_type=ctx.bot.get("bot_type"),
+        ).parsed
+        return await self.compile_document(ctx, parsed)
+
     async def compile_document(
         self, ctx: ApplyContext, parsed: Mapping[str, Any], *, only: Collection[ApplyConstruct] | None = None
     ) -> Compiled:

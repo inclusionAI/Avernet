@@ -31,6 +31,12 @@ from agentclaw.community.core.apply_engine.apply_task import (
 from agentclaw.community.core.repository.protocols.platform import (
     TaskQueueRepositoryProtocol,
 )
+from agentclaw.community.core.bot_config_manifest.schema.limits import MAX_DOCUMENT_BYTES
+from agentclaw.community.core.skill_center.materialization_contract import ValidatedExactSkillPackage
+from agentclaw.community.core.skill_center.skill_reference_contract import (
+    PublicSkillPreview,
+    SkillReferenceServiceProtocol,
+)
 from agentclaw.community.core.task_queue.types import DEFAULT_APP, TaskStatus
 from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestApplyLockRepositoryProtocol,
@@ -42,6 +48,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
+from tests.community.core.apply_engine._fixture_data import build_skill_zip, real_validator
 from tests.community.endpoints.manifest_device_seed import (
     seed_empty_identity,
     seed_empty_manifest_device,
@@ -701,3 +708,154 @@ def apply_materialises_resources():
     """W6's category, end to end: an inline file entry and an archived
     directory entry converge through the one write chain, each leaving its
     per-entry row in the report."""
+
+
+_PREVIEW_PATH = "/openapi/v1/bots/{bot_id}/config-manifest"
+_PREVIEW_QUERY = {**_QUERY, "dry_run": "true"}
+_PUBLIC_SKILL = {"name": "preview-weather", "origin": "center", "skill_code": "preview-weather"}
+
+
+class _FirstPublicSkill:
+    def __init__(self) -> None:
+        self.previewed: list[str] = []
+        self.prepared: list[PublicSkillPreview] = []
+
+    def preview_public_reference(self, *, scope, skill_code, expected_name) -> PublicSkillPreview:
+        self.previewed.append(skill_code)
+        assert scope.actor_id == _OWNER
+        assert expected_name == "preview-weather"
+        package = build_skill_zip(expected_name)
+        return PublicSkillPreview(
+            skill_code=skill_code,
+            skill_uuid="0f08b36f-cf91-4af2-85ca-04c315936f41",
+            name=expected_name,
+            sc_skill_id=1,
+            sc_version_number="1.0.0",
+            sc_version_id=2,
+            content=ValidatedExactSkillPackage(
+                skill_code=skill_code,
+                version_number="1.0.0",
+                sha256=hashlib.sha256(package).hexdigest(),
+                package=real_validator().validate_zip(package),
+                metadata_json='{"mcp_dependencies": []}',
+                download_size=len(package),
+            ),
+        )
+
+    def prepare_public_reference(self, *, scope, preview) -> None:
+        self.prepared.append(preview)
+        raise AssertionError("preview must not prepare a Public skill")
+
+
+def _seed_first_public_skill(world) -> None:
+    _seed_bot_with_a_held_lock(world)
+    references = _FirstPublicSkill()
+    world.injector.binder.bind(SkillReferenceServiceProtocol, to=references, scope=singleton)
+
+
+def _assert_preview_preserved_storage(response, world) -> None:
+    key = dict(env=get_current_env(), entity_id=_OWNER, bot_id=_BOT_ID)
+    stored = world.get(BotConfigManifestRepositoryProtocol).get(**key)
+    assert stored is not None and stored.document == _DOCUMENT
+    assert world.get(BotConfigManifestApplyRepositoryProtocol).latest(**key) is None
+
+
+def _assert_first_public_only_previewed(response, world) -> None:
+    _assert_preview_preserved_storage(response, world)
+    report = response.json()["data"]
+    assert not any(entry["category"] == "script" for entry in report["entries"])
+    references = world.get(SkillReferenceServiceProtocol)
+    assert references.previewed == ["preview-weather"]
+    assert references.prepared == []
+
+
+def _public_preview_input(*, nested: bool) -> CaseInput:
+    manifest = {"skills": [_PUBLIC_SKILL]}
+    if nested:
+        manifest = {"capabilities": manifest}
+    return CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params=_PREVIEW_QUERY,
+        headers=_HEADERS,
+        json_body={"document": json.dumps({"schema_version": 1, "manifest": manifest})},
+    )
+
+
+_PUBLIC_PREVIEW_RESULT = ExpectSuccess(
+    status=200,
+    json_contains={
+        "data": {
+            "bot_id": _BOT_ID,
+            "apply_id": "",
+            "trigger": "dry_run",
+            "entries": [
+                {"category": "capabilities", "name": "skills/preview-weather", "action": "created"}
+            ],
+        }
+    },
+)
+
+
+@endpoint_test(
+    method="PUT",
+    path=_PREVIEW_PATH,
+    scenario="previews_first_public_code_from_submitted_capabilities",
+    input=_public_preview_input(nested=True),
+    seed=_seed_first_public_skill,
+    expect=_PUBLIC_PREVIEW_RESULT,
+    extra_assertions=(_assert_first_public_only_previewed,),
+)
+def put_preview_uses_submitted_manifest():
+    """A held Apply lock does not block preview or cause it to use the stored script."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=_PREVIEW_PATH,
+    scenario="previews_legacy_flat_skills",
+    input=_public_preview_input(nested=False),
+    seed=_seed_first_public_skill,
+    expect=_PUBLIC_PREVIEW_RESULT,
+    extra_assertions=(_assert_first_public_only_previewed,),
+)
+def put_preview_accepts_flat_skills():
+    """Legacy flat skills compile to the same capability plan."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=_PREVIEW_PATH,
+    scenario="preview_rejects_over_limit_document",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params=_PREVIEW_QUERY,
+        headers=_HEADERS,
+        json_body={"document": " " * (MAX_DOCUMENT_BYTES + 1)},
+    ),
+    seed=_seed_bot_with_manifest,
+    expect=ExpectError(status=413),
+    extra_assertions=(_assert_preview_preserved_storage,),
+)
+def put_preview_checks_size_before_compilation():
+    """An over-limit request follows the same 413 contract as a save."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=_PREVIEW_PATH,
+    scenario="preview_refuses_mixed_capabilities",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params=_PREVIEW_QUERY,
+        headers=_HEADERS,
+        json_body={"document": "schema_version: 1\nmanifest: {capabilities: {}, skills: []}\n"},
+    ),
+    seed=_seed_bot_with_manifest,
+    expect=ExpectError(
+        status=422,
+        json_contains={"data": {"violations": [{"code": "mixed_capabilities"}]}},
+    ),
+    extra_assertions=(_assert_preview_preserved_storage,),
+)
+def put_preview_checks_schema():
+    """Refused input keeps the saved document and Apply history intact."""

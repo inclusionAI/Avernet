@@ -326,6 +326,18 @@ it('读取并持久化 MCP caller 模式，不在前端模拟', async () => {
   expect(controller.updateMcpCallType).toHaveBeenCalledWith('bot-1', 'mcp.weather', 'owner', 'owner-1');
 });
 
+it('getCallerContext 透传 bot_call_type 为 botCallType(openspec add-session-files-caller-runtime-target D6)', async () => {
+  controller.getCallerContext.mockResolvedValue({
+    data: { editable: false, bot_call_type: 'caller', mcp_call_types: {}, cli_call_types: {} },
+  });
+  await expect(botEditorService.getCallerContext('bot-2')).resolves.toEqual({
+    editable: false,
+    botCallType: 'caller',
+    mcpCallTypes: {},
+    cliCallTypes: {},
+  });
+});
+
 it('我的 Skill 仅请求当前 Bot 的 LOCAL 分页，保留激活和未激活项并透传 owner', async () => {
   const items = Array.from({ length: 20 }, (_, i) => ({ skill_id: `local-${i}`, name: `Local ${i}`, active: i === 0 }));
   controller.listSkills.mockImplementation(async (_botId, options) => {

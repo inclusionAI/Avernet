@@ -150,10 +150,13 @@ export const botSessionFileService = {
       onPhase?: (phase: 'completing' | 'materializing') => void;
     },
   ): Promise<DomainResult<BotSessionFileView>> {
-    const params = buildParams(userId, opts.ownerId, opts.stage, opts.deviceUuid, opts.callerRuntimeTarget);
+    // 契约(R20261119 session-file-frontend-params §2):仅 upload-intents 带 caller_runtime_target;
+    // upload-complete / materialize-status 不带(定位沿用资源记录的 binding)。两份 params 分开拼。
+    const intentsParams = buildParams(userId, opts.ownerId, opts.stage, opts.deviceUuid, opts.callerRuntimeTarget);
+    const runtimeParams = buildParams(userId, opts.ownerId, opts.stage, opts.deviceUuid);
     try {
       const hash = await sha256Hex(file);
-      const intents = await createUploadIntents(botId, sessionId, params, {
+      const intents = await createUploadIntents(botId, sessionId, intentsParams, {
         files: [{ filename: file.name, size_bytes: file.size, ...(hash ? { content_hash: hash } : {}) }],
       });
       const intent = mapIntent(intents.files[0]);
@@ -161,7 +164,7 @@ export const botSessionFileService = {
       await directUpload(intent, file, opts.signal ?? new AbortController().signal, opts.onProgress);
 
       opts.onPhase?.('completing');
-      const completed = await completeUpload(botId, sessionId, params, {
+      const completed = await completeUpload(botId, sessionId, runtimeParams, {
         resource_id: intent.resourceId,
         transfer_id: intent.transferId,
       });
@@ -178,7 +181,7 @@ export const botSessionFileService = {
         await sleep(POLL_INTERVAL);
         let status;
         try {
-          status = await getMaterializeStatus(botId, sessionId, intent.resourceId, params);
+          status = await getMaterializeStatus(botId, sessionId, intent.resourceId, runtimeParams);
         } catch (err) {
           const httpStatus = (err as { status?: number } | null)?.status;
           if (typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 500) {

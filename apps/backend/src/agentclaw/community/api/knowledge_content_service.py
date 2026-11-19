@@ -94,6 +94,8 @@ class KnowledgeContentServiceProtocol(Protocol):
         offset: int,
         limit: int,
         source: Literal["personal", "team"] | None = None,
+        pagination: Literal["cursor"] | None = None,
+        cursor: str | None = None,
     ) -> ContentReply: ...
     async def book_imports(
         self, *, kb_id: str, access: ContentAccess, offset: int, limit: int
