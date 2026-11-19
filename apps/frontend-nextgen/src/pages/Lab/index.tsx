@@ -94,7 +94,7 @@ export default function LabLandingPage() {
   return (
     <div className="flex h-full flex-col bg-background">
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1240px] flex-col px-4 py-6 sm:px-6 lg:px-[60px]">
+        <div className="flex w-full flex-col px-5 py-6">
           <header className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
             <h1 className="m-0 text-2xl font-semibold text-foreground">实验室</h1>
             <p className="m-0 text-[13px] leading-5 text-muted-foreground">
