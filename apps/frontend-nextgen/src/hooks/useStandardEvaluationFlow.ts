@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   standardEvaluationService,
-  type StandardEvaluationGoalType,
-  type StandardEvaluationSetItem,
+  type StandardEvaluationGoalType, type StandardEvaluationSetItem,
   type StandardQualityTask,
   type StandardTaskEnvironment,
 } from '@/services/botWorkshop/standardEvaluationService';
@@ -10,9 +9,9 @@ import {
   applyEvaluationTaskSteps,
   createInitialEvaluationSteps,
   EVALUATION_GOAL_INPUT_ENABLED,
-  getEvaluationTaskSaveStatus,
-  TERMINAL_TASK_STATUSES,
-  waitForStandardEnvironmentReady,
+  getEvaluationTaskError,
+  retryStandardEvaluationStep,
+  startStandardEvaluationTask,
   type StandardEvaluationStepKey,
   type StandardEvaluationStepStatus,
 } from '@/services/botWorkshop/standardEvaluationWorkflow';
@@ -46,6 +45,7 @@ export function useStandardEvaluationFlow({
   const [evaluationTask, setEvaluationTask] = useState<StandardQualityTask>();
   const [environment, setEnvironment] = useState<StandardTaskEnvironment>();
   const [error, setError] = useState<string>();
+  const [retryingStep, setRetryingStep] = useState<StandardEvaluationStepKey>();
 
   const currentStepKeyRef = useRef<StandardEvaluationStepKey>();
   const aliveRef = useRef(true);
@@ -57,10 +57,13 @@ export function useStandardEvaluationFlow({
     };
   }, []);
 
-  const updateStep = useCallback((key: StandardEvaluationStepKey, status: StandardEvaluationStepStatus) => {
-    if (status === 'running') currentStepKeyRef.current = key;
-    setSteps((prev) => prev.map((step) => (step.key === key ? { ...step, status } : step)));
-  }, []);
+  const updateStep = useCallback(
+    (key: StandardEvaluationStepKey, status: StandardEvaluationStepStatus, stepError?: string) => {
+      if (status === 'running') currentStepKeyRef.current = key;
+      setSteps((prev) => prev.map((step) => (step.key === key ? { ...step, status, error: stepError ?? '' } : step)));
+    },
+    [],
+  );
 
   const resetSteps = useCallback(() => {
     currentStepKeyRef.current = 'create_environment';
@@ -101,99 +104,57 @@ export function useStandardEvaluationFlow({
       : Boolean(goalPrompt.trim())
     : true;
 
+  const updateEvaluationTask = useCallback(
+    (task: StandardQualityTask) => {
+      setEvaluationTask(task);
+      if (task.environment) setEnvironment(task.environment);
+      applyEvaluationTaskSteps(task, updateStep);
+    },
+    [updateStep],
+  );
+
   const startEvaluation = useCallback(async () => {
     if (!enabled || !canStart || running || !selectedSampleSetId || !goalReady) return;
 
+    const selectedSet = sampleSets.find((item) => item.uuid === selectedSampleSetId);
+    if (!selectedSet) {
+      setError('所选评测样本集不存在');
+      return;
+    }
+
     resetSteps();
     setRunning(true);
+    setRetryingStep(undefined);
     setError(undefined);
     setEvaluationTask(undefined);
     setEnvironment(undefined);
 
     try {
-      const selectedSet = sampleSets.find((item) => item.uuid === selectedSampleSetId);
-      if (!selectedSet) throw new Error('所选评测样本集不存在');
-
-      updateStep('create_environment', 'running');
-      await waitForStandardEnvironmentReady({
+      const task = await startStandardEvaluationTask({
         botId,
         botVersion,
         ownerId,
-        isAlive: () => aliveRef.current,
-        onEnvironmentUpdate: setEnvironment,
-      });
-      if (!aliveRef.current) return;
-      updateStep('create_environment', 'done');
-
-      updateStep('confirm_sample_set', 'running');
-      updateStep('confirm_sample_set', 'done');
-
-      updateStep('execute_evaluation', 'running');
-      let task = await standardEvaluationService.createStandardEvaluationTask({
-        botId,
-        botVersion,
-        ownerId,
-        setUuid: selectedSet.uuid,
+        selectedSampleSet: selectedSet,
         goalType,
         goalText: goalType === 'semantic' ? goalPrompt : '',
+        isAlive: () => aliveRef.current,
+        onStepUpdate: updateStep,
+        onEnvironmentUpdate: setEnvironment,
+        onTaskUpdate: updateEvaluationTask,
       });
       if (!aliveRef.current) return;
-      setEvaluationTask(task);
-      if (task.environment) setEnvironment(task.environment);
-
-      const taskDeadline = Date.now() + 30 * 60 * 1000;
-      let currentSaveStatus: string | undefined;
-      while (Date.now() < taskDeadline) {
-        currentSaveStatus = getEvaluationTaskSaveStatus(task);
-
-        if (currentSaveStatus === 'DONE') break;
-        if (currentSaveStatus === 'FAILED') break;
-        if (TERMINAL_TASK_STATUSES.has(task.status) && currentSaveStatus === undefined) break;
-
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 3000);
-        });
-        task = await standardEvaluationService.getStandardEvaluationCurrentTask({
-          botId,
-          botVersion,
-          ownerId,
-        });
-        if (!aliveRef.current) return;
-        setEvaluationTask(task);
-        if (task.environment) setEnvironment(task.environment);
-        applyEvaluationTaskSteps(task, updateStep);
-      }
-
-      if (currentSaveStatus !== 'DONE') {
-        if (currentSaveStatus === 'FAILED') {
-          throw new Error(task.error || '标准评测流程失败');
-        }
-        throw new Error('等待标准评测完成超时');
-      }
-
-      updateStep('save_evaluation_result', 'running');
-      const destroyResult = await standardEvaluationService.destroyStandardEnvironment({
-        botId,
-        botVersion,
-        ownerId,
-      });
-      if (!aliveRef.current) return;
-      const environmentDestroyed =
-        destroyResult.destroyed || destroyResult.destroy_status === 'already_destroyed';
-      if (destroyResult.supported !== false && !environmentDestroyed) {
-        throw new Error(destroyResult.error || '标准评测环境销毁失败');
-      }
-      updateStep('save_evaluation_result', 'done');
 
       if (task.status !== 'success') {
-        setError(task.error || task.ext?.error_msg || task.ext?.error || '评测未通过，已按 BLOCKED 保存门禁结果');
+        setError(getEvaluationTaskError(task) || '评测未通过，已按 BLOCKED 保存门禁结果');
       }
       onFinished?.();
     } catch (cause) {
       const failureStep = currentStepKeyRef.current;
-      if (failureStep) updateStep(failureStep, 'failed');
-      setError(cause instanceof Error ? cause.message : '重新发起评测失败');
+      const message = cause instanceof Error ? cause.message : '重新发起评测失败';
+      if (failureStep) updateStep(failureStep, 'failed', message);
+      setError(message);
     } finally {
+      setRetryingStep(undefined);
       setRunning(false);
     }
   }, [
@@ -210,8 +171,54 @@ export function useStandardEvaluationFlow({
     running,
     sampleSets,
     selectedSampleSetId,
+    updateEvaluationTask,
     updateStep,
   ]);
+
+  const retryStep = useCallback(
+    async (key: StandardEvaluationStepKey) => {
+      if (!enabled || !canStart || running) return;
+
+      setRetryingStep(key);
+      setRunning(true);
+      setError(undefined);
+      try {
+        await retryStandardEvaluationStep({
+          step: key,
+          botId,
+          botVersion,
+          ownerId,
+          selectedSampleSet,
+          goalType,
+          goalText: goalType === 'semantic' ? goalPrompt : '',
+          isAlive: () => aliveRef.current,
+          onStepUpdate: updateStep,
+          onEnvironmentUpdate: setEnvironment,
+          onTaskUpdate: updateEvaluationTask,
+        });
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : '节点重试失败';
+        updateStep(key, 'failed', message);
+        setError(message);
+      } finally {
+        setRetryingStep(undefined);
+        setRunning(false);
+      }
+    },
+    [
+      botId,
+      botVersion,
+      canStart,
+      enabled,
+      goalPrompt,
+      goalType,
+      ownerId,
+      running,
+      selectedSampleSet,
+      updateEvaluationTask,
+      updateStep,
+    ],
+  );
 
   const reportUrl = evaluationTask?.report_url || evaluationTask?.ext?.eval_progress?.report?.reportUrl;
 
@@ -237,5 +244,7 @@ export function useStandardEvaluationFlow({
     reportUrl,
     error,
     startEvaluation,
+    retryStep,
+    retryingStep,
   };
 }

@@ -1,6 +1,7 @@
 import { EvalFileInput } from '@/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput';
+import { StandardEvaluationFlowSteps } from '@/components/BotWorkshop/ServiceBotEvaluation/StandardEvaluationFlowSteps';
 import { evaluationStatusLabel, evaluationStatusTone } from '@/components/BotWorkshop/ServiceBotEvaluation/evaluationStatus';
-import { Badge, type BadgeTone } from '@/components/ui/Badge';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
@@ -17,29 +18,7 @@ interface RestartEvaluationPanelProps {
   onFinished?: () => void;
 }
 
-const stepStatusLabel = (status: string) => {
-  if (status === 'pending') return '待执行';
-  if (status === 'running') return '执行中';
-  if (status === 'done') return '已完成';
-  if (status === 'failed') return '失败';
-  return '待执行';
-};
-
-const stepStatusTone: Record<string, BadgeTone> = {
-  pending: 'neutral',
-  running: 'primary',
-  done: 'success',
-  failed: 'error',
-};
-
 const MASA_AGENT_EVALUATION_URL = 'https://masa.alipay.com/evaluation/agent/projects';
-
-const stepStatusClassName = (status: string) => {
-  if (status === 'running') return 'border-primary/30 bg-primary/5';
-  if (status === 'done') return 'border-success/30 bg-success/5';
-  if (status === 'failed') return 'border-destructive/30 bg-destructive/5';
-  return 'border-border bg-background';
-};
 
 export function RestartEvaluationPanel({
   botId,
@@ -71,6 +50,8 @@ export function RestartEvaluationPanel({
     reportUrl,
     error,
     startEvaluation,
+    retryStep,
+    retryingStep,
   } = useStandardEvaluationFlow({
     botId,
     botVersion,
@@ -214,25 +195,14 @@ export function RestartEvaluationPanel({
             </Badge>
           ) : null}
         </div>
-        <div className="space-y-2">
-          {steps.map((step, index) => (
-            <div
-              key={step.key}
-              className={`flex flex-col gap-3 rounded-lg border p-4 transition-colors sm:flex-row sm:items-center sm:justify-between ${stepStatusClassName(step.status)}`}
-            >
-              <div className="flex min-w-0 flex-1 items-start gap-3">
-                <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-                  {index + 1}
-                </span>
-                <div className="min-w-0">
-                  <p className="m-0 text-sm font-medium text-foreground">{step.title}</p>
-                  <p className="m-0 mt-1 text-xs leading-5 text-muted-foreground">{step.description}</p>
-                </div>
-              </div>
-              <Badge tone={stepStatusTone[step.status]}>{stepStatusLabel(step.status)}</Badge>
-            </div>
-          ))}
-        </div>
+        <StandardEvaluationFlowSteps
+          steps={steps}
+          running={running}
+          enabled={enabled}
+          canStart={canStart}
+          retryingStep={retryingStep}
+          onRetry={(step) => void retryStep(step)}
+        />
         <div className="flex flex-wrap items-center justify-end gap-3 border-t border-divider pt-4">
           <Button
             disabled={!goalReady || !selectedSampleSetId || sampleSetLoading || running || !canStart || !enabled}

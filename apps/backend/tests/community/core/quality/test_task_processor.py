@@ -1153,7 +1153,34 @@ class TestTaskProcessor:
 
         assert result.status == "task_created"
         mock_masa_eval_http.get.assert_called_once_with(
-            "/eval/progress?set_task_uuid=test-task-uuid"
+            "/eval/progress",
+            params={"set_task_uuid": "test-task-uuid"},
+        )
+
+    def test_to_task_executed_reuses_eval_start_env(
+        self, processor, mock_repo, mock_masa_eval_http
+    ):
+        """The progress poll must carry the env used by /eval/start."""
+        task = make_task(
+            id=1,
+            status="task_created",
+            ext={"set_task_uuid": "test-task-uuid", "eval_start_env": "eval-bus-1"},
+        )
+        mock_repo.get_by_id.return_value = task
+
+        response = MagicMock()
+        response.json.return_value = {
+            "success": True,
+            "data": {"set_task_uuid": "test-task-uuid", "status": "running"},
+        }
+        mock_masa_eval_http.get.return_value = response
+
+        result = processor.to_task_executed(1)
+
+        assert result.status == "task_created"
+        mock_masa_eval_http.get.assert_called_once_with(
+            "/eval/progress",
+            params={"set_task_uuid": "test-task-uuid", "env": "eval-bus-1"},
         )
 
     def test_to_task_executed_completed_transitions_to_success(
@@ -1526,7 +1553,26 @@ class TestTaskProcessor:
 
         assert result["status"] == "completed"
         mock_masa_eval_http.get.assert_called_once_with(
-            "/eval/progress?set_task_uuid=test-task-uuid"
+            "/eval/progress",
+            params={"set_task_uuid": "test-task-uuid"},
+        )
+
+    def test_call_eval_progress_api_keeps_same_env_as_start(self, processor, mock_masa_eval_http):
+        """The progress request must carry the Eval-zone env used by /eval/start."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '{"success": true, "data": {"status": "init", "executed_count": 0, "total_count": 1}}'
+        mock_response.json.return_value = {
+            "success": True,
+            "data": {"status": "init", "executed_count": 0, "total_count": 1},
+        }
+        mock_masa_eval_http.get.return_value = mock_response
+
+        processor._call_eval_progress_api("set-task-1", env="eval-bot-1:eval")
+
+        mock_masa_eval_http.get.assert_called_once_with(
+            "/eval/progress",
+            params={"env": "eval-bot-1:eval", "set_task_uuid": "set-task-1"},
         )
 
     def test_call_eval_progress_api_missing_data_raises_error(

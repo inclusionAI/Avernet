@@ -10,7 +10,9 @@ interface EvaluationHistoryRecord {
   publish_id?: string;
   bot_version?: string;
   mode?: string;
+  task_type?: string;
   status?: string;
+  decision_status?: string;
   gate_status?: string;
   cert_id?: string;
   cert_result?: string;
@@ -47,6 +49,24 @@ const gateStatusLabel = (record: EvaluationHistoryRecord) => {
 const evaluatedAt = (record: EvaluationHistoryRecord) =>
   record.evaluated_at ?? record.decided_at ?? '时间未知';
 
+const evaluationMode = (record: EvaluationHistoryRecord) => {
+  const certId = record.cert_id ?? '';
+  const isStandardEvaluation =
+    record.task_type === 'STANDARD_EVAL' ||
+    record.decision_status === 'STANDARD_EVAL_FINISHED' ||
+    certId.startsWith('standard_eval:');
+  if (isStandardEvaluation) return '标准统一评测';
+
+  const isSimpleEvaluation =
+    record.task_type === 'SIMPLE_CERT_SUBMIT' ||
+    record.decision_status === 'succeeded' ||
+    record.mode === '极简统一评测' ||
+    (Boolean(certId) && !certId.startsWith('standard_eval:'));
+  if (isSimpleEvaluation) return '极简统一评测';
+
+  return '标准统一评测';
+};
+
 const releaseTitle = (record: EvaluationHistoryRecord, isCurrent: boolean) =>
   isCurrent
     ? `当前发布单 · ${record.bot_version ?? '当前版本'}`
@@ -74,7 +94,7 @@ const HistoryRecordRow = ({
     <div className="min-w-0 flex-1">
       <p className="m-0 font-medium text-foreground">
         {releaseTitle(record, isCurrent)}
-        <span className="ml-2 text-muted-foreground">{record.mode ?? '极简统一评测'}</span>
+        <span className="ml-2 text-muted-foreground">{evaluationMode(record)}</span>
       </p>
       <p className="m-0 mt-1 break-words text-muted-foreground">{evaluatedAt(record)}</p>
       <p className="m-0 mt-1 break-words text-muted-foreground">{releaseMeta(record) || '—'}</p>
