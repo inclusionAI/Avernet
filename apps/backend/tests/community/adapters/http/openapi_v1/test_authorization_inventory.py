@@ -378,12 +378,15 @@ _DEFERRED_OPERATIONS = frozenset(
         # relocate it. The seam adjudicates one level; this is a disjunction,
         # and expressing it is not a question this feature settles.
         #
-        # File reads now have the same disjunction: authorize_file_list
-        # checks MEMBER or BCN friendship plus Backend-owned session identity.
-        # Upload/delete operations keep Check(MEMBER).
+        # File operations now have the same disjunction: file_access checks
+        # MEMBER or BCN friendship plus Backend-owned session identity. Friend
+        # mutations additionally require a non-TeClaw Caller instance.
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status"),
+        ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents"),
+        ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions"),
         ("POST", "/openapi/v1/bots/{bot_id}/sessions"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"),
