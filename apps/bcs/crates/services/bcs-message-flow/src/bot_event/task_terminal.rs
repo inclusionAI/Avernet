@@ -48,7 +48,7 @@ pub(super) async fn finish(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
         Ok(deliveries) => deliveries,
         Err(err) => { error.get_or_insert(err); Vec::new() }
     };
-    try_channel_outbound(flow, &terminal).await;
+    try_channel_outbound(flow, &terminal, Some(row)).await;
     if let Err(err) = flow.frontend_delivery.unregister_run(&terminal.run_id).await { error.get_or_insert(err); }
     if let Err(err) = flow.complete_send_context(&terminal.run_id).await { error.get_or_insert(err); }
     flow.message_tracker.cleanup_run(&terminal.run_id).await;

@@ -156,6 +156,8 @@ pub struct OutboundMessage {
     pub render_hint: ChannelRenderHint,
     /// Original IM message id when this run was started by a channel message.
     pub source_im_message_id: Option<String>,
+    /// Trusted BCS dispatch mode; never inferred from a Bot event payload.
+    pub caller_dispatch: bool,
     /// 该消息是否来自 IM(防回环:来自 IM 的不再转发回去)。
     pub source_is_channel: bool,
 }

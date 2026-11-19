@@ -52,6 +52,7 @@ impl BcsChannelService {
                 StateMachineTerminalStatus::Failed => ChannelOutboundPurpose::StateMachineFailed },
             text: Some(n.text.clone()), raw_payload: serde_json::json!({ "request_id": n.request_id, "run_id": event.run_id, "node_id": n.node_id }),
             render_hint: ChannelRenderHint::Render, source_im_message_id: None,
+            caller_dispatch: false,
         }).await?;
         if !result.delivered {
             return Err(result.error.unwrap_or_else(|| ServiceError::InternalError("terminal IM delivery was not confirmed".into())));

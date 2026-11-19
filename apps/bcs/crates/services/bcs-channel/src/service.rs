@@ -505,6 +505,7 @@ impl ChannelService for BcsChannelService {
                     raw_payload: msg.raw_payload.clone(),
                     render_hint: msg.render_hint,
                     source_im_message_id: msg.source_im_message_id.clone(),
+                    caller_dispatch: msg.caller_dispatch,
                 })
                 .await
             {
