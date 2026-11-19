@@ -205,6 +205,9 @@ const BotWorkshopDetailPage: React.FC = () => {
           bot={bot}
           runtimeStage={debugRuntimeStage}
           ownerId={addressedOwnerId}
+          // 查看正式运行的 service Bot 时调试面板只读回看,直接对话请走"对话"页。
+          composerDisabled={debugRuntimeStage === 'online' && bot.serviceMode === 'service'}
+          composerDisabledPlaceholder="正式运行的服务Bot请在“对话”中使用"
           fullscreen={debugFullscreen}
           onClose={() => {
             setDebugOpen(false);

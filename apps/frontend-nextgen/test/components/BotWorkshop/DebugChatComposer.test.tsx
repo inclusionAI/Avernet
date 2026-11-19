@@ -109,6 +109,29 @@ it('按线上态协议把 Sender 文件引用发送给调试会话', () => {
   });
 });
 
+it('composerDisabled 时整体禁用输入并以指引文案占位', () => {
+  const onSend = jest.fn();
+
+  render(
+    <DebugChatComposer
+      bot={bot}
+      session={session}
+      userId="viewer"
+      isRequesting={false}
+      composerDisabled
+      composerDisabledPlaceholder="正式运行的服务Bot请在“对话”中使用"
+      onSend={onSend}
+      onStop={jest.fn()}
+    />,
+  );
+
+  expect(mockSenderProps.disabled).toBe(true);
+  expect(mockSenderProps.placeholder).toBe('正式运行的服务Bot请在“对话”中使用');
+
+  fireEvent.click(screen.getByRole('button', { name: '模拟发送' }));
+  expect(onSend).not.toHaveBeenCalled();
+});
+
 it('从能力菜单打开与线上态相同的上传入口', () => {
   const onUpload = jest.fn();
 
