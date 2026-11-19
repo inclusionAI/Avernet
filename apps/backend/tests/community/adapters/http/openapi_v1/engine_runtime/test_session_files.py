@@ -443,7 +443,7 @@ def test_friend_file_mutations_require_caller_instance(
     assert resources.calls == []
 
 
-def test_friend_can_upload_complete_poll_and_delete_own_non_teclaw_session(
+def test_friend_file_mutations_route_by_trusted_bot_call_type(
     friend_client, resources, runtime_bindings, expert,
 ):
     common = {
@@ -475,7 +475,10 @@ def test_friend_can_upload_complete_poll_and_delete_own_non_teclaw_session(
     assert completed.status_code == 200, completed.text
     assert status.status_code == 200, status.text
     assert removed.status_code == 200, removed.text
-    assert runtime_bindings.requests[0].target is RuntimeBindingTarget.CALLER_INSTANCE
+    # The public caller_instance selector means "the friend's chat runtime".
+    # AUTO preserves an independent Caller for call_type=caller and selects the
+    # shared publish binding for call_type=owner, which has no instance row.
+    assert runtime_bindings.requests[0].target is RuntimeBindingTarget.AUTO
     assert runtime_bindings.requests[0].actor_user_id == "friend-1"
     owned_calls = [call for call in expert.calls if call[0] == "get_owned_chat_session"]
     assert len(owned_calls) == 4

@@ -572,7 +572,7 @@ async def create_session_file_upload_intents(
         intents = adapter.create_upload_intents(
             actor_user_id=user_id,
             creator_name=creator_name,
-            target=runtime_target,
+            target=access.target,
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,
@@ -804,7 +804,7 @@ async def delete_session_file(
     try:
         await adapter.delete(
             target=RuntimeBindingRequest(
-                target=runtime_target,
+                target=access.target,
                 bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=access.stage,
             ),
             session_key=session_id,

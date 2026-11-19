@@ -28,6 +28,7 @@ class SessionFileAccess:
 
     facts: BotFacts
     stage: str
+    target: RuntimeBindingTarget
 
 
 async def authorize_file_list(
@@ -86,7 +87,9 @@ async def authorize_file_operation(
                 relay, bot_id, caller_id=user_id, owner_id=owner_id,
                 stage=stage.value, surface="sessions",
             )
-            return SessionFileAccess(facts=facts, stage=stage.value)
+            return SessionFileAccess(
+                facts=facts, stage=stage.value, target=runtime_target,
+            )
         except ManagedBotNotFoundError:
             friend_user_id = user_id
 
@@ -115,4 +118,8 @@ async def authorize_file_operation(
         raise EngineResourceNotFoundError(
             "friend session files are unavailable for TeClaw"
         )
-    return SessionFileAccess(facts=facts, stage=resolved_stage)
+    return SessionFileAccess(
+        facts=facts,
+        stage=resolved_stage,
+        target=RuntimeBindingTarget.AUTO,
+    )
