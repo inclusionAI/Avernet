@@ -1,0 +1,44 @@
+apps/bcs-internal/bcn-configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 17-25
+apps/bcs-internal/bcn-configs/sofa-rpc-gray.toml
+  h_fa66fe7c023b4b 22-30
+apps/bcs-internal/bcn-configs/sofa-rpc-pre.toml
+  h_fa66fe7c023b4b 21-29
+apps/bcs-internal/bcn-configs/sofa-rpc-prod.toml
+  h_fa66fe7c023b4b 22-30
+apps/bcs-internal/bcn-configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 60-68
+apps/bcs-internal/configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 17-25
+apps/bcs-internal/configs/sofa-rpc-gray.toml
+  h_fa66fe7c023b4b 18-26
+apps/bcs-internal/configs/sofa-rpc-local.toml
+  h_fa66fe7c023b4b 17-25
+apps/bcs-internal/configs/sofa-rpc-pre.toml
+  h_fa66fe7c023b4b 17-25
+apps/bcs-internal/configs/sofa-rpc-prod.toml
+  h_fa66fe7c023b4b 18-26
+apps/bcs-internal/configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 53-61
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  h_fa66fe7c023b4b 141-164,200,260,298-301,334
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host.rs
+  h_fa66fe7c023b4b 4,7-11,14-18,35-39,45-47,51,64
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa.rs
+  h_fa66fe7c023b4b 25-26,155-168,185,195,212,251-256
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_tonic.rs
+  h_fa66fe7c023b4b 2-3
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  h_fa66fe7c023b4b 8,128-133,158,174,274,287-290,302,334-340,349,362,364
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eaa533ba071127998ec1ec0813f53cff3ad5f701",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

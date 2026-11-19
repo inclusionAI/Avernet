@@ -1,0 +1,21 @@
+apps/backend/tests/corp/e2e/test_manifest_mcp_full_replace_flow.py
+  s_fc1557df5d7924::t_84ee3653b2ffeb 82,122-137,175,243-244,258,282,329-331,335-336,338-340,348-352,451-452
+submodules/avernet
+  s_fc1557df5d7924::t_81c7c11b7e221b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52fb1753a773e0af516d0503e0d6e0e459baf6f9",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

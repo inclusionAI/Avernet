@@ -1,0 +1,50 @@
+apps/bcsfuse/tests/deployment/test_zbcsfuse_runtime.py
+  s_4645e948b53118::t_6d726a19178c1f 90,92,121-130,173-175,203-206,221-225
+  s_4645e948b53118::t_383dcd2a4ca116 3
+apps/bcsfuse/internal/bcsfuse_internal/config/zbcsfuse.py
+  s_4645e948b53118::t_36806b4f188e61 39,118-119,136-141
+  s_4645e948b53118::t_3f73014fa0d9e6 142
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_4645e948b53118::t_5745b6ee457df2 49-56
+apps/bcsfuse/scripts/ci/configure_zbcsfuse.py
+  s_4645e948b53118::t_383dcd2a4ca116 65-67
+  s_4645e948b53118::t_5745b6ee457df2 38-39,61-64,68-71
+apps/bcsfuse/tests/contracts/test_internal_storage_providers.py
+  s_4645e948b53118::t_6d726a19178c1f 94,96-107,110-123
+  s_4645e948b53118::t_383dcd2a4ca116 95,108-109
+apps/bcsfuse/internal/bcsfuse_internal/providers/zdas_weak_read.py
+  s_4645e948b53118::t_383dcd2a4ca116 1-42
+apps/bcsfuse/tests/alipay/test_bcn_metadata.py
+  s_4645e948b53118::t_cc40bf48bef98a 6,259-303,307-344,348-355
+  s_4645e948b53118::t_383dcd2a4ca116 304-306,345-347
+  s_4645e948b53118::t_62429940ba9cdb 356-357
+apps/bcsfuse/internal/zbcsfuse_internal/providers/bcn_metadata.py
+  s_4645e948b53118::t_1ff1b4e6c65dcd 1,55,57,71-75,120-122
+apps/bcsfuse/internal/zbcsfuse_internal/providers/card_repository.py
+  s_4645e948b53118::t_1ff1b4e6c65dcd 5,88-94
+  s_4645e948b53118::t_d71ce01c8f9c38 95-96
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_4645e948b53118::t_383dcd2a4ca116 47
+  s_4645e948b53118::t_5745b6ee457df2 19-22,145
+  s_4645e948b53118::t_36806b4f188e61 126-127,140-144,146-158,227-228
+apps/bcsfuse/tests/deployment/test_zbcsfuse_config.py
+  s_4645e948b53118::t_6d726a19178c1f 170-190
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay_catalog.py
+  s_4645e948b53118::t_1ff1b4e6c65dcd 49,105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5789f8a76af9e03e4747212deeb61b14edddb921",
+  "prompts": {},
+  "sessions": {
+    "s_4645e948b53118": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e741-60e4-7c20-be5a-3c6017a7a86b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

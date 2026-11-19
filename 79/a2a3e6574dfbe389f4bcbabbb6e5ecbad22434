@@ -1,0 +1,30 @@
+apps/bcs-internal/.aci.yml
+  h_fa66fe7c023b4b 63
+apps/bcs-internal/contracts/alipayagentbase/README.md
+  h_fa66fe7c023b4b 1-51
+apps/bcs-internal/contracts/alipayagentbase/SOURCE-BASELINE.md
+  h_fa66fe7c023b4b 1-92
+apps/bcs-internal/contracts/alipayagentbase/api-signatures.json
+  h_fa66fe7c023b4b 1-2730
+apps/bcs-internal/contracts/alipayagentbase/contract-lock.json
+  h_fa66fe7c023b4b 1-222
+apps/bcs-internal/contracts/alipayagentbase/contract-lock.schema.json
+  h_fa66fe7c023b4b 1-150
+apps/bcs-internal/contracts/alipayagentbase/dto-closure-manifest.json
+  h_fa66fe7c023b4b 1-272
+apps/bcs-internal/docs/sofa-rpc/alipayagentbase-a2a-remote-server-contract.md
+  h_fa66fe7c023b4b 1-71
+apps/bcs-internal/scripts/check-agentbase-contract.py
+  h_fa66fe7c023b4b 1-1179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "79a2a3e6574dfbe389f4bcbabbb6e5ecbad22434",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/Cargo.toml
+  s_460ca40e7dae23::t_d463b7413162fb 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3c0659171c8ea1fa1e0bcff525efc58eed999256",
+  "prompts": {},
+  "sessions": {
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

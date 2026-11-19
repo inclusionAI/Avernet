@@ -1,0 +1,33 @@
+apps/bcs/crates/bootstrap/bcs/tests/bootstrap_auth_boundaries.rs
+  s_257b4c26393128::t_81fcf65e796db5 5
+apps/bcs/crates/bootstrap/bcs/tests/bot_authority_migration.rs
+  s_257b4c26393128::t_bdb9699395b7c9 267-273
+apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs
+  s_257b4c26393128::t_a8a4e4f59ce815 40
+apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs
+  s_257b4c26393128::t_57cf0e044ea197 60,62,66,71,192,194,338,347
+apps/bcs/crates/tools/bcs-admin/src/migrate_regression_tests.rs
+  s_257b4c26393128::t_5ae40ffb069e5e 45-47
+apps/bcs/scripts/e2e-test/custom_binding_story.py
+  s_257b4c26393128::t_677bba40e8ee27 74
+apps/bcs/scripts/e2e-test/fuse_cards_story.py
+  s_257b4c26393128::t_591e22ba86ec1a 310
+apps/bcs/scripts/e2e-test/oauth/config_cases.py
+  s_257b4c26393128::t_fea9b7876150a3 8,14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c6def0aeddd6f54b8f71bb39c094c94d55d06862",
+  "prompts": {},
+  "sessions": {
+    "s_257b4c26393128": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f292-a423-71b0-9d30-cfb5b4573a1e",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

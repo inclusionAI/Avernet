@@ -1,0 +1,25 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/README.md
+  s_460ca40e7dae23::t_16b742e5a68006 222-225
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/agent_card_management/v1/agent_card_management.proto
+  s_460ca40e7dae23::t_a7aab76aa86ceb 74-76,89
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/mapping.rs
+  s_460ca40e7dae23::t_c85a1098f911f4 110,126,1021-1032
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  s_460ca40e7dae23::t_440414ba4a8ab7 318,390
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "203202bc71581f2b9c09b7fb1152c933ddfc2843",
+  "prompts": {},
+  "sessions": {
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

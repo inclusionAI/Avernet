@@ -1,0 +1,44 @@
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  s_83a624b3301ddd::t_ac3230f86385ac 13
+apps/bcs-internal/scripts/check-p4.sh
+  s_83a624b3301ddd::t_ac3230f86385ac 21
+apps/bcs-internal/specs/README.md
+  s_83a624b3301ddd::t_ac3230f86385ac 21-22
+apps/bcs-internal/Cargo.toml
+  s_83a624b3301ddd::t_ac3230f86385ac 6,54-55
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_83a624b3301ddd::t_ac3230f86385ac 10
+apps/bcs-internal/README.md
+  s_83a624b3301ddd::t_ac3230f86385ac 20
+apps/bcs-internal/Cargo.lock
+  s_83a624b3301ddd::t_86fc4212fb3444 531,682,856-879,1935
+apps/bcs-internal/crates/plugins/bcs-app-identity-oneid/CONTEXT.md
+  s_83a624b3301ddd::t_6a45b800d5d92d 1-39
+apps/bcs-internal/crates/plugins/bcs-app-identity-oneid/Cargo.toml
+  s_83a624b3301ddd::t_1efeb589c48ac2 1-20
+apps/bcs-internal/crates/plugins/bcs-app-identity-oneid/src/lib.rs
+  s_83a624b3301ddd::t_ca1b86fb897538 1-264
+apps/bcs-internal/crates/plugins/bcs-app-identity-oneid/src/sdk.rs
+  s_83a624b3301ddd::t_9829542a1655a2 1-146
+apps/bcs-internal/specs/application-identity/plan.md
+  s_83a624b3301ddd::t_b8ba5c85c1d055 1-2,4-29
+  s_83a624b3301ddd::t_9b8ae043de07df 3
+apps/bcs-internal/specs/application-identity/spec.md
+  s_83a624b3301ddd::t_5a24b6acf8aefe 1-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23f403179d0066141c430fcf60148a67dd515d1b",
+  "prompts": {},
+  "sessions": {
+    "s_83a624b3301ddd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e45d-5111-7891-a6fd-1154755a372f",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

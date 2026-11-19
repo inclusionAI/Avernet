@@ -1,0 +1,14 @@
+submodules/avernet
+  h_3141242c39a938 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6ce4228bfa83a42667aa34e8dff253db999d2c0a",
+  "prompts": {},
+  "humans": {
+    "h_3141242c39a938": {
+      "author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

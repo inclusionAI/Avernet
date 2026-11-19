@@ -1,0 +1,153 @@
+apps/bcs/crates/adapters/http/bcs-http/tests/network_tracing_otel.rs
+  s_405f6041118eb1::t_32b392307674dc 132
+apps/bcs/crates/adapters/http/bcs-http/src/routes/bot_chat.rs
+  s_405f6041118eb1::t_521dbe4b2ee79e 122-131,170,172,215
+  s_405f6041118eb1::t_6cb7cd0b0044d3 121
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_management_errors.rs
+  s_405f6041118eb1::t_636e09984d8d53 594-603,668,674,676-695
+  s_405f6041118eb1::t_406857ff3ad012 754
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/provider_transport_contract.rs
+  s_405f6041118eb1::t_32b392307674dc 334,373,413,555,696,740,774,842,936,999,1222,1289,1326,1346,1545,1754,1801,1851,1898,1944,1990
+apps/bcs/crates/bootstrap/bcs/src/http_adapter.rs
+  s_405f6041118eb1::t_554e16bc826964 151
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/conformance_a2a_delivery.rs
+  s_405f6041118eb1::t_32b392307674dc 182
+apps/bcs/crates/bootstrap/bcs/tests/metrics_wrappers.rs
+  s_405f6041118eb1::t_32b392307674dc 540,803
+apps/bcs/crates/bootstrap/bcs/src/server/resource_builders.rs
+  s_405f6041118eb1::t_7f7c10993c03c9 742-747
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued_runtime.rs
+  s_405f6041118eb1::t_521dbe4b2ee79e 37,39-41,56
+  s_405f6041118eb1::t_636e09984d8d53 38
+  s_405f6041118eb1::t_6ab96b58f5aec3 11-15
+apps/bcs/crates/services/bcs-message-flow/src/bot_event/relay.rs
+  s_405f6041118eb1::t_32b392307674dc 457
+apps/bcs/crates/bootstrap/bcs/src/server/a2a_wiring.rs
+  s_405f6041118eb1::t_7f7c10993c03c9 29,33-39
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/web_send.rs
+  s_405f6041118eb1::t_32b392307674dc 1087
+apps/bcs/crates/bootstrap/bcs/tests/run_output_lifecycle.rs
+  s_405f6041118eb1::t_32b392307674dc 158
+apps/bcs/crates/adapters/ws/bcs-ws/tests/diagnostic_registries.rs
+  s_405f6041118eb1::t_32b392307674dc 13
+apps/bcs/crates/services/bcs-message-flow/src/task_flow.rs
+  s_405f6041118eb1::t_32b392307674dc 503
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/contracts/caller_execution.rs
+  s_405f6041118eb1::t_32b392307674dc 22
+apps/bcs/crates/adapters/ws/bcs-ws/tests/bot_delivery_port.rs
+  s_405f6041118eb1::t_32b392307674dc 23,51,79
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/mod.rs
+  s_405f6041118eb1::t_521dbe4b2ee79e 304-311,327
+apps/bcs/crates/service-api/bcs-service-api/src/port/delivery.rs
+  s_405f6041118eb1::t_32b392307674dc 33-34
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_direct_a2a.rs
+  s_405f6041118eb1::t_32b392307674dc 82
+  s_405f6041118eb1::t_6ab96b58f5aec3 148,150-152
+  s_405f6041118eb1::t_1df652090f12c4 156
+  s_405f6041118eb1::t_8dc6f196dec828 113-147,149,153-155,157-163
+  s_405f6041118eb1::t_33a4680a92eec7 112
+apps/bcs/crates/adapters/http/bcs-http/src/state.rs
+  s_405f6041118eb1::t_521dbe4b2ee79e 492,589,772-773
+  s_405f6041118eb1::t_2535fee316d2d4 774-776
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/provider_headers_contract.rs
+  s_405f6041118eb1::t_32b392307674dc 118
+apps/bcs/crates/bootstrap/bcs/src/config/root.rs
+  s_405f6041118eb1::t_7f7c10993c03c9 150-152,492
+apps/bcs/crates/bootstrap/bcs/tests/delivery_worker_load.rs
+  s_405f6041118eb1::t_32b392307674dc 81
+apps/bcs/crates/services/bcs-message-flow/tests/support/protected_dispatch_io.rs
+  s_405f6041118eb1::t_32b392307674dc 93
+apps/bcs/crates/service-api/bcs-service-api/tests/message_flow_contracts.rs
+  s_405f6041118eb1::t_32b392307674dc 74
+apps/bcs/crates/services/bcs-message-flow/src/queued_group.rs
+  s_405f6041118eb1::t_32b392307674dc 921
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  s_405f6041118eb1::t_6b92ef061f8e58 200-206
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_names.rs
+  s_405f6041118eb1::t_521dbe4b2ee79e 47-57,60,62-81,85-89
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_protected_dispatch_runtime_contract.rs
+  s_405f6041118eb1::t_32b392307674dc 130
+apps/bcs/crates/services/bcs-message-flow/src/bot_event/task.rs
+  s_405f6041118eb1::t_32b392307674dc 178
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_405f6041118eb1::t_1df652090f12c4 369
+apps/bcs/crates/services/bcs-system-message/src/dispatcher.rs
+  s_405f6041118eb1::t_32b392307674dc 359
+apps/bcs/crates/bootstrap/bcs/src/config/tests.rs
+  s_405f6041118eb1::t_6b92ef061f8e58 8-33
+  s_405f6041118eb1::t_70d6be953aa493 7
+apps/bcs/crates/service-api/bcs-service-api/src/lib.rs
+  s_405f6041118eb1::t_32b392307674dc 12
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs
+  s_405f6041118eb1::t_636e09984d8d53 431-434
+  s_405f6041118eb1::t_7f7c10993c03c9 90,93-94,96-97,99-114,123,133-143,165-172,206-208,304-306,354
+  s_405f6041118eb1::t_1df652090f12c4 95
+  s_405f6041118eb1::t_554e16bc826964 12,50,66-89,91-92,98,132
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/dispatch.rs
+  s_405f6041118eb1::t_32b392307674dc 245
+  s_405f6041118eb1::t_3b3cffab6a5f01 38-52
+  s_405f6041118eb1::t_521dbe4b2ee79e 66-68
+apps/bcs/crates/services/bcs-message-flow/tests/caller_p2c_e2e_contract.rs
+  s_405f6041118eb1::t_32b392307674dc 86
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_runtime.rs
+  s_405f6041118eb1::t_32b392307674dc 89
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime_dispatch.rs
+  s_405f6041118eb1::t_32b392307674dc 358,363
+apps/bcs/crates/service-api/bcs-config-api/src/lib.rs
+  s_405f6041118eb1::t_32b392307674dc 15
+apps/bcs/crates/adapters/http/bcs-http/src/routes/admin_invocations.rs
+  s_405f6041118eb1::t_636e09984d8d53 173
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_required_routes_gate.rs
+  s_405f6041118eb1::t_32b392307674dc 70
+apps/bcs/crates/service-api/bcs-service-api/src/application/a2a_chat.rs
+  s_405f6041118eb1::t_32b392307674dc 47,77
+apps/bcs/crates/services/bcs-bot/tests/caller_delivery_gate.rs
+  s_405f6041118eb1::t_32b392307674dc 139
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/structured_delivery.rs
+  s_405f6041118eb1::t_32b392307674dc 174
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/group_send.rs
+  s_405f6041118eb1::t_32b392307674dc 446
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued.rs
+  s_405f6041118eb1::t_521dbe4b2ee79e 23-30,75-79,91
+  s_405f6041118eb1::t_6ab96b58f5aec3 85-87
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat.rs
+  s_405f6041118eb1::t_32b392307674dc 48,196
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/run_terminal.rs
+  s_405f6041118eb1::t_32b392307674dc 44,102,155,208,276,335
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery/test_user_contract.rs
+  s_405f6041118eb1::t_554e16bc826964 4-5,27,47,50-53,59,61
+  s_405f6041118eb1::t_8dc6f196dec828 18
+  s_405f6041118eb1::t_636e09984d8d53 1-3,6-17,19-26,28-46,48-49,54-58,60,62-67
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/event_parser.rs
+  s_405f6041118eb1::t_32b392307674dc 20,82,143
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/run_start.rs
+  s_405f6041118eb1::t_32b392307674dc 27,50,102,192,285,415
+apps/bcs/crates/bootstrap/bcs/src/config/validation.rs
+  s_405f6041118eb1::t_7f7c10993c03c9 126-130,134-139
+  s_405f6041118eb1::t_3b3cffab6a5f01 131-133
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bot_chat_contract.rs
+  s_405f6041118eb1::t_32b392307674dc 216
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/callback_abort.rs
+  s_405f6041118eb1::t_32b392307674dc 183
+apps/bcs/crates/service-api/bcs-config-api/src/a2a_test_user.rs
+  s_405f6041118eb1::t_521dbe4b2ee79e 12-17,51-52
+  s_405f6041118eb1::t_32b392307674dc 1-11,18-50,53-64
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/dispatch.rs
+  s_405f6041118eb1::t_32b392307674dc 468
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4b4e507f637d4e71d23b2ec6ad67eae977d2f2b3",
+  "prompts": {},
+  "sessions": {
+    "s_405f6041118eb1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4a4-3df3-7910-8f9f-0ef7f4920a3e",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

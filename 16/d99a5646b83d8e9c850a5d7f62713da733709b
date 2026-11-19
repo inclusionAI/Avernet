@@ -1,0 +1,24 @@
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/README.md
+  s_172d103570f764::t_543a8548bd44ae 39-41
+  s_172d103570f764::t_3ad754c15d8baa 38,42-45
+apps/bcs-internal/docs/diagnostics/README.md
+  s_172d103570f764::t_3ad754c15d8baa 9
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/outbound.rs
+  s_172d103570f764::t_4551e31efe89dc 1561-1563,1584,4044,4069,4073-4075,4077-4080,4093-4096
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "16d99a5646b83d8e9c850a5d7f62713da733709b",
+  "prompts": {},
+  "sessions": {
+    "s_172d103570f764": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c5c5-dcdf-70e1-a916-44078da46c35",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

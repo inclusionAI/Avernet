@@ -1,0 +1,27 @@
+apps/bcs-internal/specs/2026-11-16-tbase-store/verification.md
+  s_a9c87caa3de52e::t_3788c36cc51d84 155-165
+apps/bcs-internal/crates/plugins/bcs-tbase-store/Cargo.toml
+  s_a9c87caa3de52e::t_d9cfe01b7e1493 26
+apps/bcs-internal/crates/plugins/bcs-tbase-store/README.md
+  s_a9c87caa3de52e::t_3788c36cc51d84 168-170
+apps/bcs-internal/specs/2026-11-16-tbase-store/progress.md
+  s_a9c87caa3de52e::t_3788c36cc51d84 6
+apps/bcs-internal/Cargo.lock
+  s_a9c87caa3de52e::t_da29b49406d004 7178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7034d541df6f006de6d1916efe01c639897cf09c",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

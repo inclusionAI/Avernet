@@ -1,0 +1,21 @@
+apps/bcs/crates/services/bcs-bot-store/src/a2a.rs
+  s_257b4c26393128::t_7ba88fa54f189a 159-161
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_a2a_storage.rs
+  s_257b4c26393128::t_c3c87b0e85e28e 416-457
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "49f828794d2e5ea1491260bb7161dfa3b418efa8",
+  "prompts": {},
+  "sessions": {
+    "s_257b4c26393128": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f292-a423-71b0-9d30-cfb5b4573a1e",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
