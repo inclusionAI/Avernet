@@ -1,0 +1,56 @@
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  h_059e888e5e4e82 39,513,524
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 154-158
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/authorization.py
+  h_059e888e5e4e82 33,50,94
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/context_state_machines.py
+  h_059e888e5e4e82 63,98
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/method_state_machines.py
+  h_059e888e5e4e82 57,158
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/state_machine.py
+  h_059e888e5e4e82 33,170
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/README.md
+  h_059e888e5e4e82 55-64,149-172
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/method_binding.py
+  h_059e888e5e4e82 1,3-5,8,28,33,46-52,54,56-57,59-60,63,245,262
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/method_composition.py
+  h_059e888e5e4e82 68-69
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/lifecycle.py
+  h_059e888e5e4e82 308
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/creation_facts.py
+  h_059e888e5e4e82 26,58,62,121-122
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/collaboration_creation.py
+  h_059e888e5e4e82 113-114
+apps/backend/src/agentclaw/community/core/task/context_collab/products/bbs_public_discussion/service.py
+  h_059e888e5e4e82 156
+apps/backend/tests/community/adapters/http/task/test_context_collab_creation.py
+  h_059e888e5e4e82 58-59
+apps/backend/tests/community/core/task/context_collab/products/swarm_execution_support.py
+  h_059e888e5e4e82 1-127
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_open_swarm.py
+  h_059e888e5e4e82 1-617
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py
+  h_059e888e5e4e82 82,84,87-90,156-157
+apps/backend/tests/community/core/task/context_collab/test_l4_primitives.py
+  h_059e888e5e4e82 122-124,126,152-153
+apps/backend/tests/community/core/task/context_collab/test_method_binding.py
+  h_059e888e5e4e82 4,34-37,66
+apps/backend/tests/community/core/task/context_collab/test_method_composition.py
+  h_059e888e5e4e82 5,36,75,89,176-178,185-198
+apps/backend/tests/community/core/task/context_collab/test_method_profiles.py
+  h_059e888e5e4e82 30,35,43,46
+apps/backend/tests/community/core/task/context_collab/test_network_profiles.py
+  h_059e888e5e4e82 37-40,46-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b2a53eef79e11702c0f1dddb02adf98fada7ba86",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
