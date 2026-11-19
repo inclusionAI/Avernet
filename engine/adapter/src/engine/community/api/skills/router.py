@@ -311,6 +311,7 @@ async def probe_runtime_skills_layout(
             PoolLayoutProbeCommand(
                 engine=body.engine,
                 layout_contract_version=body.layout_contract_version,
+                for_service_build=body.for_service_build,
             )
         )
     except CapabilityNotSupportedError as error:
