@@ -26,6 +26,8 @@ export function useBotSessionFileUpload(
   sessionId: string | null,
   userId: string | null,
   ownerId?: string,
+  /** 好友会话身份(2026-11-19 需求追加:好友 Bot 文件全链携带 f_user_id),缺省不携带 */
+  friendUserId?: string,
   stage?: BotRuntimeStage,
   /** 多实例选中实例(openspec add-session-files-device-uuid),缺省不携带 */
   deviceUuid?: string,
@@ -91,6 +93,8 @@ export function useBotSessionFileUpload(
             ...(deviceUuid ? { deviceUuid } : {}),
             // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target)
             ...(callerRuntimeTarget ? { callerRuntimeTarget } : {}),
+            // 好友会话身份(2026-11-19 需求追加:上传链三接口携带 f_user_id)
+            ...(friendUserId ? { friendUserId } : {}),
             signal: abortController.signal,
             onProgress: updateProgress(currentTask.localId),
             // 字节直传后的编排阶段回写任务态:组装中/物化中(转圈),避免 100% 进度条停滞无反馈。
@@ -127,7 +131,7 @@ export function useBotSessionFileUpload(
         }
       }
     },
-    [botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget, store],
+    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget, store],
   );
 
   const cancelAll = useCallback(() => {

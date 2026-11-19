@@ -97,7 +97,8 @@ const ScheduledTasksPage = () => {
           </p>
         )}
         {state.identity.error && <Empty title="身份加载失败" description={state.identity.error} />}
-        {context?.can_manage && (
+        {/* 编辑锁横幅只对服务 Bot 有意义；个人 Bot 与老前端一致不做锁检查。 */}
+        {context?.can_manage && context?.bot_type === 'service' && (
           <section
             role="status"
             className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-4 py-3"

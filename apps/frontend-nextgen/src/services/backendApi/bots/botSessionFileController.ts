@@ -77,7 +77,11 @@ export interface BotSessionFileListData {
 export interface BotRequestParams {
   user_id: string;
   owner_id?: string;
-  /** 仅文件列表支持好友身份；不授予上传、删除或内容访问权限。 */
+  /**
+   * 好友 Bot（isFriendBot）会话的好友身份（2026-11-19 需求追加）：好友 Bot 文件全链
+   * （列表/上传三接口/删除/内容/下载）携带 `f_user_id`；非好友会话不携带。
+   * （原注释「仅文件列表支持好友身份；不授予上传、删除或内容访问权限」为旧契约，作废。）
+   */
   f_user_id?: string;
   stage?: 'draft' | 'verify' | 'online';
   /**

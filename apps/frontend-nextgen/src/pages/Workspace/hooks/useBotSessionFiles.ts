@@ -75,6 +75,7 @@ export function useBotSessionFiles(
   const deleteFile = useCallback(
     async (file: BotSessionFileView) => {
       if (!botId || !sessionId || !userId) return false;
+      // 好友全链携带 f_user_id(2026-11-19 需求追加),与列表同源同值。
       const res = await botSessionFileService.remove(
         botId,
         sessionId,
@@ -84,6 +85,7 @@ export function useBotSessionFiles(
         stage,
         deviceUuid,
         callerRuntimeTarget,
+        friendUserId,
       );
       if (res.ok) {
         store.removeReadyFile(file.resourceId);
@@ -93,7 +95,7 @@ export function useBotSessionFiles(
       toast.error(res.error.friendlyMessage);
       return false;
     },
-    [botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget, store],
+    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget, store],
   );
 
   const downloadFile = useCallback(
@@ -111,6 +113,7 @@ export function useBotSessionFiles(
               stage,
               deviceUuid,
               callerRuntimeTarget,
+              friendUserId,
             )
           : await botSessionFileService.resolveContentUrl(
               botId,
@@ -122,6 +125,7 @@ export function useBotSessionFiles(
               stage,
               deviceUuid,
               callerRuntimeTarget,
+              friendUserId,
             );
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '下载失败');
@@ -138,7 +142,7 @@ export function useBotSessionFiles(
       a.click();
       a.remove();
     },
-    [botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget],
+    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget],
   );
 
   const previewFile = useCallback(
@@ -156,6 +160,7 @@ export function useBotSessionFiles(
           stage,
           deviceUuid,
           callerRuntimeTarget,
+          friendUserId,
         );
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '预览失败');
@@ -163,7 +168,7 @@ export function useBotSessionFiles(
       }
       window.open(url, '_blank', 'noopener,noreferrer');
     },
-    [botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget],
+    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget],
   );
 
   return {

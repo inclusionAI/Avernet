@@ -2,15 +2,19 @@ import { isPatchAllApplied } from '@/components/BotWorkshop/BotHealthCheckDrawer
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
-import type { BotHealthDimension } from '@/domain/botHealthCheck';
+import type { BotHealthDimension, BotHealthPatch } from '@/domain/botHealthCheck';
 import { Lightbulb } from 'lucide-react';
 import { AdvicePatchCard } from './AdvicePatchCard';
 
 interface OptimizationPanelProps {
   dimension: BotHealthDimension;
+  /** 点击「一键修复」：由上层打开修复预览并确认应用（不传则不渲染修复入口）。 */
+  onApplyPatch?: (patch: BotHealthPatch) => void | Promise<void>;
+  /** 是否有修复正在应用中（应用期间禁用全部修复按钮）。 */
+  applyingPatch?: boolean;
 }
 
-export function OptimizationPanel({ dimension }: OptimizationPanelProps) {
+export function OptimizationPanel({ dimension, onApplyPatch, applyingPatch }: OptimizationPanelProps) {
   const status = dimension.status;
   const isScanning = status === 'scanning';
   const isFailed = ['failed', 'error'].includes((dimension.scanStatus ?? '').toLowerCase());
@@ -80,11 +84,11 @@ export function OptimizationPanel({ dimension }: OptimizationPanelProps) {
                           查看修复记录
                         </Button>
                       </>
-                    ) : (
-                      <Button size="sm" onClick={() => {}}>
+                    ) : onApplyPatch ? (
+                      <Button size="sm" disabled={applyingPatch} onClick={() => void onApplyPatch(patch)}>
                         一键修复
                       </Button>
-                    )}
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>

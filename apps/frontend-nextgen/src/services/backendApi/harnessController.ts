@@ -135,6 +135,72 @@ export async function getHarnessDimReport(params: {
   return assertData(envelope, '健康报告');
 }
 
+export interface HarnessPreviewOperationDto {
+  op?: string;
+  target?: string;
+  diff?: string | null;
+  op_summary?: string | null;
+  content?: string | null;
+  template?: string | null;
+  detail?: Record<string, unknown> | null;
+}
+
+export interface HarnessPreviewRequestDto {
+  entity_type: string;
+  entity_id: string;
+  scan_id?: number | null;
+  file_type?: string | null;
+  patch_id_list: number[];
+}
+
+export interface HarnessPreviewResponseDto {
+  success?: boolean;
+  bot_id: string;
+  scan_id?: number | null;
+  risk_level: string;
+  final_content: string;
+  operations: HarnessPreviewOperationDto[];
+}
+
+export interface HarnessApplyRequestDto {
+  entity_type: string;
+  entity_id: string;
+  patch_id_list: number[];
+  record_id?: number | null;
+  bot_publish_id?: string | null;
+}
+
+export interface HarnessApplyResponseDto {
+  success: boolean;
+  err_msg?: string | null;
+}
+
+/** 预览补丁（不落盘），对应 POST /openapi/v1/bots/{bot_id}/harness/preview */
+export async function previewHarnessPatch(params: {
+  botId: string;
+  userId: string;
+  data: HarnessPreviewRequestDto;
+}): Promise<HarnessPreviewResponseDto> {
+  const envelope = await backendRequest<OpenApiEnvelope<HarnessPreviewResponseDto>>(
+    `${botHarnessBase(params.botId)}/preview`,
+    { method: 'POST', params: { user_id: params.userId }, data: params.data },
+  );
+  return assertData(envelope, '补丁预览');
+}
+
+/** 应用补丁，对应 POST /openapi/v1/bots/{bot_id}/harness/apply */
+export async function applyHarnessPatch(params: {
+  botId: string;
+  userId: string;
+  data: HarnessApplyRequestDto;
+}): Promise<HarnessApplyResponseDto> {
+  const envelope = await backendRequest<OpenApiEnvelope<HarnessApplyResponseDto>>(
+    `${botHarnessBase(params.botId)}/apply`,
+    { method: 'POST', params: { user_id: params.userId }, data: params.data },
+  );
+  return assertData(envelope, '补丁应用');
+}
+
 export async function getHarnessDimHistory(params: {
   botId: string;
   userId: string;
