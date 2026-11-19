@@ -19,6 +19,7 @@ import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 import { ConversationOriginFilter } from './ConversationOriginFilter';
 import { ConversationSessionSearchIconButton } from './ConversationSessionSearchIconButton';
+import { FriendBotMoreMenu } from './FriendBotMoreMenu';
 
 export interface ConversationBotItemActionsProps {
   /** 行 Bot:筛选 botId / 埋点参数 / 「Bot 管理」菜单项回调透传。 */
@@ -60,6 +61,12 @@ export interface ConversationBotItemActionsProps {
   showMenu: boolean;
   /** 「Bot 管理」入口回调:跳转该 Bot 所属空间的 Bot 管理页,带 Bot 名称过滤定位该 Bot。 */
   onOpenBotManagement?(bot: ChatBotView): void;
+  /** 好友 Bot 分组「更多操作」菜单(仅好友行;菜单内提供「移除好友」)。 */
+  supportsFriendRemoval?: boolean;
+  /** 打开移除好友二次确认;装配层负责 API 调用与状态清理。 */
+  onRemoveFriend?(): void;
+  /** Bot 是否可会话(不可会话行不渲染新建/检索/筛选等会话类入口);缺省视为可用。 */
+  hasSessionControls?: boolean;
 }
 
 /** Bot 行 hover 操作区:显隐由行容器的 group-hover/聚焦/钉住类驱动(相对行绝对定位)。 */
@@ -88,7 +95,12 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
     onSearchToggle,
     showMenu,
     onOpenBotManagement,
+    supportsFriendRemoval,
+    onRemoveFriend,
+    hasSessionControls = true,
   } = props;
+  // 会话类入口统一受可用/可会话门控:不可用或不可会话(如好友详情未解析)行只留移除类入口。
+  const sessionControlsVisible = hasSessionControls && !unavailable;
   // icon 级显隐群发类(2026-11-04 重构):与原容器级语义逐项等价——
   // 行 hover/行内键盘聚焦/触屏,以及筛选菜单打开期间(data-state=open,鼠标
   // 移出行不塌缩)整组显示;容器不再整体 opacity(父子相乘会连带隐藏常显 icon)。
@@ -123,7 +135,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
         />
       )}
       {/* 会话类入口(新建/检索/筛选)仅可用 Bot 渲染:不可用 Bot 的会话操作无意义(2026-10-21)。 */}
-      {!isOthers && !unavailable && (
+      {sessionControlsVisible && !isOthers && (
         <IconButton
           label="新建会话"
           size="sm"
@@ -138,7 +150,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
         />
       )}
       {/* 🔍 激活(检索生效/实例指定标记)时常显——用户始终知道该 Bot 有生效条件(2026-11-04 显隐重构)。 */}
-      {!unavailable && searchVisible && (
+      {sessionControlsVisible && searchVisible && (
         <ConversationSessionSearchIconButton
           marked={searchMarked}
           onToggle={onSearchToggle}
@@ -146,7 +158,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
         />
       )}
       {/* 筛选激活(归属/范围非默认项)时常显——同 🔍 标记语义,始终提示生效条件(2026-11-04 显隐重构)。 */}
-      {!unavailable && showFilter && (
+      {sessionControlsVisible && showFilter && (
         <ConversationOriginFilter
           botId={bot.botId}
           origin={origin}
@@ -180,6 +192,12 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
             onOpenBotManagement(bot);
           }}
         />
+      )}
+      {/* 好友 Bot 移除入口(PRD v1.5 AC-01):菜单项为红色警示「移除好友」。
+          仅好友分组装配 supportsFriendRemoval;管理/协作分组与 Bot 身份侧栏不渲染。
+          不受 Bot 运行状态影响(AC-18),不可用行经 stripVisible 保留本入口。 */}
+      {supportsFriendRemoval && onRemoveFriend && (
+        <FriendBotMoreMenu botName={bot.displayName} triggerClassName={iconVisibility} onRemoveFriend={onRemoveFriend} />
       )}
     </div>
   );

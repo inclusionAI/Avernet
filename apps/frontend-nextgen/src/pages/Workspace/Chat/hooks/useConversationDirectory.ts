@@ -7,7 +7,7 @@
 // 拉取整个目录(当前 Service 只有组合目录一个入口)。
 import type { ConversationBotView } from '@/domain/conversation/types';
 import { conversationService } from '@/services/workspace/conversationService';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConversationTeamDirectory } from './useConversationTeamDirectory';
 
 export interface ConversationDirectoryModel {
@@ -23,6 +23,8 @@ export interface ConversationDirectoryModel {
   friendError: string | null;
   retryManaged(): void;
   retryFriend(): void;
+  /** 好友关系解除后仅移除该好友目录项,不重拉整个目录(避免影响管理/协作 Bot 的选中会话)。 */
+  removeFriendBot(botId: string): void;
 }
 
 interface DirectoryState {
@@ -99,6 +101,13 @@ export function useConversationDirectory(userId: string | null): ConversationDir
 
   const retryManaged = useRef(() => setManagedNonce((nonce) => nonce + 1)).current;
   const retryFriend = useRef(() => setFriendNonce((nonce) => nonce + 1)).current;
+  // 移除好友只丢弃好友目录项:保留 managed/team 数据与加载态,已打开的管理/协作会话不被卸载。
+  const removeFriendBot = useCallback((botId: string) => {
+    setState((current) => ({
+      ...current,
+      friendBots: current.friendBots.filter((view) => view.bot.botId !== botId),
+    }));
+  }, []);
 
   const teamBots = useMemo(() => {
     const managedIds = new Set(state.managedBots.map((view) => view.bot.botId));
@@ -120,5 +129,6 @@ export function useConversationDirectory(userId: string | null): ConversationDir
     friendError: state.friendError,
     retryManaged,
     retryFriend,
+    removeFriendBot,
   };
 }

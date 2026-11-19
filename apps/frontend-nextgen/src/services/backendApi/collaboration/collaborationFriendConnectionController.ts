@@ -61,9 +61,10 @@ export interface ListFriendConnectionsParams {
   page_size?: number;
 }
 
-export interface DeleteFriendConnectionBody {
-  from_actor: FriendConnectionActor;
-  to_actor: FriendConnectionActor;
+/** 删除好友连接：调用方由 Gateway Principal 鉴权，只需指明对方 actor。 */
+export interface DeleteFriendConnectionParams {
+  target_actor_type: FriendConnectionActorType;
+  target_actor_id: string;
 }
 
 export const COLLABORATION_FRIEND_CONNECTION_ENDPOINTS = {
@@ -122,10 +123,11 @@ export function listFriendConnections<T = FriendConnectionDto>(
   });
 }
 
-export function deleteFriendConnection(body: DeleteFriendConnectionBody, signal?: AbortSignal) {
-  return backendRequest<BackendApiEnvelope<void>>(COLLABORATION_FRIEND_CONNECTION_ENDPOINTS.connections, {
+/** `DELETE /openapi/v1/collaboration/friend-connections` 以 query 指定对方 actor，幂等返回 deleted。 */
+export function deleteFriendConnection(params: DeleteFriendConnectionParams, signal?: AbortSignal) {
+  return backendRequest<BackendApiEnvelope<{ deleted: boolean }>>(COLLABORATION_FRIEND_CONNECTION_ENDPOINTS.connections, {
     method: 'DELETE',
-    data: body,
+    params: { ...params },
     injectUserId: false,
     signal,
   });

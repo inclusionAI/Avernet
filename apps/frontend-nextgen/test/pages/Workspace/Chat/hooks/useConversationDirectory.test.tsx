@@ -195,3 +195,26 @@ it('团队加载独立：失败不影响管理/好友，可单独重试且按 ca
   await waitFor(() => expect(result.current.teamBots).toEqual([{ section: 'team', bot: teamBot }]));
   expect(listOwnedBotsWithMeta).toHaveBeenCalledTimes(1);
 });
+
+it('移除好友只丢弃好友目录项，保留管理/协作 Bot 且不重拉目录', async () => {
+  const secondFriend = {
+    ...friendSource,
+    id: 'friend-bot-2:888',
+    name: '另一个好友',
+  };
+  listOwnedBotsWithMeta.mockResolvedValue(okOwned);
+  listFriends.mockResolvedValue({
+    ok: true as const,
+    data: { items: [friendSource, secondFriend], total: 2, offset: 0, limit: 100, hasMore: false },
+  });
+  const { result } = renderHook(() => useConversationDirectory('327325'));
+  await waitFor(() => expect(result.current.friendBots).toHaveLength(2));
+
+  act(() => result.current.removeFriendBot('friend-bot:777'));
+
+  expect(result.current.friendBots.map((view) => view.bot.botId)).toEqual(['friend-bot-2:888']);
+  expect(result.current.managedBots).toEqual([{ bot: ownedBot, section: 'managed' }]);
+  // 不触发整目录重拉：管理/协作 Bot 的加载态与已打开会话不受影响。
+  expect(listOwnedBotsWithMeta).toHaveBeenCalledTimes(1);
+  expect(listFriends).toHaveBeenCalledTimes(1);
+});

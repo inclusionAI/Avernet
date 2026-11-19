@@ -124,20 +124,16 @@ describe('collaboration friend connection controller', () => {
     );
   });
 
-  it('deletes the current Human connection with actor filters', async () => {
-    backendRequest.mockResolvedValue({ code: 20000, data: {} });
+  it('deletes the current Human connection with target actor query params', async () => {
+    backendRequest.mockResolvedValue({ code: 20000, data: { deleted: true } });
 
-    await deleteFriendConnection({
-      from_actor: { type: 'human', id: '900003' },
-      to_actor: { type: 'bot', id: 'bot-1' },
-    });
+    await deleteFriendConnection({ target_actor_type: 'bot', target_actor_id: 'bot-1' });
 
+    // 契约:DELETE /openapi/v1/collaboration/friend-connections?target_actor_type=&target_actor_id=
+    // 调用方由 Gateway Principal 鉴权,不传 from_actor。
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/friend-connections', {
       method: 'DELETE',
-      data: {
-        from_actor: { type: 'human', id: '900003' },
-        to_actor: { type: 'bot', id: 'bot-1' },
-      },
+      params: { target_actor_type: 'bot', target_actor_id: 'bot-1' },
       injectUserId: false,
     });
   });

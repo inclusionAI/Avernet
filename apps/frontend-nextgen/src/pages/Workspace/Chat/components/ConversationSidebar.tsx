@@ -47,6 +47,8 @@ export interface ConversationSidebarProps {
   /** 「Bot 管理」菜单项回调(#2990 还原):带该 Bot 所属空间上下文跳转 Bot 管理页;
    *  好友 Bot 不提供(装配层只经 ManagedItem 传导,菜单项不渲染)。 */
   onOpenBotManagement?(bot: ConversationBotView['bot']): void;
+  /** 好友 Bot 分组「移除好友」:仅好友行提供入口;装配层负责二次确认、API 与状态清理。 */
+  onRemoveFriend?(bot: ConversationBotView['bot']): void;
   /** Bot 正在回复中的会话 id(#2990 还原):仅当前打开的普通 Runtime 会话;Coding Bot 暂为 null。 */
   replyingSessionId: string | null;
 }

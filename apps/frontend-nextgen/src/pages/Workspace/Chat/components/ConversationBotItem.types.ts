@@ -61,4 +61,6 @@ export interface ConversationBotItemProps {
   sessionActions?: ConversationSessionListActions;
   /** Bot 级“新建会话”在途标记；行尾 + 与主舞台空态共享，防止重复提交。 */
   createSessionPending?: boolean;
+  /** 好友 Bot 分组「移除好友」入口：仅好友行装配；点击后由装配层弹出二次确认。 */
+  onRemoveFriend?(bot: ChatBotView): void;
 }
