@@ -199,6 +199,7 @@ impl Host {
             "due" => {
                 let target = Did(field(request, "did")?.into());
                 let mut after = None;
+                let mut crossed_boundary = false;
                 for _ in 0..64 {
                     let page = self
                         .dispatch
@@ -215,7 +216,13 @@ impl Host {
                         return Ok(json!(true));
                     }
                     if page.next.is_none() {
-                        return Ok(json!(false));
+                        // The supervisor shares the durable scan cursor. This
+                        // first boundary may finish only its remaining suffix;
+                        // absence requires one complete subsequent round.
+                        if crossed_boundary {
+                            return Ok(json!(false));
+                        }
+                        crossed_boundary = true;
                     }
                     after = page.next;
                     tokio::time::sleep(Duration::from_millis(2)).await;
