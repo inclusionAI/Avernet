@@ -1,0 +1,58 @@
+apps/bcsfuse/src/app/tc/migration.py
+  s_e7fe9f07a64c50::t_d25ef06504a325 234-237
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  s_e7fe9f07a64c50::t_e9b3ebb587f928 116-118,122-130,138-141,145
+  s_e7fe9f07a64c50::t_bf7be5891e1742 102-104,109-115
+  s_e7fe9f07a64c50::t_c4fee46ab36cf6 105-108,119-121,131-137,142-144
+  s_e7fe9f07a64c50::t_ae3fd3fd42ec6e 146-147
+apps/bcsfuse/tests/contract/test_tc_document_mapping.py
+  s_e7fe9f07a64c50::t_1a68ba3efea428 41-49
+  s_e7fe9f07a64c50::t_c4fee46ab36cf6 29-31,36-38,78-81
+  s_e7fe9f07a64c50::t_5fe5e9aea452e5 13-28,32-35,39-40,50-54
+apps/bcsfuse/src/app/tc/v2.py
+  s_e7fe9f07a64c50::t_fb7039af42517c 47-49,52-53
+  s_e7fe9f07a64c50::t_f2e06fa0a6dbb7 54
+  s_e7fe9f07a64c50::t_c4fee46ab36cf6 61-65
+  s_e7fe9f07a64c50::t_669669c996bfb4 76
+apps/bcsfuse/tests/contract/test_tc_http_compat.py
+  s_e7fe9f07a64c50::t_c4fee46ab36cf6 127-129
+apps/bcsfuse/src/app/tc/catalog.py
+  s_e7fe9f07a64c50::t_c4fee46ab36cf6 170-173
+  s_e7fe9f07a64c50::t_fb7039af42517c 188
+apps/bcsfuse/src/app/tc/migration_api.py
+  s_e7fe9f07a64c50::t_d25ef06504a325 98-102,105
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_e7fe9f07a64c50::t_c4fee46ab36cf6 481-482,488,541-544,583-586,593-596
+  s_e7fe9f07a64c50::t_d25ef06504a325 483-487,506
+  s_e7fe9f07a64c50::t_3585c80ce98ea4 364-383
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_writes.py
+  s_e7fe9f07a64c50::t_fb7039af42517c 49-50
+apps/bcsfuse/tests/contract/test_tc_migration.py
+  s_e7fe9f07a64c50::t_230c98ed75b76e 125-127
+  s_e7fe9f07a64c50::t_d25ef06504a325 112-116,119-124,128-134
+  s_e7fe9f07a64c50::t_e691cc1d3b1bec 117-118
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_e7fe9f07a64c50::t_7f0d8626053bf6 49,54,78
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_e7fe9f07a64c50::t_010663f3d5d1d0 112-114,125-126
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/cards.py
+  s_e7fe9f07a64c50::t_e1eabc1f5b8f5f 21-24
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/card_store.py
+  s_e7fe9f07a64c50::t_f7d274bf40e210 4-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fbc813988b64e1a666282d8e52180dab1d3ab9d7",
+  "prompts": {},
+  "sessions": {
+    "s_e7fe9f07a64c50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf7a-1d65-7ce2-80b0-e54cb93b8362",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
