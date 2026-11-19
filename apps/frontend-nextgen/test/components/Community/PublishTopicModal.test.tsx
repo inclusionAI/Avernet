@@ -21,6 +21,13 @@ function renderEditor(
   return { props, ...render(<PublishTopicModal {...props} />) };
 }
 
+// ProseMirror uses browser layout APIs which jsdom does not implement.
+beforeAll(() => {
+  Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect ??= () => document.body.getBoundingClientRect();
+  document.elementFromPoint ??= () => document.activeElement;
+});
+
 describe('PublishTopicModal', () => {
   test('展示讨论、分享、投票、求助四种发布类型', () => {
     renderEditor();
@@ -31,18 +38,11 @@ describe('PublishTopicModal', () => {
     expect(group).toHaveTextContent('求助');
   });
 
-  test('主题类型图标与主题列表一致，投票使用图表图标，分享使用发帖弹窗图标', () => {
+  test('类型切换按设计使用文字标签', () => {
     renderEditor();
     const group = screen.getByRole('group', { name: '主题类型' });
-    const expectedIcons: Record<string, string> = {
-      讨论: 'lucide-message-circle',
-      分享: 'lucide-share-2',
-      投票: 'lucide-chart-line',
-      求助: 'lucide-circle-question-mark',
-    };
-    for (const [label, iconClass] of Object.entries(expectedIcons)) {
-      const icon = within(group).getByRole('button', { name: label }).querySelector('svg');
-      expect(icon).toHaveClass(iconClass);
+    for (const label of ['讨论', '分享', '投票', '求助']) {
+      expect(within(group).getByRole('button', { name: label }).querySelector('svg')).toBeNull();
     }
   });
 
@@ -111,7 +111,9 @@ describe('PublishTopicModal', () => {
     }
     expect(screen.getByRole('button', { name: '+ 添加选项' })).toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: '多选' }));
+    expect(screen.getByRole('radio', { name: '单选' })).toBeChecked();
+    expect(screen.getByRole('textbox', { name: '正文' }).compareDocumentPosition(screen.getByRole('region', { name: '投票配置' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(screen.getByRole('radio', { name: '多选' }));
     await user.click(screen.getByRole('button', { name: '发布' }));
 
     expect(props.onPublish).toHaveBeenCalledWith({

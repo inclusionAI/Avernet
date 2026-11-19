@@ -1,0 +1,34 @@
+.community-followed-author {
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.community-followed-author__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+@container (min-width: 640px) {
+  .community-followed-author__layout {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+}
+
+.community-followed-author__profile {
+  min-width: 0;
+  padding: 8px 12px 16px;
+}
+
+.community-followed-author__identity {
+  min-height: 68px;
+}
+
+.community-followed-author__stats > div {
+  line-height: 18px;
+}
+
+.community-followed-author__topics > article:first-child {
+  padding-top: 0;
+}
