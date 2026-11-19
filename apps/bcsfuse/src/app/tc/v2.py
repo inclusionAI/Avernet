@@ -100,7 +100,10 @@ class CardOperations:
                 data if not current and legacy_worker else fields,
                 resource_type,
                 search_config,
-                labels=labels,
+                labels=labels if labels_supplied else None,
+                label_updates={"visibility": [fields["availability"]]}
+                if not labels_supplied and "availability" in fields
+                else None,
                 document_mapping=document_mapping,
             )
 

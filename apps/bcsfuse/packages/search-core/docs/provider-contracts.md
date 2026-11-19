@@ -113,6 +113,8 @@ and behavior are unchanged.
   existing labels; supplied labels replace the complete map, including removing
   omitted keys. An empty map clears labels where host validation permits it. Optional internal
   operations settings are not accepted as an HTTP `search_config` field.
+  Legacy adapters may pass internal `label_updates` to adjust individual keys on
+  the latest snapshot inside conflict retries; HTTP Card writes do not expose it.
 - `CardRecord.prepared` is an optional host artifact-cache value, carried through
   internal writes for compatibility. Public CRUD does not read an artifact table.
 - Conformance: `tests/test_card_management.py` exercises the actual public router,
