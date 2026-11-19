@@ -7,6 +7,12 @@ Bot's Caller configuration controls managed Caller admission; providing
 identity does not itself enable Caller mode. Adapters must leave the field
 unset unless they have authenticated the sender at their ingress boundary.
 
+Trusted channel submissions can skip the group speaking lease when a live
+single-Bot binding and its per-sender conversation mapping prove the Session
+has exactly the mapped Human and the bound Bot, and that Bot is the sole send
+target. The Caller identity checks still apply. Workbench and other ingress
+keep their existing lease checks, as do shared or unverified channel Sessions.
+
 The binding-level credential forwarding below is a separate path.
 
 Channel providers may opt into caller execution with `requires_caller_execution` and validate the binding target with `validate_binding_config`. The default implementations preserve existing providers. The channel service additionally enforces a single Bot target. Group bindings, state-machine routing, WebSocket delivery and fan-out are not supported.

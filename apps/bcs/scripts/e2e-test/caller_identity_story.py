@@ -66,13 +66,15 @@ def caller_definition() -> dict:
 class WorkbenchSocket:
     """Minimal masked-frame WebSocket client for the group session channel."""
 
-    def __init__(self, base: str, owner: str, group: str, session: str):
+    def __init__(self, base: str, owner: str, group: str, session: str, *, session_ticket: str | None = None):
         url = urllib.parse.urlsplit(base)
         self.conn = socket.create_connection((url.hostname, url.port or 80), timeout=10)
         self.conn.settimeout(15)
         key = base64.b64encode(os.urandom(16)).decode()
+        path = ("/openapi/v1/collaboration/messages/ws?" + urllib.parse.urlencode([("token", session_ticket)])
+                if session_ticket else "/ws")
         self.conn.sendall(
-            ("GET /ws HTTP/1.1\r\n"
+            (f"GET {path} HTTP/1.1\r\n"
              f"Host: {url.netloc}\r\n"
              "Upgrade: websocket\r\nConnection: Upgrade\r\n"
              f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"

@@ -24,6 +24,9 @@ import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from caller_identity_story import WorkbenchSocket, segment
+from group_session_ws_probe import _gateway_principal_token
+
 
 TRACE_QUERY_MARKER = 'redact-this-value'
 
@@ -95,11 +98,12 @@ class Story:
             {'X-E2E-Ingress-Key': self.key})
         return body
 
-    def binding(self, bot, mode='caller', status=200, target=None):
+    def binding(self, bot, mode='caller', status=200, target=None, group_chat_scope=None):
         account = uuid.uuid4().hex
         result = self.request('POST', '/channels/bindings', {
             'channel_type': 'caller-e2e', 'account_ref': account,
             'target': target or {'bot': {'bot_id': bot}}, 'outbound_visibility': 'full_transcript',
+            'group_chat_scope': group_chat_scope,
             'env': self.environment, 'config': {'execution_mode': mode}}, status)
         return account, result
 
@@ -199,6 +203,71 @@ class Story:
         self.policy(True)
         self.callback(account, credential='test-token-lost', conversation='lost-conversation')
         print(f'Caller HTTP/queue/provider E2E: {self.checks} HTTP assertions passed', flush=True)
+
+    def exclusive_channel_speaking(self, db_path, signing_key):
+        """Compare channel and Workbench admission to the same real Session."""
+        bot_id = self.bot['bot_uuid']
+        bot_ref = segment(self.bot['provider_bot_ref'])
+        provider_id = segment(self.registration['provider_id'])
+        applied = self.request('PATCH', f'/providers/{provider_id}/bots/{bot_ref}/caller', {
+            'snapshot': {'source_revision': 1, 'caller_identity': {'enabled': True}},
+        }, headers={'Authorization': 'Bearer ' + self.registration['provider_admin_token']})
+        assert applied['sync_status'] == 'applied', 'Caller snapshot not applied'
+        # Inspect committed admission before delivery. This test does not
+        # depend on the external execution or container issuance service.
+        self.policy(True)
+        account, _ = self.binding(bot_id, 'default', group_chat_scope='per_sender')
+        shared, _ = self.binding(bot_id, 'default', group_chat_scope='conversation_shared')
+        sender = 'callere2eowner'
+
+        def deliveries():
+            with sqlite3.connect(f'file:{db_path}?mode=ro', uri=True) as db:
+                return db.execute(
+                    'SELECT group_id, session_id, status, '
+                    "json_extract(semantic_projection_json, '$.caller_required') "
+                    "FROM bcs_message_deliveries WHERE target_bot_id = ? AND status = 'queued'",
+                    (bot_id,),
+                ).fetchall()
+
+        self.callback(account, sender=sender, credential=None, kind='2', status=422)
+        self.callback(shared, sender=sender, credential=None, kind='2', status=422, attest_sender=True)
+        assert deliveries() == [], 'missing Caller identity or a shared Session bypassed admission'
+        self.callback(account, sender=sender, credential=None, kind='2', attest_sender=True)
+        rows = deliveries()
+        assert len(rows) == 1 and rows[0][2:] == ('queued', 1), 'channel did not enqueue protected Caller work'
+        group_id, session_id = rows[0][:2]
+
+        # The Human is a Session member, not a Group member. Use the public
+        # Session token so lease.acquire authorizes against this same Session.
+        principal = _gateway_principal_token(user_id=sender, username=sender,
+            tenant='alipay', signing_key=signing_key, issuer='gateway')
+        ticket = self.request('POST', f'/openapi/v1/collaboration/sessions/{segment(session_id)}/token',
+            headers={'X-Avernet-Principal': principal})
+        ws = WorkbenchSocket(self.base, sender, group_id, session_id, session_ticket=ticket['data']['token'])
+        try:
+            connected = ws.receive(ws.connect_id)
+            assert connected.get('ok') is True, connected
+            params = {'group_id': group_id, 'session_id': session_id,
+                      'bot_id': 'human_' + sender, 'mentions': [bot_id]}
+            ws.send({'type': 'req', 'id': 'web-without-lease', 'method': 'chat.send',
+                     'params': {**params, 'message': 'web must still be fenced'}})
+            # The next request on this connection is a barrier after the
+            # rejected submission, which need not produce a response frame.
+            ws.send({'type': 'req', 'id': 'web-lease', 'method': 'lease.acquire',
+                     'params': {'groupId': group_id}})
+            acquired = ws.receive('web-lease')
+            assert acquired.get('ok') is True, acquired
+            assert deliveries() == rows, 'Workbench bypassed the lease in a channel Session'
+            lease = acquired['payload']
+            ws.send({'type': 'req', 'id': 'web-with-lease', 'method': 'chat.send',
+                     'params': {**params, 'message': 'web with lease',
+                                'leaseId': lease['leaseId'], 'leaseEpoch': lease['epoch']}})
+            admitted = ws.receive('web-with-lease')
+            assert admitted.get('ok') is True, admitted
+            assert deliveries() == rows * 2, 'Workbench with a lease did not enqueue protected work'
+        finally:
+            ws.close()
+        print('Exclusive channel Caller admission and unchanged Workbench lease fence: PASS', flush=True)
 
 
 def verify_network_traces(path, provider):
@@ -408,6 +477,8 @@ def run_story(binary, environment, credential_type='iam-token'):
                     raise AssertionError('missing caller credential did not fail closed')
                 assert provider.received.empty(), 'cache loss fell back to provider identity'
                 print('Durable queue/cache-loss restart fails closed: PASS', flush=True)
+                if environment == 'local' and credential_type == 'iam-token':
+                    story.exclusive_channel_speaking(root / 'bcs.db', env['CALLER_E2E_SIGNING_KEY'])
             finally:
                 process.send_signal(signal.SIGTERM)
                 process.wait(timeout=30)

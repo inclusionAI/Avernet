@@ -838,9 +838,20 @@ pub(crate) async fn apply_session_participant_scope(
     group: &mut Group,
     session_id: Option<&str>,
 ) -> ServiceResult<()> {
+    if let Some(session) = load_session_participant_scope(flow, group, session_id).await? {
+        group.participants = session.participants;
+    }
+    Ok(())
+}
+
+async fn load_session_participant_scope(
+    flow: &BcsMessageFlow,
+    group: &Group,
+    session_id: Option<&str>,
+) -> ServiceResult<Option<bcs_domain::Session>> {
     let (Some(session_id), Some(session_mgmt)) = (session_id, flow.session_management.as_ref())
     else {
-        return Ok(());
+        return Ok(None);
     };
     let session = session_mgmt
         .get(session_id)
@@ -862,8 +873,7 @@ pub(crate) async fn apply_session_participant_scope(
             request_id: None,
         });
     }
-    group.participants = session.participants;
-    Ok(())
+    Ok(Some(session))
 }
 
 mod persistence;
@@ -871,6 +881,7 @@ pub(crate) use persistence::{try_persist_group_message, persisted_message_visibi
 use persistence::{persisted_inbound_content};
 mod state_machine_result;
 mod web_send;
+mod channel_speech;
 pub use web_send::{handle_web_send};
 mod group_send;
 pub use group_send::{handle_group_chat, handle_persistent_group_send};

@@ -183,7 +183,10 @@ pub(super) async fn handle_web_send_with_result(
     }
 
     flow.group.reset_message_count(&cmd.group_id).await?;
-    apply_session_participant_scope(flow, &mut group, cmd.session_id.as_deref()).await?;
+    let mut scoped_session = load_session_participant_scope(flow, &group, cmd.session_id.as_deref()).await?;
+    if let Some(session) = scoped_session.as_mut() {
+        group.participants = std::mem::take(&mut session.participants);
+    }
     backfill_bot_names(flow.registry.as_ref(), &mut group).await;
 
     let overlay = build_route_overlay(flow, &group).await;
@@ -431,6 +434,13 @@ pub(super) async fn handle_web_send_with_result(
         }
         match bcs_domain::speaking_lease::resolve_speaking_mode(has_human_member, any_bot_caller_enabled) {
             bcs_domain::speaking_lease::SessionSpeakingMode::Plain => None,
+            bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired
+                if decision.targets.len() == 1
+                    && decision.targets[0].bot_uuid == group.driver_bot
+                    && decision.targets[0].delivery_type == DeliveryType::Send
+                    && channel_speech::is_exclusive_channel_submission(
+                        flow, &cmd, &group, scoped_session.as_ref(),
+                    ).await? => None,
             bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired => {
                 // Fail closed when the composition cannot decide leases.
                 let repo = flow.speaking_leases.as_ref().ok_or_else(|| {

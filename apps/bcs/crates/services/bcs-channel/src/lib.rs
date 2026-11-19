@@ -5,6 +5,7 @@ mod queue_commands;
 mod runtime_inbound;
 mod human_input;
 mod service;
+mod speech_scope;
 mod bindings;
 mod session_outbound;
 mod human_input_notification;
