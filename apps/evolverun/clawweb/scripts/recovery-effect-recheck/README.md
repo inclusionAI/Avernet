@@ -31,5 +31,6 @@ executes independently. On restart, it reconciles saved request IDs and existing
 AIS steps before taking more work. Each launch re-reads policy and task state.
 Uncertain HTTP sends retain their slot and reuse the request ID. The progress
 page shows `unknown` as a completed recheck, and reports execution failures and
-diagnosis delivery separately. An accepted result is visible in DI after data
-sync under the original task creation date.
+diagnosis delivery separately. An accepted result has been written to the
+diagnosis source. Its appearance and date in DI depend on warehouse sync and
+the report's date field.
