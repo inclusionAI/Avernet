@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import stat
 from collections.abc import Callable
 from pathlib import Path
@@ -41,9 +42,13 @@ def inspect_legacy_service_layout(
                 continue
             return None
         # Fresh Legacy drafts may have no local packages yet.
-        for root in (layout.active_root, layout.legacy_repo):
-            if not stat.S_ISDIR(root.lstat().st_mode):
-                return None
+        if not stat.S_ISDIR(layout.active_root.lstat().st_mode):
+            return None
+        # Legacy may link the Repo to a shared directory.
+        if not stat.S_ISDIR(layout.legacy_repo.stat().st_mode):
+            return None
+        with os.scandir(layout.legacy_repo):
+            pass
     except OSError:
         return None
 

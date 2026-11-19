@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -10,6 +11,7 @@ from engine.community.plugins.openclaw._skills import _SkillsPortMixin
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("repo_is_symlink", [False, True])
 @pytest.mark.parametrize(
     ("mounted", "mapping_versions"),
     [
@@ -18,11 +20,18 @@ from engine.community.plugins.openclaw._skills import _SkillsPortMixin
     ],
 )
 async def test_fresh_legacy_layout_is_ready_for_service_build_only(
-    tmp_path: Path, mounted: bool, mapping_versions: list[str]
+    tmp_path: Path, mounted: bool, mapping_versions: list[str], repo_is_symlink: bool
 ) -> None:
     workspace = tmp_path / ".openclaw" / "workspace"
     active = workspace / "skills"
-    (active / "skills-repo").mkdir(parents=True)
+    active.mkdir(parents=True)
+    repo = active / "skills-repo"
+    if repo_is_symlink:
+        shared_repo = tmp_path / "shared-repo"
+        shared_repo.mkdir()
+        repo.symlink_to(shared_repo, target_is_directory=True)
+    else:
+        repo.mkdir()
     center = workspace / "skills-pool" / "skill-center"
     center.mkdir(parents=True)
 
@@ -54,3 +63,51 @@ async def test_fresh_legacy_layout_is_ready_for_service_build_only(
     (center.parent / ".pool-active").write_text('{"activation_state":"finalizing"}')
     conflict = await port.probe_pool_layout({**request, "for_service_build": True})
     assert conflict["status"] != "READY"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target_kind", ["missing", "file"])
+async def test_service_layout_probe_rejects_invalid_legacy_repo_symlink(
+    tmp_path: Path, target_kind: str
+) -> None:
+    workspace = tmp_path / ".openclaw" / "workspace"
+    active = workspace / "skills"
+    active.mkdir(parents=True)
+    target = tmp_path / "shared-repo"
+    if target_kind == "file":
+        target.touch()
+    (active / "skills-repo").symlink_to(target)
+    center = workspace / "skills-pool" / "skill-center"
+    center.mkdir(parents=True)
+
+    class Port(_SkillsPortMixin):
+        _skills_layout_context = RuntimeLayoutContext(home=tmp_path)
+
+        def _skills_center_is_mounted(self, path: Path) -> bool:
+            return path == center
+
+    build_probe = await Port().probe_pool_layout(
+        {"layout_contract_version": LAYOUT_CONTRACT_VERSION, "for_service_build": True}
+    )
+    assert build_probe["status"] == "NOT_CAPABLE"
+    assert build_probe["evidence"]["reason"] == "pool_ready_marker_absent"
+
+
+@pytest.mark.asyncio
+async def test_service_layout_probe_rejects_unreadable_legacy_repo(tmp_path: Path) -> None:
+    repo = tmp_path / ".openclaw" / "workspace" / "skills" / "skills-repo"
+    repo.mkdir(parents=True)
+
+    class Port(_SkillsPortMixin):
+        _skills_layout_context = RuntimeLayoutContext(home=tmp_path)
+
+    with patch(
+        "engine.community.plugins.openclaw.service_layout_probe.os.scandir",
+        side_effect=PermissionError,
+    ) as scandir:
+        build_probe = await Port().probe_pool_layout(
+            {"layout_contract_version": LAYOUT_CONTRACT_VERSION, "for_service_build": True}
+        )
+
+    scandir.assert_called_once_with(repo)
+    assert build_probe["status"] == "NOT_CAPABLE"
