@@ -170,7 +170,6 @@ def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
         open_binding_id,
         swarm_binding_id,
         role_refs,
-        participants,
     ) = publish_todo_task(deploy_open_swarm, tmp_path)
 
     # 2. 基于L5层OPEN方法公开招募多个Coding相关Agent
@@ -236,9 +235,7 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
     )
     collet_id = instance.collet_ref
     open_binding_id, swarm_binding_id = instance.method_binding_refs
-    record = _record(injector, collet_id)
     role_refs = {role: scenario_role_ref(profile.ref, role) for role in ROLES}
-    participants = {p.participant_id: p for p in record.participants}
 
     return (
         profile,
@@ -250,8 +247,7 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
         collet_id,
         open_binding_id,
         swarm_binding_id,
-        role_refs,
-        participants,
+        role_refs
     )
 
 
