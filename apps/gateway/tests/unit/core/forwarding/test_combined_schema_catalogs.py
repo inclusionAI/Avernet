@@ -417,7 +417,7 @@ class TestBuildForwardingWithMixedSources:
         extra.refresh_all.assert_called_once_with()
         assert result.schema_catalogs["custom"] is extra
 
-    def test_routes_http_domain_to_http_catalog(self) -> None:
+    def test_routes_http_domain_to_http_catalog(self, tmp_path: Path) -> None:
         from gateway.community.bootstrap._forwarding import build_forwarding
 
         config_data = {
@@ -437,7 +437,10 @@ class TestBuildForwardingWithMixedSources:
 
         with patch(
             "gateway.community.bootstrap._forwarding._load_domain_map"
-        ) as mock_dm:
+        ) as mock_dm, patch(
+            "gateway.community.config.ConfigLoader.load",
+            return_value=Config(config_dir=tmp_path),
+        ):
             mock_dm.return_value = DomainMap.from_config(config_data, variables={})
 
             http_cat = HttpSchemaCatalog()
