@@ -454,7 +454,9 @@ def test_composite_method_keeps_open_policy_scoped_to_open(command):
             "unsupported Method policy type",
         ),
         (
-            lambda c: replace(c.composition, policies=[OpenMethodPolicy(_publication())]),
+            lambda c: replace(
+                c.composition, policies=[OpenMethodPolicy(_publication())]
+            ),
             "immutable tuple",
         ),
         (
@@ -534,3 +536,36 @@ def test_composition_does_not_accept_references_or_untyped_contracts(
     )
     with pytest.raises(ContextCollabValidationError, match="tuple of L5 MethodProfile"):
         ProductCatalog((unchecked,))
+
+
+@pytest.mark.parametrize("service_ref", ["", "  ", 42])
+def test_swarm_planner_reference_requires_nonempty_string(command, service_ref):
+    swarm_command = replace(
+        command,
+        composition=MethodCompositionTemplate("Swarm", (get_profile("Swarm", "0.2"),)),
+        swarm_plan_service_ref=service_ref,
+    )
+    with pytest.raises(ContextCollabValidationError, match="plan capability"):
+        create_product_profile(swarm_command)
+
+
+def test_swarm_planner_requires_swarm_method(command):
+    with pytest.raises(ContextCollabValidationError, match="Swarm Method"):
+        create_product_profile(replace(command, swarm_plan_service_ref="plan/1"))
+
+
+def test_explicit_swarm_planner_is_preserved_by_authoring_and_catalog(command):
+    profile = create_product_profile(
+        replace(
+            command,
+            composition=MethodCompositionTemplate(
+                "Swarm", (get_profile("Swarm", "0.2"),)
+            ),
+            swarm_plan_service_ref="plan/1",
+        )
+    )
+    assert profile.swarm_plan_service_ref == "plan/1"
+    assert (
+        ProductCatalog((profile,)).get(profile.ref.profile_id, profile.ref.version)
+        is profile
+    )

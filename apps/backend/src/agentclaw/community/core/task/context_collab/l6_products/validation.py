@@ -50,6 +50,15 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
             raise ContextCollabValidationError(
                 "composition Methods must be an immutable tuple of L5 MethodProfile contracts"
             )
+    if definition.swarm_plan_service_ref is not None and (
+        not isinstance(definition.swarm_plan_service_ref, str)
+        or not definition.swarm_plan_service_ref.strip()
+        or "Swarm"
+        not in {m.method_kind for m in definition.composition.required_methods}
+    ):
+        raise ContextCollabValidationError(
+            "Swarm plan capability requires a non-empty reference and Swarm Method"
+        )
     if tuple(item.method_kind for item in methods) != tuple(
         item.value for item in parse_method_kinds(definition.composition.method_kind)
     ):

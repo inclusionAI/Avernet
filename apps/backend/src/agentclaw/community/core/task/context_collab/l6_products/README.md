@@ -28,7 +28,7 @@ itself; the L4 service/repository do not acquire a dependency on L6.
 | WorkflowProfile | [contracts.py](contracts.py) | Optional product orchestration contract. Existing profiles own their action mappings and reference a versioned G4 machine over L4 Task, or explicitly declare a nontransition event stream. Not required merely to run an autonomous Bot. |
 | MethodPolicy / OpenMethodPolicy | [L5 method_policies.py](../l5_methods/method_policies.py) | L5-owned Method policy values selected in `composition.policies` for a required Method. Currently only Open declares one; other Methods need no placeholder policy. |
 | OpenAdmissionPolicy / OpenPublicationProfile / BotSelfApplicationAdmission | [L5 publication.py](../l5_methods/publication.py) | L5-owned participation/role/capacity constraints, bounded Bot self-application, ADMITTED delivery gate and partial-failure behavior. L6 selects these values; product services and DI execute the journey. |
-| ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: Collet ID and optional independent root Task ID (absent before Work.start), product and selected Task/workflow/domain versions, actual MethodBinding references for the pinned topology, selected Method versions, actual RoleBinding references, pinned participant eligibility, governance requirements and negotiation result. No independent lifecycle state. |
+| ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: Collet ID and optional independent root Task ID (absent before L4 Work creation), product and selected Task/workflow/domain versions, actual MethodBinding references for the pinned topology, selected Method versions, actual RoleBinding references, pinned participant eligibility, governance requirements and negotiation result. No independent lifecycle state. |
 | Compatibility selection | `negotiate(profile, offer)` | Exact required profile/Method/ACCS/layer/extension/governance match. Reports missing required and omitted optional capabilities separately. Never silently chooses a newer version or weaker policy. |
 
 `profiles.py` retains the wire ID enums for compatibility; IDs alone are not
@@ -467,6 +467,14 @@ creation_event_ref points to that binding Event. At Work.start, actual initial e
 the Task alongside the objective/completion conditions in WorkStartCommand.
 All G1/G4 checks precede the atomic creation/start write. Root Task is revision 2
 and Collet revision 4 after a successful first start, absent intervening Events.
+Alternatively, explicit L4 `create_task` after Instantiate creates root Work at
+CREATED/revision 1 and advances Collet once, without starting or dispatching.
+It inherits the actual Collet executor bindings and preserves the installed
+selection and initial binding Event. A later Work.start (or the Swarm
+controller's `wake()`) starts that same Task without recreating it. The
+[creation regressions](../../../../../../../tests/community/core/task/context_collab/test_l6_runtime_contract.py)
+cover selection preservation, stale/unauthorized/duplicate rejection and SQL
+insert-failure rollback on this path.
 
 For compatibility, installation also accepts untouched, unassigned existing Work
 (Task revision 1, only its creation Event). That path preserves `task.created`,
@@ -650,8 +658,8 @@ history to newly invented partitions.
 
 `root_task_ref` is a local reference, not a universal ACCS field or a Collet ID
 alias. Taskless installation persists `None` in `creation_facts`; no placeholder
-Task is created. Once Work.start creates the authoritative L4 root, reads resolve
-the live reference from the same L4 snapshot without rewriting immutable L6
+Task is created. Once explicit L4 create_task or Work.start creates the
+authoritative root, reads resolve the live reference from the same L4 snapshot without rewriting immutable L6
 selection or renegotiating capabilities. Other pinned references and creation
 evidence remain unchanged. An instance installed on existing Work must retain
 its exact root reference; empty/mismatched references fail closed. Historical
@@ -838,26 +846,62 @@ consumes these L4 refs without importing L6. See the
 [L5 Swarm handoff contract](../l5_methods/README.md#swarm-stage-handoff-and-role-matching).
 
 The [Swarm coding test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py)
-defines five scoped Agents and their requirements/design/coding/verification/PR
-roles before instantiation. Its explicit controller reads READY stages, matches
-their RoleBinding requirements, allocates work, validates local artifacts and
-completes each stage. A serial Stage dependency chain enforces handoff; it is not
-a new Method composition relation. Since bare Swarm is not a supported top-level
-Collet method, the test uses Single with an explicit runtime `nest` edge to a
-Task-scoped Swarm binding. The nested Swarm plan is authored through L5, not
-claimed as an automatically instantiated L6 nested template.
+first authors a Swarm-only ProductProfile, injects it through an isolated
+ProductCatalog, and calls new-Collet L6 Instantiate, which creates the Collet
+internally and binds five scoped Agents/roles and its ACTIVE top-level Swarm
+binding. Only after Instantiate returns does explicit L4 `create_task` create
+the unstarted root Task, inheriting the bound root executor without overwriting
+product metadata or participation evidence. The root Task stays CREATED through
+controller construction; `controller.wake()` starts it via L4/G1/G4 and enqueues
+planning. G1 permits top-level Swarm; bare Group still requires a nested bind.
+No Single binding or runtime `nest` edge is introduced.
 
-The existing versioned G4 Task machine governs Work start/progress/submission/
-acceptance through a declared WorkflowProfile; Swarm's G4 Stage machine alone
-governs internal phase states. Role assignments do not broaden G1: the owner
-coordinates Swarm and reports aggregate progress, while the designated PR Agent
-submits the Task and the owner accepts it. The test controller waits for all
-stages before submitting; there is **no new cross-layer guard** that prevents an
-otherwise authorized direct Task submission while Swarm is unfinished.
+The profile explicitly configures `swarm_plan_service_ref="mock.ai_coding.plan/1"`.
+This is an optional local capability reference on ProductProfile authoring, not
+an ACCS wire operation or a worker execution profile. A non-Swarm profile cannot
+set it. Legacy profiles may omit it and remain usable without an autonomous
+controller; trying to coordinate without an installed explicit capability fails.
+The composition root selects that exact implementation from its injected
+capabilities, never a hidden default. The
+[unified plan interface](../swarm_planning.py) lives outside
+L5; the [test mock](../../../../../../../tests/community/core/task/context_collab/products/swarm_coding_support.py)
+lives in test support. On every call it inspects completed stages/artifacts,
+chooses the next coding phase and the Agent that should execute it, or proposes
+completion. L6 does not implement phase selection inside SwarmController.
 
-Only external Agent computation/PR creation is simulated: verification really
-runs four local Python unit tests, and the PR artifact is explicitly a simulated
-draft. No LLM, remote A2A, autonomous scheduler, real remote PR or MethodStore
-restart is covered. P1 has no `complete_plan` operation: the test leaves the plan
-RUNNING with all stages SUCCEEDED rather than mutating storage to invent a
-COMPLETED result. These limits do not change the installed commission product.
+The [L5 SwarmController](../l5_methods/swarm_controller.py) takes only caller input
+`collet_id` through an assisted DI construction. Configuration, root Task,
+binding, actual L4 role facts and execution/report ports are resolved internally.
+The first unified plan decision supplies the DAG and first executor. L5 validates
+it, adopts/starts the plan, validates the selected READY Stage and role candidate,
+and only then generates that executor's profile and allocates. There is no
+separate external MATCH call; neither product setup nor planning declares runtime
+profiles. Subsequent plan calls receive the current authoritative completed
+phases and select the next phase/executor together.
+
+Each working Agent produces a different artifact and actively reports through
+G4: requirements Markdown, design Markdown, Python source, a real four-test
+unittest report, and a **simulated** PR draft JSON. The protocol authenticates
+the allocated Agent and validates evidence, submits/accepts the Stage's own L4
+child Task through the Task machine, persists Stage output refs and completes
+the Stage through the Method machine. SQL reload retains all five done child
+Tasks and their worker-attributed artifact events; root Work remains distinct.
+A worker returning without reporting leaves both its Stage and Task running.
+
+After all phases, the mock proposes completion. L5 independently validates
+Stage success, artifacts, done child Tasks and released allocations before G4
+sets SwarmPlan COMPLETED. The test asserts `controller.is_completed()`, all five
+Stage artifacts, actual verification success, execution profiles/allocations and
+SQL-reloaded child Work. The product Workflow still governs root submission and
+human acceptance: internal completion does not auto-accept root Work. No new
+cross-layer guard prevents an otherwise authorized direct root submission while
+Swarm is unfinished.
+
+The journey contains one numbered successful end-to-end case; rejection and
+failure-recovery scenarios are not exercised by this file. Agent transport and
+PR creation are local simulations. There is no production
+scheduler, durable queue/MethodStore, live LLM/A2A, automatic retry/replanning,
+remote PR or distributed SQL/Method transaction. See the
+[L5 coordination contract](../l5_methods/README.md#bounded-swarm-coordination)
+for report recovery and wake behavior. Local condition keys are not standardized
+ACCS schemas. These changes do not alter the installed commission product.

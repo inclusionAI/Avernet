@@ -423,6 +423,7 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
             )
         updated = replace(
             stage,
+            output_artifact_refs=tuple(command.artifact_refs),
             state=StageState.from_wire(new_state),
             transitioned_from=stage.state.value,
             transition_reason=reason,

@@ -159,6 +159,7 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.record
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
+from agentclaw.community.di.modules.swarm_runtime import SwarmRuntimeModule
 from agentclaw.community.di.modules.task_commission_authorization import (
     TaskMethodOpsAuthorizer,
 )
@@ -318,6 +319,7 @@ class TaskModule(Module):
     """Production bindings for the task module(社区核心,所有 profile 装配)。"""
 
     def configure(self, binder: Binder) -> None:
+        binder.install(SwarmRuntimeModule())
         # TaskGraphService remains directly constructible for lightweight test
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.

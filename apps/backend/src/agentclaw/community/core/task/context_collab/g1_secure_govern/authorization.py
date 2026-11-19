@@ -43,6 +43,7 @@ VISIBILITY_PRIVATE = "private"
 TOP_LEVEL_METHOD_KINDS = frozenset(
     {
         MethodKind.SINGLE.value,
+        MethodKind.SWARM.value,
         MethodKind.OPEN_GROUP.value,
         MethodKind.OPEN_SINGLE.value,
         MethodKind.OPEN.value,
@@ -109,7 +110,8 @@ class StructuralContextCollabAuthorizer(
         if method_kind not in TOP_LEVEL_METHOD_KINDS:
             raise ContextCollabValidationError(
                 f"top-level method_kind must be one of {sorted(TOP_LEVEL_METHOD_KINDS)}, "
-                f"got: {method_kind!r}; bare Group/Swarm may only enter via a nested method bind"
+                f"got: {method_kind!r}; "
+                "bare Group may only enter via a nested method bind"
             )
         if method_kind == MethodKind.SINGLE.value and executor_ref is None:
             raise ContextCollabValidationError(

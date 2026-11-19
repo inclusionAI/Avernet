@@ -38,6 +38,17 @@ It implements bounded local contracts, not full ACCS conformance.
   L6 composes lower-layer contracts; concrete business templates stay in
   `products/`. G1–G4 cross-cut these layers.
 
+## Unified Swarm planning boundary
+
+[`swarm_planning.py`](swarm_planning.py) owns the collaboration-domain outbound
+`SwarmPlanningService` protocol and decision values, outside L5. It uses Method
+value contracts, so it is not a lower-level `plugin_api` interface. Product
+configuration explicitly selects a named implementation; DI supplies it. Each
+`plan` call reads current Stage/participation facts and selects both next Stage
+and executor, or proposes completion. Implementations cannot grant authority or
+declare execution profiles; L5 validates and commits decisions. The coding mock
+lives only in tests.
+
 ## Operation ownership
 
 Operation implementation follows the owner of the affected authority, not the
@@ -57,7 +68,7 @@ l4_context_primitives/
   operations/
     contracts.py           # L4 commands and primitive storage ports
     collet_lifecycle.py     # create/activate/suspend/resume/complete/archive
-    work.py                # G4 Task resolution, Task fence and atomic append
+    work.py                # G4 Task resolution, Task fence and atomic root/child append
   persistence/
     repository.py          # actual L4 creation/read/append SQL and Task/Collet CAS
     models.py              # canonical Collet/Task/Event ORM models (one model set)
@@ -73,7 +84,7 @@ l5_methods/
     lifecycle.py            # binding lifecycle, inspect, compose and detach
     single.py / group.py     # separate operations; single_group.py preserves combined API
     open/                   # opportunity query/application/admission operations
-    swarm/                  # execution profile/plan/stage operations
+    swarm/                  # execution profile/plan/stage + worker report operations
 l6_products/
   service_api.py            # legacy combined creation command/extended Protocol
   task_contracts.py         # standard_task@1: fixed Task contract, not a Bot plan
@@ -346,12 +357,16 @@ collet = l4_collab_service.create_collet(
 ```
 
 Collet creation persists only the context and returns revision 1. It has no Task,
-Event, participants or creation facts. Root Task creation belongs to Work.start
-in the product journey, after installation and required admission/selection.
-The separate `create_task` API remains available for callers that explicitly
-need existing unassigned Work; it is not a prerequisite for Instantiate and is
-not used by the commission journey. Creation failures propagate and SQL writes
-roll back. Objective/executors remain Task authority, not Collet fields.
+Event, participants or creation facts. Root Task creation follows installation
+and required admission/selection in product journeys: Work.start can atomically
+create/start it, or explicit `create_task` can create it first without starting.
+The latter works before or after Instantiate and inherits actual Collet executor
+bindings when present, otherwise leaving Work unassigned. It preserves installed
+selection metadata and binding evidence, and is not a prerequisite for
+Instantiate. The Swarm journey uses Instantiate → create_task → controller.wake;
+the commission journey continues to use Work.start directly. Creation failures
+propagate and SQL writes roll back. Objective/executors remain Task authority,
+not Collet fields.
 
 Product-specific instantiation belongs to L6, not an L4 side effect:
 [`ProductInstantiationServiceProtocol.instantiate`](l6_products/operations/contracts.py)
@@ -679,8 +694,23 @@ together when changing it. Keep their tests and migration aligned. Source
 imports of product selection or snapshots must use their owning boundaries;
 Existing HTTP product inputs remain unchanged; new Collet library serialization
 includes metadata/ETag while old six-field values remain readable. Pure L4
-creation evidence still contains only objective and empty executor_refs; initial
-product participation is recorded separately.
+Task creation evidence contains objective and executor_refs (empty without
+prior executor bindings); initial product participation is recorded separately.
 The in-memory
 MethodStore and SQL/MethodStore/delivery transaction gap remain existing limits;
 this change does not add live A2A execution or a recursive workflow engine.
+
+## Swarm execution reports and child Work
+
+The [L5 controller/report contract](l5_methods/README.md#bounded-swarm-coordination)
+coordinates a product-selected external unified plan capability. Each Stage
+references an independent L4 child Task. The internal L4 append contract accepts
+a child `task_creation` only with an existing same-Collet parent and identical
+accountable principal, an initial created revision and a G4-prepared start.
+It atomically records task.created/task.started and preserves root_task_ref.
+Subsequent Work resolves the exact TaskUpdate subject, fences that Task revision
+and the Collet revision, and never substitutes a child for root Work.
+Worker completion evidence belongs in Task events and Stage output refs; it is
+not a G3 telemetry-only observation. Root acceptance remains separate. The
+[Swarm integration test](../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py)
+checks child Work SQL reload and five phase artifacts.

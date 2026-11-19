@@ -1,24 +1,21 @@
-"""多角色 coding: L6 → Single 嵌套 Swarm → 五阶段交接 → Task 验收。
+"""Profile/DI → L6 实例化 → L4 创建 Task → L5 唤醒启动 → 统一 PLAN → Task 验收。
 
-真实 DI/SQLite/L4 角色/L5/G4;仅模拟 Agent 计算与 PR 草稿，不调用远程
-LLM/A2A、不创建真实 PR。不声称验证 Activity、Grant 或 MethodStore 重启恢复。
-计算成功不改 Stage 状态，协调人验证本地产物后显式 complete_stage。
+真实 DI/SQLite/L4 角色/L5/G4；规划分配、Agent 计算用本地服务替身。
+不调用远程 LLM/A2A，不创建真实 PR；计算成功不自动改变权威状态。
+L5 协调器不是持久化调度器，不声称支持重试/重规划或持久化产品 Decision。
 """
 
 import json
 import subprocess
 import sys
-from dataclasses import replace
-from datetime import datetime, timedelta, timezone
 
 import pytest
-from injector import Binder, Injector
-
-from agentclaw.community.core.task.context_collab.errors import (
-    ContextCollabValidationError,
-)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.execution_report import (
+    StageExecutionReport,
+    StageReportProtocol,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
@@ -30,34 +27,19 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.context_
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     ColletCreateCommand,
     EventAppendCommand,
-    WorkStartCommand,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
-    role_binding_ref,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
-    initial_participation,
+    TaskCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
     get_profile,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
-    BindMethodCommand,
-    ComposeMethodCommand,
-    MethodLifecycleServiceProtocol,
-    MethodStateChangeCommand,
-    SwarmAllocateCommand,
-    SwarmExecutionProfileCommand,
-    SwarmMethodOpsServiceProtocol,
-    SwarmPlanCandidateCommand,
-    SwarmPlanOpCommand,
-    SwarmStageOutcomeCommand,
-)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.matching import (
-    stage_role_candidates,
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_controller import (
+    SwarmController,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_controller_contracts import (
+    StageExecutionService,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
     AllocationState,
@@ -94,9 +76,16 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.reposi
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
+from agentclaw.community.di.modules.swarm_runtime import SwarmPlanningCapabilities
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from injector import AssistedBuilder, Binder, Injector, InstanceProvider
+
+from tests.community.core.task.context_collab.products.swarm_coding_support import (
+    PLAN_SERVICE,
+    LocalCodingPlanService,
+)
 
 OWNER = ActorContext(PrincipalRef("human", "coding_owner"), source="api")
 ROLES = ("requirements", "design", "coding", "verification", "pr_submission")
@@ -108,76 +97,168 @@ ARTIFACTS = (
     "test-report.json",
     "pr-draft.json",
 )
-BINDING, PLAN = "coding_swarm", "coding_plan"
 
 
+def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
+    # 1. 第一步：L6 定义可复用的 ProductProfile，显式指定统一 plan 接口和五阶段 Agent 角色。
+    # Profile 只声明合同；此时不生成 Plan、执行者分配或运行时 execution profile。
+    profile = _create_product_profile()
+    assert profile.swarm_plan_service_ref == PLAN_SERVICE
 
-def test_task_commission_end_to_end_swarm(runtime, tmp_path):
-    injector, instance = runtime
-    collet_id, axes = instance.collet_ref, current_axes()
-    initial = _record(injector, collet_id)
-    assert initial.task is None
-    facts = initial_participation(initial.events)
-    assert {p.agent_ref for p in facts.participants if p.agent_ref} == set(AGENTS)
-    assert len(facts.role_bindings) == 7
-    assert set(instance.role_binding_refs) == {
-        role_binding_ref(collet_id, b) for b in facts.role_bindings
-    }
-    swarm, store, facts = _start_swarm(injector, instance)
-    selected = []
-    for expected_role in ROLES:
-        # 当前阶段来自权威 READY 状态，不由循环计数器决定。
-        ready = [
-            s
-            for s in store.list_stages(axes, BINDING, collet_id)
-            if s.state is StageState.READY
-        ]
-        assert len(ready) == 1
-        stage = ready[0]
-        assert stage.name == expected_role
-        candidates = stage_role_candidates(collet_id, stage, facts)
-        assert len(candidates) == 1
-        participant = candidates[0]
-        selected.append(participant.agent_ref)
-        allocated = swarm.allocate_stage(
-            collet_id, BINDING, _command(stage, participant), OWNER
-        )
-        assert allocated.state == "ACTIVE"
-        output = _simulate_agent(stage.name, participant, tmp_path)
-        assert (
-            store.get_stage(axes, stage.stage_id, BINDING, collet_id).state
-            is StageState.RUNNING
-        )
-        assert output.name == stage.completion_condition["required_artifact"]
-        assert output.read_text()
-        done = swarm.complete_stage(
-            collet_id,
-            BINDING,
-            stage.stage_id,
-            SwarmStageOutcomeCommand(
-                [allocated.object_id], reason=f"validated artifact://{output.name}"
-            ),
-            OWNER,
-        )
-        assert done.state == "SUCCEEDED"
-        assert (
-            store.get_allocation(axes, allocated.object_id, BINDING, collet_id).state
-            is AllocationState.RELEASED
-        )
-        _append(
-            injector,
-            collet_id,
-            "task.progress.updated",
-            note=f"{stage.name}: artifact://{output.name}",
-            percent=len(selected) * 20,
-        )
-    assert selected == list(AGENTS)
-    assert all(
-        s.state is StageState.SUCCEEDED
-        for s in store.list_stages(axes, BINDING, collet_id)
+    # 2. 第二步：通过 DI 装配真实协议与本地替身；plan 实现在 L5 外，统一决定下一阶段及执行者。
+    injector = deploy_swarm(profile, tmp_path)
+    store = injector.get(MethodStoreProtocol)
+    service = injector.get(ContextServiceProtocol)
+    planner = injector.get(LocalCodingPlanService)
+    executor = injector.get(StageExecutionService)
+    axes = current_axes()
+
+    # 3. 第三步：L6 Instantiate 内部创建 Collet，绑定产品、Swarm 和五阶段 Agent 角色。
+    # 此时只有上下文与绑定证据，尚未创建根 Task，更不会启动或派发。
+    instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
+        ProductInstantiateNewCommand(
+            collet=ColletCreateCommand(OWNER.actor, title="Swarm AI coding"),
+            profile_ref=profile.ref,
+            participant_refs=AGENTS,
+            executor_ref=AGENTS[-1],
+        ),
+        OWNER,
     )
-    # P1 暂无 complete_plan 操作，不能直接改 store 假装 COMPLETED。
-    assert store.get_plan(axes, PLAN, BINDING, collet_id).state is PlanState.RUNNING
+    collet_id = instance.collet_ref
+    [binding_id] = instance.method_binding_refs
+    instantiated = _record(injector, collet_id)
+    assert instantiated.task is None
+    assert instantiated.tasks == ()
+    assert instantiated.product_instance == instance
+    assert [event.event_kind for event in instantiated.events] == [
+        "collet.participants_bound"
+    ]
+    assert store.list_execution_profiles(axes, binding_id, collet_id) == []
+    assert not planner.calls
+    assert not executor.calls
+
+    # 4. 第四步：实例化之后通过 L4 显式创建根 Task，明确 coding 目标，但不启动。
+    # 沿用已绑定的根成果提交者；各 Stage 的执行者仍由后面的统一 plan 决定。
+    root_task = service.create_task(
+        collet_id,
+        TaskCreateCommand(
+            instantiated.collet.version,
+            OWNER.actor,
+            objective="实现计算器求和并测试后提交 PR 草稿",
+        ),
+        OWNER,
+    )
+    record = _record(injector, collet_id)
+    assert record.task == root_task
+    assert record.task.status == "created"
+    assert record.task.executor_refs == (AGENTS[-1],)
+    assert len(record.tasks) == 1
+    assert record.product_instance.root_task_ref == root_task.task_id
+    assert record.product_instance.method_binding_refs == (binding_id,)
+    assert record.product_instance.creation_event_ref == instance.creation_event_ref
+    assert record.creation_facts == instantiated.creation_facts
+    assert record.participants == instantiated.participants
+    assert record.role_bindings == instantiated.role_bindings
+    assert record.events[:-1] == instantiated.events
+    assert record.events[-1].event_kind == "task.created"
+    assert not planner.calls
+    assert not executor.calls
+    assert store.list_execution_profiles(axes, binding_id, collet_id) == []
+
+    # 5. 第五步：只传 collet_id 构造真实 L5 Controller；由 wake 统一启动根 Task 并进入 Swarm 规划。
+    controller = injector.get(AssistedBuilder[SwarmController]).build(
+        collet_id=collet_id
+    )
+    assert controller.binding_id == binding_id
+    assert _record(injector, collet_id).task.status == "created"
+    assert not planner.calls
+    assert not executor.calls
+    assert not controller.step()  # 构造本身不启动，也不产生待执行的规划。
+    controller.wake()
+    record = _record(injector, collet_id)
+    assert record.task.task_id == root_task.task_id
+    assert record.task.objective == root_task.objective
+    assert record.task.status == "in_progress"
+    assert not planner.calls
+    assert not executor.calls
+    # 外部 plan 同时给出初始 DAG 与第一阶段执行者，尚无权威写入。
+    assert controller.step()
+    assert len(planner.calls) == 1
+    assert planner.calls[0].stages == ()
+    assert controller.plan() is None
+    assert store.list_execution_profiles(axes, binding_id, collet_id) == []
+
+    # 6. 第六步：L5 应用规划后才生成 execution profile 并派发；需求 Agent 干活后主动走 G4 上报产物。
+    # G4/协议推进需求 Stage 及其独立子 Task，而不是把 execute 返回当成完成。
+    assert controller.step()
+    first = controller.stages()[0]
+    assert first.state is StageState.SUCCEEDED
+    assert first.output_artifact_refs == ("artifact://requirements.md",)
+    assert (
+        next(
+            t for t in _record(injector, collet_id).tasks if t.task_id == first.task_ref
+        ).status
+        == "done"
+    )
+    assert not controller.is_completed()
+
+    # 7. 第七步：继续设计、编码、测试、PR 草稿；每次 plan 根据已完成阶段及产物重新选择下一阶段和 Agent。
+    # 各 Agent 均主动 G4 上报，直到 plan 声明结束且协议确认整个 Swarm 已完成。
+    controller.drain()
+    assert controller.is_completed()
+    assert controller.plan().state is PlanState.COMPLETED
+    assert len(planner.calls) == len(ROLES) + 1
+    assert [
+        sum(s.state is StageState.SUCCEEDED for s in r.stages) for r in planner.calls
+    ] == list(range(len(ROLES) + 1))
+    assert [p.agent_ref for _, p, _ in executor.calls] == list(AGENTS)
+
+    # 8. 第八步：逐阶段验证不同产物、子 Task、实际执行者及上报事件，确认分配释放与运行时合同。
+    stages = controller.stages()
+    record = _record(injector, collet_id)
+    tasks = {t.task_id: t for t in record.tasks}
+    assert len(stages) == len(ROLES)
+    assert [stage.name for stage in stages] == list(ROLES)
+    assert len(tasks) == len(ROLES) + 1
+    root_starts = [
+        event
+        for event in record.events
+        if event.task_ref == root_task.task_id and event.event_kind == "task.started"
+    ]
+    assert len(root_starts) == 1  # 后续阶段内部 wake 不会重复启动根 Task。
+    assert root_starts[0].actor_ref == OWNER.actor
+    for stage, artifact, agent in zip(stages, ARTIFACTS, AGENTS):
+        assert stage.state is StageState.SUCCEEDED
+        assert stage.output_artifact_refs == (f"artifact://{artifact}",)
+        assert (tmp_path / artifact).read_text()
+        task = tasks[stage.task_ref]
+        assert task.status == "done"
+        assert task.parent_task_ref == record.task.task_id
+        assert task.executor_refs == (agent,)
+        reports = [
+            e
+            for e in record.events
+            if e.task_ref == stage.task_ref and e.event_kind == "task.submitted"
+        ]
+        assert len(reports) == 1
+        assert reports[0].actor_ref == PrincipalRef(agent.agent_type, agent.agent_id)
+        assert reports[0].payload["artifacts"] == [f"artifact://{artifact}"]
+    allocations = store.list_allocations(axes, binding_id, collet_id)
+    assert len(allocations) == len(ROLES)
+    assert all(a.state is AllocationState.RELEASED for a in allocations)
+    profiles = store.list_execution_profiles(axes, binding_id, collet_id)
+    assert len(profiles) == len(ROLES)
+    by_id = {p.execution_profile_id: p for p in profiles}
+    assert all(
+        by_id[a.execution_profile_ref].target_ref == a.target_ref for a in allocations
+    )
+    test_report = json.loads((tmp_path / "test-report.json").read_text())
+    assert test_report["exit_code"] == 0
+    assert "Ran 4 tests" in test_report["output"]
+    assert json.loads((tmp_path / "pr-draft.json").read_text())["simulated"] is True
+
+    # 9. 第九步：Swarm 内部完成不等于用户验收；PR Agent 汇总五阶段产物，提交根 Task 待验收。
+    assert record.task.status == "in_progress"
     submitter = ActorContext(
         PrincipalRef("bot", AGENTS[-1].agent_id), source="local_agent"
     )
@@ -187,37 +268,39 @@ def test_task_commission_end_to_end_swarm(runtime, tmp_path):
             collet_id,
             "task.submitted",
             submitter,
-            artifacts=[f"artifact://{name}" for name in ARTIFACTS],
+            artifacts=[f"artifact://{a}" for a in ARTIFACTS],
         ).current_status
         == "reviewing"
     )
+
+    # 10. 第十步：用户显式验收成果，根 Task 才进入 done。
     assert (
         _append(
-            injector,
-            collet_id,
-            "task.accepted",
-            note="验收代码、真实单测报告与模拟 PR 草稿",
+            injector, collet_id, "task.accepted", note="验收五阶段产物"
         ).current_status
         == "done"
     )
-    # 新仓储重读 SQL；MethodStore 仍为进程内，不声称支持重启恢复。
+
+    # 11. 第十一步：通过新仓储实例重读 SQLite，验证根/子 Task 均完成，Swarm 仍满足完成条件。
     repo = injector.get(ContextCollabRepositoryProtocol).__class__(
         injector.get(DatabasePlugin), injector.get(ProductCatalog)
     )
     reread = repo.get_current_status(collet_id)
     assert reread.task.status == "done"
-    assert reread.product_instance.root_task_ref == reread.task.task_id
-    assert initial_participation(reread.events) == facts
+    assert len(reread.tasks) == len(ROLES) + 1
+    assert all(t.status == "done" for t in reread.tasks)
+    assert reread.product_instance.method_binding_refs == (binding_id,)
+    assert controller.is_completed()
 
 
-def _profile():
+def _create_product_profile():
     # Workflow 只管宏观 Work；Stage DAG 管内部阶段，不复制第二套阶段机。
     return create_product_profile(
         ProductProfileCreateCommand(
             ref=VersionedProfileRef("ai_coding_swarm", 1),
-            # 现有顶层不支持裸 Swarm，使用真实 nest，而非发明新的 wire 枚举。
+            swarm_plan_service_ref=PLAN_SERVICE,
             composition=MethodCompositionTemplate(
-                "Single", (get_profile("Single", "0.2"),)
+                "Swarm", (get_profile("Swarm", "0.2"),)
             ),
             participant_scope=ParticipantScope(ParticipantScopeKind.ALLOWLIST, AGENTS),
             scenario_roles=(
@@ -289,24 +372,26 @@ def _profile():
 
 
 @pytest.fixture
-def runtime(db):
-    profile = _profile()
+def deploy_swarm(db):
+    def deploy(profile, workspace):
+        planner = LocalCodingPlanService()
+        executor = LocalStageExecutionService(workspace)
 
-    def local(binder: Binder):
-        binder.bind(DatabasePlugin, to=db)
-        binder.bind(ProductCatalog, to=ProductCatalog((profile,)))
+        def local(binder: Binder):
+            binder.bind(DatabasePlugin, to=db)
+            binder.bind(ProductCatalog, to=ProductCatalog((profile,)))
+            binder.bind(LocalCodingPlanService, to=InstanceProvider(planner))
+            binder.bind(
+                SwarmPlanningCapabilities,
+                to=SwarmPlanningCapabilities({PLAN_SERVICE: planner}),
+            )
+            binder.bind(StageExecutionService, to=InstanceProvider(executor))
 
-    injector = Injector([TaskPersistenceModule(), TaskModule(), local])
-    instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
-        ProductInstantiateNewCommand(
-            collet=ColletCreateCommand(OWNER.actor, title="Swarm AI coding"),
-            profile_ref=profile.ref,
-            participant_refs=AGENTS,
-            executor_ref=AGENTS[-1],
-        ),
-        OWNER,
-    )
-    return injector, instance
+        injector = Injector([TaskPersistenceModule(), TaskModule(), local])
+        executor.reports = injector.get(StageReportProtocol)
+        return injector
+
+    return deploy
 
 
 def _record(injector, collet_id):
@@ -330,108 +415,53 @@ def _append(injector, collet_id, event, actor=OWNER, **payload):
     )
 
 
-def _start_swarm(injector, instance):
-    collet_id = instance.collet_ref
-    record = _record(injector, collet_id)
-    injector.get(ContextServiceProtocol).start(
-        collet_id,
-        WorkStartCommand(
-            record.collet.version, objective="实现计算器求和并测试后提交 PR 草稿"
-        ),
-        OWNER,
-    )
-    record = _record(injector, collet_id)
-    lifecycle = injector.get(MethodLifecycleServiceProtocol)
-    lifecycle.bind(
-        collet_id,
-        BindMethodCommand("Swarm", BINDING, parent_scope_ref=record.task.task_id),
-        OWNER,
-    )
-    lifecycle.activate(collet_id, BINDING, MethodStateChangeCommand(), OWNER)
-    edge = lifecycle.compose(
-        collet_id,
-        instance.method_binding_refs[0],
-        ComposeMethodCommand("nest", BINDING, "Swarm"),
-        OWNER,
-    )
-    assert edge.edge["relation_kind"] == "nest"
-    facts = initial_participation(record.events)
-    refs = {b.role: role_binding_ref(collet_id, b) for b in facts.role_bindings}
-    swarm = injector.get(SwarmMethodOpsServiceProtocol)
-    for role in ROLES:
-        participant = next(
-            p
-            for p in facts.participants
-            if any(
-                b.role == role and b.participant_id == p.participant_id
-                for b in facts.role_bindings
-            )
-        )
-        swarm.declare_execution_profile(
+class LocalStageExecutionService:
+    """Only the execution/evidence double knows coding artifacts and the filesystem."""
+
+    def __init__(self, workspace):
+        self.workspace = workspace
+        self.calls = []
+
+    def execute(
+        self, stage, participant, profile, allocation_ref, collet_id, binding_id
+    ):
+        assert profile.target_ref == participant.participant_id
+        assert profile.supported_work_kinds == ("EXECUTE",)
+        assert profile.input_contract_ref == "coding-input/1"
+        assert profile.output_contract_ref == "coding-output/1"
+        self.calls.append((stage, participant, profile))
+        output = _simulate_agent(stage.name, participant, self.workspace)
+        report = StageExecutionReport(
             collet_id,
-            BINDING,
-            SwarmExecutionProfileCommand(
-                mode="A2A_AGENT",
-                target_ref=participant.participant_id,
-                supported_work_kinds=["EXECUTE"],
-                input_contract_ref="coding-input/1",
-                output_contract_ref="coding-output/1",
-                execution_profile_id=f"execution_{role}",
-            ),
-            OWNER,
+            binding_id,
+            stage.stage_id,
+            allocation_ref,
+            (f"artifact://{output.name}",),
         )
-    swarm.submit_plan_candidate(
-        collet_id,
-        BINDING,
-        SwarmPlanCandidateCommand(
-            task_ref=record.task.task_id,
-            swarm_plan_id=PLAN,
-            max_parallelism=1,
-            max_depth=5,
-            budget_resource_refs=["resource://local-coding-budget"],
-            termination_condition={"all_stages_succeeded": True},
-            stages=[
-                {
-                    "stage_id": role,
-                    "name": role,
-                    "dependency_stage_refs": [] if i == 0 else [ROLES[i - 1]],
-                    "requirement_refs": [refs[role]],
-                    "input_artifact_refs": []
-                    if i == 0
-                    else [f"artifact://{ARTIFACTS[i - 1]}"],
-                    "output_artifact_roles": [ARTIFACTS[i]],
-                    "completion_condition": {"required_artifact": ARTIFACTS[i]},
-                }
-                for i, role in enumerate(ROLES)
-            ],
-        ),
-        OWNER,
-    )
-    assert swarm.validate_plan(collet_id, BINDING, PLAN, OWNER)["valid"]
-    store = injector.get(MethodStoreProtocol)
-    assert all(
-        s.state is StageState.PENDING
-        for s in store.list_stages(current_axes(), BINDING, collet_id)
-    )
-    swarm.adopt_plan(collet_id, BINDING, PLAN, SwarmPlanOpCommand(), OWNER)
-    swarm.start_plan(collet_id, BINDING, PLAN, SwarmPlanOpCommand(), OWNER)
-    return swarm, store, facts
+        actor = ActorContext(
+            PrincipalRef(
+                participant.agent_ref.agent_type, participant.agent_ref.agent_id
+            ),
+            source="local_agent",
+        )
+        self.reports.report(report, actor)
 
-
-def _command(stage, participant):
-    return SwarmAllocateCommand(
-        stage_ref=stage.stage_id,
-        target_kind="AGENT",
-        target_ref=participant.participant_id,
-        execution_profile_ref=f"execution_{stage.name}",
-        lease_expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-        allocation_id=f"allocation_{stage.stage_id}",
-        qualification_evidence_refs=list(stage.requirement_refs),
-    )
+    def accepts(self, stage, output):
+        expected = self.workspace / stage.completion_condition["required_artifact"]
+        if (
+            output.artifact_refs != (f"artifact://{expected.name}",)
+            or not expected.is_file()
+            or not expected.read_text()
+        ):
+            return False
+        if stage.name == "verification":
+            report = json.loads(expected.read_text())
+            return report["exit_code"] == 0 and "Ran 4 tests" in report["output"]
+        return True
 
 
 def _simulate_agent(role, participant, workspace):
-    """唯一计算面模拟；显式读前序产物，测试 Agent 真正运行 unittest。"""
+    """Agent 执行替身；显式读前序产物，测试 Agent 真正运行 unittest。"""
     index = ROLES.index(role)
     if index:
         assert (workspace / ARTIFACTS[index - 1]).read_text()

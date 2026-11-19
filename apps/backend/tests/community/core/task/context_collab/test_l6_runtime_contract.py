@@ -50,6 +50,7 @@ from agentclaw.community.core.task.context_collab.l6_products.operations.collabo
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
     ProductInstantiateCommand,
+    ProductInstantiateNewCommand,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
     ProductInstantiationService,
@@ -63,6 +64,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
+    ContextCollabTaskModel,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
@@ -91,6 +93,7 @@ from agentclaw.community.core.task.context_collab.services.method_lifecycle_serv
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
+from sqlalchemy import event as sql_event
 from sqlalchemy import func, select
 
 from tests.community.core.task.context_collab.product_catalog import (
@@ -657,3 +660,112 @@ def test_legacy_commission_progress_requires_typed_executor(db):
         _actor(BOT),
     )
     assert progressed.context_version == 5
+
+
+@pytest.fixture
+def instantiated_without_work(db):
+    repo, store, _, _ = _services(db)
+    authorizer = StructuralContextCollabAuthorizer()
+    l4 = ContextService(
+        repo, ProductCollaborationPolicy(LEGACY_PRODUCT_CATALOG, authorizer)
+    )
+    instance = ProductInstantiationService(
+        repo, store, LEGACY_PRODUCT_CATALOG, authorizer, l4
+    ).instantiate(
+        ProductInstantiateNewCommand(
+            collet=ColletCreateCommand(OWNER),
+            profile_ref=VersionedProfileRef("task_commission", 1),
+            participant_refs=(AgentRef("bot", "worker"),),
+        ),
+        _actor(),
+    )
+    record = repo.get_current_status(instance.collet_ref)
+    assert record.task is None and record.tasks == ()
+    return l4, repo, record
+
+
+def test_create_task_after_instantiation_preserves_selection_and_bindings(
+    instantiated_without_work, db
+):
+    l4, repo, before = instantiated_without_work
+    cid = before.collet.collet_id
+    with db.orm_session() as session:
+        raw_facts = session.query(ContextCollabColletModel).one().creation_facts
+    task = l4.create_task(
+        cid,
+        TaskCreateCommand(before.collet.version, OWNER, "deliver", ("accepted",)),
+        _actor(),
+    )
+    after = repo.get_current_status(cid)
+    assert task == after.task and task.status == "created" and task.version == 1
+    assert task.executor_refs == (AgentRef("bot", "worker"),)
+    assert task.completion_conditions == ("accepted",)
+    assert after.collet.version == before.collet.version + 1
+    assert after.product_instance == replace(
+        before.product_instance, root_task_ref=task.task_id
+    )
+    assert after.creation_facts == before.creation_facts
+    assert after.participants == before.participants
+    assert after.role_bindings == before.role_bindings
+    assert after.events[:-1] == before.events
+    event = after.events[-1]
+    assert event.event_kind == "task.created" and event.task_ref == task.task_id
+    assert event.payload["executor_refs"] == [AgentRef("bot", "worker").to_dict()]
+    with db.orm_session() as session:
+        assert session.query(ContextCollabColletModel).one().creation_facts == raw_facts
+        assert session.query(ContextCollabTaskModel).count() == 1
+
+
+@pytest.mark.parametrize("rejection", ["stale", "stranger", "duplicate"])
+def test_create_task_after_instantiation_rejects_without_writes(
+    instantiated_without_work, rejection
+):
+    l4, repo, before = instantiated_without_work
+    cid = before.collet.collet_id
+    command = TaskCreateCommand(before.collet.version, OWNER, "deliver")
+    if rejection == "duplicate":
+        l4.create_task(cid, command, _actor())
+        before = repo.get_current_status(cid)
+        command = replace(command, expected_version=before.collet.version)
+    elif rejection == "stale":
+        command = replace(command, expected_version=before.collet.version - 1)
+    actor = (
+        _actor(PrincipalRef("human", "stranger"))
+        if rejection == "stranger"
+        else _actor()
+    )
+    error = (
+        ContextCollabVersionConflict
+        if rejection == "stale"
+        else ContextCollabValidationError
+    )
+    with pytest.raises(error):
+        l4.create_task(cid, command, actor)
+    assert repo.get_current_status(cid) == before
+
+
+@pytest.mark.parametrize("target", [ContextCollabTaskModel, ContextCollabEventModel])
+def test_create_task_after_instantiation_write_failure_preserves_selection(
+    instantiated_without_work, db, target
+):
+    l4, repo, before = instantiated_without_work
+    cid = before.collet.collet_id
+
+    def fail(*_):
+        raise RuntimeError("Task creation insert failed")
+
+    sql_event.listen(target, "before_insert", fail)
+    try:
+        with pytest.raises(RuntimeError, match="Task creation insert failed"):
+            l4.create_task(
+                cid,
+                TaskCreateCommand(before.collet.version, OWNER, "deliver"),
+                _actor(),
+            )
+    finally:
+        sql_event.remove(target, "before_insert", fail)
+    assert repo.get_current_status(cid) == before
+    with db.orm_session() as session:
+        assert session.query(ContextCollabColletModel).count() == 1
+        assert session.query(ContextCollabTaskModel).count() == 0
+        assert session.query(ContextCollabEventModel).count() == len(before.events)
