@@ -160,9 +160,8 @@ def test_friend_iam_failure_never_installs_credentials(friend_iam, failure):
 def jit_iam(friend_iam):
     from agentclaw.community.core.token_exchange.orchestrator import TokenExchangeOrchestrator
 
-    caller = SimpleNamespace(
-        get_iam_token=AsyncMock(return_value=CallerIamTokenOutcome("original")),
-    )
+    refresh = AsyncMock(return_value=CallerIamTokenOutcome("test-token"))
+    caller = SimpleNamespace(get_iam_token=refresh)
     pipeline = SimpleNamespace(run=AsyncMock(return_value=[]))
     auth = SimpleNamespace(resolve_user_from_request=AsyncMock(side_effect=AssertionError("no browser identity")))
     bots = Mock()
@@ -178,7 +177,7 @@ def jit_iam(friend_iam):
 def test_friend_post_forwards_verbatim_jit_selectors_without_changing_caller(jit_iam, target):
     response = request(jit_iam.http, caller_runtime_target=target, device_uuid=" 副本/A:2 ", entity_id="unrelated")
     assert response.status_code == 200, response.json()
-    assert response.json()["data"]["iam_token"] == "original"
+    assert response.json()["data"]["iam_token"] == "test-token"
     jit_iam.caller.get_iam_token.assert_awaited_once()
     args = jit_iam.caller.get_iam_token.await_args.kwargs
     assert args["entity_id"] == "entity-owner"
@@ -196,7 +195,7 @@ def test_friend_post_forwards_verbatim_jit_selectors_without_changing_caller(jit
 def test_post_invalid_selector_only_skips_jit(jit_iam, selector):
     response = request(jit_iam.http, **selector)
     assert response.status_code == 200
-    assert response.json()["data"]["iam_token"] == "original"
+    assert response.json()["data"]["iam_token"] == "test-token"
     jit_iam.caller.get_iam_token.assert_awaited_once()
     jit_iam.pipeline.run.assert_not_awaited()
 
@@ -220,7 +219,7 @@ def test_post_uses_verified_principal_only_for_an_entity_scoped_jit_request(jit_
         "actor_user_id": "forged", "verified_actor_user_id": "forged", **scope,
     }, headers={dependencies.PRINCIPAL_HEADER: mint(user_id="friend", tenant=None)})
     assert response.status_code == 200, response.json()
-    assert response.json()["data"]["iam_token"] == "original"
+    assert response.json()["data"]["iam_token"] == "test-token"
     jit_iam.caller.get_iam_token.assert_awaited_once()
     assert jit_iam.caller.get_iam_token.await_args.kwargs["entity_id"] == scope.get("entity_id")
     jit_iam.bots.get_unique_by_id.assert_not_called()
