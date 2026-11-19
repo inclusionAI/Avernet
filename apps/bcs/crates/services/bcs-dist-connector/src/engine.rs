@@ -102,7 +102,7 @@ impl ConnectorEngine {
     async fn run_loop(&self) -> Result<(), RuntimeError> {
         let inner = &self.inner;
         let config = inner.config.clone();
-        self.register().await;
+        self.register().await?;
         let mut feed = inner
             .ports
             .queue
@@ -321,25 +321,53 @@ impl ConnectorEngine {
             .count()
     }
 
-    /// Registers this instance. The membership provider is pending from the
-    /// executor team: until it exists the registration fails and the
-    /// Connector runs without one.
-    async fn register(&self) {
-        let config = &self.inner.config;
-        let registered = self
-            .inner
-            .ports
-            .membership
-            .register(
-                config.me.clone(),
-                RuntimeRole::Connector,
-                config.control_address.clone(),
-                config.membership_ttl,
-            )
-            .await;
-        match registered {
-            Ok(lease) => *lock(&self.inner.lease) = Some(lease),
-            Err(error) => tracing::warn!(?error, "membership registration unavailable; running without it"),
+    /// Registers this instance before anything is claimed.
+    ///
+    /// Only the answer of the "no provider wired" stub lets the Connector run
+    /// unregistered. A refusal (for example an invalid control address) fails
+    /// the start. Any other failure may have applied the registration, so it
+    /// is asked again (an identical registration is idempotent) until it
+    /// answers: claiming without a lease that is renewed would let the
+    /// registration expire under running calls.
+    async fn register(&self) -> Result<(), RuntimeError> {
+        let inner = &self.inner;
+        let config = &inner.config;
+        let mut backoff = Backoff::new(config);
+        loop {
+            let registered = inner
+                .ports
+                .membership
+                .register(
+                    config.me.clone(),
+                    RuntimeRole::Connector,
+                    config.control_address.clone(),
+                    config.membership_ttl,
+                )
+                .await;
+            match registered {
+                Ok(lease) => {
+                    *lock(&inner.lease) = Some(lease);
+                    return Ok(());
+                }
+                Err(StoreError::NotApplied { code }) if code == crate::delayed::NEED_CONTRACT => {
+                    tracing::warn!("no membership provider wired; running without a registration");
+                    return Ok(());
+                }
+                Err(error @ (StoreError::Invalid { .. } | StoreError::UnsupportedFormat { .. })) => {
+                    tracing::error!(?error, "membership registration refused");
+                    return Err(failed("membership_registration_refused"));
+                }
+                Err(error) => {
+                    tracing::warn!(?error, "membership registration failed; retrying before any claim");
+                }
+            }
+            if inner.draining.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            tokio::select! {
+                () = backoff.wait() => {}
+                () = inner.stop.notified() => {}
+            }
         }
     }
 
