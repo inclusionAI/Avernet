@@ -36,9 +36,10 @@ export async function loadRoutineContext(scope: RoutineScope): Promise<RoutineCo
     reason: caller && stage !== 'online' ? 'Caller 模式仅支持运行中环境' : '当前尚未取得该环境的可信实例清单',
   }));
   // This existing endpoint reports ONLINE only. Never reuse its UUIDs for draft/verify or Caller bindings.
-  // 草稿/预发阶段不查（注定为空）。线上判定用链接里的 runtime_stage：详情接口的
-  // payload 不含发布状态字段（仅源行 status），从它解析不出线上结论。
-  if (service && caller === false && engine !== 'teclaw' && scope.stage === 'online') {
+  // 草稿/预发阶段不查（注定为空）。关注页链接可能明确指向 draft/verify 实例（详情接口
+  // payload 不含发布状态字段，无法自行判定），此时跳过；定时任务列表页默认无
+  // runtime_stage 筛选（scope.stage 为 undefined），仍需取线上实例供创建表单使用。
+  if (service && caller === false && engine !== 'teclaw' && scope.stage !== 'draft' && scope.stage !== 'verify') {
     try {
       const containers = await sendRoutineRequest<{ instances: Array<{ id: string }> }>(`${path}/containers`, {
         params,
