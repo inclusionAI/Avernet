@@ -1,5 +1,4 @@
-import { Button } from '@/components/ui/Button';
-import { cn } from '@/utils/cn';
+import { PillTabs } from '@/components/Common/PillTabs';
 
 export type BotManagementTab = 'tc' | 'external';
 
@@ -18,30 +17,12 @@ export function BotManagementTabs({
   className?: string;
 }) {
   return (
-    <div className={cn('flex items-center gap-1', className)} role="tablist" aria-label="Bot 类型">
-      {(
-        [
-          ['tc', '内部Bot'],
-          ['external', '外部 Bot'],
-        ] as const
-      ).map(([tab, label]) => (
-        <Button
-          key={tab}
-          variant="ghost"
-          role="tab"
-          type="button"
-          aria-selected={value === tab}
-          className={cn(
-            'inline-flex h-8 items-center rounded-md px-3 text-[13px] transition-colors cursor-pointer',
-            value === tab
-              ? 'bg-primary/10 font-medium text-primary'
-              : 'font-normal text-muted-foreground hover:bg-muted hover:text-foreground',
-          )}
-          onClick={() => onChange(tab)}
-        >
-          {label}
-        </Button>
-      ))}
-    </div>
+    <PillTabs<BotManagementTab>
+      label="Bot 类型"
+      options={[{ value: 'tc', label: '内部Bot' }, { value: 'external', label: '外部 Bot' }]}
+      value={value}
+      onChange={onChange}
+      className={className}
+    />
   );
 }
