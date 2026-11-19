@@ -413,3 +413,45 @@ async fn labels_have_constant_read_and_atomic_write_round_trips() {
         assert_eq!(db.queries.load(Ordering::SeqCst),1);
     }
 }
+
+#[tokio::test]
+async fn catalog_labels_accept_driver_bytes_without_relaxing_storage_validation() {
+    use bcs_db_api::DbValue;
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    assert!(store.compare_and_set(&record(), 0).await.unwrap());
+    let raw = r#"{"stage":["trial"],"region":["杭州","a"]}"#;
+    let labels: bcs_service_api::types::catalog_labels::CatalogLabels = serde_json::from_str(raw).unwrap();
+    // SQLite preserves BLOB parameters as DbValue::Bytes, matching the native
+    // MySQL JSON result shape without requiring a local database service.
+    for (stored, expected) in [
+        (DbValue::String(raw.into()), labels.clone()),
+        (DbValue::Bytes(raw.as_bytes().to_vec()), labels),
+        (DbValue::Null, Default::default()),
+    ] {
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET catalog_labels=? WHERE env='test' AND bot_uuid='bot'",
+            vec![stored],
+        )).await.unwrap();
+        assert_eq!(store.get("bot").await.unwrap().unwrap().catalog_labels, expected);
+        assert_eq!(store.get_by_provider_ref("provider", "remote").await.unwrap().unwrap().catalog_labels, expected);
+        assert_eq!(store.refreshable(None, 16).await.unwrap()[0].catalog_labels, expected);
+    }
+    for stored in [
+        DbValue::Bytes(vec![0xff]),
+        DbValue::Bytes(b"not-json".to_vec()),
+        DbValue::Bytes(b"null".to_vec()),
+        DbValue::Bytes(b"[]".to_vec()),
+        DbValue::Bytes(br#"{"stage":[]}"#.to_vec()),
+        DbValue::Bytes(br#"{"stage":["trial","trial"]}"#.to_vec()),
+        DbValue::I64(1),
+    ] {
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET catalog_labels=? WHERE env='test' AND bot_uuid='bot'",
+            vec![stored],
+        )).await.unwrap();
+        assert!(store.get("bot").await.is_err());
+        assert!(store.get_by_provider_ref("provider", "remote").await.is_err());
+        assert!(store.refreshable(None, 16).await.is_err());
+    }
+}

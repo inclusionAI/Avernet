@@ -156,7 +156,9 @@ impl A2aBotRepoPort for DbA2aBotStore {
 }
 fn decode(row:&bcs_db_api::DbRow)->ServiceResult<A2aBotRecord> {
     let required=|column|row.get_string(column).map_err(error)?.ok_or_else(||error("missing binding or Card"));
-    Ok(A2aBotRecord {catalog_labels:bcs_service_api::types::catalog_labels::CatalogLabels::from_storage(row.get_string("catalog_labels").map_err(error)?.as_deref())?,bot_uuid:required("bot_uuid")?,provider_id:required("provider_id")?,provider_bot_ref:required("provider_bot_ref")?,
+    // Native MySQL JSON may be UTF-8 bytes; retain strict conversion errors.
+    let labels = bcs_db_api::db_get_column_opt::<String>(row, "catalog_labels").map_err(error)?;
+    Ok(A2aBotRecord {catalog_labels:bcs_service_api::types::catalog_labels::CatalogLabels::from_storage(labels.as_deref())?,bot_uuid:required("bot_uuid")?,provider_id:required("provider_id")?,provider_bot_ref:required("provider_bot_ref")?,
         agent_card_url:row.get_string("agent_card_url").map_err(error)?,agent_card:parse_card(&required("agent_card")?)?,
         revision:u64::try_from(row.get_i64("agent_card_revision").map_err(error)?.ok_or_else(||error("missing revision"))?).map_err(error)?})
 }
