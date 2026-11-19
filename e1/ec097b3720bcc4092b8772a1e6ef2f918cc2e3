@@ -1,0 +1,85 @@
+.aci/agentclaw/agentclaw-pre-deploy-openapi.aci.yml
+  s_7c97e57846d67d::t_69b10d25c91343 93-98
+  s_7c97e57846d67d::t_b961f692fa67a6 1-84,86-92,99
+  s_7c97e57846d67d::t_d02876dcff70a2 85
+apps/gateway/src/gateway/enterprise/plugins/schema_catalog/oss.py
+  s_7c97e57846d67d::t_e5d75eb2ddb413 56-57
+  s_7c97e57846d67d::t_b820e52fb6d4d2 76,110,113-114
+  s_7c97e57846d67d::t_0051cd8f96d15d 6,78-79
+  s_7c97e57846d67d::t_d1f4e466a127f8 54,87,93-97,103-104,109,115-117,125
+  s_7c97e57846d67d::t_da5133c8dd80e4 1-5,7-23,29-32,35-36,38-50,55,58,60-61,63-65,70-75,77,80-81,88-92,102,105-106,126-132
+  s_7c97e57846d67d::t_e52bff71f55f80 51-53,107-108
+  s_7c97e57846d67d::t_fa93b43623111b 82-86
+  s_7c97e57846d67d::t_00c1bcf506276e 24-28,33-34,37,66-69,98-101,111-112,118-124
+  s_7c97e57846d67d::t_e2a7fd517757e5 59
+  s_7c97e57846d67d::t_e9ed8073def00f 62
+apps/gateway/pyproject.toml
+  s_7c97e57846d67d::t_32d7a09b0d1d73 13
+apps/backend/scripts/publish_pre_openapi.py
+  s_7c97e57846d67d::t_9b54d279ebf66f 18
+  s_7c97e57846d67d::t_3aefc407f72d25 62-64
+  s_7c97e57846d67d::t_c41e109c1d477a 45,48
+  s_7c97e57846d67d::t_8f1bceb8587a88 1-17,19-44,46-47,49-61,65-91
+apps/gateway/configs/application-prepub.yaml
+  s_7c97e57846d67d::t_36777865d3c8ea 11
+  s_7c97e57846d67d::t_21270ca12a56dc 43-44
+  s_7c97e57846d67d::t_cc5d02b3c77086 9-10,32-42
+.aci/agentclaw/README.md
+  s_7c97e57846d67d::t_3c05bdd3b538fd 1-4,6-9
+  s_7c97e57846d67d::t_61ddf2697b4adf 5
+apps/backend/tests/corp/scripts/test_publish_pre_openapi.py
+  s_7c97e57846d67d::t_9b54d279ebf66f 11
+  s_7c97e57846d67d::t_940619c054d241 1-8,10,12-58
+  s_7c97e57846d67d::t_2443db915e9632 9,59-67,70
+  s_7c97e57846d67d::t_28943320ac5240 69
+  s_7c97e57846d67d::t_22ec2da8cd88f5 68
+apps/gateway/src/gateway/enterprise/bootstrap/_register.py
+  s_7c97e57846d67d::t_5bd8c0c01519fa 43,139-148
+  s_4aed7f97accaf5::t_b4b9e20eeda22a 149
+apps/gateway/tests/test_oss_schema_catalog.py
+  s_7c97e57846d67d::t_fa6a8ca5fbb8f2 1-2,4-6,129-130,134-143,145-161,163-168
+  s_7c97e57846d67d::t_1e9a80e9a97e2b 58-59,64-65,71
+  s_7c97e57846d67d::t_36777865d3c8ea 170-171
+  s_7c97e57846d67d::t_fe94a52a5eb97a 7-8,16,18,22-24,39-42,44-46,50-57
+  s_7c97e57846d67d::t_649b1fc40edb07 131-133
+  s_7c97e57846d67d::t_a3d2001378955b 180-185,194-195,199-202,208-213
+  s_7c97e57846d67d::t_ffb80478271913 12,17,47-49
+  s_7c97e57846d67d::t_9db7532030ca8f 85
+  s_7c97e57846d67d::t_04a87467b0568d 173-179
+  s_7c97e57846d67d::t_57b3ca0fc91328 3,19-21,25-29,38,43
+  s_7c97e57846d67d::t_06e68df605e900 66-70
+  s_7c97e57846d67d::t_64f6390b3de764 169,172
+  s_7c97e57846d67d::t_e475de0bb7f2fe 9-11,14-15,78-84,86-96,102-109,111-117,125-126,128
+  s_7c97e57846d67d::t_8a62e2c186ecdb 60-63,72-77
+  s_7c97e57846d67d::t_b36fa457e1dfcd 30-37,186-193,196-198,203-207
+  s_7c97e57846d67d::t_0140241865149a 97-100,127
+  s_7c97e57846d67d::t_fad68e04632091 13,101,110,118-124,144,162
+apps/backend/conf/docker/Dockerfile
+  s_7c97e57846d67d::t_ba452224cf3571 50
+apps/gateway/uv.lock
+  s_7c97e57846d67d::t_8ad8e599d69a79 90-113,400-405,628,650,943-951,1303-1316,1479-1499,1809-1817
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e1ec097b3720bcc4092b8772a1e6ef2f918cc2e3",
+  "prompts": {},
+  "sessions": {
+    "s_4aed7f97accaf5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f255-df7f-7ba3-9728-ed3a96b866e2",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    },
+    "s_7c97e57846d67d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ee18-34ed-7dc1-9e5d-7bce40c3556e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
