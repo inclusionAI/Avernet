@@ -15,7 +15,18 @@ jest.mock('@/services/workspace/sessionService');
 function Destination() {
   const location = useLocation();
   const navigationType = useNavigationType();
-  return <div data-testid="destination">{location.search}:{navigationType}</div>;
+  return <div data-testid="destination">{location.pathname}{location.search}:{navigationType}</div>;
+}
+
+function renderInvite(entry: string) {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <Routes>
+        <Route path="/workspace/invite/:type/:token" element={<InviteAcceptPanel />} />
+        <Route path="/workspace/collaboration/*" element={<Destination />} />
+      </Routes>
+    </MemoryRouter>,
+  );
 }
 
 const svc = invitationService as unknown as {
@@ -30,7 +41,10 @@ describe('InviteAcceptPanel', () => {
     useExternalAuthStore.getState().setAuthenticated({ userId: 'staff-1', displayName: '我', provider: 'github' });
     svc.getAcceptPageState.mockReset();
     svc.acceptInvitation.mockReset();
-    jest.mocked(sessionService.getSessionDetail).mockReset();
+    jest.mocked(sessionService.getSessionDetail).mockReset().mockResolvedValue({
+      ok: false,
+      error: { code: 'SESSION_NOT_FOUND', friendlyMessage: '未找到会话', canRetry: false },
+    });
   });
 
   it('renders confirm view when invitation is valid and posts accept on confirm', async () => {
@@ -39,16 +53,13 @@ describe('InviteAcceptPanel', () => {
       ok: true,
       data: { targetType: 'group', targetId: 'g1', alreadyJoined: false },
     });
-    render(
-      <MemoryRouter initialEntries={['/workspace/invite/groups/tk-1']}>
-        <Routes>
-          <Route path="/workspace/invite/:type/:token" element={<InviteAcceptPanel />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderInvite('/workspace/invite/groups/tk-1');
     expect(await screen.findByText(/是否确认加入/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '确认加入' }));
     await waitFor(() => expect(svc.acceptInvitation).toHaveBeenCalled());
+    expect((await screen.findByTestId('destination')).textContent).toBe(
+      '/workspace/collaboration?current=human_staff-1&group=g1:REPLACE',
+    );
   });
 
   it('uses sessions path segment to show session join copy', async () => {
@@ -94,10 +105,71 @@ describe('InviteAcceptPanel', () => {
       </MemoryRouter>,
     );
     const destination = await screen.findByTestId('destination');
-    expect(destination).toHaveTextContent(targetType === 'group' ? '?current=human_staff-1&group=g1:REPLACE' : '?current=human_staff-1&group=g1&session=s1:REPLACE');
+    const session = targetType === 'session' ? '&session=s1' : '';
+    expect(destination).toHaveTextContent(`/workspace/collaboration?current=human_staff-1&group=g1${session}:REPLACE`);
     expect(screen.queryByRole('button', { name: '确认加入' })).not.toBeInTheDocument();
     expect(svc.acceptInvitation).not.toHaveBeenCalled();
     expect(sessionService.getSessionDetail).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { type: 'group', search: 'view=group', suffix: '/group', returnParam: '' },
+    { type: 'group', search: 'view=group&showReturn=false', suffix: '/group', returnParam: '&showReturn=false' },
+    { type: 'group', search: 'view=full&showReturn=false', suffix: '', returnParam: '' },
+    { type: 'group', search: 'view=session', suffix: '', returnParam: '' },
+    { type: 'session', search: 'view=session&showReturn=false', suffix: '/session', returnParam: '&showReturn=false' },
+    { type: 'session', search: 'view=group&showReturn=true', suffix: '/group', returnParam: '&showReturn=true' },
+    { type: 'session', search: 'view=full', suffix: '', returnParam: '' },
+    { type: 'session', search: 'showReturn=false', suffix: '', returnParam: '' },
+    { type: 'session', search: 'view=unknown', suffix: '', returnParam: '' },
+    { type: 'session', search: 'view=session&showReturn=0', suffix: '/session', returnParam: '' },
+  ])('an existing $type member follows ?$search', async ({ type, search, suffix, returnParam }) => {
+    const targetId = type === 'group' ? 'g1' : 'g1:s1';
+    svc.getAcceptPageState.mockResolvedValue({ ok: true, data: {
+      isValid: true, targetType: type, targetId, groupId: 'g1', alreadyJoined: true,
+    } });
+    renderInvite(`/workspace/invite/${type}s/tk-1?${search}`);
+    const session = type === 'session' ? '&session=g1%3As1' : '';
+    expect((await screen.findByTestId('destination')).textContent).toBe(
+      `/workspace/collaboration${suffix}?current=human_staff-1&group=g1${session}${returnParam}:REPLACE`,
+    );
+    expect(svc.acceptInvitation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { type: 'group', pathType: 'sessions', view: 'group' },
+    { type: 'session', pathType: 'sessions', view: 'group' },
+    { type: 'session', pathType: 'sessions', view: 'session' },
+  ])('after confirming a $type invite, opens $view using the verified target', async ({ type, pathType, view }) => {
+    const targetId = type === 'group' ? 'g1' : 'g1:s1';
+    svc.getAcceptPageState.mockResolvedValue({ ok: true, data: {
+      isValid: true, targetType: type, targetId, groupId: 'g1', alreadyJoined: false,
+    } });
+    svc.acceptInvitation.mockResolvedValue({ ok: true, data: { targetType: type, targetId, alreadyJoined: false } });
+    renderInvite(`/workspace/invite/${pathType}/tk-1?view=${view}&showReturn=false&group=other`);
+    expect(svc.acceptInvitation).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: '确认加入' }));
+    const session = type === 'session' ? '&session=g1%3As1' : '';
+    expect((await screen.findByTestId('destination')).textContent).toBe(
+      `/workspace/collaboration/${view}?current=human_staff-1&group=g1${session}&showReturn=false:REPLACE`,
+    );
+    expect(svc.acceptInvitation).toHaveBeenCalledTimes(1);
+    expect(sessionService.getSessionDetail).not.toHaveBeenCalled();
+  });
+
+  it('does not use a different preview target to build a focused link with no verified parent group', async () => {
+    svc.getAcceptPageState.mockResolvedValue({ ok: true, data: {
+      isValid: true, targetType: 'session', targetId: 'g1:s1', groupId: 'g1', alreadyJoined: false,
+    } });
+    svc.acceptInvitation.mockResolvedValue({
+      ok: true, data: { targetType: 'session', targetId: 'g2:s2', alreadyJoined: false },
+    });
+    renderInvite('/workspace/invite/sessions/tk-1?view=session');
+    fireEvent.click(await screen.findByRole('button', { name: '确认加入' }));
+    expect((await screen.findByTestId('destination')).textContent).toBe(
+      '/workspace/collaboration?current=human_staff-1&session=g2%3As2:REPLACE',
+    );
+    expect(sessionService.getSessionDetail).toHaveBeenCalledWith('g2:s2');
   });
 
   it('preview service failure renders retry instead of a confirmation button', async () => {

@@ -44,7 +44,7 @@ export function useInviteAccept(token: string): InviteAcceptState & {
   });
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const requestVersion = useRef(0);
-  const verifiedTarget = useRef<{ key: string; targetType: 'group' | 'session' } | null>(null);
+  const verifiedTarget = useRef<{ key: string; targetType: 'group' | 'session'; targetId: string; groupId: string } | null>(null);
   const setState = useCallback((state: InviteAcceptState) => setResult({ key: requestKey, state }), [requestKey]);
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export function useInviteAccept(token: string): InviteAcceptState & {
         return;
       }
       const { targetType, targetId, groupId, alreadyJoined } = res.data;
-      verifiedTarget.current = { key: requestKey, targetType };
+      verifiedTarget.current = { key: requestKey, targetType, targetId, groupId };
       setState({
         status: alreadyJoined ? 'accepted' : 'confirm',
         targetType,
@@ -88,31 +88,27 @@ export function useInviteAccept(token: string): InviteAcceptState & {
         return;
       }
       const { targetType, targetId, alreadyJoined } = res.data;
+      let groupId = targetType === 'group' ? targetId : undefined;
       if (targetType === 'session' && targetId) {
-        const session = await sessionService.getSessionDetail(targetId);
-        if (version !== requestVersion.current) return;
-        if (session.ok) {
-          setState({
-            status: 'accepted',
-            targetType,
-            targetId,
-            groupId: session.data.groupId,
-            sessionId: targetId,
-            alreadyJoined,
-          });
-          return;
+        const preview = verifiedTarget.current;
+        if (preview?.key === requestKey && preview.targetType === targetType && preview.targetId === targetId) {
+          groupId = preview.groupId;
+        } else {
+          const session = await sessionService.getSessionDetail(targetId);
+          if (version !== requestVersion.current) return;
+          if (session.ok) groupId = session.data.groupId;
         }
       }
       setState({
         status: 'accepted',
         targetType,
         targetId,
-        groupId: targetType === 'group' ? targetId : undefined,
+        groupId,
         sessionId: targetType === 'session' ? targetId : undefined,
         alreadyJoined,
       });
     },
-    [token, setState],
+    [requestKey, token, setState],
   );
 
   const resetToConfirm = useCallback(() => setState({ status: 'confirm' }), [setState]);
