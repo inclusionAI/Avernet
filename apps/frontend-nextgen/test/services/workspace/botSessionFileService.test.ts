@@ -576,7 +576,7 @@ describe('caller_runtime_target 拼装 - Caller 模式 Bot 运行时定位(opens
     jest.useRealTimers();
   });
 
-  it('uploadOne 传 callerRuntimeTarget=service 时上传链三接口 params 均带 caller_runtime_target', async () => {
+  it('uploadOne 传 callerRuntimeTarget=service 时仅 upload-intents 带;complete/物化轮询不带(R20261119 契约 §2)', async () => {
     const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), {
       callerRuntimeTarget: 'service',
     });
@@ -586,12 +586,8 @@ describe('caller_runtime_target 拼装 - Caller 模式 Bot 运行时定位(opens
     expect(mocked.createUploadIntents.mock.calls[0][2]).toEqual(
       expect.objectContaining({ caller_runtime_target: 'service' }),
     );
-    expect(mocked.completeUpload.mock.calls[0][2]).toEqual(
-      expect.objectContaining({ caller_runtime_target: 'service' }),
-    );
-    expect(mocked.getMaterializeStatus.mock.calls[0][3]).toEqual(
-      expect.objectContaining({ caller_runtime_target: 'service' }),
-    );
+    expect(mocked.completeUpload.mock.calls[0][2]).not.toHaveProperty('caller_runtime_target');
+    expect(mocked.getMaterializeStatus.mock.calls[0][3]).not.toHaveProperty('caller_runtime_target');
   });
 
   it('uploadOne 不传 callerRuntimeTarget 时上传链 params 无该键', async () => {
