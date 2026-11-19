@@ -1,3 +1,4 @@
+import { formatHttpLog, httpLogLevel } from "@avernet/clawweb-shared/server/services/file-log-format";
 /**
  * Internal API Logger — structured logging for all ClawMind↔clawweb API calls.
  * Writes to both console (stdout) and a log file for production debugging.
@@ -27,17 +28,18 @@ type ApiLogMethod = "READ" | "WRITE" | "PUT" | "DELETE";
  * Outputs to both console and a dedicated log file.
  */
 export function apiLog(method: ApiLogMethod, path: string, details: Record<string, unknown>): void {
-  const timestamp = new Date().toISOString();
+  const now = new Date();
+  const level = httpLogLevel(details.status);
   const entry = {
-    ts: timestamp,
+    ts: now.toISOString(),
     method,
     path,
     ...details,
   };
-  const line = JSON.stringify(entry);
+  const line = formatHttpLog(now, level, "internal-api", entry);
 
   // Console output (always)
-  console.log(`[internal-api] ${method} ${path} ${details.status ?? "pending"}`);
+  console[level === "ERROR" ? "error" : "log"](`[internal-api] ${method} ${path} ${details.status ?? "pending"}`);
 
   // File output (best-effort)
   try {

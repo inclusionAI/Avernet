@@ -29,7 +29,7 @@ it.each(["CREATE_FAILED", "EXECUTION_FAILED"])("writes %s as a single timestampe
     });
   });
   const line = readFileSync(logFile, "utf-8");
-  expect(line).toMatch(/^2026-10-30 21:04:05\.006 \[session-recovery\] \{/);
+  expect(line).toMatch(/^2026-10-30 21:04:05\.006 ERROR \[session-recovery\] \{/);
   expect(line.split("\n")).toHaveLength(2);
   expect(events()).toEqual([expect.objectContaining({ job: "session_recovery_task", event: eventName, eventId: "diagnosis-1",
     botId: "default", environment: "pre", targetEnvironment: "prod", count: 1, pid: process.pid, ts: now.toISOString() })]);
@@ -106,4 +106,10 @@ it("persists configuration provenance and MIST names but rejects secret-bearing 
   expect(events()[0]).toMatchObject({ configuration: "model_credentials", source: "mist", mistKey: "team.model", taskId: "SR-one",
     ownerEnabled: false, groupEnabled: true, enabled: true, teamKey: "97", routeSource: "team" });
   expect(readFileSync(logFile, "utf8")).not.toContain("PRIVATE_");
+});
+
+it.each([["failed", "ERROR"], ["succeeded", "INFO"]])("labels tool_settled outcome %s", async (outcome, level) => {
+  const { logRepairEvent } = await import("../logging.js");
+  logRepairEvent("session-recovery", "session_recovery_tool", "tool_settled", { outcome, operation: "trajectory_read" });
+  expect(readFileSync(logFile, "utf8")).toContain(` ${level} [session-recovery] {`);
 });

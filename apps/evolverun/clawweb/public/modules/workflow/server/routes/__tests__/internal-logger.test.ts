@@ -39,3 +39,9 @@ describe("internal API file log retention integration", () => {
     expect(files.appendFileSync.mock.calls.every(call => call[0] === "/home/admin/logs/clawweb/clawweb-internal-api.log")).toBe(true);
   });
 });
+
+it.each([[undefined, "INFO"], [200, "INFO"], [404, "ERROR"], [503, "ERROR"]])("labels internal API status %s", async (status, level) => {
+  const { apiLog } = await loadLogger();
+  apiLog("READ", "/test", { status });
+  expect(files.appendFileSync.mock.calls[0][1]).toContain(` ${level} [internal-api] {`);
+});
