@@ -261,6 +261,7 @@ dry_run** 是推荐动作，尤其是第一次声明 `skills` 或 `resources` �
 清单本体（每个 bot 一份文档）                                      → B.1
   GET    /openapi/v1/bots/{bot_id}/config-manifest                 读回原文
   PUT    /openapi/v1/bots/{bot_id}/config-manifest                 整体替换 + 自动 apply
+  PUT    .../config-manifest?dry_run=true                          预览提交的清单，不保存
   DELETE /openapi/v1/bots/{bot_id}/config-manifest                 清除声明（不删实体）
   GET    /openapi/v1/bots/{bot_id}/config-manifest/capabilities    这个 bot 支持哪些构造
 
@@ -566,21 +567,31 @@ script:                    # 命令式部分，能力门控（teclaw 拒绝）
 
 ### 4.4 先 dry_run
 
+bot 已存在时，有两种同步预览：
+
 ```text
-POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true
+PUT  /openapi/v1/bots/{bot_id}/config-manifest?dry_run=true  预览请求中提交的清单
+POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true  预览 bot 已保存的清单
 ```
 
-返回**计划**：每一条会发生什么、取哪个源、解析出哪个 SHA。不做任何写入。第一次
-声明 `skills` 或 `resources` 时值得跑一次——因为覆盖语义会移除区域内没被声明的
-东西（§8），而 dry_run 是在动手之前看清这件事的地方。
+要在第一次保存前预览新清单，使用 `PUT` 并传入和普通 PUT 相同的 body：
 
-**它需要 bot 已存在**（要有 `{bot_id}` 才寻址得到）。**还没有 bot 的人不必找
-替代品**：创建请求会在申请授权之前对清单跑同一套校验（§4.5），写错不会浪费一次
-授权；只是「取源会取到什么」要等创建流程里的那次 apply 才知道，看它返回的报告。
+```json
+{ "document": "schema_version: 1\nmanifest:\n  capabilities:\n    skills: []\n" }
+```
 
-**dry_run 是同步的**，和真正的 apply 不一样：计划就在响应体里，不需要轮询。它也
-不写任何东西——不改配置，也不写 apply 记录，所以不发 `apply_id`、不出现在
-`last-apply` 里。
+`document` 是**完整 YAML 文本**，不是清单的 JSON 对象。预览会校验并解析提交的
+内容，返回各条目的计划、移除项和解析出的源版本；不会保存这份清单、物化资源、
+更改运行配置或写入 Apply 历史。预览可能拉取并缓存源内容。`POST` 则不接收新
+清单，使用 bot 当前保存的原文。
+
+两种 dry-run 都同步返回报告：HTTP 200 的 `data` 是 B.2.1 的报告形状，
+`trigger=dry_run`、`apply_id` 为空；检查 `result` 和各条目的错误，不需要轮询，
+`last-apply` 也不会改变。校验不通过返回 422；resolve/plan 失败也应查看报告，
+不能仅凭 HTTP 200 判断计划成功。确认计划后，再用普通 PUT 保存并自动 apply。
+
+**两者都需要 bot 已存在。** 还没有 bot 时，创建请求在申请授权前校验清单（§4.5）；
+取源和交付的结果由创建流程的 apply 报告提供。
 
 ### 4.5 路径 A：用清单创建 bot（还没有 bot 时）
 
@@ -1626,7 +1637,12 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | --- | --- | --- | --- |
 | `document` | ✅ | string | 清单文档全文（YAML）。**原样存、原样读回**。校验规则见 §5–§6 与附录 E |
 
-**响应 `data`**：与 B.1.1 同样的字段，但 `warnings` 与 `apply` 这次会填：
+**可选 query 参数**：`dry_run=true` 时，仅预览本次请求中的 `document`，不保存或
+启动 apply。HTTP 200 的 `data` 是 B.2.1 的 Apply 报告，而不是 B.1.1 的清单对象；
+`trigger=dry_run`，`apply_id` 为空。预览可能拉取并缓存源内容。省略参数或传
+`false` 时执行下面的正常保存路径。完整示例见 §4.4。
+
+**普通 PUT 的响应 `data`**：与 B.1.1 同样的字段，但 `warnings` 与 `apply` 这次会填：
 
 `apply` 对象——`PUT` 启动的那次 apply 的**启动结果**（不是报告）：
 
