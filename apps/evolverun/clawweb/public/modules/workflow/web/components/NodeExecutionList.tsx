@@ -77,7 +77,7 @@ interface NodeExecutionListProps {
   onSelectNode: (nodeId: string) => void
   selectedNodeId?: string
   workflowSpec?: WorkflowSpec
-  onAnalyze: (node: NodeExecution) => void
+  onAnalyze?: (node: NodeExecution) => void
   onApproval?: (node: NodeExecution) => void
   approvalNodeIds?: Set<string>
   renderSubworkflowLinks?: (node: NodeExecution) => ReactNode
@@ -165,7 +165,7 @@ function NodeRow({
   isSelected: boolean
   onSelect: () => void
   workflowSpec?: WorkflowSpec
-  onAnalyze: (node: NodeExecution) => void
+  onAnalyze?: (node: NodeExecution) => void
   onApproval?: (node: NodeExecution) => void
   hasApproval: boolean
   nodes: NodeExecution[]
@@ -435,7 +435,7 @@ function NodeDetailPanel({
   workflowSpec?: WorkflowSpec
   flowId: string
   groupExecutionId?: string
-  onAnalyze: (node: NodeExecution) => void
+  onAnalyze?: (node: NodeExecution) => void
   readOnly: boolean
 }) {
   const hasFanoutSpec = Boolean((workflowSpec?.nodes.find(item => item.id === node.node_id)?.executor as Record<string, unknown> | undefined)?.fanout)
@@ -460,8 +460,11 @@ function NodeDetailPanel({
           {!readOnly && (node.embedded_session_key || node.session_id) && (
             <button
               onClick={() => {
-                setAnalyzing(true)
-                onAnalyze(node)
+                if (onAnalyze) {
+                  onAnalyze(node)
+                } else {
+                  setAnalyzing(true)
+                }
               }}
               className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-blue-700 text-xs hover:bg-blue-100"
             >
