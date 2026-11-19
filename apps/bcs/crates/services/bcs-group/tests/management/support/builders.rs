@@ -5,7 +5,7 @@ pub(super) fn create_cmd(
     driver_bot_id: &str,
     participants: Vec<GroupCreateParticipantCommand>,
 ) -> GroupCreateCommand {
-    GroupCreateCommand {
+    GroupCreateCommand { catalog_labels:Default::default(),
         human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-under-test".to_string()),

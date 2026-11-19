@@ -91,7 +91,7 @@ async fn update_round_trips_human_mention_notify_mode_for_dm_groups() {
         .service
         .create(CreateGroup {
             caller: bot_principal("bot-a"),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                 name: Some("A and B".into()),
                 context: None,
                 target_actor_id: "bot-b".into(),

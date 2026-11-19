@@ -92,7 +92,7 @@ impl GroupService for RecordingGroupService {
 }
 
 fn group_detail() -> GroupDetail {
-    GroupDetail::Collaboration(CollaborationGroupDetail {
+    GroupDetail::Collaboration(CollaborationGroupDetail { catalog_labels:Default::default(),
         group_id: "group-with-webhook".into(),
         version: 1,
         name: Some("Webhook group".into()),

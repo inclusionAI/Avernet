@@ -13,7 +13,7 @@ async fn human_originator_can_create_with_owned_protected_participant() {
         .service
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice-login", Some("Alice"), None),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Protected collaboration".into()),
@@ -69,7 +69,7 @@ async fn human_originator_rejects_non_owned_protected_participant() {
         .service
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice-login", Some("Alice"), None),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
@@ -104,7 +104,7 @@ async fn dm_create_uses_target_actor_id_and_projects_two_symmetric_participants(
         .service
         .create(CreateGroup {
             caller: bot_principal("bot-a"),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                 name: Some("A and B".into()),
                 context: None,
                 target_actor_id: "bot-b".into(),
@@ -215,7 +215,7 @@ async fn create_group_propagates_quota_lookup_database_failure() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 driver_bot_uuid: "driver".into(),
@@ -250,7 +250,7 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 driver_bot_uuid: "driver".into(),
@@ -290,7 +290,7 @@ async fn bot_dm_propagates_caller_registry_failure_after_target_validation() {
         .service
         .create(CreateGroup {
             caller: bot_principal("caller"),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                 name: None,
                 context: None,
                 target_actor_id: "target".into(),
@@ -317,7 +317,7 @@ async fn bot_dm_propagates_friendship_failure_after_initial_validation() {
         .service
         .create(CreateGroup {
             caller: bot_principal("caller"),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                 name: None,
                 context: None,
                 target_actor_id: "target".into(),
@@ -345,7 +345,7 @@ async fn create_rejects_non_bot_driver_and_dm_target_with_declared_code() {
         .service
         .create(CreateGroup {
             caller: bot_principal("requester"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
@@ -373,7 +373,7 @@ async fn create_rejects_non_bot_driver_and_dm_target_with_declared_code() {
         .service
         .create(CreateGroup {
             caller: bot_principal("requester"),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                 name: None,
                 context: None,
                 target_actor_id: "human_staff-1".into(),

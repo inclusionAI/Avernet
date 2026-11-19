@@ -631,6 +631,9 @@ CreateCollaborationGroup:
     - participants
     - collaboration
   properties:
+    catalog_labels:
+      $ref: ../domain-models.yaml#/CatalogLabelsInput
+      description: Omission initializes empty labels for new Groups; Chat/DM reject normalized nonempty labels.
     human_mention_notify_mode:
       $ref: ../domain-models.yaml#/HumanMentionNotifyMode
       default: all
@@ -686,6 +689,9 @@ CreateDirectMessageGroup:
     - group_kind
     - target_actor_id
   properties:
+    catalog_labels:
+      $ref: ../domain-models.yaml#/CatalogLabelsInput
+      description: Omission initializes empty labels for new Groups; Chat/DM reject normalized nonempty labels.
     group_kind:
       const: dm
     target_actor_id:
@@ -706,6 +712,9 @@ UpdateGroup:
   additionalProperties: false
   minProperties: 1
   properties:
+    catalog_labels:
+      $ref: ../domain-models.yaml#/CatalogLabelsInput
+      description: Omission preserves stored labels; explicit object replaces all labels.
     name:
       type: string
     context:

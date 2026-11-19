@@ -169,6 +169,11 @@ pub trait GroupCoreService: Send + Sync {
     }
 
     /// Create or update a group.
+    /// Atomic Group/template/labels write. Legacy upserts preserve labels.
+    async fn upsert_with_catalog_labels(&self, group: Group, labels: Option<crate::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {
+        if labels.is_some() { return Err(crate::ServiceError::InternalError("catalog-label Group write unavailable".into())); }
+        self.upsert(group).await
+    }
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
 
     async fn finalize_provisioning(

@@ -90,3 +90,13 @@ chat-run dependency. Legacy chat/run handling is unchanged.
 
 `tests/conformance_a2a_v1.rs` covers all six management operations, Provider-admin
 credential forwarding, Card source/visibility forwarding and machine errors.
+
+## Configured catalog labels
+
+The [BCS label contract](../../../docs/catalog-labels.md) owns dictionary,
+omission, atomic persistence, refresh fencing and complete-publication semantics.
+Service API 7.0.0 adds typed metadata and explicit preserve/replace commands;
+external Rust consumers rebuild together. Labels are not raw Card or authorization
+state. Bootstrap loads the independent policy file once; no environment overlay
+or request can extend it. See the change validation record for actual test and
+release evidence; local code is not a published or deployed revision.

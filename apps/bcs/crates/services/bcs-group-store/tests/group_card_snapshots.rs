@@ -49,6 +49,9 @@ async fn snapshot_is_one_current_env_scoped_read_and_never_hides_errors_or_backf
     group.label = Some("cached name".into());
     repo.upsert(group.clone()).await.unwrap();
     other.upsert(group).await.unwrap();
+    repo.patch_mutable_fields("snapshot",bcs_service_api::GroupMutableFieldsPatch {
+        catalog_labels:Some(serde_json::from_value(json!({"stage":["running"],"region":["a","b"]})).unwrap()),..Default::default()
+    }).await.unwrap();
     repo.try_get("snapshot").await.unwrap(); // Warm the ordinary display cache.
     let mut stored = repo.read_card_snapshot("snapshot").await.unwrap().unwrap().card_template.unwrap();
     stored["description"] = json!("old prefix and name");
@@ -63,6 +66,7 @@ async fn snapshot_is_one_current_env_scoped_read_and_never_hides_errors_or_backf
     let snapshot = repo.read_card_snapshot("snapshot").await.unwrap().unwrap();
     let queries = probe.queries.lock().unwrap().clone();
     assert_eq!(queries.len(), 1);
+    assert_eq!(snapshot.catalog_labels.as_map().len(),2);
     assert!(queries[0].contains("LIMIT 1"));
     assert!(!queries[0].contains("bcs_group_participants"));
     assert_eq!(snapshot.visibility, "public");

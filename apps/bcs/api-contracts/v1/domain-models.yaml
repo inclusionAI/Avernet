@@ -926,6 +926,7 @@ CollaborationGroupDetail:
   type: object
   additionalProperties: false
   required:
+    - catalog_labels
     - group_id
     - version
     - kind
@@ -939,6 +940,8 @@ CollaborationGroupDetail:
     - created_at
     - updated_at
   properties:
+    catalog_labels:
+      $ref: "#/CatalogLabels"
     group_id:
       type: string
     version:
@@ -991,6 +994,7 @@ DirectMessageGroupDetail:
   type: object
   additionalProperties: false
   required:
+    - catalog_labels
     - group_id
     - version
     - kind
@@ -1002,6 +1006,8 @@ DirectMessageGroupDetail:
     - created_at
     - updated_at
   properties:
+    catalog_labels:
+      $ref: "#/CatalogLabels"
     group_id:
       type: string
     version:
@@ -2507,3 +2513,30 @@ FriendRequestDecisionEnvelope:
       $ref: "#/FriendRequest"
     request_id:
       type: string
+
+
+CatalogLabelsInput:
+  type: object
+  description: >-
+    Whole-object replacement using the standalone catalog-labels.toml dictionary.
+    Outer null is rejected; known-key null/empty arrays remove keys. Values are
+    exact configured strings, de-duplicated before configured multiplicity checks.
+    Unknown keys (even null/[]) and unknown values reject the entire request.
+  additionalProperties:
+    oneOf:
+      - type: array
+        items:
+          type: string
+          minLength: 1
+      - type: "null"
+
+CatalogLabels:
+  type: object
+  description: Normalized catalog management metadata, separate from raw Card JSON.
+  additionalProperties:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1

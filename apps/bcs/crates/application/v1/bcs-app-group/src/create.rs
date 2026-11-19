@@ -10,6 +10,7 @@ impl GroupServiceImpl {
         group_id: Option<String>,
         provisioning: bool,
     ) -> Result<(GroupDetail, Option<String>, Option<bcs_service_api::InitialGroupRun>), ApplicationError> {
+        let catalog_labels=self.normalize_catalog_labels(request.catalog_labels.clone(),GroupKind::Normal,map_create_collaboration(request.collaboration.clone()).0)?;
         let originator = request
             .originator
             .take()
@@ -168,6 +169,7 @@ impl GroupServiceImpl {
         let created = self
             .management
             .create_group(GroupCreateCommand {
+                catalog_labels,
                 human_mention_notify_mode: request.human_mention_notify_mode,
                 create_initial_session: true,
                 group_id,
@@ -424,6 +426,7 @@ impl GroupServiceImpl {
         group_id: Option<String>,
         provisioning: bool,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
+        self.normalize_catalog_labels(request.catalog_labels.clone(),GroupKind::Dm,GroupStrategy::Chat)?;
         self.ensure_collaboration_eligible(
             &principal,
             &request.target_actor_id,

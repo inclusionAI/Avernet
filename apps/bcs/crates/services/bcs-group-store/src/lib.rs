@@ -175,7 +175,7 @@ fn apply_db_group_mutation_candidate(
 ) -> ServiceResult<()> {
     let changed = match mutation {
         GroupEventfulMutation::PatchMutableFields(patch) => {
-            let mut changed = false;
+            let mut changed = patch.catalog_labels.is_some();
             if let Some(label) = &patch.label
                 && group.label.as_ref() != Some(label)
             {
@@ -459,4 +459,12 @@ impl GroupMetricsSnapshotPort for MySqlGroupStore {
 
         Ok(counts)
     }
+}
+
+fn validate_catalog_labels(group:&Group,labels:Option<&bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+    if labels.is_some_and(|labels|!labels.is_empty()) && (group.group_kind!=bcs_service_api::GroupKind::Normal
+        || !matches!(group.group_strategy,GroupStrategy::ManagerWorker|GroupStrategy::StateMachine)) {
+        return Err(ServiceError::InvalidOperation {message:"catalog_labels unsupported for this Group".into(),request_id:None});
+    }
+    Ok(())
 }

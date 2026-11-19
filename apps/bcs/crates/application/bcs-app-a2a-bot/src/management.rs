@@ -11,6 +11,7 @@ fn failure(code: Code, field: &str, reason: &'static str) -> ServiceError {
 }
 fn view(provider: &str, record: A2aBotRecord) -> ServiceResult<ManagedA2aCard> {
     Ok(ManagedA2aCard {
+        catalog_labels: record.catalog_labels,
         provider_name: provider.into(),
         agent_name: bcs_service_api::types::a2a_bot::card_bot_name(&record.agent_card)
             .map_err(|_| failure(Code::InvalidCard, "agent_card.name", "INVALID_NAME"))?
@@ -78,6 +79,7 @@ impl A2aBotManagement {
         &self,
         command: RegisterAgentCommand,
     ) -> ServiceResult<ManagedA2aCard> {
+        let labels=self.policy.normalize(command.catalog_labels)?;
         let (provider_id, provider_name, provider_config) =
             self.public_provider(&command.provider_admin_token).await?;
         let provider = self
@@ -130,6 +132,7 @@ impl A2aBotManagement {
                 card,
                 command.now_ms,
                 command.visibility,
+                labels,
             )
             .await?;
         let record = self
@@ -164,9 +167,11 @@ impl A2aBotManagement {
         bot_id: &str,
         source: Option<A2aCardSource>,
         visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
+        labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     ) -> ServiceResult<ManagedA2aCard> {
         let (provider, label, _) = self.public_provider(token).await?;
-        if source.is_none() && visibility.is_none() {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
+        if source.is_none() && visibility.is_none() && labels.is_none() {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
+        let labels=self.policy.normalize(labels.unwrap_or_default())?;
         let target = self.public_record_by_id(&provider, bot_id).await?;
         let loaded = match source {Some(source)=>Some(self.public_load(source).await?),None=>None};
         // Retry only local CAS races, never the outbound fetch. Each attempt
@@ -189,6 +194,7 @@ impl A2aBotManagement {
                 .checked_add(1)
                 .ok_or_else(|| failure(Code::InternalError, "", "REVISION_EXHAUSTED"))?;
             let next = A2aBotRecord {
+                catalog_labels: labels.clone(),
                 agent_card_url: url.clone(),
                 agent_card: raw,
                 revision,

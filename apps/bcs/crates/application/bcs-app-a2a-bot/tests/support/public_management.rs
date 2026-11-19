@@ -31,7 +31,7 @@ async fn public_fixture() -> (RegistrationChain, A2aBotManagement) {
     (chain, service)
 }
 fn request(raw: serde_json::Value) -> RegisterAgentCommand {
-    RegisterAgentCommand {
+    RegisterAgentCommand { catalog_labels:Default::default(),
         provider_bot_ref: uuid::Uuid::new_v4().simple().to_string(),        visibility: Default::default(),
         provider_admin_token: "test-admin".into(),
         owners: Some(vec!["delegated-owner".into()]),
@@ -58,7 +58,8 @@ async fn public_registration_query_update_and_inline_refresh_follow_contract() {
     assert_eq!(registered.agent_name, "订单助手");
     let serialized = serde_json::to_value(&registered).unwrap();
     assert!(serialized.get("bot_runtime_token").is_none());
-    assert_eq!(serialized.as_object().unwrap().len(), 6);
+    assert_eq!(serialized.as_object().unwrap().len(), 7);
+    assert_eq!(serialized["catalog_labels"],json!({}));
     assert_eq!(
         service
             .get_agent_by_id("test-admin", &registered.bot_id)
@@ -309,3 +310,6 @@ async fn visibility_only_update_preserves_card_and_combined_update_rolls_back_on
     assert_eq!(chain.db.query(read()).await.unwrap()[0].get_string("visibility").unwrap().as_deref(),Some("public"));
     assert!(service.update_agent_by_id_with_visibility("wrong-token","权限测试",None,Some(Protected)).await.is_err());
 }
+
+#[path="catalog_labels.rs"]
+mod catalog_labels;

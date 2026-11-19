@@ -66,13 +66,13 @@ async fn fixture() -> Fixture {
     db.execute(DbStatement::new("CREATE TABLE bcs_bots (name TEXT, bot_info TEXT DEFAULT '{}', bot_uuid TEXT NOT NULL, env TEXT NOT NULL, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, webhook_url TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
     let env = bcs_config::resolve_env_str();
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, provider_id, provider_bot_ref, connection_mode) VALUES ('bot', ?, ?, 'remote', 'gateway')", vec![env.clone().into(), registered.provider.provider_id.clone().into()])).await.unwrap();
-    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")].concat()).into_iter() {
+    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql"),"ALTER TABLE bcs_bots ADD COLUMN catalog_labels TEXT NULL;"].concat()).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     let cards = Arc::new(DbA2aBotStore::sqlite(db.clone(), env));
     let core = Arc::new(A2aBotCore::new(cards.clone(), Arc::new(DbProviderStore::sqlite(db.clone()))));
     let fetcher = Arc::new(Fetcher { calls: AtomicUsize::new(0), fail: AtomicBool::new(false), change_route: AtomicBool::new(false),paused:AtomicBool::new(false),entered:Default::default(),release:Default::default() });
-    let command = ConfigureA2aBotCommand { provider_id: registered.provider.provider_id,
+    let command = ConfigureA2aBotCommand { catalog_labels:Default::default(), provider_id: registered.provider.provider_id,
         provider_admin_token: registered.provider_admin_token, bot_uuid: "bot".into(),
         source: "https://example.org/card".into(), expected_revision: Some(0), now_ms: 1000 };
     Fixture { service: A2aBotManagement::new(provider_core, core.clone(), fetcher.clone()), core, cards, fetcher, providers, command, db, _dir: dir }
@@ -138,7 +138,7 @@ async fn a2a_core_conformance() {
     use bcs_test_support::contract::a2a_bot::a2a_bot_core_service_contract_tests;
     let f = fixture().await;
     let card = f.fetcher.fetch("https://example.org/card", true).await.unwrap();
-    let record = bcs_service_api::port::repo::a2a_bot::A2aBotRecord {
+    let record = bcs_service_api::port::repo::a2a_bot::A2aBotRecord { catalog_labels:Default::default(),
         bot_uuid:"bot".into(), provider_id:f.command.provider_id.clone(), provider_bot_ref:"remote".into(),
         agent_card_url:Some("https://example.org/card".into()), agent_card:card.raw, revision:1,};
     a2a_bot_core_service_contract_tests(f.core.as_ref(), record).await;

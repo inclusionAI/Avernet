@@ -76,6 +76,8 @@ pub struct InlineGroupEventSubscriptionInfo {
 /// Request to create a group.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateGroupRequest {
+    #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="bcs_domain::catalog_labels::present_input")]
+    pub catalog_labels:Option<bcs_domain::catalog_labels::CatalogLabelsInput>,
     pub id: Option<String>,
     pub label: Option<String>,
     /// Mode is deprecated - kept for backward compatibility, defaults to "agent"

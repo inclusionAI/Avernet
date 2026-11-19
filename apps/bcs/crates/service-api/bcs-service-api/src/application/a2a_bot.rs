@@ -3,6 +3,7 @@ use crate::{ServiceResult, port::repo::a2a_bot::A2aBotRecord};
 
 #[derive(Clone)]
 pub struct ConfigureA2aBotCommand {
+    pub catalog_labels: crate::types::catalog_labels::CatalogLabelsInput,
     pub provider_id: String,
     pub provider_admin_token: String,
     pub bot_uuid: String,
@@ -14,6 +15,7 @@ pub struct ConfigureA2aBotCommand {
 
 #[derive(Clone,Debug)]
 pub struct NamedA2aCard {
+    pub catalog_labels: crate::types::catalog_labels::CatalogLabels,
     pub provider_bot_ref:String,
     pub bot_id:String,
     pub provider_name:String,
@@ -23,6 +25,7 @@ pub struct NamedA2aCard {
 }
 #[derive(Clone)]
 pub struct RegisterNamedA2aBotCommand {
+    pub catalog_labels: crate::types::catalog_labels::CatalogLabelsInput,
     pub provider_bot_ref:String,
     pub provider_name:String,
     pub provider_admin_token:String,
@@ -36,12 +39,14 @@ pub struct NamedA2aRegistration {pub card:NamedA2aCard,pub bot_runtime_token:Opt
 /// Public v0.1 management view, deliberately excludes runtime credentials.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ManagedA2aCard {
+    pub catalog_labels: crate::types::catalog_labels::CatalogLabels,
     pub provider_bot_ref:String,
     pub provider_name:String, pub agent_name:String, pub bot_id:String,
     pub agent_card_url:Option<String>, pub agent_card:serde_json::Value,
 }
 #[derive(Clone)]
 pub struct RegisterAgentCommand {
+    pub catalog_labels: crate::types::catalog_labels::CatalogLabelsInput,
     pub provider_bot_ref:String,
     pub visibility: crate::types::a2a_bot::A2aRegistrationVisibility,
     /// None, null and an empty list request the Provider's configured default owner.
@@ -49,8 +54,30 @@ pub struct RegisterAgentCommand {
     pub source:crate::types::a2a_bot::A2aCardSource, pub now_ms:i64,
 }
 
+#[derive(Clone)]
+pub struct UpdateAgentCommand {
+    pub provider_admin_token: String,
+    pub bot_id: String,
+    pub source: Option<crate::types::a2a_bot::A2aCardSource>,
+    pub visibility: Option<crate::types::a2a_bot::A2aRegistrationVisibility>,
+    /// None is legacy omission (clear), not preserve; Some(empty) is a valid label-only clear.
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
+}
+
 #[async_trait]
 pub trait A2aBotManagementService: Send + Sync {
+    async fn update_agent(&self, command: UpdateAgentCommand) -> ServiceResult<ManagedA2aCard> {
+        if command.catalog_labels.is_none() {
+            return self.update_agent_by_id_with_visibility(&command.provider_admin_token,&command.bot_id,command.source,command.visibility).await;
+        }
+        Err(crate::ServiceError::InternalError("catalog-label management unavailable".into()))
+    }
+    async fn register_provider_bot_with_labels(&self, command: crate::RegisterProviderBotCommand,
+        source: crate::types::a2a_bot::A2aCardSource, now_ms: i64,
+        labels: crate::types::catalog_labels::CatalogLabelsInput) -> ServiceResult<crate::RegisterProviderBotOutcome> {
+        if labels.0.is_empty() {return self.register_provider_bot(command,source,now_ms).await;}
+        Err(crate::ServiceError::InternalError("catalog-label registration unavailable".into()))
+    }
     async fn register_agent(&self,_command:RegisterAgentCommand)->ServiceResult<ManagedA2aCard> {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
     }
@@ -89,6 +116,11 @@ pub trait A2aBotManagementService: Send + Sync {
         Err(crate::ServiceError::InvalidOperation {
             message: "A2A Provider registration is not configured".into(), request_id: None,
         })
+    }
+    /// Provider-ID-scoped legacy label-only update; no source fetch or source replacement.
+    async fn configure_catalog_labels(&self,_provider_id:&str,_token:&str,_bot_id:&str,
+        _labels:crate::types::catalog_labels::CatalogLabelsInput,_expected_revision:Option<u64>)->ServiceResult<A2aBotRecord> {
+        Err(crate::ServiceError::InternalError("catalog-label configuration unavailable".into()))
     }
     async fn get(&self, provider_id: &str, admin_token: &str, bot_uuid: &str) -> ServiceResult<Option<A2aBotRecord>>;
     async fn configure(&self, command: ConfigureA2aBotCommand) -> ServiceResult<A2aBotRecord>;

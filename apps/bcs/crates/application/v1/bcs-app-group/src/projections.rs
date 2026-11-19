@@ -21,6 +21,9 @@ impl GroupServiceImpl {
             .avatar_map_for_ids(avatar::detail_bot_ids(&participants))
             .await?;
         avatar::apply_participant_avatars(&mut participants, &avatars);
+        let catalog_labels=if group.group_kind==GroupKind::Normal && matches!(group.group_strategy,GroupStrategy::ManagerWorker|GroupStrategy::StateMachine) {
+            self.groups.read_card_snapshot(&group.id).await.map_err(map_service_error)?.map(|snapshot|snapshot.catalog_labels).unwrap_or_default()
+        } else {Default::default()};
         let common = DetailCommon {
             group_id: group.id.clone(),
             version: group.version,
@@ -43,6 +46,7 @@ impl GroupServiceImpl {
                 )));
             }
             return Ok(GroupDetail::DirectMessage(DirectMessageGroupDetail {
+                catalog_labels,
                 group_id: common.group_id,
                 version: common.version,
                 name: common.name,
@@ -84,6 +88,7 @@ impl GroupServiceImpl {
         let (driver_bot_owner, driver_bot_owner_name) =
             self.resolve_driver_bot_owner(&group.driver_bot).await;
         Ok(GroupDetail::Collaboration(CollaborationGroupDetail {
+            catalog_labels,
             group_id: common.group_id,
             version: common.version,
             name: common.name,

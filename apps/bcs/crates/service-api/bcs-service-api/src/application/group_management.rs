@@ -13,6 +13,7 @@ use crate::core::{
 /// Request for creating a group collaboration session.
 #[derive(Debug, Clone)]
 pub struct GroupCreateCommand {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabels>,
     pub group_id: Option<String>,
     pub caller_actor_id: Option<String>,
     pub driver_bot_id: String,
@@ -178,6 +179,8 @@ pub struct GroupParticipantView {
 /// Group detail shape returned by group management use cases.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupDetailResult {
+    #[serde(default)]
+    pub catalog_labels:crate::types::catalog_labels::CatalogLabels,
     pub group_id: String,
     pub label: Option<String>,
     pub status: GroupStatus,
@@ -372,6 +375,10 @@ pub trait GroupQueryService: Send + Sync {
 /// Group management application service.
 #[async_trait]
 pub trait GroupManagementService: Send + Sync {
+    /// Validate delivery intent before definition/provisioning writes.
+    fn normalize_catalog_labels(&self,input:crate::types::catalog_labels::CatalogLabelsInput)->crate::ServiceResult<crate::types::catalog_labels::CatalogLabels> {
+        crate::types::catalog_labels::CatalogLabelPolicy::default().normalize(input)
+    }
     /// Create a group and, after the membership write succeeds, best-effort
     /// create driver-to-public-participant subscription edges.
     async fn create_group(

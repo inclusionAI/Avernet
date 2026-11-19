@@ -70,6 +70,7 @@ impl Default for GroupConfig {
 
 #[derive(Clone)]
 pub struct GroupManagement {
+    catalog_label_policy:Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>,
     group: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friend: Arc<dyn FriendCoreService>,
@@ -142,6 +143,9 @@ impl GroupManagementWithRuntimeCleanup {
 
 #[async_trait]
 impl GroupManagementService for GroupManagementWithRuntimeCleanup {
+    fn normalize_catalog_labels(&self,input:bcs_service_api::types::catalog_labels::CatalogLabelsInput)->ServiceResult<bcs_service_api::types::catalog_labels::CatalogLabels> {
+        self.inner.normalize_catalog_labels(input)
+    }
     async fn create_group(
         &self,
         cmd: GroupCreateCommand,
@@ -221,6 +225,9 @@ impl GroupManagementService for GroupManagementWithRuntimeCleanup {
 }
 
 impl GroupManagement {
+    pub fn with_catalog_label_policy(mut self,policy:Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>)->Self {
+        self.catalog_label_policy=policy;self
+    }
     pub fn new(
         group: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
@@ -231,6 +238,7 @@ impl GroupManagement {
         system_message: Arc<dyn bcs_service_api::SystemMessageService>,
     ) -> Self {
         Self {
+            catalog_label_policy:Arc::default(),
             group,
             registry,
             friend,

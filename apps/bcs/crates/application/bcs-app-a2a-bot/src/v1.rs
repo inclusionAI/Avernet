@@ -60,6 +60,7 @@ pub(crate) fn failure(error: ServiceError) -> ApplicationError {
                     ApplicationError::forbidden_code(code, "Provider access denied")
                 }
                 Code::BotNotFound => ApplicationError::not_found(code, "Agent not found"),
+                Code::InvalidRequest if error.field.starts_with("catalog_labels") => ApplicationError::invalid(code, format!("{}: {}",error.field,error.reason)),
                 Code::InvalidRequest => ApplicationError::invalid(code, "Invalid A2A request"),
                 Code::ProviderBotRefConflict
                 | Code::BotNameConflict
@@ -115,6 +116,7 @@ impl A2aService for A2aApiService {
     ) -> Result<ManagedA2aCard, ApplicationError> {
         self.management
             .register_agent(RegisterAgentCommand {
+                catalog_labels: command.catalog_labels.unwrap_or_default(),
                 provider_admin_token: command.token,
                 provider_bot_ref: command.provider_bot_ref,
                 owners: command.owners,
@@ -144,12 +146,10 @@ impl A2aService for A2aApiService {
     }
     async fn update(&self, command: UpdateA2aAgent) -> Result<ManagedA2aCard, ApplicationError> {
         self.management
-            .update_agent_by_id_with_visibility(
-                &command.token,
-                &command.bot_id,
-                source(command.source)?,
-                command.visibility,
-            )
+            .update_agent(bcs_service_api::application::a2a_bot::UpdateAgentCommand {
+                provider_admin_token:command.token,bot_id:command.bot_id,
+                source:source(command.source)?,visibility:command.visibility,catalog_labels:command.catalog_labels,
+            })
             .await
             .map_err(failure)
     }
@@ -165,6 +165,7 @@ impl A2aService for A2aApiService {
     ) -> Result<NamedA2aRegistration, ApplicationError> {
         self.management
             .register_named(RegisterNamedA2aBotCommand {
+                catalog_labels: command.catalog_labels.unwrap_or_default(),
                 provider_admin_token: command.token,
                 provider_name: command.provider_name,
                 provider_bot_ref: command.provider_bot_ref,

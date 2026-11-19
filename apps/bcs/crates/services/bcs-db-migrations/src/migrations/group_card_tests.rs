@@ -24,7 +24,7 @@ async fn group_card_upgrade_preserves_history_and_does_not_backfill_groups() -> 
     assert_eq!(row[0].get_string("name")?.as_deref(), Some("group_agent_cards"));
     let columns = db.query(DbStatement::new("PRAGMA table_info(bcs_group_agent_cards)")).await?;
     let names = columns.iter().map(|row| db_get_column::<String>(row, "name")).collect::<DbResult<Vec<_>>>()?;
-    assert_eq!(names, vec!["id", "gmt_create", "gmt_modified", "env", "group_id", "card_template"]);
+    assert_eq!(names, vec!["id", "gmt_create", "gmt_modified", "env", "group_id", "card_template", "catalog_labels"]);
     let insert = "INSERT INTO bcs_group_agent_cards (env, group_id, card_template) VALUES (?, ?, ?)";
     let long_json = serde_json::json!({"name": "群卡".repeat(40_000)}).to_string();
     let params = vec![DbValue::from("env-a"), DbValue::from("old-group"), DbValue::from(long_json.clone())];

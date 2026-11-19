@@ -1,4 +1,4 @@
-//! Three Bot-owned Card columns. Routes/credentials are never persisted here.
+//! Bot-owned Card snapshot and separate catalog metadata; no stored routes/credentials.
 use std::sync::Arc;
 use serde_json::json;
 use async_trait::async_trait;
@@ -92,7 +92,7 @@ impl A2aBotRepoPort for DbA2aBotStore {
         }).collect()
     }
     async fn get(&self, bot_uuid:&str)->ServiceResult<Option<A2aBotRecord>> {
-        self.db.query(DbStatement::with_params("SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND bot_uuid=? AND is_deleted=0 AND agent_card IS NOT NULL LIMIT 1",
+        self.db.query(DbStatement::with_params("SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision,catalog_labels FROM bcs_bots WHERE env=? AND bot_uuid=? AND is_deleted=0 AND agent_card IS NOT NULL LIMIT 1",
             vec![self.env.clone().into(),bot_uuid.into()])).await.map_err(error)?.first().map(decode).transpose()
     }
     async fn compare_and_set(&self,record:&A2aBotRecord,expected_revision:u64)->ServiceResult<bool> {
@@ -134,7 +134,7 @@ impl A2aBotRepoPort for DbA2aBotStore {
     async fn get_by_name(&self,provider_id:&str,name:&str)->ServiceResult<Option<A2aBotRecord>> {
         let name_column=match self.flavor {DbSqlFlavor::Mysql=>"name COLLATE utf8mb4_bin",DbSqlFlavor::Sqlite=>"name COLLATE BINARY"};
         let rows=self.db.query(DbStatement::with_params(
-            format!("SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND provider_id=? AND {name_column}=? AND is_deleted=0 LIMIT 2"),
+            format!("SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision,catalog_labels FROM bcs_bots WHERE env=? AND provider_id=? AND {name_column}=? AND is_deleted=0 LIMIT 2"),
             vec![self.env.clone().into(),provider_id.into(),name.into()])).await.map_err(error)?;
         if rows.len()>1 { return Err(ServiceError::Conflict("Multiple active Bots use this name in the Provider".into())); }
         if rows.first().is_some_and(|row| matches!(row.get_string("agent_card"), Ok(None))) { return Ok(None); }
@@ -143,20 +143,20 @@ impl A2aBotRepoPort for DbA2aBotStore {
     async fn get_by_provider_ref(&self, provider_id:&str, provider_bot_ref:&str)->ServiceResult<Option<A2aBotRecord>> {
         let ref_column=match self.flavor {DbSqlFlavor::Mysql=>"CAST(provider_bot_ref AS BINARY)=CAST(? AS BINARY)",DbSqlFlavor::Sqlite=>"provider_bot_ref=? COLLATE BINARY"};
         let rows=self.db.query(DbStatement::with_params(format!(
-            "SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND provider_id=? AND {ref_column} AND is_deleted=0 AND connection_mode='gateway' AND agent_card IS NOT NULL LIMIT 2"),
+            "SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision,catalog_labels FROM bcs_bots WHERE env=? AND provider_id=? AND {ref_column} AND is_deleted=0 AND connection_mode='gateway' AND agent_card IS NOT NULL LIMIT 2"),
             vec![self.env.clone().into(),provider_id.into(),provider_bot_ref.into()])).await.map_err(error)?;
         if rows.len()>1 {return Err(error("multiple Bots use the same Provider reference"));}
         rows.first().map(decode).transpose()
     }
     async fn refreshable(&self, after:Option<&str>, limit:u32)->ServiceResult<Vec<A2aBotRecord>> {
-        let rows=self.db.query(DbStatement::with_params("SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND is_deleted=0 AND agent_card_url IS NOT NULL AND agent_card IS NOT NULL AND bot_uuid>? ORDER BY bot_uuid LIMIT ?",
+        let rows=self.db.query(DbStatement::with_params("SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision,catalog_labels FROM bcs_bots WHERE env=? AND is_deleted=0 AND agent_card_url IS NOT NULL AND agent_card IS NOT NULL AND bot_uuid>? ORDER BY bot_uuid LIMIT ?",
             vec![self.env.clone().into(),after.unwrap_or("").into(),i64::from(limit.clamp(1,16)).into()])).await.map_err(error)?;
         rows.iter().map(decode).collect()
     }
 }
 fn decode(row:&bcs_db_api::DbRow)->ServiceResult<A2aBotRecord> {
     let required=|column|row.get_string(column).map_err(error)?.ok_or_else(||error("missing binding or Card"));
-    Ok(A2aBotRecord {bot_uuid:required("bot_uuid")?,provider_id:required("provider_id")?,provider_bot_ref:required("provider_bot_ref")?,
+    Ok(A2aBotRecord {catalog_labels:bcs_service_api::types::catalog_labels::CatalogLabels::from_storage(row.get_string("catalog_labels").map_err(error)?.as_deref())?,bot_uuid:required("bot_uuid")?,provider_id:required("provider_id")?,provider_bot_ref:required("provider_bot_ref")?,
         agent_card_url:row.get_string("agent_card_url").map_err(error)?,agent_card:parse_card(&required("agent_card")?)?,
         revision:u64::try_from(row.get_i64("agent_card_revision").map_err(error)?.ok_or_else(||error("missing revision"))?).map_err(error)?})
 }
@@ -186,10 +186,11 @@ pub(crate) fn registration_card_steps(card:&A2aBotRecord,env:&str)->ServiceResul
     params.extend(bot_info_values);
     params.push(serde_json::to_string(&card.agent_card).map_err(error)?.into());
     params.push(card.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null));
+    params.push(serde_json::to_string(&card.catalog_labels).map_err(error)?.into());
     params.push(card.bot_uuid.clone().into());params.push(env.into());
     params.push(card.provider_id.clone().into());params.push(card.provider_bot_ref.clone().into());
     Ok(vec![bcs_db_api::DbTransactionStep::ExecuteChecked {statement:DbStatement::with_params(format!(
-        "UPDATE bcs_bots SET name=?,{bot_info_assignment},agent_card=?,agent_card_url=?,agent_card_revision=1,gmt_modified=CURRENT_TIMESTAMP WHERE bot_uuid=? AND env=? AND provider_id=? AND provider_bot_ref=? AND connection_mode='gateway' AND is_deleted=0 AND agent_card IS NULL AND agent_card_revision=0"),
+        "UPDATE bcs_bots SET name=?,{bot_info_assignment},agent_card=?,agent_card_url=?,catalog_labels=?,agent_card_revision=1,gmt_modified=CURRENT_TIMESTAMP WHERE bot_uuid=? AND env=? AND provider_id=? AND provider_bot_ref=? AND connection_mode='gateway' AND is_deleted=0 AND agent_card IS NULL AND agent_card_revision=0"),
         params),expected_affected_rows:1}])
 }
 
@@ -226,14 +227,15 @@ impl DbA2aBotStore {
         params.extend(bot_info_values);
         params.push(serde_json::to_string(&record.agent_card).map_err(error)?.into());
         params.push(record.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null));
+        params.push(serde_json::to_string(&record.catalog_labels).map_err(error)?.into());
         params.push(self.env.clone().into());params.push(record.bot_uuid.clone().into());
         params.push(record.provider_id.clone().into());params.push(record.provider_bot_ref.clone().into());
         let predicate=if let Some(expected)=expected {params.push(i64::try_from(expected).map_err(error)?.into());" AND agent_card_revision=?"} else {""};
         let results=self.db.transaction(vec![
             DbTransactionStep::Execute(DbStatement::with_params(format!(
-                "UPDATE bcs_bots SET {visibility_assignment}name=?,{bot_info_assignment},agent_card=?,agent_card_url=?,agent_card_revision=agent_card_revision+1,gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision<9223372036854775807{predicate}"),params).with_transaction_stop_on_no_rows()),
+                "UPDATE bcs_bots SET {visibility_assignment}name=?,{bot_info_assignment},agent_card=?,agent_card_url=?,catalog_labels=?,agent_card_revision=agent_card_revision+1,gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision<9223372036854775807{predicate}"),params).with_transaction_stop_on_no_rows()),
             DbTransactionStep::Query(DbStatement::with_params(
-                "SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND bot_uuid=?",vec![self.env.clone().into(),record.bot_uuid.clone().into()])),
+                "SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision,catalog_labels FROM bcs_bots WHERE env=? AND bot_uuid=?",vec![self.env.clone().into(),record.bot_uuid.clone().into()])),
         ]).await.map_err(|failure|if failure.is_duplicate_key() {ServiceError::Conflict("Bot name is already in use in this Provider".into())} else {error(failure)})?;
         match results.last() {
             Some(DbTransactionStepResult::Rows(rows)) if rows.len()==1=>{

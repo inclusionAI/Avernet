@@ -25,6 +25,8 @@ pub struct Target {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Registration {
+    #[serde(default, deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    catalog_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     provider_bot_ref: String,
     #[serde(default)]
     visibility: A2aRegistrationVisibility,
@@ -36,6 +38,8 @@ struct Registration {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Update {
+    #[serde(default, deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    catalog_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     visibility: Option<A2aRegistrationVisibility>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
@@ -51,6 +55,8 @@ struct Refresh {}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NamedRegistration {
+    #[serde(default, deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    catalog_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     provider_bot_ref: String,
     owners: Vec<String>,
     summary: Option<String>,
@@ -106,7 +112,7 @@ async fn execute(
         if parts.method == axum::http::Method::PUT {
             let input: Update = body(&parts.headers, &bytes)?;
             let result = service
-                .update(UpdateA2aAgent {
+                .update(UpdateA2aAgent { catalog_labels:input.catalog_labels,
                     token,
                     bot_id,
                     visibility: input.visibility,
@@ -128,7 +134,7 @@ async fn execute(
     }
     let input: Registration = body(&parts.headers, &bytes)?;
     let result = service
-        .register(RegisterA2aAgent {
+        .register(RegisterA2aAgent { catalog_labels:input.catalog_labels,
             token,
             provider_bot_ref: input.provider_bot_ref,
             owners: input.owners,
@@ -219,14 +225,18 @@ pub async fn register_named(
             .map_err(|_|ApplicationError::payload_too_large("request_too_large", "Request body exceeds limit"))?;
         if parts.uri.query().is_some() { return Err(ApplicationError::invalid("invalid_request", "Query is not allowed")); }
         let input: NamedRegistration = body(&parts.headers, &bytes)?;
-        let result = service(&state)?.register_named(RegisterNamedA2aAgent { token, provider_name,
+        let result = service(&state)?.register_named(RegisterNamedA2aAgent { catalog_labels:input.catalog_labels, token, provider_name,
             provider_bot_ref: input.provider_bot_ref, owners: input.owners, summary: input.summary,
             source: A2aCardInput { agent_card_url: input.agent_card_url, agent_card: input.agent_card } }).await?;
         let card = result.card;
         let mut value = json!({"provider_bot_ref":card.provider_bot_ref,"bot_id":card.bot_id,"provider_name":card.provider_name,
-            "bot_name":card.bot_name,"agent_card_url":card.agent_card_url,"agent_card":card.agent_card});
+            "bot_name":card.bot_name,"catalog_labels":card.catalog_labels,"agent_card_url":card.agent_card_url,"agent_card":card.agent_card});
         if let Some(token) = result.bot_runtime_token { value["bot_runtime_token"]=json!(token); }
         Ok(value)
     }.await;
     reply(&id, StatusCode::CREATED, result)
 }
+
+#[cfg(test)]
+#[path="catalog_labels_tests.rs"]
+mod catalog_labels_tests;

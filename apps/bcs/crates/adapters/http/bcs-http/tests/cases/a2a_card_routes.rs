@@ -13,7 +13,7 @@ use tower::ServiceExt;
 struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>>, owners: std::sync::Mutex<Vec<Option<Vec<String>>>> }
 
 fn record() -> A2aBotRecord {
-    A2aBotRecord { bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
+    A2aBotRecord { catalog_labels:Default::default(), bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
         agent_card_url:Some("https://example.org/card".into()), agent_card:json!({"skills":[{"description":"unchanged", "unknown":42}]}), revision:1 ,}
 }
 
@@ -27,7 +27,7 @@ impl A2aBotManagementService for Management {
         self.calls.fetch_add(1,Ordering::SeqCst);
         if token!="test-admin" {return Err(ServiceError::Forbidden("private-provider-id private-bot-uuid".into()));}
         assert_eq!(bot_id,"bot");
-        Ok(bcs_service_api::application::a2a_bot::ManagedA2aCard {provider_bot_ref:"remote".into(),provider_name:"orders".into(),agent_name:"订单助手".into(),
+        Ok(bcs_service_api::application::a2a_bot::ManagedA2aCard { catalog_labels:Default::default(),provider_bot_ref:"remote".into(),provider_name:"orders".into(),agent_name:"订单助手".into(),
             bot_id:bot_id.into(),agent_card_url:None,agent_card:json!({"name":"订单助手","skills":[{"description":"完整描述","unknown":42}]})})
     }
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
@@ -47,7 +47,7 @@ impl A2aBotManagementService for Management {
         assert_eq!(command.provider_name,"orders");
         assert!(matches!(command.source,bcs_service_api::types::a2a_bot::A2aCardSource::Inline(_)));
         let card=self.get_agent_by_id(&command.provider_admin_token,"bot").await?;
-        Ok(NamedA2aRegistration {card:NamedA2aCard {provider_bot_ref:card.provider_bot_ref,bot_id:card.bot_id,provider_name:card.provider_name,
+        Ok(NamedA2aRegistration {card:NamedA2aCard { catalog_labels:Default::default(),provider_bot_ref:card.provider_bot_ref,bot_id:card.bot_id,provider_name:card.provider_name,
             bot_name:card.agent_name,agent_card_url:card.agent_card_url,agent_card:card.agent_card},
             bot_runtime_token:Some("test-runtime".into())})
     }

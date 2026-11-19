@@ -10,7 +10,7 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
@@ -59,7 +59,7 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
@@ -119,7 +119,7 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
@@ -166,7 +166,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
@@ -268,7 +268,7 @@ async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref(
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
@@ -332,7 +332,7 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Human review".into()),
@@ -382,7 +382,7 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
@@ -436,7 +436,7 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
         .service
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
@@ -508,7 +508,7 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
@@ -552,7 +552,7 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),
@@ -623,7 +623,7 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("State machine".into()),

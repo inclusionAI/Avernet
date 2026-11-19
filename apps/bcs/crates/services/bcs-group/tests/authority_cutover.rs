@@ -91,7 +91,7 @@ fn create_cmd(
     driver_bot_id: &str,
     participants: Vec<GroupCreateParticipantCommand>,
 ) -> GroupCreateCommand {
-    GroupCreateCommand {
+    GroupCreateCommand { catalog_labels:Default::default(),
         human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-under-test".to_string()),
@@ -253,7 +253,7 @@ async fn create_group_sponsorship_requires_current_edge() {
     // non-hidden Bot into a private Group with
     // no friendship anywhere.
     service
-        .create_group(GroupCreateCommand {
+        .create_group(GroupCreateCommand { catalog_labels:Default::default(),
             human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             group_id: Some("group-under-test".into()),
@@ -362,7 +362,7 @@ async fn public_group_rejects_non_public_controlled_bot() {
     // Group: rejected regardless of the CURRENT
     // control edge.
     let denied = service
-        .create_group(GroupCreateCommand {
+        .create_group(GroupCreateCommand { catalog_labels:Default::default(),
             human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             group_id: Some("group-public".into()),
@@ -399,7 +399,7 @@ async fn public_group_rejects_non_public_controlled_bot() {
     // The positive keeps working: the same
     // controlled Bot enters a non-public Group.
     service
-        .create_group(GroupCreateCommand {
+        .create_group(GroupCreateCommand { catalog_labels:Default::default(),
             human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             group_id: Some("group-private".into()),

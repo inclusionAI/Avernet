@@ -155,6 +155,7 @@ impl MySqlGroupStore {
 
         match &command.mutation {
             GroupEventfulMutation::PatchMutableFields(patch) => {
+                validate_catalog_labels(&terminal,patch.catalog_labels.as_ref())?;
                 let mut assignments = Vec::new();
                 let mut params = Vec::new();
                 if let Some(label) = &patch.label {
@@ -194,7 +195,7 @@ impl MySqlGroupStore {
                         Self::human_mention_notify_mode_to_str(mode),
                     ));
                 }
-                if assignments.is_empty() {
+                if assignments.is_empty() && patch.catalog_labels.is_none() {
                     return Err(ServiceError::Conflict(
                         "Group mutation contains no changed fields".to_string(),
                     ));
@@ -213,9 +214,10 @@ impl MySqlGroupStore {
                         params,
                     ),
                 ));
-                if patch.label.is_some() || patch.context.is_some() {
+                if patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some() {
                     steps.push(self.card_template_upsert_step(&command.group_id)?);
                 }
+                if let Some(labels)=&patch.catalog_labels { steps.push(self.catalog_labels_step(&command.group_id,labels)?); }
             }
             GroupEventfulMutation::UpdateStatus(status) => {
                 steps.push(DbTransactionStep::Execute(

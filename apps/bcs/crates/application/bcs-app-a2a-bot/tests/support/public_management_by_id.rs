@@ -86,7 +86,7 @@ async fn paused_fixture() -> (RegistrationChain, Arc<A2aBotManagement>, Arc<Paus
     let cards = Arc::new(DbA2aBotStore::sqlite(chain.db.clone(), bcs_config::resolve_env_str()).with_registry(&chain.bot_repo));
     let core = Arc::new(A2aBotCore::new(cards, chain.provider_repo.clone()));
     let paused = Arc::new(PausedFetcher { entered: Default::default(), release: Default::default(), calls: AtomicUsize::new(0) });
-    let service = Arc::new(A2aBotManagement::new(fetcher.providers.clone(), core, paused.clone())
+    let service = Arc::new(A2aBotManagement::new(fetcher.providers.clone(), core, paused.clone()).with_catalog_label_policy(catalog_labels::policy())
         .with_registration(registration, chain.registry_core.clone()));
     (chain, service, paused)
 }
@@ -147,5 +147,29 @@ async fn deletion_or_binding_change_during_fetch_never_writes() {
         let rows = chain.db.query(DbStatement::with_params("SELECT agent_card FROM bcs_bots WHERE bot_uuid=?", vec![first.bot_id.into()])).await.unwrap();
         let saved: serde_json::Value = serde_json::from_str(&rows[0].get_string("agent_card").unwrap().unwrap()).unwrap();
         assert_eq!(saved, first.agent_card);
+    }
+}
+
+#[tokio::test]
+async fn label_only_replacement_fences_manual_and_background_url_refresh() {
+    for background in [false,true] {
+        let (chain,service,fetcher)=paused_fixture().await;
+        let mut command=request(card("LabelsRefresh",None));
+        command.catalog_labels=serde_json::from_value(json!({"stage":["trial"]})).unwrap();
+        let first=service.register_agent(command).await.unwrap();
+        chain.db.execute(DbStatement::with_params("UPDATE bcs_bots SET agent_card_url='https://example.org/card.json' WHERE bot_uuid=?",vec![first.bot_id.clone().into()])).await.unwrap();
+        if background {service.refresh_due(0).await.unwrap();}
+        let refreshing={let service=service.clone();let id=first.bot_id.clone();tokio::spawn(async move {
+            if background {service.refresh_due(300_000).await.map(|_|())} else {service.refresh_agent_by_id("test-admin",&id).await.map(|_|())}
+        })};
+        fetcher.entered.notified().await;
+        service.update_agent(bcs_service_api::application::a2a_bot::UpdateAgentCommand {
+            provider_admin_token:"test-admin".into(),bot_id:first.bot_id.clone(),source:None,visibility:None,
+            catalog_labels:Some(serde_json::from_value(json!({"stage":["running"]})).unwrap()),
+        }).await.unwrap();
+        assert_eq!(fetcher.calls.load(Ordering::SeqCst),1);
+        fetcher.release.notify_one();assert!(refreshing.await.unwrap().is_err());
+        let saved=service.get_agent_by_id("test-admin",&first.bot_id).await.unwrap();
+        assert_eq!(saved.catalog_labels.as_map()["stage"],["running"]);assert_eq!(saved.agent_card,first.agent_card);
     }
 }

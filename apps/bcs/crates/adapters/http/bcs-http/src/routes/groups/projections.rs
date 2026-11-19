@@ -36,6 +36,7 @@ pub(crate) fn group_detail_to_create_json(mut result: GroupDetailResult, created
         "group_kind": result.group_kind,
         "dm_pair_key": result.dm_pair_key,
         "human_mention_notify_mode": result.human_mention_notify_mode,
+        "catalog_labels":result.catalog_labels,
         "created": created
     });
     insert_opening_message(&mut response, opening_message);
@@ -135,6 +136,7 @@ pub(crate) fn group_to_detail_json(mut group: GroupDetailResult) -> Value {
         "originator": group.originator,
         "visibility": group.visibility,
         "human_mention_notify_mode": group.human_mention_notify_mode,
+        "catalog_labels":group.catalog_labels,
     });
     insert_opening_message(&mut response, opening_message);
     response

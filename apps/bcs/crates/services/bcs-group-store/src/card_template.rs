@@ -111,11 +111,11 @@ impl MySqlGroupStore {
             &[("card_template", updated.as_str()), ("gmt_modified", self.flavor.now())],
         );
         let sql = format!(
-            "INSERT INTO bcs_group_agent_cards (env, group_id, card_template) \
+            "INSERT INTO bcs_group_agent_cards (env, group_id, card_template, catalog_labels) \
              SELECT g.env, g.group_id, JSON_SET(\
                  CASE g.group_strategy WHEN 'manager_worker' THEN ? ELSE ? END, \
                  '$.name', {name}, '$.description', {description}, \
-                 '$.skills[0].name', {name}, '$.skills[0].description', {description}) \
+                 '$.skills[0].name', {name}, '$.skills[0].description', {description}), '{{}}' \
              FROM bcs_groups AS g WHERE g.env = ? AND g.group_id = ? \
              AND g.group_kind = 'normal' AND g.group_strategy IN ('manager_worker', 'state_machine') \
              {conflict}"
@@ -128,6 +128,14 @@ impl MySqlGroupStore {
             encode(GroupStrategy::ManagerWorker)?, encode(GroupStrategy::StateMachine)?,
             Value::from(self.env.as_str()), Value::from(id),
         ])))
+    }
+
+    pub(crate) fn catalog_labels_step(&self,id:&str,labels:&bcs_service_api::types::catalog_labels::CatalogLabels)->ServiceResult<DbTransactionStep> {
+        let encoded=serde_json::to_string(labels).map_err(|e|ServiceError::InternalError(format!("catalog_labels: {e}")))?;
+        Ok(DbTransactionStep::Execute(DbStatement::with_params(
+            "UPDATE bcs_group_agent_cards SET catalog_labels=? WHERE env=? AND group_id=?",
+            vec![Value::from(encoded),Value::from(self.env.as_str()),Value::from(id)],
+        )))
     }
 
     pub(crate) fn card_template_delete_step(&self, id: DbTransactionParam) -> DbTransactionStep {

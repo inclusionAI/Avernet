@@ -62,7 +62,7 @@ pub(super) fn scoped_payload() -> ProviderRegisterTokenPayload {
 }
 
 fn register_command(token: String) -> RegisterBot {
-    RegisterBot {
+    RegisterBot { catalog_labels:Default::default(),
         token,
         bot_name: "Test Bot".into(),
         mode: None,

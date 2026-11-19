@@ -25,6 +25,8 @@ pub struct Target {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Registration {
+    #[serde(default,deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    catalog_labels:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     provider_bot_ref: String,
     #[serde(default)]
     visibility: bcs_service_api::types::a2a_bot::A2aRegistrationVisibility,
@@ -36,6 +38,8 @@ struct Registration {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Update {
+    #[serde(default,deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    catalog_labels:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
@@ -224,6 +228,10 @@ fn body<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, ServiceError>
     {
         return Err(error(Code::InvalidRequest, "", "NULL_FIELD_NOT_ALLOWED"));
     }
+    if let Some(labels)=value.get("catalog_labels") {
+        serde_json::from_value::<bcs_service_api::types::catalog_labels::CatalogLabelsInput>(labels.clone())
+            .map_err(|_|error(Code::InvalidRequest,"catalog_labels","OBJECT_OF_NULLABLE_STRING_ARRAYS_REQUIRED"))?;
+    }
     serde_json::from_value(value).map_err(|_| error(Code::InvalidRequest, "", "INVALID_FIELDS"))
 }
 
@@ -268,6 +276,7 @@ async fn execute(
             .unwrap_or(0);
         let card = service
             .register_agent(RegisterAgentCommand {
+                catalog_labels:input.catalog_labels.unwrap_or_default(),
                 provider_bot_ref: input.provider_bot_ref,
                 visibility: input.visibility,
                 provider_admin_token: token,
@@ -281,12 +290,12 @@ async fn execute(
     } else if parts.method == axum::http::Method::PUT {
         let input: Update = body(&bytes)?;
         let bot_id = bot_id.as_deref().ok_or_else(||error(Code::InvalidRequest,"bot_id","MISSING_BOT_ID"))?;
-        if input.visibility.is_none() && input.agent_card_url.is_none() && input.agent_card.is_none() {
+        if input.visibility.is_none() && input.agent_card_url.is_none() && input.agent_card.is_none() && input.catalog_labels.is_none() {
             return Err(error(Code::InvalidRequest,"","UPDATE_REQUIRED"));
         }
         let source = if input.agent_card_url.is_none() && input.agent_card.is_none() {None}
             else {Some(source(input.agent_card_url,input.agent_card)?)};
-        Ok((StatusCode::OK,ManagementView::Card(service.update_agent_by_id_with_visibility(&token,bot_id,source,input.visibility).await?)))
+        Ok((StatusCode::OK,ManagementView::Card(service.update_agent(bcs_service_api::application::a2a_bot::UpdateAgentCommand {provider_admin_token:token,bot_id:bot_id.into(),source,visibility:input.visibility,catalog_labels:input.catalog_labels}).await?)))
     } else {
         let _: Refresh = body(&bytes)?;
         let bot_id = bot_id.as_deref().ok_or_else(||error(Code::InvalidRequest,"bot_id","MISSING_BOT_ID"))?;

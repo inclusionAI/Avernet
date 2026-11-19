@@ -567,6 +567,7 @@ pub(super) fn build_openapi_v1_state(
     .with_bot_authority_hook(bot_authority_hook.clone())
     .with_bot_authority_core(bot_authority_core.clone())
     .with_participant_view_bindings(participant_view_bindings.clone())
+    .with_catalog_label_policy(config.catalog_label_policy.clone())
     .with_group_message_history(group_message_history.clone())
     .with_collaboration_runtime(collaboration_runtime.clone());
     if config.eventing.enabled {
@@ -656,6 +657,7 @@ pub(super) fn build_openapi_v1_state(
         Arc::new(bcs_app_register::RegisterServiceImpl::new(
             invite_token_secret.clone(),
         )
+        .with_catalog_label_policy(config.catalog_label_policy.clone())
         .with_registry(registry.clone())
         .with_provider_registration(provider_registration)
         .with_a2a_cards(Arc::new(bcs_a2a_http::card_fetch::HttpA2aCardFetcher::new(

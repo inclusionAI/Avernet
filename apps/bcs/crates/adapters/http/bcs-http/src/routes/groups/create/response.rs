@@ -38,6 +38,7 @@ pub(crate) fn v1_group_detail_to_legacy_create_json(
                 "group_kind": "normal",
                 "dm_pair_key": Value::Null,
                 "human_mention_notify_mode": group.human_mention_notify_mode,
+                "catalog_labels":group.catalog_labels,
                 "created": created,
                 "event_subscriptions": event_subscriptions,
             });
@@ -72,6 +73,7 @@ pub(crate) fn v1_group_detail_to_legacy_create_json(
                 "group_kind": "dm",
                 "dm_pair_key": Value::Null,
                 "human_mention_notify_mode": group.human_mention_notify_mode,
+                "catalog_labels":group.catalog_labels,
                 "created": created,
                 "event_subscriptions": event_subscriptions,
             })

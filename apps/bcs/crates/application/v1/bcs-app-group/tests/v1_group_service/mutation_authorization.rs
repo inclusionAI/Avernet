@@ -121,7 +121,7 @@ async fn tenant_metadata_does_not_restrict_bot_collaboration() {
         .service
         .create(CreateGroup {
             caller: bot_principal_in_tenant("driver", "tenant-b"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Cross-tenant collaboration".into()),
@@ -239,7 +239,7 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Before".into()),
@@ -319,7 +319,7 @@ async fn create_gates_driver_against_bot_originator_by_friendship() {
         .service
         .create(CreateGroup {
             caller: authenticated_bot_principal("requester", "requester"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
@@ -352,7 +352,7 @@ async fn bot_originator_rejects_non_friend_protected_participant() {
         .service
         .create(CreateGroup {
             caller: authenticated_bot_principal("requester", "requester"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
@@ -388,7 +388,7 @@ async fn create_propagates_protected_participant_friendship_lookup_failure() {
         .service
         .create(CreateGroup {
             caller: authenticated_bot_principal("driver", "driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,

@@ -198,6 +198,8 @@ pub struct PatchProviderRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderBotRequest {
+    #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="bcs_domain::catalog_labels::present_input")]
+    pub catalog_labels:Option<bcs_domain::catalog_labels::CatalogLabelsInput>,
     /// Optional A2A display alias; legacy registrations still require a name.
     #[serde(default, skip_serializing_if="Option::is_none")]
     pub name: Option<String>,
