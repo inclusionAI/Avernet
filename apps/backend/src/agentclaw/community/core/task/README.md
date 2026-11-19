@@ -240,10 +240,15 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
   assignee 或协作群成员必须来自该次候选响应；单 Bot 使用外部权威身份形态，由 Backend
   落图时拆分为产品 `bot_id` 与 `assignee_owner_id`；
   `PLAN_RESULT` 原子地持久化唯一后继节点，`/dispatch` 执行实际投递。
-- Relay 同实例 Harness resume 在原会话要求 task-loop 真实重读 S1，再调用
-  Skill 的 `relay_ledger_runtime.py` 读取当前节点本地账本。后端已接纳状态优先；
+- Relay 同实例 Harness resume 仅发送短续跑触发；Skill 的
+  `relay_ledger_runtime.py` 统一入口真实读取 S1、读取当前节点本地账本并输出精简决策。后端已接纳状态优先；
   本地账本负责方法止损、在途等待/对账及细粒度阶段续跑，不上传完整账本，
   不从节点扩展属性消费第二份恢复投影，不保证跨容器恢复。
+  `relay_runtime_monitor.py` 区分 Runtime 失败、终态未上报、active 无消息活动；
+  active 停滞按最后可观测活动的单调时间计算，默认 5×120 秒（10 分钟）后请求同会话恢复，
+  不因探针临时不可用而清零；活动只证明 Runtime/消息变化，不证明业务验收进展。
+  run/session 的版本与更新时间变化不单独算活动；当前进程同节点恢复互斥，发送后
+  留一个探针观察窗口避免重复介入；active 静默即使耗尽续跑次数也不直接判 HUNG。无后端分布式恢复锁，不保证多进程全局去重。
 - Relay 报告仅有 `EXECUTION_RESULT` 与 `PLAN_RESULT`。`event_id` 用于同一请求重试的幂等回放；
   `relay_token` 是当前节点执行代次的服务端围栏，不写入任务轨迹。
   通用接口长期保留可选 `trace` 的结构校验、步骤轨迹写入和内容指纹能力；分布式接力

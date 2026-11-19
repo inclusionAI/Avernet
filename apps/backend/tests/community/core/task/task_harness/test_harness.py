@@ -437,14 +437,14 @@ class TestHarnessOnlyPollsExecutionLeaves:
         h.register("t1")
         h._poll_once()
 
-        for _ in range(2):
-            clock.advance(10.0)
+        for _ in range(3):
+            clock.advance(1.0)
             assert h._poll_once() == []
             assert recovery.nodes == []
             assert node.status == Status.RUNNING
             assert "relay_harness_resume_attempts" not in node.run_info.extend_props
 
-        clock.advance(10.0)
+        clock.advance(1.0)
         resets = h._poll_once()
         assert resets == []
         assert node.status == Status.RUNNING
@@ -804,3 +804,95 @@ class TestRunPollLoop:
         h.run_poll_loop(stop)
         assert stop.is_set()
         assert calls["n"] >= 3
+
+
+def test_relay_recovery_is_serialized_per_node_and_releases_on_error(svc, graph):
+    import asyncio
+    from unittest.mock import patch
+    from agentclaw.community.core.task.task_harness import relay_runtime_monitor
+    _dispatch_running(svc, graph, "c1")
+    node = svc._get_node(graph, "c1")
+    h = TaskHarness(svc, Recorder())
+
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+        calls = []
+
+        async def monitor(*args, **kwargs):
+            calls.append(1)
+            started.set()
+            await release.wait()
+            raise RuntimeError("probe failure")
+
+        with patch.object(relay_runtime_monitor, "monitor_relay_runtime", side_effect=monitor):
+            first = asyncio.create_task(h._relay_runtime_harness("t1", node, elapsed=1, sla=1))
+            await started.wait()
+            assert await h._relay_runtime_harness("t1", node, elapsed=1, sla=1) is None
+            release.set()
+            with pytest.raises(RuntimeError):
+                await first
+        assert calls == [1]
+        assert not h._relay_recovering
+
+    asyncio.run(scenario())
+
+
+def test_relay_stagnation_uses_elapsed_time_and_survives_probe_outage(svc, graph):
+    graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+    _dispatch_running(svc, graph, "c1")
+    node = svc._get_node(graph, "c1")
+    node.run_info.extend_props["session_id"] = "s1"
+    clock = _Clock(0.0)
+    probe = _ScriptedProbe(_runtime_result("active"))
+    recovery = _FakeRelayRecovery()
+    h = TaskHarness(svc, Recorder(), clock=clock, runtime_probe=probe,
+                    runtime_probe_threshold=120, relay_recovery=recovery)
+    h.register("t1")
+    h._poll_once()
+    clock.advance(120)
+    h._poll_once()
+    probe.observations = [_runtime_result("probe_unavailable")]
+    clock.advance(120)
+    h._poll_once()
+    assert not recovery.nodes
+    probe.observations = [_runtime_result("active")]
+    clock.advance(479)
+    h._poll_once()
+    assert not recovery.nodes  # 599 seconds of silence is below the default window.
+    clock.advance(1)
+    h._poll_once()
+    assert len(recovery.nodes) == 1
+
+
+def test_delivered_resume_has_observation_window_before_second_recovery(svc, graph):
+    import asyncio
+    graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+    _dispatch_running(svc, graph, "c1")
+    node = svc._get_node(graph, "c1")
+    node.run_info.extend_props["session_id"] = "s1"
+    clock = _Clock(100)
+    recovery = _FakeRelayRecovery()
+    h = TaskHarness(svc, Recorder(), clock=clock,
+                    runtime_probe=_ScriptedProbe(_runtime_result("terminal_failed")),
+                    runtime_probe_threshold=120, relay_recovery=recovery)
+    asyncio.run(h._relay_runtime_harness("t1", node, elapsed=100, sla=900))
+    clock.advance(1)
+    asyncio.run(h._relay_runtime_harness("t1", node, elapsed=101, sla=900))
+    assert len(recovery.nodes) == 1
+
+
+def test_active_silence_exhaustion_does_not_fail_long_running_call(svc, graph):
+    import asyncio
+    graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+    _dispatch_running(svc, graph, "c1")
+    node = svc._get_node(graph, "c1")
+    node.run_info.extend_props["relay_harness_resume_attempts"] = 2
+    clock = _Clock(100)
+    h = TaskHarness(svc, Recorder(), clock=clock,
+                    runtime_probe=_ScriptedProbe(_runtime_result("active")),
+                    runtime_probe_threshold=120)
+    asyncio.run(h._relay_runtime_harness("t1", node, elapsed=100, sla=900))
+    clock.advance(600)
+    patch = asyncio.run(h._relay_runtime_harness("t1", node, elapsed=700, sla=900))
+    assert patch is None
+    assert node.status == Status.RUNNING
