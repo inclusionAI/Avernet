@@ -445,15 +445,15 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents",
-    ): Check(PermissionLevel.MEMBER, explicit=True),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete",
-    ): Check(PermissionLevel.MEMBER, explicit=True),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}",
-    ): Check(PermissionLevel.MEMBER, explicit=True),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content",

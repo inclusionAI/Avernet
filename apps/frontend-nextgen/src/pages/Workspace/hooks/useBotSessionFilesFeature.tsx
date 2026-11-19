@@ -89,7 +89,7 @@ export function useBotSessionFilesFeature(
   // 取值推导(2026-11-19 需求勘误,IAM 链同规则):我管理的/我协作的 Caller Bot →
   // service(服务实例池,由 stage(+device_uuid) 定位);好友 Caller Bot → caller_instance
   // (当前用户独立 Caller 实例,与 f_user_id 并存合法;仅 service 并存会 404)。探测失败
-  // (真好友视角受 Check(MEMBER) 管控 403)静默降级省略——契约安全:f_user_id 路由自明。
+  // 静默降级省略；好友文件写操作会因缺少 caller_instance 定位而关闭访问。
   const callerRuntimeTarget = !isCallerRuntimeBot
     ? undefined
     : bot?.isFriendBot
