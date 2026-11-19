@@ -99,7 +99,8 @@ with the chat's `stage` for the service workspace, or `caller_instance` for
 the caller's workspace. Omitting the parameter preserves automatic resolution.
 An unavailable explicit target fails without trying the other workspace.
 Upload completion and materialization status use the existing resource record.
-A friend read with `f_user_id` cannot override its scope to `service`.
+Explicit `service` requires Bot owner or collaborator access. File reads
+ignore `f_user_id` for this target.
 
 Friend-session reads retain the authorized session subject and resolved stage:
 service conversations use online, and Caller conversations use the subject's

@@ -181,6 +181,7 @@ class _EngineFiles:
         self.resources.binding_requests.append(target)
         _, upstream = await self.resources.open_session_file_content(
             target=target, session_key=session_key, resource_id=resource_id, disposition=disposition,
+            session_user_id=session_user_id,
         )
         return upstream
 
@@ -834,11 +835,38 @@ def test_invalid_caller_runtime_target_is_rejected(
 
 
 @pytest.mark.parametrize("suffix", ["", "/sr_1/content"])
-def test_friend_session_masks_service_caller_runtime_target(client, friendships, resources, suffix):
-    friendships.allowed = True
-    response = client.get(_base() + suffix, params={
-        "f_user_id": "friend-1", "caller_runtime_target": "service",
+@pytest.mark.parametrize("actor", [OWNER, "collaborator"])
+def test_service_target_ignores_friend_subject(client, relay, friendships, resources, expert, suffix, actor):
+    from agentclaw.community.core.engine_runtime.models import BotFacts
+
+    relay.bots[(BOT, OWNER)] = BotFacts(
+        bot_id=BOT, owner_id=OWNER, bot_type="service", active_engine="openclaw",
+    )
+    relay.add_operator("collaborator")
+    client.app.dependency_overrides[require_principal] = lambda: {"user_id": actor}
+    response = user_scoped_client(client.app, actor).get(_base() + suffix, params={
+        "owner_id": OWNER, "f_user_id": "friend-1",
+        "caller_runtime_target": "service", "stage": "online",
+    })
+
+    assert response.status_code == 200, response.text
+    assert friendships.calls == []
+    assert expert.calls == []
+    target, = resources.binding_requests
+    assert target.target is RuntimeBindingTarget.CALLER_SERVICE
+    assert target.actor_user_id == actor
+    assert target.stage == "online"
+    assert resources.calls[0][1]["session_user_id"] is None
+
+
+@pytest.mark.parametrize("suffix", ["", "/sr_1/content"])
+def test_service_target_requires_operator_access(friend_client, friendships, resources, expert, suffix):
+    response = friend_client.get(_base() + suffix, params={
+        "owner_id": OWNER, "f_user_id": "friend-1",
+        "caller_runtime_target": "service", "stage": "online",
     })
 
     assert fails(response, 404)["message"] == "Not found"
+    assert friendships.calls == []
+    assert expert.calls == []
     assert resources.calls == []
