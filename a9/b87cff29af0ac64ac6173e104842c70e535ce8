@@ -1,0 +1,19 @@
+apps/bcs/scripts/e2e-test/managers_sync_concurrent.sh
+  s_40c467adb5f8c4::t_163e8ff898422b 5-7,37,39-40,63,67,69-70,74-75,77-83,85-142,144-145,149-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a9b87cff29af0ac64ac6173e104842c70e535ce8",
+  "prompts": {},
+  "sessions": {
+    "s_40c467adb5f8c4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f1b1-2db9-7170-81a0-b47a264458c8",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
