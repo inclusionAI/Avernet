@@ -41,6 +41,7 @@ def _driver(status="created"):
         )
     ]
     record = SimpleNamespace(
+        events=[],
         collet=SimpleNamespace(version=7),
         task=SimpleNamespace(task_id="task_root", status=status),
     )

@@ -39,7 +39,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     TaskCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
-    initial_executor_refs,
+    bound_executor_refs,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.creation import (
     build_created_collet,
@@ -144,7 +144,7 @@ class ContextCollabRepository(Generic[StateT]):
                 .order_by(ContextCollabEventModel.id.asc())
                 .all()
             )
-            executors = initial_executor_refs(
+            executors = bound_executor_refs(
                 [_event_from_row(event) for event in binding_rows]
             )
             facts = {
@@ -310,7 +310,7 @@ class ContextCollabRepository(Generic[StateT]):
                     .order_by(ContextCollabEventModel.id.asc())
                     .all()
                 )
-                if not child and creating.executor_refs != initial_executor_refs(
+                if not child and creating.executor_refs != bound_executor_refs(
                     [_event_from_row(e) for e in binding_rows]
                 ):
                     raise ContextCollabValidationError(

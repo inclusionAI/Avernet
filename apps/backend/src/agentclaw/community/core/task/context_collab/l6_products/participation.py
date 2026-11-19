@@ -48,6 +48,7 @@ def product_participation(
     bindings = tuple(
         RoleBinding(role.l4_role, scenario_participant_id(role, executor))
         for role in profile.scenario_roles
-        if role.participant_source != "executor_ref" or executor is not None
+        if role.participant_source != "open_admission"
+        and (role.participant_source != "executor_ref" or executor is not None)
     )
     return ParticipationFacts(tuple(participants), bindings)

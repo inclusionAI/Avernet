@@ -52,9 +52,14 @@ class ProductProfileCreateCommand:
 
     ref: VersionedProfileRef
     composition: MethodCompositionTemplate
-    scenario_roles: tuple[ScenarioRole, ...]
-    governance: GovernanceRequirements
-    compatibility: CompatibilityRequirements
+    # Empty means standard roles resolved during authoring, never no authorization.
+    scenario_roles: tuple[ScenarioRole, ...] = ()
+    governance: GovernanceRequirements = GovernanceRequirements(
+        "g1.structural/1", "g2.optimistic-version/1", "g3.event-projection/1", "g4.product-contract/1"
+    )
+    compatibility: CompatibilityRequirements = CompatibilityRequirements(
+        "0.2", ("L2", "L3", "L4", "L5"), (), (), "reject_missing_required", "new_instances_only"
+    )
     domain: DomainProfile | None = None
     workflow: WorkflowProfile | None = None
     task_contract_ref: VersionedProfileRef | None = None

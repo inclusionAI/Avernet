@@ -43,8 +43,9 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.metho
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
     resolve_transition,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import validate_enrolled_participation
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
-    initial_participation,
+    current_participation,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     ProfileOpAcceptedResult,
@@ -235,8 +236,9 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
             record = self._collab_repo.get_current_status(collab_context_id)
             if record is None:
                 raise ContextCollabNotFoundError("stage Collet not found")
+            validate_enrolled_participation(collab_context_id, record.events, self._store)
             candidates = stage_role_candidates(
-                collab_context_id, stage, initial_participation(record.events)
+                collab_context_id, stage, current_participation(record.events)
             )
             if command.target_kind != "AGENT" or command.target_ref not in {
                 participant.participant_id for participant in candidates

@@ -111,3 +111,45 @@ def initial_executor_refs(events: Sequence[EventRecord]) -> tuple[AgentRef, ...]
     if any(ref not in {p.agent_ref for p in facts.participants} for ref in refs):
         raise ContextCollabValidationError("initial executor is not a Participant")
     return refs
+
+
+ADMITTED_BINDING_EVENT = "collet.admitted_participants_bound"
+
+
+def current_participation(events: Sequence[EventRecord]) -> ParticipationFacts:
+    """Initial facts plus an authorized, pre-Work Open enrollment.
+
+    Enrollment is append-only evidence, not a rewrite of pinned product creation.
+    Only the enrollment operation writes this internal event; generic append does
+    not register it. Rebinding/reassignment and post-Work enrollment are unsupported.
+    """
+    initial = initial_participation(events)
+    enrollments = [e for e in events if e.event_kind == ADMITTED_BINDING_EVENT]
+    if len(enrollments) > 1:
+        raise ContextCollabValidationError("conflicting Open enrollment evidence")
+    if not enrollments:
+        return initial
+    added = ParticipationFacts.from_dict(enrollments[0].payload["participation"])
+    return ParticipationFacts(
+        initial.participants + added.participants,
+        initial.role_bindings + added.role_bindings,
+    )
+
+
+def bound_executor_refs(events: Sequence[EventRecord]) -> tuple[AgentRef, ...]:
+    """Work inherits runtime enrollment, or unchanged initial fixed assignments."""
+    initial = initial_executor_refs(events)
+    enrollments = [e for e in events if e.event_kind == ADMITTED_BINDING_EVENT]
+    if not enrollments:
+        return initial
+    facts = current_participation(events)
+    raw = enrollments[0].payload.get("executor_refs")
+    if not isinstance(raw, list) or any(not isinstance(item, dict) for item in raw):
+        raise ContextCollabValidationError("invalid enrolled executor evidence")
+    refs = normalize_executor_refs(tuple(AgentRef.from_dict(item) for item in raw))
+    holders = {b.participant_id for b in facts.role_bindings if b.role == "selected-agent"}
+    if initial or len(refs) != 1 or not any(
+        p.agent_ref == refs[0] and p.participant_id in holders for p in facts.participants
+    ):
+        raise ContextCollabValidationError("enrolled executor requires its RoleBinding")
+    return refs

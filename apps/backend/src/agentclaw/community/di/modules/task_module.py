@@ -121,15 +121,15 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
-    ProductCollaborationPolicy,
-)
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
     ProductInstantiationServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     ProductMethodBindingRecovery,
 )
+from agentclaw.community.core.task.context_collab.l6_products.open_enrollment import ProductOpenEnrollmentServiceProtocol
+from agentclaw.community.core.task.context_collab.l6_products.operations.open_enrollment import ProductOpenEnrollmentService
+from agentclaw.community.core.task.context_collab.l6_products.operations.open_enrollment_policy import OpenEnrollmentCollaborationPolicy
 from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
     ProductInstantiationService,
 )
@@ -439,6 +439,10 @@ class TaskModule(Module):
             to=ProductInstantiationService,
             scope=singleton,
         )
+        binder.bind(
+            ProductOpenEnrollmentServiceProtocol, to=ProductOpenEnrollmentService,
+            scope=singleton,
+        )
         # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
         # backend-owned Bot-side cron manager (openclaw mode). Singletons are also
         # discoverable by the application lifecycle auto-start path.
@@ -466,10 +470,11 @@ class TaskModule(Module):
         repository: L4ContextCollabRepositoryProtocol[ContextStatusRecord],
         authorizer: ContextCollabAuthorizerProtocol,
         catalog: ProductCatalog,
+        store: MethodStoreProtocol,
     ) -> ContextServiceProtocol:
         """L4 owns all operations; retain selected G1 admission and G4 contracts."""
         return ContextService(
-            repository, ProductCollaborationPolicy(catalog, authorizer), authorizer
+            repository, OpenEnrollmentCollaborationPolicy(catalog, authorizer, store), authorizer
         )
 
     @singleton

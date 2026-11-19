@@ -34,6 +34,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
     COLLET_BINDING_EVENT,
     initial_executor_refs,
     initial_participation,
+    current_participation,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     InitialEventDraft as InitialEventDraft,
@@ -136,11 +137,11 @@ class ContextStatusRecord(_RecordView):
 
     @property
     def participants(self):
-        return initial_participation(self.events).participants
+        return current_participation(self.events).participants
 
     @property
     def role_bindings(self):
-        return initial_participation(self.events).role_bindings
+        return current_participation(self.events).role_bindings
 
 
 @dataclass

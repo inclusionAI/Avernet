@@ -2,8 +2,8 @@
 
 真实 DI、SQLite、L4/L5/G4；本文件显式声明五个 Bot，复用 Swarm 执行替身。
 候选 Bot 自己发现/申请，发布人调用本地评审方法按 Profile 所需能力筛选；仅模拟身份与计算，
-不验证远端认证、LLM、真实 PR 或持久化调度。角色预绑定不等于 OPEN 录取；
-本 case 显式编排录取后启动，不声称通用 SwarmDriver 会自动执行 OPEN 准入检查。
+不验证远端认证、LLM、真实 PR 或持久化调度。产品只声明角色需求；
+申请者在运行时才出现，录取后绑定角色，Swarm 在当前有效的录取集合中选择执行者。
 """
 
 import json
@@ -29,9 +29,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     ColletCreateCommand,
     EventAppendCommand,
     TaskCreateCommand,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
-    role_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
@@ -77,16 +74,19 @@ from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile impor
     PlanState,
     StageState,
 )
+from agentclaw.community.core.task.context_collab.l6_products.open_enrollment import (
+    AdmittedAgent,
+    OpenEnrollmentCommand,
+    ProductOpenEnrollmentServiceProtocol,
+    scenario_role_ref,
+)
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodTemplate,
-    CompatibilityRequirements,
-    GovernanceRequirements,
     MethodCompositionTemplate,
     MethodRelationTemplate,
-    ScenarioRole,
     VersionedProfileRef,
 )
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
@@ -228,15 +228,16 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
                 OWNER.actor, title="AI coding", description=OBJECTIVE
             ),
             profile_ref=profile.ref,
-            participant_refs=AGENTS,
-            executor_ref=AGENTS[-1],
         ),
         OWNER,
     )
     collet_id = instance.collet_ref
     open_binding_id, swarm_binding_id = instance.method_binding_refs
     record = _record(injector, collet_id)
-    role_refs = {b.role: role_binding_ref(collet_id, b) for b in record.role_bindings}
+    assert record.task is None
+    assert all(p.agent_ref is None for p in record.participants)
+    assert {b.role for b in record.role_bindings} == {"responsible_user"}
+    role_refs = {role: scenario_role_ref(profile.ref, role) for role in ROLES}
     participants = {p.participant_id: p for p in record.participants}
 
     return (
@@ -268,7 +269,8 @@ def swarm_run(injector, collet_id):
         if event.task_ref == started.task.task_id and event.event_kind == "task.started"
     ]
     assert len(starts) == 1
-    assert starts[0].actor_ref == PrincipalRef(AGENTS[-1].agent_type, AGENTS[-1].agent_id)
+    [executor] = before.task.executor_refs
+    assert starts[0].actor_ref == PrincipalRef(executor.agent_type, executor.agent_id)
     assert driver.step()
 
     # 9. 第九步：应用统一规划和执行者分配，需求 Bot 执行并主动 G4 上报，推进 Stage 与独立子 Task。
@@ -372,40 +374,7 @@ def _create_product_profile():
                 ),
             ),
             participant_scope=ParticipantScope(ParticipantScopeKind.OPEN),
-            scenario_roles=(
-                ScenarioRole(
-                    "owner",
-                    "responsible_user",
-                    "principal_ref",
-                    True,
-                    ("coordinate", "accept"),
-                ),
-                ScenarioRole(
-                    "submitter",
-                    "selected-agent",
-                    "executor_ref",
-                    True,
-                    ("submit_result",),
-                ),
-                *(
-                    ScenarioRole(role, role, "agent_ref", True, (role,), agent)
-                    for role, agent in zip(ROLES, AGENTS)
-                ),
-            ),
-            governance=GovernanceRequirements(
-                "g1.structural/1",
-                "g2.optimistic-version/1",
-                "g3.event-projection/1",
-                "g4.product-contract/1",
-            ),
-            compatibility=CompatibilityRequirements(
-                "0.2",
-                ("L2", "L3", "L4", "L5"),
-                (),
-                (),
-                "reject_missing_required",
-                "new_instances_only",
-            ),
+
         )
     )
 
@@ -530,6 +499,34 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
     assert storage_service.list_plans(storage_envs, swarm_binding_id, collet_id) == []
     assert storage_service.list_allocations(storage_envs, swarm_binding_id, collet_id) == []
     assert storage_service.list_execution_profiles(storage_envs, swarm_binding_id, collet_id) == []
+
+    # 录取后才绑定具体 Agent：身份取实际申请者，角色取被审核录取的申请。
+    # 根执行者由本案例的协调策略选择已录取的 PR 提交者，不取 AGENTS 的位置。
+    [root_application] = [
+        application for application in admitted_by_agent.values()
+        if role_refs["pr_submission"] in application.requested_role_refs
+    ]
+    before = _record(injector, collet_id)
+    injector.get(ProductOpenEnrollmentServiceProtocol).bind(
+        OpenEnrollmentCommand(
+            collet_id,
+            before.collet.version,
+            tuple(
+                AdmittedAgent(application.application_id, applicants[agent_id].agent)
+                for agent_id, application in admitted_by_agent.items()
+            ),
+            applicants[root_application.applicant_agent_ref].agent,
+        ),
+        OWNER,
+    )
+    bound = _record(injector, collet_id)
+    assert bound.task is None  # 绑定不会创建或启动 Task。
+    assert bound.product_instance == before.product_instance
+    assert {p.agent_ref for p in bound.participants if p.agent_ref is not None} == {
+        applicants[agent_id].agent for agent_id in admitted_by_agent
+    }
+    assert set(ROLES) <= {binding.role for binding in bound.role_bindings}
+
 
 
 @pytest.fixture

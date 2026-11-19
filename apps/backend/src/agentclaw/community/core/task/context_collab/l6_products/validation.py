@@ -72,6 +72,7 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
             "principal_ref",
             "executor_ref",
             "agent_ref",
+            "open_admission",
         }:
             raise ContextCollabValidationError(
                 "unsupported scenario role participant source"
@@ -86,11 +87,17 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
             raise ContextCollabValidationError(
                 "agent_ref requires agent_ref participant source"
             )
+    deferred = [r for r in definition.scenario_roles if r.participant_source == "open_admission"]
+    if deferred and not any(
+        d.profile.method_kind == "Open" and isinstance(d.policy, OpenMethodPolicy)
+        for d in methods
+    ):
+        raise ContextCollabValidationError("open_admission roles require a required Open policy")
     contract = resolve_event_contract(definition)
     if isinstance(contract, TaskLifecycleContract):
         if not any(
             role.l4_role == ROLE_SELECTED_AGENT
-            and role.participant_source == "executor_ref"
+            and role.participant_source in {"executor_ref", "open_admission"}
             and role.required
             for role in definition.scenario_roles
         ):
