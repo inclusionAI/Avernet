@@ -1,4 +1,6 @@
 """Tests for ExpertChat API router."""
+
+from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 import logging
 from types import SimpleNamespace
 
@@ -439,6 +441,7 @@ def test_real_service_session_guards_and_publication_mapping(operation, case):
         repository=repo, bot_repo=bots, device_provider=MagicMock(),
         baas_service=MagicMock(), resolver=resolver, collaborator_service=collaborator,
         transport=MagicMock(), instance_service=MagicMock(), publish_repository=publishes,
+        session_key_codecs=EngineRuntimeModule().session_key_codec_registry(),
     )
 
     class BindService(Module):
@@ -806,6 +809,7 @@ def test_teclaw_session_http_uses_real_service_without_provisioning(client_with_
         repository=repository, bot_repo=bots, device_provider=MagicMock(),
         baas_service=MagicMock(), resolver=resolver, collaborator_service=MagicMock(),
         transport=transport, instance_service=instances, publish_repository=publishes,
+        session_key_codecs=EngineRuntimeModule().session_key_codec_registry(),
     )
     api_service.create_chat_session = real_service.create_chat_session
     response = client.post("/api/v1/expert-chats/test_bot/test_owner/sessions")

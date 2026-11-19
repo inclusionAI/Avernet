@@ -56,6 +56,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )
 from agentclaw.community.core.expert_chat.expert_chat_service_protocol import ExpertChatServiceProtocol
+from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecRegistry
 
 logger = get_logger()
 
@@ -126,6 +127,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         transport: DeviceAdapterTransport,
         instance_service: ExpertChatInstanceService,
         publish_repository: BotPublishRepositoryProtocol,
+        session_key_codecs: SessionKeyCodecRegistry,
     ):
         """Initialise.
 
@@ -156,6 +158,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         self._transport = transport
         self._instance_service = instance_service
         self._publish_repository = publish_repository
+        self._session_key_codecs = session_key_codecs
 
     # ============ Public Methods ============
 
@@ -309,7 +312,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
                     user_id,
                     connection=connection,
                 )
-                await self._remove_session_favorite(connection, session_key, user_id)
+                await self._remove_session_favorite(bot, connection, session_key, user_id)
                 # Persist progress after each confirmed runtime deletion. If a
                 # later deletion fails, retrying must not revisit a session that
                 # the Engine has already removed.
@@ -679,7 +682,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         await self._delete_adapter_session(
             bot, session_key, user_id, connection=connection
         )
-        await self._remove_session_favorite(connection, session_key, user_id)
+        await self._remove_session_favorite(bot, connection, session_key, user_id)
         self._repo.delete_owned_session(user_id, bot_id, owner_id, session_key)
 
         if self._repo.get_session(user_id, bot_id, owner_id) == session_key:
@@ -919,13 +922,14 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
 
     async def _remove_session_favorite(
         self,
+        bot: Dict[str, Any],
         connection: Dict[str, Any],
         session_key: str,
         user_id: str,
     ) -> None:
         """Best-effort favorite cleanup for engines whose delete is deferred."""
-        encoded_session_key = quote(session_key, safe="")
         try:
+            encoded_session_key = self._session_path_key(bot, connection, session_key)
             await self._transport.invoke(
                 connection,
                 "DELETE",

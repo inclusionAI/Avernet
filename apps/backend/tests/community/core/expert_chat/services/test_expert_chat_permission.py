@@ -14,6 +14,8 @@ Also: 早失败 — 权限不通过时 resolver 不应被调到。
 """
 from __future__ import annotations
 
+from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
+
 from unittest.mock import AsyncMock, MagicMock
 
 from tests.community.bot_address_fakes import support_legacy_locator
@@ -49,6 +51,7 @@ def _make_service(
         transport=transport or MagicMock(invoke=AsyncMock()),
         instance_service=instance_service or MagicMock(),
         publish_repository=MagicMock(),
+        session_key_codecs=EngineRuntimeModule().session_key_codec_registry(),
     )
 
 
