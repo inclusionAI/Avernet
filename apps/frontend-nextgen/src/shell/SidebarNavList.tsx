@@ -38,14 +38,16 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
   // 空间切换器为形态级入口（getShellVisibility.spaceSwitcher）：Open Core（阿里云部署）默认隐藏。
   // 隐藏 UI 不影响空间数据链路：initSpaceContext 由 AppShell 按 Bot 分组路由触发，与开关无关。
   const showSpaceSwitcher = getCapabilities().getShellVisibility().value.spaceSwitcher;
-  const sections = SECTION_ORDER.filter((section) => items.some((item) => item.section === section));
+  // 暂时只隐藏主导航里的任务护航入口，保留导航定义和路由。
+  const visibleItems = items.filter((item) => item.id !== 'task-escort');
+  const sections = SECTION_ORDER.filter((section) => visibleItems.some((item) => item.section === section));
   const activeNavigationId = getNavigationItem(activePath)?.id;
 
   if (collapsed) {
     return (
       <div className="app-scrollbar flex w-full flex-1 flex-col items-center overflow-y-auto px-1 py-2">
         {sections.map((section, index) => {
-          const sectionItems = items.filter((item) => item.section === section);
+          const sectionItems = visibleItems.filter((item) => item.section === section);
           return (
             <Fragment key={section}>
               {/* 分组间分割线（收起态专属）：协作组（实验）与 Bot 管理（bot 组）图标之间。
@@ -80,7 +82,7 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
   return (
     <nav aria-label="主导航" className="app-scrollbar flex-1 overflow-y-auto px-2 py-2">
       {sections.map((section, index) => {
-        const sectionItems = items.filter((item) => item.section === section);
+        const sectionItems = visibleItems.filter((item) => item.section === section);
         return (
           <section key={section} aria-label={navSectionLabels[section]} className={index > 0 ? 'mt-4' : 'mb-1'}>
             {/* 分组标题（SVG + dmore DOM 实测：行 h=32、与项行同为 32px 高）：
