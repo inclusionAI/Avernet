@@ -48,7 +48,12 @@ class Provider(BaseHTTPRequestHandler):
         # this story's user sends, including any invalid sends that leak through.
         if 'caller-e2e-message' in json.dumps(body.get('message', {})):
             self.server.received.put((body, self.headers.get('Authorization'), self.headers.get('X-E2E-Caller')))
-        if self.path == '/sse':
+        if body.get('method') == 'caller.container.ensure':
+            payload = json.dumps({'ok': True, 'isolation': {
+                'level': 'container_bound', 'binding_ref': body['id'],
+                'expires_at_ms': int(time.time() * 1000) + 600_000}}).encode()
+            content_type = 'application/json'
+        elif self.path == '/sse':
             payload = ('event: chat\ndata: ' + json.dumps({'runId': body['id'], 'seq': 1,
                 'state': 'final', 'message': {'role': 'assistant',
                 'content': [{'type': 'text', 'text': 'done'}]}}) + '\n\n').encode()
@@ -204,7 +209,7 @@ class Story:
         self.callback(account, credential='test-token-lost', conversation='lost-conversation')
         print(f'Caller HTTP/queue/provider E2E: {self.checks} HTTP assertions passed', flush=True)
 
-    def exclusive_channel_speaking(self, db_path, signing_key):
+    def exclusive_channel_speaking(self, db_path, signing_key, business_log):
         """Compare channel and Workbench admission to the same real Session."""
         bot_id = self.bot['bot_uuid']
         bot_ref = segment(self.bot['provider_bot_ref'])
@@ -213,8 +218,7 @@ class Story:
             'snapshot': {'source_revision': 1, 'caller_identity': {'enabled': True}},
         }, headers={'Authorization': 'Bearer ' + self.registration['provider_admin_token']})
         assert applied['sync_status'] == 'applied', 'Caller snapshot not applied'
-        # Inspect committed admission before delivery. This test does not
-        # depend on the external execution or container issuance service.
+        # Hold dispatch while comparing the two ingress paths.
         self.policy(True)
         account, _ = self.binding(bot_id, 'default', group_chat_scope='per_sender')
         shared, _ = self.binding(bot_id, 'default', group_chat_scope='conversation_shared')
@@ -230,9 +234,9 @@ class Story:
                 ).fetchall()
 
         self.callback(account, sender=sender, credential=None, kind='2', status=422)
-        self.callback(shared, sender=sender, credential=None, kind='2', status=422, attest_sender=True)
+        self.callback(shared, sender=sender, kind='2', status=422, attest_sender=True)
         assert deliveries() == [], 'missing Caller identity or a shared Session bypassed admission'
-        self.callback(account, sender=sender, credential=None, kind='2', attest_sender=True)
+        channel_message = self.callback(account, sender=sender, kind='2', attest_sender=True)
         rows = deliveries()
         assert len(rows) == 1 and rows[0][2:] == ('queued', 1), 'channel did not enqueue protected Caller work'
         group_id, session_id = rows[0][:2]
@@ -268,6 +272,28 @@ class Story:
         finally:
             ws.close()
         print('Exclusive channel Caller admission and unchanged Workbench lease fence: PASS', flush=True)
+
+        self.policy(False)
+        body = self.receive()
+        assert body['extensions']['caller_execution_token']['type'] == self.credential_type
+        assert body['extensions']['caller_execution_token']['token'] == channel_message['credential']
+        deadline = time.monotonic() + 15
+        with business_log.open('rb') as log:
+            while time.monotonic() < deadline:
+                position = log.tell()
+                line = log.readline()
+                if not line.endswith(b'\n'):
+                    log.seek(position)
+                    time.sleep(0.05)
+                    continue
+                event = json.loads(line)
+                if event.get('message') == 'caller e2e channel final' and event.get('run_id') == body['id']:
+                    assert event.get('source_im_message_id') == channel_message['message_id']
+                    assert event.get('caller_dispatch') is True
+                    break
+            else:
+                raise AssertionError('protected Caller reply never reached the originating channel')
+        print('Protected Caller reply preserved the original channel message and Caller flag: PASS', flush=True)
 
 
 def verify_network_traces(path, provider):
@@ -401,6 +427,15 @@ def run_story(binary, environment, credential_type='iam-token'):
             'database': {'type': 'sqlite', 'sqlite': {'path': str(root / 'bcs.db')}},
             'security': {'outbound_url': {'block_private_networks': True, 'allow_loopback': True}},
             'llm': {'type': 'none'}, 'bcsfuse': {'enabled': False}})
+        if environment == 'local' and credential_type == 'iam-token':
+            signing_key = subprocess.check_output(['openssl', 'genpkey', '-algorithm', 'ED25519'])
+            public_key = subprocess.check_output(['openssl', 'pkey', '-pubout'], input=signing_key)
+            config['caller_identity'] = {'plugin': 'jwt', 'jwt': {
+                'issuer': 'bcs-caller-e2e', 'signing_kid': 'local-fixture',
+                'signing_key_pem': signing_key.decode(), 'pseudonym_key_hex': uuid.uuid4().hex * 2,
+                'public_keys': [{'kid': 'local-fixture', 'public_pem': public_key.decode()}],
+                'max_ttl_seconds': 300,
+            }}
         config['logging'].update(default_level='debug', console=True)
         # Both production formatters see the same real request events. Keep
         # outputs inside this process fixture; no formatter/core calls in tests.
@@ -478,7 +513,8 @@ def run_story(binary, environment, credential_type='iam-token'):
                 assert provider.received.empty(), 'cache loss fell back to provider identity'
                 print('Durable queue/cache-loss restart fails closed: PASS', flush=True)
                 if environment == 'local' and credential_type == 'iam-token':
-                    story.exclusive_channel_speaking(root / 'bcs.db', env['CALLER_E2E_SIGNING_KEY'])
+                    story.exclusive_channel_speaking(root / 'bcs.db', env['CALLER_E2E_SIGNING_KEY'],
+                                                    root / 'business.json.log')
             finally:
                 process.send_signal(signal.SIGTERM)
                 process.wait(timeout=30)

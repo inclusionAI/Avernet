@@ -26,8 +26,10 @@ The local story also enables a Bot's Caller snapshot and checks admission
 through the live channel callback. An authenticated single-sender Session
 queues protected Caller work without a lease; a shared Session or missing
 identity is refused. The same single-sender Session still requires a lease for
-its Workbench connection. Dispatch is paused so the comparison observes
-committed queue admission without depending on a container issuer.
+its Workbench connection. After checking queue admission, the story resumes
+dispatch, verifies that the mock Provider received the original channel
+credential, and confirms that the final channel reply carries both the
+original IM message ID and the BCS-owned Caller flag.
 
 The recording network provider implements the optional read-only log identity
 hook. The story compares real HTTP success, authentication and validation error
