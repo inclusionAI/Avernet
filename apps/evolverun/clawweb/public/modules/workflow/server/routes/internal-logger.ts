@@ -28,21 +28,19 @@ type ApiLogMethod = "READ" | "WRITE" | "PUT" | "DELETE";
  * Outputs to both console and a dedicated log file.
  */
 export function apiLog(method: ApiLogMethod, path: string, details: Record<string, unknown>): void {
-  const now = new Date();
-  const level = httpLogLevel(details.status);
-  const entry = {
-    ts: now.toISOString(),
-    method,
-    path,
-    ...details,
-  };
-  const line = formatHttpLog(now, level, "internal-api", entry);
-
-  // Console output (always)
-  console[level === "ERROR" ? "error" : "log"](`[internal-api] ${method} ${path} ${details.status ?? "pending"}`);
-
-  // File output (best-effort)
   try {
+    const now = new Date();
+    const level = httpLogLevel(details.status);
+    const entry = {
+      ts: now.toISOString(),
+      method,
+      path,
+      ...details,
+    };
+    const line = formatHttpLog(now, level, "internal-api", entry);
+
+    // Console output (always)
+    console[level === "ERROR" ? "error" : "log"](`[internal-api] ${method} ${path} ${details.status ?? "pending"}`);
     ensureLogDir();
     appendFileSync(LOG_FILE, line + "\n", "utf-8");
     writeFailureReported = false;
@@ -59,7 +57,12 @@ export function apiLog(method: ApiLogMethod, path: string, details: Record<strin
  * Log a request body (truncated for large payloads).
  */
 export function apiLogBody(method: ApiLogMethod, path: string, body: unknown, extra: Record<string, unknown> = {}): void {
-  const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
+  let bodyStr: string;
+  try {
+    bodyStr = typeof body === "string" ? body : JSON.stringify(body) ?? "";
+  } catch {
+    bodyStr = "[unserializable body]";
+  }
   const truncated = bodyStr.length > 2000 ? bodyStr.substring(0, 2000) + "...[truncated]" : bodyStr;
   apiLog(method, path, { bodyPreview: truncated, ...extra });
 }

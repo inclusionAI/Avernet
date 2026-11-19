@@ -45,3 +45,11 @@ it.each([[undefined, "INFO"], [200, "INFO"], [404, "ERROR"], [503, "ERROR"]])("l
   apiLog("READ", "/test", { status });
   expect(files.appendFileSync.mock.calls[0][1]).toContain(` ${level} [internal-api] {`);
 });
+
+it("isolates serialization failures from callers", async () => {
+  const { apiLog, apiLogBody } = await loadLogger();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  expect(() => apiLog("WRITE", "/test", { value: BigInt(1) })).not.toThrow();
+  expect(() => apiLogBody("WRITE", "/test", { value: BigInt(1) })).not.toThrow();
+  expect(files.appendFileSync.mock.calls.at(-1)?.[1]).toContain("[unserializable body]");
+});
