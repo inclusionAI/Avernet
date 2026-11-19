@@ -98,6 +98,28 @@ async def write_capabilities(owner, ctx, plan):
                         "public Skill changed name, identity or dependencies after preview; shared publication may remain"
                     )
                 prepared[skill.key] = ready.skill_id
+            elif skill.from_bot is not None:
+                # The dst ``ac_skill`` row ``resolve`` deferred for a
+                # ``from: from_bot`` local skill — file-sync owns the bytes,
+                # so no package is uploaded. Register the row now
+                # (create-or-replace under the edit guard, the upload road's
+                # contract), and let the returned id drive the activation
+                # claim below. ``resolve`` left this here precisely so a
+                # ``dry_run`` (which stops before ``write``) writes nothing.
+                result = await owner._uploads.ensure_dst_local_skill_asset(
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    actor_id=ctx.actor_id,
+                    source_bot_id=skill.from_bot.source_bot_id,
+                    source_owner_id=skill.from_bot.source_owner_id,
+                    name=skill.name,
+                )
+                confirmed = True
+                operation = result["operation"]
+                uploaded[skill.key] = EntryOutcome(
+                    "updated" if operation == "replaced" else operation
+                )
+                prepared[skill.key] = str(result["skill"]["id"])
             elif skill.package is None:
                 prepared[skill.key] = skill.skill_id
         for skill in all_skills:
