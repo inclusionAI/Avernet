@@ -52,6 +52,7 @@ impl ChannelProvider for Provider {
         self.validate_config(config)?;
         Ok(config["execution_mode"] == "caller")
     }
+    fn uses_native_caller_execution(&self) -> bool { true }
     fn redact_config(&self, config: &Value) -> Value { config.clone() }
     fn delivery(&self) -> Arc<dyn ChannelDeliveryPort> { Arc::new(Delivery) }
     fn http_ingress(&self) -> Option<Arc<dyn ChannelHttpIngressPort>> {
@@ -133,7 +134,15 @@ struct Delivery;
 #[async_trait]
 impl ChannelDeliveryPort for Delivery {
     async fn is_available(&self, _: &ChannelBindingRef) -> bool { true }
-    async fn deliver_event(&self, _: ChannelOutboundEvent) -> ServiceResult<ChannelDeliveryResult> {
+    async fn deliver_event(&self, event: ChannelOutboundEvent) -> ServiceResult<ChannelDeliveryResult> {
+        if event.kind == bcs_service_api::ChannelOutboundEventKind::ChatFinal {
+            tracing::info!(
+                run_id = %event.run_id,
+                source_im_message_id = event.source_im_message_id.as_deref().unwrap_or_default(),
+                caller_dispatch = event.caller_dispatch,
+                "caller e2e channel final"
+            );
+        }
         Ok(ChannelDeliveryResult { delivered: true, provider_message_ref: None, error: None })
     }
 }

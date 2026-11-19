@@ -180,6 +180,7 @@ impl BcsChannelService {
                 }),
                 render_hint: ChannelRenderHint::Render,
                 source_im_message_id: source_im_message_id.map(str::to_string),
+                caller_dispatch: false,
         }))
     }
 

@@ -283,6 +283,11 @@ async fn native_channel_caller_admission_scopes_the_cached_proof() {
     let native = context.expect("protected channel dispatch context").native_credential.unwrap();
     assert_eq!(native.token_type, "channel-proof");
     assert_eq!(native.proof.expose_token(), "original-channel-token");
+    let run_id = row.run_id.as_deref().expect("queued Caller run ID");
+    assert_eq!(
+        flow.message_tracker.channel_source_message_id(run_id).await.as_deref(),
+        Some("im-native")
+    );
 
     let mut mismatch = row.clone();
     mismatch.semantic_projection_json["caller_execution"]["source_message_id"] = json!("im-other");

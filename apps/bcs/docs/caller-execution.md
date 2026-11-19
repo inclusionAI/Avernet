@@ -24,6 +24,10 @@ The queue stores only a reference, scoped to the environment, sender, source
 message, binding, Bot, Group and Session. A missing, mismatched or expired
 credential fails closed. BCS checks the cache TTL again before HTTP send.
 
+Managed Caller replies carry a BCS-owned dispatch flag to channel adapters.
+Protected channel sends associate the run with the original IM message so
+adapters can clear its acknowledgement when delivering the reply.
+
 The binding-level credential forwarding below also supports explicitly
 configured bindings when managed Caller admission does not apply.
 

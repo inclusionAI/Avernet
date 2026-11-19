@@ -284,8 +284,9 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             );
             return None;
         }
+        let source_im_message_id = source.content.get("source_im_message_id").and_then(|v| v.as_str());
         let native_credential = match crate::caller_execution::load_native(
-            &flow, delivery, &target, source.content.get("source_im_message_id").and_then(|v| v.as_str()),
+            &flow, delivery, &target, source_im_message_id,
         ).await {
             Ok(credential) => credential,
             Err(error) => {
@@ -294,6 +295,11 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
                 return None;
             }
         };
+        // Protected sends skip ordinary before_send, but their channel
+        // callbacks still need the originating IM message for reaction cleanup.
+        if let (Some(run_id), Some(message_id)) = (delivery.run_id.as_deref(), source_im_message_id) {
+            flow.message_tracker.cache_channel_source_message_id(run_id, message_id).await;
+        }
         Some(bcs_service_api::CallerDispatchContext {
             service_credential: bcs_to_provider_token.clone(),
             provider_id: provider_id.clone(),
