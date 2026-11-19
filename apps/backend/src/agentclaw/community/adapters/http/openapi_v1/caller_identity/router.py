@@ -25,9 +25,15 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
 )
 from agentclaw.community.api.caller_identity_service import (
+    CALLER_IDENTITY_CAPABILITY,
+    CallerContext as CoreCallerContext,
+    CallerIdentityPermissionError,
     CallerIdentityServiceProtocol,
     CallerIdentityStage as CoreCallerIdentityStage,
     McpCallType as CoreMcpCallType,
+)
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
 )
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
@@ -101,18 +107,64 @@ async def get_caller_context(
         ),
     ] = None,
     service: CallerIdentityServiceProtocol = Injected(CallerIdentityServiceProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(
+        HumanBotFriendshipServiceProtocol
+    ),
 ) -> Envelope[CallerContext]:
     """Return aggregate and per-resource Caller overrides for one Bot runtime."""
     _validate_stage(stage, publish_id)
     entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
-    result = await asyncio.to_thread(
-        service.get_context,
-        bot_id=bot_id,
-        actor_id=user_id,
-        stage=CoreCallerIdentityStage(stage.value),
-        publish_id=publish_id,
-        entity_id=entity_id,
-    )
+    core_stage = CoreCallerIdentityStage(stage.value)
+    try:
+        result = await asyncio.to_thread(
+            service.get_context,
+            bot_id=bot_id,
+            actor_id=user_id,
+            stage=core_stage,
+            publish_id=publish_id,
+            entity_id=entity_id,
+        )
+    except CallerIdentityPermissionError as denied:
+        try:
+            is_friend = await asyncio.to_thread(
+                friendships.is_friend,
+                human_id=user_id,
+                bot_id=bot_id,
+                owner_id=entity_id,
+                request_headers={
+                    key: value
+                    for key, value in request.headers.items()
+                    if key.lower()
+                    in {"authorization", "cookie", "x-request-id", "x-trace-id"}
+                },
+            )
+        except Exception as error:  # noqa: BLE001 - authorization must fail closed
+            logger.warning(
+                "openapi_caller_context_friendship_lookup_failed "
+                "bot_id=%s actor_id=%s error_type=%s",
+                bot_id,
+                user_id,
+                type(error).__name__,
+            )
+            raise denied from None
+        if not is_friend:
+            raise denied
+        bot_call_type = await asyncio.to_thread(
+            service.get_bot_call_type,
+            bot_id,
+            core_stage,
+            publish_id,
+            entity_id,
+        )
+        result = CoreCallerContext(
+            capability=CALLER_IDENTITY_CAPABILITY,
+            stage=core_stage,
+            publish_id=publish_id,
+            bot_call_type=bot_call_type,
+            mcp_call_types={},
+            cli_call_types={},
+            editable=False,
+        )
     logger.info(
         "openapi_caller_context_get_succeeded bot_id=%s stage=%s publish_id=%s "
         "mcp_caller_override_count=%s cli_caller_override_count=%s",

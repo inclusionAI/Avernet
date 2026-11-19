@@ -507,7 +507,7 @@ def test_existing_service_level_edit_lock_defences_are_preserved():
     )
 
 
-def test_caller_identity_keeps_legacy_read_and_write_permission_levels():
+def test_caller_identity_context_uses_handler_friend_auth_and_writes_stay_owner_only():
     read = AUTHORIZATION[("GET", "/openapi/v1/bots/{bot_id}/caller-context")]
     write = AUTHORIZATION[
         ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type")
@@ -516,8 +516,8 @@ def test_caller_identity_keeps_legacy_read_and_write_permission_levels():
         ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type")
     ]
 
-    assert read.level is PermissionLevel.MEMBER
-    assert read.edit_lock is None
+    assert isinstance(read, NoCheck)
+    assert "BCN friend" in read.reason
     assert write.level is PermissionLevel.OWNER
     assert write.edit_lock is EDIT_LOCK
     assert cli_write.level is PermissionLevel.OWNER
