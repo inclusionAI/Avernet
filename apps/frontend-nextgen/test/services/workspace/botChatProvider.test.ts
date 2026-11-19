@@ -288,7 +288,7 @@ describe('botChatProvider', () => {
     expect(mockGetCallerContext).toHaveBeenCalledWith('b', '2088', { suppressErrorNotification: true });
   });
 
-  it('好友 Bot:零探测(契约 owner/collaborator-only 必 404),IAM 恒省略 caller_runtime_target(2026-11-19 二轮勘误)', async () => {
+  it('好友 Caller Bot:探测 caller 时 IAM chatContext 带 caller_runtime_target=caller_instance 且与好友参数并存(三轮勘误还原)', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,
       data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
@@ -305,9 +305,10 @@ describe('botChatProvider', () => {
       sessionKey: 'sid-1',
       friendUserId: 'u',
       ownerId: '2088',
+      callerRuntimeTarget: 'caller_instance',
     });
-    // gateway 契约:caller-context 仅 owner/collaborator 可读,好友视角必 404——前端不发起。
-    expect(mockGetCallerContext).not.toHaveBeenCalled();
+    // 三轮勘误:好友探测照旧发起;探测请求失败一律零提示(suppress 透传)。
+    expect(mockGetCallerContext).toHaveBeenCalledWith('b', '2088', { suppressErrorNotification: true });
   });
 
   it('探测结果非 caller(owner)与探测失败均不带 caller_runtime_target(静默降级)', async () => {

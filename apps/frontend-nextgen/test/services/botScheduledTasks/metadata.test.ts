@@ -4,8 +4,9 @@ import type { RoutineStage } from '@/services/botScheduledTasks/types';
 
 jest.mock('@/services/botScheduledTasks/http', () => ({ sendRoutineRequest: jest.fn() }));
 
-// /containers 只报告线上容器：草稿/预发阶段（stage≠online）注定查空，必须跳过。
-// 详情接口的 payload 不含发布状态字段，线上判定依赖链接查询参数 runtime_stage。
+// /containers 只报告线上容器：链接明确指向草稿/预发实例（详情接口 payload 不含
+// 发布状态字段）时注定查空，必须跳过；未携带阶段（定时任务列表页默认）仍需拉取，
+// 否则创建表单永远拿不到线上实例。
 const sendMock = sendRoutineRequest as unknown as jest.Mock;
 const botDetail = (overrides: Record<string, unknown>) => ({
   bot_id: 'b1',
@@ -49,10 +50,11 @@ it('预发阶段不请求线上容器清单', async () => {
   expect(containerCalled()).toBe(false);
 });
 
-it('链接未携带阶段时不请求线上容器清单', async () => {
+it('链接未携带阶段时仍请求线上容器清单（定时任务列表页创建入口）', async () => {
   mockTransport(botDetail({}));
-  await load();
-  expect(containerCalled()).toBe(false);
+  const context = await load();
+  expect(containerCalled()).toBe(true);
+  expect(context.environments[2].instances).toEqual(['c1', 'c2']);
 });
 
 it('线上阶段请求线上容器并填充 online 实例清单', async () => {

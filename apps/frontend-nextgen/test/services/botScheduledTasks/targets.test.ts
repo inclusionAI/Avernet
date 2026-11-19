@@ -310,10 +310,16 @@ describe('instance selection follows the number of distinct reported UUIDs', () 
   test('duplicate UUIDs and empty IDs do not turn a single instance into multiple', () => {
     expect(routineInstanceMode(instanceContext(['uuid', 'uuid', '', ' ']), 'verify')).toBe('single');
   });
-  test('no UUIDs is unknown and never silently treated as single', () => {
+  test('no UUIDs defers instance resolution to the backend, never silently picks one', () => {
     const missing = instanceContext([]);
-    expect(routineInstanceMode(missing, 'verify')).toBe('unknown');
-    expect(() => validateCreateTarget(missing, form, 'admin')).toThrow('就绪');
+    expect(routineInstanceMode(missing, 'verify')).toBe('defer');
+    expect(routineInstanceMode(missing, 'draft')).toBe('defer');
+    expect(routineInstanceMode(missing, 'online')).toBe('defer');
+    // 未取得清单时不携带 device_uuid：后端按 stage 解析 binding，不活跃时返回阶段化发布提示。
+    expect(validateCreateTarget(missing, { ...form, device_uuid: undefined }, 'admin')).toEqual({
+      runtime_stage: 'verify',
+    });
+    expect(validateCreateTarget(missing, { runtime_stage: 'draft' }, 'admin')).toEqual({ runtime_stage: 'draft' });
   });
   test.each([false, true])('Caller=%s single-instance creation omits UUID', async (caller) => {
     const single = instanceContext(['uuid'], caller);
