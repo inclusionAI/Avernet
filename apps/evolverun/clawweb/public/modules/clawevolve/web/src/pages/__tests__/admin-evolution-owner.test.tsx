@@ -146,3 +146,19 @@ it('blocks submission after a foreign owner lookup fails or the owner is cleared
   expect(submit().disabled).toBe(true)
   expect(api.evolve.createTask).not.toHaveBeenCalled()
 })
+
+it.each(['ownerId', 'entityId'])('prefills an external Bot using %s without switching the query actor', async (key) => {
+  render(<MemoryRouter initialEntries={[`/evolve/new?type=full&botId=default&botEnv=prod&${key}=admin-owner`]}><Evolve /></MemoryRouter>)
+  await waitFor(() => expect(screen.getAllByText('My Bot').length).toBeGreaterThan(0))
+  expect(api.bots.list).toHaveBeenCalledWith({ ownerId: 'admin-owner', status: 'all' })
+  expect(owner().value).toBe('admin-owner')
+  expect(api.evolve.createTask).not.toHaveBeenCalled()
+})
+
+it('does not impersonate a URL owner or choose a different Bot', async () => {
+  render(<MemoryRouter initialEntries={['/evolve/new?type=full&botId=default&botEnv=prod&ownerId=target-owner']}><Evolve /></MemoryRouter>)
+  await screen.findByText('未找到可访问的目标 Bot，请检查参数或权限')
+  expect(owner().value).toBe('admin-owner')
+  expect(api.bots.list).not.toHaveBeenCalledWith({ ownerId: 'target-owner', status: 'all' })
+  expect(api.evolve.createTask).not.toHaveBeenCalled()
+})
