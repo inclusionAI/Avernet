@@ -1,0 +1,70 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 41-51,71,87,360-369,697-698,702-716
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/authorization.py
+  h_059e888e5e4e82 46,113-114
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/execution_report.py
+  h_059e888e5e4e82 1-26
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/context_service_protocol.py
+  h_059e888e5e4e82 94,99-102
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/contracts.py
+  h_059e888e5e4e82 62,134,139-142
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/repository.py
+  h_059e888e5e4e82 7,136-142,144-153,170,184-188,261,279-282,284-292,299,313,362-369,393,438-440
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/README.md
+  h_059e888e5e4e82 25,29,31-32,40,44,125-127,135-201
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/method_binding.py
+  h_059e888e5e4e82 5-6,37
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/contracts.py
+  h_059e888e5e4e82 203,228,522,592-602,671,699,716
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/plan.py
+  h_059e888e5e4e82 4,6,8-9,14,112,125,150-208,326
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/report.py
+  h_059e888e5e4e82 1-291
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/service.py
+  h_059e888e5e4e82 3,7-8,16,33
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/stage.py
+  h_059e888e5e4e82 426
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_controller.py
+  h_059e888e5e4e82 1-372
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_controller_contracts.py
+  h_059e888e5e4e82 1-53
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_profile.py
+  h_059e888e5e4e82 254,430,451,488
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 31,470-477,661-662,849-907
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/contracts.py
+  h_059e888e5e4e82 224-225
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/contracts.py
+  h_059e888e5e4e82 62-63,167-169
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/product_profile.py
+  h_059e888e5e4e82 28
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/validation.py
+  h_059e888e5e4e82 53-61
+apps/backend/src/agentclaw/community/core/task/context_collab/swarm_planning.py
+  h_059e888e5e4e82 1-48
+apps/backend/src/agentclaw/community/di/modules/swarm_runtime.py
+  h_059e888e5e4e82 1-97
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 162,322
+apps/backend/tests/community/core/task/context_collab/products/swarm_coding_support.py
+  h_059e888e5e4e82 1-104
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py
+  h_059e888e5e4e82 1,3-5,16-19,30,38-42,79,83-88,100-241,243-251,253,255-261,271,275-276,279,283-284,290-293,296,301,303,375-378,380-388,390-394,418-434,436-443,445,447-460,464
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  h_059e888e5e4e82 384-409,415-418
+apps/backend/tests/community/core/task/context_collab/test_l6_product_profile_operations.py
+  h_059e888e5e4e82 457-459,539-571
+apps/backend/tests/community/core/task/context_collab/test_l6_runtime_contract.py
+  h_059e888e5e4e82 53,67,96,663-771
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7fb73502eae861902b69e7b3fd1dc85f8eddc7b8",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
