@@ -48,7 +48,11 @@ export function apiLog(method: ApiLogMethod, path: string, details: Record<strin
     // Keep serving requests, but make an unavailable log destination visible.
     if (!writeFailureReported) {
       writeFailureReported = true;
-      console.error(`[clawweb] Cannot write internal API log to ${LOG_FILE}`, error);
+      try {
+        console.error(`[clawweb] Cannot write internal API log to ${LOG_FILE}`, error);
+      } catch {
+        // Both destinations can be unavailable during the same request.
+      }
     }
   }
 }

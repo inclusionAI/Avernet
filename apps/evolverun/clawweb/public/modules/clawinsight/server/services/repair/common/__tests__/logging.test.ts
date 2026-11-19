@@ -80,7 +80,7 @@ it("continues at the fixed path after copytruncate and file replacement", async 
 
 it("reports an unavailable destination once, retries after recovery and never interrupts task execution", async () => {
   const { logRepairEvent } = await import("../logging.js");
-  const warning = vi.spyOn(console, "error").mockImplementation(() => {});
+  const warning = vi.spyOn(console, "error").mockImplementation(() => { throw new Error("stderr unavailable"); });
   const output = vi.spyOn(console, "info").mockImplementation(() => {});
   writeFileSync(join(home.path, "logs"), "blocks the directory");
   const log = () => logRepairEvent("session-recovery", "session_recovery_task", "EXECUTION_FAILED", { count: 1 });

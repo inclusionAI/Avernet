@@ -31,7 +31,7 @@ describe("internal API file log retention integration", () => {
 
   it("reports an unavailable destination once and never writes to the root-volume legacy path", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => { throw new Error("stderr unavailable"); });
     const { apiLog } = await loadLogger();
     files.appendFileSync.mockImplementation(() => { throw new Error("disk unavailable"); });
     apiLog("WRITE", "/test", {}); apiLog("WRITE", "/test", {});
