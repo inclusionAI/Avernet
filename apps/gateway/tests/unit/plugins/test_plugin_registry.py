@@ -21,10 +21,12 @@ def _reset_registry() -> None:
     registry_mod._extra_options.clear()
     registry_mod._plugin_option_providers.clear()
     registry_mod._authn_strategy_providers.clear()
+    registry_mod._schema_catalog_providers.clear()
     yield
     registry_mod._extra_options.clear()
     registry_mod._plugin_option_providers.clear()
     registry_mod._authn_strategy_providers.clear()
+    registry_mod._schema_catalog_providers.clear()
 
 
 class TestRegisterPluginOption:

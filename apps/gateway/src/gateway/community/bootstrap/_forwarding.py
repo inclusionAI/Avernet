@@ -37,6 +37,7 @@ def build_forwarding(
 
     file_sources: dict[str, Path] = {}
     http_sources: dict[str, str] = {}
+    extra_sources: dict[str, dict[str, str]] = {}
     refresh_seconds = _DEFAULT_REFRESH_SECONDS
 
     internal_openapi_domains = _internal_openapi_domains(config)
@@ -50,6 +51,14 @@ def build_forwarding(
                 refresh_seconds = float(domain.schema.refresh_seconds)
             elif domain.schema.source == "http":
                 http_sources[name] = domain.schema.location
+                refresh_seconds = float(domain.schema.refresh_seconds)
+            else:
+                source = domain.schema.source
+                if source not in schema_catalogs:
+                    raise ValueError(
+                        f"domain {name!r}: unsupported schema source {source!r}"
+                    )
+                extra_sources.setdefault(source, {})[name] = domain.schema.location
                 refresh_seconds = float(domain.schema.refresh_seconds)
         for name, schema in internal_openapi_domains.items():
             source = str(schema.get("source", "file"))
@@ -69,6 +78,10 @@ def build_forwarding(
     if http_sources:
         http_cat.set_sources(http_sources)
         http_cat.refresh_all()
+    for source, sources in extra_sources.items():
+        catalog = schema_catalogs[source]
+        getattr(catalog, "set_sources")(sources)
+        getattr(catalog, "refresh_all")()
 
     return Forwarding(
         domain_map=domain_map,

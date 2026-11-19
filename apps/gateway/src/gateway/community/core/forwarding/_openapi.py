@@ -55,6 +55,7 @@ def build_served_openapi(
         )
         rewrite = (rewrites or {}).get(domain)
         doc = generate_openapi(describe(domain), rules, domain_prefix, rewrite=rewrite)
+        doc = _isolate_conflicting_schemas(doc, components, domain)
         paths.update(doc.get("paths", {}))
         for section, items in doc.get("components", {}).items():
             components.setdefault(section, {}).update(items)
@@ -75,6 +76,47 @@ def build_served_openapi(
     if tags:
         served["tags"] = tags
     return served
+
+
+def _isolate_conflicting_schemas(
+    doc: dict[str, Any], components: dict[str, Any], domain: str
+) -> dict[str, Any]:
+    """Keep references within a domain when another domain uses the same name."""
+    schemas = doc.get("components", {}).get("schemas", {})
+    existing = components.get("schemas", {})
+    if not any(
+        name in existing and existing[name] != value for name, value in schemas.items()
+    ):
+        return doc
+
+    # Rename the entire domain's schema graph: even an identical parent schema
+    # can reference a child whose definition differs between the two domains.
+    reserved = set(existing) | set(schemas)
+    names: dict[str, str] = {}
+    for name in sorted(schemas):
+        candidate = f"{domain}__{name}"
+        while candidate in reserved:
+            candidate += "_"
+        names[name] = candidate
+        reserved.add(candidate)
+
+    def rewrite(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {key: rewrite(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [rewrite(value) for value in node]
+        prefix = "#/components/schemas/"
+        if isinstance(node, str) and node.startswith(prefix):
+            name, separator, suffix = node[len(prefix) :].partition("/")
+            if name in names:
+                return prefix + names[name] + (separator + suffix if separator else "")
+        return node
+
+    result = rewrite(doc)
+    result["components"]["schemas"] = {
+        names[name]: value for name, value in result["components"]["schemas"].items()
+    }
+    return result
 
 
 def build_combined_openapi(

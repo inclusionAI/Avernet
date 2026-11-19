@@ -79,9 +79,31 @@ class Forwarding:
             name: domain.mount_prefix
             for name, domain in self.domain_map.domains.items()
         }
+        snapshots = [
+            (
+                catalog,
+                getattr(catalog, "snapshot")()
+                if hasattr(catalog, "snapshot")
+                else None,
+            )
+            for catalog in self.schema_catalogs.values()
+        ]
+
+        def describe(domain: str) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for catalog, snapshot in snapshots:
+                doc = (
+                    snapshot.get(domain, {})
+                    if snapshot is not None
+                    else catalog.current(domain)
+                )
+                if doc:
+                    result = doc
+            return result
+
         return build_served_openapi(
             list(self.domain_map.domains),
-            self._describe,
+            describe,
             route_security,
             title=title,
             version=version,

@@ -63,6 +63,16 @@ class _StubCatalog:
 
 
 class TestDescribeWithMultipleCatalogs:
+    def test_served_document_uses_one_catalog_snapshot(self) -> None:
+        doc = json.loads(_FIXTURE.read_text())
+        catalog = MagicMock()
+        catalog.snapshot.return_value = {"bots": doc}
+        catalog.current.side_effect = AssertionError("must read the captured snapshot")
+        forwarding = _forwarding({"custom": catalog})
+        result = forwarding.served_openapi(_RULES, title="gateway", version="1")
+        assert "/openapi/v1/bots" in result["paths"]
+        catalog.snapshot.assert_called_once_with()
+
     def test_file_catalog_serves_bots_http_serves_chat(self) -> None:
         bots_doc = json.loads(_FIXTURE.read_text())
         chat_doc = json.loads(_BAAS_ARTIFACT.read_text())
@@ -355,6 +365,32 @@ class TestTagsPreservedFromCombinedCatalogs:
 
 
 class TestBuildForwardingWithMixedSources:
+    def test_registered_extra_catalog_receives_its_domain(self, tmp_path: Path) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        domain_map = _domain_map(bots=("backend", "custom", ""))
+        config = Config(config_dir=tmp_path)
+        extra = MagicMock()
+        with (
+            patch("gateway.community.config.ConfigLoader.load", return_value=config),
+            patch(
+                "gateway.community.bootstrap._forwarding._load_domain_map",
+                return_value=domain_map,
+            ),
+        ):
+            result = build_forwarding(
+                schema_catalogs={
+                    "file": FileSchemaCatalog(),
+                    "http": HttpSchemaCatalog(),
+                    "custom": extra,
+                },
+                forwarder=MagicMock(spec=Forwarder),
+                ws_forwarder=MagicMock(spec=WebSocketForwarder),
+            )
+        extra.set_sources.assert_called_once_with({"bots": "."})
+        extra.refresh_all.assert_called_once_with()
+        assert result.schema_catalogs["custom"] is extra
+
     def test_routes_http_domain_to_http_catalog(self) -> None:
         from gateway.community.bootstrap._forwarding import build_forwarding
 
