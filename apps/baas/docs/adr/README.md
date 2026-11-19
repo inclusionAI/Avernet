@@ -39,7 +39,7 @@ Scope rules:
 
 ## Writing the next ADR
 
-1. Next number: **0017**. Create `NNNN-kebab-title.md` here, following the
+1. Next number: **0018**. Create `NNNN-kebab-title.md` here, following the
    scope rules above.
 2. Required sections, in order: `# ADR-NNNN: <Title>`, `## Status`,
    `## Date`, `## Applies to`, `## Context`, `## Decision`,
