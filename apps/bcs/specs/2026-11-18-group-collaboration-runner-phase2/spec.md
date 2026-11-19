@@ -38,7 +38,7 @@ Runner 的模型为：
 | [第一批 Worker SPEC（原调研版本）](https://github.com/inclusionAI/Avernet/blob/1d5c65d87866597c31b7c290d1d54577d68d4a0d/apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md) | `proposed`；包括 artifact Upsert/AppendText、两阶段终态归档、隔离保留已冻结结果等拟议契约，均不是已实现保证。2026-11-19送审核对 [PR #4144](https://github.com/inclusionAI/Avernet/pull/4144) 仍未合入；[最新固定修订](https://github.com/inclusionAI/Avernet/blob/8811efbc9751004747451d00c5ea1e6a30a6b224/apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md) 新增的checkpoint/output预算与任务独立终结约束按§5.3、§9.3衔接 |
 | [分布式契约 SPEC](../2026-11-15-distributed-contracts/spec.md) | additive declarations；接口和模型已有声明，不代表 Worker、Connector 或真实 Runner 已装配 |
 | [PR #4126](https://github.com/inclusionAI/Avernet/pull/4126) | 首次读取时 open、非 draft；本轮于 2026-11-18 10:50:33（Asia/Shanghai）合入，merge 为 `ca4ab19c213a57997f465cbb60f25f730786324d`，head 为 `220c99949bfa56eb76221ffe7078f352d84d1e8b`；[合入版本的协调 SPEC](https://github.com/inclusionAI/Avernet/blob/ca4ab19c213a57997f465cbb60f25f730786324d/apps/bcs/specs/2026-11-17-worker-coordination/spec.md) 仍为 proposed。该 PR 仅修改文档；合入不代表运行能力已实现，指定工作树未切换到 merge |
-| [PR #4145](https://github.com/inclusionAI/Avernet/pull/4145) | 2026-11-18 23:00:22（Asia/Shanghai）合入，merge `3a925fd4742520abb2377a015bb23a1a73a6e71f` 已是本稿送审基线的祖先；提供 DocumentCas、StrictLease 和公共 Worker 协调运行时，见[实现记录](../2026-11-17-worker-coordination/implementation.md)及E16。完整业务 processor 仍依赖第一批后续实现，不等于 #4144 闭环或生产 Runner 已完成 |
+| [PR #4145](https://github.com/inclusionAI/Avernet/pull/4145) | 2026-11-18 23:00:22（Asia/Shanghai）合入，merge `3a925fd4742520abb2377a015bb23a1a73a6e71f` 已是本稿送审基线的祖先；提供 DocumentCas/StrictLease 能力契约、可复用验收套件、测试内存模型和公共 Worker 协调运行时，见[实现记录](../2026-11-17-worker-coordination/implementation.md)及E16/E18。生产provider须单独实现并通过对应套件；完整业务processor仍依赖第一批后续实现，不等于生产存储就绪、#4144闭环或生产Runner已完成 |
 | [分布式业务端口](../../crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) | 声明持久受理、checkpoint/outbox、稳定身份、远端 Unknown 与取消确认的边界；本批复用，不另建基础设施 |
 | 架构与知识规范 | 遵守 [架构约束](../../../../docs/arch/arch.rules.md)、[CI 规范](../../../../docs/arch/ci.enforce.md)、[知识标准](../../../../docs/agents/knowledge-standard.md)、[BCS 规则](../../AGENTS.md)与 [ADR 导航](../../docs/adr/README.md)；不以本提案替换已接受契约 |
 
@@ -65,6 +65,7 @@ Runner 的模型为：
 | E15 | 中间节点历史并非全部 Public：Bot 为 FullOnly，Human 为 Directed；projection 字段存在不等于已实现通用可见性语言 | [runtime_message_history.rs](../../crates/services/bcs-collaboration-runtime/src/runtime_message_history.rs)：`output_payload` 中的 audience 构造；[runtime/events.rs](../../crates/services/bcs-collaboration-runtime/src/runtime/events.rs) |
 | E16 | 已有协调运行时管理ready/owner、恢复、轮次和调度生命周期；宿主processor须确认恢复、checkpoint和effects，不负责工作流业务算法 | [Worker上下文](../../crates/services/bcs-dist-worker/CONTEXT.md)、[runtime.rs](../../crates/services/bcs-dist-worker/src/runtime.rs)：`acquired_sessions`、`recovery_completed`、`begin_round`、`checkpoint_confirmed`、`effects_completed`、`round_unknown`、`scheduling_started`、`scheduling_completed` |
 | E17 | 现有协同控制不是“任意结构化Tool”：校验活跃run、有效期、Bot/群/Session和tool-call身份，claim已存intent后使用其参数；claim后再次校验run | [coordination.rs](../../crates/services/bcs-message-flow/src/bot_event/coordination.rs)：`claim_and_dispatch`；[intent端口](../../crates/service-api/bcs-service-api/src/port/coordination_intent.rs)；[Tool身份测试](../../crates/services/bcs-message-flow/tests/cases/contract_coordination_tool_identity.rs)、[chat-final测试](../../crates/services/bcs-message-flow/tests/cases/contract_coordination_chat_final.rs)。无name/toolName的BaaS结果fixture仍须兼容 |
+| E18 | 协调存储构造强制要求DocumentCas、StrictLease、ZSet；StrictLease过期/退休后保留Terminated，迟到注册不得复活；测试模型通过不等于生产provider就绪 | [coordination/mod.rs](../../crates/services/bcs-dist-store/src/coordination/mod.rs)：`CoordinationStore::with_config`；[lease.rs](../../crates/plugin-api/bcs-store-api/src/lease.rs)：`LeaseState`、`LeaseStorePlugin`；验收套件：[document](../../crates/test-support/bcs-test-support/src/contract/plugin/store/document.rs)、[lease](../../crates/test-support/bcs-test-support/src/contract/plugin/store/lease.rs)、[zset](../../crates/test-support/bcs-test-support/src/contract/plugin/store/zset.rs) |
 
 现有 `CollaborationRuntime` 同时做持久化、时钟读取、Judge 和投递；不能把它直接包成 reducer 并宣称纯计算。复用的是验证、编译、映射和业务算法，经纯化后进入生产 Runner。其仓储恢复机制不复制进 RunnerState。
 
@@ -98,7 +99,7 @@ Runner 的模型为：
 | RunnerInput 未保留规范业务身份，无法明确反馈陈旧人工回复 | 有序输入加规范身份包装；durable 输入保留 `input_id`，中间输入使用既有 `(did, holder_epoch, seq)`。`Decision.input_dispositions` 按输入顺序给 Applied / IgnoredStale / Rejected(code) | Service API；不携带 InboxPos。Worker将durable处理结果转成既有outbox中的必要effect，与state/consumed原子提交；中间事件不逐条持久回执 |
 | 现有 AdmissionReceipt 仅证明受理，无法查询业务回复是否生效 | 为原canonical admission记录增加一次性处理结果及查询/幂等写入端口；Worker新增 `RecordInputDisposition` effect，携带原身份、business_digest、commit证明和处理结果 | Inbox port / Worker；相同身份与内容重复成功、冲突拒绝。effect确认前不替换outbox。复用原受理记录，不新增Runner队列或去重库；尚未写入时返回Processing，绝不提前答Applied。AdmissionReceipt不承诺业务生效；Applied不承诺远端收到ContinueDispatch，见§6.3第7条及§9.1 |
 | Show / OutputBody 无 artifact 身份与操作 | 依赖第一批拟议的 `(node, artifact_id, class)`、Upsert/AppendText、公共纯投影 | **第一批前置补充，当前源码未有**；本批不独立实现另一套投影/快照 |
-| 第一批通用数量预算尚未明确未结束dispatch计数及耗尽收尾 | 补齐Decision动作数、每Task累计dispatch/交互数、每Session未确认结束dispatch数；正常执行配额耗尽复用独立任务终结器，提出稳定原因ExecutionQuotaExceeded | **第一批最小必要补充，仍为提案**；由Worker持有预算/占额及恢复事实，见§9.3。不在Runner复制账本，不以发出Cancel释放额度 |
+| 第一批通用数量预算尚未明确未结束dispatch计数、跨Task启动及耗尽收尾 | 补齐Decision动作数、每Task累计dispatch/交互数、每Session未确认结束dispatch数；冻结模式validator计算的dispatch需求上界及capacity_wait_timeout_millis；Worker持久化启动预留、等待截止/发生身份及处理结果。已运行任务正常配额耗尽复用独立终结器 | **第一批最小必要补充，仍为提案**；Worker拥有计数/预留与Queued生命周期，见§9.3–9.4。未启动容量等待到期为Rejected(StartCapacityTimeout)，可解释的执行额度耗尽为Failed(ExecutionQuotaExceeded)；均不在Runner复制账本或另建投递系统 |
 
 上述变更采用新的分布式模型 schema 版本与独立 namespace；当前未部署声明的 Rust struct literals、穷尽 enum match、测试与消费者须一起调整。不能声称增加字段就是源兼容，也不能悄悄把旧 `Show` 解释为 AppendText。旧运行时模型和已冻结 compiler/v1、compiler/v2 计划不改写。
 
@@ -193,7 +194,7 @@ loop_path 是冻结 metadata 的事实，活动循环实例可由活动节点路
 
 节点结果是后续 prompt、Judge 和群结果的业务输入，允许保存；完整公开展示、任务队列、归档引用、outbox、effect 回执、owner/holder、远端 task/cursor/发送状态和投递 ACK 都由 Worker/Connector拥有，不进入 RunnerState。Running/Finishing 是业务是否还可推进的标识，不复制 Worker 的 AwaitingResult/Done 归档阶段。
 
-Worker保证同一 Session 只将一个已启用任务交给 Runner，后续排队 Start 留在 Worker。此前任务归档及终态输出完成后才投递下一 Start；Runner可用新 tid 替换 Finishing 的 active_task。旧 tid 事件一律不作用于新任务，Worker仍可用它们收敛旧 dispatch 义务。
+Worker保证同一 Session 只将一个已启用任务交给 Runner，后续排队 Start 留在 Worker。此前任务归档及终态输出完成，并通过§9.4启动容量检查后才投递下一Start；等待期间任务保持Queued，Runner不接收该Start，也不替它建立业务deadline。Runner可用新tid替换Finishing的active_task。旧tid事件一律不作用于新任务，Worker仍可用它们收敛旧dispatch义务。
 
 第一批独立终结器处理输出额度耗尽等任务级故障时，可以丢弃该任务未提交候选并自行收尾；其终态发布后，为下一任务重新init空RunnerState。不能要求已故障的Runner先置Finishing，也不能把旧任务失败状态带给新任务。这是Worker生命周期控制，不是Runner新增持久权威。
 
@@ -208,6 +209,8 @@ Worker负责 InputId 内容冲突、物理去重和 Session 输入顺序；Runne
 Runner只接受当前 tid、当前 NodeExecutionKey/purpose 对应 did 且状态允许的事件。一个有效 did 已唯一绑定作用域、目标和 attempt，归一化执行侧另须核对远端身份，不能让正文自报身份越权。旧轮次、旧 attempt、已接受终结后的重复关键事件、迟到 delta 均不推进、不覆盖节点结果、不再展示。
 
 以下事件处理、重试和FailRun规则属于本批FSM策略，不能作为所有未来模式的统一失败策略。通用归一化层报告确定事实及带schema的failure category/code，不能把“是否可重试”从远端文本或连接故障中推导出来。模式特有的有界失败详情须由该模式注册的版本化schema解释；未注册事件/schema在边界明确拒绝并保留输入失败证据，不映射成任意已知业务失败。共享终结事实的扩展仍需契约评审，不预留无约束终态变体来承诺未来永不改公共契约。
+
+failure category集合随schema版本封闭，新增category必须升级schema；已知schema出现未知category属于schema违规，在边界拒绝并保留证据。code是该schema内允许有界扩展的附带详情，不是新的终结事实或重试指令：schema、终结事实和category均已知且合法时，即使code未识别，也接收终结事实、保留原code及未识别标记，不因code新增而等待节点超时。Runner仅按冻结的category/终结事实策略决定：普通Failed/Error可消耗剩余次数重试，永久配置失败或明确派发Rejected仍FailRun。known/unknown code不得改变该策略；身份、必填结构、正文大小等检查不因此放宽。
 
 FSM事件规则：
 
@@ -270,7 +273,7 @@ FSM事件规则：
 6. ContinueDispatch使用当前did内独立递增的pending-input序号；输入ID由interaction及规范回复InputId确定，内容摘要固定。再次传输是Worker/Connector重放，不能再增加业务序号。回复后远端仍Unknown时不假造已经继续成功。
 7. Finishing 后不再发Show、重开交互或改写结果。旧任务的关键回流可让Worker/Connector收敛取消/终结义务，不能再次reduce为新业务。相同InputId的重试返回既有受理/处理结果；不同InputId提交已关闭交互得到业务拒绝。Applied只证明回复已在checkpoint成为业务决定，不证明远端已收到ContinueDispatch；AdmissionReceipt则连业务生效也不承诺。
 
-规范事件payload固定为带schema的变体：展示事件含逻辑slot及文本/结构化内容；work完成含完整artifact文本；Judge完成含现有JudgeDecision；失败含明确category和稳定code；交互含remote interaction ID、kind、prompt和受信答复约束。purpose从冻结DispatchSpec核对，不接受正文覆盖。不同关键InputId若指向已关闭实例，返回IgnoredStale；相同活跃interaction身份但内容冲突返回Rejected(interaction_conflict)，保留原问题。业务可解释的非法回复/内容返回Rejected；身份越权应在admission拒绝，不让正文影响图控制。
+规范事件payload固定为带schema的变体：展示事件含逻辑slot及文本/结构化内容；work完成含完整artifact文本；Judge完成含现有JudgeDecision；失败含schema封闭的category及有界原始code，允许按§6.1标记code未识别；交互含remote interaction ID、kind、prompt和受信答复约束。purpose从冻结DispatchSpec核对，不接受正文覆盖。不同关键InputId若指向已关闭实例，返回IgnoredStale；相同活跃interaction身份但内容冲突返回Rejected(interaction_conflict)，保留原问题。业务可解释的非法回复/内容返回Rejected；身份越权应在admission拒绝，不让正文影响图控制。
 
 ## 7. 动作、输出与群最终结果
 
@@ -359,11 +362,11 @@ format/kind/Runner语义版本/digest、节点集合、当前attempt/did、结�
 | --- | --- |
 | 每次Decision动作数 | 计所有Start/Cancel/Continue/Show/SetStatus/FinishTask，连同disposition转成effect后的数量校验批次；N个节点同批超时可产生N个Cancel加N个Start，不能以活跃节点数作为动作数上界。合法最坏输入批次须在配置受理时能容纳，不能截断Decision |
 | 每Task累计dispatch/交互数 | 每个新did、规范interaction身份各计一次；work/judge、重试均计入，重放不重复计数；关闭不返还累计额度 |
-| 每Session未确认结束dispatch数 | 新Start的已提交占额及尚未收敛的旧attempt、已本地终态Task的远端义务均计入；仅已核验确定结束或确定未启动的证据可释放，CancelIntent、Unknown、本地归档均不释放 |
+| 每Session未确认结束dispatch数 | 新Start的已提交占额及尚未收敛的旧attempt、已本地终态Task的远端义务均计入；仅已核验确定结束或确定未启动的证据可释放，CancelIntent、Unknown、本地归档均不释放。启用下一Task还须扣除§9.4未使用的启动预留，不重复计作已创建dispatch |
 
 这些上限随SessionSpec/profile冻结，Worker在既有checkpoint/dispatch义务元数据中维护有界占额及释放证明，不在RunnerState复制权威计数。新did占额与其outbox动作同一fenced提交，重放按稳定did核对；释放也须有持久、幂等且可恢复的事实。未完成dispatch预算是Session边界，不用全局瞬时连接/线程槽位改变业务结果；执行侧全局暂态容量继续走第一批有界背压。收尾Cancel、既有关键回流和归档使用独立预留，不能被新启动额度耗尽阻断。
 
-本批选定正常执行额度耗尽的最小上游补充：受理前即可确定无法容纳的配置/图明确拒绝；已受理Task在Worker校验Decision时累计/未结束数量超额，拒绝整个未提交候选，以拟议稳定原因 `ExecutionQuotaExceeded` 通过第一批独立终结器将**当前Task**收尾为Failed，保留已确认内容并持久登记其未结束dispatch的取消义务。与TaskPhase/consumed共同提交处理结论，包含其他任务输入的批次拆分，不确认未处理输入；下一Task重新init。额度不自动释放，也不重复reduce同一必然失败候选。该路径沿用第一批§3.3输出超额终结机制，但将其扩展到执行数量预算仍属本稿提议，不能声称第一批已规定或实现。
+本批选定的最小上游补充分开处理启动等待与执行超额：受理前即可确定无法容纳的配置/图明确拒绝；前一Task遗留义务导致下一Task启动容量不足时按§9.4保持Queued，不先交Runner再判失败。已Running且状态/预算可解释的任务，若触及正常执行额度（例如累计交互数），Worker拒绝整个未提交候选，以拟议稳定原因 `ExecutionQuotaExceeded` 通过第一批独立终结器将**当前Task**收尾为Failed，保留已确认内容并持久登记其未结束dispatch的取消义务。与TaskPhase/consumed共同提交处理结论，包含其他任务输入的批次拆分，不确认未处理输入；下一Task获准启动时重新init。额度不自动释放，也不重复reduce同一必然失败候选。该路径沿用第一批§3.3输出超额终结机制，但执行数量预算及启动背压仍属本稿提议，不能声称第一批已规定或实现。
 
 无需为上述失败路径向EvaluationContext注入实时“未结束数量”，也不新增Runner的配额等待/重试策略。若未来需要业务感知容量，须另行定义不可变资源观察输入、候选/恢复一致性、占额与唤醒协议，只读快照本身不构成额度预留。预算数据/收尾状态不可解释、违反不变量或无法安全提交时仍按第一批故障隔离处理，不能把损坏状态当正常额度耗尽；已冻结的终态不能被配额失败覆盖。
 
@@ -371,9 +374,36 @@ format/kind/Runner语义版本/digest、节点集合、当前attempt/did、结�
 
 Runner每次reduce为零DB/网络往返；朴素可达性/汇合为有界O(N+E)扫描，闭包有上述界限。一次节点dispatch通常新增一条既有dispatch与输出effects；Judge增加一条dispatch，人工节点不增加假dispatch。每条durable输入的disposition另需一次对原admission记录的幂等条件更新，可有界批写但不能以批写冒充单行代价；中间流事件不增加这类写入。最坏批量按上述动作总数及第一批输入/字节/effect上限计算；旧dispatch收尾可能跨批，由Worker有界扫描和保存进度，不能截断取消列表。预算校验使用前述上游补充维护的有界占额元数据，不逐节点查DB或每轮扫描全部历史Task来计数；释放证明处理与第一批dispatch监督衔接。实施验收须断言正常、最大图、额度耗尽及effect重放路径的读写次数与批大小，不能在远端请求期间持有DB事务。状态/checkpoint大小随物化节点及保留业务结果增长；不能以纯单测推导存储吞吐。基础诊断只报tid/node/attempt、错误码、步骤数、等待阶段和大小，不记录正文、Judge原始响应或凭据。
 
+### 9.4 跨Task启动容量与有界等待
+
+FSM validator在受理时按完整物化图计算每Task最多新建的dispatch需求上界 `B`，与计算规则版本、模式配置digest一起冻结为Worker可读的通用数值。首版采用可证明但不求最紧的总量界：对每个物化Bot节点计 `max_attempts × (1 + has_judge)`，对每个物化Human节点计 `has_judge`，再安全求和；has_judge为0或1，Human固定一次，无假work dispatch。节点的缺省次数在受理时解析并冻结，循环按展开后的节点计，互斥分支也保守相加；Continue/Cancel重放不产生新did，不进入B。整数溢出拒绝配置，不截断。Worker只验证/使用该数值，不读取图计算业务策略。
+
+不能用“最大并行宽度×重试次数”替代B：串行A→B各两次尝试，A0超时Unknown、A1完成后B0再超时，启动B1时A0/B0/B1共占3个，超过宽度1×次数2。步骤/总时限等其他保护可能提前结束Task，但首版不据此削减保守界。
+
+设冻结的Session未结束dispatch上限为C。受理必须验证B不超过C及每Task累计dispatch上限，并校验§9.3的动作/字节/收尾预算；否则以 `InsufficientExecutionCapacity` 拒绝该配置/新会话。B是所有可能创建did的总量界，不是实际远端并发承诺，也不是把B条空dispatch预先写入存储。
+
+2A必须逐个统计现有有效[运行fixture](../../crates/services/bcs-collaboration-runtime/tests/fixtures)、[API fixture](../../tests/fixtures)及[群工作流模板](../../seeds/collaboration-templates)，包括测试内构造的串行、分支、Judge、固定/嵌套及并行循环图；非法/非工作流fixture列出排除原因。交付记录固定源码/模板revision、参数profile、展开节点数、B、实际编码预算及准入/拒绝结果，再据此确定可配置默认上限和容量等待时长。2048个Bot节点各3次且含Judge的保守界可达12288；这是计算示例，不是已验证模板需求或默认额度。不得为让模板全部准入而直接抬高C或第一批1 MiB checkpoint上限；必须同时验证旧义务占额元数据、RunnerState、outbox和收尾预留。若保守界使应支持模板无法准入，2A须给出兼容性取舍；要缩紧界则先提供安全证明、版本化规则和回归，不能删除fixture掩盖拒绝。未完成该报告或未选择经验证的profile前保持新模式关闭；本稿不拍定未经测算的通用默认值，fixture结果也不证明生产容量。
+
+Worker用既有fenced checkpoint/Task队列元数据维护实际未结束占额O及当前Task未使用的预留R，保证 `O + R <= C`。同一Session只有一个启用Task：确认前一Task终态输出完成后，按既有队列顺序选择下一Task；可用额度至少B时，在批准该Start的同一提交中预留B、推进TaskPhase及提交Runner决定。每个新did将一单位R转换为O，与其outbox原子提交；同did重放不重复转换。确定终结证明仅释放对应O，不补回已经消耗的Task累计次数。Task冻结终态后释放未使用R，已创建的旧did仍计O；提交未知先确认原结果，不能重置预留或重复启动。该计数属于Worker，不进入RunnerState，不另设持久资源服务。符合冻结B的任务不会因前一Task旧义务而在启动后耗尽已预留的dispatch容量；超出已验证B或损坏计数属于不变量违反，按第一批故障分类，不伪装成普通容量等待。
+
+容量不足时，下一Task保持Queued，不向Runner投递Start，不产生该Task的StartDispatch或业务deadline。Worker在首次确认进入容量等待时固定绝对 `capacity_wait_deadline = wait_started_at + capacity_wait_timeout_millis`，连同稳定发生身份 `(sid, tid, capacity-wait/v1)` 持久提交；时长须为profile内显式、正且有界的配置，不能缺省成无限等待。重复唤醒/恢复/接管不续期，未知提交先确认；配置更新不改变既有会话的B/C、预留规则或已固定截止。容量释放证明持久生效后重新调度；同时用既有持久调度登记截止唤醒和有界复查，不能只靠一次通知。等待不是Runner业务no_progress，也不复用只有Start后才建立的task deadline。
+
+下表是**拟议Worker任务生命周期补充**，不是Runner转移；等待字段、容量内部到期事件和预留均由第一批实现。处理规范控制输入与启动判定仍在同一Session串行推进，不能跳过更早的有效Cancel来启用任务。
+
+| 触发 / 前置条件 | Worker状态、动作与deadline |
+| --- | --- |
+| 下一Queued Task，O+B<=C，尚无容量等待或本轮now早于其截止 | 原子批准Start并占额，清除该容量等待；只在这一刻允许生产Runner处理Start并建立业务deadline；此前必要effects及前任务归档仍须完成 |
+| 下一Queued Task，O+B>C | 保持Queued，首次登记固定等待截止及发生身份；以后只复查，不重新reduce该Start，不消费其业务重试预算 |
+| 确定释放证明 / 有界复查 | 幂等更新O；容量仍不足继续等待，足够且未过期才启用。now>=等待截止时不因刚释放容量而抢先启动，保持Queued并处理规范的内部到期事件 |
+| 匹配的容量到期事件，仍Queued且now>=截止 | 由Worker独立终结器冻结Rejected，稳定原因 `StartCapacityTimeout`；复用两阶段归档/终态发布，不伪造Runner FinishTask，不先改成Running；不取消或释放前Task的义务 |
+| 等待期间有效Cancel | 仍未启用时由Worker冻结Canceled并清除等待，走既有收尾；与容量到期按规范输入顺序及第一次已冻结终态仲裁。已经启用则按正常Runner Cancel处理 |
+| 已启用/终结后的旧容量唤醒，或重复释放证明 | 不重复Start、不改终态、不重复返还额度；只收敛调度/去重责任 |
+
+Queued期间的Cancel、旧Task关键回流、独立归档/取消义务继续有预算推进；启动背压不能堵住释放容量所依赖的输入。到期Rejected/Canceled须终态发布后才依队列顺序处理后继Task。启动检查只读取有界聚合元数据，不扫描历史Task计数；预留、等待登记/清除与生命周期写入合并，截止和释放触发沿用Worker调度，不增加无界轮询。
+
 ## 10. 迁移与共存
 
-1. 保持opt-in，生产装配按§3.3注册`bcs-group-runner`。新会话准入由宿主facade在创建SessionSpec前检查，最小粒度为`(scope, group, mode kind)`的显式允许集合及所选语义版本；总开关关闭优先于允许集合。默认关闭、未命中则明确拒绝新模式请求；测试Script永不作为fallback。第一批Worker、本文契约补充、存储及Connector能力未齐全时即使命中允许集合也拒绝。此为最小静态配置边界，不要求百分比灰度平台。
+1. 保持opt-in，生产装配按§3.3注册`bcs-group-runner`。新会话准入由宿主facade在创建SessionSpec前检查，最小粒度为`(scope, group, mode kind)`的显式允许集合及所选语义版本；总开关关闭优先于允许集合。默认关闭、未命中则明确拒绝新模式请求；测试Script永不作为fallback。第一批Worker、本文契约补充、经2A验证的容量profile及Connector能力未齐全时即使命中允许集合也拒绝。协调存储必须由实际生产provider提供DocumentCas、StrictLease、ZSet并通过对应契约套件；声明supports或测试内存模型通过均不等于生产就绪，具体套件见2D。此为最小静态配置边界，不要求百分比灰度平台。
 2. 会话在创建时选定引擎及namespace，生命周期不切换。旧会话继续旧CollaborationRuntime；新会话只写新checkpoint/DispatchBoard，不双写legacy节点表，不让两套引擎消费同一业务输入。
 3. 保留现有authoring API/模板与fixture，验证、编译及快照reader提纯后由两套入口复用。开关和允许集合只影响新会话；一旦受理，engine/namespace/模式及语义版本按冻结选择路由，重试同一会话创建不能重新抽样或改选。已有会话不再按当前允许集合改选引擎，已冻结计划由兼容reader及reducer恢复。
 4. 本批最小应用桥接负责冻结FSM、提交Start/HumanReply/Cancel、返回业务input disposition及读TaskFeed。权限、actor真实性、作用域在桥接检查，不由Runner发起查询。现有普通群routing、Caller凭据接力、IM渠道及one-shot结果发布仍走原服务；未适配的入口明确留旧引擎，不静默降级新会话。
@@ -384,10 +414,12 @@ Runner每次reduce为零DB/网络往返；朴素可达性/汇合为有界O(N+E)�
 
 | 切片 | 交付及依赖 | 退出条件 |
 | --- | --- | --- |
-| 2A 共享计划与契约 | 提纯现有编译/reader；冻结模式选择/envelope；定义静态注册工厂与兼容检查；拆分通用关联/显式执行目标和FSM配置；补齐事件、交互、deadline、disposition及执行预算收尾 | fixture编译字节/hash不漂移；契约conformance覆盖旧字段迁移与未知版本拒绝；此片仅契约/纯计划，2D才启用生产注册和新模式准入 |
+| 2A 共享计划与契约 | 提纯现有编译/reader；冻结模式选择/envelope；定义静态注册工厂与兼容检查；拆分通用关联/显式执行目标和FSM配置；补齐失败schema、事件/交互/deadline/disposition、容量上界和Worker启动等待/收尾契约 | fixture编译字节/hash不漂移；逐fixture/模板容量报告与profile取舍满足§9.4/R29；conformance覆盖旧字段迁移、未知schema/category拒绝和新code兼容；此片仅契约/纯计划，2D才启用生产注册和准入 |
 | 2B 生产纯Runner | 实现状态编解码、串行/并行汇合、分支skip、loop metadata/previous_result、prompt与群结果 | 真正`DistRunnerCoreService`实现通过业务测试，不用Script代替 |
 | 2C 交互和业务控制 | Agent流/终结、原生/远端交互、Judge dispatch、节点重试、取消、timeout竞争、资源与无进展 | §12纯Runner矩阵通过；无IO/时钟/随机依赖；每条事件有确定处理结果 |
-| 2D Worker集成与入口 | 复用#4145已有协调钩子；依赖尚待实现的第一批业务processor及本稿上游补充，由该processor装配生产Runner、可控Connector和真实持久provider；facade落实定粒度准入与旧入口隔离 | 下述生命周期衔接、checkpoint/outbox恢复、稳定身份、执行配额终结、历史语义保留和终态后监督通过；声明未覆盖的真实协议 |
+| 2D Worker集成与入口 | 复用#4145已有协调钩子；依赖第一批业务processor及本稿启动容量/等待等上游补充，装配生产Runner、可控Connector和通过契约套件的实际生产provider；facade落实准入与旧入口隔离 | 下述provider门槛及生命周期衔接、checkpoint/outbox恢复、启动背压/配额终结、历史语义保留和终态后监督通过；声明未覆盖的真实协议 |
+
+2D启用前，实际装配的DocumentCas provider必须通过 `document_store_contract_tests`，StrictLease provider通过 `lease_store_contract_tests`、`lease_expiry_contract_tests`，ZSet provider通过 `z_set_store_plugin_contract_tests`（E18）。StrictLease的过期/退休终结证据不可逆、稳定返回Terminated，迟到注册/更新不得复活；普通TTL键不是兼容替代。缺少任一能力会被协调存储构造拒绝，不能仅标为故障接管降级。这只是协调层必要条件，第一批其他业务存储/Inbox/调度能力和宿主集成仍须分别验收；本批文档不实现provider，也不把测试内存模型结果当生产验收。
 
 2D的processor从 `acquired_sessions` 取得Recovering会话，核对冻结选择并补做持久effects后调用 `recovery_completed`；可推进时通过 `begin_round` 进入本轮，再读取有序输入、固定now、调用纯Runner、校验预算并提交checkpoint。只有提交结果确定才调用 `checkpoint_confirmed`；有pending effects进入Effects阶段，必要effects全部完成后调用 `effects_completed`，零effects则由前一钩子直接返回Idle。提交未知调用 `round_unknown` 并先确认原提交。调度settle按 `scheduling_started` / `scheduling_completed` 成对管理，未知时保留pending。上述钩子属于宿主processor，Runner不调用协调/IO接口；协调代码存在不等于processor、投影或归档闭环已验收。
 
@@ -395,7 +427,7 @@ Runner每次reduce为零DB/网络往返；朴素可达性/汇合为有界O(N+E)�
 
 ## 12. 验收矩阵与测试边界
 
-所有“新Runner”用例必须实例化生产`bcs-group-runner`，输入使用现有真实authoring fixture/编译产物或同结构最小图。测试工具可提供有序输入和注入时间，不能实现另一套工作流状态机来替代被测对象。下表为待实现的Given/When/Then测试定义，U为纯Runner，I为Worker集成。
+所有“新Runner”用例必须实例化生产`bcs-group-runner`，输入使用现有真实authoring fixture/编译产物或同结构最小图。测试工具可提供有序输入和注入时间，不能实现另一套工作流状态机来替代被测对象。下表为待实现的Given/When/Then测试定义，U为纯Runner或注明的共享FSM validator测试，I为Worker集成；validator的容量报告不能替代生产Runner与Worker的执行验证。
 
 | ID / 层 | Given | When | Then |
 | --- | --- | --- | --- |
@@ -422,11 +454,15 @@ Runner每次reduce为零DB/网络往返；朴素可达性/汇合为有界O(N+E)�
 | R21 U/I 模式与语义冻结 | 静态注册生产FSM语义v1，会话冻结v1；v2及其他模式未注册 | 新会话请求v2/其他模式；恢复旧会话；另移除v1 reducer而只保留兼容reader | 未注册选择在受理时拒绝；旧会话仍用生产v1并与原决策一致；缺v1时Block保留状态/义务，不换语义、不执行动作；不为通过此用例实现本批范围外的v2 Runner |
 | R22 U/I 受信输入边界 | FSM收到普通Tool和结构化协同命令；另有已受理合法HumanReply但处理时已过期 | 归一化/受理、reduce及checkpoint恢复 | Tool仅展示，协同命令不派发；未授权/未注册控制事件在边界拒绝；受理合法不绕过Runner当前实例/期限校验，过期回复拒绝；相同冻结事实/state/now重放一致 |
 | R23 U/I 数量边界 | N个并行Bot均可重试，旧远端Unknown，冻结预算足以接纳合法动作批次 | 同批N条Timeout，再重放该提交；跨Task继续监督旧dispatch | Runner产生N个Cancel及N个新Start，另计状态/输出等动作；Worker新did各占额一次，旧N个继续占额；Task本地终态/Cancel不释放，只有确定结束证明释放一次 |
-| R24 I 执行配额耗尽 | 可解释checkpoint，未结束或累计dispatch/交互达到冻结上限，有收尾预留 | 生产Runner产生超额候选；在独立收尾提交未知/半批取消effects时重启 | 整个超额候选不执行；仅当前Task以ExecutionQuotaExceeded收尾，旧确认内容保留，取消义务完整且可分批恢复；不重复reduce失败候选、不隔离整个Session、不把计数注入Runner；下一Task重新init，旧义务仍占额 |
+| R24 I 执行配额耗尽 | Running Task的checkpoint可解释，已预留dispatch容量，累计交互达到冻结上限且有收尾预留 | 生产Runner产生超额交互候选；在独立收尾提交未知/半批取消effects时重启 | 整个超额候选不执行；仅当前Task以ExecutionQuotaExceeded收尾，旧确认内容保留，取消义务完整且可分批恢复；不重复reduce失败候选、不隔离整个Session、不把计数注入Runner；下一Task经R27容量准入后重新init，旧义务仍占额；超出已验证B或计数损坏走不变量故障路径 |
 | R25 I 准入与回退 | 允许集合仅包含scopeA/groupA/FSM v1，另有旧引擎会话及已受理新引擎会话 | scopeB请求新模式；关闭总开关；重试已成功的会话创建；恢复已有会话 | 新模式未准入者明确拒绝；创建重试返回原冻结选择；已有新会话继续v1、旧会话仍用旧引擎；不双写/静默fallback，不丢远端义务；兼容reducer缺失按R21处理 |
-| R26 U/I 事实与FSM失败策略 | 当前attempt可重试，已注册失败schema；另有未注册schema事件及Unknown执行状态 | 远端Canceled/Failed、明确Rejected分别回流；规范化未知schema和Unknown | 前者按FSM既定策略重试/FailRun；Unknown不制造业务Error；未知schema明确拒绝并保留失败证据，不能猜分类或派发；通用事件层不替Runner决定retry |
+| R26 U/I 事实与FSM失败策略 | 当前attempt可重试，已注册失败schema及封闭category集合；code可有界扩展 | 分别输入普通Failed+新code、permanent/Rejected+新code、未经本地Cancel的远端Canceled；另输入未知schema、已知schema内未知category、非法payload及Unknown执行状态 | 合法新code保留原码及unrecognized标记，普通Failed按剩余次数重试，permanent/Rejected直接FailRun，Canceled按既定节点失败策略；不从code猜策略；未知schema/category及非法payload拒绝并保留有界证据，Unknown不制造业务Error；相同规范事实重放结果一致 |
+| R27 I 跨Task启动背压 | 前Task已归档但旧did仍占O，下一Task已受理且B<=C，O+B>C | 调度下一Task；释放部分旧义务仍不足；在等待截止前释放至足够；重复释放并重启 | 不足时始终Queued，无Runner Start/业务deadline；足够时原子预留B并仅Start一次，新did按R转O；旧义务不被抹除，证明仅释放一次；新Task超时仍可直接Cancel旧attempt并Start新attempt，无需等待取消确认 |
+| R28 I 容量等待恢复与竞争 | Queued Task已固定等待截止D及发生身份，旧Task清理仍在推进 | 等待登记提交未知后接管；重复唤醒；D时释放容量；分别按序输入Cancel/内部到期及反序；另在D前已Start后收到旧到期 | 先确认提交，截止不续期且不受新profile影响；D时不能抢先Start；匹配到期由Worker冻结Rejected(StartCapacityTimeout)，Cancel先有效则Canceled，已冻结终态不改；无Runner FinishTask；已Start的旧到期不影响业务，旧义务回流/取消/归档不中断 |
+| R29 U/I 容量上界与profile | 生产FSM validator、现有有效fixture/模板及1 MiB checkpoint profile；另有A→B均为无Judge的Bot且各2次、带Judge的Bot/Human及循环/分支图 | 生成§9.4报告，校验边界/溢出/排除原因；通过生产Runner与可控Connector记录合法执行的新did | A→B的B=4，覆盖实际同时3个义务的轨迹；Judge、Human无work、循环物化及互斥分支保守求和正确；每Task新did数不超其B；溢出或B>C/累计上限在受理拒绝；报告包含实际编码及收尾预留，拒绝和兼容性取舍有据，未验证profile不启用 |
+| R30 I 生产provider门槛 | 生产组合选定DocumentCas/StrictLease/ZSet provider；另有各缺一种能力的配置 | 构造协调存储并执行2D列出的实际provider契约套件；覆盖lease过期/退休后迟到注册或更新 | 缺任一能力构造失败，不能降级开启新模式；实际provider全部通过才满足协调层启用条件，内存模型通过不可替代；Terminated证据不可逆，迟到请求不复活；第一批其余存储与宿主验收仍独立成立 |
 
-纯Runner测试负责语义、身份、顺序、状态格式、输出意图和确定性；不通过mock repository宣称持久性。Worker集成测试负责输入规范化、fencing、提交未知、outbox、真实公共投影、不可变归档和dispatch监督，必须调用生产Runner。可控Connector负责录制请求、按脚本产生确定事实/Unknown和可恢复交互，不要求接入全部真实远端协议。
+纯Runner测试负责语义、身份、顺序、状态格式、输出意图和确定性；共享FSM validator负责静态容量计算及profile准入，不通过mock repository宣称持久性。Worker集成测试负责输入规范化、fencing、提交未知、outbox、真实公共投影、不可变归档、dispatch监督及启动预留/等待，凡执行群工作流必须调用生产Runner；未获准Start的场景断言Runner未被调用。可控Connector负责录制请求、按脚本产生确定事实/Unknown和可恢复交互，不要求接入全部真实远端协议。provider契约套件验证真实实现，不能用可控Connector或内存模型的结果代替。
 
 实现时既有回归入口（在仓库的`apps/bcs`目录执行，命令本次未运行）：
 
@@ -438,13 +474,13 @@ cargo test --locked -p bcs-collaboration-runtime --test fixed_loop_context
 cargo test --locked -p bcs-collaboration-runtime --test runtime_progression
 ```
 
-新crate建立后新增`cargo test --locked -p bcs-group-runner`与生产组合conformance入口，把R01–R26映射到具体测试；不存在的crate/入口不能在文档交付时宣称执行通过。legacy差分测试比较支持范围、下游输入、outcome、结果和尝试次数，显式排除旧时钟/UUID及旧存储布局差异。E17既有受信intent/无name结果的兼容测试继续保留，不因共享模式控制边界而改写旧路径。
+新crate建立后新增`cargo test --locked -p bcs-group-runner`与生产组合conformance入口，把R01–R30映射到具体测试；不存在的crate/入口不能在文档交付时宣称执行通过。legacy差分测试比较支持范围、下游输入、outcome、结果和尝试次数，显式排除旧时钟/UUID及旧存储布局差异。E17既有受信intent/无name结果的兼容测试继续保留，不因共享模式控制边界而改写旧路径。
 
 ## 13. 文档交付与未验证边界
 
 2026-11-18实际检查：本SPEC与导航共94个本地链接目标存在；15条证据中的具名源码/测试符号已核对，5个既有Cargo测试入口存在；Markdown围栏配对、尾随空白及`git diff --check`通过；公开内容人工检查及私有地址/凭据常见字面量检查未发现越界内容。两份依据的状态与PR合入后的proposed状态已核对。只读独立审阅提出的v1上游输出差异、未提交候选的时间语义和过早Timeout去重问题已修订并复核。改动仅本SPEC及导航，源码HEAD保持§2.1基线。
 
-上述检查只证明文档和可追溯性；当前R01–R26是待实现的验收要求，不能作为生产能力已通过的证据。
+上述检查只证明文档和可追溯性；当前R01–R30是待实现的验收要求，不能作为生产能力已通过的证据。
 
 未执行：Cargo构建/测试、生产Runner运行、真实provider故障实验、远端Agent/Judge联调、数据库迁移、部署或存量会话迁移。已有协调实现见§2.1/E16；第一批完整业务Worker与本批新增契约是否落地，须在实施时重新核对版本与验证，不能仅凭本稿启动生产流量。
 
@@ -455,3 +491,7 @@ cargo test --locked -p bcs-collaboration-runtime --test runtime_progression
 2026-11-19评审修订：在[PR #4237](https://github.com/inclusionAI/Avernet/pull/4237)的原8项讨论达成处理共识后，补充模式选择/历史语义兼容、通用与FSM契约拆分、数量预算及依赖接入，保持直接超时重试策略。新增建议采用本稿选定的最小边界：受理授权事实不代替业务时效检查，正常执行额度耗尽由Worker独立收尾，不增加实时资源观察或Runner等待策略；新增R21–R26验收要求。准入与失败分类新评论正文不全，本次只明确可从标题及既有契约确认的最小边界，具体后续扩展仍待Reviewer补充，不据此增加灰度平台或其他模式实现。本次仍只修订proposed文档，未实现上述能力。
 
 本轮文档检查：本SPEC与导航的100个本地链接目标存在，E01–E17及R01–R26编号连续且唯一，5个既有Cargo测试入口存在；新增E16/E17符号与源码对应，Markdown围栏/尾随空白/冲突标记、公开内容边界及`git diff --check`通过。仅SPEC内容变更，导航仍指向同一路径；未运行Cargo或运行态测试。沿用已授权的`--no-verify`提交/推送，Git hooks不计为通过。
+
+2026-11-19后续评审修订：以上轮文档提交 `58d89d1fa676c416a40a5d04bddf136b9b2e5ee8` 为基线，完整读取新增评论并按三项已确认共识修订：schema内category封闭、code允许有界扩展；跨Task遗留义务由Worker在Start前预留/等待，容量不足不转为Runner业务失败，业务超时仍直接重试；#4145能力契约与生产provider就绪分开记录。新增§9.4、E18及R27–R30，细化R24/R26和2A/2D。2A须交付现有fixture/模板容量及实际编码报告后确定profile，本次未生成该实现期报告，也未给出未经验证的容量默认值。
+
+本次文档检查：本SPEC与导航的108处本地链接均可解析到现有目标，E01–E18、R01–R30连续且唯一；新增E18构造能力检查、StrictLease语义及四个具名契约套件与源码对应，5个既有Cargo测试入口存在；Markdown围栏、尾随空白、冲突标记、公开内容边界及`git diff --check`通过。本次只修订SPEC并保持proposed；没有实现Runner/Worker/provider，也未运行Cargo或生产验证。提交和推送继续按请求使用`--no-verify`，不声称Git hooks通过。
