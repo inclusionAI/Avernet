@@ -1,0 +1,19 @@
+apps/bcs/crates/services/bcs-edge-permission/src/connect.rs
+  s_d6a579546de2ff::t_d9685499b58354 214-218,746,754
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f5e6f876a5cb11fd51e40eaf939c8fb3b833828c",
+  "prompts": {},
+  "sessions": {
+    "s_d6a579546de2ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e445-4121-7ed3-9eff-4974b76b302b",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

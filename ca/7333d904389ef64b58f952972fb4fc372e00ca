@@ -1,0 +1,148 @@
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/internal-engine-auth.test.ts
+  h_43af82e14600e4 1-111
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-internal-engine.test.ts
+  h_43af82e14600e4 1-102
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-run-subworkflows.test.ts
+  h_43af82e14600e4 1-77
+apps/evolverun/clawweb/public/app/clawweb/server/internal-engine-auth.ts
+  h_43af82e14600e4 1-82
+apps/evolverun/clawweb/public/app/clawweb/server/public-bootstrap.ts
+  h_43af82e14600e4 10-11,37-38,48-49,62,218-225,291
+apps/evolverun/clawweb/public/modules/workflow/docs/run-list-contract.md
+  h_43af82e14600e4 82-234
+apps/evolverun/clawweb/public/modules/workflow/server/contracts/run-subworkflows.ts
+  h_43af82e14600e4 1-54
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-admission-deadline.test.ts
+  h_43af82e14600e4 1-158
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-mirror.test.ts
+  h_43af82e14600e4 1-33
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-fixture.ts
+  h_43af82e14600e4 1-54
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-repository.test.ts
+  h_43af82e14600e4 1-356
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/fanout-state-repository.ts
+  h_43af82e14600e4 1-418
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  h_43af82e14600e4 9,133-137,557
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/run-subworkflows-repository.ts
+  h_43af82e14600e4 1-96
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanouts.test.ts
+  h_43af82e14600e4 1-117
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/fanouts.ts
+  h_43af82e14600e4 1-79
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  h_43af82e14600e4 7-8,32,36,553-556
+apps/evolverun/clawweb/public/modules/workflow/server/routes/runs.ts
+  h_43af82e14600e4 1-3,121-122,125-127,675
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows.test.ts
+  h_43af82e14600e4 1-282
+apps/evolverun/clawweb/public/modules/workflow/server/services/fanout-state-reader.ts
+  h_43af82e14600e4 1-78
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-read-fields.ts
+  h_43af82e14600e4 1-63
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-read-http.ts
+  h_43af82e14600e4 1-625
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-subworkflows-http.ts
+  h_43af82e14600e4 1-64
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-subworkflows-service.ts
+  h_43af82e14600e4 1-126
+apps/evolverun/clawweb/public/modules/workflow/web/api/run-subworkflows.ts
+  h_43af82e14600e4 1-24
+apps/evolverun/clawweb/public/modules/workflow/web/components/NodeExecutionList.tsx
+  h_43af82e14600e4 13-14,72-73,85,136-137,158,171,306,417,425,429,463-468
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/ChildRunDrawer.tsx
+  h_43af82e14600e4 1-47
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/SubworkflowPanel.tsx
+  h_43af82e14600e4 1-44
+apps/evolverun/clawweb/public/modules/workflow/web/components/subworkflows/__tests__/SubworkflowPanel.test.tsx
+  h_43af82e14600e4 1-111
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/useSubworkflows.ts
+  h_43af82e14600e4 1-65
+apps/evolverun/clawweb/public/modules/workflow/web/pages/RunDetail.tsx
+  h_43af82e14600e4 26,307-308
+apps/evolverun/taskguard/README.md
+  h_43af82e14600e4 17-20
+apps/evolverun/taskguard/docs/subworkflow-fanout.md
+  h_43af82e14600e4 1-176
+apps/evolverun/taskguard/integration-tests/subworkflow-fanout-e2e.test.ts
+  h_43af82e14600e4 1-96
+apps/evolverun/taskguard/package.json
+  h_43af82e14600e4 74-75
+apps/evolverun/taskguard/src/command-runner.ts
+  h_43af82e14600e4 12-13
+apps/evolverun/taskguard/src/controller.ts
+  h_43af82e14600e4 121-122,1019-1020,3975,3978-3987,3989,4006,4009-4025,4091-4094,5049-5050
+apps/evolverun/taskguard/src/controller/subworkflow-dependencies.ts
+  h_43af82e14600e4 1-73
+apps/evolverun/taskguard/src/controller/version-commands.ts
+  h_43af82e14600e4 44-45,771-772,1264-1265,1522-1528,1615,1817,1823-1826,1829
+apps/evolverun/taskguard/src/db/api-client.ts
+  h_43af82e14600e4 61
+apps/evolverun/taskguard/src/executors/embedded-context.ts
+  h_43af82e14600e4 15-26
+apps/evolverun/taskguard/src/executors/subworkflow-fanout-state.ts
+  h_43af82e14600e4 1-180
+apps/evolverun/taskguard/src/executors/subworkflow-fanout-types.ts
+  h_43af82e14600e4 1-186
+apps/evolverun/taskguard/src/executors/subworkflow-fanout.ts
+  h_43af82e14600e4 1-294
+apps/evolverun/taskguard/src/executors/subworkflow.ts
+  h_43af82e14600e4 15-17,20-22,99-109,117-124,273-280
+apps/evolverun/taskguard/src/index.ts
+  h_43af82e14600e4 74,194,1096-1101,1124,2065-2074
+apps/evolverun/taskguard/src/platform/controller-fanout-runtime.ts
+  h_43af82e14600e4 1-305
+apps/evolverun/taskguard/src/platform/default-executor.ts
+  h_43af82e14600e4 34,48,205-207,340-341,347,518
+apps/evolverun/taskguard/src/platform/fanout-host.ts
+  h_43af82e14600e4 1-25
+apps/evolverun/taskguard/src/platform/fanout-persistence.ts
+  h_43af82e14600e4 1-94
+apps/evolverun/taskguard/src/platform/fanout-taskflow.ts
+  h_43af82e14600e4 1-133
+apps/evolverun/taskguard/src/platform/mcp-tools.ts
+  h_43af82e14600e4 14-16,569,576,601,634-647
+apps/evolverun/taskguard/src/runner.ts
+  h_43af82e14600e4 617-624
+apps/evolverun/taskguard/src/types.ts
+  h_43af82e14600e4 1-2,468-469,1178-1186,1188,1558,1589-1592
+apps/evolverun/taskguard/src/validation/subworkflow-fanout.ts
+  h_43af82e14600e4 1-73
+apps/evolverun/taskguard/src/validation/workflow.ts
+  h_43af82e14600e4 2-3,1145,1166-1167,2374,2377-2382,2516-2517
+apps/evolverun/taskguard/src/workflow-dependencies.ts
+  h_43af82e14600e4 1-136
+apps/evolverun/taskguard/tests/controller-fanout-runtime.test.ts
+  h_43af82e14600e4 1-111
+apps/evolverun/taskguard/tests/fanout-cli-dispatch.test.ts
+  h_43af82e14600e4 1-20
+apps/evolverun/taskguard/tests/fanout-host.test.ts
+  h_43af82e14600e4 1-22
+apps/evolverun/taskguard/tests/fanout-persistence.test.ts
+  h_43af82e14600e4 1-62
+apps/evolverun/taskguard/tests/fanout-runtime-safety.test.ts
+  h_43af82e14600e4 1-454
+apps/evolverun/taskguard/tests/fanout-taskflow.test.ts
+  h_43af82e14600e4 1-60
+apps/evolverun/taskguard/tests/fanout-template-context.test.ts
+  h_43af82e14600e4 1-21
+apps/evolverun/taskguard/tests/subworkflow-fanout-dispatch.test.ts
+  h_43af82e14600e4 1-45
+apps/evolverun/taskguard/tests/subworkflow-fanout-validation.test.ts
+  h_43af82e14600e4 1-102
+apps/evolverun/taskguard/tests/subworkflow-fanout.test.ts
+  h_43af82e14600e4 1-412
+apps/evolverun/taskguard/tests/workflow-dependencies.test.ts
+  h_43af82e14600e4 1-259
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ca7333d904389ef64b58f952972fb4fc372e00ca",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

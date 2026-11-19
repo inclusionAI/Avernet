@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  s_ef052cb65039f6::t_29056d8b75aa9b 20,722,728
+apps/evolverun/clawweb/internal/docker/scripts/admin/bin/start.sh
+  s_ef052cb65039f6::t_29056d8b75aa9b 11-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e3fb2ecbe5ba7735441e781da73a864f4f843153",
+  "prompts": {},
+  "sessions": {
+    "s_ef052cb65039f6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17b72-ba1c-7333-9f5a-ff685f952df1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

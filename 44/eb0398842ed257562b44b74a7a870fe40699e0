@@ -1,0 +1,22 @@
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/README.md
+  h_f4a73db4ad12be 5-8,29-32,84-86
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/examples/probe.rs
+  h_f4a73db4ad12be 11-12,24-30
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/lib.rs
+  h_f4a73db4ad12be 12,15-18,33-43,73,80-81,83-84,86
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/liveness.rs
+  h_f4a73db4ad12be 56-57,59-63
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/tests/wire.rs
+  h_f4a73db4ad12be 236-305
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "44eb0398842ed257562b44b74a7a870fe40699e0",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

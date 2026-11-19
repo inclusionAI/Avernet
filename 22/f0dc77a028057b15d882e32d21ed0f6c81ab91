@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  h_b601d8706f5d44 214-215
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/agent-service.test.ts
+  h_b601d8706f5d44 131-171
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  h_b601d8706f5d44 166,172-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "22f0dc77a028057b15d882e32d21ed0f6c81ab91",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotChat.ts
+  s_4efef845bd857d::t_12968b116d5381 5,40-41
+  s_4efef845bd857d::t_9ad4bf2ff64251 7,36-39,42,55-56
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration.test.tsx
+  s_4efef845bd857d::t_e6e271a34336ef 5,15-16,20,50-65,140,305-349
+  s_4efef845bd857d::t_4504e8a4888ce2 11-14
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotChat.test.ts
+  s_4efef845bd857d::t_d293d07016dd13 5,97-111
+  s_4efef845bd857d::t_c57ed187d4a747 59
+  s_4efef845bd857d::t_9f8d5791999dea 112-113
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration.ts
+  s_4efef845bd857d::t_33d54eb7c999ec 108,142,144-145,164-176,187-189,193,195-196
+  s_4efef845bd857d::t_2de38bea21af60 6-7,9,13
+  s_4efef845bd857d::t_09980551ca67ef 8,10-11,27-71,75-76,146-154,190-191,194,197-199,215-216
+  s_4efef845bd857d::t_9ac90c992caacb 72-74
+  s_4efef845bd857d::t_e1d516e0f0e9ab 12,15
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_4efef845bd857d::t_06a875694a4aec 125-141
+  s_4efef845bd857d::t_b58cca25f436d5 404,410-413,513,523-526
+apps/frontend-nextgen/test/services/workspace/botConversationRuntimeStage.test.ts
+  s_4efef845bd857d::t_fcd32d69a8080c 159,162,171,175
+  s_4efef845bd857d::t_c0675057717c6a 5,7,156-158,160-161,163-170,172-174,176-194
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_4efef845bd857d::t_b5b88352c13b44 459-460,472,547
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_4efef845bd857d::t_b58cca25f436d5 14,78-79,273,632,660
+apps/frontend-nextgen/src/services/backendApi/bots/privateBotSessionController.ts
+  s_4efef845bd857d::t_b58cca25f436d5 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d502b0d23683415ca6947dd60f1e816896266527",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

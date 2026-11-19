@@ -1,0 +1,40 @@
+apps/backend/specs/arca-caller-jit-identity-dev/001-spec-output.md
+  s_fc1557df5d7924::t_63e5b88840f829 1-17,19-31,33-58
+  s_fc1557df5d7924::t_0e413165099549 59
+  s_fc1557df5d7924::t_13895be39bf7f6 18,32
+apps/backend/src/agentclaw/community/plugin_api/README.md
+  s_fc1557df5d7924::t_cfa64b070b3325 187-199
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  s_fc1557df5d7924::t_beff1a313e8516 13,28,33,47,53-54,77-86,116,123-124,140-159,171
+  s_fc1557df5d7924::t_7d2541907df774 87-96
+apps/backend/tests/community/core/token_exchange/test_actor_identity.py
+  s_fc1557df5d7924::t_07d39a47a404b4 8-11,105,141-199
+  s_fc1557df5d7924::t_beff1a313e8516 59
+  s_fc1557df5d7924::t_a41644202b841b 1-7,12-58,60-87,90,99,116-117,120,129,137
+  s_fc1557df5d7924::t_33255ee51378cb 88-89,91-98,100-104,106-115,118-119,121-128,130-136,138-140,200-216
+apps/backend/specs/arca-caller-jit-identity-dev/002-implementation-plan.md
+  s_fc1557df5d7924::t_63e5b88840f829 1-5,7-8,10-18
+  s_fc1557df5d7924::t_c7dd13cb8f6f04 6,9
+apps/backend/src/agentclaw/community/di/modules/caller_identity_module.py
+  s_fc1557df5d7924::t_beff1a313e8516 277,284
+apps/backend/src/agentclaw/community/plugin_api/token_plugin.py
+  s_fc1557df5d7924::t_beff1a313e8516 23
+apps/backend/tests/community/core/token_exchange/test_pipeline.py
+  s_fc1557df5d7924::t_89cc8073514e2f 3,161-163,195-197,232-234,266-268,305-307,352-354
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "93c21c4b95c4d0588012825d4e2948711afa7fd0",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+apps/bcs/crates/services/bcs-dist-worker/tests/support/mod.rs
+  s_a9c87caa3de52e::t_084b5e0021df88 48-57
+  s_a9c87caa3de52e::t_5231083b694454 17,28-29,44-45,47
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_flow.rs
+  s_a9c87caa3de52e::t_5231083b694454 1-48,54-56,58-162,164-238
+  s_a9c87caa3de52e::t_48885621e95f1c 49-53
+  s_a9c87caa3de52e::t_1516918b02ced1 57
+  s_a9c87caa3de52e::t_482926e6456443 163
+apps/bcs/crates/application/bcs-app-dist-runtime/tests/boundary.rs
+  s_a9c87caa3de52e::t_c5ff7dc285c37c 100-102,106-110,129
+  s_a9c87caa3de52e::t_abc39ef62b5e2d 103-105,111-128
+apps/bcs/crates/services/bcs-dist-worker/tests/handoff_confirmation.rs
+  s_a9c87caa3de52e::t_084b5e0021df88 1-5,9-12,19-24,33-38,54-57,66-77,79-82,86-87,89,106-121,132-133,136-141,145,147-149,162-175
+  s_a9c87caa3de52e::t_94437b08417e61 60-65,84-85,88,97,142-144,146
+  s_a9c87caa3de52e::t_698a9ec2407fd1 6-8,13-18,25-32,39-53,58-59,78,83,94-96,98-105,122-131,134-135,150-161,176-177
+  s_a9c87caa3de52e::t_098715a60698c2 90-93
+apps/bcs/crates/adapters/http/bcs-dist-worker-http/tests/control.rs
+  s_a9c87caa3de52e::t_c5ff7dc285c37c 20-21,27-29,75,79,87-89,92-93,97,100,102-103,107,114-116,183-190,195,215,220-228,235,246,256-265,272-275
+  s_a9c87caa3de52e::t_abc39ef62b5e2d 76-78,94-96,104-106,191-194,196-214,216-219,229-234,236-245,247-255,266-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c2dd2568328aec5347028d8e4965fd1e8d21fb46",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

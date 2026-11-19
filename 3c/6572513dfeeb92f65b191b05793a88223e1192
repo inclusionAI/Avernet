@@ -1,0 +1,155 @@
+apps/baas/src/secbaas/community/core/service/device_manage/_device_start.py
+  s_45f5dc83f7ac50::t_0b81f8db544e99 1-9,12-32,34-37,41,52-53,55-79,81-172,188-536,541-558,563-585,590-608,611-626,631-647,652
+  s_45f5dc83f7ac50::t_3b541b95a4362f 173-177,184-187
+  s_45f5dc83f7ac50::t_8fa14da0566ac8 42-46,80
+  s_45f5dc83f7ac50::t_340cd5bada3cc4 10-11
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 178-183,537-540,559-562,586-589,609-610,627-630,648-651
+  s_45f5dc83f7ac50::t_d7abcff473efb5 38-39
+  s_45f5dc83f7ac50::t_132ac17080e6fa 47-51,54
+  s_45f5dc83f7ac50::t_3f32c6524d848b 33,40
+apps/baas/src/secbaas/community/api/device_manage/_protocols.py
+  s_45f5dc83f7ac50::t_33c9d5d6ee6dc2 301-303,305
+apps/baas/src/secbaas/community/core/service/paas/_facade_connections.py
+  s_45f5dc83f7ac50::t_132ac17080e6fa 39-42,45,132,276,423,563,674
+  s_45f5dc83f7ac50::t_3f32c6524d848b 26
+  s_45f5dc83f7ac50::t_0b81f8db544e99 1-25,27-32,43-44,46-131,133-275,277-422,424-510,512-535,537-545,547-562,564-673,675-782
+  s_45f5dc83f7ac50::t_a78b4cc07c5ff0 33-38,511,536,546
+apps/baas/src/secbaas/community/core/service/device_manage/_device_storage_lifecycle.py
+  s_45f5dc83f7ac50::t_5641c835ac8e25 31,55-72
+  s_45f5dc83f7ac50::t_2614da748d1c5f 1-30,32-54,73-96
+apps/baas/tests/unit/plugins/sandbox/arca/local_k8s/test_missing_sandbox_contract.py
+  s_45f5dc83f7ac50::t_2c6460f6e03f2f 1-29,36-48
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 30-35
+apps/baas/src/secbaas/community/core/service/device_manage/_device_service_support.py
+  s_45f5dc83f7ac50::t_0b81f8db544e99 1-29,31-42,49-50,52-58,60-66,68-102,104-115,117-124,127,129-269,271-300,303,305-335,338-358,360-449,451-535,537-568
+  s_45f5dc83f7ac50::t_3f32c6524d848b 30
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 67,103,116,128,270,304,359,450,536
+  s_45f5dc83f7ac50::t_8fa14da0566ac8 43-48,51,59
+  s_45f5dc83f7ac50::t_a78b4cc07c5ff0 125-126,301-302,336-337
+apps/baas/src/secbaas/community/plugins/sandbox/arca/local_k8s/_sandbox_plugin.py
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 51-55,95,334-338
+  s_45f5dc83f7ac50::t_6e988a7eef145d 647-658
+  s_45f5dc83f7ac50::t_4f096c33dbf600 33,93-94
+  s_45f5dc83f7ac50::t_3f3b57a444e0f8 100,168
+apps/baas/tests/unit/core/service/device_manage/test_device_service.py
+  s_45f5dc83f7ac50::t_e542afc6891ba1 69-73,81-83,113,126-127
+  s_45f5dc83f7ac50::t_5d98503e8f9bae 59-62
+  s_45f5dc83f7ac50::t_72b48cd51c2e14 1417-1421,1827-1831,2501-2503
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 74-80,1279-1281,2310-2312,2504-2508,2542-2544
+apps/baas/src/secbaas/community/core/service/device_manage/_device_service.py
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 118,131-133
+  s_45f5dc83f7ac50::t_d7abcff473efb5 28,37-43,45,81-82
+  s_45f5dc83f7ac50::t_3f3b57a444e0f8 50-80
+  s_45f5dc83f7ac50::t_724d425fb2e75f 84
+apps/baas/docs/adr/0016-compute-release-and-storage-disposal.md
+  s_45f5dc83f7ac50::t_3719b2c51caf07 1-53
+apps/baas/src/secbaas/community/core/repository/device/_protocol.py
+  s_45f5dc83f7ac50::t_02dd8ef8dc10e0 150-159,190-191,195
+apps/baas/src/secbaas/community/core/service/device_manage/_device_disposal.py
+  s_45f5dc83f7ac50::t_12ee07d23617e5 396-398,420-423,426,428-433,440-441,444,517-518,521-523,526-528,566-572
+  s_45f5dc83f7ac50::t_67e1e8818ade4f 399,404
+  s_45f5dc83f7ac50::t_f5d4b7fee9a214 524-525
+  s_45f5dc83f7ac50::t_735531688aa990 171-181,187
+  s_45f5dc83f7ac50::t_8fa14da0566ac8 45-49,68,170,252,374,611
+  s_45f5dc83f7ac50::t_225974265003f1 700-702,711-712,719-724,748-756
+  s_45f5dc83f7ac50::t_132ac17080e6fa 50-54,57,159,202,344,606
+  s_45f5dc83f7ac50::t_5641c835ac8e25 710
+  s_45f5dc83f7ac50::t_2c592d5983a9a5 620,703
+  s_45f5dc83f7ac50::t_0b81f8db544e99 1-9,11-38,40,44,55-56,58-67,69-158,160-169,182-186,188-201,203-251,253-299,302-343,345-373,375-395,405-419,427,442-443,445-516,529-539,547-565,573-605,607-610,612-619,621-699,713-718,725-731,735-747,757-768
+  s_45f5dc83f7ac50::t_3f32c6524d848b 39,43
+  s_45f5dc83f7ac50::t_340cd5bada3cc4 10
+  s_45f5dc83f7ac50::t_d7abcff473efb5 41-42
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 300-301,400-403,424-425,434-439,519-520,540-546,704-709,732-734
+apps/baas/src/secbaas/community/api/device_manage/_device_creation_result.py
+  s_45f5dc83f7ac50::t_8b58c3dcff88e4 11,35
+apps/baas/src/secbaas/community/core/service/paas/_facade.py
+  s_45f5dc83f7ac50::t_0b81f8db544e99 34,36,219-220,222,228-230,234-236,239,242,245-248,254-256,266,282-283,286,290-291,294,300,305,307-308,310-311
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 35,43-48
+  s_45f5dc83f7ac50::t_d7abcff473efb5 32,37
+  s_45f5dc83f7ac50::t_cc9dff19370421 33
+apps/baas/src/secbaas/community/core/service/paas/_facade_creation.py
+  s_45f5dc83f7ac50::t_0b81f8db544e99 1-42,44-49,60-142,144-247,249-300,302-416,418-515
+  s_45f5dc83f7ac50::t_8b58c3dcff88e4 417
+  s_45f5dc83f7ac50::t_8fa14da0566ac8 50-55,248
+  s_45f5dc83f7ac50::t_3f32c6524d848b 43
+  s_45f5dc83f7ac50::t_132ac17080e6fa 56-59,143,301
+apps/baas/src/secbaas/community/core/service/paas/_arca_lifecycle.py
+  s_45f5dc83f7ac50::t_0b81f8db544e99 1-40,62-63,65-100,102-135,137-159,161-190,192-218,220-324,326-353,355-367,369-373,387,394-401,407-456,462,465-470,473-528,534-547,556-560,565-566
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 47-52
+  s_45f5dc83f7ac50::t_8b58c3dcff88e4 41-46,53-57,325
+  s_45f5dc83f7ac50::t_132ac17080e6fa 58-61,64,101,136,160,191,219,354,368,374-376,388
+  s_45f5dc83f7ac50::t_a4a0f7063e90ed 377-386,389-393,402-406,457-461,463-464,471-472,529-533,548-555,561-564
+apps/baas/src/secbaas/community/core/service/device_manage/_device_update.py
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 394-399,588-589
+  s_45f5dc83f7ac50::t_0b81f8db544e99 1-9,12-33,36,40,51-52,54-104,106-303,305-311,313-393,401-562,564-587,590-614,616-643
+  s_45f5dc83f7ac50::t_8fa14da0566ac8 41-45,105
+  s_45f5dc83f7ac50::t_3f32c6524d848b 34-35,39
+  s_45f5dc83f7ac50::t_5641c835ac8e25 400
+  s_45f5dc83f7ac50::t_132ac17080e6fa 46-50,53
+  s_45f5dc83f7ac50::t_d03e5589b08ab1 304,312,563,615,644
+  s_45f5dc83f7ac50::t_d7abcff473efb5 37-38
+  s_45f5dc83f7ac50::t_340cd5bada3cc4 10-11
+apps/baas/tests/unit/core/service/device_manage/test_device_service_coverage.py
+  s_45f5dc83f7ac50::t_7233a947dc70e8 83-84,87,1463-1465,1492-1494
+  s_45f5dc83f7ac50::t_fa8bd2e644f3f7 186,1576,1621-1622
+  s_45f5dc83f7ac50::t_b43504e37f29fb 166-179
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 85-86
+apps/baas/docs/adr/README.md
+  s_45f5dc83f7ac50::t_3719b2c51caf07 37
+  s_45f5dc83f7ac50::t_1b50c17125d924 41
+apps/baas/src/secbaas/community/core/service/paas/_paas_service.py
+  s_45f5dc83f7ac50::t_2614da748d1c5f 119-122
+  s_45f5dc83f7ac50::t_a4a0f7063e90ed 123-126
+apps/baas/tests/unit/core/service/device_manage/test_device_manage.py
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 68-74,699-701,1182-1184,1360-1362
+  s_45f5dc83f7ac50::t_e542afc6891ba1 53-54,63-67,75-77,384,423,428-429,457,525,575,580-581,613,667,717,764,802,868,902,943,1055,1123,1156,1161-1162,1191,1196-1197,1238,1243-1244,1287,1307,1312-1313,1376,1381-1382,1451,1456-1457,1527,1532-1533,1603,1608-1609,1679,1684-1685
+  s_45f5dc83f7ac50::t_5611b913ce7cb7 385-386,424-425,458-459,526-527,576-577,594,614-615,668-669,681,718-719,731,765-766,778,803-804,816,869-870,903-904,944-945,1056-1057,1124-1125,1157-1158,1192-1193,1239-1240,1288-1289,1308-1309,1377-1378,1452-1453,1528-1529,1604-1605,1680-1681
+  s_45f5dc83f7ac50::t_fa8bd2e644f3f7 702-703,790-794,830
+  s_45f5dc83f7ac50::t_7e6789cfa96b9e 762,785-789
+apps/baas/src/secbaas/community/core/service/paas/_facade_lifecycle.py
+  s_45f5dc83f7ac50::t_0b81f8db544e99 1-8,10-34,39-40,42-44,46-109,121-141,143-222,224-330,334-416,420-506,508-597,599-694,696-823
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 110-112,118-120
+  s_45f5dc83f7ac50::t_132ac17080e6fa 35-38,41,142,223,331-333,417-419,507,598,695
+  s_45f5dc83f7ac50::t_3f32c6524d848b 9
+  s_45f5dc83f7ac50::t_a4a0f7063e90ed 45,113-117
+apps/baas/tests/unit/core/service/device_manage/test_upfs_storage.py
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 303-316,372-373
+  s_45f5dc83f7ac50::t_b43504e37f29fb 336-348,374
+apps/baas/tests/unit/plugins/sandbox/arca/local_k8s/test_apparmor_policy.py
+  s_45f5dc83f7ac50::t_4f096c33dbf600 2,8-13,49-56,60-62,66-69
+apps/baas/src/secbaas/community/plugins/sandbox/arca/local_k8s/_storage_cleanup.py
+  s_45f5dc83f7ac50::t_3f3b57a444e0f8 1-70
+apps/baas/tests/integration/core/service/test_arca_storage_lifecycle_regression.py
+  s_45f5dc83f7ac50::t_b1bdcc53adde1f 1-224
+  s_45f5dc83f7ac50::t_1cc50424ed5deb 225-248,252-264
+  s_45f5dc83f7ac50::t_8aafd8e4fad6bb 387-554
+  s_45f5dc83f7ac50::t_7306454352e307 573,575-577,584-588
+  s_45f5dc83f7ac50::t_67e1e8818ade4f 555-557,563-566,570-572
+  s_45f5dc83f7ac50::t_87c987335d541a 327-386
+  s_45f5dc83f7ac50::t_b918e6595d390f 267-326
+  s_45f5dc83f7ac50::t_5641c835ac8e25 574,578-583
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 249-251,265-266,558-562,567-569
+apps/baas/src/secbaas/community/core/repository/device/_orm_repository.py
+  s_45f5dc83f7ac50::t_02dd8ef8dc10e0 450-466,470-481,569-570,581-582
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 467-469
+  s_45f5dc83f7ac50::t_7bfe7b9aae62cb 449
+apps/baas/src/secbaas/community/core/service/paas/_arca_paas_service.py
+  s_45f5dc83f7ac50::t_52d4f0cd45c9d1 37-38
+  s_45f5dc83f7ac50::t_0b81f8db544e99 41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3c6572513dfeeb92f65b191b05793a88223e1192",
+  "prompts": {},
+  "sessions": {
+    "s_45f5dc83f7ac50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea50-1141-7730-93e2-7477d4e77f5a",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

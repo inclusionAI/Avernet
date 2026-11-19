@@ -1,0 +1,23 @@
+apps/bcsfuse/tests/contract/test_tc_http_compat.py
+  s_ce84d91f3d35be::t_c46c3e0aa2b46c 117-133,138-145,149-150
+  s_ce84d91f3d35be::t_c22f8c8e166826 134-137,146-148
+apps/bcsfuse/src/app/tc/routes.py
+  s_ce84d91f3d35be::t_0aab0f61afd5cc 130-138,142-147,159-160
+  s_ce84d91f3d35be::t_c22f8c8e166826 139-141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7a70b104bc30c4c2f7896a4ec868ab9f3fef6790",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

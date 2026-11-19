@@ -1,0 +1,30 @@
+apps/bcs/crates/adapters/http/bcs-provider-http/src/dingtalk_header_tests.rs
+  s_d2bf2069ff97fe::t_7a9791217d6c8a 10-58
+  s_d2bf2069ff97fe::t_39c36469b4b1a3 1-9,59-73
+apps/bcs/crates/adapters/http/bcs-provider-http/src/lib.rs
+  s_d2bf2069ff97fe::t_0daf2b0f38d32f 254-256
+apps/bcs/crates/adapters/http/bcs-provider-http/src/network.rs
+  s_d2bf2069ff97fe::t_838766dcdf7568 111,223-238
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/caller_token_diagnostics.rs
+  s_d2bf2069ff97fe::t_e2f883ea1b7759 65-66,82,85-91
+apps/bcs/docs/caller-execution.md
+  s_d2bf2069ff97fe::t_0ee18020a5279d 18-19
+apps/bcs/docs/flows/README.md
+  s_d2bf2069ff97fe::t_e9ad340de636dc 16-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9fedba6d3673265706f58f02ef8ffc484f82e117",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

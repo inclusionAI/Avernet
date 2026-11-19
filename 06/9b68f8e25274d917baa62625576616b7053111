@@ -1,0 +1,19 @@
+apps/bcs-internal/crates/tools/bcs-bridge/tests/register.rs
+  s_c3a0b6b6fab230::t_a81a2d3bb60303 403,405,612,614
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "069b68f8e25274d917baa62625576616b7053111",
+  "prompts": {},
+  "sessions": {
+    "s_c3a0b6b6fab230": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bef6-9c1b-7de3-a959-ba27f5cce386",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

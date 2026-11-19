@@ -1,0 +1,43 @@
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/__tests__/MonitoringSettings.test.tsx
+  s_c5125da3cacb9c::t_9fbf9737b31c36 15-22,26-34
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-service.ts
+  s_c5125da3cacb9c::t_a4c4f79ccd6d3c 25-34,71-72,103
+apps/evolverun/clawweb/public/modules/clawinsight/preview/__tests__/http.test.ts
+  s_c5125da3cacb9c::t_9fbf9737b31c36 24,66-91,96
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/monitoring-settings.css
+  s_c5125da3cacb9c::t_a4c4f79ccd6d3c 109
+apps/evolverun/clawweb/public/modules/clawinsight/web/types/monitoring.ts
+  s_c5125da3cacb9c::t_a4c4f79ccd6d3c 32
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-browser-service.ts
+  s_c5125da3cacb9c::t_a4c4f79ccd6d3c 6,41
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/directory-contracts.ts
+  s_c5125da3cacb9c::t_a4c4f79ccd6d3c 42
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/MonitoringSettings.tsx
+  s_c5125da3cacb9c::t_a4c4f79ccd6d3c 53,66-67,69-71
+apps/evolverun/clawweb/public/modules/clawinsight/preview/server.ts
+  s_c5125da3cacb9c::t_9fbf9737b31c36 25-27,30,44,48-50
+  s_c5125da3cacb9c::t_d5bbec117a42a5 33
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/__tests__/monitoring.test.ts
+  s_c5125da3cacb9c::t_9fbf9737b31c36 360,364,380,409,424-425
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/bot-config.test.ts
+  s_c5125da3cacb9c::t_9fbf9737b31c36 10-11,118-165
+  s_c5125da3cacb9c::t_c40dc0b07671a1 166
+apps/evolverun/clawweb/public/modules/clawinsight/docs/bot-diagnosis-recovery-config.md
+  s_c5125da3cacb9c::t_a4c4f79ccd6d3c 98-101,114,118-120,139-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7215aa1a5d311c34ba2af33eda0e9d3fb08f2d67",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

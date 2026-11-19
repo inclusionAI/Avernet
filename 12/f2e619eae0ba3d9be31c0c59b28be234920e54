@@ -1,0 +1,35 @@
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotGeneralConfigDialog.test.tsx
+  s_6d6044b02bd54a::t_2d5dc53bda9917 602-634
+  s_6d6044b02bd54a::t_9430bd2c6b8b3e 6-8
+  s_6d6044b02bd54a::t_204fef70fa672d 29-35
+  s_6d6044b02bd54a::t_6e6cf3920b4bd8 635-664,666-669,676-685,691-693
+  s_6d6044b02bd54a::t_0a381155108bb4 686-690
+  s_6d6044b02bd54a::t_7710bcd2ae1853 665,670-675
+  s_6d6044b02bd54a::t_c6417ca2e58add 5
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/useUserRiskStatus.ts
+  s_6d6044b02bd54a::t_e328c294972ba6 1-51
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/RiskFlowBanners.tsx
+  s_6d6044b02bd54a::t_5b8398ecd321cd 12-16,21-22,27-28,64-78
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/index.tsx
+  s_6d6044b02bd54a::t_44434876880138 60-62,185-186
+apps/frontend-nextgen/src/components/CollaborationPrivacy/RelationCard/index.tsx
+  s_6d6044b02bd54a::t_c3c1ab4b5ca362 4,22-25,31-32,97-108
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  s_6d6044b02bd54a::t_03325b0d80e709 284-336,555-625
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "12f2e619eae0ba3d9be31c0c59b28be234920e54",
+  "prompts": {},
+  "sessions": {
+    "s_6d6044b02bd54a": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "cd632900-c4d8-457b-b09b-d17673865885",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/bot-workflow-permission-mount.test.ts
+  s_25c8d69584ee47::t_1a0044d25b4c8f 4,42,78,105,123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6757b8a76933d5dedadcf3a1b9d39f8c8f6d9ad4",
+  "prompts": {},
+  "sessions": {
+    "s_25c8d69584ee47": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c946-1fbb-7b62-8d1c-995aca01ed39",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
