@@ -1,8 +1,8 @@
 use super::common::*;
 use async_trait::async_trait;
 use bcs_dist_model::*;
-use std::{num::NonZeroU32, time::Duration};
 use serde::{Deserialize, Serialize};
+use std::{num::NonZeroU32, time::Duration};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AdmitRequest {
@@ -30,6 +30,10 @@ pub struct AppendAgentEvent {
 
 #[async_trait]
 pub trait InboxProducerPort: Send + Sync {
+    /// Unknown on legacy adapters; full phase-one assembly requires one shared identity.
+    fn scan_budget_profile(&self) -> Option<super::budget::ScanBudgetProfile> {
+        None
+    }
     /// Success requires recoverable input, initial task/spec and durable activation.
     /// Retry completes partial activation before returning Duplicate. Conflicting
     /// content under the same scoped InputId never returns success. Critical
@@ -99,9 +103,16 @@ pub trait ShardFeedPort: Send {
 
 #[async_trait]
 pub trait InboxConsumerPort: Send + Sync {
+    fn reader_resources(&self) -> Option<InboxReaderResources> {
+        None
+    }
+    /// Unknown on legacy adapters; full phase-one assembly requires one shared identity.
+    fn scan_budget_profile(&self) -> Option<super::budget::ScanBudgetProfile> {
+        None
+    }
     async fn open(&self, shard: ShardId) -> Result<Box<dyn ShardFeedPort>, StoreError>;
     async fn has_unconsumed(&self, sid: &Sid, after: Option<&InboxPos>)
-        -> Result<bool, StoreError>;
+    -> Result<bool, StoreError>;
     /// Validate committed coverage. Shared physical partitions can acknowledge
     /// only a contiguous committed prefix, never skip another session's work.
     async fn confirm_committed(
@@ -116,6 +127,14 @@ pub trait InboxConsumerPort: Send + Sync {
         shard: ShardId,
         page: PageRequest,
     ) -> Result<Page<Sid>, StoreError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InboxReaderResources {
+    pub max_document_bytes: usize,
+    pub max_readers: usize,
+    pub max_watches: usize,
+    pub max_receipts: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +166,10 @@ pub enum SettleOutcome {
 
 #[async_trait]
 pub trait InboxSchedulingPort: Send + Sync {
+    /// Unknown on legacy adapters; full phase-one assembly requires one shared identity.
+    fn scan_budget_profile(&self) -> Option<super::budget::ScanBudgetProfile> {
+        None
+    }
     /// Install/confirm the monotonic scheduling owner fence BEFORE checking work.
     async fn observe(&self, owner: &SessionOwnership) -> Result<ScheduleObservation, StoreError>;
     /// Atomic token AND owner check. Every admitted batch invalidates prior tokens,

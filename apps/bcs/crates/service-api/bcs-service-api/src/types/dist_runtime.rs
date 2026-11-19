@@ -20,3 +20,9 @@ pub enum DrainOutcome {
 pub struct RuntimeError {
     pub code: String,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerControlAction {
+    Inspect,
+    Resume,
+}

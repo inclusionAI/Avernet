@@ -5,6 +5,7 @@ mod publish;
 mod reader;
 mod retention;
 mod storage;
+mod terminal;
 
 use crate::{
     codec::{decode_json, encode_json},
@@ -180,13 +181,40 @@ struct TrimProgress {
 #[async_trait]
 impl TaskPublisherPort for StoreTaskFeed {
     async fn append(&self, request: AppendCommittedEvents) -> Result<AppendOutcome, StoreError> {
-        self.append_batch(request).await
+        let source = request.source.clone();
+        let kind = EffectKind::AppendEvents {
+            previous: request.previous,
+            events: request.events.clone(),
+        };
+        let outcome = self.append_batch(request).await?;
+        if !matches!(
+            outcome,
+            AppendOutcome::ContentConflict | AppendOutcome::OutOfOrder
+        ) {
+            self.retain_terminal(&source, kind)
+                .await
+                .map_err(|e| after_write(e, "terminal_append_marker"))?;
+        }
+        Ok(outcome)
     }
     async fn publish(
         &self,
         request: PublishCommittedSnapshot,
     ) -> Result<PublishOutcome, StoreError> {
-        self.publish_snapshot(request).await
+        let source = request.source.clone();
+        let kind = EffectKind::PublishSnapshot {
+            snapshot: request.snapshot.clone(),
+        };
+        let outcome = self.publish_snapshot(request).await?;
+        if !matches!(
+            outcome,
+            PublishOutcome::ContentConflict | PublishOutcome::Superseded { .. }
+        ) {
+            self.retain_terminal(&source, kind)
+                .await
+                .map_err(|e| after_write(e, "terminal_publish_marker"))?;
+        }
+        Ok(outcome)
     }
     async fn trim(&self, request: RetentionRequest) -> Result<TrimOutcome, StoreError> {
         self.trim_output(request).await

@@ -11,6 +11,13 @@ fn layout() -> KeyLayout {
 }
 fn provider(s: Arc<Recorder>) -> StoreInboxProducer {
     StoreInboxProducer::new(
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
         s.clone(),
         s.clone(),
         s.clone(),
@@ -163,9 +170,11 @@ async fn persist_commit(store: &Recorder, consumed: Option<InboxPos>) -> CommitR
             runner_state: None,
             dispatch_seq: Default::default(),
             deadlines: vec![],
+            deadline_history: Default::default(),
             view_drafts: Default::default(),
             last_event_id: None,
             outbox: Some(CommittedBatch {
+                created_at: None,
                 commit_id: commit_id.clone(),
                 source_commit: CommitSeq(1),
                 content_digest: digest.clone(),
@@ -300,6 +309,13 @@ async fn reader_and_watch_capacity_is_shared_across_open_feeds() {
     config.max_readers = 2;
     config.max_watches = 1;
     let p = StoreInboxProducer::new(
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
         store.clone(),
         store.clone(),
         store.clone(),

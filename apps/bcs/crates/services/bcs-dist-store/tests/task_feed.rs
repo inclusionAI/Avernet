@@ -29,6 +29,22 @@ async fn initial_empty_snapshot_and_append_restore_share_pure_projection() {
     };
     assert_eq!(display(&view).units.len(), 0);
     assert_eq!(view.covered_through, None);
+    let stored = f
+        .feed
+        .load_snapshot(&scope(), &Tid(TID.into()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.output_limits, PHASE_ONE_OUTPUT_LIMITS);
+    assert_eq!(stored.snapshot_event_id, None);
+    let mut foreign = scope();
+    foreign.principal = PrincipalId("foreign".into());
+    assert!(
+        f.feed
+            .load_snapshot(&foreign, &Tid(TID.into()))
+            .await
+            .is_err()
+    );
     let request = f.append_request(1, None, text_events(1)).await;
     assert_eq!(
         f.feed.append(request.clone()).await.unwrap(),

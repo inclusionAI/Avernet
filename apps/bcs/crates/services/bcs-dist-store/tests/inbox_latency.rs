@@ -32,6 +32,13 @@ fn provider(
     cfg: InboxProducerConfig,
 ) -> StoreInboxProducer {
     StoreInboxProducer::new(
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
         store.clone(),
         delay,
         store.clone(),
@@ -72,6 +79,131 @@ async fn repair_makes_durable_progress_at_five_and_ten_millisecond_document_rtt(
             "RTT {millis}"
         );
     }
+}
+
+#[tokio::test]
+async fn eighty_millisecond_reads_survive_sliced_discovery_and_cancelled_polls() {
+    let (_, delay, p) = setup(InboxProducerConfig::new(BackendId("model".into())));
+    p.admit(request("slow-history")).await.unwrap();
+    delay.millis.store(80, Ordering::Relaxed);
+    let page = PageRequest {
+        after: None,
+        limit: NonZeroU32::new(128).unwrap(),
+    };
+    // Cancellation must retain the original in-flight native read in its slot.
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(10),
+            p.enumerate_pending(ShardId(42), page.clone())
+        )
+        .await
+        .is_err()
+    );
+    let mut next = page;
+    let mut found = false;
+    for _ in 0..20 {
+        let start = std::time::Instant::now();
+        let result = p
+            .enumerate_pending(ShardId(42), next.clone())
+            .await
+            .unwrap();
+        assert!(
+            start.elapsed() < Duration::from_millis(160),
+            "poll slice was not bounded"
+        );
+        found |= result.items.contains(&Sid(SID.into()));
+        if found {
+            break;
+        }
+        assert!(
+            result.next.is_some(),
+            "pending read must not claim complete history"
+        );
+        next.after = result.next;
+    }
+    assert!(
+        found,
+        "healthy 80ms intent read must eventually be discovered"
+    );
+}
+
+#[tokio::test]
+async fn eighty_millisecond_repair_resumes_instead_of_restarting_the_prefix() {
+    let (store, delay, p) = setup(InboxProducerConfig::new(BackendId("model".into())));
+    store.lose_write(1);
+    assert!(p.admit(request("slow-durable-repair")).await.is_err());
+    delay.millis.store(80, Ordering::Relaxed);
+    let mut completed = false;
+    for _ in 0..100 {
+        let start = std::time::Instant::now();
+        let _ = p.repair(ShardId(42)).await;
+        assert!(
+            start.elapsed() < Duration::from_millis(160),
+            "repair poll must yield"
+        );
+        if matches!(
+            p.admission_decision(&scope(), &InputId("slow-durable-repair".into()))
+                .await
+                .unwrap(),
+            Some(AdmitOutcome::Duplicate(_))
+        ) {
+            completed = true;
+            break;
+        }
+    }
+    assert!(
+        completed,
+        "repair must retain multi-IO progress across 100ms polls"
+    );
+}
+
+#[tokio::test]
+async fn pending_history_token_reconstructs_the_same_fixed_cut_after_provider_restart() {
+    let cfg = InboxProducerConfig::new(BackendId("model".into()));
+    let (store, delay, p) = setup(cfg.clone());
+    p.admit(request("original-cut")).await.unwrap();
+    delay.millis.store(80, Ordering::Relaxed);
+    let pending = p
+        .enumerate_pending(
+            ShardId(42),
+            PageRequest {
+                after: None,
+                limit: NonZeroU32::new(128).unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(pending.items.is_empty());
+    let token = pending.next.unwrap();
+    let decoded: serde_json::Value =
+        serde_json::from_str(token.0.strip_prefix("scan-poll-v1:").unwrap()).unwrap();
+    assert_eq!(decoded["cut"], 1);
+    drop(p);
+    delay.millis.store(0, Ordering::Relaxed);
+    let restarted = provider(store, delay.clone(), cfg);
+    // Append history after the old round fixed its cut; it must not extend it.
+    let _ = restarted.repair(ShardId(42)).await;
+    let _ = restarted.discover(ShardId(42)).await;
+    restarted.admit(request("new-tail")).await.unwrap();
+    delay.millis.store(80, Ordering::Relaxed);
+    let mut page = PageRequest {
+        after: Some(token),
+        limit: NonZeroU32::new(128).unwrap(),
+    };
+    for turn in 0..10 {
+        let result = restarted
+            .enumerate_pending(ShardId(42), page.clone())
+            .await
+            .unwrap();
+        if !result.items.is_empty() {
+            assert_eq!(result.items, vec![Sid(SID.into())]);
+            assert!(result.next.is_none());
+            return;
+        }
+        page.after = result.next;
+        assert!(page.after.is_some(), "unfinished restart turn {turn}");
+    }
+    panic!("restarted discovery did not finish its fixed cut");
 }
 #[tokio::test]
 async fn inbox_capacity_rejects_before_new_intent_and_reserves_control_and_repair() {
@@ -197,6 +329,7 @@ async fn closure_returns_completed_pages_under_ordinary_document_latency() {
             runner_state: None,
             dispatch_seq: Default::default(),
             deadlines: vec![],
+            deadline_history: Default::default(),
             view_drafts: Default::default(),
             last_event_id: None,
             outbox: None,
@@ -208,17 +341,24 @@ async fn closure_returns_completed_pages_under_ordinary_document_latency() {
             last_active_at: TimestampMillis(100),
         },
     };
+    let mut raw = serde_json::to_value(envelope).unwrap();
+    raw["control"] = serde_json::json!({"revision":1,"mode":{"kind":"quarantined","isolation":{"operation_id":"close-slow","reason":"test","head":0,"failed_attempt":"attempt","closure":null,"completion":null}},"active_attempt":null,"last_business_progress":0,"last_recovery":null});
     store
         .model
-        .create_document(
-            &layout().ckpt(&owner.sid).unwrap(),
-            &serde_json::to_value(envelope).unwrap(),
-        )
+        .create_document(&layout().ckpt(&owner.sid).unwrap(), &raw)
         .await
         .unwrap();
     p.observe(&owner).await.unwrap();
     let GateCloseOutcome::Closed(closure) = p
-        .close_gate(&owner, 1, RequestId("close-slow".into()))
+        .close_gate(
+            bcs_service_api::port::repo::distributed::control::ControlGuard {
+                owner: owner.clone(),
+                expected_head: CommitSeq(0),
+                expected_revision: 1,
+            },
+            1,
+            RequestId("close-slow".into()),
+        )
         .await
         .unwrap()
     else {
@@ -365,5 +505,58 @@ async fn slow_pending_retry_cannot_consume_every_forward_scan_turn() {
         .unwrap()
         .items
         .contains(&sid)
+    );
+}
+
+#[tokio::test]
+async fn reader_accepts_normal_eighty_millisecond_authoritative_reads() {
+    let (_, delay, p) = setup(InboxProducerConfig::new(BackendId("model".into())));
+    p.admit(request("reader-realistic-rtt")).await.unwrap();
+    let mut feed = p.open(ShardId(42)).await.unwrap();
+    feed.watch(Sid(SID.into()), None).await.unwrap();
+    delay.millis.store(80, Ordering::Relaxed);
+    let batch = feed
+        .next(
+            ReadLimits {
+                max_sessions: NonZeroU32::MIN,
+                max_entries: NonZeroU32::MIN,
+                max_bytes: NonZeroU32::new(128 * 1024).unwrap(),
+            },
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+    assert!(batch.failures.is_empty(), "{:?}", batch.failures);
+    assert_eq!(batch.sessions.len(), 1);
+    assert_eq!(batch.sessions[0].entries.len(), 1);
+}
+
+#[tokio::test]
+async fn cancelling_a_read_keeps_its_watch_and_undelivered_input() {
+    let (_, delay, p) = setup(InboxProducerConfig::new(BackendId("model".into())));
+    p.admit(request("cancel-reader")).await.unwrap();
+    let mut feed = p.open(ShardId(42)).await.unwrap();
+    feed.watch(Sid(SID.into()), None).await.unwrap();
+    delay.millis.store(80, Ordering::Relaxed);
+    let limits = ReadLimits {
+        max_sessions: NonZeroU32::MIN,
+        max_entries: NonZeroU32::MIN,
+        max_bytes: NonZeroU32::new(128 * 1024).unwrap(),
+    };
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(20),
+            feed.next(limits.clone(), Duration::ZERO)
+        )
+        .await
+        .is_err()
+    );
+    delay.millis.store(0, Ordering::Relaxed);
+    let batch = feed.next(limits, Duration::ZERO).await.unwrap();
+    assert!(batch.failures.is_empty());
+    assert_eq!(batch.sessions.len(), 1);
+    assert_eq!(
+        batch.sessions[0].entries[0].input_id,
+        InputId("cancel-reader".into())
     );
 }

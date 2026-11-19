@@ -26,7 +26,23 @@ fn provider(
     clock: Arc<ClockAt>,
     config: InboxProducerConfig,
 ) -> StoreInboxProducer {
-    StoreInboxProducer::new(s.clone(), s.clone(), s.clone(), s, layout(), clock, config).unwrap()
+    StoreInboxProducer::new(
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
+        s.clone(),
+        s.clone(),
+        s.clone(),
+        s,
+        layout(),
+        clock,
+        config,
+    )
+    .unwrap()
 }
 fn config() -> InboxProducerConfig {
     InboxProducerConfig::new(BackendId("model".into()))
@@ -157,13 +173,32 @@ async fn durable_fixed_cut_advances_across_provider_restarts_and_new_history() {
     let restarted = provider(store.clone(), clock.clone(), config());
     let second = restarted.discover(ShardId(42)).await.unwrap();
     assert!(second.examined <= 64);
-    let restarted = provider(store.clone(), clock, config());
-    let third = restarted.discover(ShardId(42)).await.unwrap();
     let key = layout().admission_scan(ShardId(42), "discovery").unwrap();
-    let scan = store.read_document(&key).await.unwrap().unwrap().value;
-    assert_eq!(scan["cut"], 140);
-    assert_eq!(scan["cursor"], 140);
-    assert!(third.round_complete);
+    let mut previous = store.read_document(&key).await.unwrap().unwrap().value["cursor"]
+        .as_u64()
+        .unwrap();
+    let mut completed = false;
+    // The per-turn time budget can stop before the item limit under contention.
+    // Restart repeatedly while retaining the original cut and continuous cursor.
+    for _ in 0..12 {
+        let restarted = provider(store.clone(), clock.clone(), config());
+        let turn = restarted.discover(ShardId(42)).await.unwrap();
+        assert!(turn.examined <= 64);
+        let scan = store.read_document(&key).await.unwrap().unwrap().value;
+        assert_eq!(scan["cut"], 140);
+        let cursor = scan["cursor"].as_u64().unwrap();
+        assert!(cursor >= previous && cursor <= 140);
+        previous = cursor;
+        if turn.round_complete {
+            assert_eq!(cursor, 140);
+            completed = true;
+            break;
+        }
+    }
+    assert!(
+        completed,
+        "the fixed cut did not complete within bounded restarts"
+    );
 }
 #[tokio::test]
 async fn concurrent_reservation_cannot_spend_control_capacity() {
@@ -438,4 +473,69 @@ async fn corrupt_intent_validation_still_spends_the_scan_byte_budget() {
         bytes += serde_json::to_vec(&doc.value).unwrap().len();
     }
     assert!(bytes <= 1024 * 1024, "read {bytes} corrupt intent bytes");
+}
+
+#[tokio::test]
+async fn lost_disposable_hint_does_not_poison_a_confirmed_discovery_round() {
+    let store = Arc::new(Recorder::default());
+    let p = provider(
+        store.clone(),
+        Arc::new(ClockAt(AtomicI64::new(100))),
+        config(),
+    );
+    p.admit(request("hint-timeout")).await.unwrap();
+    let pause = store.pause_after("stream.append", &layout().wake(ShardId(42)), 1);
+    let mut finished = None;
+    for _ in 0..20 {
+        let report = p.discover(ShardId(42)).await.unwrap();
+        if report.round_complete {
+            finished = Some(report);
+            break;
+        }
+    }
+    pause.resume();
+    let report = finished.expect("bounded discovery completes");
+    assert_eq!(
+        report.pending, 0,
+        "authority was checked and activation persisted; a disposable hint is not a repair gap"
+    );
+    let root = store
+        .read_document(&layout().admission_root(ShardId(42)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(root.value["discovery_health"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn valid_single_io_profile_can_advance_maintenance() {
+    let s = Arc::new(Recorder::default());
+    let budget = Arc::new(
+        bcs_dist_store::budget::SharedScanBudget::new(bcs_dist_store::budget::ScanBudgetConfig {
+            pool_size: 4,
+            io_slots: 1,
+            ..Default::default()
+        })
+        .unwrap(),
+    );
+    let mut config = config();
+    config.connection_pool_size = 4;
+    let p = StoreInboxProducer::new(
+        budget,
+        Arc::new(bcs_dist_projection::OutputProjectionService),
+        s.clone(),
+        s.clone(),
+        s.clone(),
+        s,
+        layout(),
+        Arc::new(FixedClock(100)),
+        config,
+    )
+    .unwrap();
+    let mut complete = false;
+    for _ in 0..3 {
+        let result = p.repair(ShardId(42)).await.unwrap();
+        complete |= result.round_complete;
+    }
+    assert!(complete);
 }

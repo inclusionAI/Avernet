@@ -158,6 +158,7 @@ pub fn checkpoint() -> Checkpoint {
         commit_seq: CommitSeq(8),
         consumed: Some(position()),
         tasks: vec![TaskProgress {
+            steps: 0,
             tid: input().tid,
             phase: TaskPhase::Running,
             input: payload(),
@@ -168,12 +169,17 @@ pub fn checkpoint() -> Checkpoint {
             finalization: None,
         }]
         .into(),
-        runner_state: Some(TaskRunnerState { tid: input().tid, state: state() }),
+        runner_state: Some(TaskRunnerState {
+            tid: input().tid,
+            state: state(),
+        }),
         dispatch_seq: Default::default(),
         deadlines: vec![],
+        deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: Some(event_id()),
         outbox: Some(CommittedBatch {
+            created_at: None,
             commit_id: proof().commit_id,
             source_commit: CommitSeq(8),
             content_digest: Digest("batch-digest".into()),

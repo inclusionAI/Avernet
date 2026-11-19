@@ -64,6 +64,7 @@ impl InboxProducerConfig {
     fn validate(&self) -> Result<(), StoreError> {
         if self.wake_trim_every == 0
             || self.backend.0.is_empty()
+            || serde_json::to_vec(&self.backend.0).map_or(true, |b| b.len() > 256)
             || self.max_input_bytes == 0
             || self.max_input_bytes > 64 * 1024
             || self.max_document_bytes > 1024 * 1024
@@ -97,8 +98,10 @@ pub const LOG_GENERATION: &str = "1";
 #[derive(Clone)]
 pub struct StoreInboxProducer {
     pub(super) inner: Arc<Inner>,
+    pub(super) scans: super::scan_scheduler::ScanHandle,
 }
 pub(super) struct Inner {
+    pub projection: Arc<dyn bcs_service_api::core::dist_projection::OutputProjectionCoreService>,
     pub documents: Arc<dyn DocumentStorePlugin>,
     pub zset: Arc<dyn ZSetStorePlugin>,
     pub stream: Arc<dyn StreamStorePlugin>,
@@ -111,11 +114,17 @@ pub(super) struct Inner {
     pub wake_appends: AtomicU64,
     pub receipts: std::sync::Mutex<std::collections::BTreeMap<String, super::consumer::Delivery>>,
     pub receipt_sequence: AtomicU64,
-    pub scan_rate: std::sync::Mutex<super::maintenance::Rate>,
+    pub scan_budget: Arc<dyn bcs_service_api::port::repo::distributed::budget::ScanBudgetPort>,
     pub health: std::sync::Mutex<super::health::Health>,
 }
 impl StoreInboxProducer {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "injected storage and pure validation boundaries"
+    )]
     pub fn new(
+        scan_budget: Arc<dyn bcs_service_api::port::repo::distributed::budget::ScanBudgetPort>,
+        projection: Arc<dyn bcs_service_api::core::dist_projection::OutputProjectionCoreService>,
         kv: Arc<dyn KvStorePlugin>,
         documents: Arc<dyn DocumentStorePlugin>,
         zset: Arc<dyn ZSetStorePlugin>,
@@ -131,8 +140,11 @@ impl StoreInboxProducer {
             (stream.as_ref(), StoreCapability::Stream),
         ])?;
         config.validate()?;
+        crate::budget::validate_profile(&scan_budget.profile(), config.connection_pool_size)?;
         Ok(Self {
+            scans: super::scan_scheduler::ScanHandle::new(),
             inner: Arc::new(Inner {
+                projection,
                 documents,
                 zset,
                 stream,
@@ -145,7 +157,7 @@ impl StoreInboxProducer {
                 wake_appends: AtomicU64::new(0),
                 receipts: std::sync::Mutex::new(Default::default()),
                 receipt_sequence: AtomicU64::new(0),
-                scan_rate: std::sync::Mutex::new(Default::default()),
+                scan_budget,
                 health: std::sync::Mutex::new(Default::default()),
             }),
         })
@@ -252,6 +264,11 @@ impl StoreInboxProducer {
 }
 #[async_trait]
 impl InboxProducerPort for StoreInboxProducer {
+    fn scan_budget_profile(
+        &self,
+    ) -> Option<bcs_service_api::port::repo::distributed::budget::ScanBudgetProfile> {
+        Some(self.inner.scan_budget.profile())
+    }
     async fn admit(&self, mut request: AdmitRequest) -> Result<AdmitOutcome, StoreError> {
         if let Err(error) = self.prepare(&mut request).await {
             if matches!(&error,StoreError::Invalid{code} if code=="frozen_spec_conflict" || code=="frozen_task_conflict")

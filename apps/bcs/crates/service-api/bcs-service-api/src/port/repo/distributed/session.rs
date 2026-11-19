@@ -15,6 +15,9 @@ pub enum TaskPhase {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskProgress {
+    /// Committed Runner reductions, excluding replay and consumed-only work.
+    #[serde(default)]
+    pub steps: u32,
     pub tid: Tid,
     pub phase: TaskPhase,
     pub input: Payload,
@@ -47,6 +50,8 @@ pub struct TaskRunnerState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchSequence {
+    /// Exact task ownership; hierarchical-looking IDs are not a scope proof.
+    pub tid: Tid,
     pub holder_epoch: HolderEpoch,
     pub sequence: InputSeq,
 }
@@ -86,6 +91,10 @@ pub struct Effect {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CommittedBatch {
+    /// Frozen before the first Blob/commit IO. Diagnostic age only; never lease
+    /// authority. Omission preserves hashes of earlier coordination-only data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<TimestampMillis>,
     pub commit_id: CommitId,
     pub source_commit: CommitSeq,
     pub content_digest: Digest,
@@ -102,6 +111,10 @@ pub struct Checkpoint {
     pub runner_state: Option<TaskRunnerState>,
     pub dispatch_seq: BTreeMap<Did, DispatchSequence>,
     pub deadlines: Vec<Deadline>,
+    /// Retained identities for this Task lifetime, including canceled/fired
+    /// occurrences. Reusing an absent identity cannot arm a second timeout.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub deadline_history: BTreeMap<DeadlineId, Deadline>,
     pub view_drafts: BTreeMap<Tid, TaskContent>,
     pub last_event_id: Option<EventId>,
     pub outbox: Option<CommittedBatch>,
@@ -137,14 +150,28 @@ pub enum AcquireOutcome {
     Acquired(AcquiredSession),
     Fenced,
     /// Current graceful handoff still protects the exact source owner.
-    Deferred { check_after: std::time::Duration },
+    Deferred {
+        check_after: std::time::Duration,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SessionTransferOutcome { Transferred, AlreadyTransferred, Fenced }
+pub enum SessionTransferOutcome {
+    Transferred,
+    AlreadyTransferred,
+    Fenced,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CommitPurpose {
+    Ordinary { control_revision: u64 },
+    Isolation { operation_id: RequestId },
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommitRequest {
+    pub purpose: CommitPurpose,
     pub owner: SessionOwnership,
     /// Exact current business sequence; candidate must advance it by one.
     pub expected_commit_seq: CommitSeq,
@@ -184,12 +211,16 @@ pub trait SessionStorePort: Send + Sync {
     /// None means no local cache limit. Runtime wiring must reject a configured
     /// active-session limit above Some(capacity), and apply backpressure before
     /// issuing acquisitions. Unknown writes still occupy their reservations.
-    fn local_session_capacity(&self) -> Option<usize> { None }
+    fn local_session_capacity(&self) -> Option<usize> {
+        None
+    }
 
     /// Release a quiescent local cache entry only. Never delete durable state or
     /// revoke another owner. The caller must resolve current-round/commit/effect
     /// and scheduling operations first. Providers without a cache need no work.
-    async fn release_local(&self, _owner: &SessionOwnership) -> Result<(), StoreError> { Ok(()) }
+    async fn release_local(&self, _owner: &SessionOwnership) -> Result<(), StoreError> {
+        Ok(())
+    }
     /// Read the immutable specification established by InboxProducerPort::admit,
     /// including before the first checkpoint exists. Does not acquire ownership,
     /// create a session, or refresh its frozen definition. None means absent;
@@ -208,8 +239,12 @@ pub trait SessionStorePort: Send + Sync {
     ) -> Result<AcquireOutcome, StoreError>;
     /// Source is quiescent before calling. Preserve the latest full envelope;
     /// never overwrite with a caller snapshot. Uncertain attempts retain identity.
-    async fn handoff_session(&self, source: &SessionOwnership, target: &ShardClaim, request_id: &RequestId)
-        -> Result<SessionTransferOutcome, StoreError>;
+    async fn handoff_session(
+        &self,
+        source: &SessionOwnership,
+        target: &ShardClaim,
+        request_id: &RequestId,
+    ) -> Result<SessionTransferOutcome, StoreError>;
     async fn load(&self, sid: &Sid) -> Result<Option<CheckpointEnvelope>, StoreError>;
     /// Atomically validate sid-to-shard membership, the sealed owner's exact
     /// node/incarnation/epoch, and expected_commit_seq AND

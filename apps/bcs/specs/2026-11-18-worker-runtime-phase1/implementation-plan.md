@@ -9,7 +9,9 @@ owner: BCS distributed Worker
 Implements the approved development scope in [the SPEC](spec.md). The proposed
 SPEC remains the review baseline; this execution record does not claim deployment
 or change the boundary of phase 1. Public implementation starts from `8811efbc97`,
-rebased onto GitHub dev `3a925fd474`. Existing coordination/store/API tests pass.
+rebased onto GitHub dev `3a925fd474` before development and refreshed onto
+`687c231d3c` before publication. The final refresh only adds unrelated upstream
+changes; no feature conflict resolution was needed.
 
 Public behavior, SQL persistence semantics, migrations, recovery and resource
 limits belong in Avernet. Host repositories supply storage plugins, credentials,
@@ -110,4 +112,60 @@ separately from public implementation status.
   persistence, which remain OutcomeUnknown. Ref quotas count parsed public JSON
   encoding, including legal numeric expansion. Entire read calls and each CAS
   episode have enforced deadlines. This is not complete Worker acceptance.
-- Remaining Task 4 Dispatch provider, Tasks 5–8 and full host composition: pending.
+- Task 4 Dispatch slice: four durable providers implemented; independent SPEC and
+  quality reviews pass. All 160 store tests (23 Dispatch tests) and strict target
+  Clippy pass. Slow IO, permanently delayed items, lost cursor replies, retained
+  control receipts and disposable notification trim have regression coverage.
+- Task 5: Worker processor is wired to the real public providers. Independent
+  SPEC and quality reviews pass after fixing the recovery and boundary findings.
+  Fourteen helper tests and ten provider execution tests cover two-commit archival,
+  quota termination, large Blob recovery, canceled processing futures, takeover,
+  same-owner reacquisition and reader failures with mixed healthy delivery.
+  Target strict Clippy passes. The shared pure encoding helper, frozen metadata
+  reader and admission profile validation are included. Full runtime acceptance
+  still requires the control, capacity and host composition tasks below.
+- Task 6: public control/closure providers, Worker integration, application
+  authorization and independent Dispatch Supervisor are implemented. SPEC and
+  quality review pass; sixteen Worker control regressions and fifteen Supervisor
+  cases cover exact recovery identities, immutable terminal facts, isolated
+  sessions and uncertain remote obligations.
+- Task 7: shared scan quotas/IO, reader/cache lifecycle, fair local release,
+  encoded metadata limits, independent input quota, temporary Thinking,
+  incremental Blob/Dispatch reads and runtime observations are implemented.
+  Actual public-type serialization tests cover the conservative worst checkpoint,
+  ordinary outbox and finalization reserve. A final resource review found and
+  fixed cancelled reader delivery, input/output quota coupling and unrepresentable
+  deadlines; targeted regressions pass. Final independent quality review also
+  found and fixed failed durable outboxes monopolizing local capacity: confirmed
+  replay can park safely, including cancellation and concurrent isolation, while
+  unknown commits remain resident. SPEC and quality reviews pass. The final
+  public runtime/provider suite passes 389 tests, plus 34 distributed harness
+  self-tests.
+
+## Integration and delivery evidence
+
+The host composition uses real Proxy transport and the public SQLite archive.
+Two Worker takeover with an actually applied checkpoint reply dropped passes:
+the successor replays effects without rerunning the Runner, and an independent
+SQLite connection reads the same immutable archive. Isolation closes and archives
+two accepted tasks, rejects unauthorized recovery, confirms exact recovery retry,
+and runs a new task in the reopened generation. Dispatch supervision delivers
+late definitive remote evidence without changing the completed Task archive.
+
+Final slow-IO review added retained Dispatch scans across 100ms polls, cancellation
+safe staged delivery, single-IO pool progress, and an independent Thinking input
+bound. Disposable notification failure after authoritative discovery no longer
+poisons scan health. Focused regressions and real Proxy composition pass. A small
+explicit capacity fixture verifies normal-budget refusal, reserved critical input,
+provider restart and complete historical discovery; no production capacity profile
+is enabled or certified. Restricted source/config/measurements stay in the host.
+
+The public full suite and final independent quality review pass. Target strict
+lint and delivery checks are recorded separately. The repository-wide architecture inventory reports
+existing boundary/naming/conformance debt; required push gates remain enabled.
+New public contracts have reusable assertions invoked by concrete provider tests;
+static inventory was compared with GitHub dev to distinguish existing missing
+entries from this change. Reconstructed readers use the same conformance harness.
+Production failover durability and real host database verification remain distinct;
+the latter was explicitly deferred. GitHub publication, internal mirror availability,
+OCB gitlink integration and deployment are separate delivery states.

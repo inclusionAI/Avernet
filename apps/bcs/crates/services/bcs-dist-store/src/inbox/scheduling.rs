@@ -1,9 +1,7 @@
 use super::{StoreInboxProducer, state::*, storage::*};
 use async_trait::async_trait;
 use bcs_dist_model::*;
-use bcs_service_api::port::repo::distributed::{
-    admission::*, common::*, inbox::*, session::CheckpointEnvelope,
-};
+use bcs_service_api::port::repo::distributed::{admission::*, common::*, control::*, inbox::*};
 use bcs_store_api::zset::{ZSetEntry, ZSetRange};
 use std::ops::Bound;
 
@@ -13,9 +11,14 @@ impl StoreInboxProducer {
             return Ok(false);
         }
         Ok(self
-            .load::<CheckpointEnvelope>(&self.inner.layout.ckpt(&owner.sid)?)
+            .load::<serde_json::Value>(&self.inner.layout.ckpt(&owner.sid)?)
             .await?
-            .is_some_and(|(_, c)| c.owner == owner.owner))
+            .is_some_and(|(_, c)| {
+                serde_json::from_value::<ShardOwner>(c["owner"].clone())
+                    .ok()
+                    .as_ref()
+                    == Some(&owner.owner)
+            }))
     }
     pub(super) async fn activate(&self, sid: &Sid, op: &str) -> Result<(), StoreError> {
         let key = self.inner.layout.schedule(sid)?;
@@ -37,6 +40,11 @@ impl StoreInboxProducer {
 }
 #[async_trait]
 impl InboxSchedulingPort for StoreInboxProducer {
+    fn scan_budget_profile(
+        &self,
+    ) -> Option<bcs_service_api::port::repo::distributed::budget::ScanBudgetProfile> {
+        Some(self.inner.scan_budget.profile())
+    }
     async fn observe(&self, owner: &SessionOwnership) -> Result<ScheduleObservation, StoreError> {
         let key = self.inner.layout.schedule(&owner.sid)?;
         let mut budget = EqBudget::new();
@@ -53,13 +61,13 @@ impl InboxSchedulingPort for StoreInboxProducer {
             }) {
                 return Ok(ScheduleObservation::Fenced);
             }
-            let token = ScheduleToken {
+            let observed = ScheduleToken {
                 sid: owner.sid.clone(),
                 owner_epoch: owner.owner.epoch,
                 opaque: s.activation.to_string(),
             };
             if s.owner.as_ref() == Some(&owner.owner) && s.listening {
-                return Ok(ScheduleObservation::Observed(token));
+                return Ok(ScheduleObservation::Observed(observed));
             }
             s.owner = Some(owner.owner.clone());
             s.listening = true;
@@ -70,7 +78,7 @@ impl InboxSchedulingPort for StoreInboxProducer {
                 )
                 .await?
             {
-                return Ok(ScheduleObservation::Observed(token));
+                return Ok(ScheduleObservation::Observed(observed));
             }
         }
     }
@@ -118,6 +126,13 @@ impl InboxSchedulingPort for StoreInboxProducer {
         page: PageRequest,
     ) -> Result<Page<Sid>, StoreError> {
         let work = async {
+            let _scan_io =
+                self.inner
+                    .scan_budget
+                    .try_io()
+                    .ok_or_else(|| StoreError::NotApplied {
+                        code: "scan_io_busy".into(),
+                    })?;
             if page.limit.get() > 128 {
                 return Err(invalid("page_limit"));
             }
@@ -173,15 +188,37 @@ impl InboxSchedulingPort for StoreInboxProducer {
 }
 #[async_trait]
 impl AdmissionControlPort for StoreInboxProducer {
+    async fn gate_state(&self, owner: &SessionOwnership) -> Result<AdmissionGateState, StoreError> {
+        if !self.sealed(owner).await? {
+            return Err(invalid("gate_owner_fenced"));
+        }
+        let (_, s) = self.schedule(&owner.sid).await?;
+        if s.owner.as_ref() != Some(&owner.owner) {
+            return Err(invalid("gate_owner_fenced"));
+        }
+        Ok(AdmissionGateState {
+            generation: s.generation,
+            closed_operation: s.closed.as_ref().map(|c| c.operation.clone()),
+            closure: s.closed.and_then(|c| {
+                c.cut.map(|cut| AdmissionClosure {
+                    sid: owner.sid.clone(),
+                    generation: c.generation,
+                    operation_id: c.operation,
+                    journal_cut: cut,
+                })
+            }),
+        })
+    }
     async fn close_gate(
         &self,
-        owner: &SessionOwnership,
+        guard: ControlGuard,
         generation: u64,
         operation: RequestId,
     ) -> Result<GateCloseOutcome, StoreError> {
         if operation.0.is_empty() || operation.0.len() > 256 {
             return Err(invalid("closure_identity"));
         }
+        let owner = &guard.owner;
         let key = self.inner.layout.schedule(&owner.sid)?;
         let mut budget = EqBudget::new();
         loop {
@@ -189,12 +226,27 @@ impl AdmissionControlPort for StoreInboxProducer {
             if !budget.io(&operation.0, self.sealed(owner)).await? {
                 return Ok(GateCloseOutcome::Fenced);
             }
+            if !budget
+                .io(&operation.0, self.authorized_close(&guard, &operation))
+                .await?
+            {
+                return Ok(GateCloseOutcome::Conflict);
+            }
             let (v, mut s) = budget.io(&operation.0, self.schedule(&owner.sid)).await?;
             if s.owner.as_ref() != Some(&owner.owner) {
                 return Ok(GateCloseOutcome::Fenced);
             }
-            if s.generation != generation {
+            if s.generation != generation || s.control_revision > guard.expected_revision {
                 return Ok(GateCloseOutcome::Conflict);
+            }
+            s.control_revision = guard.expected_revision;
+            if s.closed
+                .as_ref()
+                .is_some_and(|closed| closed.operation != operation)
+            {
+                // A freshly authorized isolation supersedes an older close.
+                // The new fixed cut will re-cover every old-generation intent.
+                s.closed = None;
             }
             if let Some(closed) = &s.closed {
                 if closed.operation != operation || closed.generation != generation {
@@ -309,7 +361,32 @@ impl AdmissionControlPort for StoreInboxProducer {
 }
 
 impl StoreInboxProducer {
-    async fn closure_item(
+    pub(super) async fn authorized_close(
+        &self,
+        guard: &ControlGuard,
+        operation: &RequestId,
+    ) -> Result<bool, StoreError> {
+        let Some((_, raw)) = self
+            .load::<serde_json::Value>(&self.inner.layout.ckpt(&guard.owner.sid)?)
+            .await?
+        else {
+            return Ok(false);
+        };
+        let control: SessionControl = crate::codec::decode_json(
+            raw.get("control").cloned().unwrap_or(
+                serde_json::to_value(SessionControl::default())
+                    .map_err(|_| invalid("control_encoding"))?,
+            ),
+        )?;
+        let matching = matches!(&control.mode,ControlMode::Quarantined { isolation } | ControlMode::Blocked { isolation } if isolation.operation_id==*operation);
+        Ok(matching
+            && control.revision == guard.expected_revision
+            && raw["owner"]
+                == serde_json::to_value(&guard.owner.owner)
+                    .map_err(|_| invalid("owner_encoding"))?
+            && raw["checkpoint"]["commit_seq"] == guard.expected_head.0)
+    }
+    pub(super) async fn closure_item(
         &self,
         closure: &AdmissionClosure,
         shard: ShardId,

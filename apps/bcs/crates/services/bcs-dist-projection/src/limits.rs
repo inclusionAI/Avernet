@@ -20,6 +20,16 @@ pub(super) fn validate(limits: &OutputLimits) -> Result<(), ProjectionError> {
         return Err(invalid("empty_snapshot_bytes"));
     }
     let maxima = PHASE_ONE_OUTPUT_LIMITS;
+    // Phase one enables one bounded physical frame. A semantic Task quota may
+    // shrink independently, but cannot change the Session's persistence frame.
+    if limits.max_checkpoint_bytes != maxima.max_checkpoint_bytes
+        || limits.max_outbox_bytes != maxima.max_outbox_bytes
+        || limits.checkpoint_finalization_reserve != maxima.checkpoint_finalization_reserve
+        || limits.outbox_finalization_reserve != maxima.outbox_finalization_reserve
+        || limits.max_reference_metadata_bytes != maxima.max_reference_metadata_bytes
+    {
+        return Err(invalid("unsupported_physical_profile"));
+    }
     for (value, maximum) in [
         (
             u64::from(limits.max_unit_bytes),

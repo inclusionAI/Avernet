@@ -4,6 +4,7 @@ members = [
     "crates/plugin-api/bcs-app-identity-api",
     "crates/plugin-api/bcs-tracing-api",
     "crates/auxiliary/bcs-network-tracing",
+    "crates/auxiliary/bcs-dist-encoding",
     # bootstrap
     "crates/bootstrap/bcs",
     # adapters
@@ -160,6 +161,7 @@ version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
 bcs-dist-model = { path = "crates/contracts/bcs-dist-model" }
+bcs-dist-encoding = { path = "crates/auxiliary/bcs-dist-encoding" }
 bcs-dist-store = { path = "crates/services/bcs-dist-store" }
 bcs-dist-projection = { path = "crates/services/bcs-dist-projection" }
 bcs-dist-worker = { path = "crates/services/bcs-dist-worker" }

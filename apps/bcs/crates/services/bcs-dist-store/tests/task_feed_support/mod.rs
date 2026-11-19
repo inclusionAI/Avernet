@@ -151,9 +151,11 @@ impl Fixture {
                 runner_state: None,
                 dispatch_seq: BTreeMap::new(),
                 deadlines: vec![],
+                deadline_history: Default::default(),
                 view_drafts: BTreeMap::new(),
                 last_event_id: None,
                 outbox: Some(CommittedBatch {
+                    created_at: None,
                     commit_id: receipt.commit_id,
                     source_commit: receipt.sequence,
                     content_digest: receipt.content_digest,

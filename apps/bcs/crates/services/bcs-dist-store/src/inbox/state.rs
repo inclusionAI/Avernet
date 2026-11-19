@@ -90,7 +90,12 @@ pub(super) struct ClosedGate {
 pub(super) struct Schedule {
     pub schema_version: u32,
     pub generation: u64,
+    /// Monotonic checkpoint control revision fences cross-document transitions.
+    #[serde(default)]
+    pub control_revision: u64,
     pub closed: Option<ClosedGate>,
+    #[serde(default)]
+    pub recovered: Option<bcs_service_api::port::repo::distributed::admission::GateRecoveryReceipt>,
     pub owner: Option<ShardOwner>,
     pub activation: u64,
     pub next_check: Option<TimestampMillis>,
@@ -102,7 +107,9 @@ impl Default for Schedule {
         Self {
             schema_version: 1,
             generation: 1,
+            control_revision: 0,
             closed: None,
+            recovered: None,
             owner: None,
             activation: 0,
             next_check: None,

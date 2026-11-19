@@ -6,7 +6,9 @@ mod common;
 use bcs_dist_model::*;
 use bcs_dist_store::codec::decode_inbox_entry;
 use bcs_dist_store::coordination::CoordinationStore;
-use bcs_dist_store::inbox::{InboxProducerConfig, StoreInboxProducer, read_listener, ListenerState};
+use bcs_dist_store::inbox::{
+    InboxProducerConfig, ListenerState, StoreInboxProducer, read_listener,
+};
 use bcs_dist_store::layout::KeyLayout;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::inbox::*;
@@ -26,6 +28,13 @@ const NOW: i64 = 1_794_371_200_123;
 
 fn producer(store: &Arc<Recorder>) -> StoreInboxProducer {
     StoreInboxProducer::new(
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
         store.clone(),
         store.clone(),
         store.clone(),
@@ -69,14 +78,33 @@ async fn writes_happen_in_the_fixed_order() {
         .await
         .unwrap();
     assert!(matches!(outcome, AdmitOutcome::Accepted(ref r) if r.tid.0 == TID));
-    let calls=store.calls();
-    let root=calls.iter().position(|c|c.starts_with("document.create") && c.ends_with(":admission-root")).unwrap();
-    let canonical=calls.iter().position(|c|c.starts_with("document.create") && c.contains(":canonical:")).unwrap();
-    let slot=calls.iter().position(|c|c.starts_with("document.create") && c.contains(":schedule:")).unwrap();
-    let task_create=calls.iter().position(|c|c.starts_with("document.create") && c.contains(":task:")).unwrap();
-    let inbox=calls.iter().position(|c|c.starts_with("stream.append") && c.contains(":inbox:")).unwrap();
-    assert!(root<canonical && canonical<slot && slot<task_create && task_create<inbox);
-    assert!(calls.len()<=48,"bounded normal-path provider calls: {}",calls.len());
+    let calls = store.calls();
+    let root = calls
+        .iter()
+        .position(|c| c.starts_with("document.create") && c.ends_with(":admission-root"))
+        .unwrap();
+    let canonical = calls
+        .iter()
+        .position(|c| c.starts_with("document.create") && c.contains(":canonical:"))
+        .unwrap();
+    let slot = calls
+        .iter()
+        .position(|c| c.starts_with("document.create") && c.contains(":schedule:"))
+        .unwrap();
+    let task_create = calls
+        .iter()
+        .position(|c| c.starts_with("document.create") && c.contains(":task:"))
+        .unwrap();
+    let inbox = calls
+        .iter()
+        .position(|c| c.starts_with("stream.append") && c.contains(":inbox:"))
+        .unwrap();
+    assert!(root < canonical && canonical < slot && slot < task_create && task_create < inbox);
+    assert!(
+        calls.len() <= 48,
+        "bounded normal-path provider calls: {}",
+        calls.len()
+    );
     let created = store
         .model
         .get_json("bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e")
@@ -105,15 +133,21 @@ async fn writes_happen_in_the_fixed_order() {
 async fn same_input_twice_is_one_success() {
     let store = Arc::new(Recorder::default());
     let p = producer(&store);
-    let first = p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    let first = p
+        .admit(new_task_request("adm-9c41e7", "hello"))
+        .await
+        .unwrap();
     store.clear();
-    let second = p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    let second = p
+        .admit(new_task_request("adm-9c41e7", "hello"))
+        .await
+        .unwrap();
     let AdmitOutcome::Accepted(receipt) = first else {
         panic!("first admission not accepted: {first:?}");
     };
     assert_eq!(second, AdmitOutcome::Duplicate(receipt));
-    assert!(store.calls().len()<=6);
-    assert!(store.calls().iter().all(|c|c.starts_with("document.read")));
+    assert!(store.calls().len() <= 6);
+    assert!(store.calls().iter().all(|c| c.starts_with("document.read")));
     assert_eq!(inbox_len(&store).await, 1);
 }
 
@@ -121,8 +155,13 @@ async fn same_input_twice_is_one_success() {
 async fn same_id_with_other_content_is_a_conflict() {
     let store = Arc::new(Recorder::default());
     let p = producer(&store);
-    p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
-    let outcome = p.admit(new_task_request("adm-9c41e7", "bye")).await.unwrap();
+    p.admit(new_task_request("adm-9c41e7", "hello"))
+        .await
+        .unwrap();
+    let outcome = p
+        .admit(new_task_request("adm-9c41e7", "bye"))
+        .await
+        .unwrap();
     assert_eq!(outcome, AdmitOutcome::ContentConflict);
     assert_eq!(inbox_len(&store).await, 1);
 }
@@ -162,7 +201,10 @@ async fn a_spec_of_another_group_is_a_conflict() {
     let mut other = new_task_request("adm-2", "again");
     other.create_session = Some(spec("grp-other"));
     assert_eq!(p.admit(other).await.unwrap(), AdmitOutcome::ContentConflict);
-    assert_eq!(store.model.read_document(key).await.unwrap().unwrap(), original);
+    assert_eq!(
+        store.model.read_document(key).await.unwrap().unwrap(),
+        original
+    );
     assert_eq!(inbox_len(&store).await, 1);
 }
 
@@ -179,9 +221,18 @@ async fn repeated_creation_preserves_the_first_spec_and_task() {
     // Rebuilding a request from newer configuration cannot change a frozen
     // session, nor reset the task under the same identity.
     retry.create_session.as_mut().unwrap().workflow.revision = "4".into();
-    assert!(matches!(p.admit(retry).await.unwrap(), AdmitOutcome::Accepted(_)));
-    assert_eq!(store.model.read_document(spec_key).await.unwrap().unwrap(), original_spec);
-    assert_eq!(store.model.read_document(task_key).await.unwrap().unwrap(), original_task);
+    assert!(matches!(
+        p.admit(retry).await.unwrap(),
+        AdmitOutcome::Accepted(_)
+    ));
+    assert_eq!(
+        store.model.read_document(spec_key).await.unwrap().unwrap(),
+        original_spec
+    );
+    assert_eq!(
+        store.model.read_document(task_key).await.unwrap().unwrap(),
+        original_task
+    );
     assert_eq!(original_spec.version, Version(1));
     assert_eq!(original_task.version, Version(1));
 }
@@ -190,7 +241,10 @@ async fn repeated_creation_preserves_the_first_spec_and_task() {
 async fn admission_does_not_require_full_atomic_json() {
     let store = Arc::new(Recorder::without_capability(StoreCapability::AtomicJson));
     assert!(matches!(
-        producer(&store).admit(new_task_request("adm-1", "hello")).await.unwrap(),
+        producer(&store)
+            .admit(new_task_request("adm-1", "hello"))
+            .await
+            .unwrap(),
         AdmitOutcome::Accepted(_)
     ));
     assert!(store.calls().iter().all(|call| !call.starts_with("json.")));
@@ -203,24 +257,42 @@ async fn worker_reads_the_admitted_spec_through_the_same_document_api() {
     let expected = request.create_session.clone();
     producer(&store).admit(request).await.unwrap();
     let sessions = CoordinationStore::new(
-        store.clone(), Arc::new(Model::default()), store.clone(),
+        store.clone(),
+        Arc::new(Model::default()),
+        store.clone(),
         KeyLayout::new("c01", "main").unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
     store.clear();
     assert_eq!(sessions.get_spec(&Sid(SID.into())).await.unwrap(), expected);
-    assert_eq!(store.calls(), vec!["document.read bcn:v1:c01:main:s0042:spec:s0042.7f3a9c"]);
+    assert_eq!(
+        store.calls(),
+        vec!["document.read bcn:v1:c01:main:s0042:spec:s0042.7f3a9c"]
+    );
 }
 
 #[test]
 fn admission_requires_document_cas() {
     let store = Arc::new(Recorder::without_capability(StoreCapability::DocumentCas));
     let built = StoreInboxProducer::new(
-        store.clone(), store.clone(), store.clone(), store.clone(),
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
         KeyLayout::new("c01", "main").unwrap(),
         Arc::new(FixedClock(NOW)),
         InboxProducerConfig::new(BackendId("tbase".into())),
     );
-    assert!(matches!(built, Err(StoreError::NotApplied { ref code }) if code.contains("DocumentCas")));
+    assert!(
+        matches!(built, Err(StoreError::NotApplied { ref code }) if code.contains("DocumentCas"))
+    );
     assert!(store.calls().is_empty());
 }
 
@@ -235,7 +307,11 @@ async fn listener_reads_durable_schedule_state() {
         .admit(new_task_request("adm-9c41e7", "hello"))
         .await
         .unwrap();
-    let wakes = store.calls().iter().filter(|c| c.starts_with("stream.append") && c.ends_with(":wake")).count();
+    let wakes = store
+        .calls()
+        .iter()
+        .filter(|c| c.starts_with("stream.append") && c.ends_with(":wake"))
+        .count();
     assert_eq!(wakes, 1);
 }
 
@@ -258,6 +334,13 @@ async fn a_missing_capability_stops_construction() {
     model.ordinary_disabled = true;
     let store = Arc::new(Recorder::with_model(model));
     let built = StoreInboxProducer::new(
+        Arc::new(
+            bcs_dist_store::budget::SharedScanBudget::new(
+                bcs_dist_store::budget::ScanBudgetConfig::default(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
         store.clone(),
         store.clone(),
         store.clone(),
@@ -292,7 +375,12 @@ async fn an_intermediate_agent_event_is_appended_and_activates_the_session() {
     assert_eq!(pos.sid.0, SID);
     assert_eq!(pos.token.backend.0, "tbase");
     assert_eq!(pos.token.generation.0, "1");
-    assert!(store.calls().iter().any(|c|c.starts_with("document.replace") && c.contains(":schedule:")));
+    assert!(
+        store
+            .calls()
+            .iter()
+            .any(|c| c.starts_with("document.replace") && c.contains(":schedule:"))
+    );
     let page = StreamStorePlugin::range(
         &store.model,
         "bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
@@ -371,7 +459,10 @@ async fn a_new_task_must_match_the_frozen_session_scope() {
         .unwrap();
     assert_eq!(outcome, AdmitOutcome::ContentConflict);
     assert!(
-        store.calls().iter().all(|c| c.starts_with("kv.get") || c.starts_with("document.read")),
+        store
+            .calls()
+            .iter()
+            .all(|c| c.starts_with("kv.get") || c.starts_with("document.read")),
         "no writes: {:?}",
         store.calls()
     );

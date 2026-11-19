@@ -43,6 +43,13 @@ pub struct OutputProjection {
 /// immutable references resolved and verified. Errors preserve every input.
 pub trait OutputProjectionCoreService: Send + Sync {
     fn validate_limits(&self, limits: &OutputLimits) -> Result<(), ProjectionError>;
+    /// Validate bounded frozen metadata repeated in checkpoint/effect envelopes.
+    /// Physical framing is shared across tasks; semantic quotas may be reduced.
+    fn validate_session_limits(
+        &self,
+        spec: &SessionSpec,
+        limits: &OutputLimits,
+    ) -> Result<(), ProjectionError>;
     /// Used at admission/acquisition/publication to reject replacement of a
     /// task's frozen profile. This does not establish scope or write authority.
     fn validate_task_limits(

@@ -88,7 +88,12 @@ impl InboxSchedulingPort for Script {
 
 #[async_trait]
 impl SessionStorePort for Script {
-    async fn handoff_session(&self, source: &SessionOwnership, target: &ShardClaim, id: &RequestId) -> Result<SessionTransferOutcome, StoreError> {
+    async fn handoff_session(
+        &self,
+        source: &SessionOwnership,
+        target: &ShardClaim,
+        id: &RequestId,
+    ) -> Result<SessionTransferOutcome, StoreError> {
         self.call("SessionStorePort::handoff_session", (source, target, id))
     }
     async fn get_spec(&self, sid: &Sid) -> Result<Option<SessionSpec>, StoreError> {
@@ -139,9 +144,15 @@ impl SessionStorePort for Script {
 
 #[async_trait]
 impl ShardLeasePort for Script {
-    async fn handoff(&self, request: HandoffRequest) -> Result<HandoffOutcome, StoreError> { self.call("ShardLeasePort::handoff", (request,)) }
-    async fn source_done(&self, target: &ShardClaim, id: &RequestId) -> Result<bool, StoreError> { self.call("ShardLeasePort::source_done", (target, id)) }
-    async fn clear_handoff(&self, target: &ShardClaim, id: &RequestId) -> Result<bool, StoreError> { self.call("ShardLeasePort::clear_handoff", (target, id)) }
+    async fn handoff(&self, request: HandoffRequest) -> Result<HandoffOutcome, StoreError> {
+        self.call("ShardLeasePort::handoff", (request,))
+    }
+    async fn source_done(&self, target: &ShardClaim, id: &RequestId) -> Result<bool, StoreError> {
+        self.call("ShardLeasePort::source_done", (target, id))
+    }
+    async fn clear_handoff(&self, target: &ShardClaim, id: &RequestId) -> Result<bool, StoreError> {
+        self.call("ShardLeasePort::clear_handoff", (target, id))
+    }
     async fn claim(&self, request: ClaimShard) -> Result<LeaseClaim, StoreError> {
         self.call("ShardLeasePort::claim", (request,))
     }
@@ -163,7 +174,10 @@ impl MembershipPort for Script {
         control_address: String,
         ttl: Duration,
     ) -> Result<MembershipLease, StoreError> {
-        self.call("MembershipPort::register", (instance, role, control_address, ttl))
+        self.call(
+            "MembershipPort::register",
+            (instance, role, control_address, ttl),
+        )
     }
 
     async fn renew(&self, lease: &MembershipLease, ttl: Duration) -> Result<Renewal, StoreError> {
@@ -241,6 +255,13 @@ impl TaskPublisherPort for Script {
 
 #[async_trait]
 impl TaskReaderPort for Script {
+    async fn load_snapshot(
+        &self,
+        scope: &TaskScope,
+        tid: &Tid,
+    ) -> Result<Option<TaskSnapshot>, StoreError> {
+        self.call("TaskReaderPort::load_snapshot", (scope, tid))
+    }
     async fn restore(
         &self,
         scope: &TaskScope,

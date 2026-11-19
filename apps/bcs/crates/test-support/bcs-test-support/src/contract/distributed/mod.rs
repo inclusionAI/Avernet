@@ -9,6 +9,7 @@
 
 pub mod dispatch;
 pub mod inbox;
+pub mod runtime_safety;
 pub mod services;
 pub mod state;
 pub mod task_feed;

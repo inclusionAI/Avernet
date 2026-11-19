@@ -74,7 +74,7 @@ impl StoreInboxProducer {
             .unwrap_or(Bound::Unbounded);
         let _permit = self.io_permit().await?;
         Ok(tokio::time::timeout(
-            Duration::from_millis(100),
+            Duration::from_secs(2),
             self.inner.stream.range(
                 &self.inner.layout.inbox(sid)?,
                 start,
@@ -292,7 +292,7 @@ impl ShardFeedPort for Feed {
         {
             return Err(invalid("read_limits"));
         }
-        let result = tokio::time::timeout(Duration::from_millis(100), self.poll(limits))
+        let result = tokio::time::timeout(Duration::from_secs(2), self.poll(limits))
             .await
             .unwrap_or_else(|_| Err(unknown("reader_turn")));
         if result.is_err() {
@@ -389,15 +389,16 @@ impl Feed {
         let mut sessions = Vec::new();
         let mut hints = Vec::new();
         let mut failures = Vec::new();
+        let mut staged = Vec::new();
         let mut entries_left = limits.max_entries.get();
         let mut bytes_left = limits.max_bytes.get() as usize;
-        let round_deadline = Instant::now() + Duration::from_millis(80);
+        let round_deadline = Instant::now() + Duration::from_millis(1900);
         let count = self.watches.len().min(limits.max_sessions.get() as usize);
         for _ in 0..count {
             if entries_left == 0 || bytes_left == 0 || Instant::now() >= round_deadline {
                 break;
             }
-            let Some(mut watch) = self.watches.pop_front() else {
+            let Some(watch) = self.watches.front() else {
                 break;
             };
             if let Some(error) = watch.failure.clone() {
@@ -405,15 +406,30 @@ impl Feed {
                     sid: watch.sid.clone(),
                     error,
                 });
-                self.watches.push_back(watch);
+                self.watches.rotate_left(1);
                 continue;
             }
-            let deadline = round_deadline.min(Instant::now() + Duration::from_millis(40));
+            let deadline = round_deadline.min(Instant::now() + Duration::from_millis(500));
+            // The watch stays owned by Feed during IO. Canceling next() must not
+            // drop its permit or silently forget a Session with unread inputs.
             let read = self
-                .read_session(&watch, entries_left, bytes_left, deadline)
+                .read_session(watch, entries_left, bytes_left, deadline)
                 .await;
-            let read = match read {
-                Ok(read) => read,
+            let watch = self
+                .watches
+                .front_mut()
+                .ok_or_else(|| invalid("reader_watch_missing"))?;
+            match read {
+                Ok(read) => {
+                    entries_left -= read.physical;
+                    bytes_left -= read.bytes;
+                    if read.pending {
+                        hints.push(watch.sid.clone());
+                    }
+                    if read.through != watch.after {
+                        staged.push((watch.sid.clone(), read));
+                    }
+                }
                 Err(error) => {
                     watch.failure = Some(error.clone());
                     self.store
@@ -426,59 +442,58 @@ impl Feed {
                         sid: watch.sid.clone(),
                         error,
                     });
-                    self.watches.push_back(watch);
-                    continue;
                 }
-            };
-            entries_left -= read.physical;
-            bytes_left -= read.bytes;
-            if read.pending {
-                hints.push(watch.sid.clone());
             }
-            if read.through != watch.after {
-                let through = read.through.ok_or_else(|| invalid("reader_coverage"))?;
-                let opaque = self
-                    .store
-                    .inner
-                    .receipt_sequence
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
-                    .map_err(|_| invalid("receipt_sequence_exhausted"))?
-                    .to_string();
-                let mut receipts = self
-                    .store
-                    .inner
-                    .receipts
-                    .lock()
-                    .map_err(|_| invalid("receipt_lock"))?;
-                if receipts.len() >= self.store.inner.config.max_receipts {
-                    receipts.retain(|_, d| !d.confirmed);
-                }
-                if receipts.len() >= self.store.inner.config.max_receipts {
-                    self.watches.push_back(watch);
-                    return Err(pressure());
-                }
-                receipts.insert(
-                    opaque.clone(),
-                    Delivery {
-                        generation: self.generation.clone(),
-                        sid: watch.sid.clone(),
-                        through: through.clone(),
-                        confirmed: false,
-                    },
-                );
-                sessions.push(SessionBatch {
-                    sid: watch.sid.clone(),
-                    entries: read.entries,
-                    read_through: through.clone(),
-                    delivery: DeliveryReceipt {
-                        backend: self.store.inner.config.backend.clone(),
-                        consumer_generation: self.generation.clone(),
-                        opaque,
-                    },
-                });
-                watch.after = Some(through);
-            }
-            self.watches.push_back(watch);
+            self.watches.rotate_left(1);
+        }
+        // No await below this point: either the full returned batch owns its
+        // receipts/cursors, or cancellation before here leaves all input unread.
+        let mut receipts = self
+            .store
+            .inner
+            .receipts
+            .lock()
+            .map_err(|_| invalid("receipt_lock"))?;
+        if receipts.len() + staged.len() > self.store.inner.config.max_receipts {
+            receipts.retain(|_, d| !d.confirmed);
+        }
+        if receipts.len() + staged.len() > self.store.inner.config.max_receipts {
+            return Err(pressure());
+        }
+        for (sid, read) in staged {
+            let through = read.through.ok_or_else(|| invalid("reader_coverage"))?;
+            let opaque = self
+                .store
+                .inner
+                .receipt_sequence
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
+                .map_err(|_| invalid("receipt_sequence_exhausted"))?
+                .to_string();
+            let watch = self
+                .watches
+                .iter_mut()
+                .find(|w| w.sid == sid)
+                .ok_or_else(|| invalid("reader_watch_missing"))?;
+            receipts.insert(
+                opaque.clone(),
+                Delivery {
+                    generation: self.generation.clone(),
+                    sid: sid.clone(),
+                    through: through.clone(),
+                    confirmed: false,
+                },
+            );
+            sessions.push(SessionBatch {
+                sid,
+                entries: read.entries,
+                read_through: through.clone(),
+                delivery: DeliveryReceipt {
+                    backend: self.store.inner.config.backend.clone(),
+                    consumer_generation: self.generation.clone(),
+                    opaque,
+                },
+            });
+            watch.after = Some(through);
         }
         Ok(FeedBatch {
             sessions,
@@ -489,6 +504,19 @@ impl Feed {
 }
 #[async_trait]
 impl InboxConsumerPort for StoreInboxProducer {
+    fn reader_resources(&self) -> Option<InboxReaderResources> {
+        Some(InboxReaderResources {
+            max_readers: self.inner.config.max_readers,
+            max_watches: self.inner.config.max_watches,
+            max_receipts: self.inner.config.max_receipts,
+            max_document_bytes: self.inner.config.max_document_bytes,
+        })
+    }
+    fn scan_budget_profile(
+        &self,
+    ) -> Option<bcs_service_api::port::repo::distributed::budget::ScanBudgetProfile> {
+        Some(self.inner.scan_budget.profile())
+    }
     async fn open(&self, shard: ShardId) -> Result<Box<dyn ShardFeedPort>, StoreError> {
         let reader = self
             .inner
