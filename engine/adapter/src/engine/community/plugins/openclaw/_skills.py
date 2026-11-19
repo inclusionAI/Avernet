@@ -32,6 +32,7 @@ from engine.community.plugins.openclaw.layout_activation import (
     verify_skill_mappings,
 )
 from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layout
+from engine.community.plugins.openclaw.service_layout_probe import inspect_legacy_service_layout
 from engine.community.plugins.skills_pool.center_mount import (
     CenterMountStatus,
     inspect_center_mount,
@@ -126,6 +127,18 @@ class _SkillsPortMixin:
             home=self._skills_runtime_home(),
             layout_context=self._skills_runtime_context(),
         )
+        if (
+            params.get("for_service_build")
+            and result.evidence.get("reason") == "pool_ready_marker_absent"
+        ):
+            legacy = await asyncio.to_thread(
+                inspect_legacy_service_layout,
+                context=self._skills_runtime_context(),
+                contract_version=params["layout_contract_version"],
+                is_mounted=self._skills_center_is_mounted,
+            )
+            if legacy is not None:
+                return legacy.to_data()
         return result.to_data()
 
     async def publish_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
