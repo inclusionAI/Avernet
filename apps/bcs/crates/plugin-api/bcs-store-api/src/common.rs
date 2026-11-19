@@ -21,8 +21,8 @@ pub enum StoreCapability {
     /// Persistent create/read/projection/exact-version replacement and patch. No TTL,
     /// deletion, retained history after external deletion, or Newer is implied.
     DocumentCas,
-    /// Provider-timed, non-revivable registration lifetimes, including retirement.
-    StrictLease,
+    /// CAS-confirmed membership termination retained for 30 days; GC TTL is separate.
+    RetainedLease,
     Kv,
     /// Versioned creation/read, unconditional deletion and TTL query; no CAS.
     VersionedKv,

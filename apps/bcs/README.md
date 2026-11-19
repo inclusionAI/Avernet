@@ -15,6 +15,7 @@ Public BCS owns coordination contracts, services, adapters and reusable plugins;
 - [Local rules](AGENTS.md)
 - [API contracts](api-contracts/README.md)
 - [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — portable contracts and provider status
+- [Retained membership amendment](specs/2026-11-20-retained-membership-lease/spec.md) — CAS termination, client clocks and 30-day storage retention
 - [Runtime store plugin API](crates/plugin-api/bcs-store-api/README.md) — capability contracts and provider harnesses
 - [Distributed Worker runtime](crates/services/bcs-dist-worker/README.md) — generic processor, ownership, isolation and bounded recovery
 - [Dispatch supervision](crates/services/bcs-dist-worker/src/supervisor/README.md) — durable remote obligations independent of Task termination

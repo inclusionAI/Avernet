@@ -24,6 +24,11 @@ configuration and thin assembly. Host database acceptance may be deferred; publi
 archive behavior and crash recovery are still required. Host transport validation
 uses the requested Proxy transport. No production default test Runner is added.
 
+> Membership amendment (2026-11-20):
+> [RetainedLease](../2026-11-20-retained-membership-lease/spec.md) replaces the
+> earlier StrictLease/time/permanent-tombstone requirements. Earlier verification
+> below records the implementation tested then; it is not evidence for the new provider.
+
 ## Execution and verification
 
 Each substantive increment starts with a failing behavioral test, implements the

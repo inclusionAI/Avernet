@@ -9,6 +9,11 @@ bound to their recorded heads; they do not certify the new head.
 
 截至本稿快照：主要生产逻辑、确定性故障测试和指定的真实 PROXY 组合已存在；启动最大候选证明、实际 provider 封装预算契约、大 AppendText 外置回归和持续连接池压力准入已补齐。G1–G5公共模型主链与quota精确场景均已补并审查通过。第三轮真实PROXY正常回复/重复、70000字节AppendText、独立Cancel、实际SendingUnknown监督回合及晚到确定证据消费通过，取得该场景真实命令/字节观测并清理64个owned keys。没有将全部模型故障断点升级为L3。Singlebox opt-in内存Store+SQLite最终12个instrumented实际进程场景通过，独立SPEC/质量审查通过；按仓库原工具与同ignore配置从merge-base测得changed-line9118/11983=76.091129%，超过未修改的65%门槛。发布候选 `decdab6ea7` 的完整远端 CI 已通过；后续 Review 增量以其自身 PR head 检查为准。OB 实例验证继续 defer。
 
+> Membership amendment (2026-11-20):
+> [RetainedLease](../2026-11-20-retained-membership-lease/spec.md) replaces the
+> earlier StrictLease/time/permanent-tombstone requirements. Earlier verification
+> below records the implementation tested then; it is not evidence for the new provider.
+
 ## 口径与本轮边界
 
 - L0：静态生产源码或契约审查。L1：纯状态转换、序列化上界或确定性契约测试。L2：公共 Worker/Store/TaskFeed/DbArchive 生产实现与内存故障 transport、SQLite 的组合测试。L3：已保存的真实 PROXY conformance 或选定多 Worker 功能/故障运行记录。测试名中的 `real_providers` 只说明使用公共生产类型，不能自行升级为 L3。

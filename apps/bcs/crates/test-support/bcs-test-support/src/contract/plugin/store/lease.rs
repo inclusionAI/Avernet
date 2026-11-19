@@ -1,4 +1,4 @@
-//! Reusable StrictLease conformance. Each provider supplies fresh keys and a
+//! Reusable RetainedLease conformance. Each provider supplies fresh keys and a
 //! callback that advances its test clock or waits for real provider time.
 use bcs_store_api::{lease::*, *};
 use futures::future::join_all;
@@ -26,7 +26,7 @@ fn unchanged(before: &LeaseSnapshot, after: &LeaseSnapshot) {
 }
 
 pub async fn lease_store_contract_tests<P: LeaseStorePlugin + ?Sized>(p: &P, prefix: &str) {
-    assert!(p.supports(StoreCapability::StrictLease));
+    assert!(p.supports(StoreCapability::RetainedLease));
     let ttl = Duration::from_secs(30);
     let key = format!("{prefix}:live");
     assert_eq!(p.read_lease(&key).await.unwrap(), LeaseState::Absent);
@@ -175,13 +175,12 @@ where
     advance(step).await;
     unchanged(&edited, &alive(p.read_lease(&key).await.unwrap()));
     advance(ttl - step * 2).await;
-    // Mutations must themselves check expiry, without requiring a prior read.
-    assert_eq!(
-        p.update_lease(&direct_update, pending_update.version, b"late", Some(ttl))
-            .await
-            .unwrap(),
-        LeaseWrite::Terminated
-    );
+    // A delayed heartbeat may win before a conditional termination decision.
+    assert!(matches!(
+        p.update_lease(&direct_update, pending_update.version, b"late", Some(ttl)).await.unwrap(),
+        LeaseWrite::Applied(_)
+    ));
+    assert!(matches!(p.read_lease(&direct_update).await.unwrap(), LeaseState::Alive(_)));
     assert_eq!(
         p.register_lease(&direct_register, b"original", ttl)
             .await

@@ -8,6 +8,8 @@ When a change yields verified reusable knowledge, update its owning documentatio
 
 ## Existing change records
 
+- [2026-11-20 retained membership](2026-11-20-retained-membership-lease/spec.md) — adopted CAS termination, synchronized client clock and 30-day retention amendment.
+
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.
 
 - [2026-11-15-distributed-contracts](2026-11-15-distributed-contracts/spec.md) — declarations and ordered tasks; no runtime implementation
