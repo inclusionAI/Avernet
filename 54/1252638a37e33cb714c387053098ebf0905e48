@@ -1,0 +1,27 @@
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_20c3b110241190::t_21b6271c2b8031 47,114
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_20c3b110241190::t_f64ef5b785827a 36
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_20c3b110241190::t_dd8177340c613a 92,98-99,178,218
+apps/bcsfuse/internal/zbcsfuse_internal/providers/card_repository.py
+  s_20c3b110241190::t_540081ff17a9f0 49
+apps/bcsfuse/tests/alipay/test_v2_visibility_labels.py
+  s_20c3b110241190::t_4ef124b0cdef47 209-211,219,241-242,257,280-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "541252638a37e33cb714c387053098ebf0905e48",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

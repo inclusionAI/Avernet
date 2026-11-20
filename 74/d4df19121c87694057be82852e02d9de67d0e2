@@ -1,0 +1,107 @@
+apps/backend/specs/asc-not-found-warning-rel20261119/001-spec-output.md
+  s_fc1557df5d7924::t_fab217e3349983 1-31
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  s_fc1557df5d7924::t_68130e491d4685 101-106
+apps/backend/src/agentclaw/corp/core/caller_identity/errors.py
+  s_fc1557df5d7924::t_75e474b7426c4b 1-5
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh.py
+  s_fc1557df5d7924::t_f880480befb2dd 24,153-160,189-190
+apps/backend/src/agentclaw/corp/plugins/prod/database.py
+  s_fc1557df5d7924::t_b6274983d38c3a 25,582-588
+apps/backend/tests/corp/core/caller_identity/test_due_caller_refresh.py
+  s_fc1557df5d7924::t_50cc17627c5b2c 2,8,10,227-269
+apps/backend/tests/corp/plugins/prod/test_zdas_db.py
+  s_fc1557df5d7924::t_020867203d328e 15,147-178
+apps/frontend-nextgen/src/internal/knowledge/README.md
+  s_fc1557df5d7924::t_a2335138b981e3 38-54,69-81,83-84,97-100
+apps/frontend-nextgen/src/internal/knowledge/api/contentController.ts
+  s_fc1557df5d7924::t_ebcfd666a7e371 1,4,12-13,53-70
+apps/frontend-nextgen/src/internal/knowledge/components/ActivitiesPanel.tsx
+  s_fc1557df5d7924::t_ee0aeeb1d06bca 45-47,59-72,74-75
+apps/frontend-nextgen/src/internal/knowledge/components/AddSourceDialog.tsx
+  s_fc1557df5d7924::t_addcd764d4c6df 6,16-17,28,31,33,128-137,152-156,168,172,179,181,183,216-217,227-228,249,253,256
+apps/frontend-nextgen/src/internal/knowledge/components/BookRemovalDialog.tsx
+  s_fc1557df5d7924::t_b043cf561cdaa3 1-63
+apps/frontend-nextgen/src/internal/knowledge/components/BookSourceRow.tsx
+  s_fc1557df5d7924::t_dbe42dcc0fe980 1-51
+apps/frontend-nextgen/src/internal/knowledge/components/SourceAction.tsx
+  s_fc1557df5d7924::t_e6e1c1a6d6e9b7 1-15
+apps/frontend-nextgen/src/internal/knowledge/components/SourcesPanel.tsx
+  s_fc1557df5d7924::t_373ab03b626604 2,5,8,16-19,21-22,40-43,51,92-96,113,125,129-135,139-140,194,198-199,202,204,207-208
+apps/frontend-nextgen/src/internal/knowledge/components/SyncSettingsDialog.tsx
+  s_fc1557df5d7924::t_b1d62ee86760b3 16,20,25-26,28,47,71
+apps/frontend-nextgen/src/internal/knowledge/components/YuqueBookIcon.tsx
+  s_fc1557df5d7924::t_1beb57e7f7439c 1-9
+apps/frontend-nextgen/src/internal/knowledge/components/YuqueBookImportStep.tsx
+  s_fc1557df5d7924::t_a3465d75e5b14c 1-72
+apps/frontend-nextgen/src/internal/knowledge/components/YuqueConnectionGate.tsx
+  s_fc1557df5d7924::t_272144811e6f31 1-34
+apps/frontend-nextgen/src/internal/knowledge/components/YuqueImportStep.tsx
+  s_fc1557df5d7924::t_5b9a6f4e17948e 3,7,126-129
+apps/frontend-nextgen/src/internal/knowledge/components/YuqueSourceLink.tsx
+  s_fc1557df5d7924::t_9f2874246b34ff 1-9
+apps/frontend-nextgen/src/internal/knowledge/domain.ts
+  s_fc1557df5d7924::t_d2d718f6e0471b 37,51-55,61,168-223
+apps/frontend-nextgen/src/internal/knowledge/hooks/useKnowledgeBooks.ts
+  s_fc1557df5d7924::t_a1f48eceb6b2ea 1-22
+apps/frontend-nextgen/src/internal/knowledge/hooks/useKnowledgeContent.ts
+  s_fc1557df5d7924::t_d53321ad15b4fb 9
+apps/frontend-nextgen/src/internal/knowledge/hooks/usePageVisible.ts
+  s_fc1557df5d7924::t_ddacf027a5962b 1-11
+apps/frontend-nextgen/src/internal/knowledge/services/bookPresentation.ts
+  s_fc1557df5d7924::t_8e26dafc9ec8fa 1-15
+apps/frontend-nextgen/src/internal/knowledge/services/sourceLinks.ts
+  s_fc1557df5d7924::t_7871cb65aa6012 1-19
+apps/frontend-nextgen/test/internal/knowledge/activityActor.test.tsx
+  s_fc1557df5d7924::t_4b16699a7263cd 97,122,133-134,136-139,162-164,166-170,196-295
+apps/frontend-nextgen/test/internal/knowledge/bookRefreshFeedback.test.tsx
+  s_fc1557df5d7924::t_dd7ad2888ac5ad 1-87
+apps/frontend-nextgen/test/internal/knowledge/creationLoading.test.tsx
+  s_fc1557df5d7924::t_397958a10376d5 19,36
+apps/frontend-nextgen/test/internal/knowledge/dialogInteractions.test.tsx
+  s_fc1557df5d7924::t_5fd545db56da83 19,41
+apps/frontend-nextgen/test/internal/knowledge/pageScroll.test.tsx
+  s_fc1557df5d7924::t_6daf812ed08fcb 20,29,55
+apps/frontend-nextgen/test/internal/knowledge/sourceLinks.test.ts
+  s_fc1557df5d7924::t_73685f6ba0c7b3 1-12
+apps/frontend-nextgen/test/internal/knowledge/sourceListContinuity.test.tsx
+  s_fc1557df5d7924::t_292a19cd34d175 19,64
+apps/frontend-nextgen/test/internal/knowledge/sourceSyncFeedback.test.tsx
+  s_fc1557df5d7924::t_e9a2c92bfeb3b8 9,20
+apps/frontend-nextgen/test/internal/knowledge/uiLayout.test.tsx
+  s_fc1557df5d7924::t_cb6d6d9d447ab1 14,44
+apps/frontend-nextgen/test/internal/knowledge/yuqueBookController.test.ts
+  s_fc1557df5d7924::t_eeaad72436299a 1-23
+apps/frontend-nextgen/test/internal/knowledge/yuqueBookInteractions.test.tsx
+  s_fc1557df5d7924::t_7bec6e1d06f02d 1-233
+apps/frontend-nextgen/test/internal/knowledge/yuqueBookState.test.ts
+  s_fc1557df5d7924::t_c885ec502105ea 1-19
+docs/plans/2026-11-18-yuque-book-frontend/feedback-fixes-20261118.md
+  s_fc1557df5d7924::t_dedf9de5ee3521 1-75
+docs/plans/2026-11-18-yuque-book-frontend/plan.md
+  s_fc1557df5d7924::t_6cb9bac9b9ae84 1-20
+docs/plans/2026-11-18-yuque-book-frontend/release-verification-20261118.md
+  s_fc1557df5d7924::t_c5117599324198 1-90
+docs/plans/2026-11-18-yuque-book-frontend/spec.md
+  s_fc1557df5d7924::t_67e63b11fa25c8 1-81
+docs/plans/2026-11-18-yuque-book-frontend/sync-verification-20261118.md
+  s_fc1557df5d7924::t_c56ea29cfc1d23 1-50
+docs/plans/2026-11-18-yuque-book-frontend/tasks.md
+  s_fc1557df5d7924::t_560f75df84f579 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "74d4df19121c87694057be82852e02d9de67d0e2",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

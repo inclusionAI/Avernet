@@ -1,0 +1,18 @@
+apps/frontend-nextgen/src/internal/productGuide/productGuideService.ts
+  h_5f06d4d8b4bdd5 10,23-39,47
+apps/frontend-nextgen/test/internal/productGuide/GuideAssistantPanel.test.tsx
+  h_5f06d4d8b4bdd5 6,80,84-86,92,98-100
+apps/frontend-nextgen/test/internal/productGuide/productGuideService.test.ts
+  h_5f06d4d8b4bdd5 8,26-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dcfb1fc19247bbd1a067d438b616f5e9d67f645e",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+apps/frontend/src/pages/Cron/ScheduledTaskListPage.tsx
+  s_3df6e394ac8808::t_8860a948c6621e 445-449,522-524,545-549
+  s_3df6e394ac8808::t_8c43ae04482e00 256,531
+  s_3df6e394ac8808::t_88e869a91ea216 525-530
+  s_3df6e394ac8808::t_3327614fd8e6e1 532-534,542-544
+  s_3df6e394ac8808::t_59047d1118fbbf 550-551
+apps/frontend/src/hooks/useScheduledTasks.ts
+  s_3df6e394ac8808::t_22140fdda8c68a 1112,1120-1121
+  s_3df6e394ac8808::t_8c43ae04482e00 1116-1119,1122
+apps/frontend/src/pages/Cron/ScheduledTaskDetailPage.tsx
+  s_3df6e394ac8808::t_2e58defa49be5d 511
+  s_3df6e394ac8808::t_8c43ae04482e00 534-543,663-664
+  s_3df6e394ac8808::t_50b3e20c912ac6 512,665-667,675,679-684,709-711
+apps/frontend/src/hooks/__tests__/useScheduledTasks.disabled.test.tsx
+  s_3df6e394ac8808::t_a0533e5f9db345 1-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f02ef2b5ca85d4a4566f441808c2d77acb9ab79b",
+  "prompts": {},
+  "sessions": {
+    "s_3df6e394ac8808": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dfb8-6204-7490-86e1-9529d8c049fe",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

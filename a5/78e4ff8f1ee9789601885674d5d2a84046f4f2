@@ -1,0 +1,14 @@
+simulator/AGENTS.md
+  h_fa66fe7c023b4b 1104-1138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a578e4ff8f1ee9789601885674d5d2a84046f4f2",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

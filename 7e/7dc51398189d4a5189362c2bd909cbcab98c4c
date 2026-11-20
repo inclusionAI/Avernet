@@ -1,0 +1,53 @@
+apps/frontend-nextgen/test/internal/apiGateway/directGatewayUrls.test.ts
+  s_1a2d54725ee9e9::t_e4cf7a412b6b5f 1-18,20-86
+  s_1a2d54725ee9e9::t_d3407e11c49b1e 19
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillFileEditor.tsx
+  s_1a2d54725ee9e9::t_63a7081856e838 10
+  s_1a2d54725ee9e9::t_55a4ad83fda4e9 39-42
+  s_1a2d54725ee9e9::t_1618cbd8340d28 131-148
+  s_1a2d54725ee9e9::t_37cba94a7af884 67-68
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillCreateDrawer.tsx
+  s_1a2d54725ee9e9::t_8067aa7d575c02 266-267
+apps/frontend-nextgen/src/internal/capability-workshop/hooks/useSkillEditor.ts
+  s_1a2d54725ee9e9::t_b8d530a68c498c 121
+  s_1a2d54725ee9e9::t_e238096a90069e 238
+  s_1a2d54725ee9e9::t_80f1f08b56a9c3 93,95-97
+  s_1a2d54725ee9e9::t_ff8eb21e965750 253-254
+  s_1a2d54725ee9e9::t_4cbdd57cbac5a4 34-37
+  s_1a2d54725ee9e9::t_30d6e994c51e45 55-58
+apps/frontend-nextgen/src/internal/apiGateway/directGatewayUrls.ts
+  s_1a2d54725ee9e9::t_af610fff689b38 24-25
+  s_1a2d54725ee9e9::t_ab94954e12f4d7 28-29,31
+  s_1a2d54725ee9e9::t_41692207da4fa0 1-23,26-27,30,32-43
+apps/frontend-nextgen/src/extensions/internal.ts
+  s_1a2d54725ee9e9::t_ff5c8df96bba81 710-712
+  s_1a2d54725ee9e9::t_d6ca93e578378c 54
+apps/frontend-nextgen/test/internal/capability-workshop/useSkillEditor.test.ts
+  s_1a2d54725ee9e9::t_64a2ca2c257b58 132-133,136-138,140-148
+submodules/avernet
+  s_14f5c8a6a8abfe::t_1288443acb967f 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7e7dc51398189d4a5189362c2bd909cbcab98c4c",
+  "prompts": {},
+  "sessions": {
+    "s_14f5c8a6a8abfe": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "2901da25-4c78-4388-91df-d5cca9be2d41",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_1a2d54725ee9e9": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1f2756d2-6003-46f2-9dfc-18acc1c75bce",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

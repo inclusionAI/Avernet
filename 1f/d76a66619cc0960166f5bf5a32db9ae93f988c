@@ -1,0 +1,23 @@
+docs/research/2026-11-18-safari-login-antgroup-realm.md
+  s_1bb02c8b7701cf::t_f0c7c4e2fa7564 209-243
+  s_1bb02c8b7701cf::t_c203c208ff9044 1-208
+  s_1bb02c8b7701cf::t_c70f058fa192cc 244-274
+  s_1bb02c8b7701cf::t_dc07593934841f 275-293
+  s_1bb02c8b7701cf::t_6f5efeb496313d 294-296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1fd76a66619cc0960166f5bf5a32db9ae93f988c",
+  "prompts": {},
+  "sessions": {
+    "s_1bb02c8b7701cf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "3131c460-1a89-4de5-9ec8-9a69075a7586",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

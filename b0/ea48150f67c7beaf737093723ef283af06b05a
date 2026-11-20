@@ -1,0 +1,14 @@
+apps/bcs-internal/Cargo.lock
+  h_fa66fe7c023b4b 562,1540-1548,2388,2421
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b0ea48150f67c7beaf737093723ef283af06b05a",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

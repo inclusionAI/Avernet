@@ -1,0 +1,66 @@
+apps/bcs/crates/test-support/bcs-test-support/tests/lease_contract_faults.rs
+  s_b033c54cc00da7::t_74f7bb532a9bcb 75,88,102
+  s_b033c54cc00da7::t_c8487997ec8c45 14
+apps/bcs/crates/test-support/bcs-test-support/tests/coordination_primitives.rs
+  s_b033c54cc00da7::t_1251aed2bb09fc 227-266
+apps/bcs/specs/README.md
+  s_b033c54cc00da7::t_bfe588a8202920 11-12
+apps/bcs/specs/2026-11-20-retained-membership-lease/spec.md
+  s_b033c54cc00da7::t_34d2f2aaf3dbae 1-75
+apps/bcs/crates/services/bcs-dist-worker/README.md
+  s_b033c54cc00da7::t_74f7bb532a9bcb 95,161,174
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
+  s_b033c54cc00da7::t_bfe588a8202920 15-19
+apps/bcs/crates/plugin-api/bcs-store-api/CONTEXT.md
+  s_b033c54cc00da7::t_bfe588a8202920 8
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/ownership.rs
+  s_b033c54cc00da7::t_bfe588a8202920 92-94,100-101
+apps/bcs/README.md
+  s_b033c54cc00da7::t_bfe588a8202920 18
+apps/bcs/specs/2026-11-17-worker-coordination/spec.md
+  s_b033c54cc00da7::t_bfe588a8202920 9-13,158,161,167,170-172
+apps/bcs/specs/2026-11-20-retained-membership-lease/plan.md
+  s_b033c54cc00da7::t_bfe588a8202920 1-26,28-39
+  s_b033c54cc00da7::t_b17426784663b0 27,40-48
+apps/bcs/specs/2026-11-20-retained-membership-lease/verification.md
+  s_b033c54cc00da7::t_74f7bb532a9bcb 1-30
+apps/bcs/crates/services/bcs-dist-store/src/coordination/README.md
+  s_b033c54cc00da7::t_bfe588a8202920 5,23,32,87
+apps/bcs/crates/plugin-api/bcs-store-api/src/lease.rs
+  s_b033c54cc00da7::t_bfe588a8202920 50-52
+  s_b033c54cc00da7::t_013e17ee2d50f1 1,6-11,16-18,23-24,27-29,45-49,53-56,67-69,71-75,84-85
+apps/bcs/crates/plugin-api/bcs-store-api/README.md
+  s_b033c54cc00da7::t_bfe588a8202920 296,335-357
+  s_b033c54cc00da7::t_74f7bb532a9bcb 41
+apps/bcs/crates/test-support/bcs-test-support/src/store_model/coordination.rs
+  s_b033c54cc00da7::t_ccd25629e8f80f 110-111,114,122-123
+  s_b033c54cc00da7::t_379528f5d2132d 109
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
+  s_b033c54cc00da7::t_bfe588a8202920 27-31
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec-audit.md
+  s_b033c54cc00da7::t_bfe588a8202920 12-16
+apps/bcs/crates/plugin-api/bcs-store-api/src/common.rs
+  s_b033c54cc00da7::t_260fa3e05033a0 24-25
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/control.rs
+  s_b033c54cc00da7::t_ae8024d06a08f5 139
+apps/bcs/crates/services/bcs-dist-store/src/coordination/mod.rs
+  s_b033c54cc00da7::t_26ef706962ce4b 127-128
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/lease.rs
+  s_b033c54cc00da7::t_239d134a66ab8d 1,29,178-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1f9f3fd7720de009e48402e60bae6881953d7773",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

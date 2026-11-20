@@ -1,0 +1,54 @@
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/resource_cards.py
+  s_9e428ec8192673::t_836ca4b2a75894 62,78-86
+  s_9e428ec8192673::t_36baefde0176c2 87-88
+apps/bcsfuse/pyproject.toml
+  s_9e428ec8192673::t_836ca4b2a75894 48
+apps/bcsfuse/docs/architecture/examples/discovery/search-tr-mixed-response.json
+  s_9e428ec8192673::t_c0cdd6f498950a 28-29,71,91,106,111,116-123,125-140,142-157,160,162-169,171-186,188-203,206,210,271,286,291,296-303,305-320,322-337,340,342-349,351-366,368-383,386,390
+  s_9e428ec8192673::t_553cf7e1e43122 251,422
+apps/bcsfuse/docs/architecture/alipay-catalog.md
+  s_9e428ec8192673::t_d14393c39c18e8 78-90
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_9e428ec8192673::t_836ca4b2a75894 18,191-193
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_9e428ec8192673::t_8a566133fe8aad 130,135
+apps/bcsfuse/internal/zbcsfuse_internal/providers/bcn_metadata.py
+  s_9e428ec8192673::t_553cf7e1e43122 6,22-38,45,47,70,79,104-168
+  s_9e428ec8192673::t_8a566133fe8aad 1-5,7-10,12-21,39-44,46,48-49,71,78,80-82,85,91-94,98-103,169-171,180-184,193-197,202-204,208-213,216-226,231-233,244-248,254-262
+  s_9e428ec8192673::t_836ca4b2a75894 11,50-69,72-77,83-84,86-90,95-97,172-179,185-192,198-201,205-207,214-215,227-230,234-243,249-253,263
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_9e428ec8192673::t_c0cdd6f498950a 152-153,155-156,160
+apps/bcsfuse/tests/alipay/test_bcn_metadata.py
+  s_9e428ec8192673::t_c0cdd6f498950a 1-202
+  s_9e428ec8192673::t_c725384ecfe2e4 203-223,225,227-228
+  s_9e428ec8192673::t_d94020764d19ed 224,226
+apps/bcsfuse/internal/zbcsfuse_internal/application/card_metadata.py
+  s_9e428ec8192673::t_836ca4b2a75894 43-45,47-48
+  s_9e428ec8192673::t_8a566133fe8aad 41,46
+apps/bcsfuse/docs/deployment/zbcsfuse-sre-tr-load-test.md
+  s_9e428ec8192673::t_b06f8bad879676 69,209
+  s_9e428ec8192673::t_c60516567e8e0b 3,5,7-8
+  s_9e428ec8192673::t_c0cdd6f498950a 1-2,4,6,9-68,70-208,210-276
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay_catalog.py
+  s_9e428ec8192673::t_8a566133fe8aad 48,99
+apps/bcsfuse/requirements.txt
+  s_9e428ec8192673::t_8a566133fe8aad 38
+apps/bcsfuse/docs/architecture/examples/discovery/search-group-response.json
+  s_9e428ec8192673::t_c0cdd6f498950a 21,36,41,46-53,55-70,72-87,90,92-99,101-116,118-133,136,140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d8f1df3cf0ff1b8e1d66ec20b5cb13d94bc8f957",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

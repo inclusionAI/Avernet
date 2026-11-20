@@ -1,0 +1,19 @@
+apps/bcsfuse/tests/deployment/test_zbcsfuse_trace.py
+  s_89ee1c722ef961::t_9cc35b034d6f96 73-74,92-97,101,134-150,175,190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9649b59c8b8fdd27a11198eda21c41e208b013dd",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

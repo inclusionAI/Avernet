@@ -1,0 +1,89 @@
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay_local.py
+  s_9e428ec8192673::t_c8bbef808f7afc 15
+  s_9e428ec8192673::t_10ec96a210f866 218-220
+apps/bcsfuse/tests/alipay/test_card_rebuild.py
+  s_9e428ec8192673::t_5d2601c5ddfca3 67-68
+  s_9e428ec8192673::t_7f847219861c5f 66,69
+apps/bcsfuse/internal/bcsfuse_internal/providers/qdrant_process.py
+  s_9e428ec8192673::t_c8bbef808f7afc 3-5
+  s_9e428ec8192673::t_47cffa94d3f776 1,7
+apps/bcsfuse/internal/zbcsfuse_internal/providers/card_preparation.py
+  s_9e428ec8192673::t_c8bbef808f7afc 3-5
+  s_9e428ec8192673::t_5903005d4d742e 1,7
+apps/bcsfuse/docs/architecture/search-application-architecture.md
+  s_9e428ec8192673::t_88e2949a545efa 11,22-24,33
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/updates.py
+  s_9e428ec8192673::t_c8bbef808f7afc 14-25,27,30-38,41-48
+  s_9e428ec8192673::t_4bb31d8a40e53b 1,3-4,6-7,49-50,52-56,59,61-63
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/card_http.py
+  s_9e428ec8192673::t_c8bbef808f7afc 4-7
+  s_9e428ec8192673::t_09c6ad660378fa 1,3,10-15
+apps/bcsfuse/internal/zbcsfuse_internal/application/search.py
+  s_e604a7fd67b17c::t_3ab6220d4baaca 1,6,8
+  s_9e428ec8192673::t_833848357548f6 3-4
+apps/bcsfuse/internal/zbcsfuse_internal/application/catalog_retrieval.py
+  s_9e428ec8192673::t_c8bbef808f7afc 3-6
+  s_9e428ec8192673::t_37b066728f6315 1,8
+apps/bcsfuse/internal/zbcsfuse_internal/application/default_candidates.py
+  s_9e428ec8192673::t_c8bbef808f7afc 3-5
+  s_9e428ec8192673::t_bc7803e5581337 1,7
+apps/bcsfuse/docs/architecture/alipay-catalog.md
+  s_9e428ec8192673::t_88e2949a545efa 15-16,18
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/http_admission.py
+  s_9e428ec8192673::t_c8bbef808f7afc 3-5
+  s_9e428ec8192673::t_5d8a51f6da5d87 1,7
+apps/bcsfuse/internal/bcsfuse_internal/providers/vector_index_lifecycle.py
+  s_9e428ec8192673::t_c8bbef808f7afc 3-6
+  s_9e428ec8192673::t_c2a8f488dd86dd 1,8
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay.py
+  s_9e428ec8192673::t_c8bbef808f7afc 9-14
+  s_9e428ec8192673::t_0417ae1c422c30 1,3,8
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay_catalog.py
+  s_9e428ec8192673::t_c8bbef808f7afc 4,7-10,44,67-79,82-84,88-92,95-99
+  s_9e428ec8192673::t_4580c4df71c9e9 1
+apps/bcsfuse/internal/zbcsfuse_internal/application/card_metadata.py
+  s_9e428ec8192673::t_c8bbef808f7afc 5-7,14-21,23-40
+  s_9e428ec8192673::t_24a20893c547f1 1
+apps/bcsfuse/internal/bcsfuse_internal/config/alipay_search.py
+  s_9e428ec8192673::t_eab6305908b1de 1,6-7,10,15-17
+apps/bcsfuse/internal/zbcsfuse_internal/application/admission.py
+  s_9e428ec8192673::t_ffdd4b452aba2c 1,3,5
+apps/bcsfuse/internal/zbcsfuse_internal/application/cache.py
+  s_9e428ec8192673::t_54e38d9ade71df 1,3-8,10
+apps/bcsfuse/internal/zbcsfuse_internal/application/document_index.py
+  s_9e428ec8192673::t_26f0c5527ec616 1,3,5
+apps/bcsfuse/internal/zbcsfuse_internal/application/emergency.py
+  s_9e428ec8192673::t_4316b19df6608b 1-19
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/documents.py
+  s_9e428ec8192673::t_8858b5ff44fc70 5-11,74,77
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/sync_policy.py
+  s_9e428ec8192673::t_8371b605964e3f 1,3,5
+apps/bcsfuse/tests/alipay/test_http_admission.py
+  s_9e428ec8192673::t_263637960512ee 26,100-102
+apps/bcsfuse/tests/alipay/test_index_sync_policy.py
+  s_9e428ec8192673::t_eb79df58199529 36,76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a9503d65f0216e8b9c6a3327776c31178ae981f0",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_e604a7fd67b17c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17b1c-91e3-7641-b378-6138442786ee",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
