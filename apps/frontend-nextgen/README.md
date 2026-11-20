@@ -393,3 +393,21 @@ Home/End for the 220–360px bounds (264px default). Width is stored locally und
 editor retains its 72px compact rail and mobile retains horizontal navigation
 without a resize handle. No global selection styles are changed during dragging.
 Regression coverage: [sidebar.test.tsx](test/taskEscortWorkspace/sidebar.test.tsx).
+
+## AgentCoding after-create actions
+
+AgentCoding template creation keeps the open-claw-compatible after-create
+contract: only the architectural Bot onboarding action is emitted. A template may
+declare `afterCreate` or `after_create`, and when the template exposes an
+`architect_name` field the frontend adds the fixed `update_architect_bot_ext`
+action automatically. The action sends
+
+```http
+PATCH /api/public/bots/{bot_id}/ext
+```
+
+with `arch_domain` and `is_domain_bot: true` after direct creation or
+authorization succeeds. An empty submitted architecture-domain value is ignored.
+Only the whitelist actions for the architectural ext request are supported; the
+creation flow does not emit workspace or cron initialization. Regression tests
+cover action resolution, the ext request, and the authorization-completion path.
