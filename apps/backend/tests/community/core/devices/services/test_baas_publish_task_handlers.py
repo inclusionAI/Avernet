@@ -909,7 +909,7 @@ def test_restart_poll_marks_failed_on_business_timeout():
         repo=repo,
         bot_repository=bot_repository,
         baas_device_service=baas_device_service,
-        clock=lambda: 723.4,
+        clock=lambda: 1923.4,
     )
     repo.get_by_id.return_value = _make_binding(
         status=DeviceBindingStatus.PENDING.value,
@@ -948,7 +948,7 @@ def test_restart_poll_marks_failed_on_business_timeout():
         ext={
             "keep": "value",
             "start_status": "FAILED",
-            "start_message": "BaaS publish timeout after 600s (publish_id=1001)",
+            "start_message": "BaaS publish timeout after 1800s (publish_id=1001)",
             "restart_publish_id": "1001",
         },
     )
@@ -956,6 +956,47 @@ def test_restart_poll_marks_failed_on_business_timeout():
         binding_id=42,
         status=DeviceBindingStatus.FAILED.value,
     )
+
+
+def test_restart_poll_waits_until_30_minute_business_timeout():
+    repo = MagicMock()
+    baas_device_service = MagicMock()
+    bot_repository = MagicMock()
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=bot_repository,
+        baas_device_service=baas_device_service,
+        clock=lambda: 1923.3,
+    )
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={"restart_publish_id": "1001"},
+    )
+    bot_repository.get_by_binding_id.return_value = {
+        "bot_id": "bot-001",
+        "owner_id": "owner-001",
+        "template_type": "applicationCoding",
+        "ext": {"keep": "value"},
+    }
+    baas_device_service.poll_publish_once.return_value = (
+        DeviceBindingStatus.PENDING.value
+    )
+
+    outcome = handler.handle(
+        {
+            "binding_id": 42,
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "publish_id": 1001,
+            "started_at_epoch_s": 123.4,
+            "bot_uuid": "uuid-001",
+        }
+    )
+
+    assert outcome == Reschedule(10.0)
+    baas_device_service.poll_publish_once.assert_called_once_with(publish_id=1001)
+    bot_repository.update_by_owner.assert_not_called()
+    repo.update_status.assert_not_called()
 
 
 def test_restart_poll_ignores_stale_restart_publish_id():
