@@ -58,5 +58,5 @@ conflicting lifecycle operations for every engine. Completion/audit atomicity
 belongs to the recycle repository, not HTTP adapters. All three Bot types use the
 same activation claim/rollback while preserving existing provisioning.
 See `apps/backend/docs/openapi-v1/README.md` and
-`docs/plans/2026-11-07-openapi-recycle-async.md` from repository root for contract,
+`apps/backend/docs/plans/2026-11-07-openapi-recycle-async.md` from repository root for contract,
 rollout ordering and limits; no new table is required.
