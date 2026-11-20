@@ -49,8 +49,12 @@ from agentclaw.community.core.agentswarm.domain.models import (
     AgentKind, AgentSpec, ProviderKind, RunStatus,
 )
 from agentclaw.community.core.agentswarm.domain.models import RunOptions
+from agentclaw.community.core.agentswarm.catalog_rule import find_catalog_entry
+from agentclaw.community.core.agentswarm.domain.models import AgentDefinitionId
 from agentclaw.community.core.agentswarm.service.protocols import (
-    AgentAuthorizationState, AgentSwarmConfigError, AgentSwarmRunNotFoundError,
+    AgentAuthorizationState, AgentDefinitionRef, AgentReferenceUnresolved,
+    DefinitionManifestInvalid, DefinitionNameConflict, DefinitionRowConflict,
+    AgentSwarmConfigError, AgentSwarmRunNotFoundError,
     GlobalRunLimitExceeded, IdentitySourceInvalid, IdentitySourceRequired,
     QueueDepthExceeded, TenantRunLimitExceeded,
     IDENTITY_SOURCE_NO_PASSPORT, IDENTITY_SOURCE_NOT_OWNED,
@@ -64,6 +68,9 @@ from agentclaw.community.adapters.http.agentswarm.schemas import (
     CancelResponseDTO, GuardEventDetailDTO, RoundDetailDTO, RunDetailDTO,
     RunListDTO, RunSummaryDTO, StreamEventDTO, SubmitRunDTO,
     SubmitRunResponseDTO,
+    CreateDefinitionDTO, DefinitionDTO, DefinitionIdDTO, DefinitionListDTO,
+    DefinitionVersionsDTO, DefinitionVersionDTO, QueryDefinitionsDTO,
+    UpdateDefinitionDTO,
 )
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -242,6 +249,16 @@ async def submit_run(
                action=AuditAction.SUBMIT_REJECTED,
                reason=f"identity_source_invalid_{exc.reason or 'unknown'}")
         raise
+    except AgentReferenceUnresolved as exc:
+        # Absent, deleted and another owner's definition all answer alike, so a
+        # caller cannot use this path to probe the id space.
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.SUBMIT_REJECTED,
+               reason="agent_reference_unresolved")
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
     _audit(audit_writer, tenant=tenant, actor=user.staffId,
            action=AuditAction.SUBMIT_ACCEPTED, run_id=run_id)
     return summary
@@ -535,6 +552,15 @@ def _to_domain(dto: SubmitRunDTO, owner_id: str = "") -> SubmitRunRequest:
             )
             for a in dto.agents
         ),
+        # The roster's reference form; resolution (and its refusals) happens in
+        # the service, before any run row is written.
+        agent_refs=tuple(
+            AgentDefinitionRef(
+                definition_id=AgentDefinitionId(ref.definition_id),
+                alias=ref.alias,
+            )
+            for ref in dto.agent_refs
+        ),
         provider=ProviderKind.coerce(dto.provider),
         idempotency_key=dto.idempotency_key,
         owner_id=owner_id,
@@ -602,6 +628,13 @@ def _to_detail_dto(detail) -> RunDetailDTO:
                 kind=spec.kind.value,
                 model=spec.model,
                 engine=spec.engine,
+                definition_id=(
+                    str(prov.definition_id)
+                    if (prov := detail.agent_refs.get(spec.name)) else None
+                ),
+                definition_row_id=(
+                    prov.definition_row_id if prov else None
+                ),
             )
             for spec in detail.agent_catalog
         ],
@@ -609,6 +642,12 @@ def _to_detail_dto(detail) -> RunDetailDTO:
             AgentDetailDTO(
                 agent_id=a.agent_id,
                 name=a.name,
+                catalog_name=(
+                    entry.name
+                    if (entry := find_catalog_entry(
+                        detail.agent_catalog, a.name)) is not None
+                    else None
+                ),
                 role=a.role,
                 kind=a.kind,
                 status=a.status,
@@ -717,3 +756,190 @@ h1{{font-size:18px;}} .meta{{color:#9aa4b2;}} .ok{{color:#4caf50;font-weight:bol
 <div class="meta">Termination: {termination}</div>
 <div class="meta">Agents spawned: {len(run.agent_catalog)}</div>
 </body></html>"""
+
+
+# ── agent definitions ────────────────────────────────────────────────────────
+#
+# Every route derives ``owner`` from the authenticated caller and never from the
+# request. Another user's definition answers 404 — never 403, which would
+# confirm the id exists — so the id space cannot be enumerated.
+
+
+def _definition_dto(d) -> DefinitionDTO:
+    return DefinitionDTO(
+        definition_id=str(d.definition_id),
+        name=d.name,
+        role=d.role,
+        instructions=d.instructions,
+        kind=d.kind.value,
+        model=d.model,
+        engine=d.engine or None,
+        bot_type=d.bot_type,
+        manifest_document=d.manifest_document,
+        manifest_digest=d.manifest_digest,
+        owner_id=d.owner_id,
+        creator_id=d.creator_id,
+        modifier_id=d.modifier_id,
+        definition_row_id=d.row_id,
+        created_at=int(d.created_at),
+    )
+
+
+def _definition_or_404(d, definition_id: str):
+    if d is None:
+        raise HTTPException(status_code=404, detail="definition not found")
+    return d
+
+
+@router.post("/agent/definitions/add", status_code=201)
+async def create_definition(
+    body: CreateDefinitionDTO,
+    svc: AgentSwarmServiceDep,
+    tenant: TenantQuery,
+    user: CurrentUserDep,
+    audit_writer: AgentSwarmAuditWriterDep,
+) -> DefinitionDTO:
+    try:
+        created = svc.create_definition(
+            tenant=tenant, owner_id=user.staffId, name=body.name,
+            role=body.role, instructions=body.instructions, kind=body.kind,
+            model=body.model, engine=body.engine or "",
+            bot_type=body.bot_type or "personal",
+            manifest_document=body.manifest_document,
+        )
+    except DefinitionNameConflict as exc:
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.DEFINITION_NAME_CONFLICT)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DefinitionManifestInvalid as exc:
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.DEFINITION_MANIFEST_REJECTED)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _audit(audit_writer, tenant=tenant, actor=user.staffId,
+           action=AuditAction.DEFINITION_CREATED)
+    return _definition_dto(created)
+
+
+@router.post("/agent/definitions/list")
+async def list_definitions(
+    body: QueryDefinitionsDTO,
+    svc: AgentSwarmServiceDep,
+    tenant: TenantQuery,
+    user: CurrentUserDep,
+) -> DefinitionListDTO:
+    found = svc.list_definitions(
+        tenant, user.staffId, name_filter=body.name,
+        page=body.page, page_size=body.page_size,
+    )
+    return DefinitionListDTO(
+        items=[_definition_dto(d) for d in found.items],
+        total=found.total,
+        page=found.page,
+        page_size=found.page_size,
+    )
+
+
+@router.post("/agent/definitions/get")
+async def get_definition(
+    body: DefinitionIdDTO,
+    svc: AgentSwarmServiceDep,
+    tenant: TenantQuery,
+    user: CurrentUserDep,
+) -> DefinitionDTO:
+    d = svc.get_definition(
+        AgentDefinitionId(body.definition_id), tenant, user.staffId,
+    )
+    return _definition_dto(_definition_or_404(d, body.definition_id))
+
+
+@router.post("/agent/definitions/versions")
+async def list_definition_versions(
+    body: DefinitionIdDTO,
+    svc: AgentSwarmServiceDep,
+    tenant: TenantQuery,
+    user: CurrentUserDep,
+) -> DefinitionVersionsDTO:
+    versions = svc.list_definition_versions(
+        AgentDefinitionId(body.definition_id), tenant, user.staffId,
+    )
+    if not versions:
+        # No row at all: absent, or another owner's. Reported alike so the id
+        # space cannot be probed. A *deleted* definition still has rows, and is
+        # reported below with deleted=true rather than as absent.
+        raise HTTPException(status_code=404, detail="definition not found")
+    # Deleted is stated, not inferred: a retired row and a superseded row look
+    # identical, so "no live version" is the only signal and it is easy to miss.
+    deleted = not any(v.is_live for v in versions)
+    return DefinitionVersionsDTO(
+        definition_id=str(body.definition_id),
+        deleted=deleted,
+        versions=[
+            DefinitionVersionDTO(
+                definition_row_id=v.row_id,
+                is_live=v.is_live,
+                manifest_digest=v.manifest_digest,
+                creator_id=v.creator_id,
+                modifier_id=v.modifier_id,
+                created_at=int(v.created_at),
+            )
+            for v in versions
+        ],
+    )
+
+
+@router.post("/agent/definitions/update")
+async def update_definition(
+    body: UpdateDefinitionDTO,
+    svc: AgentSwarmServiceDep,
+    tenant: TenantQuery,
+    user: CurrentUserDep,
+    audit_writer: AgentSwarmAuditWriterDep,
+) -> DefinitionDTO:
+    try:
+        updated = svc.update_definition(
+            definition_id=AgentDefinitionId(body.definition_id), tenant=tenant,
+            owner_id=user.staffId, expected_row_id=body.definition_row_id,
+            name=body.name, role=body.role, instructions=body.instructions,
+            kind=body.kind, model=body.model, engine=body.engine or "",
+            bot_type=body.bot_type or "personal",
+            manifest_document=body.manifest_document,
+        )
+    except AgentSwarmRunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="definition not found") from exc
+    except DefinitionRowConflict as exc:
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.DEFINITION_ROW_CONFLICT)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DefinitionNameConflict as exc:
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.DEFINITION_NAME_CONFLICT)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DefinitionManifestInvalid as exc:
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.DEFINITION_MANIFEST_REJECTED)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _audit(audit_writer, tenant=tenant, actor=user.staffId,
+           action=AuditAction.DEFINITION_REVISED)
+    return _definition_dto(updated)
+
+
+@router.post("/agent/definitions/delete")
+async def delete_definition(
+    body: DefinitionIdDTO,
+    svc: AgentSwarmServiceDep,
+    tenant: TenantQuery,
+    user: CurrentUserDep,
+    audit_writer: AgentSwarmAuditWriterDep,
+) -> dict[str, int]:
+    retired = svc.delete_definition(
+        AgentDefinitionId(body.definition_id), tenant, user.staffId,
+    )
+    if retired == 0:
+        raise HTTPException(status_code=404, detail="definition not found")
+    _audit(audit_writer, tenant=tenant, actor=user.staffId,
+           action=AuditAction.DEFINITION_DELETED)
+    return {"retired": retired}

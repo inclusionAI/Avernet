@@ -8,8 +8,8 @@ from agentclaw.community.core.agentswarm.domain.models.enums import (
     RunOptions, RunStatus, TerminationReason,
 )
 from agentclaw.community.core.agentswarm.domain.models.ids import (
-    AgentId, ArtifactKey, BotId, EpochMillis, EventId, IdempotencyKey,
-    MessageId, ResultId, RoundId, RunId, TenantId,
+    AgentDefinitionId, AgentId, ArtifactKey, BotId, EpochMillis, EventId,
+    IdempotencyKey, MessageId, ModelId, ResultId, RoundId, RunId, TenantId,
 )
 from agentclaw.community.core.agentswarm.domain.models.specs import (
     AgentSpec, Decision, FinalAnswer, GuardDetails, MessageContent,
@@ -137,3 +137,77 @@ class NameAliasMap:
 
     def resolve_one(self, name: str) -> AgentId | None:
         return self._aliases.get(name)
+
+@dataclass(frozen=True)
+class AgentDefinition:
+    """One immutable version of a user-owned agent definition.
+
+    ``definition_id`` is reused by every version; ``row_id`` (the stored row's
+    own id) is what identifies *this* version, since there is no revision
+    counter (design D1c). ``creator_id`` is copied forward from the first
+    version, while ``modifier_id`` names whoever produced this one.
+    """
+
+    definition_id: AgentDefinitionId
+    tenant: TenantId
+    owner_id: str
+    creator_id: str
+    modifier_id: str
+    name: str
+    role: str = ""
+    instructions: str = ""
+    kind: AgentKind = AgentKind.LLM
+    model: str | None = None
+    engine: str = ""
+    bot_type: str = "personal"
+    manifest_document: str = ""
+    manifest_digest: str = ""
+    row_id: int = 0
+    is_live: bool = True
+    created_at: EpochMillis = EpochMillis(0)
+
+    def to_spec(self) -> AgentSpec:
+        """Project this definition onto the agent spec a run executes.
+
+        A definition never stores an identity file or a metadata map (design
+        D1d), so both take the values an equivalent inline agent gets by
+        defaulting them: ``SOUL.md`` is what the host adapter already falls back
+        to, and an empty metadata map is what the inline form produces when the
+        caller sets none.
+        """
+        return AgentSpec(
+            name=self.name,
+            role=self.role,
+            instructions=self.instructions,
+            kind=self.kind,
+            model=ModelId(self.model) if self.model else None,
+            engine=self.engine,
+            bot_type=self.bot_type,
+            identity_file="SOUL.md",
+            metadata={},
+            config_manifest=self.manifest_document,
+        )
+
+
+@dataclass(frozen=True)
+class AgentDefinitionPage:
+    items: tuple[AgentDefinition, ...]
+    total: int
+    page: int
+    page_size: int
+
+
+@dataclass(frozen=True)
+class RunAgentRef:
+    """Which definition version one catalog entry of one run came from.
+
+    Relates to the *catalog entry* (``catalog_name`` = ``AgentSpec.name``), not
+    to a spawned agent instance: one entry may spawn several agents and all of
+    them share this record (design D4).
+    """
+
+    run_id: RunId
+    tenant: TenantId
+    catalog_name: str
+    definition_id: AgentDefinitionId
+    definition_row_id: int
