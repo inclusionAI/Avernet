@@ -131,6 +131,10 @@ from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_config_module import TaskConfigModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
+from agentclaw.community.di.modules.task_experience_module import TaskExperienceModule
+from agentclaw.community.di.modules.task_experience_config_module import (
+    TaskExperienceConfigModule,
+)
 from agentclaw.community.di.modules.task_trajectory_config_module import (
     TaskTrajectoryConfigModule,
 )
@@ -289,11 +293,13 @@ def build_injector(
         BotAppGrantModule(),
         BotChatOpenModule(),
         CallerIdentityModule(),
-        AcliClisModule(),
-        UserListModule(),
-        BotDormantModule(),
         TaskQueueModule(),
         TaskPersistenceModule(),
+        TaskExperienceConfigModule(),
+        TaskExperienceModule(),
+        TaskQueueModule(),
+        TaskPersistenceModule(),
+        TaskExperienceModule(),
         QualityModule(),
         # HTTP transport (real httpx) — shared by every base profile. Only the
         # test/corp_test columns override these keys with LocalHttpClient;
