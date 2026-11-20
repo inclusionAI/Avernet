@@ -232,13 +232,13 @@ async def test_jit_reads_selectors_after_unchanged_caller_refresh(selection):
     assert await service.get_iam_token(**request) is caller.outcome
     assert caller.requests == [request]
     context, = pipeline.contexts
-    assert context.caller_runtime_target == selection.get("caller_runtime_target")
+    assert context.friend_user_id is None
+    assert not hasattr(context, "caller_runtime_target")
     assert context.device_uuid == selection.get("device_uuid")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", [
-    {"caller_runtime_target": ""}, {"caller_runtime_target": "AUTO"},
     {"device_uuid": ""},
 ])
 async def test_invalid_jit_selectors_preserve_caller_without_fallback(selection):
@@ -250,7 +250,7 @@ async def test_invalid_jit_selectors_preserve_caller_without_fallback(selection)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("selection", [{"caller_runtime_target": "wrong"}, {"device_uuid": ""}])
+@pytest.mark.parametrize("selection", [{"device_uuid": ""}])
 async def test_http_invalid_selection_preserves_caller_response(selection):
     from httpx import ASGITransport, AsyncClient
     from tests.community.api.test_dingtalk_iam_token import _app
@@ -274,7 +274,7 @@ async def test_http_invalid_selection_preserves_caller_response(selection):
 async def test_jit_selector_failure_preserves_original_caller_exception():
     caller_error = RuntimeError("caller refresh failed")
     service, caller, pipeline = _service(_Auth(), caller_error=caller_error)
-    request = _request(auth_request=AuthRequestContext(query_params={"caller_runtime_target": "invalid"}))
+    request = _request(auth_request=AuthRequestContext(query_params={"device_uuid": ""}))
     with pytest.raises(RuntimeError) as exc:
         await service.get_iam_token(**request)
     assert exc.value is caller_error
@@ -291,4 +291,4 @@ async def test_verified_friend_keeps_requested_runtime_for_target_authorization(
     ))
     assert await service.get_iam_token(**request) is caller.outcome
     assert caller.requests == [request]
-    assert [ctx.caller_runtime_target for ctx in pipeline.contexts] == [target]
+    assert [ctx.friend_user_id for ctx in pipeline.contexts] == ["friend-1"]

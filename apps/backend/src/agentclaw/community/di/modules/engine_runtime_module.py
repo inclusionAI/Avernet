@@ -62,6 +62,8 @@ from agentclaw.community.core.system_config import ConfigRepositoryProtocol
 from agentclaw.community.core.runtime_binding.service import (
     RuntimeBindingResolutionService,
 )
+from agentclaw.community.core.runtime_binding.container_locator import RuntimeContainerLocator
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.di.modules.config_module import read_user_config
 from agentclaw.community.di.config import GatewayEndpoint
 from injector import Binder, Module, inject, provider, singleton
@@ -132,6 +134,18 @@ class EngineRuntimeModule(Module):
             publish_repository=publish_repository,
             binding_repository=binding_repository,
             caller_instance_repository=caller_instance_repository,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def runtime_container_locator(
+        self, bots: BotRepository, runtime_bindings: RuntimeBindingResolutionService,
+        binding_repository: DeviceBindingRepository, baas_service: BaasService,
+    ) -> RuntimeContainerLocator:
+        return RuntimeContainerLocator(
+            bots=bots, runtime_bindings=runtime_bindings,
+            binding_repository=binding_repository, baas_service=baas_service,
         )
 
     @singleton
