@@ -24,8 +24,6 @@ export interface BotSessionFilesPanelProps {
   stage?: BotRuntimeStage;
   /** 多实例选中实例(openspec add-session-files-device-uuid 扩展段),预览内容链定向;缺省不携带 */
   deviceUuid?: string;
-  /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
-  callerRuntimeTarget?: 'service' | 'caller_instance';
   /** 好友会话身份(2026-11-19 需求追加:预览内容链携带 f_user_id),缺省不携带 */
   friendUserId?: string;
   onClose: () => void;
@@ -64,7 +62,6 @@ export function BotSessionFilesPanel({
   ownerId,
   stage,
   deviceUuid,
-  callerRuntimeTarget,
   friendUserId,
   onClose,
   onUploadClick,
@@ -121,8 +118,6 @@ export function BotSessionFilesPanel({
     stage,
     // 多实例选中实例(openspec add-session-files-device-uuid 扩展段),缺省不携带
     deviceUuid,
-    // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带
-    callerRuntimeTarget,
     // 好友会话身份(2026-11-19 需求追加:预览内容链携带 f_user_id),缺省不携带
     friendUserId,
   });

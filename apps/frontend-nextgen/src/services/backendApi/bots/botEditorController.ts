@@ -394,7 +394,6 @@ export const botEditorController = {
       editable: boolean;
       /**
        * 聚合 Caller 判定:任一 MCP/CLI 以 caller 身份执行即为 'caller'。
-       * 会话文件面据此注入 caller_runtime_target(openspec add-session-files-caller-runtime-target D6);
        * 可选以兼容旧网关/mock。后端 CallerContext 必回。
        */
       bot_call_type?: 'caller' | 'owner';

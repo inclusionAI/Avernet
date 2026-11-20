@@ -151,7 +151,7 @@ def _seed_happy_services(world) -> None:
         },
     )
 
-    def resolve_binding(_self, _request):
+    def resolve_binding(_self, _request, *, session_user_id=None):
         return SimpleNamespace(
             binding_id=101,
         )
@@ -160,7 +160,7 @@ def _seed_happy_services(world) -> None:
         world,
         RuntimeBindingResolutionService,
         {
-            "resolve": resolve_binding,
+            "resolve_session_file": resolve_binding,
         },
     )
 
@@ -203,7 +203,7 @@ def _seed_happy_services(world) -> None:
     async def open_content(_self, _target, _session_key, _resource_id, _disposition, *, session_user_id=None):
         return _ContentUpstream()
 
-    async def delete_file(_self, _target, _session_key, _resource_id):
+    async def delete_file(_self, _target, _session_key, _resource_id, *, session_user_id=None):
         return None
 
     bind_overrides(world, EngineSessionFilesProtocol, {

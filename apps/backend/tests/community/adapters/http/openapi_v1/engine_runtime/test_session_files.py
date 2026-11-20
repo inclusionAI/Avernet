@@ -24,7 +24,7 @@ from agentclaw.community.api.tc_resource_ready_observer import (
 )
 from agentclaw.community.api.session_resource_service import SessionResourceServiceProtocol
 from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingTarget
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingSource, RuntimeBindingTarget
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.core.session_resources.types import SessionResourceStatus
 from tests.community.adapters.http.openapi_v1.conftest import (
@@ -181,23 +181,27 @@ class _EngineFiles:
         self.resources.binding_requests.append(target)
         _, upstream = await self.resources.open_session_file_content(
             target=target, session_key=session_key, resource_id=resource_id, disposition=disposition,
+            session_user_id=session_user_id,
         )
         return upstream
 
-    async def delete_file(self, target, session_key, resource_id):
+    async def delete_file(self, target, session_key, resource_id, *, session_user_id=None):
         self.resources.binding_requests.append(target)
         self.resources.calls.append(("delete", {
             "target": target, "session_key": session_key, "resource_id": resource_id,
+            "session_user_id": session_user_id,
         }))
 
 
 class _RuntimeBindings:
     def __init__(self) -> None:
         self.requests: list[object] = []
+        self.subjects = []
 
-    def resolve(self, request):
+    def resolve_session_file(self, request, *, session_user_id=None):
         self.requests.append(request)
-        return SimpleNamespace(binding_id=101)
+        self.subjects.append(session_user_id)
+        return SimpleNamespace(binding_id=101, source=RuntimeBindingSource.SERVICE_ONLINE)
 
 
 @pytest.fixture
@@ -295,7 +299,7 @@ def test_friend_service_files_use_resolved_online_stage(client, friendships, exp
     assert resources.calls[-1][1]["target"].stage == "online"
 
 
-def test_owner_reads_friend_caller_files_from_friend_binding(
+def test_owner_reads_uploads_and_deletes_friend_files_using_friend_binding(
     client, friendships, expert, resources,
 ):
     from unittest.mock import Mock, AsyncMock
@@ -337,9 +341,22 @@ def test_owner_reads_friend_caller_files_from_friend_binding(
     client.app.state.injector.binder.bind(EngineSessionFilesProtocol, to=service)
     assert ok(client.get(_base(), params={"f_user_id": "friend-1"}))["files"][0]["resource_id"] == "workspace_friend"
     assert client.get(_base() + "/workspace_friend/content", params={"f_user_id": "friend-1"}).status_code == 200
-    assert instances.get_instance.call_count == 2
+    client.app.state.injector.binder.bind(RuntimeBindingResolutionService, to=bindings)
+    intent = client.post(_base() + "/upload-intents", params={"f_user_id": "friend-1"},
+                         json={"files": [{"filename": "friend-upload.txt"}]})
+    assert intent.status_code == 201, intent.text
+    assert resources.calls == [("intent", {
+        "owner_id": OWNER, "actor_user_id": OWNER, "creator_name": None,
+        "bot_id": BOT, "session_key": SESSION_ID, "scope_type": "openapi_session",
+        "engine_type": "openclaw", "filename": "friend-upload.txt", "binding_id": 82,
+        "size_bytes": None, "content_hash": None,
+    })]
+    transport.invoke.return_value = {"deleted": True, "resource_id": "workspace_friend"}
+    removed = client.delete(_base() + "/workspace_friend", params={"f_user_id": "friend-1"})
+    assert removed.status_code == 200, removed.text
+    assert instances.get_instance.call_count == 4
     assert all(call.args == (82, "friend-1") for call in resolver.resolve_for_binding.call_args_list)
-    assert resources.calls == []
+    assert [name for name, _ in resources.calls] == ["intent"]
 
 
 @pytest.mark.parametrize("operation", ["list", "content", "delete"])
@@ -354,7 +371,7 @@ def test_real_engine_boundary_does_not_leak_exception_credentials(client, operat
         stream=AsyncMock(side_effect=ValueError(secret)),
     )
     bindings = Mock()
-    bindings.resolve.return_value = SimpleNamespace(binding_id=101)
+    bindings.resolve_session_file.return_value = SimpleNamespace(binding_id=101, source=RuntimeBindingSource.PERSONAL)
     resolver = Mock()
     resolver.resolve_for_binding.return_value = SimpleNamespace(conn_info={})
     client.app.state.injector.binder.bind(
@@ -431,12 +448,22 @@ def test_friend_file_list_rejects_verify_before_reading_resources(friend_client,
     ("/sr_1", "delete", None),
     ("/upload-intents", "post", {"files": [{"filename": "report.txt"}]}),
 ])
-def test_friend_file_mutations_require_caller_instance(
-    friend_client, resources, suffix, method, body,
+@pytest.mark.parametrize("reason", ["not_friend", "foreign_identity", "foreign_session"])
+def test_friend_mutations_require_verified_owned_session(
+    friend_client, resources, friendships, expert, suffix, method, body, reason,
 ):
+    from unittest.mock import AsyncMock
+
+    subject = "friend-1"
+    if reason == "not_friend":
+        friendships.allowed = False
+    elif reason == "foreign_identity":
+        subject = "friend-2"
+    else:
+        expert.get_owned_chat_session = AsyncMock(side_effect=BotNotFoundError("foreign"))
     response = getattr(friend_client, method)(
         _base() + suffix,
-        params={"owner_id": OWNER, "f_user_id": "friend-1"},
+        params={"owner_id": OWNER, "f_user_id": subject},
         **({"json": body} if body is not None else {}),
     )
     assert response.status_code == 404
@@ -449,7 +476,7 @@ def test_friend_can_upload_complete_poll_and_delete_own_non_teclaw_session(
     common = {
         "owner_id": OWNER,
         "stage": "online",
-        "caller_runtime_target": "caller_instance",
+        "f_user_id": "friend-1",
     }
 
     intent = friend_client.post(
@@ -459,12 +486,12 @@ def test_friend_can_upload_complete_poll_and_delete_own_non_teclaw_session(
     )
     completed = friend_client.post(
         _base() + "/upload-complete",
-        params={"owner_id": OWNER, "stage": "online"},
+        params={"owner_id": OWNER, "stage": "online", "f_user_id": "friend-1"},
         json={"resource_id": "sr_1", "transfer_id": "tr_1"},
     )
     status = friend_client.get(
         _base() + "/sr_1/materialize-status",
-        params={"owner_id": OWNER, "stage": "online"},
+        params={"owner_id": OWNER, "stage": "online", "f_user_id": "friend-1"},
     )
     removed = friend_client.delete(
         _base() + "/sr_1",
@@ -475,25 +502,32 @@ def test_friend_can_upload_complete_poll_and_delete_own_non_teclaw_session(
     assert completed.status_code == 200, completed.text
     assert status.status_code == 200, status.text
     assert removed.status_code == 200, removed.text
-    assert runtime_bindings.requests[0].target is RuntimeBindingTarget.CALLER_INSTANCE
+    assert runtime_bindings.requests[0].target is RuntimeBindingTarget.AUTO
+    assert runtime_bindings.subjects == ["friend-1"]
+    assert resources.calls[0][1]["actor_user_id"] == "friend-1"
+    assert resources.calls[-1][1]["session_user_id"] == "friend-1"
     assert runtime_bindings.requests[0].actor_user_id == "friend-1"
     owned_calls = [call for call in expert.calls if call[0] == "get_owned_chat_session"]
     assert len(owned_calls) == 4
 
 
-def test_friend_upload_refuses_teclaw_before_creating_resource(
-    friend_client, relay, resources,
+@pytest.mark.parametrize("method,suffix,body", [
+    ("post", "/upload-intents", {"files": [{"filename": "report.txt"}]}),
+    ("delete", "/sr_1", None),
+])
+def test_friend_mutations_refuse_teclaw_before_contacting_resources(
+    friend_client, relay, resources, method, suffix, body,
 ):
     relay.set_active_engine("teclaw")
 
-    response = friend_client.post(
-        _base() + "/upload-intents",
+    response = getattr(friend_client, method)(
+        _base() + suffix,
         params={
             "owner_id": OWNER,
             "stage": "online",
-            "caller_runtime_target": "caller_instance",
+            "f_user_id": "friend-1",
         },
-        json={"files": [{"filename": "report.txt"}]},
+        **({"json": body} if body is not None else {}),
     )
 
     assert response.status_code == 404
@@ -866,43 +900,76 @@ def session_file_route(request):
     return request.param
 
 
-@pytest.mark.parametrize(("selector", "expected"), [
-    (None, RuntimeBindingTarget.AUTO),
-    ("service", RuntimeBindingTarget.CALLER_SERVICE),
-    ("caller_instance", RuntimeBindingTarget.CALLER_INSTANCE),
-])
-def test_caller_runtime_target_reaches_binding_request(
-    client, resources, runtime_bindings, session_file_route, selector, expected,
+@pytest.mark.parametrize("selector", [None, "service", "caller_instance", "unknown"])
+def test_obsolete_runtime_query_is_ignored(
+    client, resources, runtime_bindings, session_file_route, selector,
 ):
     method, suffix, body, status = session_file_route
     params = {} if selector is None else {"caller_runtime_target": selector}
     response = client.request(method, _base() + suffix, params=params, json=body)
-
     assert response.status_code == status, response.text
     binding_request, = runtime_bindings.requests + resources.binding_requests
-    assert binding_request.target is expected
+    assert binding_request.target is RuntimeBindingTarget.AUTO
     assert binding_request.actor_user_id == OWNER
 
 
-def test_invalid_caller_runtime_target_is_rejected(
-    client, resources, runtime_bindings, session_file_route,
+@pytest.mark.parametrize("selector", ["service", "caller_instance", "unknown"])
+def test_obsolete_query_cannot_override_verified_friend_subject(
+    client, friendships, resources, runtime_bindings, session_file_route, selector,
 ):
-    method, suffix, body, _ = session_file_route
-    response = client.request(
-        method, _base() + suffix, params={"caller_runtime_target": "unknown"}, json=body,
-    )
+    friendships.allowed = True
+    method, suffix, body, status = session_file_route
+    response = client.request(method, _base() + suffix, params={
+        "f_user_id": "friend-1", "caller_runtime_target": selector,
+    }, json=body)
+    assert response.status_code == status, response.text
+    request, = runtime_bindings.requests + resources.binding_requests
+    assert request.target is RuntimeBindingTarget.AUTO
+    assert request.actor_user_id == OWNER
+    if suffix == "/upload-intents":
+        assert runtime_bindings.subjects == ["friend-1"]
+        assert resources.calls[-1][1]["actor_user_id"] == OWNER
+    else:
+        assert resources.calls[-1][1]["session_user_id"] == "friend-1"
 
-    assert response.status_code == 422, response.text
+
+@pytest.mark.parametrize("selector", [None, "caller_instance", "service"])
+@pytest.mark.parametrize("method,suffix,body", [
+    ("POST", "/upload-intents", {"files": [{"filename": "a.txt"}]}),
+    ("DELETE", "/sr_1", None),
+])
+def test_friend_mutation_requires_explicit_subject(
+    friend_client, resources, runtime_bindings, selector, method, suffix, body,
+):
+    params = {"owner_id": OWNER}
+    if selector is not None:
+        params["caller_runtime_target"] = selector
+    response = friend_client.request(method, _base() + suffix, params=params, json=body)
+    assert response.status_code == 404, response.text
     assert resources.calls == []
     assert runtime_bindings.requests == []
 
 
-@pytest.mark.parametrize("suffix", ["", "/sr_1/content"])
-def test_friend_session_masks_service_caller_runtime_target(client, friendships, resources, suffix):
-    friendships.allowed = True
-    response = client.get(_base() + suffix, params={
-        "f_user_id": "friend-1", "caller_runtime_target": "service",
-    })
+def test_session_file_openapi_removes_obsolete_selector(client):
+    paths = client.app.openapi()["paths"]
+    operations = [operation for path, methods in paths.items() if "/files" in path
+                  for operation in methods.values() if isinstance(operation, dict)]
+    assert operations
+    for operation in operations:
+        assert "caller_runtime_target" not in {p["name"] for p in operation.get("parameters", [])}
 
-    assert fails(response, 404)["message"] == "Not found"
-    assert resources.calls == []
+
+@pytest.mark.parametrize("operation", ["complete", "status"])
+def test_implicit_friend_lifecycle_keeps_existing_record_without_binding_resolution(
+    friend_client, resources, runtime_bindings, operation,
+):
+    params = {"owner_id": OWNER, "stage": "online"}
+    if operation == "complete":
+        response = friend_client.post(_base() + "/upload-complete", params=params,
+                                      json={"resource_id": "sr_1", "transfer_id": "tr_1"})
+    else:
+        response = friend_client.get(_base() + "/sr_1/materialize-status", params=params)
+    assert response.status_code == 200, response.text
+    assert [name for name, _ in resources.calls] == [operation]
+    assert runtime_bindings.requests == []
+    assert resources.binding_requests == []

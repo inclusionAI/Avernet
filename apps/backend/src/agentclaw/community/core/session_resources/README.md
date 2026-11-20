@@ -42,6 +42,13 @@ to the resolved runtime's manifest, including files published by local Chat tool
 It does not create or require upload-control-plane records. Upload/status APIs
 and their callback state machine remain owned by SessionResourceService.
 
+OpenAPI file operations select the service stage when `f_user_id` is omitted.
+An explicitly authorized friend subject selects its independent Caller instance
+when the engine strategy requires one; shared engines retain their stage binding.
+Upload intents pin the same selection into the resource record; content and
+deletion keep the friend subject through Engine connection resolution. The
+obsolete `caller_runtime_target` HTTP selector no longer affects file routing.
+
 ### File timestamp contract
 
 Session File `uploaded_at` and `created_at` values are ISO-8601 UTC timestamps

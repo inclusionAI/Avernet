@@ -54,7 +54,7 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
     await act(async () => {
       await result.current.refresh();
     });
-    expect(mockLoadReady).toHaveBeenCalledWith('bot-1', 's1', 'u1', 'owner-1', 'u1', undefined, undefined, undefined);
+    expect(mockLoadReady).toHaveBeenCalledWith('bot-1', 's1', 'u1', 'owner-1', 'u1', undefined, undefined);
   });
 
   it('懒加载(2026-10-21):进入会话不再默认调 file 接口,refresh(/file 唤起或面板打开)才加载;缓存变化不重复请求', async () => {
@@ -70,7 +70,7 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
       await result.current.refresh();
     });
     expect(mockLoadReady).toHaveBeenCalledTimes(1);
-    expect(mockLoadReady).toHaveBeenCalledWith('bot-1', 's1', 'u1', 'owner-1', undefined, undefined, undefined, undefined);
+    expect(mockLoadReady).toHaveBeenCalledWith('bot-1', 's1', 'u1', 'owner-1', undefined, undefined, undefined);
     expect(result.current.readyFiles.map((file) => file.resourceId)).toEqual(['r1']);
     // 本地缓存变化(上传就绪)不触发请求。
     act(() => result.current.addReadyFile(makeFile('uploaded', 'new.txt')));
@@ -196,5 +196,5 @@ it('文件列表透传 online stage', async () => {
   await act(async () => {
     await result.current.refresh();
   });
-  expect(mockLoadReady).toHaveBeenLastCalledWith('bot', 's1', 'viewer', 'entity', 'viewer', 'online', undefined, undefined);
+  expect(mockLoadReady).toHaveBeenLastCalledWith('bot', 's1', 'viewer', 'entity', 'viewer', 'online', undefined);
 });

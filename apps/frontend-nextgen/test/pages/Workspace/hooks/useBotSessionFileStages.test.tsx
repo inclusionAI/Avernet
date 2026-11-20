@@ -30,17 +30,19 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
-it.each(['online', undefined] as const)('文件列表/删除/下载/预览 stage=%p，与现有缺省请求兼容', async (stage) => {
-  const args = stage ? ([stage] as const) : [];
-  const { result } = renderHook(() => useBotSessionFiles('bot', 's1', 'viewer', 'entity', undefined, ...args));
+it.each(
+  (['draft', 'verify', 'online', undefined] as const).flatMap((stage) =>
+    [undefined, 'human_friend'].map((friendUserId) => ({ stage, friendUserId }))),
+)('文件列表/删除/下载/预览 stage=$stage friend=$friendUserId', async ({ stage, friendUserId }) => {
+  const { result } = renderHook(() => useBotSessionFiles('bot', 's1', 'viewer', 'entity', friendUserId, stage));
   await act(async () => {
     await result.current.refresh();
   });
-  expect(service.loadReady).toHaveBeenCalledWith('bot', 's1', 'viewer', 'entity', undefined, stage, undefined, undefined);
+  expect(service.loadReady).toHaveBeenCalledWith('bot', 's1', 'viewer', 'entity', friendUserId, stage, undefined);
   await act(async () => {
     await result.current.deleteFile(file);
   });
-  expect(service.remove).toHaveBeenCalledWith('bot', 's1', 'r1', 'viewer', 'entity', stage, undefined, undefined, undefined);
+  expect(service.remove).toHaveBeenCalledWith('bot', 's1', 'r1', 'viewer', 'entity', stage, undefined, friendUserId);
   await act(async () => {
     await result.current.downloadFile(file);
   });
@@ -53,18 +55,17 @@ it.each(['online', undefined] as const)('文件列表/删除/下载/预览 stage
     'attachment',
     stage,
     undefined,
-    undefined,
-    undefined,
+    friendUserId,
   );
   await act(async () => {
     await result.current.previewFile(file);
   });
-  expect(service.resolveContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', stage, undefined, undefined, undefined);
+  expect(service.resolveContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', stage, undefined, friendUserId);
   jest.mocked(isLargeBotSessionFile).mockReturnValue(true);
   await act(async () => {
     await result.current.downloadFile(file);
   });
-  expect(service.resolveExternalDownloadUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', stage, undefined, undefined, undefined);
+  expect(service.resolveExternalDownloadUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', stage, undefined, friendUserId);
 });
 
 it('文件预览内容 URL 与文本读取均使用 online', async () => {
@@ -77,10 +78,11 @@ it('文件预览内容 URL 与文本读取均使用 online', async () => {
       userId: 'viewer',
       ownerId: 'entity',
       stage: 'online',
+      friendUserId: 'human_friend',
     }),
   );
   await waitFor(() => expect(result.current.status).toBe('ready'));
   // 尾位 friendUserId 槽(2026-11-19 需求追加)显式占位,与调用形态逐位对齐。
-  expect(service.resolveContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', 'online', undefined, undefined, undefined);
-  expect(service.fetchBlob).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', 'online', undefined, undefined, undefined);
+  expect(service.resolveContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', 'online', undefined, 'human_friend');
+  expect(service.fetchBlob).toHaveBeenLastCalledWith('bot', 's1', 'r1', 'viewer', 'entity', 'inline', 'online', undefined, 'human_friend');
 });

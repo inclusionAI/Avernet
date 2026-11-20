@@ -25,8 +25,6 @@ export function useBotSessionFiles(
   stage?: BotRuntimeStage,
   /** 多实例选中实例(openspec add-session-files-device-uuid),缺省不携带 */
   deviceUuid?: string,
-  /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
-  callerRuntimeTarget?: 'service' | 'caller_instance',
 ): UseBotSessionFilesResult {
   const store = useBotSessionFileStore();
   const { setIsLoadingList, setReadyFiles, resetForSession } = store;
@@ -44,7 +42,7 @@ export function useBotSessionFiles(
     }
     const requestId = ++requestIdRef.current;
     setIsLoadingList(true);
-    // 显式位参(2026-11-19 勘误):条件 spread 会让缺省位被后值顶替(device_uuid 槽吃 caller 值)。
+    // 显式位参保留好友身份、stage 和 device_uuid 的独立槽位。
     // undefined 占位与可选参数省略等价,各值归位。
     const readyRes = await botSessionFileService.loadReady(
       botId,
@@ -54,13 +52,12 @@ export function useBotSessionFiles(
       friendUserId,
       stage,
       deviceUuid,
-      callerRuntimeTarget,
     );
     if (requestIdRef.current !== requestId) return;
     setIsLoadingList(false);
     if (readyRes.ok) setReadyFiles(readyRes.data.items);
     else toast.error(readyRes.error.friendlyMessage);
-  }, [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget, setIsLoadingList, setReadyFiles]);
+  }, [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, setIsLoadingList, setReadyFiles]);
 
   useEffect(() => {
     // 懒加载(2026-10-21):进入会话不再默认调 file 接口(选会话≠有查看文件清单的诉求);
@@ -70,7 +67,7 @@ export function useBotSessionFiles(
       requestIdRef.current++;
       setIsLoadingList(false);
     };
-  }, [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget, resetForSession, setIsLoadingList]);
+  }, [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, resetForSession, setIsLoadingList]);
 
   const deleteFile = useCallback(
     async (file: BotSessionFileView) => {
@@ -84,7 +81,6 @@ export function useBotSessionFiles(
         ownerId,
         stage,
         deviceUuid,
-        callerRuntimeTarget,
         friendUserId,
       );
       if (res.ok) {
@@ -95,7 +91,7 @@ export function useBotSessionFiles(
       toast.error(res.error.friendlyMessage);
       return false;
     },
-    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget, store],
+    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, store],
   );
 
   const downloadFile = useCallback(
@@ -112,7 +108,6 @@ export function useBotSessionFiles(
               ownerId,
               stage,
               deviceUuid,
-              callerRuntimeTarget,
               friendUserId,
             )
           : await botSessionFileService.resolveContentUrl(
@@ -124,7 +119,6 @@ export function useBotSessionFiles(
               'attachment',
               stage,
               deviceUuid,
-              callerRuntimeTarget,
               friendUserId,
             );
       } catch (err) {
@@ -142,7 +136,7 @@ export function useBotSessionFiles(
       a.click();
       a.remove();
     },
-    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget],
+    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid],
   );
 
   const previewFile = useCallback(
@@ -159,7 +153,6 @@ export function useBotSessionFiles(
           'inline',
           stage,
           deviceUuid,
-          callerRuntimeTarget,
           friendUserId,
         );
       } catch (err) {
@@ -168,7 +161,7 @@ export function useBotSessionFiles(
       }
       window.open(url, '_blank', 'noopener,noreferrer');
     },
-    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget],
+    [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid],
   );
 
   return {

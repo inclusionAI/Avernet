@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
+from agentclaw.community.core.bot_management.engines.registry import resolve_provisioning
 from agentclaw.community.core.engine_runtime.stage import (
     SERVICE_BOT_TYPE,
     STAGE_DRAFT,
@@ -58,6 +60,50 @@ class RuntimeBindingResolutionService:
         if not bot:
             raise RuntimeBotNotFoundError("runtime bot is unavailable")
 
+        return self._resolve(bot, request)
+
+    def resolve_session_file(
+        self, request: RuntimeBindingRequest, *, session_user_id: str | None = None,
+    ) -> ResolvedRuntimeBinding:
+        """Resolve an authorized file request by stage or friend-chat subject.
+
+        Callers must authorize the actor and the optional friend session before
+        invoking this method. The subject selects a runtime, not an identity grant.
+        """
+        bot = self._bot_repository.get_by_id_and_owner(request.bot_id, request.owner_id)
+        if not bot:
+            raise RuntimeBotNotFoundError("runtime bot is unavailable")
+        target = RuntimeBindingTarget.AUTO
+        if self._value(bot.get("bot_type")) == SERVICE_BOT_TYPE:
+            target = RuntimeBindingTarget.CALLER_SERVICE
+            if session_user_id and self._value(bot.get("call_type")) == "caller":
+                context, strategy = resolve_provisioning(
+                    bot_id=request.bot_id, owner_id=request.owner_id,
+                    bot_type=SERVICE_BOT_TYPE,
+                    active_engine=bot.get("active_engine") or "openclaw",
+                    template_type=bot.get("template_type") or None,
+                    template_config=bot.get("template_config")
+                    if isinstance(bot.get("template_config"), dict) else None,
+                )
+                if strategy.requires_caller_chat_instance(context):
+                    target = RuntimeBindingTarget.CALLER_INSTANCE
+        selected = replace(
+            request, target=target,
+            actor_user_id=session_user_id
+            if target is RuntimeBindingTarget.CALLER_INSTANCE else request.actor_user_id,
+        )
+        result = self._resolve(bot, selected)
+        logger.info(
+            "session_files.binding.selected bot_id=%s owner_id=%s actor_user_id=%s "
+            "session_user_id=%s stage=%s source=%s binding_id=%s",
+            request.bot_id, request.owner_id, request.actor_user_id, session_user_id,
+            request.stage, result.source.value, result.binding_id,
+        )
+        return result
+
+    def _resolve(
+        self, bot: dict[str, Any], request: RuntimeBindingRequest,
+    ) -> ResolvedRuntimeBinding:
         source = self._source(bot, request)
         if source is RuntimeBindingSource.CALLER_INSTANCE:
             binding_id = self._resolve_caller_instance_binding(
