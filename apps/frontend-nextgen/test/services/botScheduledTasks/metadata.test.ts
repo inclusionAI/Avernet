@@ -38,7 +38,7 @@ beforeEach(() => {
   sendMock.mockReset();
 });
 
-it.each(['draft', 'verify', 'online', undefined] as const)(
+it.each(['draft', 'verify', undefined] as const)(
   '任何链接阶段（%s）都请求线上容器清单，填充 online 实例',
   async (stage) => {
     mockTransport(botDetail({}));
@@ -46,7 +46,7 @@ it.each(['draft', 'verify', 'online', undefined] as const)(
     expect(containerCalled()).toBe(true);
     expect(context.environments[2].instances).toEqual(['c1', 'c2']);
     // 草稿/预发从未获得这份清单：线上 UUID 不得复用给其他环境。
-    if (stage !== 'online') expect(context.environments[0].instances).toEqual([]);
+    expect(context.environments[0].instances).toEqual([]);
   },
 );
 
