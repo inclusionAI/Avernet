@@ -18,6 +18,7 @@ from agentclaw.community.core.task.todos.models import (
     MAX_BOT_ID_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EVENT_ID_LENGTH,
+    MAX_INTERACTION_MENTIONS,
     MAX_MESSAGE_LENGTH,
     MAX_TITLE_LENGTH,
     TodoEventRecord,
@@ -80,6 +81,19 @@ class CreateTodoRequest(BaseModel):
     )
 
 
+class TodoInteractionMentionRequest(BaseModel):
+    """One structured Bot mention in a product interaction."""
+
+    actor_type: Literal["bot"] = Field(
+        description="Mentioned actor kind; Todo interactions currently support Bots only."
+    )
+    actor_id: str = Field(
+        min_length=1,
+        max_length=MAX_BOT_ID_LENGTH,
+        description="Identifier of a Bot eligible in the Todo Space.",
+    )
+
+
 class CreateTodoInteractionRequest(BaseModel):
     """Append one Human interaction event in the B collaboration Context."""
 
@@ -87,6 +101,17 @@ class CreateTodoInteractionRequest(BaseModel):
         min_length=1,
         max_length=MAX_MESSAGE_LENGTH,
         description="Feedback or supplementary instruction for the pending execution.",
+    )
+    reply_to_event_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_EVENT_ID_LENGTH,
+        description="Stable interaction event being replied to; floor numbers are presentation-only.",
+    )
+    mentions: list[TodoInteractionMentionRequest] = Field(
+        default_factory=list,
+        max_length=MAX_INTERACTION_MENTIONS,
+        description="Structured Bot mentions; persistence does not wake or run the mentioned Bots.",
     )
 
 

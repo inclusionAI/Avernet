@@ -39,6 +39,17 @@ The Todo Events endpoint stays compact and event-centric: it returns normalized 
 
 The Interactions endpoint is actor/content-centric and richer: it includes the Human objective in `task.created`, Human messages and rejection instructions, selected rejection floors from the full payload, and `artifact.reported` payloads. The client resolves each artifact event by its stable `artifact_id`, displays complete text and complete file/link/code details at the event's exact position, and uses the reporting Bot as the actor. The Artifacts endpoint remains the complete persisted inventory and content source.
 
+An interaction may persist `reply_to_event_id` and structured `mentions` in the
+same `user_interaction.posted` event payload. The reply ID must identify a
+replyable event already visible in the same Context; the UI floor is derived
+presentation metadata and is never accepted as identity. Mentions currently
+support Bot actors only, and each mentioned Bot must satisfy the same live
+Bot/Space eligibility policy as Todo creation. Arbitrary `@text` has no
+authority without the structured Bot ID. Persisting a mention does not wake the
+mentioned Bot, create another run, or change orchestration: the existing Human
+interaction transition and scheduler resume continue to target the Todo's
+original executor. No interaction table or schema migration is introduced.
+
 New single-Bot Todo delivery calls the BaaS Open API directly with the exact
 `bot_id:owner_id` identity. It does not create a synthetic one-Bot BCS group and
 does not add the Todo creator as a group observer. Eligibility is determined by

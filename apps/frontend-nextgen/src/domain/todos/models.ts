@@ -101,6 +101,13 @@ export interface CreateTodoInput {
 
 export interface CreateTodoInteractionInput {
   message: string;
+  replyToEventId?: string;
+  mentions?: TodoInteractionMention[];
+}
+
+export interface TodoInteractionMention {
+  actorType: 'bot';
+  actorId: string;
 }
 
 export interface TodoAcceptanceTarget {

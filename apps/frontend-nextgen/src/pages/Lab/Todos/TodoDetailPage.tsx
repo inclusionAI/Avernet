@@ -231,6 +231,9 @@ export default function TodoDetailPage() {
                     humanAvatarUrl={humanIdentity?.avatarUrl}
                     enabled={canInteractWithTodo(todo.status)}
                     loading={detail.mutationLoading}
+                    mentionBots={detail.mentionBots}
+                    mentionBotsLoading={detail.mentionBotsLoading}
+                    mentionBotsError={detail.mentionBotsError}
                     rejectionMode={rejectionMode}
                     selectedTargets={selectedTargets}
                     rejectionMessage={rejectionMessage}

@@ -83,6 +83,7 @@ jest.mock('@/services/todos/todoService', () => ({
   addTodoInteraction: jest.fn(),
   loadTodoEvents: jest.fn(),
   loadTodoArtifacts: jest.fn(),
+  loadTodoMentionBots: jest.fn(),
   downloadTodoArtifactContent: jest.fn(),
   startTodoRun: jest.fn(),
 }));

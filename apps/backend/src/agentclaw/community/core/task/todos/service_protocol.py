@@ -9,6 +9,7 @@ from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
     TodoAcceptanceTarget,
     TodoEventRecord,
+    TodoInteractionMention,
     TodoPage,
     TodoRecord,
     TodoStatus,
@@ -71,6 +72,8 @@ class TodoServiceProtocol(Protocol):
         actor_id: str,
         author_name: str | None,
         message: str,
+        reply_to_event_id: str | None = None,
+        mentions: tuple[TodoInteractionMention, ...] = (),
         env: str | None = None,
     ) -> TodoEventRecord: ...
 

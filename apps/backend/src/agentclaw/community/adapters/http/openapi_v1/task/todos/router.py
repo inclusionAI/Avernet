@@ -40,6 +40,8 @@ from agentclaw.community.core.task.todos.models import (
     MAX_TITLE_LENGTH,
     TodoAcceptanceTarget,
     TodoAcceptanceTargetKind,
+    TodoInteractionMention,
+    TodoInteractionMentionActorType,
 )
 from agentclaw.community.di import Injected
 
@@ -264,6 +266,14 @@ async def create_todo_interaction(
         actor_id=actor_id,
         author_name=None,
         message=body.message,
+        reply_to_event_id=body.reply_to_event_id,
+        mentions=tuple(
+            TodoInteractionMention(
+                actor_type=TodoInteractionMentionActorType(mention.actor_type),
+                actor_id=mention.actor_id,
+            )
+            for mention in body.mentions
+        ),
     )
     response.status_code = 201
     return created(TodoInteractionResponse.from_record(event), request)

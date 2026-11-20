@@ -143,10 +143,18 @@ export function listTodoInteractions(todoId: string) {
 }
 
 export function createTodoInteraction(todoId: string, input: CreateTodoInteractionInput) {
+  const data: BackendUnknownRecord = { message: input.message };
+  if (input.replyToEventId) data.reply_to_event_id = input.replyToEventId;
+  if (input.mentions?.length) {
+    data.mentions = input.mentions.map((mention) => ({
+      actor_type: mention.actorType,
+      actor_id: mention.actorId,
+    }));
+  }
   return backendRequest<BackendApiEnvelope<TodoEventDto>>(TODO_ENDPOINTS.interactions(todoId), {
     method: 'POST',
     params: userScopedParams(),
-    data: { message: input.message },
+    data,
     operation: 'create-todo-interaction',
   });
 }

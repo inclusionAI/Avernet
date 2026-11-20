@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 from fastapi import Request, Response
+from pydantic import ValidationError as PydanticValidationError
 
 from agentclaw.community.adapters.http.openapi_v1.task.todos.router import (
     create_todo,
@@ -336,8 +337,44 @@ async def test_create_interaction_uses_message_only_and_returns_created_event():
             "actor_id": "human_1",
             "author_name": None,
             "message": "Please include the rollback plan",
+            "reply_to_event_id": None,
+            "mentions": (),
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_interaction_maps_reply_and_structured_mentions():
+    service = _RecordedService()
+    response = Response()
+
+    await create_todo_interaction(
+        todo_id="todo_1",
+        body=CreateTodoInteractionRequest(
+            message="Please review this floor",
+            reply_to_event_id="event_2",
+            mentions=[{"actor_type": "bot", "actor_id": "bot_2"}],
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/todos/todo_1/interactions"),
+        response=response,
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        service=service,
+    )
+
+    call = service.calls[0]
+    assert call["reply_to_event_id"] == "event_2"
+    assert len(call["mentions"]) == 1
+    assert call["mentions"][0].actor_type.value == "bot"
+    assert call["mentions"][0].actor_id == "bot_2"
+
+
+def test_create_interaction_rejects_non_bot_mention_actor():
+    with pytest.raises(PydanticValidationError):
+        CreateTodoInteractionRequest(
+            message="invalid",
+            mentions=[{"actor_type": "human", "actor_id": "human_2"}],
+        )
 
 
 @pytest.mark.asyncio

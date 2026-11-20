@@ -149,6 +149,25 @@ describe('todoController', () => {
     });
   });
 
+  it('创建楼层回复时映射稳定事件和结构化 Bot mention', async () => {
+    await createTodoInteraction('todo/1', {
+      message: '@复核助手 请确认价格来源',
+      replyToEventId: 'event-3',
+      mentions: [{ actorType: 'bot', actorId: 'bot-review' }],
+    });
+
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/interactions', {
+      method: 'POST',
+      params: userParams,
+      data: {
+        message: '@复核助手 请确认价格来源',
+        reply_to_event_id: 'event-3',
+        mentions: [{ actor_type: 'bot', actor_id: 'bot-review' }],
+      },
+      operation: 'create-todo-interaction',
+    });
+  });
+
   it('查询事件时下发当前用户', async () => {
     await listTodoEvents('todo/1');
 

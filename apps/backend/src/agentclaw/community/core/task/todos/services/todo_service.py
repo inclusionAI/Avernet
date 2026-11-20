@@ -34,6 +34,7 @@ from agentclaw.community.core.task.todos.models import (
     MAX_BOT_ID_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EVENT_ID_LENGTH,
+    MAX_INTERACTION_MENTIONS,
     MAX_MESSAGE_LENGTH,
     MAX_TITLE_LENGTH,
     MAX_TODO_ID_LENGTH,
@@ -42,6 +43,8 @@ from agentclaw.community.core.task.todos.models import (
     TodoAcceptanceTargetKind,
     TodoArtifactRecord as TodoEventArtifactRecord,
     TodoEventRecord,
+    TodoInteractionMention,
+    TodoInteractionMentionActorType,
     TodoPage,
     TodoRecord,
     TodoStatus,
@@ -65,6 +68,9 @@ _INTERACTION_EVENT_TYPES = {
     _TASK_COMPLETED_EVENT,
     _TASK_REJECTED_EVENT,
     _ARTIFACT_REPORTED_EVENT,
+}
+_REPLYABLE_INTERACTION_EVENT_TYPES = _INTERACTION_EVENT_TYPES - {
+    _TASK_COMPLETED_EVENT,
 }
 
 
@@ -218,15 +224,21 @@ class TodoService(TodoServiceProtocol):
         actor_id: str,
         author_name: str | None,
         message: str,
+        reply_to_event_id: str | None = None,
+        mentions: tuple[TodoInteractionMention, ...] = (),
         env: str | None = None,
     ) -> TodoEventRecord:
-        todo, normalized_actor_id = self._load_todo(
+        todo, normalized_actor_id, space = self._load_todo_with_space(
             todo_id=todo_id, actor_id=actor_id, env=env
         )
         normalized_author_name = self._optional_text(
             author_name, "author_name", MAX_ACTOR_NAME_LENGTH
         )
         normalized_message = self._required_text(message, "message", MAX_MESSAGE_LENGTH)
+        normalized_reply_to_event_id = self._optional_text(
+            reply_to_event_id, "reply_to_event_id", MAX_EVENT_ID_LENGTH
+        )
+        normalized_mentions = self._interaction_mentions(mentions)
         if todo.status is not TodoStatus.PENDING_ACCEPTANCE:
             raise TodoStateConflictError("Interactions require pending acceptance")
         context_id = self._require_context(todo)
@@ -234,6 +246,18 @@ class TodoService(TodoServiceProtocol):
             collab_context_id=context_id,
             actor_id=normalized_actor_id,
         )
+        self._validate_interaction_reply(
+            context.events,
+            reply_to_event_id=normalized_reply_to_event_id,
+        )
+        for mention in normalized_mentions:
+            resolve_todo_bot(
+                bot_repository=self._bot_repository,
+                space=space,
+                actor_id=normalized_actor_id,
+                bot_id=mention.actor_id,
+            )
+
         # Claim the interaction synchronously before delivering it to B. This
         # closes the product-state window where a persisted Human event can
         # still be followed by another create-interaction request.
@@ -245,6 +269,16 @@ class TodoService(TodoServiceProtocol):
         payload: dict[str, Any] = {"content": normalized_message}
         if normalized_author_name is not None:
             payload["author_name"] = normalized_author_name
+        if normalized_reply_to_event_id is not None:
+            payload["reply_to_event_id"] = normalized_reply_to_event_id
+        if normalized_mentions:
+            payload["mentions"] = [
+                {
+                    "actor_type": mention.actor_type.value,
+                    "actor_id": mention.actor_id,
+                }
+                for mention in normalized_mentions
+            ]
         event = self._collaboration.append_event(
             collab_context_id=context_id,
             request=TodoCollaborationEventRequest(
@@ -384,13 +418,23 @@ class TodoService(TodoServiceProtocol):
     def _load_todo(
         self, *, todo_id: str, actor_id: str, env: str | None
     ) -> tuple[TodoRecord, str]:
+        todo, normalized_actor_id, _space = self._load_todo_with_space(
+            todo_id=todo_id,
+            actor_id=actor_id,
+            env=env,
+        )
+        return todo, normalized_actor_id
+
+    def _load_todo_with_space(
+        self, *, todo_id: str, actor_id: str, env: str | None
+    ) -> tuple[TodoRecord, str, SpaceRecord]:
         normalized_todo_id = self._required_text(todo_id, "todo_id", MAX_TODO_ID_LENGTH)
         normalized_actor_id = self._required_text(
             actor_id, "actor_id", MAX_ACTOR_ID_LENGTH
         )
         todo = self._repository.get_todo(todo_id=normalized_todo_id)
-        self._require_todo_space_member(todo, normalized_actor_id, env)
-        return todo, normalized_actor_id
+        space = self._require_todo_space_member(todo, normalized_actor_id, env)
+        return todo, normalized_actor_id, space
 
     def _require_context(self, todo: TodoRecord) -> str:
         if not todo.collab_context_id:
@@ -425,6 +469,54 @@ class TodoService(TodoServiceProtocol):
             created_at=event.created_at,
             payload=dict(event.payload),
         )
+
+    @classmethod
+    def _interaction_mentions(
+        cls,
+        mentions: tuple[TodoInteractionMention, ...],
+    ) -> tuple[TodoInteractionMention, ...]:
+        if not isinstance(mentions, tuple):
+            raise ValidationError("mentions must be a tuple")
+        if len(mentions) > MAX_INTERACTION_MENTIONS:
+            raise ValidationError("mentions exceeds the maximum count")
+
+        normalized: list[TodoInteractionMention] = []
+        seen: set[tuple[TodoInteractionMentionActorType, str]] = set()
+        for mention in mentions:
+            if not isinstance(mention, TodoInteractionMention):
+                raise ValidationError("mentions contains an invalid mention")
+            try:
+                actor_type = TodoInteractionMentionActorType(mention.actor_type)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("mention actor_type is invalid") from exc
+            actor_id = cls._required_text(
+                mention.actor_id,
+                "mention actor_id",
+                MAX_BOT_ID_LENGTH,
+            )
+            key = (actor_type, actor_id)
+            if key in seen:
+                raise ValidationError("mentions must be unique")
+            seen.add(key)
+            normalized.append(
+                TodoInteractionMention(actor_type=actor_type, actor_id=actor_id)
+            )
+        return tuple(normalized)
+
+    @staticmethod
+    def _validate_interaction_reply(
+        events: Iterable[TodoCollaborationEvent],
+        *,
+        reply_to_event_id: str | None,
+    ) -> None:
+        if reply_to_event_id is None:
+            return
+        if not any(
+            event.event_id == reply_to_event_id
+            and event.event_type in _REPLYABLE_INTERACTION_EVENT_TYPES
+            for event in events
+        ):
+            raise ValidationError("reply_to_event_id is not a visible interaction event")
 
     @classmethod
     def _acceptance_message(
