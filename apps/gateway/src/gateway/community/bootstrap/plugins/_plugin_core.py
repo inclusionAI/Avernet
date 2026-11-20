@@ -52,7 +52,13 @@ class PluginContainer(containers.DeclarativeContainer):
 
     forwarder = providers.Selector(
         config.plugins.forwarder,
-        httpx=providers.Singleton(HttpxForwarder),
+        httpx=providers.Singleton(
+            HttpxForwarder,
+            connect_timeout=config.plugins.forwarder_config.connect_timeout,
+            read_timeout=config.plugins.forwarder_config.read_timeout,
+            write_timeout=config.plugins.forwarder_config.write_timeout,
+            pool_timeout=config.plugins.forwarder_config.pool_timeout,
+        ),
     )
 
     schema_catalogs = providers.Dict(
