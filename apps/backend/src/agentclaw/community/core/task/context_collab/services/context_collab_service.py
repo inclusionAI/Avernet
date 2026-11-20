@@ -627,11 +627,20 @@ class ContextCollabService(ContextCollabServiceProtocol):
             raise ContextCollabValidationError(
                 "Context executor returned a different group; refusing to resume"
             )
-        if group_id is None and previous_run_id is None:
-            raise ContextCollabValidationError(
-                "collaboration context resume requires a previous runtime handle"
-            )
-        if group_id is not None and runtime_result.run_id is not None:
+        if group_id is None:
+            if previous_run_id is None:
+                raise ContextCollabValidationError(
+                    "collaboration context resume requires a previous runtime handle"
+                )
+            if not runtime_result.run_id:
+                raise ContextCollabValidationError(
+                    "direct Context resume returned no new run_id"
+                )
+            if runtime_result.run_id == previous_run_id:
+                raise ContextCollabValidationError(
+                    "direct Context resume returned the previous run_id"
+                )
+        elif runtime_result.run_id is not None:
             raise ContextCollabValidationError(
                 "BCS Context resume returned an unexpected direct run_id"
             )

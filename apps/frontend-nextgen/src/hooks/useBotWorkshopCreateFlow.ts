@@ -1,3 +1,4 @@
+import { reconcileOwnedBotGrants } from '@/services/collaboration/botGrantReconciliationService';
 import type { BotCreateInput, BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, BackendRequestError } from '@/services/botWorkshop';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
@@ -15,6 +16,7 @@ export function useBotWorkshopCreateFlow({ load, setCreateScenario }: BotWorksho
   const [creating, setCreating] = useState(false);
   const handleCreated = useCallback(
     async (bot: BotDomain) => {
+      void reconcileOwnedBotGrants(bot.id);
       setCreateScenario(undefined);
       toast.success(`${bot.name} 已创建`);
       await load();

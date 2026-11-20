@@ -31,7 +31,7 @@ Acceptance is event-first. The client supplies a stable `decision_id`; A first f
 
 Target IDs are durable references. `floor` is presentation metadata captured from the interaction view and is not used as a domain identity. The event retains the full Human instruction and selected targets so the interaction timeline can reconstruct the rejection even after a refresh or retry.
 
-A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter explicitly requests event payloads for its richer interaction projection. ContextCollab execution is a Task-core executor, not a deployment Plugin: it directly reuses Task's `BcsClientPort`, `BcsCreateGroupRequest`, `BcsBotTokenProvider`, and existing BCS DI adapter without modifying `TaskExecutor` or introducing a shared Task/Todo abstraction.
+A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter explicitly requests event payloads for its richer interaction projection. ContextCollab execution is a Task-core executor, not a deployment Plugin. New Todo runs reuse Task's existing `OpenApiBotPort` and owner-granted BaaS `allowed-bots` authorization without modifying `TaskExecutor` or introducing a shared Task/Todo abstraction. Optional BCS ports are retained only to resume and inspect historical group-backed Todo Contexts.
 
 `TodoCollaborationPort` is an internal Task/Todo consumer boundary, not a globally replaceable Plugin API. `InProcessTodoCollaborationAdapter` is the production composition and delegates to the same-process `ContextCollabServiceProtocol`; it is fixed by `TaskTodoBindings` rather than selected by deployment Profile. The deterministic fake lives under Todo tests and is not shipped or registered as a local plugin.
 
@@ -39,24 +39,22 @@ The Todo Events endpoint stays compact and event-centric: it returns normalized 
 
 The Interactions endpoint is actor/content-centric and richer: it includes the Human objective in `task.created`, Human messages and rejection instructions, selected rejection floors from the full payload, and `artifact.reported` payloads. The client resolves each artifact event by its stable `artifact_id`, displays complete text and complete file/link/code details at the event's exact position, and uses the reporting Bot as the actor. The Artifacts endpoint remains the complete persisted inventory and content source.
 
-Todo delivery uses the same `singlebot_2_group` shape as Task: BCS creates one
-real `manager_worker` group whose only Bot participant is the selected executor
-with role `manager`; the Todo creator joins as a non-speaking Human `observer`.
-The selected Bot is both `driver_bot` and `master_bot`. No second Bot and no
-`default` Bot is added. Because this is Bot collaboration, an executor is
-eligible only when the authoritative BCS agent visibility is exactly `public`;
-legacy Human-facing `ac_bots.public` does not grant eligibility. The authoritative
-catalog lookup uses the exact BCS Bot UUID as an explicit Bot viewer, so the
-agent-facing `visibility` rule is evaluated instead of the Human-facing
-`user_visibility` rule. `protected`, `private`, missing or unknown visibility,
-and unavailable catalog metadata all fail closed. The rule is checked when
-creating a Todo, before its initial dispatch, and before resuming a Human
-interaction or rejection. Historical Todos remain readable if their Bot later
-becomes non-public, but no new or resumed run is delivered until that exact
-Bot identity is public again. Final delivery uses `inject_observers`, and later Human interaction resumes the same
-BCS group session rather than creating another group. The public `/run`
-operation is a compensation/operator entry point; the ordinary frontend
-neither edits Todos nor exposes manual Run.
+New single-Bot Todo delivery calls the BaaS Open API directly with the exact
+`bot_id:owner_id` identity. It does not create a synthetic one-Bot BCS group and
+does not add the Todo creator as a group observer. Eligibility is determined by
+the live Bot record, selected Space scope, and a usable owner identity. Bot
+catalog `visibility` and `user_visibility` are not Todo eligibility gates;
+delivery authorization comes from the owner's secbaas `allowed-bots` grant.
+
+The direct runtime returns a real `run_id` and `session_id`, both of which are
+persisted in `task.started`. Later Human interaction or rejection reuses the same
+session by sending the BaaS message with `metadata.session_id`; each resumed
+round receives and persists a new `run_id`. The triggering event ID is the
+message idempotency key. Historical Contexts that already store
+`group_id + session_id` continue to use the legacy BCS resume/status path, but
+new Todo execution never creates a group. No new table or Context schema is
+introduced. The public `/run` operation remains a compensation/operator entry
+point; the ordinary frontend neither edits Todos nor exposes manual Run.
 
 While a Todo is `pending_acceptance`, posting a normal Human interaction atomically claims A as `pending_acceptance -> in_progress`, then append-only records `user_interaction.posted` in B. Rejection uses the same resume mechanism after its B-first acceptance event and A-side state projection. Status refresh keeps A `in_progress` while B is still `done` and the latest Human-work event has not yet been followed by `task.started`. The scheduler then resumes B from that event and reuses the previous executor session.
 
@@ -67,8 +65,7 @@ Resume retries are idempotent. Once B is `in_progress` or a later `task.started`
 Each dispatched or resumed Bot run receives only its dynamic execution context
 in the message body: `todo_id`, `todo_execution_id`, the current-generation
 `todo_execution_token`, the environment-specific Backend URL, and the current
-objective. Runtime metadata may repeat these values for observability, but Bot
-behavior must not depend on metadata being propagated by a transport. Fixed
+objective. Runtime metadata repeats stable routing identifiers for observability but deliberately excludes the execution token. Bot behavior must not depend on metadata being propagated by a transport. Fixed
 report/upload/complete paths, request formats, ordering, and failure handling
 belong to the `todo-runner` Skill and are not duplicated in the runtime message.
 
@@ -151,12 +148,10 @@ consumes:
   - TodoRepositoryProtocol
   - SpaceAccessServiceProtocol
   - BotRepository
-  - BotCatalogMetadataServiceProtocol
   - CachePlugin
   - TodoCollaborationPort
   - TodoArtifactServiceProtocol
 internal_dependencies:
-  - agentclaw.community.core.bot_public.catalog_metadata
   - agentclaw.community.core.errors
   - agentclaw.community.core.repository.protocols
   - agentclaw.community.core.spaces

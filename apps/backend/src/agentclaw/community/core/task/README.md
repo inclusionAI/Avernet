@@ -295,3 +295,24 @@ qualified IDs remain opaque, validated and unchanged. This is the established
 TeamClaw composite addressing contract, not an assumption that arbitrary external
 Providers' `bot_uuid` and `provider_bot_ref` are interchangeable. This resolver
 does not rewrite remote identities or grant permissions.
+
+## Owned-Bot secbaas grant reconciliation
+
+Task exposes a best-effort compensation endpoint for converging secbaas
+`allowed-bots` grants after authentication or Bot creation. A Human login
+schedules a sequential scan of that verified principal's live Bots; successful
+Bot creation may narrow the same operation to the new product Bot ID. Personal
+and service Bots share the established `bcn_bot_reference` identity rule.
+
+The verified `Principal.user_id` is the only Owner authority. A caller cannot
+select another Owner, and a single-Bot request is resolved through
+`get_by_id_and_owner` before any grant call. Browser Cookie and Referer are used
+only by the short-lived in-process compensation and are neither persisted nor
+logged.
+
+Reconciliation is deliberately best effort: it returns `202 Accepted`, runs in
+the process background, visits Bots in order, bounds each secbaas request, and
+isolates lookup, identity and grant failures as warnings. There is no new table,
+durable queue or login/Bot-creation failure coupling; a later login retries and
+converges idempotently. BBS periodic-task creation keeps its existing synchronous
+grant safety gate unchanged.

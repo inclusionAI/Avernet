@@ -135,10 +135,12 @@ provides:
   - SessionSourceListingProtocol
   - TodoServiceProtocol
   - TodoArtifactServiceProtocol
+  - BotGrantReconciliationServiceProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.task.bot_grant_reconciliation_service_protocol  # Owned-Bot secbaas grant compensation Service API re-export
   - agentclaw.community.core.task.todos.service_protocol  # Todo workbench Service API contract re-export
   - agentclaw.community.core.task.todos.artifact_service_protocol  # Todo artifact Service API contract re-export
   - agentclaw.community.core.caller_identity.scheduled_refresh  # Scheduled Caller refresh Service API v1

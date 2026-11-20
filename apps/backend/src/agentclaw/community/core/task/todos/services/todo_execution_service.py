@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.core.bot_public.catalog_metadata import (
-    BotCatalogMetadataServiceProtocol,
-)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
@@ -175,14 +172,12 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         repository: TodoRepositoryProtocol,
         space_access: SpaceAccessServiceProtocol,
         bot_repository: BotRepository,
-        catalog_metadata: BotCatalogMetadataServiceProtocol,
         collaboration: TodoCollaborationPort,
         artifacts: TodoArtifactServiceProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access
         self._bot_repository = bot_repository
-        self._catalog_metadata = catalog_metadata
         self._collaboration = collaboration
         self._artifacts = artifacts
 
@@ -205,7 +200,6 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         )
         bot = resolve_todo_bot(
             bot_repository=self._bot_repository,
-            catalog_metadata=self._catalog_metadata,
             space=space,
             actor_id=todo.created_by,
             bot_id=todo.bot_id,
@@ -288,7 +282,6 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         )
         bot = resolve_todo_bot(
             bot_repository=self._bot_repository,
-            catalog_metadata=self._catalog_metadata,
             space=space,
             actor_id=todo.created_by,
             bot_id=todo.bot_id,
@@ -444,9 +437,7 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
 
     def _mark_pending_acceptance(self, todo: TodoRecord) -> TodoRecord:
         if not todo.collab_context_id:
-            raise TodoNotFoundError(
-                "Completed Todo collaboration Context is missing"
-            )
+            raise TodoNotFoundError("Completed Todo collaboration Context is missing")
         self._artifacts.complete_execution(
             todo_id=todo.todo_id,
             collab_context_id=todo.collab_context_id,
