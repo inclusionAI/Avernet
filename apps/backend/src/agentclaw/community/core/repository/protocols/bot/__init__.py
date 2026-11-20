@@ -11,6 +11,8 @@ from agentclaw.community.core.repository.protocols.bot.app_grant import (
     BotAppGrantRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot.bot import (
+    DEFAULT_BUILD_ACTIVE_TTL_SECONDS,
+    BotBuildActiveRepositoryProtocol,
     BotRepository,
     BotRestartLockRepositoryProtocol,
     TemplateRepository,
@@ -64,6 +66,8 @@ from agentclaw.community.core.repository.protocols.bot.user_app_grant import (
 
 __all__ = [
     "BotAppGrantRepositoryProtocol",
+    "BotBuildActiveRepositoryProtocol",
+    "DEFAULT_BUILD_ACTIVE_TTL_SECONDS",
     "BotConfigManifestApplyLockRepositoryProtocol",
     "BotConfigManifestApplyRepositoryProtocol",
     "BotCollabLockRepositoryProtocol",

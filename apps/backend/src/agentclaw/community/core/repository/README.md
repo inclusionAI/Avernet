@@ -186,6 +186,7 @@ provides:
   # bot
   - BotAppGrantRepositoryProtocol
   - UserAppGrantRepositoryProtocol
+  - BotBuildActiveRepositoryProtocol
   - BotCollabLockRepositoryProtocol
   - ManagerSyncReadRepository
   - SourceCredentialRepositoryProtocol
@@ -321,6 +322,7 @@ provides:
   # bot
   - BotAppGrantRepository
   - UserAppGrantRepository
+  - BotBuildActiveRepository
   - BotCollabLockRepository
   - BotCollabLogRepository
   - BotFriendRepository
