@@ -707,3 +707,134 @@ async fn delete_participant_driver_owner_self_leave_still_rejected() {
     );
     assert!(recorded_bot_left(&fixture, &session.id).is_empty());
 }
+
+#[tokio::test]
+async fn session_manager_can_add_a_human_participant_by_actor_id() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .bots
+        .save_created_by("driver", "staff-driver", true)
+        .await
+        .expect("assign driver owner");
+    bcs_test_support::grant_owner_edge(
+        &fixture.authority_repo,
+        "driver",
+        "staff-driver",
+    )
+    .await;
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("staff-driver"),
+            session_id: session.id.clone(),
+            bot_uuid: "human_staff-guest".into(),
+            message_view_scope: None,
+        })
+        .await
+        .expect("add human participant");
+
+    assert_eq!(added.actor_id, "human_staff-guest");
+    assert_eq!(added.actor_kind, ActorKind::Human);
+    assert_eq!(added.role, ParticipantRole::Observer);
+    assert_eq!(added.mode, ParticipantMode::Present);
+    assert_eq!(added.message_view_scope, MessageViewScope::Full);
+
+    let detail = fixture
+        .service
+        .get(GetSession {
+            caller: human_principal("staff-driver"),
+            session_id: session.id.clone(),
+        })
+        .await
+        .expect("read session after add");
+    assert!(
+        detail
+            .participants
+            .iter()
+            .any(|p| p.actor_id == "human_staff-guest" && p.actor_kind == ActorKind::Human)
+    );
+
+    let duplicate = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("staff-driver"),
+            session_id: session.id,
+            bot_uuid: "human_staff-guest".into(),
+            message_view_scope: None,
+        })
+        .await
+        .expect_err("adding the same Human twice must conflict");
+    assert!(matches!(
+        duplicate,
+        V1ApplicationError::Conflict { ref code, .. } if code == "participant_already_exists"
+    ));
+}
+
+#[tokio::test]
+async fn add_human_participant_rejects_malformed_actor_ids() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .bots
+        .save_created_by("driver", "staff-driver", true)
+        .await
+        .expect("assign driver owner");
+    bcs_test_support::grant_owner_edge(
+        &fixture.authority_repo,
+        "driver",
+        "staff-driver",
+    )
+    .await;
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+
+    for actor_id in ["human_", "human_ ", "human_staff guest", "human_staff\n"] {
+        let error = fixture
+            .service
+            .add_participant(AddSessionParticipant {
+                caller: human_principal("staff-driver"),
+                session_id: session.id.clone(),
+                bot_uuid: actor_id.into(),
+                message_view_scope: None,
+            })
+            .await
+            .expect_err("malformed Human actor id must be refused");
+        assert!(
+            matches!(
+                error,
+                V1ApplicationError::InvalidInput { ref code, .. } if code == "invalid_participant"
+            ),
+            "unexpected error for {actor_id:?}: {error:?}"
+        );
+    }
+}

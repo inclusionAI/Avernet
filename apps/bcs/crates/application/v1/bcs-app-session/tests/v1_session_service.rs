@@ -25,7 +25,7 @@ use bcs_service_api::application::v1::{
     AddSessionParticipant, ApplicationError as V1ApplicationError, AuthenticatedAppIdentity,
     AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, CollectSession,
     CompleteSession, CreateSession, DeleteSession, DeleteSessionParticipant, GetSession,
-    ListSessionMessages, ListSessions, SessionListSort, SessionMessageService,
+    ListSessionMessages, ListSessions, SendSessionMessage, SessionListSort, SessionMessageService,
     SessionParticipantInput, SessionService, SessionStatus as V1SessionStatus, UncollectSession,
     UpdateSession, UpdateSessionParticipant,
 };
@@ -38,9 +38,10 @@ use bcs_service_api::{
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
     FriendCoreService, Group, GroupCoreService, GroupHistoryCommand, GroupHistoryResult,
     GroupMessage, GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError,
-    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanActor,
-    MessageHistoryOptions, MessageRole, Participant, ParticipantMode, ParticipantRole,
-    ServiceResult, SessionHistoryCommand, SessionHistoryResult, SessionKind,
+    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HandleSessionHumanInputCommand,
+    HandleSessionHumanInputOutcome, HumanActor, MessageHistoryOptions,
+    MessageRole, Participant, ParticipantMode, ParticipantRole, ServiceResult,
+    SessionHistoryCommand, SessionHistoryResult, SessionKind,
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
     StateMachineRun, StateMachineRunStatus, StateMachineRunView, SystemMessageEvent,
 };
@@ -173,10 +174,22 @@ struct RecordingRuntime {
     participant_history_calls: Mutex<Vec<(String, u64, Option<u64>, HumanMessageView)>>,
     history_result: Mutex<Option<SessionHistoryResult>>,
     session_run: Mutex<Option<StateMachineRunView>>,
+    human_input_calls: Mutex<Vec<HandleSessionHumanInputCommand>>,
 }
 
 #[async_trait]
 impl CollaborationRuntimeService for RecordingRuntime {
+    async fn handle_session_human_input(
+        &self,
+        cmd: HandleSessionHumanInputCommand,
+    ) -> Result<HandleSessionHumanInputOutcome, CollaborationRuntimeError> {
+        self.human_input_calls
+            .lock()
+            .expect("runtime human input lock")
+            .push(cmd);
+        Ok(HandleSessionHumanInputOutcome::NotStateMachine)
+    }
+
     async fn start_state_machine_run(
         &self,
         cmd: StartStateMachineRunCommand,
@@ -814,6 +827,9 @@ mod collection;
 
 #[path = "v1_session_service/history.rs"]
 mod history;
+
+#[path = "v1_session_service/send_message.rs"]
+mod send_message;
 
 #[path = "v1_session_service/participants.rs"]
 mod participants;

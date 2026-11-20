@@ -591,6 +591,7 @@ impl BcsServer {
             group_message_history.clone(),
             session_file_service.clone(),
             use_cases.system_message.clone(),
+            maybe_wrap_message_flow(&config, message_flow),
             collaboration_templates.clone(),
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,

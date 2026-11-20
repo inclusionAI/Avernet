@@ -35,7 +35,7 @@ use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, IdentityPolicy, Page,
     ParticipantSummary, Principal, resolve_authorized_principal,
-    message::{ListSessionMessages, SessionMessageService},
+    message::{ListSessionMessages, SendSessionMessage, SendSessionMessageOutcome, SessionMessageService},
     require_authenticated_user, require_human, select_principal,
     session::{
         AddSessionParticipant, CollectSession, CompleteSession, CreateSession,
@@ -50,13 +50,14 @@ use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::repo::SessionRepoPort;
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 use bcs_service_api::types::bot_profile::BotAvatarMap;
-use bcs_service_api::types::{HumanMessageView, MessageViewScope};
+use bcs_service_api::types::{human_user_id_of_actor, HumanMessageView, MessageViewScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, CallerContext, CollaborationRuntimeError,
     CollaborationRuntimeService, CreateSessionLaunch, FriendCoreService, Group as DomainGroup,
-    GroupCoreService, GroupMessage, GroupMessageHistoryService, GroupStrategy, GroupUseCaseError,
-    HumanActor, MessageHistoryOptions, Participant, ParticipantMode, ParticipantRole,
-    RegisteredBot, RequestedSessionRole, ServiceError, Session,
+    GroupCoreService, GroupChatCommand, GroupMessage, GroupMessageHistoryService, GroupStrategy,
+    GroupUseCaseError, HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome,
+    HumanActor, HumanResponseSource, MessageFlowService, MessageHistoryOptions, Participant,
+    ParticipantMode, ParticipantRole, RegisteredBot, RequestedSessionRole, ServiceError, Session,
     SessionCaller,
     SessionHistoryCommand, SessionKind, SessionLaunchError, SessionLaunchRequest,
     SessionLaunchService, SessionStatus as DomainSessionStatus, StateMachineRunView,
@@ -93,6 +94,10 @@ pub struct SessionServiceImpl {
     /// instance's display fetch. A missing wiring
     /// fails closed.
     session_snapshots: Option<Arc<dyn SessionAuthorizationCoreService>>,
+    /// The collaboration message flow backing the V1 send-into-Session
+    /// use case (`SessionMessageService::send`). A missing wiring fails
+    /// closed there.
+    message_flow: Option<Arc<dyn MessageFlowService>>,
 }
 
 impl SessionServiceImpl {
@@ -121,6 +126,7 @@ impl SessionServiceImpl {
             participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             bot_authority: None,
             session_snapshots: None,
+            message_flow: None,
         }
     }
 
@@ -140,6 +146,13 @@ impl SessionServiceImpl {
         bot_authority: Arc<dyn BotAuthorityPort>,
     ) -> Self {
         self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// Wire the message flow consumed by the V1 send-into-Session
+    /// use case. Failing to wire it fails closed there.
+    pub fn with_message_flow(mut self, message_flow: Arc<dyn MessageFlowService>) -> Self {
+        self.message_flow = Some(message_flow);
         self
     }
 
@@ -652,15 +665,71 @@ impl SessionService for SessionServiceImpl {
         let (session, group) = self
             .load_session_for_manage(&principal, &command.session_id)
             .await?;
-        // VSN7B: the added Bot must be collaboration-eligible from the caller
-        // OR from the parent Group's driver/originator (visible + friend/creator
+        // A Human participant is addressed by its composed `human_<user.id>`
+        // actor id. BCS has no user directory to consult, so the identifier is
+        // validated structurally and the Session-management authority already
+        // checked above decides who may invite. Bots keep the collaboration
+        // eligibility gate: the added Bot must be reachable from the caller or
+        // from the parent Group's driver/originator (visible + friend/creator
         // relation), not merely registered.
-        self.ensure_collaboration_eligible(&principal, &command.bot_uuid, "bot_uuid", &group)
+        let human_user_id = match human_user_id_of_actor(&command.bot_uuid) {
+            Some(user_id) => {
+                // Invitation targets arrive from the caller, so the composed
+                // Human actor id needs its own structural validation: the
+                // suffix must be a non-empty, whitespace/control-free user id.
+                // Existence and consent are not directory concerns BCS can
+                // resolve here; Session-management authority remains the
+                // admission gate.
+                if user_id.is_empty()
+                    || user_id.len() > 128
+                    || user_id
+                        .chars()
+                        .any(|ch| ch.is_whitespace() || ch.is_control())
+                {
+                    return Err(ApplicationError::invalid(
+                        "invalid_participant",
+                        "Human participant ids must be human_{user.id} with a non-empty user id",
+                    ));
+                }
+                Some(user_id)
+            }
+            None => None,
+        };
+        let target = if human_user_id.is_some() {
+            None
+        } else {
+            self.ensure_collaboration_eligible(
+                &principal,
+                &command.bot_uuid,
+                "bot_uuid",
+                &group,
+            )
             .await?;
-        // VfhG3: explicit 409 if the target Bot is already a session participant.
-        // The legacy memory repo silently skipped duplicates (idempotent); the V1
-        // contract surfaces a `participant_already_exists` Conflict so callers
-        // can distinguish a real add from a no-op.
+            Some(
+                self.registry
+                    .try_get(&command.bot_uuid)
+                    .await
+                    .map_err(map_service_error)?
+                    .ok_or_else(|| {
+                        ApplicationError::not_found(
+                            "actor_not_found",
+                            format!("Actor '{}' was not found", command.bot_uuid),
+                        )
+                    })?,
+            )
+        };
+        let target_actor_kind = if human_user_id.is_some() {
+            ActorKind::Human
+        } else {
+            target
+                .as_ref()
+                .expect("Bot lookup populated above")
+                .actor_kind
+        };
+        // VfhG3: explicit 409 if the target actor is already a session
+        // participant. The legacy memory repo silently skipped duplicates
+        // (idempotent); the V1 contract surfaces a `participant_already_exists`
+        // Conflict so callers can distinguish a real add from a no-op.
         if session
             .participants
             .iter()
@@ -669,23 +738,19 @@ impl SessionService for SessionServiceImpl {
             return Err(ApplicationError::conflict(
                 "participant_already_exists",
                 format!(
-                    "Bot '{}' is already a participant of Session '{}'",
+                    "Actor '{}' is already a participant of Session '{}'",
                     command.bot_uuid, command.session_id
                 ),
             ));
         }
-        let target = self
-            .registry
-            .try_get(&command.bot_uuid)
-            .await
-            .map_err(map_service_error)?
-            .ok_or_else(|| {
-                ApplicationError::not_found(
-                    "actor_not_found",
-                    format!("Actor '{}' was not found", command.bot_uuid),
-                )
-            })?;
-        let mode = ParticipantMode::default_for(target.actor_kind);
+        // A Human joining a Session through this explicit invitation is present
+        // (mirrors the legacy chat self-enrollment); a Bot keeps its actor-kind
+        // default mode.
+        let mode = if target_actor_kind == ActorKind::Human {
+            ParticipantMode::Present
+        } else {
+            ParticipantMode::default_for(target_actor_kind)
+        };
         // VfhG3: derive role from parent group.participants if the bot is already
         // there; otherwise strategy default (ManagerWorker→Worker, else
         // Consultant). Mirrors legacy bcs-http add_session_participant which picks
@@ -696,7 +761,7 @@ impl SessionService for SessionServiceImpl {
             .iter()
             .find(|p| p.bot_uuid == command.bot_uuid);
         let role = group_participant.map(|p| p.role).unwrap_or_else(|| {
-            if target.actor_kind == ActorKind::Human {
+            if target_actor_kind == ActorKind::Human {
                 ParticipantRole::Observer
             } else {
                 match group.group_strategy {
@@ -712,7 +777,7 @@ impl SessionService for SessionServiceImpl {
             .message_view_scope
             .or_else(|| group_participant.map(|participant| participant.message_view_scope))
             .unwrap_or(MessageViewScope::Full);
-        if !message_view_scope.is_valid_for(target.actor_kind) {
+        if !message_view_scope.is_valid_for(target_actor_kind) {
             return Err(ApplicationError::invalid(
                 "invalid_message_view_scope",
                 "Bot participants must use full message_view_scope",
@@ -723,7 +788,7 @@ impl SessionService for SessionServiceImpl {
             bot_name: None,
             kind: None,
             role,
-            actor_kind: target.actor_kind,
+            actor_kind: target_actor_kind,
             mode: Some(mode),
             tags,
             message_view_scope,
@@ -744,11 +809,18 @@ impl SessionService for SessionServiceImpl {
             .find(|p| p.bot_uuid == command.bot_uuid)
             .cloned()
         {
-            let event = SystemMessageEvent::BotJoined {
-                group_id: updated.group_id.clone(),
-                actor,
-                session_id: command.session_id.clone(),
-                session_input: updated.input.clone(),
+            let event = if target_actor_kind == ActorKind::Human {
+                SystemMessageEvent::HumanJoined {
+                    group_id: updated.group_id.clone(),
+                    actor,
+                }
+            } else {
+                SystemMessageEvent::BotJoined {
+                    group_id: updated.group_id.clone(),
+                    actor,
+                    session_id: command.session_id.clone(),
+                    session_input: updated.input.clone(),
+                }
             };
             if let Err(error) = self
                 .system_message

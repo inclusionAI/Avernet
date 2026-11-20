@@ -311,11 +311,85 @@ def test_add_session_participant_accepts_bot_uuid_and_optional_scope() -> None:
     assert schema["additionalProperties"] is False
     assert schema["required"] == ["bot_uuid"]
     assert set(schema["properties"]) == {"bot_uuid", "message_view_scope"}
-    assert schema["properties"]["bot_uuid"] == {"type": "string"}
+    bot_uuid = schema["properties"]["bot_uuid"]
+    assert bot_uuid["type"] == "string"
+    assert "human_{user.id}" in bot_uuid["description"]
     assert schema["properties"]["message_view_scope"]["enum"] == [
         "full",
         "participant",
     ]
+
+
+def test_session_message_send_uses_the_gateway_principal_boundary() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/messages"
+    ]["post"]
+
+    assert operation["operationId"] == "send_session_message"
+    assert operation["x-avernet-security"] == {
+        "user": "required",
+        "app": "required",
+    }
+    assert operation["requestBody"]["required"] is True
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["message"],
+        "properties": {
+            "message": {"type": "string", "minLength": 1},
+        },
+    }
+
+
+def test_session_message_send_projects_a_strict_delivery_envelope() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/messages"
+    ]["post"]
+    envelope = operation["responses"]["200"]["content"]["application/json"]["schema"]
+
+    assert envelope["additionalProperties"] is False
+    assert set(envelope["required"]) == {"code", "message", "data", "request_id"}
+    data = envelope["properties"]["data"]
+    assert data["additionalProperties"] is False
+    assert set(data["required"]) == {
+        "session_id",
+        "group_id",
+        "sender",
+        "delivered_count",
+    }
+    assert set(data["properties"]) == {
+        "session_id",
+        "group_id",
+        "sender",
+        "delivered_count",
+    }
+    assert data["properties"]["delivered_count"]["type"] == "integer"
+
+
+def test_session_message_send_documents_its_error_responses() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/messages"
+    ]["post"]
+
+    assert {
+        status: response["x-error-codes"]
+        for status, response in operation["responses"].items()
+        if status != "200" and "x-error-codes" in response
+    } == {
+        "400": ["invalid_request"],
+        "401": ["unauthenticated"],
+        "403": ["forbidden"],
+        "404": [
+            "session_not_found",
+            "group_not_found",
+            "participant_not_found",
+        ],
+        "409": ["conflict"],
+        "500": ["internal_error"],
+    }
 
 
 def test_update_session_participant_accepts_bot_and_human_modes() -> None:

@@ -245,6 +245,12 @@ pub struct CollectSessionRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct SendSessionMessageRequest {
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UncollectSessionQuery {
     pub participant: String,
 }
