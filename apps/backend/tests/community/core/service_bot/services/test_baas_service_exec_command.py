@@ -163,3 +163,46 @@ class TestExecCommandOnBot:
 
         with pytest.raises(BaasServiceError, match="network down"):
             svc.exec_command_on_bot(bot_uuid="BOT-1", cmd="echo hi")
+
+
+def test_exec_command_recognizes_only_structured_no_active_503(caplog):
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
+
+    svc, client = _make_service()
+    request = httpx.Request("POST", "http://baas-test:8080/execute")
+    response = httpx.Response(503, json={"detail": {"error": "NO_ACTIVE_DEVICES", "message": "private-response-marker"}}, request=request)
+    client.post.return_value = response
+    with pytest.raises(BaasNoActiveDevicesError):
+        svc.exec_command_on_bot(bot_uuid="BOT-1", cmd="true")
+    assert "no active device" in caplog.text
+    assert "private-response-marker" not in caplog.text
+
+    response = httpx.Response(404, json={"detail": {"error": "NO_ACTIVE_DEVICES"}}, request=request)
+    client.post.return_value = response
+    with pytest.raises(BaasServiceError) as caught:
+        svc.exec_command_on_bot(bot_uuid="BOT-1", cmd="true")
+    assert not isinstance(caught.value, BaasNoActiveDevicesError)
+
+
+def test_probe_safe_errors_do_not_expose_response(caplog):
+    svc, client = _make_service()
+    request = httpx.Request("POST", "http://baas-test:8080/execute")
+    client.post.return_value = httpx.Response(500, text="sensitive-response-marker", request=request)
+    with pytest.raises(BaasServiceError) as caught:
+        svc.exec_command_on_bot(bot_uuid="BOT-1", cmd="true", safe_errors=True)
+    assert "sensitive-response-marker" not in str(caught.value)
+    assert "sensitive-response-marker" not in caplog.text
+
+
+def test_probe_safe_errors_redacts_error_envelope_and_transport(caplog):
+    svc, client = _make_service()
+    client.post.return_value.json.return_value = {"code": 1, "message": "private-envelope-marker"}
+    with pytest.raises(BaasServiceError) as caught:
+        svc.exec_command_on_bot(bot_uuid="BOT-1", cmd="true", safe_errors=True)
+    assert "private-envelope-marker" not in str(caught.value)
+    assert "private-envelope-marker" not in caplog.text
+    client.post.side_effect = RuntimeError("private-transport-marker")
+    with pytest.raises(BaasServiceError) as caught:
+        svc.exec_command_on_bot(bot_uuid="BOT-1", cmd="true", safe_errors=True)
+    assert "private-transport-marker" not in str(caught.value)
+    assert "private-transport-marker" not in caplog.text

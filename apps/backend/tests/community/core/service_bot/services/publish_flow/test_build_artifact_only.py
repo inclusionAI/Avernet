@@ -239,3 +239,310 @@ async def test_build_artifact_only_captures_employee_snapshot_before_produce() -
     # 快照在 produce 之前捕获
     assert call_order == ["capture", "produce"]
     assert result.employee_snapshot is snapshot_obj
+@pytest.mark.asyncio
+async def test_pending_draft_probe_retries_before_build(monkeypatch) -> None:
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
+
+    producer = _SimpleProducer()
+    runner, ext = _runner(producer)
+    bot = {"id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+           "active_engine": "claude_code", "env": "dev", "device_binding": {
+               "device_id": "bot-uuid", "device_provider": "baas", "status": "PENDING",
+               "device_props": {},
+           }}
+    runner._bot_service.get_bot_by_address.return_value = bot
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.side_effect = [
+        BaasNoActiveDevicesError(status_code=503), {"exit_code": 0},
+    ]
+    monkeypatch.setattr("agentclaw.community.core.service_bot.services.publish_flow.build_stage.asyncio.sleep", AsyncMock())
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.BUILT
+    assert runner._baas_service.exec_command_on_bot.call_count == 2
+    runner._runtime_projector.project.assert_awaited_once()
+    ext.commit_built_artifact.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_pending_draft_probe_rejects_changed_target(monkeypatch) -> None:
+    producer = _SimpleProducer()
+    runner, ext = _runner(producer)
+    bot = {"id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+           "active_engine": "claude_code", "env": "dev", "device_binding": {
+               "device_id": "bot-uuid", "device_provider": "baas", "status": "PENDING",
+               "device_props": {},
+           }}
+    runner._bot_service.get_bot_by_address.side_effect = [bot, {**bot, "binding_id": 13}]
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.return_value = {"exit_code": 0}
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    runner._runtime_projector.project.assert_not_awaited()
+    ext.commit_built_artifact.assert_not_called()
+    ext.update_status.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_pending_draft_probe_exhaustion_fails_without_build(monkeypatch) -> None:
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
+
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "PENDING",
+            "device_props": {},
+        },
+    }
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.side_effect = BaasNoActiveDevicesError(status_code=503)
+    monkeypatch.setattr("agentclaw.community.core.service_bot.services.publish_flow.build_stage.asyncio.sleep", AsyncMock())
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    assert runner._baas_service.exec_command_on_bot.call_count == 22
+    runner._runtime_projector.project.assert_not_awaited()
+    ext.commit_built_artifact.assert_not_called()
+    ext.update_status.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_pending_draft_probe_stops_when_publish_changed() -> None:
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "PENDING", "device_props": {},
+        },
+    }
+    ext.get_record.return_value = _record(status=PublishStatus.DRAFT.value)
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    runner._baas_service.exec_command_on_bot.assert_not_called()
+    runner._runtime_projector.project.assert_not_awaited()
+    ext.commit_built_artifact.assert_not_called()
+    ext.update_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_active_binding_still_probes_for_device_availability() -> None:
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "ACTIVE", "device_props": {},
+        },
+    }
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.return_value = {"exit_code": 0}
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.BUILT
+    runner._baas_service.exec_command_on_bot.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_coding_draft_with_unreadable_binding_fails_closed() -> None:
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code",
+    }
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    runner._baas_service.exec_command_on_bot.assert_not_called()
+    runner._runtime_projector.project.assert_not_awaited()
+    ext.commit_built_artifact.assert_not_called()
+
+
+def test_readiness_timeout_does_not_wait_for_blocked_worker() -> None:
+    import asyncio
+    import threading
+    import time
+
+    runner, ext = _runner(_SimpleProducer())
+    release = threading.Event()
+    bot = {"id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+           "active_engine": "claude_code", "device_binding": {
+               "device_id": "bot-uuid", "device_provider": "baas", "status": "ACTIVE", "device_props": {},
+           }}
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.side_effect = lambda **kwargs: release.wait(2)
+    started = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError):
+            asyncio.run(asyncio.wait_for(runner._wait_for_draft_device(_record(), bot), timeout=0.05))
+        assert time.monotonic() - started < 1
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_coding_draft_without_binding_fails_before_projection() -> None:
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": None,
+        "active_engine": "claude_code",
+    }
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    runner._runtime_projector.project.assert_not_awaited()
+    ext.commit_built_artifact.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_concurrent_built_status_does_not_report_build_success() -> None:
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "ACTIVE", "device_props": {},
+        },
+    }
+    ext.get_record.return_value = _record(status=PublishStatus.BUILT.value)
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    ext.update_status.assert_not_called()
+    ext.commit_built_artifact.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_probe_failure_racing_state_transition_does_not_rewrite_publish() -> None:
+    from agentclaw.community.core.service_bot.services.bot_publish_service import PublishNotFoundError
+
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "ACTIVE", "device_props": {},
+        },
+    }
+    ext.get_record.side_effect = [
+        _record(status=PublishStatus.BUILDING.value),
+        _record(status=PublishStatus.BUILT.value),
+    ]
+    runner._baas_service.exec_command_on_bot.side_effect = RuntimeError("probe failure")
+    ext.update_status.side_effect = PublishNotFoundError("CAS lost")
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    assert "stopped" in result.message
+    ext.commit_built_artifact.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_readiness_capacity_waits_without_blocking_other_providers() -> None:
+    import asyncio
+    from agentclaw.community.core.service_bot.services.publish_flow.build_stage import _READINESS_SLOTS
+
+    for _ in range(8):
+        assert _READINESS_SLOTS.acquire(blocking=False)
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "ACTIVE", "device_props": {},
+        },
+    }
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.return_value = {"exit_code": 0}
+    task = asyncio.create_task(runner.build(_record(status=PublishStatus.BUILDING.value), "operator"))
+    try:
+        await asyncio.sleep(0.1)
+        assert not task.done()
+        other, _ = _runner(_SimpleProducer())
+        result = await other.build(_record(status=PublishStatus.BUILDING.value), "operator")
+        assert result.status == PublishStatus.BUILT
+    finally:
+        for _ in range(8):
+            _READINESS_SLOTS.release()
+    assert (await asyncio.wait_for(task, 1)).status == PublishStatus.BUILT
+
+@pytest.mark.asyncio
+async def test_readiness_slots_recover_after_real_blocked_reads() -> None:
+    import asyncio
+    import threading
+    from agentclaw.community.core.service_bot.services.publish_flow.build_stage import _readiness_read
+
+    release = threading.Event()
+    entered = threading.Barrier(9)
+
+    def blocked():
+        entered.wait(timeout=2)
+        release.wait(timeout=3)
+        return "done"
+
+    tasks = [asyncio.create_task(_readiness_read(blocked)) for _ in range(8)]
+    try:
+        await asyncio.to_thread(entered.wait, 2)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(_readiness_read(lambda: "ninth"), timeout=0.1)
+    finally:
+        release.set()
+        await asyncio.gather(*tasks)
+    assert await asyncio.wait_for(_readiness_read(lambda: "recovered"), 1) == "recovered"
+
+@pytest.mark.asyncio
+async def test_readiness_wait_covers_fifteen_intervals(monkeypatch) -> None:
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
+
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "PENDING", "device_props": {},
+        },
+    }
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.side_effect = [
+        *[BaasNoActiveDevicesError(status_code=503) for _ in range(15)], {"exit_code": 0},
+    ]
+    sleep = AsyncMock()
+    monkeypatch.setattr("agentclaw.community.core.service_bot.services.publish_flow.build_stage.asyncio.sleep", sleep)
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.BUILT
+    assert runner._baas_service.exec_command_on_bot.call_count == 16
+    assert sleep.await_count == 15
+
+@pytest.mark.asyncio
+async def test_nonzero_readiness_probe_fails_before_projection() -> None:
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "ACTIVE", "device_props": {},
+        },
+    }
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.return_value = {"exit_code": 1}
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    assert "probe failed" in result.message
+    runner._runtime_projector.project.assert_not_awaited()
+    ext.commit_built_artifact.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_readiness_timeout_maps_to_failed_build() -> None:
+    runner, ext = _runner(_SimpleProducer())
+    runner._wait_for_draft_device = AsyncMock(side_effect=TimeoutError)
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    assert "readiness timed out" in result.message
+    ext.update_status.assert_called_once()
+    ext.commit_built_artifact.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_readiness_reads_inherit_external_tenant() -> None:
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope, get_current_avernet_tenant
+
+    runner, ext = _runner(_SimpleProducer())
+    bot = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "ACTIVE", "device_props": {},
+        },
+    }
+    seen = []
+
+    def lookup(**kwargs):
+        seen.append(get_current_avernet_tenant())
+        return bot
+
+    runner._bot_service.get_bot_by_address.side_effect = lookup
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.return_value = {"exit_code": 0}
+    with avernet_tenant_scope("external-tenant"):
+        assert await runner._wait_for_draft_device(_record(status=PublishStatus.BUILDING.value), bot) == bot
+    assert seen == ["external-tenant"]

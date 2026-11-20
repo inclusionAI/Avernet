@@ -62,6 +62,12 @@ class PublishExtState:
         ext.pop("retry", None)
 
     # ── ext read / write ─────────────────────────────────────────────────
+    def get_record(self, publish_id: int) -> BotPublishRecord:
+        record = self._publish_service.get_publish_by_id(publish_id)
+        if not record:
+            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
+        return record
+
     def get_latest_ext(self, publish_id: int) -> dict:
         """Fetch the publish record's latest ext, avoiding write-back from a stale snapshot."""
         latest_record = self._publish_service.get_publish_by_id(publish_id)
