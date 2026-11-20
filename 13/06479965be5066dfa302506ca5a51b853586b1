@@ -1,0 +1,101 @@
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_bots.rs
+  s_fc73a782e73675::t_4002ffe090480c 2,50,52
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_names.rs
+  s_fc73a782e73675::t_286748a2cb31bb 2,40-41
+apps/bcs/crates/adapters/http/bcs-http/src/routes/catalog_label_errors.rs
+  s_fc73a782e73675::t_63a4490d52bbb5 2-3,6-7,13,20,30-33,35
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/create/mod.rs
+  s_fc73a782e73675::t_cc2c1612744d3b 23
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/handlers.rs
+  s_fc73a782e73675::t_69ac89186c27bd 84-86
+apps/bcs/crates/adapters/http/bcs-http/src/routes/mod.rs
+  s_fc73a782e73675::t_1fd43cd2e50c6c 2
+apps/bcs/crates/adapters/http/bcs-http/src/routes/providers/registration.rs
+  s_fc73a782e73675::t_4cd6956df2dada 68-81
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/catalog_label_type_errors.rs
+  s_fc73a782e73675::t_7af20bdf031d32 1-59
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_providers.rs
+  s_fc73a782e73675::t_9f2c40997b3016 20-22
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_fc73a782e73675::t_ae0eb63b910a5a 106-113
+apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs
+  s_fc73a782e73675::t_85fd45855d089d 47-50
+apps/bcs/crates/application/bcs-app-a2a-bot/src/management.rs
+  s_fc73a782e73675::t_7c4e9fc63af7ed 73,81-88,117-118,152,160-162,169-172,203-205,244,257
+apps/bcs/crates/application/bcs-app-a2a-bot/src/names.rs
+  s_fc73a782e73675::t_b47e06d6b3c0b6 20,24-34,40
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/card_admission.rs
+  s_fc73a782e73675::t_e8455506328788 1-141
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management.rs
+  s_fc73a782e73675::t_3cab0b85525400 322-324
+apps/bcs/crates/bootstrap/bcs/tests/integration_catalog_labels.rs
+  s_fc73a782e73675::t_9fd3fa9ea38936 85-107
+apps/bcs/crates/contracts/bcs-protocol/src/http/groups.rs
+  s_fc73a782e73675::t_cde55c98743200 81-82
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_fc73a782e73675::t_5f77f3d0326b21 990-1000
+apps/bcs/crates/service-api/bcs-service-api/src/core/group.rs
+  s_fc73a782e73675::t_0c8a135ce8f8c0 177-182
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/group.rs
+  s_fc73a782e73675::t_7c6c84d7cddc6b 84-89
+apps/bcs/crates/services/bcs-group-store/src/memory.rs
+  s_fc73a782e73675::t_e27eb7cc043c32 256-266
+apps/bcs/crates/services/bcs-group-store/src/store_eventful.rs
+  s_fc73a782e73675::t_35610e50466852 91-104,106,122-152,522-525
+apps/bcs/crates/services/bcs-group-store/src/store_repo.rs
+  s_fc73a782e73675::t_0a1f6c3c2ff1ad 18-21,24
+apps/bcs/crates/services/bcs-group-store/src/store_tests.rs
+  s_fc73a782e73675::t_6ac0bc16acd527 324-330,332-336
+apps/bcs/crates/services/bcs-group-store/src/store_writes.rs
+  s_fc73a782e73675::t_e3f0f1dbd90087 36,103,120,204-206
+apps/bcs/crates/services/bcs-group-store/tests/catalog_labels.rs
+  s_fc73a782e73675::t_1928eda99c9958 71-102
+apps/bcs/crates/services/bcs-group/CONTEXT.md
+  s_fc73a782e73675::t_5f921b96672f2d 102-117
+apps/bcs/crates/services/bcs-group/src/application/management/create.rs
+  s_fc73a782e73675::t_16373f0eb3f1ed 250-253
+apps/bcs/crates/services/bcs-group/src/core/group_core.rs
+  s_fc73a782e73675::t_9be1f3decabaf2 128-141
+apps/bcs/crates/services/bcs-group/tests/authority_cutover.rs
+  s_fc73a782e73675::t_ed5ba39d8bcada 157-161
+apps/bcs/crates/services/bcs-group/tests/catalog_commit.rs
+  s_fc73a782e73675::t_f89a9d0486f898 1-554
+apps/bcs/crates/services/bcs-group/tests/management/creation.rs
+  s_fc73a782e73675::t_3daf78302eb6ea 23-24,26,81-82,84,374-396
+apps/bcs/docs/catalog-labels.md
+  s_fc73a782e73675::t_a1b87788d75a2d 47-69,98-113
+apps/bcs/specs/2026-11-19-configured-catalog-labels/README.md
+  s_fc73a782e73675::t_481c1b13347ab5 17
+apps/bcs/specs/2026-11-19-configured-catalog-labels/audit.md
+  s_fc73a782e73675::t_0a54e37b760f52 1-100
+apps/bcs/specs/2026-11-19-configured-catalog-labels/design.md
+  s_fc73a782e73675::t_6ea6cdf23775ca 62-74,84-92
+apps/bcs/specs/2026-11-19-configured-catalog-labels/requirements/card-catalog-label-management/spec.md
+  s_fc73a782e73675::t_9b75c5cf65980f 62-81
+apps/bcs/specs/2026-11-19-configured-catalog-labels/requirements/full-catalog-label-publication/spec.md
+  s_fc73a782e73675::t_aa65921c68f3f5 35-53
+apps/bcs/specs/2026-11-19-configured-catalog-labels/tasks.md
+  s_fc73a782e73675::t_6c565c4c6171bc 62-74
+apps/bcs/specs/2026-11-19-configured-catalog-labels/validation.md
+  s_fc73a782e73675::t_ad579089db96fa 5-10,393-576
+apps/gateway/configs/schemas/bcn.openapi.json
+  s_fc73a782e73675::t_af1eac4754b47d 1
+apps/gateway/tests/unit/scripts/test_bcn_catalog_labels.py
+  s_fc73a782e73675::t_56675c6d94f1fb 19-23,25,50,52,54-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1306479965be5066dfa302506ca5a51b853586b1",
+  "prompts": {},
+  "sessions": {
+    "s_fc73a782e73675": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f47e-75e4-72b0-a716-aea1ec929edb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
