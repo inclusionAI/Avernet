@@ -65,6 +65,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
 )
 from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
+from agentclaw.community.core.service_bot.services.publish_flow.ext_state import PublishExtState
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
     service_publish_extra_envs,
     service_publish_template_config,
@@ -647,6 +648,10 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
             else None
         )
         try:
+            delivery_kwargs = (
+                {"delivery": PublishExtState.compose_stored(publish_ext, PublishStage.ONLINE)}
+                if self._baas.resolve_container_provider(bot_info) == "teclaw" else {}
+            )
             result = await self._bot_build_service.release_async(
                 bot=bot_info,
                 user_id=str(bot_info["owner_id"]),
@@ -654,6 +659,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,
                 version=str(version),
+                **delivery_kwargs,
                 docker_image=docker_image,
                 ext_info=ext_info,
                 extra_envs=skills_env,
@@ -739,6 +745,10 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
             else None
         )
         try:
+            delivery_kwargs = (
+                {"delivery": PublishExtState.compose_stored(publish_ext, PublishStage.ONLINE)}
+                if self._baas.resolve_container_provider(bot_info) == "teclaw" else {}
+            )
             await prepare_instance_restart(bot=bot_info, device_id=bot_uuid, target_runtime=self._baas)
             result = await self._bot_build_service.upgrade_async(
                 bot_uuid=bot_uuid,
@@ -748,6 +758,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,
                 version=str(version),
+                **delivery_kwargs,
                 docker_image=docker_image,
                 ext_info=ext_info,
                 extra_envs=skills_env,

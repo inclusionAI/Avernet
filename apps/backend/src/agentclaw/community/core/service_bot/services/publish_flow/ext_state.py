@@ -190,7 +190,8 @@ class PublishExtState:
         base = (publish_record.ext or {}).get("config_artifact")
         return DeliveryArtifact.compose(base, stage, overrides), overrides
 
-    def compose_stored(self, ext: dict, stage: PublishStage) -> DeliveryArtifact:
+    @staticmethod
+    def compose_stored(ext: dict, stage: PublishStage) -> DeliveryArtifact:
         """Compose the delivery artifact for ``stage`` from the STORED per-stage
         overrides slot (``ext['engine_overrides_by_stage'][stage]``).
 

@@ -327,6 +327,126 @@ class TestResolveBuildArtifact:
         assert result_record.version is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["create", "upgrade"])
+async def test_caller_delivery_uses_frozen_online_publish_snapshot(action):
+    """Both Caller operations deliver the published ONLINE artifact, not the raw base."""
+    from copy import deepcopy
+
+    svc, _, baas, _, bot_repo, bindings, build, *_ = _make_service()
+    _wire_bot_repo(bot_repo)
+    _wire_binding_repo(bindings)
+    baas.resolve_container_provider.return_value = "teclaw"
+    build.release_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+    build.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+    publish_ext = {
+        "config_artifact": {"engine_ext": {"stage": "draft"}, "engine_overrides": {"channels": {"dingding": {"accounts": [{"client_id": "base"}]}}}},
+        "engine_overrides_by_stage": {"online": {"channels": {"dingding": {"accounts": [{"client_id": "published"}]}}}},
+    }
+    original = deepcopy(publish_ext)
+    if action == "create":
+        await svc._create_container(BOT_ID, OWNER_ID, USER_ID, migration_path=None, publish_ext=publish_ext)
+        kwargs = build.release_async.await_args.kwargs
+    else:
+        await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path=None, publish_ext=publish_ext)
+        kwargs = build.upgrade_async.await_args.kwargs
+    artifact = kwargs["delivery"].config_artifact
+    assert artifact["engine_ext"]["stage"] == "release"
+    assert artifact["engine_overrides"]["channels"]["dingding"]["accounts"][0]["client_id"] == "published"
+    assert publish_ext == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["create", "upgrade"])
+async def test_caller_non_teclaw_ignores_legacy_artifact_shape(action):
+    svc, _, baas, _, bot_repo, bindings, build, *_ = _make_service()
+    _wire_bot_repo(bot_repo)
+    _wire_binding_repo(bindings)
+    baas.resolve_container_provider.return_value = "baas"
+    build.release_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+    build.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+    ext = {"config_artifact": {"engine_ext": None}}
+    if action == "create":
+        await svc._create_container(BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path", publish_ext=ext)
+        kwargs = build.release_async.await_args.kwargs
+    else:
+        await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path="/nas/path", publish_ext=ext)
+        kwargs = build.upgrade_async.await_args.kwargs
+    assert "delivery" not in kwargs
+    assert kwargs["migration_path"] == "/nas/path"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["create", "upgrade"])
+async def test_invalid_teclaw_artifact_is_reported_as_connection_error_before_issue(action):
+    svc, _, baas, _, bot_repo, bindings, build, *_ = _make_service()
+    _wire_bot_repo(bot_repo)
+    _wire_binding_repo(bindings)
+    baas.resolve_container_provider.return_value = "teclaw"
+    build.release_async = AsyncMock()
+    build.upgrade_async = AsyncMock()
+    ext = {"config_artifact": {"engine_ext": None}}
+    with pytest.raises(ConnectionError) as exc:
+        if action == "create":
+            await svc._create_container(BOT_ID, OWNER_ID, USER_ID, migration_path=None, publish_ext=ext)
+        else:
+            await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path=None, publish_ext=ext)
+    assert exc.value.error_code == "5001"
+    build.release_async.assert_not_called()
+    build.upgrade_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["create", "upgrade"])
+async def test_offloaded_caller_config_reaches_teclaw_baas_request(action):
+    """Exercise OSS resolution, Caller composition, real BuildService and BaaS payload shaping."""
+    import json
+    from types import SimpleNamespace
+
+    from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
+    from agentclaw.community.core.service_bot.repository.config_artifact_offload import ConfigArtifactOffloader
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
+    from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
+
+    base = {"engine_type": "teclaw", "engine_ext": {"stage": "draft"}, "blob": "published"}
+    oss = MagicMock()
+    oss.get_object.return_value = json.dumps(base).encode()
+    ext = ConfigArtifactOffloader(oss).resolve({"config_artifact_oss": {"oss_key": "fixture"}})
+    baas = MagicMock()
+    baas.resolve_container_provider.return_value = "teclaw"
+    captured = []
+    def create(bot, **kwargs):
+        captured.append(BaasService._build_teclaw_payload(
+            SimpleNamespace(_default_ttl_minutes=30), bot, kwargs["owner_id"], kwargs["request_id"],
+            kwargs["config_artifact"], template_uuid=kwargs["template_uuid"], device_count=kwargs["device_count"], ttl_in_minutes=None,
+        ))
+        return {"bot_uuid": BOT_UUID, "publish_id": 888}
+    def update(bot_uuid, bot, **kwargs):
+        return create(bot, **kwargs)
+    baas.create_teclaw_bot.side_effect = create
+    baas.update_teclaw_bot.side_effect = update
+    build = BotBuildService(
+        user_list_repository=MagicMock(exists=MagicMock(return_value=False)),
+        artifact_transfers=ArtifactTransferRegistry({}), build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
+        env="test", device_service=MagicMock(), baas_service=baas, path_factory=MagicMock(),
+        passport_plugin=MagicMock(), device_binding_repo=MagicMock(), sandbox_registry=MagicMock(),
+        bot_repository=MagicMock(), teclaw_template_uuid="teclaw-tpl", baas_template_resolver=MagicMock(),
+        channel_service=MagicMock(), common_whitelist_service=MagicMock(),
+    )
+    build._passport_plugin.query_token.return_value = "test-token"
+    svc, _, _, _, bot_repo, bindings, *_ = _make_service(baas=baas, bot_build_service=build)
+    _wire_bot_repo(bot_repo, {"bot_id": BOT_ID, "owner_id": OWNER_ID, "entity_id": OWNER_ID, "active_engine": "teclaw", "bot_type": "service"})
+    _wire_binding_repo(bindings)
+    if action == "create":
+        await svc._create_container(BOT_ID, OWNER_ID, USER_ID, migration_path=None, publish_ext=ext)
+    else:
+        await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path=None, publish_ext=ext)
+    delivered = captured[0]["config"]["deploy_config"]["teclaw_bot_config"]
+    assert delivered["blob"] == "published"
+    assert delivered["engine_ext"]["stage"] == "release"
+    oss.get_object.assert_called_once_with("fixture")
+
+
 class TestCreateContainer:
     """Tests for _create_container method (async, uses release_async)."""
 
