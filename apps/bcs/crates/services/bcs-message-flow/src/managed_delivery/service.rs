@@ -513,7 +513,7 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
             .try_acquire()
             .map_err(|_| ManagedDeliveryError::Conflict)?;
         let bots: Vec<String> = commands.iter().flat_map(|c| c.targets.iter().map(|t| t.target_bot_id.clone())).collect();
-        let _guards = self.mutations.acquire(bots).await;
+        let mut _guards = self.mutations.acquire(bots.clone()).await;
         let policy = match &self.policy { Some(live) => Some(live.snapshot.read().await), None => None };
         if let Some(policy) = &policy {
           for command in &mut commands {
@@ -601,8 +601,42 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         {
             return Err(ManagedDeliveryError::Conflict);
         }
+        let commands_before_persist = commands.clone();
+        let bots_before_retry = bots.clone();
         let repo = self.repo.clone();
-        let (results, _guards) = persist_with_guards(_guards, async move { repo.admit_batch(commands).await }).await?;
+        let (results, _guards) = {
+            let mut delay = tokio::time::Duration::from_millis(100);
+            loop {
+                let repo = repo.clone();
+                let cmds = commands.clone();
+                match persist_with_guards(_guards, async move { repo.admit_batch(cmds).await }).await {
+                    Ok(ok) => break ok,
+                    Err(e @ ManagedDeliveryError::Repository(
+                        MessageDeliveryRepoError::Storage(_),
+                    )) => {
+                        tracing::warn!(
+                            delay_ms = delay.as_millis(),
+                            error = %e,
+                            "queue admission persistence failed; retrying after backoff"
+                        );
+                        tokio::time::sleep(delay).await;
+                        delay = (delay * 2).min(tokio::time::Duration::from_secs(5));
+                        _guards = self
+                            .mutations
+                            .acquire(bots_before_retry.clone())
+                            .await;
+                        commands = commands_before_persist.clone();
+                        if !self
+                            .admission_available
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                        {
+                            return Err(ManagedDeliveryError::Conflict);
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        };
         for result in &results {
         tracing::debug!(message_id = %result.message.message_id, session_id = %result.message.session_id,
             duplicate = result.duplicate, target_count = result.deliveries.len(),
