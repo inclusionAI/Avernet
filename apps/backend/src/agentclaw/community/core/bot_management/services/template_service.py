@@ -20,6 +20,7 @@ The repository is injected via constructor (DI), following the same pattern
 as BotService / BotRepository.
 """
 
+import json
 from typing import Optional, Dict, Any, List
 
 from injector import inject
@@ -34,6 +35,9 @@ from agentclaw.community.plugin_api.bot_template_write_extension import (
 )
 
 logger = get_logger()
+
+# MySQL TEXT column maximum byte length (utf8mb4).
+_TEXT_MAX_BYTES = 65535
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +107,29 @@ class TemplateService:
         if not ext_content:
             logger.warning("[template_service._validate_ext_content] ext content is empty")
             raise TemplateValidationError("Template ext content cannot be empty")
+
+        try:
+            serialized = json.dumps(ext_content, ensure_ascii=False).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "[template_service._validate_ext_content] Cannot serialize ext content: %s",
+                exc,
+            )
+            raise TemplateValidationError(
+                "Template ext content contains unserializable data"
+            ) from exc
+
+        if len(serialized) > _TEXT_MAX_BYTES:
+            logger.warning(
+                "[template_service._validate_ext_content] ext content exceeds TEXT column limit: "
+                "%d bytes (max %d bytes)",
+                len(serialized),
+                _TEXT_MAX_BYTES,
+            )
+            raise TemplateValidationError(
+                f"Template ext content too large: {len(serialized)} bytes "
+                f"(maximum {_TEXT_MAX_BYTES} bytes)"
+            )
 
     def _encrypt_token_field(
         self,
