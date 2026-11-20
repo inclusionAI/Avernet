@@ -115,13 +115,13 @@ def test_friend_binding_scope_is_checked_against_subject_without_fallback(change
         bindings={12: _Binding(12), 31: _Binding(31), 41: binding},
         records=[_PublishRecord(31)],
         caller_instance={"status": "success", "ext": {
-            "binding_id": 41, "credentials": {"token": "private-friend-token"},
+            "binding_id": 41, "credentials": {"token": "<test-friend-token>"},
         }},
     )
     with caplog.at_level("INFO"), pytest.raises(RuntimeBindingNotFoundError):
         service.resolve_session_file(RuntimeBindingRequest(BOT, OWNER, OWNER), session_user_id=CALLER)
     assert instances.calls == [(CALLER, BOT, OWNER)]
-    assert "private-friend-token" not in caplog.text
+    assert "<test-friend-token>" not in caplog.text
 
 
 def test_session_file_selection_does_not_change_global_auto():
@@ -151,7 +151,7 @@ def test_selection_log_keeps_actor_subject_and_binding_without_credentials(caplo
         {"id": 3, "bot_type": "service", "call_type": "caller", "binding_id": 12},
         bindings={41: _Binding(41, apply_reason=f"caller_instance:{BOT}", applied_by=CALLER)},
         caller_instance={"status": "success", "ext": {
-            "binding_id": 41, "credentials": {"token": "private-friend-token"},
+            "binding_id": 41, "credentials": {"token": "<test-friend-token>"},
         }},
     )
     with caplog.at_level("INFO"):
@@ -161,4 +161,4 @@ def test_selection_log_keeps_actor_subject_and_binding_without_credentials(caplo
     assert f"session_user_id={CALLER}" in caplog.text
     assert "binding_id=41" in caplog.text
     assert "source=caller_instance" in caplog.text
-    assert "private-friend-token" not in caplog.text
+    assert "<test-friend-token>" not in caplog.text
