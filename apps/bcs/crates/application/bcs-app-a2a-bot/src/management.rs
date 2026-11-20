@@ -23,7 +23,7 @@ fn view(provider: &str, record: A2aBotRecord) -> ServiceResult<ManagedA2aCard> {
     })
 }
 impl A2aBotManagement {
-    async fn public_provider(&self, token: &str) -> ServiceResult<(String, String, String)> {
+    async fn authenticated_public_provider(&self, token: &str) -> ServiceResult<(String, String, String)> {
         let provider = self.providers.authenticate_provider_admin(token).await?;
         if provider.disabled {
             return Err(failure(Code::PermissionDenied, "", "PROVIDER_DISABLED"));
@@ -32,10 +32,12 @@ impl A2aBotManagement {
             .slug
             .filter(|s| bcs_service_api::types::a2a_bot::valid_provider_name(s))
             .ok_or_else(|| failure(Code::ServiceUnavailable, "", "PROVIDER_NAME_NOT_CONFIGURED"))?;
-        self.providers
-            .pin_a2a_provider_name(&provider.provider_id, &name)
-            .await?;
         Ok((provider.provider_id, name, provider.config))
+    }
+    async fn public_provider(&self, token: &str) -> ServiceResult<(String, String, String)> {
+        let identity = self.authenticated_public_provider(token).await?;
+        self.providers.pin_a2a_provider_name(&identity.0, &identity.1).await?;
+        Ok(identity)
     }
     async fn public_record_by_id(&self, provider: &str, bot_id: &str) -> ServiceResult<A2aBotRecord> {
         if bot_id.is_empty() || bot_id != bot_id.trim() || bot_id.chars().any(char::is_control) {
@@ -169,13 +171,14 @@ impl A2aBotManagement {
         visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
         labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     ) -> ServiceResult<ManagedA2aCard> {
-        let (provider, label, _) = self.public_provider(token).await?;
+        let (provider, label, _) = self.authenticated_public_provider(token).await?;
         if source.is_none() && visibility.is_none() && labels.is_none() {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
         let labels=labels.map(|input|self.policy.normalize(input)).transpose()?;
         let target = self.public_record_by_id(&provider, bot_id).await?;
         let loaded = match source {Some(source)=>Some(self.public_load(source).await?),None=>None};
         // Retry only local CAS races, never the outbound fetch. Each attempt
         // rechecks the original identity and binding, so renames cannot retarget.
+        let mut provider_name_pinned = false;
         for _ in 0..3 {
             self.authorize(&provider, token).await?;
             let current = self
@@ -193,6 +196,12 @@ impl A2aBotManagement {
                 .revision
                 .checked_add(1)
                 .ok_or_else(|| failure(Code::InternalError, "", "REVISION_EXHAUSTED"))?;
+            // Reserve the name only after auth, label, target and Card validation.
+            // Pin at most once per request; the store still fences concurrent slug changes.
+            if !provider_name_pinned {
+                self.providers.pin_a2a_provider_name(&provider, &label).await?;
+                provider_name_pinned = true;
+            }
             let next = A2aBotRecord {
                 // Omission preserves this CAS attempt's latest labels, not the pre-fetch snapshot.
                 catalog_labels: labels.clone().unwrap_or_else(||current.catalog_labels.clone()),

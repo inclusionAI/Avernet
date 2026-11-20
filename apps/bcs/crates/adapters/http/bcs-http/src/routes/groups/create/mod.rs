@@ -3,6 +3,7 @@
 use super::*;
 
 mod definition;
+mod labels;
 mod participants;
 mod response;
 mod spec;
@@ -16,8 +17,12 @@ pub async fn create_group(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Json(req): Json<CreateGroupRequest>,
+    body: Result<Json<CreateGroupRequest>, JsonRejection>,
 ) -> Response {
+    let Json(req) = match body {
+        Ok(body) => body,
+        Err(error) => return labels::rejection_response(error),
+    };
     if let Some(input)=req.catalog_labels.clone() {
         let labels=match state.services.group_management.normalize_catalog_labels(input) {
             Ok(labels)=>labels,Err(e)=>return group_use_case_error_to_http(e.into()).into_response(),

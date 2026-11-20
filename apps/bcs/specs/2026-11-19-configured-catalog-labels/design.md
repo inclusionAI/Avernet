@@ -59,6 +59,14 @@ For a supplied object: validate every key against the policy, including keys who
 
 For Group PATCH, omitted keys inside a supplied object are removed, not preserved. For Agent updates, old callers changing only source or visibility preserve current labels. On every CAS attempt, omission uses the latest record, never an earlier snapshot. Explicit objects still replace the entire collection. Auth, Provider scoping, owner/manager checks and existing error envelopes remain authoritative. Return field-specific invalid-request details (`catalog_labels`, `catalog_labels.<key>`, or list index) for null object, unknown key/value, wrong type and disallowed multiplicity without introducing hardcoded business errors.
 
+Public Agent update authentication and label/target/Card validation precede Provider
+slug reservation. A valid request reserves the name once before the first CAS write;
+concurrent slug changes remain fenced by the store. Invalid input must not newly
+pin the Provider name. Legacy Group label type errors are mapped at the HTTP parsing
+boundary to field-specific structured 400 responses (`INVALID_TYPE`); unrelated
+parser errors preserve their existing status and envelope behavior. The Gateway's
+published Group label schema fragments must match the generated BCS contract.
+
 ### D4. Persistence and Group eligibility
 
 Add `catalog_labels` independently to `bcs_bots` and `bcs_group_agent_cards`; MySQL/OceanBase JSON, SQLite TEXT containing JSON. Use nullable/default NULL additive columns so old rows/inserts remain valid; new writes serialize normalized empty state as `{}`. Read SQL NULL as empty; malformed non-null stored JSON is a storage error, not silent empty fallback. Do not duplicate labels in `bot_info`, `bcs_groups`, raw Card documents or A2A task/run/context tables.

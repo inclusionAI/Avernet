@@ -315,3 +315,72 @@ subprocesses and explicitly accepted these local failures as non-blocking for
 this push. The user also authorized updating the PR description to match the
 final commit. The raw failures above remain recorded; neither this confirmation
 nor publication is a claim that all local tests or final coverage passed.
+
+
+## PR #4256 third review revision (2026-11-20)
+
+Baseline HEAD for this revision: `c34dc36ad91e99a3b0103ecffc652807be36a581`.
+The user authorized fixing the first three new comments, local regression,
+commit and push. Work stays in the dedicated configured-catalog-labels worktree;
+no rebase, main-checkout edit, online DDL, deployment or OCB integration occurs.
+
+### Scope and safety
+
+1. Public Agent updates now perform read-only Provider authentication, label
+   normalization, scoped target validation and Card validation before reserving
+   the Provider slug. Reservation occurs once before the first CAS write, not
+   once per retry; the store still rejects a concurrent slug change. Other public
+   management entries retain their existing reservation semantics. Invalid label,
+   target, empty-update and Card input cannot newly pin a mutable slug. This does
+   not claim that later commit/storage failures roll back a separate reservation.
+   Successful-path query count is unchanged: the existing reservation is moved,
+   not duplicated; failed pre-validation requests avoid its DB write/read/cache
+   invalidation. Existing bounded Card CAS retries and single URL fetch remain.
+2. Gateway Group create/PATCH/detail schemas now contain all 13 generated label
+   property fragments, copied from a fresh BCS OpenAPI dump. Full regeneration
+   also includes 151 historical semantic differences, so only the label fragments
+   were applied. A structural before/after comparison confirms exactly 13 property
+   additions, no removals or unrelated changes; the existing compatibility checker
+   reports no breaking changes. New tests regenerate the authoritative dump and
+   compare every Group label schema fragment, including optional PATCH clear `{}`.
+3. Legacy Group create catches JSON data rejections only when the structured
+   serde path begins with the `catalog_labels` field. It returns structured 400
+   with `invalid_request`, precise field/list index, and `INVALID_TYPE`. It uses
+   the existing workspace `serde_path_to_error` dependency without changing its
+   version; the lockfile adds only the bcs-http dependency edge. Other DTO errors
+   remain 422, syntax errors 400, unsupported content types 415 and oversized
+   bodies 413. No parsing error reaches Group or subscription writes.
+
+### Executed evidence
+
+- Red regression against the pre-fix implementation: unknown label key mutated
+  Provider config by adding `a2a_name_pinned`; the label-type HTTP regression
+  returned 422 instead of 400; both Gateway schema tests failed on missing fields.
+- `cargo check --manifest-path apps/bcs/Cargo.toml -p bcs-http --tests`: PASS.
+- Rustup Rust 1.94.0, `CARGO_INCREMENTAL=0`, `CARGO_BUILD_JOBS=2`:
+  `cargo test --manifest-path apps/bcs/Cargo.toml --locked -p bcs-app-a2a-bot -p bcs-http -- --test-threads=1`:
+  **885 passed, 0 failed, 0 ignored**, including the 131-case Group HTTP suite.
+- The new Provider tests cover eight rejected input/auth/target cases without
+  Provider config or Agent record mutation and verify actual slug rename remains
+  allowed; valid label updates still pin the name, and a deterministic slug change
+  during URL fetch rejects the Agent write without pinning the changed name.
+- Group HTTP tests cover seven invalid label type shapes through both subscription
+  modes, precise JSON field/index details and no writes; separate negative controls
+  preserve unrelated 422, syntax 400, content-type 415 and body-limit 413.
+- `cargo test --manifest-path apps/bcs/Cargo.toml --locked -p bcs --test integration_catalog_labels -- --test-threads=1`:
+  **1 passed, 0 failed** (actual HTTP/SQLite/restart/Fuse mock payload chain).
+- In `apps/gateway`, after `uv sync --frozen`, `PYTHONPATH=src .venv/bin/python -m pytest tests/unit -q`:
+  **917 passed, 1 skipped, 0 failed**. Initial invocation from the repository root
+  could not collect app-bootstrap tests because config lookup used the wrong cwd;
+  the complete run from the Gateway module succeeded. The first Rust test build
+  also caught a missing test-only trait import, corrected before the passing run.
+- Ruff check and format check on the new Gateway test: PASS.
+- Full BCS workspace tests, final LLVM coverage and Singlebox runtime coverage are
+  NOT_RUN for this revision. Earlier local full-suite environmental failures remain
+  historical and must not replace these focused results or the new remote CI.
+  No test or coverage threshold, retry, timeout, allowlist or platform was weakened.
+
+Ignored Rust logs and exit receipts are under `apps/bcs/testresult/` with prefix
+`pr4256-round3-`; Python logs are temporary local artifacts. Disk preflight had
+about 38 GiB available, with no active Cargo process. Final checks will be recorded
+in the publication report; no build-output cleanup was needed in this round.

@@ -345,3 +345,60 @@ async fn legacy_group_label_policy_errors_are_bad_requests_before_any_create_or_
         }
     }
 }
+
+
+#[tokio::test]
+async fn legacy_group_label_type_errors_are_structured_before_any_write() {
+    use bcs_group::GroupStore;
+    use bcs_service_api::GroupCoreService;
+    let groups=Arc::new(GroupStore::new());
+    let service=Arc::new(RecordingGroupService::default());
+    let app=build_router(HttpAppState::new(Services::builder().group(groups.clone()).build_for_test())
+        .with_group_application(service.clone()));
+    for subscriptions in [false,true] {
+        for (labels,field) in [
+            (json!(null),"catalog_labels"),
+            (json!([]),"catalog_labels"),
+            (json!(1),"catalog_labels"),
+            (json!({"stage":1}),"catalog_labels.stage"),
+            (json!({"stage":{}}),"catalog_labels.stage"),
+            (json!({"stage":[1]}),"catalog_labels.stage[0]"),
+            (json!({"stage":["trial",false]}),"catalog_labels.stage[1]"),
+        ] {
+            let mut body=json!({"driver_bot":"driver-bot","group_strategy":"manager_worker",
+                "participants":[{"bot_uuid":"driver-bot","role":"driver"}],"catalog_labels":labels});
+            if subscriptions {body["event_subscriptions"]=json!([{
+                "name":"group-webhook","event_filters":["group.*"],
+                "sink":{"type":"webhook","url":"http://127.0.0.1:28082/events"},
+            }]);}
+            let response=app.clone().oneshot(Request::builder().method("POST").uri("/groups")
+                .header("content-type","application/json").body(Body::from(body.to_string())).unwrap()).await.unwrap();
+            assert_eq!(response.status(),StatusCode::BAD_REQUEST,"inline={subscriptions}, labels={labels}");
+            assert!(response.headers()["content-type"].to_str().unwrap().starts_with("application/json"));
+            let body:Value=serde_json::from_slice(&to_bytes(response.into_body(),8192).await.unwrap()).unwrap();
+            assert_eq!(body["code"],"bad_request");
+            assert_eq!(body["params"]["code"],"invalid_request");
+            assert_eq!(body["params"]["field"],field);
+            assert_eq!(body["params"]["reason"],"INVALID_TYPE");
+            assert!(groups.list().await.is_empty());
+            assert!(service.create.lock().unwrap().is_none());
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_group_non_label_json_rejections_keep_their_statuses() {
+    let service=Arc::new(RecordingGroupService::default());
+    let app=bot_test_router(service.clone());
+    for (content_type,body,status) in [
+        ("application/json",r#"{"driver_bot":"driver-bot","participants":1}"#.to_owned(),StatusCode::UNPROCESSABLE_ENTITY),
+        ("application/json","{".to_owned(),StatusCode::BAD_REQUEST),
+        ("text/plain","{}".to_owned(),StatusCode::UNSUPPORTED_MEDIA_TYPE),
+        ("application/json"," ".repeat(3*1024*1024),StatusCode::PAYLOAD_TOO_LARGE),
+    ] {
+        let response=app.clone().oneshot(Request::builder().method("POST").uri("/groups")
+            .header("content-type",content_type).body(Body::from(body)).unwrap()).await.unwrap();
+        assert_eq!(response.status(),status);
+        assert!(service.create.lock().unwrap().is_none());
+    }
+}

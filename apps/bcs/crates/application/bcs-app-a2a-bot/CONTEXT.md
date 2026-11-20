@@ -102,3 +102,9 @@ external Rust consumers rebuild together. Labels are not raw Card or authorizati
 state. Bootstrap loads the independent policy file once; no environment overlay
 or request can extend it. See the change validation record for actual test and
 release evidence; local code is not a published or deployed revision.
+
+Public Agent updates use read-only Provider authentication before label/target/Card
+validation. They reserve the Provider slug only after those checks and at most
+once across CAS retries; invalid input cannot newly pin a mutable slug. The store's
+slug comparison still fences concurrent renames. Other entries keep their existing
+reservation semantics; no transaction spans Card fetching.

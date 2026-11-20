@@ -316,3 +316,6 @@ mod catalog_labels;
 
 #[path="catalog_label_updates.rs"]
 mod catalog_label_updates;
+
+#[path="provider_name_updates.rs"]
+mod provider_name_updates;

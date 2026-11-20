@@ -44,6 +44,22 @@ The supplied object replaces the **whole** collection, not individual keys.
 Invalid combined writes persist neither metadata nor Card and emit no committed
 catalog-change notification. Existing authorization and response envelopes apply.
 
+Public Agent updates authenticate and validate labels, the scoped target and Card
+before reserving the Provider slug. Invalid input must not turn a mutable slug
+into a pinned name. A valid update still reserves the name once before its first
+CAS commit; the store rejects a concurrent slug change. Other management entries
+retain their existing name-reservation behavior.
+
+Legacy `POST /groups` returns structured HTTP 400 for label policy violations and
+label deserialization/type errors, with `params.code = invalid_request`, a precise
+`params.field` (including a list index when applicable), and `params.reason`.
+Type errors use `INVALID_TYPE`. Unrelated JSON data errors, malformed JSON,
+unsupported content types and oversized bodies keep their existing handling.
+
+The Gateway-published Group create/PATCH/detail label schemas are copied from the
+generated BCS contract. The scoped consistency test compares every Group label
+schema fragment, without republishing unrelated historical OpenAPI differences.
+
 | Operation | Omitted | Explicit `{}` | Nonempty normalized object |
 | --- | --- | --- | --- |
 | Agent registration | initialize empty | empty | replace |
