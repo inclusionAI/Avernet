@@ -60,10 +60,17 @@ class BaasConnInfoBuilder:
         *,
         device_uuid: str | None = None,
     ) -> dict[str, Any]:
+        # COSEC: trusted binding identity selects affinity; operator identity stays intact.
+        affinity = self._caller_affinity(binding, user_id)
+        if affinity != user_id:
+            logger.info(
+                "baas.caller_affinity.selected binding_id=%s operator_id=%s device_affinity=%s",
+                binding.id, user_id, affinity,
+            )
         try:
             ws_info = self._baas_service.get_ws_info(
                 bind_id=binding.id,
-                device_affinity=user_id,
+                device_affinity=affinity,
                 device_uuid=device_uuid,
             )
         except BaasNoActiveDevicesError as error:
@@ -124,10 +131,30 @@ class BaasConnInfoBuilder:
             ws_info=ws_info,
             engine_type=engine_type,
             bot_type=bot_type,
-            user_id=user_id,
+            user_id=affinity,
             device_uuid=device_uuid,
             sandbox_client=self._sandbox_client,
         )
+
+    @staticmethod
+    def _caller_affinity(binding: DeviceBindingRecord, user_id: str) -> str:
+        """Canonicalize routing from the trusted Caller binding, not current Bot metadata."""
+        reason, subject = binding.apply_reason, binding.applied_by
+        if (
+            binding.device_provider != "baas"
+            or not isinstance(reason, str)
+            or not reason.startswith("caller_instance:")
+            or not isinstance(subject, str)
+            or not subject.strip()
+        ):
+            return user_id
+        bot_id = reason[len("caller_instance:"):]
+        if not bot_id or bot_id != bot_id.strip():
+            return user_id
+        bolt_id = (binding.device_props or {}).get("bolt_id")
+        if bolt_id and bolt_id != bot_id:
+            return user_id
+        return subject
 
     def _resolve_bot(self, binding: DeviceBindingRecord) -> dict[str, Any] | None:
         """两步反查策略,对齐 ``BaasDeviceService._resolve_bot_by_binding_id``。"""
