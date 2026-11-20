@@ -39,6 +39,7 @@ predates the split keeps its current behavior.
 from __future__ import annotations
 
 import dataclasses
+import json as _json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -85,6 +86,86 @@ def build_bot_apply_body(bot_id: str, artifact: BotConfigArtifact) -> dict:
         "operation": "UPDATE",
         "bot_config": artifact.to_dict(),
     }
+
+
+class _HttpErrorDesc:
+    """Parsed summary of an HTTP error response for structured logging."""
+
+    __slots__ = ("error_code", "detail", "raw")
+
+    def __init__(self, error_code: str | None, detail: str | None, raw: str) -> None:
+        self.error_code = error_code
+        self.detail = detail
+        self.raw = raw
+
+    def __str__(self) -> str:
+        parts = [f"status={self.raw}"]
+        if self.error_code:
+            parts.append(f"error_code={self.error_code}")
+        if self.detail:
+            parts.append(f"detail={self.detail}")
+        return " ".join(parts)
+
+
+def _describe_http_error(exc: HttpClientStatusError) -> _HttpErrorDesc:
+    """Safely parse an HTTP error response body for structured logging.
+
+    Returns an ``_HttpErrorDesc`` whose ``__str__`` is suitable for log
+    formatting: it includes the status code, any ``error_code`` found in the
+    JSON body, and the ``detail`` field when present.
+    """
+    raw = f"{exc.response.status_code}"
+    error_code: str | None = None
+    detail: str | None = None
+    try:
+        body = _json.loads(exc.response.text)
+    except (ValueError, TypeError):
+        # Response body is not valid JSON — include it verbatim.
+        return _HttpErrorDesc(None, None, raw + f" body={exc.response.text!r}")
+    if isinstance(body, dict):
+        error_code = body.get("error_code") or body.get("error")
+        if isinstance(error_code, str):
+            pass
+        else:
+            error_code = None
+        detail = body.get("detail") or body.get("message")
+        if not isinstance(detail, str):
+            detail = None
+    return _HttpErrorDesc(error_code, detail, raw)
+
+
+# Error codes that indicate a SkillSet resource conflict; recognised so
+# generic-exception handling can surface context when they appear in a
+# chained exception.
+_SKILLSET_CONFLICT_CODES: frozenset[str] = frozenset(
+    {
+        "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+        "RESOURCE_DIRECT_ACTIVE",
+        "RESOURCE_MANAGED_BY_SKILL_SET",
+        "SYSTEM_DEFAULT_IMMUTABLE",
+    }
+)
+
+
+def _describe_exception_cause(exc: BaseException) -> str:
+    """Walk the exception cause/context chain for a recognised conflict code.
+
+    Returns a suffix suitable for appending to a log line (leading space
+    included), or the empty string when no recognised code is found.
+    """
+    seen: set[int] = set()
+    node: BaseException | None = exc
+    while node is not None:
+        node_id = id(node)
+        if node_id in seen:
+            break
+        seen.add(node_id)
+        msg = str(node) if node is not exc else ""
+        for code in _SKILLSET_CONFLICT_CODES:
+            if code in msg:
+                return f"; exception chain contains {code}"
+        node = node.__cause__ or node.__context__
+    return ""
 
 
 class TeclawDeviceSyncService(DeviceSync):
@@ -270,11 +351,18 @@ class TeclawDeviceSyncService(DeviceSync):
             self._deliver(artifact)
             self._record_draft_artifact(artifact)
         except HttpClientStatusError as e:
+            desc = _describe_http_error(e)
             logger.error(
-                "[TeclawDeviceSyncService.%s] HTTP error for bot=%s: %s - %s",
-                caller, self._bot_id, e.response.status_code, e.response.text,
+                "[TeclawDeviceSyncService.%s] HTTP error for bot=%s: %s",
+                caller, self._bot_id, desc,
             )
-            return {"success": False, "message": f"HTTP 错误: {e.response.status_code}"}
+            result: dict[str, Any] = {
+                "success": False,
+                "message": f"HTTP 错误: {e.response.status_code}",
+            }
+            if desc.error_code:
+                result["error_code"] = desc.error_code
+            return result
         except HttpClientRequestError as e:
             logger.error(
                 "[TeclawDeviceSyncService.%s] request failed for bot=%s: %s",
@@ -282,9 +370,10 @@ class TeclawDeviceSyncService(DeviceSync):
             )
             return {"success": False, "message": f"请求失败: {e}"}
         except Exception as e:  # compose / transport errors must not crash callers
+            cause_chain = _describe_exception_cause(e)
             logger.exception(
-                "[TeclawDeviceSyncService.%s] error for bot=%s: %s",
-                caller, self._bot_id, e,
+                "[TeclawDeviceSyncService.%s] error for bot=%s: %s%s",
+                caller, self._bot_id, e, cause_chain,
             )
             return {"success": False, "message": f"投递失败: {e}"}
 

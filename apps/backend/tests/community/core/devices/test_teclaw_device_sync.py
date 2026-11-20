@@ -18,6 +18,9 @@ from agentclaw.community.core.config_compose.models import ComposeOccasion
 from agentclaw.community.core.devices.services.teclaw_device_sync import (
     TECLAW_BOT_APPLY_PATH,
     TeclawDeviceSyncService,
+    _describe_exception_cause,
+    _describe_http_error,
+    _HttpErrorDesc,
     build_bot_apply_body,
     extract_teclaw_bot_id,
 )
@@ -421,3 +424,96 @@ def test_mcp_methods_return_false_on_failure():
     m["http_client"].post.side_effect = httpx.ConnectError("no route")
 
     assert service.sync_remove_mcp("s1") is False
+
+
+# ── enhanced error diagnostics ────────────────────────────────────────────
+
+
+def test_http_status_error_includes_error_code_when_json_body_has_one():
+    service, m = _make_service()
+    response = httpx.Response(
+        status_code=409,
+        json={
+            "error_code": "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+            "message": "Resource belongs to another SkillSet",
+        },
+        request=httpx.Request("POST", HTTP_URL),
+    )
+    m["http_client"].post.return_value = response
+
+    result = service.sync_symlinks([])
+
+    assert result["success"] is False
+    assert result["error_code"] == "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
+    assert result["message"] == "HTTP 错误: 409"
+
+
+def test_http_status_error_with_non_json_body_has_no_error_code():
+    service, m = _make_service()
+    response = httpx.Response(
+        status_code=502,
+        text="bad gateway",
+        request=httpx.Request("POST", HTTP_URL),
+    )
+    m["http_client"].post.return_value = response
+
+    result = service.sync_symlinks([])
+
+    assert result["success"] is False
+    assert "error_code" not in result
+
+
+def test_describe_http_error_extracts_error_code_from_json():
+    response = httpx.Response(
+        status_code=409,
+        json={"error_code": "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"},
+        request=httpx.Request("POST", HTTP_URL),
+    )
+    exc = httpx.HTTPStatusError(
+        message="Conflict", request=response.request, response=response
+    )
+
+    desc = _describe_http_error(exc)
+
+    assert desc.error_code == "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
+    assert "error_code=RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET" in str(desc)
+
+
+def test_describe_http_error_handles_non_json_body():
+    response = httpx.Response(
+        status_code=500,
+        text="Internal Server Error",
+        request=httpx.Request("POST", HTTP_URL),
+    )
+    exc = httpx.HTTPStatusError(
+        message="Server Error", request=response.request, response=response
+    )
+
+    desc = _describe_http_error(exc)
+
+    assert desc.error_code is None
+    assert desc.raw.startswith("500")
+
+
+def test_describe_exception_cause_finds_code_in_chained_exception():
+    inner = RuntimeError("skill_sets/my_set: RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET")
+    # Simulate "raise X from Y" chaining: outer.__cause__ = None,
+    # outer.__context__ = inner.
+    outer: RuntimeError
+    try:
+        try:
+            raise inner
+        except RuntimeError:
+            raise RuntimeError("compose failed")
+    except RuntimeError as e:
+        outer = e
+
+    suffix = _describe_exception_cause(outer)
+
+    assert "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET" in suffix
+
+
+def test_describe_exception_cause_returns_empty_when_no_match():
+    exc = RuntimeError("something unrelated happened")
+
+    assert _describe_exception_cause(exc) == ""
