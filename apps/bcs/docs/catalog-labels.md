@@ -44,21 +44,29 @@ The supplied object replaces the **whole** collection, not individual keys.
 Invalid combined writes persist neither metadata nor Card and emit no committed
 catalog-change notification. Existing authorization and response envelopes apply.
 
-Public Agent updates authenticate and validate labels, the scoped target and Card
-before reserving the Provider slug. Invalid input must not turn a mutable slug
-into a pinned name. A valid update still reserves the name once before its first
-CAS commit; the store rejects a concurrent slug change. Other management entries
-retain their existing name-reservation behavior.
+Provider authentication/name resolution is read-only. Public and named registration,
+updates and refreshes validate the Card's persistence projection before reserving
+the Provider slug; rejected label/owner/reference/target/Card inputs must not pin a
+previously mutable name. Successful get/find results reserve the name only after
+validating their target/view; an empty find does not reserve it. A valid update
+reserves once before its first CAS commit, and a concurrent slug change is still
+fenced. Later transaction/CAS/storage failures do not roll back the separate
+reservation; no broader all-failure atomicity is implied.
 
-Legacy `POST /groups` returns structured HTTP 400 for label policy violations and
-label deserialization/type errors, with `params.code = invalid_request`, a precise
-`params.field` (including a list index when applicable), and `params.reason`.
-Type errors use `INVALID_TYPE`. Unrelated JSON data errors, malformed JSON,
-unsupported content types and oversized bodies keep their existing handling.
+Legacy Group create/PATCH, Provider Card configuration/registration and named
+registration return structured HTTP 400 for label deserialization/type errors,
+with `params.code = invalid_request`, a precise `params.field` (including a list
+index when applicable), and `params.reason = INVALID_TYPE`. Their unrelated
+parsing errors retain the existing status/envelope behavior. Group create policy
+violations also retain their structured field and reason.
 
-The Gateway-published Group create/PATCH/detail label schemas are copied from the
-generated BCS contract. The scoped consistency test compares every Group label
-schema fragment, without republishing unrelated historical OpenAPI differences.
+The Gateway-published contract includes the complete generated optional register
+request body, every Group label property and the required membership of every
+Group detail response variant. Request labels remain optional. Consistency tests
+compare all generated label locations and their parent required semantics, not
+only a Group-filtered property fragment. Selective generated publication leaves
+unrelated historical schema differences untouched and passes the regular
+compatibility checker.
 
 | Operation | Omitted | Explicit `{}` | Nonempty normalized object |
 | --- | --- | --- | --- |
@@ -86,6 +94,22 @@ normalized `{}` deterministically. SQL NULL/missing historical Group Card rows
 read empty; malformed non-null JSON is an error. Explicit eligible Group label
 writes materialize a missing template in the Group transaction; reads do not
 backfill.
+
+Legacy normal-Group creation is create-only, including caller-supplied IDs. An
+existing identity returns conflict without replacing its management anchors,
+participants, immutable kind/strategy, version or labels. This is enforced by the
+SQL unique constraint in the creation transaction and by the memory store's write
+lock, not an out-of-transaction exists check. Use authorized PATCH to modify an
+existing Group. DM pair-based reuse and trusted internal metadata upserts retain
+their separate contracts; creation is not an authorization bypass for either.
+
+Versioned Group writes return their already validated, version-fenced committed
+candidate after the transaction, leaving the cache invalidated. No fallible
+response read is performed between COMMIT and the Core catalog notification.
+Transaction failures still propagate and produce no catalog notification. This
+moves the normal Group/participant reads before commit without increasing their
+count on a warm Core path; it is not a durable outbox or a
+process-crash recovery guarantee.
 
 Agent writes use the existing identity/revision CAS and transaction; label-only
 updates advance the same revision. Omitted update labels are taken from the latest

@@ -16,12 +16,13 @@ _GATEWAY = Path(__file__).resolve().parents[3]
 def _label_schemas(node: Any, path: tuple = ()) -> dict[tuple, Any]:
     found = {}
     if isinstance(node, dict):
+        if "catalog_labels" in node.get("properties", {}):
+            found[(*path, "properties", "catalog_labels")] = {
+                "schema": node["properties"]["catalog_labels"],
+                "required": "catalog_labels" in node.get("required", []),
+            }
         for key, value in node.items():
-            child = (*path, key)
-            if key == "catalog_labels" and path and path[-1] == "properties":
-                found[child] = value
-            else:
-                found.update(_label_schemas(value, child))
+            found.update(_label_schemas(value, (*path, key)))
     elif isinstance(node, list):
         for index, value in enumerate(node):
             found.update(_label_schemas(value, (*path, index)))
@@ -46,21 +47,48 @@ def label_contracts(tmp_path_factory):
     return published, generated
 
 
-def test_published_group_label_fields_match_authoritative_dump(label_contracts):
+def test_all_published_label_contracts_match_authoritative_dump(label_contracts):
     published, generated = label_contracts
-    expected = {
-        path: schema
-        for path, schema in _label_schemas(generated).items()
-        if path[:3] == ("components", "schemas", "GroupDetail")
-        or (
-            path[0] == "paths"
-            and path[1].startswith("/openapi/v1/collaboration/groups")
-        )
-    }
+    expected = _label_schemas(generated)
     assert expected, "the authoritative contract must expose catalog labels"
-    actual = _label_schemas(published)
-    for path, schema in expected.items():
-        assert actual.get(path) == schema, path
+    # Include register, every expanded Group branch, and sibling required semantics.
+    assert _label_schemas(published) == expected
+
+
+def test_register_declares_the_complete_generated_optional_request_body(
+    label_contracts,
+):
+    published, generated = label_contracts
+    path = "/openapi/v1/collaboration/register"
+    actual = published["paths"][path]["post"]["requestBody"]
+    assert actual == generated["paths"][path]["post"]["requestBody"]
+    assert not actual.get(
+        "required", False
+    )  # Existing query-only callers remain valid.
+    fields = actual["content"]["application/json"]["schema"]["properties"]
+    assert {
+        "agent_card",
+        "agent_card_url",
+        "bot_name",
+        "catalog_labels",
+    } <= fields.keys()
+
+
+def test_label_responses_are_required_but_request_labels_are_optional(label_contracts):
+    published, _ = label_contracts
+    contracts = _label_schemas(published)
+    responses = {
+        path: value
+        for path, value in contracts.items()
+        if "responses" in path or path[:3] == ("components", "schemas", "GroupDetail")
+    }
+    requests = {
+        path: value for path, value in contracts.items() if "requestBody" in path
+    }
+    assert len(responses) == 10
+    assert len(requests) == 4
+    assert all(value["required"] for value in responses.values())
+    assert all(not value["required"] for value in requests.values())
 
 
 def test_group_patch_declares_optional_replace_and_clear_labels(label_contracts):

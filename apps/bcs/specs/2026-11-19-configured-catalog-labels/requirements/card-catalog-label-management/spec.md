@@ -59,3 +59,23 @@ All input validation and existing authorization SHALL precede persistence. Combi
 #### Scenario: Storage failure
 - **WHEN** label persistence fails inside a combined update
 - **THEN** no partial Card/Group success is reported and no committed-change notification is emitted
+
+### Requirement: Creation MUST NOT bypass existing Group management authorization
+
+Normal Group creation MUST be create-only, including legacy caller-supplied IDs.
+An existing identity MUST conflict atomically without replacing its management
+anchors, participants, kind/strategy, version, Card template or labels. An exists
+check followed by an unconditional upsert MUST NOT implement this boundary.
+Authorized PATCH and DM pair-based reuse retain their separate contracts.
+
+#### Scenario: Existing Group identity cannot be taken over through creation
+- **GIVEN** an existing Group with labels and an unrelated caller who cannot PATCH it
+- **WHEN** the caller submits a valid normal-Group creation request with that same ID
+- **THEN** creation returns conflict and the complete existing Group and labels are unchanged
+- **AND** no committed catalog change notification is emitted for the rejected creation
+
+#### Scenario: Concurrent creators cannot overwrite the winning resource
+- **GIVEN** two otherwise valid create commands with the same ID and different management anchors or labels
+- **WHEN** both race against an initially absent identity
+- **THEN** exactly one creation succeeds and the other conflicts
+- **AND** memory and persistent stores retain the winner's complete identity and labels

@@ -82,6 +82,29 @@ async fn agent_http_persistence_retry_restart_and_full_payload(){
     assert_eq!(status,StatusCode::CREATED,"{created}");
     let group_id=created["data"]["group_id"].as_str().unwrap();let group_url=format!("{groups_url}/{group_id}");
     assert_eq!(created["data"]["catalog_labels"],json!({"stage":["trial"]}));
+    // A legacy create must not be a second, unauthorized update surface for an existing ID.
+    let unrelated=state.services.a2a_bot_management.as_ref().unwrap().register_provider_bot(bcs_service_api::RegisterProviderBotCommand {
+        provider_id:provider.provider_id.clone(),provider_admin_token:token.clone(),provider_bot_ref:"other-owner-ref".into(),name:String::new(),
+        owners:vec!["other-owner".into()],summary:None,webhook_url:None,domains:vec![],skills:vec![],scopes:vec![],bot_uuid:None,
+        reject_existing_bot_uuid:true,connection_mode:bcs_service_api::ProviderBotConnectionMode::Gateway,
+        avatar:bcs_service_api::types::bot_profile::AvatarChange::Keep,
+    },bcs_service_api::types::a2a_bot::A2aCardSource::Inline(raw_card()),1000).await.unwrap();
+    let unrelated_token=unrelated.bot_runtime_token.unwrap();
+    let legacy_group_url=format!("http://{addr}/groups/{group_id}");
+    // Compare the same detail projection: create also returns transient bootstrap fields.
+    let before:Value=http.get(&group_url).header("x-avernet-principal",&principal).send().await.unwrap().json().await.unwrap();
+    let denied=http.patch(&legacy_group_url).bearer_auth(&unrelated_token).json(&json!({"name":"must not overwrite"})).send().await.unwrap();
+    assert_eq!(denied.status(),StatusCode::FORBIDDEN);
+    let denied=http.post(format!("http://{addr}/groups")).bearer_auth(&unrelated_token).json(&json!({
+        "id":group_id,"driver_bot":unrelated.bot_uuid,"originator":unrelated.bot_uuid,
+        "participants":[{"bot_uuid":unrelated.bot_uuid,"role":"manager"}],
+        "group_strategy":"manager_worker","visibility":"private","create_initial_session":false,
+        "catalog_labels":{"stage":["running"]}
+    })).send().await.unwrap();
+    let status=denied.status();let denial=denied.text().await.unwrap();assert_eq!(status,StatusCode::CONFLICT,"{denial}");
+    let preserved:Value=http.get(&group_url).header("x-avernet-principal",&principal).send().await.unwrap().json().await.unwrap();
+    assert_eq!(preserved["data"],before["data"]);
+
     for patch in [json!({"name":"HTTP renamed"}),json!({"catalog_labels":{"stage":["running"]}})] {
         let response=http.patch(&group_url).header("x-avernet-principal",&principal).json(&patch).send().await.unwrap();
         let status=response.status();let value:Value=response.json().await.unwrap();assert_eq!(status,StatusCode::OK,"{value}");

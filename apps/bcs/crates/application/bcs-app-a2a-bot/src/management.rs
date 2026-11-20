@@ -34,11 +34,6 @@ impl A2aBotManagement {
             .ok_or_else(|| failure(Code::ServiceUnavailable, "", "PROVIDER_NAME_NOT_CONFIGURED"))?;
         Ok((provider.provider_id, name, provider.config))
     }
-    async fn public_provider(&self, token: &str) -> ServiceResult<(String, String, String)> {
-        let identity = self.authenticated_public_provider(token).await?;
-        self.providers.pin_a2a_provider_name(&identity.0, &identity.1).await?;
-        Ok(identity)
-    }
     async fn public_record_by_id(&self, provider: &str, bot_id: &str) -> ServiceResult<A2aBotRecord> {
         if bot_id.is_empty() || bot_id != bot_id.trim() || bot_id.chars().any(char::is_control) {
             return Err(failure(Code::InvalidRequest, "bot_id", "INVALID_BOT_ID"));
@@ -75,15 +70,22 @@ impl A2aBotManagement {
                 (Some(url), card)
             }
         };
+        bcs_service_api::types::a2a_card_projection::project_agent_card_capabilities(Some(&card.raw))?;
         Ok((url, card))
     }
     pub(super) async fn public_register(
         &self,
         command: RegisterAgentCommand,
     ) -> ServiceResult<ManagedA2aCard> {
-        let labels=self.policy.normalize(command.catalog_labels)?;
         let (provider_id, provider_name, provider_config) =
-            self.public_provider(&command.provider_admin_token).await?;
+            self.authenticated_public_provider(&command.provider_admin_token).await?;
+        let labels=self.policy.normalize(command.catalog_labels)?;
+        if command.now_ms < 0 {
+            return Err(failure(Code::InvalidRequest, "", "INVALID_REGISTRATION_TIME"));
+        }
+        if self.registration.is_none() {
+            return Err(failure(Code::ServiceUnavailable, "", "REGISTRATION_NOT_CONFIGURED"));
+        }
         let provider = self
             .providers
             .get_provider_by_slug(&provider_name)
@@ -112,6 +114,8 @@ impl A2aBotManagement {
         policy::validate_provider_bot_ref(&command.provider_bot_ref)?;
         let (url, card) = self.public_load(command.source).await?;
         policy::validate_summary(command.summary.as_deref(), &card.raw)?;
+        self.authorize(&provider_id, &command.provider_admin_token).await?;
+        self.providers.pin_a2a_provider_name(&provider_id, &provider_name).await?;
         let outcome = self
             .register_loaded_with_visibility(
                 bcs_service_api::RegisterProviderBotCommand {
@@ -145,7 +149,7 @@ impl A2aBotManagement {
         view(&provider_name, record)
     }
     pub(super) async fn public_find(&self, token:&str, provider_bot_ref:&str) -> ServiceResult<Vec<ManagedA2aCard>> {
-        let (provider,label,_)=self.public_provider(token).await?;
+        let (provider,label,_)=self.authenticated_public_provider(token).await?;
         policy::validate_provider_bot_ref(provider_bot_ref)?;
         let Some(record)=self.core.get_by_provider_ref(&provider,provider_bot_ref).await? else {return Ok(vec![])};
         let record=self.public_record_by_id(&provider,&record.bot_uuid).await?;
@@ -153,15 +157,19 @@ impl A2aBotManagement {
         if record.provider_bot_ref!=provider_bot_ref {
             return Err(failure(Code::TargetChanged,"provider_bot_ref","TARGET_CHANGED"));
         }
-        Ok(vec![view(&label,record)?])
+        let result=view(&label,record)?;
+        self.providers.pin_a2a_provider_name(&provider, &label).await?;
+        Ok(vec![result])
     }
     pub(super) async fn public_get(
         &self,
         token: &str,
         bot_id: &str,
     ) -> ServiceResult<ManagedA2aCard> {
-        let (provider, label, _) = self.public_provider(token).await?;
-        view(&label, self.public_record_by_id(&provider, bot_id).await?)
+        let (provider, label, _) = self.authenticated_public_provider(token).await?;
+        let result=view(&label, self.public_record_by_id(&provider, bot_id).await?)?;
+        self.providers.pin_a2a_provider_name(&provider, &label).await?;
+        Ok(result)
     }
     pub(super) async fn public_update(
         &self,
@@ -192,6 +200,9 @@ impl A2aBotManagement {
                 .ok_or_else(|| failure(Code::TargetChanged, "bot_id", "TARGET_CHANGED"))?;
             let (url,raw)=match &loaded {Some((url,card))=>(url.clone(),card.raw.clone()),None=>(current.agent_card_url.clone(),current.agent_card.clone())};
             policy::validate_source_transition(&current.agent_card, &raw)?;
+            if loaded.is_none() {
+                bcs_service_api::types::a2a_card_projection::project_agent_card_capabilities(Some(&raw))?;
+            }
             let revision = current
                 .revision
                 .checked_add(1)
@@ -230,7 +241,7 @@ impl A2aBotManagement {
         token: &str,
         bot_id: &str,
     ) -> ServiceResult<ManagedA2aCard> {
-        let (provider, label, _) = self.public_provider(token).await?;
+        let (provider, label, _) = self.authenticated_public_provider(token).await?;
         let old = self.public_record_by_id(&provider, bot_id).await?;
         let url = old
             .agent_card_url
@@ -243,6 +254,7 @@ impl A2aBotManagement {
             .revision
             .checked_add(1)
             .ok_or_else(|| failure(Code::InternalError, "", "REVISION_EXHAUSTED"))?;
+        self.providers.pin_a2a_provider_name(&provider, &label).await?;
         let next = A2aBotRecord {
             agent_card: card.raw,
             revision,

@@ -2,6 +2,12 @@
 
 Date: 2026-11-19. Status: **LOCAL_TESTED; NOT_PUBLISHED; NOT_DEPLOYED**.
 
+> This is an append-only validation history. The initial status and omission-clears
+> descriptions are historical, not the current contract. For the latest local
+> patch and unresolved gates, read the final dated section and audit.md first;
+> Agent updates now preserve omitted labels and only explicit objects replace them.
+
+
 ## Planning-time checks (historical)
 
 - Refreshed the authoritative development ref and created the dedicated `codex/configured-catalog-labels` worktree; main checkout WIP and submodule state were not changed by spec editing.
@@ -384,3 +390,187 @@ Ignored Rust logs and exit receipts are under `apps/bcs/testresult/` with prefix
 `pr4256-round3-`; Python logs are temporary local artifacts. Disk preflight had
 about 38 GiB available, with no active Cargo process. Final checks will be recorded
 in the publication report; no build-output cleanup was needed in this round.
+
+
+## PR #4256 fourth revision: independent Card audit (2026-11-20)
+
+### Scope, independence and compatibility
+
+Worktree: `/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/configured-catalog-labels`.
+Branch: `codex/configured-catalog-labels`; immutable review baseline:
+`450df329b39bca15c42edffda06ab4722659cd55`; comparison merge-base:
+`a2433cbf2bafa4c38fbff78b226d61701adcd5a2`. The final patch is uncommitted.
+One independent reviewer inspected Git objects for this baseline across roughly
+20 admission/auth/update/refresh/persistence/publication/contract boundaries,
+not the main worker's changing source. Its audit did not execute Cargo tests;
+local execution evidence below belongs to the implementation/verification phase.
+See [audit.md](audit.md) for the root-cause and boundary matrix.
+
+Beyond converging the preceding comments into shared admission validation,
+JSON rejection mapping and complete Gateway-schema semantics, the audit found
+two additional pre-existing Group roots whose impact extends to labels:
+
+1. Legacy explicit-ID create was an unchecked upsert into an existing resource.
+   Creation is now atomically create-only across Core, Memory and SQL. Existing
+   IDs return HTTP 409 even to an existing manager; authorized updates use PATCH.
+   Trusted internal upserts and DM reuse remain unchanged. New trait defaults
+   fail closed; custom Core/repo wrappers must implement/delegate atomic create.
+2. Eventful Group transaction success depended on a subsequent fallible read
+   before Core could notify the catalog. Canonical Group/participant reads now
+   happen before the version-fenced transaction; successful commit returns the
+   validated SQL-shaped candidate and invalidates cache. This is not an outbox
+   or a process-crash durability guarantee. Warm Core calls keep the same two
+   Group/participant reads; cold direct repo calls save two; Delete is unchanged.
+
+No historical migration, database schema, gate, allowlist, threshold, retry budget or
+ignored-test configuration was changed. No commit, push, PR reply/update, OCB
+integration, online DDL or deployment occurred in this revision.
+
+### Final executed local evidence
+
+Rust execution uses Rustup 1.94.0 via an explicit toolchain PATH,
+`CARGO_INCREMENTAL=0`, `CARGO_BUILD_JOBS=2`.
+
+```bash
+cargo test --manifest-path apps/bcs/Cargo.toml --locked \
+  -p bcs-service-api -p bcs-app-a2a-bot -p bcs-http -p bcs-api-http \
+  -p bcs-app-group -p bcs-app-register -p bcs-bot-store \
+  -p bcs-group-store -p bcs-group -p bcs-fusion \
+  --no-fail-fast -- --test-threads=1
+
+cargo test --manifest-path apps/bcs/Cargo.toml --locked \
+  -p bcs --test integration_catalog_labels -- --test-threads=1
+```
+
+- Final ten-package run: exit **0**, **2,396 passed, 0 failed, 11 ignored,
+  0 filtered**, across 166 test-result records including doc tests. Executed
+  success rate is 2,396/2,396; ignored tests are not passes. This is not the
+  complete workspace denominator or proof of the remote 100% gate.
+- Bootstrap integration: exit **0**, **1 passed, 0 failed**. Actual mounted
+  HTTP/auth/application/SQLite/restart/mock-Fuse chain also proves unauthorized
+  PATCH is 403, legacy duplicate-ID create is 409, and full before/after GET
+  detail remains identical. Create-only bootstrap response fields are not
+  compared to GET projection fields.
+- Post-COMMIT fault tests: focused **4 passed, 0 failed**, also included in the
+  final package run. Real SQLite tests cover armed read failure after successful
+  commit, real transaction rollback with zero notifications, SQL/candidate
+  timestamp/member/default-policy equality, and stale-cache conflict recovery.
+- Admission tests cover 60 malformed Card combinations (three admission entries,
+  URL/inline, domains/scopes, five invalid shapes), persisted-state preservation,
+  actual subsequent Provider rename, owner/ref/time/read/refresh rejection,
+  successful pin and concurrent rename fencing. These combinations are cases
+  within tests, not extra Cargo test-count entries.
+- Legacy HTTP tests exercise seven malformed label shapes across four neighboring
+  entries, exact structured 400 field paths, plus 12 unrelated-protocol negative
+  controls. Existing Group-create tests retain subscription/no-subscription paths.
+- Gateway full unit command, from `apps/gateway`:
+  `PYTHONPATH=src .venv/bin/python -m pytest tests/unit -q`:
+  exit **0**, **919 passed, 1 skipped, 0 failed**. Four generated-schema tests
+  compare all 14 label locations plus required membership and complete register
+  body. Ruff check and format check pass for the modified Python test.
+- Gateway schema diff against immutable HEAD has exactly **11 semantic changes**:
+  one complete optional register requestBody plus ten Group response required
+  lists. Existing `check_compatible` reports **[]**; no unrelated generated
+  schema changes were copied.
+- `check-config-validation.sh` under Rustup 1.94.0: exit **0**, **162 passed,
+  0 failed, 0 ignored, 204 filtered**. Filtering is the existing config gate's
+  scope, not a full-bootstrap test claim.
+
+An earlier combined run caught one stale recording-DB fixture: after moving the
+canonical reads before COMMIT, it supplied routing-only rows where a Group row
+was needed. The fixture now supplies the required preflight rows and still
+asserts the injected transaction-lock Conflict and cache invalidation. The
+HTTP regression initially compared create-only transient bootstrap response
+fields with GET detail; it now compares full GET before/after. Both final runs
+above are clean and unfiltered within their selected package scope.
+
+### Architecture and coverage limits
+
+The initial full `arch-check.sh` result was exit 6: 6 pass, 3 skip, 6 failed gates
+(DEP-1~8, LINT-1, CFG-1, LINT-4, TEST-1, R25). That invocation also exposed the
+host Homebrew Rust/LLVM mismatch; it is not clean code-only gate evidence.
+After explicitly selecting Rustup, config validation passes as recorded above.
+Fresh dependency/import/trait-naming checks still fail with repository boundary
+and naming findings. Fresh conformance checking also reports missing harness and
+implementation entries. Its whole-workspace `cargo test -- --list` compilation
+was deliberately interrupted to bound additional disk/build cost, so discovery
+is incomplete, not proof that tests are absent. No green overall architecture
+result is claimed, and all findings have not been baseline-attributed this round.
+
+Full-workspace execution, final LLVM/changed-line coverage, Singlebox runtime and
+E2E coverage, real MySQL/OceanBase migration/fault testing, mixed binaries, remote
+CI on this uncommitted patch and downstream Fuse replacement acceptance remain
+**NOT_RUN / NOT_PROVEN**. Passing selected suites must not be described as meeting
+all remote coverage/CI requirements. No failing gate is waived by earlier user
+acceptance of unrelated local environmental failures.
+
+Temporary local logs and matching exit receipts include:
+`/tmp/pr4256-round4-final-packages-rerun.{log,exit}`,
+`/tmp/pr4256-round4-integration-rerun.{log,exit}`,
+`/tmp/pr4256-round4-catalog-commit.{log,exit}`,
+`/tmp/pr4256-round4-gateway-unit.{log,exit}` and
+`/tmp/pr4256-round4-config-validation.{log,exit}`.
+They are not committed as generated artifacts. All changed/new source files
+remain below 1,000 lines (largest: store test fixture, 963). Disk availability
+at final local verification was approximately 46 GiB; no target cleanup was
+needed. Documentation strict validation and final diff checks are recorded in
+the delivery report.
+
+
+## Confirmed-issue closure follow-up (2026-11-20)
+
+The user requested explicit completion of the confirmed comments and independent
+findings. The current authenticated PR metadata still names HEAD
+`450df329b39bca15c42edffda06ab4722659cd55`; local branch/HEAD are unchanged.
+The nine confirmed review items and two independent findings are mapped to
+source and regression tests in audit.md (C1-C9, G1-G2). The current PR body already
+states omission-preserving Agent updates in its input table and compatibility
+section; no additional remote description edit was necessary or performed.
+
+The previous local implementation remains intact. This follow-up strengthens
+Group regression assertions to require application/repository Conflict rather
+than any error; adds duplicate-create/no-notification and full-creation-rollback
+plus successful-retry tests; and expands committed candidate comparisons from
+three to ten successive non-delete mutations. These include status, routing,
+Bot/Human membership, participant mode and scope updates with/without mode.
+Rejected create independently preserves both DB canonical data and cached input
+projections. These projections are deliberately not assumed identical.
+
+### Final fresh results
+
+Commands use the same explicit Rustup 1.94.0 PATH, constrained jobs and disabled
+incremental compilation as the fourth-revision command block above; package
+selection and `--no-fail-fast -- --test-threads=1` are unchanged.
+
+| Check | Fresh result |
+| --- | --- |
+| Ten affected Rust packages, unit/integration/doc-test executables | Exit 0; **2,398 passed, 0 failed, 11 ignored, 0 filtered**, 166 result records |
+| `-p bcs --test integration_catalog_labels -- --test-threads=1` | Exit 0; **1 passed, 0 failed** |
+| Group catalog commit/creation fault and projection suite | **6 passed, 0 failed**, included in the 2,398 count |
+| Gateway `PYTHONPATH=src .venv/bin/python -m pytest tests/unit -q` | Exit 0; **919 passed, 0 failed, 1 skipped** |
+| Four generated Gateway contract tests, explicit verbose rerun | Exit 0; **4 passed**, included in the 919 count |
+| `check-config-validation.sh` | Exit 0; **162 passed, 0 failed**, 204 filtered by the existing config gate |
+| Gateway compatibility checker against immutable HEAD | **[]** breaking findings |
+| Ruff check/format check for the modified Gateway test | PASS |
+
+A machine-checked local receipt verifies that every named critical Rust
+regression is actually present with `... ok` in the completed run, not merely
+written in source. Temporary logs/receipts are under `/tmp/pr4256-closure/`
+(`affected`, `integration`, `gateway`, `schema-tests`, `config-validation` and
+`closure-receipt.json`); they are not committed. Initial new-test iterations
+caught an incorrect type import and a fixture comparison of cached display-only
+fields with SQL canonical fields; both were corrected before final runs. The
+host Homebrew rustfmt/LLVM mismatch was avoided using an explicit Rustup formatter
+on the newly added test file only. No global formatting was run.
+
+This is local known-issue closure, **not a new remote gate result**. Full workspace
+execution, LLVM/changed-line and Singlebox coverage, real MySQL/OceanBase,
+deployment and Fuse full-replacement acceptance remain unverified for this patch.
+The previously recorded overall architecture failures are not waived or marked
+green. The executed Rust pass rate is 2,398/2,398; 11 ignored tests are not passes,
+and this selected denominator is not the remote workspace denominator.
+
+All modifications remain in the named worktree. No commit, push, PR update/reply,
+DDL, deployment or OCB change occurred. Available disk is approximately 45 GiB;
+no cleanup was needed. Final OpenSpec/diff/source-size checks are reported with
+the handoff.

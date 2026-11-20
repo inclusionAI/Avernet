@@ -319,3 +319,6 @@ mod catalog_label_updates;
 
 #[path="provider_name_updates.rs"]
 mod provider_name_updates;
+
+#[path="card_admission.rs"]
+mod card_admission;

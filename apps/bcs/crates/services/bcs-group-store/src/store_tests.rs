@@ -321,10 +321,19 @@ async fn eventful_mutable_patch_reports_a_missing_routing_lock_as_a_conflict() {
         "routing_policy_json".to_string(),
         Value::from(stored_policy_json),
     )]));
-    let db = Arc::new(RecordingDbPlugin::with_missing_transaction_lock_row(vec![
-        routing_row,
+    let group_row = DbRow::new(BTreeMap::from([
+        ("group_id".to_string(), Value::from("group-1")),
+        ("driver_bot".to_string(), Value::from("driver")),
+        ("version".to_string(), Value::from(1)),
+        ("routing_policy_json".to_string(), Value::from(
+            serde_json::to_string(&policy).expect("serialize policy"),
+        )),
     ]));
-    let repo = MySqlGroupStore::new(db, "local".to_string());
+    let db = RecordingDbPlugin::with_missing_transaction_lock_row(Vec::new());
+    *db.query_results.lock().expect("query results") = VecDeque::from([
+        vec![routing_row], vec![group_row], Vec::new(),
+    ]);
+    let repo = MySqlGroupStore::new(Arc::new(db), "local".to_string());
     let mut group = Group::new("group-1", "driver", Vec::new());
     group.routing_policy = Some(policy);
     let expected_version = group.version;

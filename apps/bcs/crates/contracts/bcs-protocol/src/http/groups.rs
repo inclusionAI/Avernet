@@ -78,6 +78,8 @@ pub struct InlineGroupEventSubscriptionInfo {
 pub struct CreateGroupRequest {
     #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="bcs_domain::catalog_labels::present_input")]
     pub catalog_labels:Option<bcs_domain::catalog_labels::CatalogLabelsInput>,
+    /// Optional create-only identity. An existing ID conflicts; use authorized
+    /// PATCH instead of replacing an existing Group through creation.
     pub id: Option<String>,
     pub label: Option<String>,
     /// Mode is deprecated - kept for backward compatibility, defaults to "agent"

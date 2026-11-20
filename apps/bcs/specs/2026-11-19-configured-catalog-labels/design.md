@@ -59,13 +59,19 @@ For a supplied object: validate every key against the policy, including keys who
 
 For Group PATCH, omitted keys inside a supplied object are removed, not preserved. For Agent updates, old callers changing only source or visibility preserve current labels. On every CAS attempt, omission uses the latest record, never an earlier snapshot. Explicit objects still replace the entire collection. Auth, Provider scoping, owner/manager checks and existing error envelopes remain authoritative. Return field-specific invalid-request details (`catalog_labels`, `catalog_labels.<key>`, or list index) for null object, unknown key/value, wrong type and disallowed multiplicity without introducing hardcoded business errors.
 
-Public Agent update authentication and label/target/Card validation precede Provider
-slug reservation. A valid request reserves the name once before the first CAS write;
-concurrent slug changes remain fenced by the store. Invalid input must not newly
-pin the Provider name. Legacy Group label type errors are mapped at the HTTP parsing
-boundary to field-specific structured 400 responses (`INVALID_TYPE`); unrelated
-parser errors preserve their existing status and envelope behavior. The Gateway's
-published Group label schema fragments must match the generated BCS contract.
+Provider authentication/name resolution is read-only. Public and named registration,
+updates and refreshes validate both admission and persistence projection before
+slug reservation. Validate owner/ref/target and local prerequisites before pinning;
+successful get/find views validate their target first and empty finds do not pin.
+A valid update reserves once before its first CAS write, retaining rename fencing.
+Later DB/CAS failures do not imply rollback of the separate reservation.
+Legacy label type errors in Group create/PATCH, Provider Card configure/register
+and named registration are mapped at their parsing boundaries to field-specific
+structured 400 (`INVALID_TYPE`), without globally changing unrelated rejections.
+The Gateway must expose the complete generated register body and label property
+plus parent required semantics in every response expansion; input labels stay
+optional. Compare generated contracts semantically and retain unrelated historical
+schema content during selective publication.
 
 ### D4. Persistence and Group eligibility
 
@@ -74,6 +80,15 @@ Add `catalog_labels` independently to `bcs_bots` and `bcs_group_agent_cards`; My
 Ship one new uniquely numbered migration per existing dialect chain containing both column additions. Determine numbers at implementation time after re-fetching; never edit migration 039/041 or the committed baseline. Confirm real MySQL/OceanBase JSON driver decoding and SQLite upgrades. Old migration runners may reject unknown newer history; verify that explicitly rather than assuming additive columns alone prove rollback safety.
 
 Eligible Group Cards remain normal manager-worker/state-machine Groups, including private Groups that may later become public. Do not expand Chat/DM Card support: omitted/empty labels remain compatible there; a non-empty label write fails explicitly as unsupported, not silently discarded. A legacy eligible Group lacking a Card row returns empty on read; an explicit label write creates a valid template and labels atomically. Ordinary reads do not backfill. Existing template upserts must preserve labels unless a replace was explicitly requested; labels survive name/context changes, eventful writes and idempotent create recovery. Creation omission initializes a new resource only and must not clear labels when an existing Group is returned.
+
+Legacy normal-Group creation, including explicit IDs, is create-only at the Core/
+repo boundary. SQL unique constraints and the memory write lock reject collisions
+atomically; do not authorize a replacement using only the incoming caller/driver.
+Existing Group changes use authorized PATCH. DM reuse and trusted internal upsert
+remain distinct contracts. Versioned mutations return the already fenced committed
+candidate without a fallible post-COMMIT read before catalog notification. This
+removes a lost-notification error window, not process-crash durability; no outbox
+or external delivery guarantee is added.
 
 Agent creation writes identity/Card/labels in the existing transaction. A combined Card/visibility/label update commits atomically and uses existing revision/identity fences. Refresh updates only the fields it owns, must not write a stale copied label map, and honors superseded-refresh fencing. Label-only Agent updates participate in the management revision fence so older refreshes cannot restore old metadata. Group writes use the existing Group transaction and authorization path, not a second post-commit write. Cache invalidation and catalog notification follow successful commit only.
 

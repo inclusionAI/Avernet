@@ -125,6 +125,20 @@ impl GroupCoreService for GroupCore {
         Ok(())
     }
 
+    async fn create_with_catalog_labels(&self,group:Group,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        let _policy_read = match &self.policy_gate {Some(gate)=>Some(gate.read().await),None=>None};
+        if let Some(registry)=&self.collaboration_registry {
+            let actors=group.participants.iter().map(|p|p.bot_uuid.clone()).collect::<Vec<_>>();
+            if registry.collaboration_owner(&actors).await?.is_some() && group.visibility!="private" {
+                return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+            }
+        }
+        let id=group.id.clone();
+        self.repo.create_with_catalog_labels(group,labels).await?;
+        self.catalog_changed(&id);
+        Ok(())
+    }
+
     /// Strict authorization snapshot read; the Core forwards
     /// the repo's strict port read and adds no cache
     /// fallback (spec §8.3).

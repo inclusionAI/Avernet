@@ -44,6 +44,10 @@ impl A2aBotManagement {
             A2aCardSource::Inline(raw)=>(None,self.fetcher.validate(raw,true).await?),
         };
         self.providers.a2a_authentication(provider_id,&card.raw).await?;
+        bcs_service_api::types::a2a_bot::card_bot_name(&card.raw)
+            .map_err(|message|ServiceError::InvalidOperation {message:message.into(),request_id:None})?;
+        bcs_service_api::types::a2a_bot::a2a_management::source_agent(&card.raw)?;
+        bcs_service_api::types::a2a_card_projection::project_agent_card_capabilities(Some(&card.raw))?;
         Ok((url,card))
     }
     async fn commit(&self,provider_id:String,bot_uuid:String,source:A2aCardSource,expected:u64,skip_unchanged:bool,labels:bcs_service_api::types::catalog_labels::CatalogLabels)->ServiceResult<A2aBotRecord> {

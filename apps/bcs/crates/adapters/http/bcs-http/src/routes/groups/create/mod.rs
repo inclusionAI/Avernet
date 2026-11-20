@@ -3,7 +3,6 @@
 use super::*;
 
 mod definition;
-mod labels;
 mod participants;
 mod response;
 mod spec;
@@ -21,7 +20,7 @@ pub async fn create_group(
 ) -> Response {
     let Json(req) = match body {
         Ok(body) => body,
-        Err(error) => return labels::rejection_response(error),
+        Err(error) => return crate::routes::catalog_label_errors::rejection_response(error),
     };
     if let Some(input)=req.catalog_labels.clone() {
         let labels=match state.services.group_management.normalize_catalog_labels(input) {

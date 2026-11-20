@@ -68,3 +68,35 @@ async fn legacy_missing_template_null_corruption_and_failure_rollback(){
     db.execute(DbStatement::new("UPDATE bcs_group_agent_cards SET catalog_labels='null'")).await.unwrap();
     assert!(repo.read_card_snapshot("legacy").await.is_err());
 }
+
+
+async fn create_only_contract(repo:&dyn GroupRepoPort) {
+    let mut first=Group::new("create-only","owner",vec![]);first.group_strategy=GroupStrategy::ManagerWorker;
+    let mut second=first.clone();second.driver_bot="stranger".into();
+    let (a,b)=tokio::join!(
+        repo.create_with_catalog_labels(first,Some(labels("trial"))),
+        repo.create_with_catalog_labels(second,Some(labels("running")))
+    );
+    assert_eq!(usize::from(a.is_ok())+usize::from(b.is_ok()),1);
+    assert!(matches!(if a.is_err(){a}else{b},Err(bcs_service_api::ServiceError::Conflict(_))));
+    let before=repo.try_get("create-only").await.unwrap().unwrap();
+    let snapshot=repo.read_card_snapshot("create-only").await.unwrap().unwrap();
+    let mut changed=before.clone();changed.group_strategy=GroupStrategy::Chat;
+    assert!(matches!(repo.create_with_catalog_labels(changed,None).await,Err(bcs_service_api::ServiceError::Conflict(_))));
+    assert_eq!(serde_json::to_value(repo.try_get("create-only").await.unwrap().unwrap()).unwrap(),serde_json::to_value(before).unwrap());
+    assert_eq!(repo.read_card_snapshot("create-only").await.unwrap().unwrap().catalog_labels,snapshot.catalog_labels);
+    let chat=Group::new("existing-chat","owner",vec![]);repo.create_with_catalog_labels(chat,None).await.unwrap();
+    let mut invalid=Group::new("existing-chat","stranger",vec![]);invalid.group_strategy=GroupStrategy::ManagerWorker;
+    assert!(matches!(repo.create_with_catalog_labels(invalid,Some(labels("running"))).await,Err(bcs_service_api::ServiceError::Conflict(_))));
+    let saved=repo.read_card_snapshot("existing-chat").await.unwrap().unwrap();
+    assert_eq!(saved.group_strategy,GroupStrategy::Chat);assert!(saved.catalog_labels.is_empty());assert!(saved.card_template.is_none());
+}
+#[tokio::test]
+async fn atomic_create_only_memory_conflicts_do_not_change_identity_or_labels() {
+    create_only_contract(&MemoryGroupRepo::new()).await;
+}
+#[tokio::test]
+async fn atomic_create_only_sqlite_conflicts_do_not_change_identity_or_labels() {
+    let db=Arc::new(LocalSqliteDbPlugin::new().unwrap());bcs_db_migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
+    create_only_contract(&MySqlGroupStore::sqlite(db,"labels".into())).await;
+}

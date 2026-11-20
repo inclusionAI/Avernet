@@ -1,5 +1,5 @@
 //! Provider-name registration and named chat; Card management uses stable Bot IDs.
-use axum::{Json,extract::{Path,Query,State},http::{HeaderMap,StatusCode},response::{IntoResponse,Response}};
+use axum::{Json,extract::{Path,Query,State,rejection::JsonRejection},http::{HeaderMap,StatusCode},response::{IntoResponse,Response}};
 use serde::Deserialize;
 use serde_json::{json,Value};
 use bcs_service_api::{ServiceError,application::a2a_bot::{NamedA2aCard,RegisterNamedA2aBotCommand},types::a2a_bot::A2aCardSource};
@@ -37,7 +37,8 @@ fn view(card:NamedA2aCard)->Value {
 fn now_ms()->i64 {std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value|value.as_millis().min(i64::MAX as u128) as i64).unwrap_or(0)}
 fn unavailable()->Response {(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"A2A management unavailable"}))).into_response()}
 
-pub async fn register(State(state):State<HttpAppState>,Path(provider_name):Path<String>,headers:HeaderMap,Json(body):Json<Registration>)->Response {
+pub async fn register(State(state):State<HttpAppState>,Path(provider_name):Path<String>,headers:HeaderMap,body:Result<Json<Registration>,JsonRejection>)->Response {
+    let Json(body)=match body {Ok(body)=>body,Err(error)=>return super::catalog_label_errors::rejection_response(error)};
     let token=match token(&headers) {Ok(token)=>token,Err(error)=>return error};
     let Some(service)=&state.services.a2a_bot_management else {return unavailable()};
     let source=match source(body.agent_card_url,body.agent_card) {Ok(source)=>source,Err(error)=>return error};

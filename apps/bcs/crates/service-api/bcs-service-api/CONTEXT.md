@@ -987,3 +987,14 @@ external Rust consumers rebuild together. Labels are not raw Card or authorizati
 state. Bootstrap loads the independent policy file once; no environment overlay
 or request can extend it. See the change validation record for actual test and
 release evidence; local code is not a published or deployed revision.
+
+
+## Atomic normal-Group creation
+
+`GroupCoreService` and `GroupRepoPort` expose `create_with_catalog_labels` for
+create-only admission. Existing identities conflict atomically; a default
+implementation fails explicitly rather than doing an unsafe exists/upsert pair.
+Memory and SQL implement the contract, and legacy normal-Group creation uses it
+instead of upsert. Custom downstream Core/repo implementations must implement
+or delegate this method before using legacy creation. Trusted internal upserts
+and DM pair reuse retain their separate behavior. See the [label contract](../../../docs/catalog-labels.md).

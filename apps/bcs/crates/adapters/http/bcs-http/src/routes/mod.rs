@@ -1,4 +1,5 @@
 mod agentpass_jwt;
+mod catalog_label_errors;
 pub mod actors;
 pub mod admin_invocations;
 pub mod admission;

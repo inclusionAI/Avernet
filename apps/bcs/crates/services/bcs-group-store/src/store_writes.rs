@@ -33,7 +33,7 @@ impl MySqlGroupStore {
     }
 
     /// Create or update a session.
-    pub(crate) async fn upsert_sql(&self, group: Group, labels: Option<bcs_service_api::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {
+    pub(crate) async fn upsert_sql(&self, group: Group, labels: Option<bcs_service_api::types::catalog_labels::CatalogLabels>, create_only:bool) -> ServiceResult<()> {
         validate_catalog_labels(&group,labels.as_ref())?;
         let group_id = group.id.clone();
         let env = self.env.clone();
@@ -100,7 +100,7 @@ impl MySqlGroupStore {
         let g_visibility = group.visibility.clone();
         let g_notify_mode_str = Self::human_mention_notify_mode_to_str(group.human_mention_notify_mode);
 
-        let upsert_clause = self.flavor.on_conflict_update(
+        let upsert_clause = if create_only {String::new()} else {self.flavor.on_conflict_update(
             &["group_id", "env"],
             &[
                 "label",
@@ -117,7 +117,7 @@ impl MySqlGroupStore {
                 "human_mention_notify_mode",
             ],
             &[("gmt_modified", self.flavor.now())],
-        );
+        )};
         let upsert_sql = format!(
             "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, version, record_status, visibility, human_mention_notify_mode, gmt_create, gmt_modified) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
@@ -200,6 +200,9 @@ impl MySqlGroupStore {
         self.db.plugin().transaction(steps).await.map_err(|e| {
             if provider_scope_guard::public_scope_denied(&e, guard_step) {
                 return ServiceError::Forbidden("same_owner groups must remain private".into());
+            }
+            if create_only && e.is_duplicate_key() {
+                return ServiceError::Conflict("Group identity already exists".into());
             }
             warn!(group_id = %group_id, error = %e, "upsert transaction failed");
             ServiceError::InternalError(e.to_string())

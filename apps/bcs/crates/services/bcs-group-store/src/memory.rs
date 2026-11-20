@@ -253,6 +253,17 @@ impl GroupRepoPort for MemoryGroupRepo {
         Ok(())
     }
 
+    async fn create_with_catalog_labels(&self,group:DomainGroup,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        super::validate_catalog_labels(&group,labels.as_ref())?;
+        let mut groups=self.groups.write().await;
+        if groups.contains_key(&group.id) {return Err(ServiceError::Conflict("Group identity already exists".into()));}
+        let mut cards=self.card_templates.write().await;
+        super::card_template::update_memory_template(&mut cards,&group);
+        if let Some(labels)=labels {self.catalog_labels.write().await.insert(group.id.clone(),labels);}
+        groups.insert(group.id.clone(),group);
+        Ok(())
+    }
+
     async fn patch_mutable_fields(
         &self,
         id: &str,

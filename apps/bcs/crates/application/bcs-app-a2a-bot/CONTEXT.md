@@ -103,8 +103,11 @@ state. Bootstrap loads the independent policy file once; no environment overlay
 or request can extend it. See the change validation record for actual test and
 release evidence; local code is not a published or deployed revision.
 
-Public Agent updates use read-only Provider authentication before label/target/Card
-validation. They reserve the Provider slug only after those checks and at most
-once across CAS retries; invalid input cannot newly pin a mutable slug. The store's
-slug comparison still fences concurrent renames. Other entries keep their existing
-reservation semantics; no transaction spans Card fetching.
+Provider authentication and name resolution are read-only. Public/named registration,
+updates and refresh validate Card capability projections before name reservation;
+invalid owner/ref/target/Card inputs do not newly pin a mutable slug. Successful
+get/find results validate their view before reservation; an empty find performs no
+reservation. Updates pin at most once across CAS retries, while the store's slug
+comparison fences concurrent renames. Store projection validation remains defense
+in depth. No transaction spans Card fetching; a later DB/CAS failure is not a
+rollback guarantee for the separate Provider reservation.

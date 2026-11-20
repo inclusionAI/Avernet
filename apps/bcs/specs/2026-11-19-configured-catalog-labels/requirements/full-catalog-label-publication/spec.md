@@ -32,3 +32,22 @@ Release SHALL expand schema and distribute the policy before new binaries, roll 
 #### Scenario: Rollback after non-empty labels exist
 - **WHEN** operators roll back application binaries
 - **THEN** new clients are stopped first, added columns/data/history remain, migration-runner compatibility is verified and old-writer/publication loss risks are explicitly controlled
+
+### Requirement: Post-commit response reads MUST NOT suppress catalog notification
+
+A successfully committed versioned Group mutation MUST reach the existing Core
+catalog notification boundary even if a later response-oriented database read
+would fail. Transaction failures MUST still propagate and emit no committed
+notification. This requirement does not add process-crash durability or a catalog
+outbox; the existing publication queue remains identity-based.
+
+#### Scenario: Committed label change survives a response-read failure boundary
+- **GIVEN** a persistent Group and a fault that rejects Group reads after a successful mutation transaction
+- **WHEN** the Group labels are committed through the versioned mutation path
+- **THEN** the committed version and normalized labels are durable and the Group identity is notified
+- **AND** the write path does not require a second post-commit Group read before notification
+
+#### Scenario: Failed Group transaction cannot notify a rolled-back change
+- **GIVEN** a failure inside the Group/template/labels transaction
+- **WHEN** a combined metadata and label mutation is attempted
+- **THEN** all writes roll back, the error propagates and no catalog notification is emitted

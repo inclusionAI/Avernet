@@ -15,10 +15,13 @@ impl GroupRepoPort for MySqlGroupStore {
     }
 
     async fn upsert_with_catalog_labels(&self,group:Group,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
-        self.upsert_sql(group,labels).await
+        self.upsert_sql(group,labels,false).await
+    }
+    async fn create_with_catalog_labels(&self,group:Group,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        self.upsert_sql(group,labels,true).await
     }
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
-        self.upsert_sql(group,None).await
+        self.upsert_sql(group,None,false).await
     }
 
     async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {

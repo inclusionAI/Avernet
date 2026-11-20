@@ -1,5 +1,5 @@
 //! Provider-admin Card configuration and explicit refresh.
-use axum::{Json, extract::{Path, State}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}};
+use axum::{Json, extract::{Path, State, rejection::JsonRejection}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}};
 use bcs_service_api::application::a2a_bot::ConfigureA2aBotCommand;
 use serde::Deserialize;
 use serde_json::json;
@@ -47,8 +47,9 @@ fn unavailable() -> Response {
 
 pub async fn configure(
     State(state): State<HttpAppState>, Path((provider_id, bot_uuid)): Path<(String, String)>,
-    headers: HeaderMap, Json(request): Json<ConfigureRequest>,
+    headers: HeaderMap, body: Result<Json<ConfigureRequest>, JsonRejection>,
 ) -> Response {
+    let Json(request)=match body {Ok(body)=>body,Err(error)=>return super::catalog_label_errors::rejection_response(error)};
     let token = match bearer_token(&headers) { Ok(v) => v, Err(e) => return e.into_response() };
     let Some(service) = &state.services.a2a_bot_management else { return unavailable(); };
     let source=match bcs_service_api::types::a2a_bot::A2aCardSource::from_parts(request.agent_card_url,request.agent_card) {

@@ -88,17 +88,27 @@ impl MySqlGroupStore {
             .as_ref()
             .map(|stored_json| parse_stored_routing_policy_json(stored_json.as_deref()))
             .transpose()?;
-        let current = self
-            .try_get(&command.group_id)
-            .await?
-            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
+        // Move the former post-commit Group/participant read before the write.
+        // A cached Group can contain display-only fields and timestamps that
+        // differ from persistence; it must not become the committed response.
+        // Delete never needed a post-commit read, so keep its existing path.
+        let current = if deleting {
+            self.try_get(&command.group_id).await?
+        } else {
+            self.load_group_from_mysql(&command.group_id).await?
+        };
+        let Some(current) = current else {
+            self.cache.write().await.remove(&command.group_id);
+            return Err(ServiceError::GroupNotFound(command.group_id.clone()));
+        };
         if current.version != command.expected_version {
+            self.cache.write().await.remove(&command.group_id);
             return Err(ServiceError::Conflict(format!(
                 "Group '{}' expected version {}, found {}",
                 command.group_id, command.expected_version, current.version
             )));
         }
-        let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
         if deleting && command.event.is_some() {
             return Err(ServiceError::InvalidOperation {
                 message: "Group deletion is not part of the public Event Catalog".to_string(),
@@ -109,8 +119,37 @@ impl MySqlGroupStore {
         if let Some(policy) = authoritative_routing_policy {
             terminal.routing_policy = policy;
         }
-        apply_db_group_mutation_candidate(&mut terminal, &command.mutation, command.mutated_at_ms)?;
-        let mutated_at = db_timestamp_from_millis(command.mutated_at_ms)?;
+        // Group metadata is read at whole-second precision in both SQL
+        // dialects. Persist the same precision we return (also avoiding MySQL
+        // fractional-second rounding); public Event timestamps retain millis.
+        // Delete already returned its terminal candidate before this change.
+        let persisted_at_ms = if deleting {
+            command.mutated_at_ms
+        } else {
+            command.mutated_at_ms / 1000 * 1000
+        };
+        apply_db_group_mutation_candidate(&mut terminal, &command.mutation, persisted_at_ms)?;
+        if let GroupEventfulMutation::PatchMutableFields(patch) = &command.mutation {
+            if let Some(delivery) = patch.default_bot_final_delivery {
+                // The SQL patch materializes a default policy even when only
+                // another field changed and the requested delivery is default.
+                terminal.routing_policy.get_or_insert_with(Default::default)
+                    .default_bot_final_delivery = delivery;
+            }
+        }
+        if let GroupEventfulMutation::AddParticipant { participant, .. } = &command.mutation {
+            // Match this path's existing INSERT/read projection: names are
+            // display-only, kind/mode are normalized, and tags are not inserted.
+            if let Some(inserted) = terminal.participants.iter_mut()
+                .find(|stored| stored.bot_uuid == participant.bot_uuid)
+            {
+                inserted.bot_name = None;
+                inserted.kind = Some(ParticipantKind::Bot);
+                inserted.mode = Some(inserted.effective_mode());
+                inserted.tags.clear();
+            }
+        }
+        let mutated_at = db_timestamp_from_millis(persisted_at_ms)?;
         let routing_policy_guard = match self.flavor {
             DbSqlFlavor::Mysql if routing_policy_snapshot.is_some() => {
                 " AND routing_policy_json <=> ?"
@@ -480,11 +519,9 @@ impl MySqlGroupStore {
             )));
         }
         self.cache.write().await.remove(&command.group_id);
-        if deleting {
-            return Ok(terminal);
-        }
-        self.try_get(&command.group_id)
-            .await?
-            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id))
+        // The version-fenced candidate is the state just committed. A second
+        // read can fail after COMMIT and prevent Core from notifying the catalog.
+        // Keep the cache invalidated; later reads load current authoritative data.
+        Ok(terminal)
     }
 }

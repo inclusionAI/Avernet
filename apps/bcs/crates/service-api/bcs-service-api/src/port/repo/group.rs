@@ -81,6 +81,12 @@ pub trait GroupRepoPort: Send + Sync {
         if labels.is_some() { return Err(ServiceError::InternalError("catalog-label Group write unavailable".into())); }
         self.upsert(group).await
     }
+    /// Create-only admission: reject an existing identity atomically, without
+    /// replacing its management anchors, type, participants or catalog labels.
+    /// Implementations must not emulate this using an exists check plus upsert.
+    async fn create_with_catalog_labels(&self, _group: Group, _labels: Option<crate::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("atomic Group creation unavailable".into()))
+    }
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
     /// Atomically make a provisioning Group available, activate its pending
     /// inline subscriptions, and append the ordered creation Events.

@@ -14,6 +14,7 @@ This directory is the review/delivery copy intended for version control (current
 - [full-catalog-label-publication](requirements/full-catalog-label-publication/spec.md)
 4. [Ordered tasks](tasks.md): implementation progress and separately gated release/deployment tasks.
 5. [Validation record](validation.md): actual local verification and explicitly separated runtime/deployment gaps.
+6. [Independent audit and regression matrix](audit.md): root-cause findings, repaired boundaries and verification limits.
 
 ## Accepted decisions
 

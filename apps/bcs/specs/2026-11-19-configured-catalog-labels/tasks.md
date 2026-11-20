@@ -59,3 +59,16 @@
 - [x] 8.3 Cover omission/explicit clear, deterministic competing SQLite CAS commits, concurrent label writes during URL fetch, and real HTTP readback/publication across canonical aliases and Provider legacy routes.
 - [x] 8.4 Fix legacy Group create mapping: catalog-label `InvalidRequest` becomes structured HTTP 400 before Group/event-subscription writes; preserve unrelated management errors as before. Add with/without inline-subscription regression coverage.
 - [ ] 8.5 Run fresh local unit/coverage gates with remote thresholds and record pass-rate/coverage denominators plus any platform/environment gaps. Do not push or update PR until separately authorized.
+
+
+## 9. PR #4256 independent AgentCard / GroupCard audit (2026-11-20)
+
+- [x] 9.1 Delegate an independent immutable-HEAD review across Agent/Group admission, auth, updates, refresh/CAS, storage/cache, publication and schema; separate pre-existing roots from PR-introduced effects.
+- [x] 9.2 Close shared admission-side-effect, legacy JSON error-boundary and Gateway parent-schema gaps; test rejection state and full generated semantics, not only label fragments.
+- [x] 9.3 Make legacy explicit-ID Group creation atomically create-only in Core, Memory and SQL; preserve trusted internal upsert and DM reuse, document existing-ID 409 and custom implementation requirements.
+- [x] 9.4 Remove the post-COMMIT Group-read notification gap without swallowing transaction/CAS failures; assert committed candidate matches SQL projection, rollback sends no notification, and stale cache conflicts recover.
+- [x] 9.5 Complete a fresh unfiltered affected-package run, real HTTP/SQLite/restart/publication integration and Gateway unit suite; record exact denominators and all remaining gates in validation.md.
+- [ ] 9.6 Run full-workspace tests, LLVM changed-line coverage and Singlebox against the final patch; do not infer remote CI or coverage success from focused local results.
+- [ ] 9.7 When separately authorized, commit/push this audit revision and update the PR description with final scope, compatibility changes and actual validation limits.
+
+- [x] 9.8 Reconcile every confirmed review item (C1-C9) and independent finding (G1-G2) against source/tests; record local-vs-remote closure, strengthen explicit Conflict/no-notification/rollback checks, and compare all non-delete mutation response variants with fresh SQL reads.
