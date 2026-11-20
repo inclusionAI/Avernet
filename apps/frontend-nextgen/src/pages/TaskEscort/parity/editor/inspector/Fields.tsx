@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { Textarea } from '@/components/ui/Textarea';
 import type { EditorNode } from '@/domain/taskEscortParity/editorTypes';
 import { useEffect, useId, useState } from 'react';
 import { parseInspectorJson } from './validation';
@@ -31,7 +32,7 @@ export function TextField({
       <label htmlFor={id} className="text-sm font-medium">
         {label}
       </label>
-      {multiline ? <textarea {...props} rows={5} /> : <input {...props} />}
+      {multiline ? <Textarea {...props} rows={5} /> : <input {...props} />}
       {!compatible && <p className="text-xs text-muted-foreground">复杂原值保留；请使用完整 JSON。</p>}
     </div>
   );
@@ -80,7 +81,7 @@ export function ArgsField({
     <div className="space-y-2">
       <label className="text-sm">
         参数 JSON
-        <textarea
+        <Textarea
           aria-label="参数 JSON"
           className={inputClass}
           value={text}

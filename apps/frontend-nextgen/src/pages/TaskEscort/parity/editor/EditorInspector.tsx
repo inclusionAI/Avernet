@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { Textarea } from '@/components/ui/Textarea';
 import type { EditorNode, EditorSpec } from '@/domain/taskEscortParity/editorTypes';
 import { useEffect, useState } from 'react';
 import { EditorDialog } from './EditorPrimitives';
@@ -89,7 +90,7 @@ function NodeDraft({
         <p className="text-xs text-muted-foreground">
           保留隐藏字段和原始超时单位；id、类型和坐标只读。不会执行命令或调用工具。
         </p>
-        <textarea
+        <Textarea
           aria-label="完整节点 JSON"
           className={`${inputClass} mt-3 font-mono`}
           rows={18}
