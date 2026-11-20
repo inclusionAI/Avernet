@@ -1,12 +1,12 @@
 /** @jest-environment jsdom */
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useExpertBotCreation } from '@/hooks/useExpertBotCreation';
-import { reconcileOwnedBotGrants } from '@/services/backendApi/collaboration/botGrantReconciliationController';
+import { reconcileOwnedBotGrants } from '@/services/collaboration/botGrantReconciliationService';
 import { backendRequest } from '@/services/backendApi/httpClient';
 import type { BotCreateInput } from '@/services/botWorkshop';
 import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 
-jest.mock('@/services/backendApi/collaboration/botGrantReconciliationController', () => ({
+jest.mock('@/services/collaboration/botGrantReconciliationService', () => ({
   reconcileOwnedBotGrants: jest.fn(),
 }));
 jest.mock('@/services/backendApi/httpClient', () => ({

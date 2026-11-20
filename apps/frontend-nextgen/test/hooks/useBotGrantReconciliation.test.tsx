@@ -1,11 +1,11 @@
 /** @jest-environment jsdom */
 import { useBotGrantReconciliation } from '@/hooks/useBotGrantReconciliation';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
-import { reconcileOwnedBotGrants } from '@/services/backendApi/collaboration/botGrantReconciliationController';
+import { reconcileOwnedBotGrants } from '@/services/collaboration/botGrantReconciliationService';
 import { renderHook, waitFor } from '@testing-library/react';
 
 jest.mock('@/hooks/useHumanIdentity', () => ({ useHumanIdentity: jest.fn() }));
-jest.mock('@/services/backendApi/collaboration/botGrantReconciliationController', () => ({
+jest.mock('@/services/collaboration/botGrantReconciliationService', () => ({
   reconcileOwnedBotGrants: jest.fn(),
 }));
 

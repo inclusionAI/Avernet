@@ -1,4 +1,4 @@
-import { reconcileOwnedBotGrants } from '@/services/backendApi/collaboration/botGrantReconciliationController';
+import { reconcileOwnedBotGrants } from '@/services/collaboration/botGrantReconciliationService';
 import { useEffect } from 'react';
 import { useHumanIdentity } from './useHumanIdentity';
 

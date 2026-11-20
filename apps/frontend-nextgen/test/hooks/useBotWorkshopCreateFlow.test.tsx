@@ -1,10 +1,10 @@
 /** @jest-environment jsdom */
 import { useBotWorkshopCreateFlow } from '@/hooks/useBotWorkshopCreateFlow';
-import { reconcileOwnedBotGrants } from '@/services/backendApi/collaboration/botGrantReconciliationController';
+import { reconcileOwnedBotGrants } from '@/services/collaboration/botGrantReconciliationService';
 import { botWorkshopService } from '@/services/botWorkshop';
 import { act, renderHook } from '@testing-library/react';
 
-jest.mock('@/services/backendApi/collaboration/botGrantReconciliationController', () => ({
+jest.mock('@/services/collaboration/botGrantReconciliationService', () => ({
   reconcileOwnedBotGrants: jest.fn(),
 }));
 jest.mock('@/services/botWorkshop', () => ({

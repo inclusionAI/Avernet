@@ -1,4 +1,4 @@
-import { reconcileOwnedBotGrants } from '@/services/backendApi/collaboration/botGrantReconciliationController';
+import { reconcileOwnedBotGrants } from '@/services/collaboration/botGrantReconciliationService';
 import type { BotCopyInput, BotCreateAuthorization, BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, BackendRequestError } from '@/services/botWorkshop';
 import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
