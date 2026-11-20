@@ -45,8 +45,7 @@ class FakeBotRepository:
         return self.id_to_bot.get(bot_id)
 
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
-        bot = self.id_to_bot.get(f"{bot_id}:{owner_id}")
-        return bot or (None if bot_id == "default" else self.id_to_bot.get(bot_id))
+        return self.id_to_bot.get(f"{bot_id}:{owner_id}")
 
     def classify_forum_recipient(self, bot_id: str):
         return self.id_to_bot.get(bot_id, ("missing", None))
@@ -156,7 +155,10 @@ def test_first_reply_creates_one_detailed_notice_payload() -> None:
     assert repository.content["text"] == "张三回复了你的帖子《聚合通知测试》"
     assert repository.content["event_count"] == 1
     assert repository.content["actor_count"] == 1
-    assert repository.content["target"] == {"topicId": "topic-1", "postId": "post-900001"}
+    assert repository.content["target"] == {
+        "topicId": "topic-1",
+        "postId": "post-900001",
+    }
 
 
 def test_five_replies_merge_into_one_unread_notice() -> None:
@@ -172,7 +174,10 @@ def test_five_replies_merge_into_one_unread_notice() -> None:
     assert repository.calls == 5
     assert len(repository.groups) == 1
     assert repository.content is not None
-    assert repository.content["text"] == "张三、李四 等 4 人回复了你的帖子《聚合通知测试》（5 条）"
+    assert (
+        repository.content["text"]
+        == "张三、李四 等 4 人回复了你的帖子《聚合通知测试》（5 条）"
+    )
     assert repository.content["event_count"] == 5
     assert repository.content["actor_count"] == 4
     assert repository.content["post_ids"] == [
@@ -393,9 +398,12 @@ def test_content_factory_ignores_invalid_actors_and_requires_valid_aggregate() -
     )
 
     assert _decode_aggregate(None) == _decode_aggregate({})
-    assert _decode_aggregate(
-        {"event_count": -1, "actors": ["bad"], "post_ids": ["post-1"]}
-    ).actors == ()
+    assert (
+        _decode_aggregate(
+            {"event_count": -1, "actors": ["bad"], "post_ids": ["post-1"]}
+        ).actors
+        == ()
+    )
 
     result = factory({"event_count": 1, "actors": ["bad", {"type": 1, "id": 2}]})
 
@@ -411,7 +419,9 @@ def test_two_actor_notice_text_names_both_actors() -> None:
     _notify(publisher, actor_id="900002", actor_name="李四")
 
     assert repository.content is not None
-    assert repository.content["text"] == "张三、李四回复了你的帖子《聚合通知测试》（2 条）"
+    assert (
+        repository.content["text"] == "张三、李四回复了你的帖子《聚合通知测试》（2 条）"
+    )
 
 
 def test_default_bot_actor_falls_back_to_display_identity() -> None:
@@ -432,3 +442,226 @@ def test_default_bot_actor_falls_back_to_display_identity() -> None:
 
     scoped = factory(None)
     assert scoped["actors"] == [{"type": "BOT", "id": "default", "displayName": "Bot"}]
+
+
+def test_bot_actor_uses_repository_bot_name_for_scoped_identity() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"bot-a:900001": {"owner_id": "900001", "bot_name": "智能助手"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_LIKED,
+        recipient_type="HUMAN",
+        recipient_id="900003",
+        actor_type="BOT",
+        actor_id="bot-a:900001",
+        actor_display_name=None,
+        target_type="TOPIC",
+        target_id="topic-1",
+        text="赞了你的内容",
+        topic_id="topic-1",
+        post_id=None,
+        topic_title="聚合通知测试",
+    )
+
+    assert repository.calls == 1
+    assert repository.content is not None
+    assert repository.content["text"] == "智能助手赞了你的内容《聚合通知测试》"
+    assert repository.content["actors"] == [
+        {"type": "BOT", "id": "bot-a:900001", "displayName": "智能助手"}
+    ]
+
+
+def test_all_bbs_events_resolve_bot_actor_display_name() -> None:
+    # 站内五种社区事件都走同一个 Bot 名称解析边界。
+    cases = [
+        (WorkOrderEventType.BBS_FOLLOWED, "关注了你"),
+        (WorkOrderEventType.BBS_LIKED, "赞了你的内容"),
+        (WorkOrderEventType.BBS_FAVORITED, "收藏了你的内容"),
+        (WorkOrderEventType.BBS_REPLIED, "回复了你的帖子"),
+        (WorkOrderEventType.BBS_HELP_RESPONDED, "响应了你的求助帖"),
+    ]
+    for event_type, action in cases:
+        repository = FakeWorkOrderRepository()
+        bots = FakeBotRepository()
+        bots.id_to_bot = {"bot-a": {"bot_name": "智能助手"}}
+        publisher = ForumNotificationPublisher(repository, bots)
+
+        publisher.notify(
+            event_type=event_type,
+            recipient_type="HUMAN",
+            recipient_id="900003",
+            actor_type="BOT",
+            actor_id="bot-a",
+            actor_display_name=None,
+            target_type="TOPIC",
+            target_id="target-1",
+            text=action,
+            topic_id="topic-1",
+            post_id=None,
+        )
+
+        assert repository.content is not None
+        assert repository.content["text"] == f"智能助手{action}"
+
+
+def test_aggregate_bot_notice_uses_names_and_preserves_stable_ids() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {
+        "bot-a:900001": {"owner_id": "900001", "bot_name": "智能助手"},
+        "default:900002": {"owner_id": "900002", "bot_name": "默认助手"},
+    }
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    for actor_id in ("bot-a:900001", "default:900002"):
+        publisher.notify(
+            event_type=WorkOrderEventType.BBS_REPLIED,
+            recipient_type="HUMAN",
+            recipient_id="900003",
+            actor_type="BOT",
+            actor_id=actor_id,
+            actor_display_name=None,
+            target_type="POST",
+            target_id="post-1",
+            text="回复了你的帖子",
+            topic_id="topic-1",
+            post_id="post-1",
+            topic_title="聚合通知测试",
+        )
+
+    assert repository.content is not None
+    assert (
+        repository.content["text"]
+        == "智能助手、默认助手回复了你的帖子《聚合通知测试》（2 条）"
+    )
+    assert repository.content["actors"] == [
+        {"type": "BOT", "id": "bot-a:900001", "displayName": "智能助手"},
+        {"type": "BOT", "id": "default:900002", "displayName": "默认助手"},
+    ]
+
+
+def test_bot_actor_uses_repository_bot_name_for_named_identity() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"bot-b": {"bot_name": "社区机器人"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_REPLIED,
+        recipient_type="HUMAN",
+        recipient_id="900003",
+        actor_type="BOT",
+        actor_id="bot-b",
+        actor_display_name=None,
+        target_type="POST",
+        target_id="post-1",
+        text="回复了你的帖子",
+        topic_id="topic-1",
+        post_id="post-1",
+    )
+
+    assert repository.content is not None
+    assert repository.content["text"] == "社区机器人回复了你的帖子"
+
+
+def test_default_bot_actor_uses_owner_scoped_bot_name() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"default:900001": {"owner_id": "900001", "bot_name": "默认助手"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_FOLLOWED,
+        recipient_type="HUMAN",
+        recipient_id="900003",
+        actor_type="BOT",
+        actor_id="default:900001",
+        actor_display_name=None,
+        target_type="HUMAN",
+        target_id="900003",
+        text="关注了你",
+        topic_id=None,
+        post_id=None,
+    )
+
+    assert repository.content is not None
+    assert repository.content["text"] == "默认助手关注了你"
+
+
+def test_bot_actor_name_resolution_failure_degrades_to_existing_rule() -> None:
+    class BrokenBotRepository(FakeBotRepository):
+        def get_by_id(self, bot_id: str):
+            raise RuntimeError("bot repository unavailable")
+
+    repository = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(repository, BrokenBotRepository())
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_LIKED,
+        recipient_type="HUMAN",
+        recipient_id="900003",
+        actor_type="BOT",
+        actor_id="bot-missing",
+        actor_display_name=None,
+        target_type="TOPIC",
+        target_id="topic-1",
+        text="赞了你的内容",
+        topic_id="topic-1",
+        post_id=None,
+    )
+
+    assert repository.calls == 1
+    assert repository.content is not None
+    assert repository.content["text"] == "bot-missing赞了你的内容"
+
+
+def test_repository_bot_name_takes_priority_over_provided_display_name() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"bot-a:900001": {"bot_name": "仓库名称"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_LIKED,
+        recipient_type="HUMAN",
+        recipient_id="900003",
+        actor_type="BOT",
+        actor_id="bot-a:900001",
+        actor_display_name="调用方名称",
+        target_type="TOPIC",
+        target_id="topic-1",
+        text="赞了你的内容",
+        topic_id="topic-1",
+        post_id=None,
+    )
+
+    assert repository.content is not None
+    assert repository.content["text"] == "仓库名称赞了你的内容"
+
+
+def test_repository_lookup_failure_degrades_to_provided_display_name() -> None:
+    class BrokenBotRepository(FakeBotRepository):
+        def get_by_id(self, bot_id: str):
+            raise RuntimeError("bot repository unavailable")
+
+    repository = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(repository, BrokenBotRepository())
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_LIKED,
+        recipient_type="HUMAN",
+        recipient_id="900003",
+        actor_type="BOT",
+        actor_id="bot-b",
+        actor_display_name="调用方名称",
+        target_type="TOPIC",
+        target_id="topic-1",
+        text="赞了你的内容",
+        topic_id="topic-1",
+        post_id=None,
+    )
+
+    assert repository.content is not None
+    assert repository.content["text"] == "调用方名称赞了你的内容"
