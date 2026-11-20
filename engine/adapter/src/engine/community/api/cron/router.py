@@ -6,6 +6,7 @@ Cron Router - 定时任务管理
 import logging
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 from engine.community.api.cron.schemas import (
     CreateTaskRequest,
@@ -127,9 +128,19 @@ async def get_task(task_id: str):
     warning = check_capability(Capability.CRON_LIST)
     try:
         cron_api = get_cron_api()
-        job = await cron_api.get_job(task_id)
+        supports_confirmation = callable(getattr(type(cron_api), "get_job_for_detail", None))
+        if supports_confirmation:
+            job, confirmed_missing = await getattr(cron_api, "get_job_for_detail")(task_id)
+        else:
+            job, confirmed_missing = await cron_api.get_job(task_id), False
+        if job and supports_confirmation and job.id != task_id:
+            raise RuntimeError("Cron detail returned a different task")
 
         if not job:
+            if confirmed_missing:
+                return JSONResponse(status_code=404, content={
+                    "detail": "Task not found", "code": "cron.task_not_found.v1",
+                })
             raise HTTPException(status_code=404, detail="Task not found")
 
         return {"success": True, "data": job.model_dump(), "warning": warning}

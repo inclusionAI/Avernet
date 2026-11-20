@@ -10,6 +10,29 @@ log = logging.getLogger("openclaw-port")
 class _CronPortMixin:
     """Domain mixin: cron job CRUD + run/runs (pooled, per-token)."""
 
+    async def cron_get_for_detail(self, job_id: str, token: str | None = None) -> tuple[dict | None, bool]:
+        """Return the job or an explicit, request-specific missing result."""
+        client = await self._pooled_client(token)
+        hello = client.hello
+        if hello and hello.features and "cron.get" in hello.features.methods:
+            try:
+                response = await client.send_request("cron.get", {"jobId": job_id})
+            except Exception:
+                response = None
+            if response is not None:
+                error = getattr(response, "error", None)
+                if (getattr(response, "ok", None) is False and error
+                        and getattr(error, "code", None) == "INVALID_REQUEST"
+                        and getattr(error, "message", None) == f"cron job not found: {job_id}"):
+                    return None, True
+                if (getattr(response, "ok", None) is True
+                        and isinstance(getattr(response, "payload", None), dict) and response.payload):
+                    if response.payload.get("id") != job_id:
+                        raise RuntimeError("Cron detail returned a different task")
+                    return response.payload, False
+        jobs = await self.cron_list(include_disabled=True, token=token)
+        return next((job for job in jobs if job.get("id") == job_id), None), False
+
     async def cron_list(
         self,
         include_disabled: bool = True,
