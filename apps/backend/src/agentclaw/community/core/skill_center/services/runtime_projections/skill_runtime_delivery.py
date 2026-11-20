@@ -31,6 +31,10 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeSkillProjection,
 )
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    RUNTIME_NOT_BOUND_REASON,
+    RuntimeLayoutProbeStatus,
+)
 from agentclaw.community.core.skills_pool.mapping_intent import (
     MAPPING_CONTRACT_V3,
     mapping_contract_for,
@@ -438,22 +442,42 @@ class SkillRuntimeDelivery:
                     user_id=owner_id,
                     engine=layout_engine,
                 )
+                if probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR:
+                    return RuntimeProjectionResult.pending(
+                        code="SKILL_RUNTIME_UNAVAILABLE",
+                        reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                    )
+                if probe.status is not RuntimeLayoutProbeStatus.READY:
+                    # An unbound runtime can gain a binding later, so keep
+                    # that case retryable. Other non-READY answers mean the
+                    # runtime cannot honour the logical mapping contract;
+                    # report the capability gap instead of failing the whole
+                    # projection with an unexpected exception.
+                    if probe.evidence.get("reason") == RUNTIME_NOT_BOUND_REASON:
+                        return RuntimeProjectionResult.pending(
+                            code="SKILL_RUNTIME_UNAVAILABLE",
+                            reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                        )
+                    return self._unsupported_mapping_contract_result()
                 supported_versions = probe.evidence.get(
                     "supported_mapping_contract_versions"
                 )
                 center_mount = probe.evidence.get("center_mount")
+                supports_v3 = (
+                    isinstance(supported_versions, list)
+                    and MAPPING_CONTRACT_V3 in supported_versions
+                )
                 if (
                     isinstance(center_mount, dict)
                     and center_mount.get("restart_required") is True
-                    and (
-                        not isinstance(supported_versions, list)
-                        or MAPPING_CONTRACT_V3 not in supported_versions
-                    )
+                    and not supports_v3
                 ):
                     return RuntimeProjectionResult.pending(
                         code="CENTER_RUNTIME_RESTART_REQUIRED",
                         reason="Bot 尚未加载 Skill Center 目录，请重启 Bot 后重试",
                     )
+                if not supports_v3:
+                    return self._unsupported_mapping_contract_result()
             contract = mapping_contract_for(contract_mappings, supported_versions)
             raw_published = await self._pool_runtime.publish_mappings(
                 bot_id=bot_id,

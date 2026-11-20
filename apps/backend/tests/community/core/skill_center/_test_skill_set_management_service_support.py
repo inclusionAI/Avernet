@@ -56,6 +56,10 @@ from agentclaw.community.core.skill_center.services.skill_set_management_service
     SkillSetManagementService,
 )
 
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    RuntimeLayoutProbeStatus,
+)
+
 
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
@@ -707,18 +711,20 @@ class _CenterRuntimePool(_RuntimePool):
     async def probe(self, **_kwargs):
         self.probe_calls.append(_kwargs)
         return SimpleNamespace(
+            status=RuntimeLayoutProbeStatus.READY,
             evidence={
                 "supported_mapping_contract_versions": [
                     "skills-pool-mapping-v2",
                     "skills-pool-mapping-v3",
                 ]
-            }
+            },
         )
 
 class _CenterMountMissingRuntimePool(_CenterRuntimePool):
     async def probe(self, **_kwargs):
         self.probe_calls.append(_kwargs)
         return SimpleNamespace(
+            status=RuntimeLayoutProbeStatus.READY,
             evidence={
                 "supported_mapping_contract_versions": [
                     "skills-pool-mapping-v2"
