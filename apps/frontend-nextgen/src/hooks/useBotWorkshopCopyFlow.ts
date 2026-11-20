@@ -1,3 +1,4 @@
+import { reconcileOwnedBotGrants } from '@/services/backendApi/collaboration/botGrantReconciliationController';
 import type { BotCopyInput, BotCreateAuthorization, BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, BackendRequestError } from '@/services/botWorkshop';
 import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
@@ -91,6 +92,7 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
       }
       if (!active || terminal) return;
       if (bot) {
+        void reconcileOwnedBotGrants(bot.id);
         const avatar = pendingAvatarRef.current;
         let avatarFailed = false;
         if (avatar) {

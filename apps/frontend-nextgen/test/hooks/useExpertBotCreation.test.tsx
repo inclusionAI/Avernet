@@ -1,10 +1,14 @@
 /** @jest-environment jsdom */
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useExpertBotCreation } from '@/hooks/useExpertBotCreation';
+import { reconcileOwnedBotGrants } from '@/services/backendApi/collaboration/botGrantReconciliationController';
 import { backendRequest } from '@/services/backendApi/httpClient';
 import type { BotCreateInput } from '@/services/botWorkshop';
 import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 
+jest.mock('@/services/backendApi/collaboration/botGrantReconciliationController', () => ({
+  reconcileOwnedBotGrants: jest.fn(),
+}));
 jest.mock('@/services/backendApi/httpClient', () => ({
   ...jest.requireActual('@/services/backendApi/httpClient'),
   backendRequest: jest.fn(),
@@ -22,7 +26,7 @@ const input: BotCreateInput = {
   agentCoding: { kind: 'template', template, values: { architect_name: '提交时的架构域' } },
 };
 
-beforeEach(() => request.mockReset());
+beforeEach(() => { request.mockReset(); jest.mocked(reconcileOwnedBotGrants).mockClear(); });
 afterEach(() => jest.useRealTimers());
 
 test('专家任务返回可用 Bot 后沿原创建后动作保存提交的模板配置', async () => {
@@ -39,6 +43,7 @@ test('专家任务返回可用 Bot 后沿原创建后动作保存提交的模板
     method: 'PATCH', data: { arch_domain: '提交时的架构域', is_domain_bot: true },
   })));
   expect(result.current.status?.state).toBe('READY');
+  expect(reconcileOwnedBotGrants).toHaveBeenCalledWith('expert-1');
 });
 
 test('授权完成后只初始化原 Bot 一次，并保留提交时的 DIMA/托管选项', async () => {
@@ -143,6 +148,7 @@ test('管理重新打开只读原创建失败，不用后续 Apply 改写历史'
   expect(request).toHaveBeenCalledWith('/openapi/v1/bots/existing-1/with-manifest/status', {
     method: 'GET', params: {},
   });
+  expect(reconcileOwnedBotGrants).not.toHaveBeenCalled();
 });
 
 test('详情查询失败只显示查询错误，不推断创建失败或重发写请求', async () => {
