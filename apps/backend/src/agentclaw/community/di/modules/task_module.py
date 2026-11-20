@@ -352,30 +352,38 @@ class TaskModule(Module):
         injector: Injector,
         task_dispatch: TaskDispatchConfig,
     ) -> ContextCollabExecutor:
-        """Build the ContextCollab BCS executor, failing closed when unbound."""
+        """Build direct Todo execution with optional legacy BCS compatibility."""
+        try:
+            openapi_bot = injector.get(OpenApiBotPort)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] OpenApiBotPort unavailable: %s",
+                exc,
+            )
+            return UnavailableContextCollabExecutor(str(exc))
+        if openapi_bot is None:
+            return UnavailableContextCollabExecutor("OpenApiBotPort resolved to None")
         try:
             bcs = injector.get(BcsClientPort)
         except Exception as exc:  # noqa: BLE001 lightweight deployment
             logger.info(
-                "[task][context-collab] BcsClientPort unavailable: %s",
+                "[task][context-collab] BcsClientPort unavailable; "
+                "legacy group-backed Todo resume disabled: %s",
                 exc,
             )
-            return UnavailableContextCollabExecutor(str(exc))
-        if bcs is None:
-            return UnavailableContextCollabExecutor(
-                "BcsClientPort resolved to None"
-            )
+            bcs = None
         try:
             bot_tokens = injector.get(BcsBotTokenProvider)
         except Exception as exc:  # noqa: BLE001 lightweight deployment
             logger.info(
                 "[task][context-collab] BcsBotTokenProvider unavailable; "
-                "using empty provider: %s",
+                "legacy group-backed Todo resume disabled: %s",
                 exc,
             )
             bot_tokens = NullBcsBotTokenProvider()
         return ContextCollabExecutor(
-            bcs,
+            openapi_bot,
+            bcs=bcs,
             bot_tokens=bot_tokens,
             backend_url=task_dispatch.backend_url,
         )

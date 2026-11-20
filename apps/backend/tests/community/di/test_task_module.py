@@ -44,6 +44,10 @@ from agentclaw.community.core.task.task_dispatch.task_settings import (
 from agentclaw.community.core.task.task_discovery.frontend_url import (
     ConfigFrontendUrlProvider,
 )
+from agentclaw.community.core.task.context_collab.executor import (
+    ContextCollabExecutor,
+    UnavailableContextCollabExecutor,
+)
 from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
@@ -149,6 +153,37 @@ class _StubBbsCronModule(Module):
     @provider
     def bbs_browse_scheduler(self) -> BbsBrowseLoopScheduler:
         return object()  # type: ignore[return-value]
+
+
+class _ContextExecutorInjector:
+    def __init__(self, openapi_bot=None) -> None:
+        self._openapi_bot = openapi_bot
+
+    def get(self, binding):
+        if binding is OpenApiBotPort and self._openapi_bot is not None:
+            return self._openapi_bot
+        raise RuntimeError(f"binding unavailable: {binding}")
+
+
+def test_context_collab_executor_requires_openapi_bot_port():
+    executor = TaskModule().context_collab_executor(
+        _ContextExecutorInjector(),
+        TaskDispatchConfig(backend_url="http://backend.example"),
+    )
+
+    assert isinstance(executor, UnavailableContextCollabExecutor)
+
+
+def test_context_collab_executor_allows_missing_legacy_bcs_ports():
+    openapi_bot = object()
+    executor = TaskModule().context_collab_executor(
+        _ContextExecutorInjector(openapi_bot),
+        TaskDispatchConfig(backend_url="http://backend.example"),
+    )
+
+    assert isinstance(executor, ContextCollabExecutor)
+    assert executor._openapi_bot is openapi_bot
+    assert executor._bcs is None
 
 
 def test_task_module_wires_bbs_browse_cron_manager():

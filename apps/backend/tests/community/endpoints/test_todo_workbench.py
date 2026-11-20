@@ -14,12 +14,6 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.task.todo_artifact_service import (
     TodoArtifactServiceProtocol,
 )
-from agentclaw.community.core.bot_public.catalog_metadata import (
-    BotCatalogAddress,
-    BotCatalogMetadata,
-    BotCatalogMetadataPage,
-    BotCatalogMetadataServiceProtocol,
-)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
@@ -153,24 +147,6 @@ class _FixedBots:
                 "active_engine": "openclaw",
             }
         ]
-
-
-class _FixedBotCatalogMetadata:
-    def search_public_bot_metadata(self, **kwargs):
-        items = tuple(
-            BotCatalogMetadata(
-                address=BotCatalogAddress(
-                    bot_id=bot_uuid.rsplit(":", 1)[0],
-                    entity_id=bot_uuid.rsplit(":", 1)[1],
-                ),
-                kind="bot",
-                bot_uuid=bot_uuid,
-                actor_kind="bot",
-                visibility="public",
-            )
-            for bot_uuid in kwargs["bot_uuids"]
-        )
-        return BotCatalogMetadataPage(total=len(items), items=items)
 
 
 def _artifact_record(
@@ -355,11 +331,6 @@ def _bind_todo_world(
     binder.bind(TodoRepositoryProtocol, to=repository, scope=singleton)
     binder.bind(SpaceAccessServiceProtocol, to=_FixedSpaceAccess(), scope=singleton)
     binder.bind(BotRepository, to=_FixedBots(), scope=singleton)
-    binder.bind(
-        BotCatalogMetadataServiceProtocol,
-        to=_FixedBotCatalogMetadata(),
-        scope=singleton,
-    )
     binder.bind(TodoCollaborationPort, to=collaboration, scope=singleton)
     binder.bind(
         TodoArtifactServiceProtocol,
