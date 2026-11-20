@@ -97,3 +97,41 @@ for surface in ("legacy", "openapi"):
         endpoint_test(method=method, path=base + suffix, scenario="missing_bot", seed=seed,
                       input=CaseInput(path_params={**params, "bot_id": bad_bot}, query_params=request_query, headers=headers(), json_body=data),
                       expect=ExpectError(status=404))(lambda: None)
+
+
+def seed_offline_reapplication(world):
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+
+    init_principal_verifier_config(Resolver(), "risk-test", strict=False)
+    make_staff_user(world, user_id=OWNER)
+    bot = make_bot(world, bot_id="offline-bot", owner_id=OWNER, bot_type="personal")
+    world.get(BotRepository).update_ext_by_id_owner_and_env(
+        bot_id="offline-bot", owner_id=OWNER, env=get_current_env(),
+        ext={"public_approval": {"puid": "offline-puid", "status": "PROCESSING"}},
+    )
+    world.injector.binder.bind(RiskInputBuilder, to=InstanceProvider(Builder()))
+    world.injector.binder.bind(SecurityProvider, to=InstanceProvider(Security()))
+    world.injector.binder.bind(TaskQueueService, to=InstanceProvider(Queue()))
+    repo = world.get(BotPublicRiskRepository)
+    old, _ = repo.create_or_replay(RiskCheck(
+        risk_check_id="offline-risk", env=get_current_env(), bot_pk=bot["id"], owner_id=OWNER,
+        operator_id=OWNER, client_scope=f"legacy:{OWNER}", client_request_id="offline-old",
+        public_scope="legacy", target_json=json.dumps({"public_scope": "legacy", "visibility": "PUBLIC",
+            "view_depts": [], "permission_owner": "owner", "friend_approval": "0"}),
+        request_hash="old", input_json="{}", input_hash="old", approval_biz_id="old-biz",
+    ))
+    assert repo.update_current(env=get_current_env(), risk_check_id=old.risk_check_id,
+        row_version=old.row_version, changes={"phase": "NEEDS_ATTENTION", "approval_puid": "offline-puid",
+            "workflow_json": json.dumps({"error": "CALLBACK_DEVICE_OFFLINE_REAPPLY", "callback_claim": {
+                "claim_id": "claim", "status": "unknown", "event": {"puid": "offline-puid", "decision": "AGREE"}}})})
+
+
+reapply_path = "/api/bots/{bot_id}/public/risk-checks/{risk_check_id}/reapply"
+for scenario, version, expect in (
+    ("happy", 2, ExpectSuccess(status=200, json_contains={"success": True, "data": {"phase": "CHECKING"}})),
+    ("stale", 1, ExpectError(status=409)),
+):
+    endpoint_test(method="POST", path=reapply_path, scenario=scenario, seed=seed_offline_reapplication,
+        input=CaseInput(path_params={"bot_id": "offline-bot", "risk_check_id": "offline-risk"},
+                        headers=headers(), json_body={"owner_id": OWNER, "client_request_id": "retry", "expected_version": version}),
+        expect=expect)(lambda: None)

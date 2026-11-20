@@ -16,7 +16,7 @@ class RiskApprovalGuard:
         self.check_h3 = check_h3
         self.clock = clock or (lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
-    def check(self, env: str, risk_id: str, owner: str, bot_pk: int, puid: str, decision: str, scope: str) -> str:
+    def check(self, env: str, risk_id: str, owner: str, bot_pk: int, puid: str, decision: str, scope: str, *, claim_id: str | None = None) -> str:
         if not puid or decision not in {"AGREE", "DISAGREE", "CANCEL"}:
             return "DENIED"
         for _ in range(3):
@@ -42,10 +42,12 @@ class RiskApprovalGuard:
                         return "ALREADY_APPLIED" if claim.get("status") == "applied" else "DEFERRED"
                     if self.check_h3(row) is True:
                         workflow["callback_claim"] = {"event": event, "status": "processing"}
+                        if claim_id:
+                            workflow["callback_claim"]["claim_id"] = claim_id
                         if self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
                                                     changes={"workflow_json": json.dumps(workflow),
                                                              "next_action_at": self.clock() + timedelta(minutes=2)}):
-                            return "ALLOW"
+                            return f"ALLOW:{row.row_version + 1}" if claim_id else "ALLOW"
                         continue
                     workflow["error"] = "INPUT_OR_PERMISSION_INVALID"
                     changes = {"phase": "NEEDS_ATTENTION", "next_action_at": None}
@@ -129,6 +131,26 @@ class RiskApprovalGuard:
             if self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version, changes=changes):
                 return
         raise RuntimeError("unable to persist risk callback outcome")
+
+    def finish_device_offline(self, env: str, risk_id: str, puid: str, claim_id: str, claim_version: int) -> bool:
+        """Classify only the original claim after a resolver failed before dispatch."""
+        row = self.repo.get(env=env, risk_check_id=risk_id)
+        if (row is None or row.current_target_key is None or row.phase != "APPROVING"
+                or row.public_scope != "legacy" or row.approval_puid != puid
+                or row.row_version != claim_version):
+            return False
+        workflow = json.loads(row.workflow_json)
+        claim = workflow.get("callback_claim") or {}
+        if claim != {"event": {"puid": puid, "decision": "AGREE"},
+                     "status": "processing", "claim_id": claim_id}:
+            return False
+        claim["status"] = "unknown"
+        workflow["error"] = "CALLBACK_DEVICE_OFFLINE_REAPPLY"
+        return self.repo.update_current(
+            env=env, risk_check_id=risk_id, row_version=claim_version,
+            changes={"phase": "NEEDS_ATTENTION", "next_action_at": None,
+                     "workflow_json": json.dumps(workflow)},
+        )
 
     def revalidate_claim(self, env: str, risk_id: str, puid: str, decision: str) -> bool:
         """Repeat current and input checks immediately before the business write."""

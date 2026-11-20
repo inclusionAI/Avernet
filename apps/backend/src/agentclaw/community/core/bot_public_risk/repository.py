@@ -29,6 +29,9 @@ from sqlalchemy.sql import func
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_public_risk.repository_protocol import RiskCheck, RequestConflict
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.core.bot_management.owner_handoff.guard import assert_bot_mutable
+from agentclaw.community.core.bot_management.owner_handoff.contracts import HandoffError
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 
@@ -194,6 +197,77 @@ class BotPublicRiskRepository:
             row = RiskCheckModel(
                 **values, avernet_tenant=tenant, current_target_key=key, row_version=1
             )
+            session.add(row)
+            session.flush()
+            return _view(row), True
+
+    def reapply_offline(self, record: RiskCheck, *, expected_risk_id: str, expected_version: int) -> tuple[RiskCheck, bool]:
+        """Lock Bot before risk, matching the owner-handoff mutation order."""
+        tenant = get_current_avernet_tenant()
+        with self._db.transactional_orm_session() as session:
+            bot = session.query(BotModel).filter_by(
+                id=record.bot_pk, env=record.env, avernet_tenant=tenant, is_delete=0,
+            ).with_for_update().one_or_none()
+            if bot is None or bot.owner_id != record.operator_id or bot.owner_id != record.owner_id:
+                raise RequestConflict("Bot owner changed")
+            try:
+                assert_bot_mutable({"ext": bot.ext})
+            except HandoffError:
+                raise RequestConflict("Bot owner handoff in progress") from None
+            prior_request = session.query(RiskCheckModel).filter_by(
+                avernet_tenant=tenant, env=record.env, client_scope=record.client_scope,
+                client_request_id=record.client_request_id,
+            ).one_or_none()
+            if prior_request is not None:
+                try:
+                    prior_workflow = json.loads(prior_request.workflow_json)
+                except (ValueError, TypeError):
+                    raise RequestConflict("request state unavailable") from None
+                if (not isinstance(prior_workflow, dict) or prior_request.bot_pk != record.bot_pk
+                        or prior_request.request_hash != record.request_hash
+                        or prior_workflow.get("reapply_from") != expected_risk_id
+                        or prior_workflow.get("reapply_version") != expected_version):
+                    raise RequestConflict("request ID reused with different intent")
+                return _view(prior_request), False
+            previous = session.query(RiskCheckModel).filter_by(
+                avernet_tenant=tenant, env=record.env,
+                current_target_key=_target_key(record.bot_pk, "legacy"),
+            ).with_for_update().one_or_none()
+            try:
+                ext = json.loads(bot.ext or "{}")
+                approval = ext.get("public_approval") or {}
+                workflow = json.loads(previous.workflow_json) if previous else {}
+                old_target = json.loads(previous.target_json) if previous else None
+                new_target = json.loads(record.target_json)
+            except (ValueError, TypeError, AttributeError):
+                raise RequestConflict("approval state unavailable") from None
+            claim = workflow.get("callback_claim") if isinstance(workflow, dict) else None
+            if (not isinstance(approval, dict) or not isinstance(workflow, dict)
+                    or not isinstance(claim, dict) or not claim.get("claim_id")
+                    or claim.get("status") != "unknown"
+                    or claim.get("event") != {"puid": previous.approval_puid if previous else None, "decision": "AGREE"}
+                    or previous is None or previous.risk_check_id != expected_risk_id
+                    or previous.row_version != expected_version or previous.public_scope != "legacy"
+                    or previous.phase != "NEEDS_ATTENTION"
+                    or workflow.get("error") != "CALLBACK_DEVICE_OFFLINE_REAPPLY"
+                    or old_target != new_target
+                    or previous.owner_id != bot.owner_id or bot.public != "0"
+                    or approval.get("status") != "PROCESSING"
+                    or not previous.approval_puid or approval.get("puid") != previous.approval_puid):
+                raise RequestConflict("offline approval is no longer current")
+            workflow["invalidation_reason"] = "REAPPLIED"
+            previous.workflow_json = json.dumps(workflow)
+            previous.current_target_key = None
+            previous.row_version += 1
+            previous.next_action_at = None
+            previous.phase = "CLOSED"
+            session.flush()
+            values = {f.name: getattr(record, f.name) for f in fields(RiskCheck)
+                      if f.name not in {"current_target_key", "gmt_create", "gmt_modified", "row_version"}}
+            values["workflow_json"] = json.dumps({"reapply_from": expected_risk_id,
+                                                  "reapply_version": expected_version})
+            row = RiskCheckModel(**values, avernet_tenant=tenant,
+                                 current_target_key=_target_key(record.bot_pk, "legacy"), row_version=1)
             session.add(row)
             session.flush()
             return _view(row), True

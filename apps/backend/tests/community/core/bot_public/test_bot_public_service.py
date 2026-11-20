@@ -3319,6 +3319,52 @@ def test_risk_callback_rejects_puid_matching_but_changed_target():
     assert guard.finish.call_args.args[-1] is False
 
 
+def test_legacy_risk_callback_offline_before_dispatch_is_reapplyable():
+    import json
+    from dataclasses import replace
+    from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+    from agentclaw.community.core.bot_public_risk.repository_protocol import RiskCheck
+    from agentclaw.community.core.devices.services.device_context import DeviceOfflineError
+
+    class RiskRepo:
+        def __init__(self):
+            self.row = RiskCheck(risk_check_id="r1", env="dev", bot_pk=42, owner_id="owner1",
+                                 operator_id="owner1", client_scope="legacy:owner1", client_request_id="req",
+                                 public_scope="legacy", target_json=json.dumps({"permission_owner": "owner", "friend_approval": "1"}),
+                                 request_hash="h", input_json="{}", input_hash="h", approval_biz_id="biz",
+                                 phase="APPROVING", security_status="PASS", approval_puid="p1",
+                                 current_target_key="current", workflow_json='{"approval_target_ready":true}')
+
+        def get(self, **_):
+            return self.row
+
+        def update_current(self, *, row_version, changes, **_):
+            if self.row.row_version != row_version:
+                return False
+            self.row = replace(self.row, **changes, row_version=row_version + 1)
+            return True
+
+    repo = RiskRepo()
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = _make_bot(ext={"public_approval": {
+        "puid": "p1", "status": "PROCESSING", "public": "1",
+        "permission_owner": "owner", "friend_approval": "1",
+    }})
+    resolver = MagicMock()
+    resolver.resolve_for_bot.side_effect = DeviceOfflineError("offline")
+    dispatcher = MagicMock()
+    service = _make_service(bot_repository=bot_repo, device_context_resolver=resolver,
+                            device_sync_dispatcher=dispatcher)
+    service._risk_approval_guard = RiskApprovalGuard(repo, lambda _: True)
+    with patch("agentclaw.community.core.bot_public.services.bot_public_service.get_current_env", return_value="dev"):
+        result = service.handle_public_approval_callback("bot1", "owner1", "p1", "AGREE", risk_check_id="r1")
+    assert result["success"] is False
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["error"] == "CALLBACK_DEVICE_OFFLINE_REAPPLY"
+    dispatcher.dispatch.assert_not_called()
+    bot_repo.update_by_owner.assert_not_called()
+
+
 def test_unknown_reserved_risk_puid_cannot_fall_through_to_legacy_callback():
     repository = MagicMock()
     repository.find_approval.return_value = None

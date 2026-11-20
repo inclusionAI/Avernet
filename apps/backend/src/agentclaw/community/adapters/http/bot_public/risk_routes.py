@@ -16,6 +16,7 @@ from agentclaw.community.core.bot_public_risk.access import (
 )
 from agentclaw.community.adapters.http.bot_public.schemas_risk import (
     LegacyRiskRequest,
+    LegacyOfflineReapplyRequest,
     OpenApiRiskRequest,
     RiskRecordResponse,
     RiskRefreshResponse,
@@ -81,6 +82,7 @@ def _view(record):
     return RiskRecordResponse.model_validate(
         {
             "risk_check_id": record.risk_check_id,
+            "row_version": record.row_version,
             "phase": record.phase,
             "security_status": record.security_status,
             "detail_url": record.detail_url,
@@ -239,6 +241,33 @@ async def create_legacy(
             HTTPException(status_code=409, detail="Request identifier conflict"),
             response,
         )
+    except HTTPException as exc:
+        return _legacy_failure(exc, response)
+
+
+@legacy_router.post("/{bot_id}/public/risk-checks/{risk_check_id}/reapply", response_model=ApiResponse)
+async def reapply_legacy_offline(
+    bot_id: str, risk_check_id: str, req: LegacyOfflineReapplyRequest, response: Response,
+    user: AuthenticatedUser = Depends(get_current_user),
+    bots: BotRepository = Injected(BotRepository),
+    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
+    service: BotPublicRiskServiceProtocol = Injected(BotPublicRiskServiceProtocol),
+):
+    try:
+        bot = await _authorize(bots, collaborators, bot_id=bot_id, actor_id=user.staffId,
+                               surface="legacy", owner_id=req.owner_id)
+        _require_mutable(bot)
+        if user.staffId != bot.current_owner_id:
+            raise HTTPException(status_code=404, detail="Not found")
+        record, _ = await asyncio.to_thread(
+            service.reapply_offline, bot=bot, actor_id=user.staffId, risk_check_id=risk_check_id,
+            expected_version=req.expected_version, client_request_id=req.client_request_id,
+        )
+        return ApiResponse(success=True, message="操作成功", data=_view(record).model_dump(mode="json"))
+    except RequestConflict:
+        return _legacy_failure(HTTPException(status_code=409, detail="Risk application changed"), response)
+    except LookupError:
+        return _legacy_failure(HTTPException(status_code=404, detail="Not found"), response)
     except HTTPException as exc:
         return _legacy_failure(exc, response)
 
