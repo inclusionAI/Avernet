@@ -1,7 +1,7 @@
 # BCSFuse 公共能力与应用边界
 
 Avernet 维护可独立安装的 `search_core` 和 TC 应用 `app`。宿主维护内部平台连接及自己的业务应用。
-**TC 在业务组装中挂载 v2 Card/搜索与配置接口，固定使用 TC 新表。旧 v1 通过 TC 专属配置整体选择旧表或新表，不向共享 search-core 加入切源逻辑。**
+**TC 在业务组装中挂载 v2 Card/搜索与配置接口，V1 和 V2 共用 Card/Doc 后端与索引更新任务。旧后端源码已归档，恢复旧表需部署仍支持旧后端的版本；共享 search-core 不加入切源逻辑。**
 
 ## 代码归属
 
@@ -81,7 +81,7 @@ HTTP 搜索/推荐 → 公共检索流程 → Card 元数据回查 → 返回结
 `search_core.bootstrap.local` 组装 SQLite、Qdrant Local 和离线示例向量；
 真实业务在组装入口替换转换器、模型、索引与鉴权，复用同一加工和检索流程。
 具体步骤见 [独立启动指南](../../packages/search-core/docs/local-catalog.md)。
-公共能力抽取本身不改变支付宝历史 index_key；TC 的新表、入口兼容和后端选择由 TC 业务组装负责。
+公共能力抽取本身不改变支付宝历史 index_key；TC 的 Card/Doc 入口兼容与命名索引版本选择由 TC 业务组装负责。
 
 TC 与支付宝共用 Card 映射和版本构建机制，各自保留业务默认转换器。TC 未选择新版本时
 保留历史默认 index_key 和集合；新版本先独立构建，配置选择后重启加载，旧版本保留回切。
