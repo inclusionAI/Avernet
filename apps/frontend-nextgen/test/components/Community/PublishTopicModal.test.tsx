@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { PublishTopicModal } from '@/components/Community/PublishTopicModal';
 import '@testing-library/jest-dom';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 Element.prototype.hasPointerCapture ??= () => false;
@@ -27,6 +27,14 @@ beforeAll(() => {
   Range.prototype.getBoundingClientRect ??= () => document.body.getBoundingClientRect();
   document.elementFromPoint ??= () => document.activeElement;
 });
+
+// Exercise the editor's real paste handler without relying on jsdom's
+// per-character contenteditable selection and MutationObserver timing.
+function pasteBody(text: string) {
+  fireEvent.paste(screen.getByRole('textbox', { name: '正文' }), {
+    clipboardData: { getData: (type: string) => (type === 'text/plain' ? text : '') },
+  });
+}
 
 describe('PublishTopicModal', () => {
   test('展示讨论、分享、投票、求助四种发布类型', () => {
@@ -63,7 +71,7 @@ describe('PublishTopicModal', () => {
     const { props } = renderEditor();
 
     await user.type(screen.getByLabelText('主题标题'), '  社区如何沉淀知识  ');
-    await user.type(screen.getByLabelText('正文'), '讨论内容');
+    pasteBody('讨论内容');
     await user.click(screen.getByRole('button', { name: '发布' }));
 
     expect(props.onPublish).toHaveBeenCalledWith({
@@ -80,7 +88,7 @@ describe('PublishTopicModal', () => {
 
     await user.click(screen.getByRole('button', { name: '分享' }));
     await user.type(screen.getByLabelText('主题标题'), '分享经验');
-    await user.type(screen.getByLabelText('正文'), '正文内容');
+    pasteBody('正文内容');
 
     const publishButton = screen.getByRole('button', { name: '发布' });
     expect(publishButton).toBeEnabled();
@@ -98,7 +106,7 @@ describe('PublishTopicModal', () => {
     const { props } = renderEditor();
 
     await user.type(screen.getByLabelText('主题标题'), '选择协作方案');
-    await user.type(screen.getByLabelText('正文'), '请说明理由');
+    pasteBody('请说明理由');
     await user.click(screen.getByRole('button', { name: '投票' }));
     await user.type(screen.getByLabelText('选项 1'), '方案 A');
     await user.type(screen.getByLabelText('选项 2'), '方案 B');
@@ -130,7 +138,7 @@ describe('PublishTopicModal', () => {
     renderEditor({ onPublish });
 
     await user.type(screen.getByLabelText('主题标题'), '选择协作方案');
-    await user.type(screen.getByLabelText('正文'), '请说明理由');
+    pasteBody('请说明理由');
     await user.click(screen.getByRole('button', { name: '投票' }));
     await user.type(screen.getByLabelText('选项 1'), '只有一个选项');
     await user.click(screen.getByRole('button', { name: '发布' }));
@@ -147,7 +155,7 @@ describe('PublishTopicModal', () => {
     expect(screen.queryByRole('region', { name: '求助设置' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/期望解决时间/)).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('主题标题'), '接口联调失败');
-    await user.type(screen.getByLabelText('正文'), '需要一起排查');
+    pasteBody('需要一起排查');
     await user.click(screen.getByRole('button', { name: '发布' }));
 
     expect(props.onPublish).toHaveBeenCalledWith({
