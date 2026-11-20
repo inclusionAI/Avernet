@@ -128,13 +128,11 @@ Non-TeClaw friend Bots support the same session-file lifecycle as an owner or
 explicit member collaborator: upload intent, upload completion, materialization
 status, listing, content reads, and deletion. This is not an operator grant.
 Each friend request rechecks the live BCN friendship and Backend-owned session;
-upload and deletion require an explicit `f_user_id`. Omission selects the
-operator's service stage, including for Caller-type Bots; the old
-`caller_runtime_target` parameter is no longer used. With `f_user_id`, the
-engine strategy selects the friend's independent Caller instance or shared
-runtime. TeClaw friend writes remain unavailable. Upload completion and status
-retain their resource-record binding and legacy implicit friend authorization.
-Failures remain masked as 404.
+upload and deletion additionally require
+`caller_runtime_target=caller_instance`, so they cannot target the Bot owner's
+service runtime. Existing upload clients may omit `f_user_id`: Backend attempts
+operator authorization first and only then falls back to the authenticated
+user's strictly owned friend session. Failures remain masked as 404.
 
 Two things about this group are not the shape a reader would assume:
 

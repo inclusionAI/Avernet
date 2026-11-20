@@ -6,7 +6,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from agentclaw.community.core.bot_management.engines.registry import resolve_provisioning
 from agentclaw.community.core.engine_runtime.stage import (
     SERVICE_BOT_TYPE,
     STAGE_DRAFT,
@@ -73,24 +72,16 @@ class RuntimeBindingResolutionService:
         bot = self._bot_repository.get_by_id_and_owner(request.bot_id, request.owner_id)
         if not bot:
             raise RuntimeBotNotFoundError("runtime bot is unavailable")
-        target = RuntimeBindingTarget.AUTO
-        if self._value(bot.get("bot_type")) == SERVICE_BOT_TYPE:
-            target = RuntimeBindingTarget.CALLER_SERVICE
-            if session_user_id and self._value(bot.get("call_type")) == "caller":
-                context, strategy = resolve_provisioning(
-                    bot_id=request.bot_id, owner_id=request.owner_id,
-                    bot_type=SERVICE_BOT_TYPE,
-                    active_engine=bot.get("active_engine") or "openclaw",
-                    template_type=bot.get("template_type") or None,
-                    template_config=bot.get("template_config")
-                    if isinstance(bot.get("template_config"), dict) else None,
-                )
-                if strategy.requires_caller_chat_instance(context):
-                    target = RuntimeBindingTarget.CALLER_INSTANCE
+        service_bot = self._value(bot.get("bot_type")) == SERVICE_BOT_TYPE
+        friend_caller = bool(session_user_id) and service_bot and self._value(bot.get("call_type")) == "caller"
+        target = (
+            RuntimeBindingTarget.CALLER_SERVICE
+            if service_bot and not friend_caller else RuntimeBindingTarget.AUTO
+        )
         selected = replace(
             request, target=target,
-            actor_user_id=session_user_id
-            if target is RuntimeBindingTarget.CALLER_INSTANCE else request.actor_user_id,
+            actor_user_id=(session_user_id or request.actor_user_id)
+            if friend_caller else request.actor_user_id,
         )
         result = self._resolve(bot, selected)
         logger.info(

@@ -121,10 +121,9 @@ Bot owner、BCN 确认好友关系有效、ExpertChat 的后端会话索引确�
 
 非 TeClaw 好友 Bot 支持与 owner／显式 MEMBER 协作者一致的会话文件生命周期：
 申请上传凭证、完成上传、查询物化状态、列表、内容读取和删除。好友上传与删除必须
-显式传入 `f_user_id`，不再使用 `caller_runtime_target`。省略 `f_user_id` 时，
-包括 Caller 类型在内的服务 Bot 均按 `stage` 定位服务实例；传入时按引擎策略定位
-好友的独立 Caller 实例或共享运行时。完成上传和物化状态沿用资源记录的绑定，
-并保留旧的隐式好友鉴权。TeClaw 好友 Bot 不进入这条文件写入路径。
+显式选择 `caller_runtime_target=caller_instance`；上传接口兼容不携带 `f_user_id`
+的现有前端请求，但仍先尝试 operator 权限，只有失败后才按认证用户执行上述好友及
+会话归属校验。TeClaw 好友 Bot 不进入这条文件写入路径。
 
 响应结构不变，仍只返回指定 owner／Bot／本人会话下的资源记录。新版前端文件列表、
 内容与删除请求应继续显式传 `f_user_id`；owner／协作者调用无需迁移。

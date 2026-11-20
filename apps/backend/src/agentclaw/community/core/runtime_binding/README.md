@@ -20,7 +20,6 @@ consumes:
 internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.core.engine_runtime.stage
-  - agentclaw.community.core.bot_management.engines
 ```
 
 `RuntimeBindingTarget.CALLER_SERVICE` explicitly resolves a service Bot's draft,
@@ -33,12 +32,3 @@ user's independent instance. Explicit `CALLER_INSTANCE` selection is unchanged.
 It does not select a device, retain session affinity, mutate state, or call the
 Session Resource state machine. The OpenAPI adapter resolves once for upload
 creation and passes the resulting `binding_id` to that existing state machine.
-
-`resolve_session_file(request, session_user_id=...)` is the file-specific entry
-point. Without an authorized friend subject, service Bots use the requested
-stage even when they have `call_type=caller`. With a subject, the provisioning
-strategy decides whether Caller chat uses an independent instance or a shared
-stage runtime (including Teclaw). Independent instances are looked up for the
-subject, not the reading actor, and unavailable instances never fall back to a
-service binding. Personal Bots retain their draft binding. This does not change
-the general `resolve()` / `AUTO` contract used by other consumers.

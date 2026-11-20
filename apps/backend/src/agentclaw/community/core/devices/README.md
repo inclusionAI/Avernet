@@ -15,15 +15,6 @@ only when the Engine upload response contains its explicit read-only marker. Oth
 without being classified as read-only. This does not promise atomic writes or
 change the permissions of the underlying filesystem.
 
-Independent Caller BaaS bindings use their trusted `applied_by` as device
-affinity for both WebSocket selection and HTTP connection info when
-`apply_reason` is `caller_instance:<bot_id>`. A known
-`device_props.bolt_id` must match that marker; current Bot metadata does not
-change a Caller binding's affinity. Legacy bindings without props
-can retain the same Caller affinity. Shared, service and desktop bindings
-continue to use the requester's affinity. This changes provider routing only;
-`DeviceContext.user_id`, resource ownership and creator identity remain intact.
-
 ## Staff template overrides
 
 Staff template overrides (`system/personal_bot_test_template_whitelist`) match
