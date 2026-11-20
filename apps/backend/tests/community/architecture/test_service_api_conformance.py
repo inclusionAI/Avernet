@@ -73,6 +73,7 @@ from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
     BotDormantAuditServiceProtocol,
     BotDormantRecycleServiceProtocol,
+    BotDormantRecycleOperationProtocol,
 )
 from agentclaw.community.api.bot_runtime_projector import (
     BotRuntimeProjectorProtocol,
@@ -415,6 +416,7 @@ _PAIRS = [
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
     (BotDormantActivateServiceProtocol, ActivateBotService),
     (BotDormantRecycleServiceProtocol, RecycleBotService),
+    (BotDormantRecycleOperationProtocol, RecycleBotService),
     (BotDormantAuditServiceProtocol, DormantAuditService),
     (BotInventoryBotPort, BotService),
     (DesktopBotInventoryPort, DesktopBotService),
