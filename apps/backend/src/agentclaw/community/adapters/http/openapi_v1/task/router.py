@@ -33,6 +33,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
+from agentclaw.community.adapters.http.openapi_v1.principal import refuse_app_only_caller
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -373,6 +374,7 @@ async def list_bbs_tasks(
     response_model=Envelope[BotGrantReconciliationAcceptedDTO],
     status_code=status.HTTP_202_ACCEPTED,
     responses=USER_SCOPED_403,
+    dependencies=[Depends(refuse_app_only_caller)],
 )
 @envelope_errors
 async def reconcile_owned_bot_grants(
