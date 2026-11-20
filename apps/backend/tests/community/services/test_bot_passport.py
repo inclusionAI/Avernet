@@ -158,13 +158,13 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
             )
 
         assert worker_counts == [5]
-        assert {item["type"] for item in result} == {
+        assert {item["type"] for item in result["bindings"]} == {
             "draft",
             "online",
             "verify",
             "caller",
         }
-        assert sum(item["type"] == "caller" for item in result) == 6
+        assert sum(item["type"] == "caller" for item in result["bindings"]) == 6
         bot_service._device_binding_repo.list_active_caller_instance_bindings.assert_called_once_with(
             bot_id="service-bot-1",
             owner_id="owner-1",
@@ -201,15 +201,16 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
                 "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
                 return_value="prod",
             ),
-            pytest.raises(BotServiceError, match="draft unavailable"),
         ):
-            bot_service._hot_update_service_bot_passport_token(
+            result = bot_service._hot_update_service_bot_passport_token(
                 bot_id="service-bot-1",
                 user_id="owner-1",
                 token="fake-owner-passport-token",
                 bot={"binding_id": 20},
             )
 
+        assert "draft unavailable" in result["errors"][0]
+        assert len(result["bindings"]) >= 1  # online + verify + caller succeed
         assert bot_service._hot_update_by_publish_binding.call_count == 2
         device_service.update_device_headers.assert_called_once()
 
@@ -238,15 +239,16 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
                 "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
                 return_value="prod",
             ),
-            pytest.raises(BotServiceError, match="caller a unavailable"),
         ):
-            bot_service._hot_update_service_bot_passport_token(
+            result = bot_service._hot_update_service_bot_passport_token(
                 bot_id="service-bot-1",
                 user_id="owner-1",
                 token="fake-owner-passport-token",
                 bot={},
             )
 
+        assert "caller a unavailable" in result["errors"][0]
+        assert len(result["bindings"]) >= 2  # caller-b and caller-c succeed
         assert set(attempted) == {
             "BOT-caller-a",
             "BOT-caller-b",
@@ -294,7 +296,7 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
                 bot={"binding_id": 20},
             )
 
-        assert result == [
+        assert result["bindings"] == [
             {
                 "binding_id": 20,
                 "type": "draft",
@@ -302,6 +304,7 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
                 "devices": [{"device_uuid": "draft"}],
             }
         ]
+        assert result["errors"] == []
 
 class TestCreateBotWithBotId(TestBotServicePassportIntegration):
     """Tests for create_bot with bot_id parameter."""
