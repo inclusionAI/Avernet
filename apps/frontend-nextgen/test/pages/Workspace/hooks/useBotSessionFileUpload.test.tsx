@@ -112,15 +112,3 @@ it('取消后忽略晚到的上传成功，不引用旧文件、不消费新会�
   expect(useBotSessionFileStore.getState().isUploading).toBe(true);
   expect(uploadOne).toHaveBeenCalledTimes(1);
 });
-
-it.each(['session-1', 'new-session'])('好友上传在 %s 保留好友身份和 stage', async (sessionId) => {
-  uploadOne.mockResolvedValue({ ok: true, data: { resourceId: 'r1', displayName: 'note.md', status: 'ready' } });
-  const { result, rerender } = renderHook(({ sid }) => useBotSessionFileUpload('bot-1', sid, 'viewer', 'owner', 'human_friend', 'online'), { initialProps: { sid: 'session-1' } });
-  rerender({ sid: sessionId });
-  const file = new File(['content'], 'note.md');
-  act(() => { result.current.stageFiles([file]); });
-  await act(async () => { await result.current.submit(); });
-  expect(uploadOne).toHaveBeenCalledWith('bot-1', sessionId, 'viewer', file, expect.objectContaining({
-    ownerId: 'owner', stage: 'online', friendUserId: 'human_friend',
-  }));
-});

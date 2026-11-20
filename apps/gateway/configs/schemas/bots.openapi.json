@@ -99818,6 +99818,28 @@
               "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Runtime used by the chat: service selects the requested stage, caller_instance selects the caller's instance. Omit for default routing.",
+            "in": "query",
+            "name": "caller_runtime_target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "service",
+                    "caller_instance"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Runtime used by the chat: service selects the requested stage, caller_instance selects the caller's instance. Omit for default routing.",
+              "title": "Caller Runtime Target"
+            }
           }
         ],
         "responses": {
@@ -100374,6 +100396,28 @@
               "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Runtime used by the chat: service selects the requested stage, caller_instance selects the caller's instance. Omit for default routing.",
+            "in": "query",
+            "name": "caller_runtime_target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "service",
+                    "caller_instance"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Runtime used by the chat: service selects the requested stage, caller_instance selects the caller's instance. Omit for default routing.",
+              "title": "Caller Runtime Target"
+            }
           }
         ],
         "requestBody": {
@@ -100669,6 +100713,28 @@
               "deprecated": true,
               "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Runtime used by the chat: service selects the requested stage, caller_instance selects the caller's instance. Omit for default routing.",
+            "in": "query",
+            "name": "caller_runtime_target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "service",
+                    "caller_instance"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Runtime used by the chat: service selects the requested stage, caller_instance selects the caller's instance. Omit for default routing.",
+              "title": "Caller Runtime Target"
             }
           }
         ],
@@ -100968,6 +101034,28 @@
               "deprecated": true,
               "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Runtime used by the chat: service selects the requested stage, caller_instance selects the caller's instance. Omit for default routing.",
+            "in": "query",
+            "name": "caller_runtime_target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "service",
+                    "caller_instance"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Runtime used by the chat: service selects the requested stage, caller_instance selects the caller's instance. Omit for default routing.",
+              "title": "Caller Runtime Target"
             }
           }
         ],
