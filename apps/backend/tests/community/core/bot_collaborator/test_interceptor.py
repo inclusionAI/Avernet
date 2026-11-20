@@ -913,3 +913,122 @@ class TestResolveOwnerId:
 
         result = interceptor._resolve_owner_id(ctx, "bot_123", "user_001")
         assert result is None
+
+
+class TestRestartCollaboratorBar:
+    """The legacy restart route admits an explicit MEMBER collaborator."""
+
+    @pytest.mark.asyncio
+    async def test_explicit_member_collaborator_passes_with_member_bar(self):
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
+
+        user = AuthenticatedIdentity(
+            id="1", operatorName="test", staffId="user_001"
+        )
+        interceptor = CollaboratorPermissionInterceptor(
+            bot_id="$request.bot_id",
+            owner_id="$request.owner_id",
+            required_level=PermissionLevel.MEMBER,
+            explicit=True,
+        )
+        mock_injector = MagicMock()
+        ctx = InterceptorContext(
+            user=user,
+            route_kwargs={
+                "request": {"bot_id": "bot_shared", "owner_id": "owner_other"}
+            },
+            injector=mock_injector,
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"owner_id": "owner_other"}
+        mock_lock_info = MagicMock()
+        mock_lock_info.has_collaborators = True
+        mock_lock_info.lock.holder_user_id = "user_001"
+        mock_lock_info.holder_name = "Tester"
+        mock_lock_service = MagicMock()
+        mock_lock_service.get_lock_info.return_value = mock_lock_info
+        mock_collab = MagicMock()
+        mock_collab.check_collaborator_permission.return_value = {
+            "has_permission": True,
+            "level": "MEMBER",
+            "level_value": 1,
+        }
+
+        def _get(cls):
+            if cls is BotRepository:
+                return mock_repo
+            if cls is CollaboratorLockService:
+                return mock_lock_service
+            if cls is CollaboratorService:
+                return mock_collab
+            return None
+
+        mock_injector.get.side_effect = _get
+
+        result = await interceptor.before(ctx)
+
+        assert ctx.response is None
+        assert result is not None
+        assert ctx.metadata.get("permission_level") == "MEMBER"
+        mock_collab.check_collaborator_permission.assert_called_once_with(
+            bot_id="bot_shared",
+            owner_id="owner_other",
+            user_id="user_001",
+            required_level=PermissionLevel.MEMBER,
+            explicit=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_collaborator_with_member_bar_stays_forbidden(self):
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
+
+        user = AuthenticatedIdentity(
+            id="1", operatorName="test", staffId="user_001"
+        )
+        interceptor = CollaboratorPermissionInterceptor(
+            bot_id="$request.bot_id",
+            owner_id="$request.owner_id",
+            required_level=PermissionLevel.MEMBER,
+            explicit=True,
+        )
+        mock_injector = MagicMock()
+        ctx = InterceptorContext(
+            user=user,
+            route_kwargs={
+                "request": {"bot_id": "bot_shared", "owner_id": "owner_other"}
+            },
+            injector=mock_injector,
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"owner_id": "owner_other"}
+        mock_lock_info = MagicMock()
+        mock_lock_info.has_collaborators = True
+        mock_lock_info.lock.holder_user_id = "user_001"
+        mock_lock_info.holder_name = "Tester"
+        mock_lock_service = MagicMock()
+        mock_lock_service.get_lock_info.return_value = mock_lock_info
+        mock_collab = MagicMock()
+        mock_collab.check_collaborator_permission.return_value = {
+            "has_permission": False,
+            "level": "NONE",
+            "level_value": 0,
+        }
+
+        def _get(cls):
+            if cls is BotRepository:
+                return mock_repo
+            if cls is CollaboratorLockService:
+                return mock_lock_service
+            if cls is CollaboratorService:
+                return mock_collab
+            return None
+
+        mock_injector.get.side_effect = _get
+
+        result = await interceptor.before(ctx)
+
+        assert result is None
+        assert ctx.response is not None
+        assert ctx.response.error_code == 403

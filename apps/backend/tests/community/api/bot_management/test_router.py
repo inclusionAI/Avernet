@@ -736,6 +736,51 @@ class TestRestartBot:
         assert resp.json()["success"] is True
         assert resp.json()["data"]["restart_in_progress"] is True
 
+    def test_collaborator_bar_matches_public_restart_contract(self):
+        """The internal restart route must use the public MEMBER bar.
+
+        ``/openapi/v1/bots/{bot_id}/restart`` already authorizes an explicit
+        MEMBER collaborator. The legacy route the "My Bots" page calls used
+        the interceptor's default ADMIN bar, which refuses default-role
+        collaborators. Keep the two surfaces in step.
+        """
+        from agentclaw.community.adapters.http.bot_management import (
+            router as router_module,
+        )
+        from agentclaw.community.core.bot_collaborator.interceptor import (
+            CollaboratorPermissionInterceptor,
+        )
+        from agentclaw.community.core.bot_collaborator.models import (
+            PermissionLevel,
+        )
+
+        route = next(
+            route
+            for route in router_module.router.routes
+            if getattr(route, "path", None) == "/api/bots/{bot_id}/restart"
+            and "POST" in route.methods
+        )
+        interceptors = None
+        for cell in route.endpoint.__closure__ or ():
+            value = cell.cell_contents
+            if (
+                isinstance(value, tuple)
+                and value
+                and all(
+                    isinstance(item, CollaboratorPermissionInterceptor)
+                    for item in value
+                )
+            ):
+                interceptors = value
+                break
+
+        assert interceptors, "restart route must stay behind the collaborator interceptor"
+        interceptor = interceptors[0]
+        assert interceptor.required_level is PermissionLevel.MEMBER
+        assert interceptor.explicit is True
+        assert interceptor.skip_lock_check is False
+        assert interceptor.persist_audit_log is True
+
 
 class TestRestartScheduler:
     def test_rejects_non_admin(self, client):
