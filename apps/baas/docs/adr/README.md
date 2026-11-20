@@ -9,7 +9,7 @@ Scope rules:
 - Decisions here are **BaaS-app-level** and govern the community platform
   (including its side of the two-edition relationship). Hard-to-reverse,
   system-level decisions for the whole Avernet monorepo live in the repo-root
-  [`docs/adr/`](../../../docs/adr/) — see `CONTEXT-MAP.md` and
+  [`docs/adr/`](../../../../docs/adr/) — see `CONTEXT-MAP.md` and
   `docs/agents/domain.md` for that numbering and lifecycle. No repo-root ADR
   concerns BaaS topics today, so the app-level numbering here starts at 0001.
 - The internal OCB monorepo keeps its **own, separate** enterprise-focused ADR
@@ -39,7 +39,7 @@ Scope rules:
 
 ## Writing the next ADR
 
-1. Next number: **0017**. Create `NNNN-kebab-title.md` here, following the
+1. Next number: **0018**. Create `NNNN-kebab-title.md` here, following the
    scope rules above.
 2. Required sections, in order: `# ADR-NNNN: <Title>`, `## Status`,
    `## Date`, `## Applies to`, `## Context`, `## Decision`,
