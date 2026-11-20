@@ -35,16 +35,20 @@ describe('community rich text', () => {
     expect(container.querySelector('ul,h1,h2')).toBeNull();
     unmount();
   });
-  test.each(['https://example.com/path)tail', 'https://example.com/?x=1&copy;=2'])(
+  test.each([
+    ['https://example.com/path)tail', 'https://example.com/path%29tail'],
+    ['https://example.com/(one)(two))tail', 'https://example.com/%28one%29%28two%29%29tail'],
+    ['https://example.com/?x=1&copy;=2', 'https://example.com/?x=1&copy;=2'],
+  ])(
     'preserves rendered href %s',
-    (href) => {
+    (href, expectedHref) => {
       const root = document.createElement('div');
       const link = document.createElement('a');
       link.href = href;
       link.textContent = '文档';
       root.append(link);
       const { container } = render(<CommunityBody body={communityEditorMarkdown(root)} />);
-      expect(container.querySelector('a')?.getAttribute('href')).toBe(href.replace(')', '%29'));
+      expect(container.querySelector('a')?.getAttribute('href')).toBe(expectedHref);
     },
   );
   test('summary strips formatting without losing link text', () => {
