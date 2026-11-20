@@ -1,13 +1,14 @@
 import { Button } from '@/components/ui/Button';
 import type { ForumTargetRef, InteractionStats } from '@/domain/community/types';
 import { cn } from '@/utils/cn';
-import { Bookmark, Eye, Heart } from 'lucide-react';
+import { Bookmark, Eye, Heart, Star } from 'lucide-react';
 import { formatDateTime } from '../CommunityTopicDetail/model';
 
 export interface TopicInteractionBarProps {
   topicId: string;
   topicStats: InteractionStats;
   publishedAt: string;
+  compact?: boolean;
   liked?: boolean;
   favorited?: boolean;
   likePending?: boolean;
@@ -24,6 +25,7 @@ export function TopicInteractionBar({
   topicId,
   topicStats,
   publishedAt,
+  compact = false,
   liked = false,
   favorited = false,
   likePending = false,
@@ -31,6 +33,7 @@ export function TopicInteractionBar({
   onLike,
   onFavorite,
 }: TopicInteractionBarProps) {
+  const FavoriteIcon = compact ? Star : Bookmark;
   const target: ForumTargetRef = { targetType: 'TOPIC', id: topicId };
 
   return (
@@ -69,11 +72,11 @@ export function TopicInteractionBar({
             favorited ? 'text-warning hover:text-warning' : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          <Bookmark className={cn('size-4', favorited && 'fill-current')} aria-hidden />
-          <span>{favorited ? '已收藏' : '收藏'}</span>
+          <FavoriteIcon className={cn('size-4', favorited && 'fill-current')} aria-hidden />
+          <span>{compact ? topicStats.favoriteCount : favorited ? '已收藏' : '收藏'}</span>
         </Button>
       </div>
-      <span className="text-xs text-muted-foreground">发表于：{formatDateTime(publishedAt)}</span>
+      {!compact && <span className="text-xs text-muted-foreground">发表于：{formatDateTime(publishedAt)}</span>}
     </section>
   );
 }

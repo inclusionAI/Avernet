@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 // CommunityPersonalCenter 覆盖率补齐:该文件独立驱动 index/ActivityList/FollowList/
-// useFollowedAuthorTopics 的 100% 行覆盖(loading/error/空态/兜底上下文/回贴分组/
+// useFollowedAuthorTopics 的 100% 行覆盖(loading/error/空态/兜底上下文/回帖主题去重/
 // 关注身份选择与主题列表加载各分支),不依赖同目录其它测试文件运行。
 import type {
   CommunityTopic,
@@ -13,7 +13,7 @@ import type { UsePersonalCenterResult } from '@/hooks/usePersonalCenter';
 import { communityService } from '@/services/community';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 // 说明:jest.mock 工厂在 import 绑定初始化前执行,故工厂内必须使用注入的全局 jest,
 // 这里从 @jest/globals 只导入断言/生命周期 API。
 import { beforeEach, describe, expect, it } from '@jest/globals';
@@ -283,7 +283,7 @@ describe('CommunityPersonalCenter 覆盖补齐', () => {
     expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-1', postId: 'post-1' });
   });
 
-  it('REPLIED 按主题分组,直接回复与楼中楼都可跳转', () => {
+  it('REPLIED 合并直接回复和楼中楼，点击唯一主题行打开主题', () => {
     mockedCenter.activityType = 'REPLIED';
     const replyContext: PersonalCenterTopicContext = {
       ...baseTopicContext,
@@ -322,19 +322,17 @@ describe('CommunityPersonalCenter 覆盖补齐', () => {
     };
     const { onOpenTopic } = renderCenter();
 
-    // timezone-less UTC 串按北京时间展示
-    expect(screen.getByText('最近回复：2026-10-27 18:00')).toBeInTheDocument();
-    expect(screen.getByText('回复 @风控分析 Bot：先按 true/false positive 分类标注误报。')).toBeInTheDocument();
+    const list = within(screen.getByLabelText('我的回帖列表'));
+    expect(list.getAllByRole('heading', { name: '误报率怎么压下来' })).toHaveLength(1);
+    expect(list.queryByText('我回复另一个回复的内容。')).not.toBeInTheDocument();
+    expect(list.queryByText(/先按 true\/false positive/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('误报率怎么压下来'));
-    expect(onOpenTopic).toHaveBeenLastCalledWith({ topicId: 'topic-2' });
-    // 无 postId 的楼条目标题为分组标题,这里点楼中楼行
-    const innerRow = screen.getByText('我回复另一个回复的内容。');
-    fireEvent.click(innerRow);
-    expect(onOpenTopic).toHaveBeenLastCalledWith({ topicId: 'topic-2', postId: 'post-child' });
+    fireEvent.click(list.getByRole('heading', { name: '误报率怎么压下来' }));
+    expect(onOpenTopic).toHaveBeenCalledTimes(1);
+    expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-2' });
   });
 
-  it('REPLIED 兜底:未知时间展示「时间未知」,无 topicId 时标题兜底且点击不跳转', () => {
+  it('REPLIED 忽略无主题 ID 的回复，回复时间缺失不影响原帖可见', () => {
     mockedCenter.activityType = 'REPLIED';
     mockedCenter.activityPage = {
       items: [
@@ -344,7 +342,7 @@ describe('CommunityPersonalCenter 覆盖补齐', () => {
           target: { targetType: 'TOPIC', id: 'topic-e' },
           bodyPreview: '时间缺失的回复',
           happenedAt: '   ',
-          topicContext: { ...baseTopicContext, title: '时间空串分组' },
+          topicContext: { ...baseTopicContext, title: '时间空串对应主题' },
         }),
         activity({
           activityType: 'REPLIED',
@@ -352,9 +350,9 @@ describe('CommunityPersonalCenter 覆盖补齐', () => {
           target: { targetType: 'TOPIC', id: 'topic-bad' },
           bodyPreview: '时间非法的回复',
           happenedAt: 'not-a-date',
-          topicContext: { ...baseTopicContext, title: '时间非法分组' },
+          topicContext: { ...baseTopicContext, title: '时间非法对应主题' },
         }),
-        // 无 topicId 且无上下文/正文(bodyPreview 为 nullish 才会走到兜底)→ 标题为「话题 #」
+        // 无 topicId 的回复不能转换为可打开的主题行
         activity({
           activityType: 'REPLIED',
           topicId: undefined,
@@ -368,14 +366,12 @@ describe('CommunityPersonalCenter 覆盖补齐', () => {
     };
     const { onOpenTopic } = renderCenter();
 
-    expect(screen.getAllByText('最近回复：时间未知')).toHaveLength(2);
-    expect(screen.getByText('话题 #')).toBeInTheDocument();
-    const callsBefore = onOpenTopic.mock.calls.length;
-    fireEvent.click(screen.getByText('话题 #'));
-    // 无 topicId → openTarget 为 null → 不触发跳转
-    expect(onOpenTopic.mock.calls.length).toBe(callsBefore);
-    expect(screen.getByText('时间缺失的回复')).toBeInTheDocument();
-    expect(screen.getByText('时间非法的回复')).toBeInTheDocument();
+    const list = within(screen.getByLabelText('我的回帖列表'));
+    expect(list.getAllByRole('heading')).toHaveLength(2);
+    expect(list.getByRole('heading', { name: '时间非法对应主题' })).toBeInTheDocument();
+    expect(list.queryByText('时间缺失的回复')).not.toBeInTheDocument();
+    fireEvent.click(list.getByRole('heading', { name: '时间空串对应主题' }));
+    expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-e' });
   });
 
   it('FOLLOWED 列表:选中用户/键盘选中 Bot/查看主题/取消关注', async () => {
@@ -400,23 +396,23 @@ describe('CommunityPersonalCenter 覆盖补齐', () => {
     // 点击选中用户 → 拉取其主题
     fireEvent.click(screen.getByText('孙七'));
     await waitFor(() => expect(communityService.listTopics).toHaveBeenCalledWith({ authorId: 'user-b', limit: 20 }));
-    await waitFor(() => expect(screen.getByText('孙七 的帖子')).toBeInTheDocument());
+    expect(within(screen.getByLabelText('关注对象资料')).getByRole('heading', { name: '孙七' })).toBeVisible();
+    await screen.findByRole('heading', { name: '孙七的调研报告' });
     expect(screen.getByText('孙七的调研报告')).toBeInTheDocument();
     expect(screen.getByLabelText('浏览 321')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('孙七的调研报告'));
     expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-2' });
 
-    // 非 Enter/空格按键不改变选中态
-    fireEvent.keyDown(screen.getByText('孙七'), { key: 'Tab' });
-    expect(screen.getByText('孙七 的帖子')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回我的关注列表' }));
+    const botCard = screen.getByRole('button', { name: /^协作 Bot/ });
+    fireEvent.keyDown(botCard, { key: 'Tab' });
+    expect(screen.queryByLabelText('关注对象资料')).not.toBeInTheDocument();
+    fireEvent.keyDown(botCard, { key: 'Enter' });
+    const profile = within(screen.getByLabelText('关注对象资料'));
+    expect(profile.getByRole('heading', { name: '协作 Bot' })).toBeVisible();
 
-    // 键盘 Enter 选中 Bot 身份
-    fireEvent.keyDown(screen.getByText('协作 Bot'), { key: 'Enter' });
-    await waitFor(() => expect(screen.getByText('协作 Bot 的帖子')).toBeInTheDocument());
-
-    // 取消关注按钮触发宿主回调
-    fireEvent.click(screen.getByRole('button', { name: '取消关注 孙七' }));
+    fireEvent.click(profile.getByRole('button', { name: '取消关注' }));
     expect(mockedCenter.unfollow).toHaveBeenCalledTimes(1);
   });
 
@@ -477,7 +473,7 @@ describe('CommunityPersonalCenter 覆盖补齐', () => {
     // 艾克:请求挂起时展示主题骨架屏
     fireEvent.click(screen.getByText('艾克'));
     const postsSection = screen.getByLabelText('关注对象的帖子');
-    await waitFor(() => expect(screen.getByText('艾克 的帖子')).toBeInTheDocument());
+    expect(within(screen.getByLabelText('关注对象资料')).getByRole('heading', { name: '艾克' })).toBeVisible();
     expect(postsSection.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
     await act(async () => {
       deferredList.resolve({ items: [topic({ id: 'topic-e', title: '艾克的专题' })], total: 1 });
@@ -582,12 +578,13 @@ describe('CommunityPersonalCenter 覆盖补齐', () => {
     const { view } = renderCenter();
 
     fireEvent.click(screen.getByText('满仓'));
-    await waitFor(() => expect(screen.getByText('满仓 的帖子')).toBeInTheDocument());
+    expect(within(screen.getByLabelText('关注对象资料')).getByRole('heading', { name: '满仓' })).toBeVisible();
+    await screen.findByRole('heading', { name: '满仓的主题' });
 
     // 列表变化后选中身份再也找不到 → effect 清空 selectedKey
     mockedCenter.activityPage = { items: [], total: 0 };
     view.rerender(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
-    expect(screen.queryByText('满仓 的帖子')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('关注对象资料')).not.toBeInTheDocument();
     expect(screen.getByText('暂无关注')).toBeInTheDocument();
   });
 });
