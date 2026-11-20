@@ -66,6 +66,8 @@ pub struct ChannelOutboundEvent {
     pub render_hint: ChannelRenderHint,
     /// Original IM message id that started this run, when available.
     pub source_im_message_id: Option<String>,
+    /// Trusted BCS dispatch mode; never inferred from a Bot event payload.
+    pub caller_dispatch: bool,
 }
 
 /// 归一化投递结果(刻意极简,仿 `BotDeliveryResult`)。

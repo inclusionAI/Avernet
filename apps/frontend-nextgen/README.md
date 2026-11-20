@@ -51,6 +51,24 @@ Group absent from the current sidebar page/filter is resolved by ID through the
 existing selected-Group detail fallback, including Session-only membership; list
 absence alone never changes the participation filter or discards the requested Session.
 
+Both already-joined and newly accepted invitations support these optional URL
+query parameters. The verified token target, not the editable path segment or
+query, supplies the resource IDs and determines the allowed views.
+
+| Invitation URL path | `view` values | Result |
+| --- | --- | --- |
+| `/workspace/invite/groups/{token}` | `group`, `full` | `group` opens `/workspace/collaboration/group` for the invited Group. |
+| `/workspace/invite/sessions/{token}` | `session`, `group`, `full` | `session` opens `/workspace/collaboration/session` without the session list. `group` opens the parent Group and initially selects the invited Session. Neither view changes membership in the parent Group. |
+
+`view=full` or an omitted, unknown, or unsupported `view` keeps the original
+`/workspace/collaboration` destination and target selection. If the verified
+target lacks the IDs required to open a focused page, the invitation uses that
+same full-workspace fallback. On focused pages, `showReturn=false` hides the
+**Return to full collaboration** button; `showReturn=true`, an omitted value, or
+an unknown value leaves it visible. The full workspace has no such return bar.
+For example, `/workspace/invite/sessions/{token}?view=session&showReturn=false`
+opens the invited Session with no session list or return bar.
+
 An explicit Session deep link issues one sidebar-location request after route
 identity hydration. Once the target Group and Session details are verified,
 location clears obstructing sidebar filters, displays an out-of-list target,
@@ -78,6 +96,8 @@ Regression coverage is in [invitationService.test.ts](test/services/workspace/in
 [useInviteAccept.preview.test.ts](test/pages/Workspace/hooks/useInviteAccept.preview.test.ts),
 [useInviteAccept.readonlyIdentity.test.ts](test/pages/Workspace/hooks/useInviteAccept.readonlyIdentity.test.ts)
 and [InviteAcceptPanel.test.tsx](test/pages/Workspace/InviteAcceptPanel.test.tsx).
+The [focused-page tests](test/pages/Workspace/FocusedCollaboration.test.tsx)
+cover the return bar and preservation of its option when changing Sessions.
 Sidebar and route regressions are covered by
 [invitationSidebarNavigation.test.tsx](test/pages/Workspace/invitationSidebarNavigation.test.tsx),
 [useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
@@ -241,6 +261,32 @@ display a dash. Lab rows do not claim execution duration from these timestamps;
 the default MyTask presentation remains unchanged. Regression coverage lives in
 [`Tasks.test.tsx`](test/pages/Lab/Tasks.test.tsx).
 
+## Notification center detail classification
+
+Approval details loaded through `workOrderService.getDetail` retain the approval
+identity even when the detail response omits `item_type` or `event_type`, or its
+event is not yet in the display catalogue. Notification details loaded through
+`notificationService.getDetail` retain their recipient-notification identity,
+even when they carry an originating approval event. Classification does not depend
+on approval status, read state or the user's current approval permission.
+Approval-result notifications display the category label “审批类”, rather than
+“审批通知”; this presentation choice does not turn a notification into an
+approvable work order or change its read state.
+The [shared category tag](src/components/Admin/WorkOrderCategoryTag.tsx) is used
+by list rows and detail drawers in every view, including pending and processed.
+Approval work orders and approval-result notifications display “审批类”; other
+notifications display “通知类”. All category tags use the same neutral semantic
+colors, independent of event type, read state or processing status. Approval
+status/action colors are unchanged. The shared event catalogue still recognizes
+Skill editor requests for domain metadata.
+
+Regression coverage lives in
+[workOrderService.api.test.ts](test/services/admin/workOrderService.api.test.ts),
+[notificationService.test.ts](test/services/admin/notificationService.test.ts),
+[workOrderMeta.test.ts](test/domain/admin/workOrderMeta.test.ts) and
+[WorkOrderDetailDrawer.test.tsx](test/components/Admin/WorkOrderDetailDrawer.test.tsx) and
+[WorkOrderCategoryTag.test.tsx](test/components/Admin/WorkOrderCategoryTag.test.tsx).
+
 ## Source synchronization
 
 `OPEN_CORE_MANIFEST.json` records the TeamClaw source commit. Changes originating in this public directory must be taken back into the TeamClaw Open Core baseline before the next export.
@@ -336,3 +382,14 @@ Presentation and interaction regression coverage lives in
 [`test/evolution`](test/evolution), including template pagination, task actions,
 score display and output inspection. Run `npm test -- --runInBand test/evolution`
 in a configured frontend workspace.
+
+## TaskEscort sidebar
+
+The [TaskEscort navigation](src/pages/TaskEscort/Navigation.tsx) uses 14px labels,
+12px group headings, 20px icons and 44px rows. On desktop its right edge is a
+focusable separator: drag right to grow, use Left/Right for 10px steps, or
+Home/End for the 220–360px bounds (264px default). Width is stored locally under
+`task-escort.sidebar-width`; unavailable storage leaves resizing usable. The
+editor retains its 72px compact rail and mobile retains horizontal navigation
+without a resize handle. No global selection styles are changed during dragging.
+Regression coverage: [sidebar.test.tsx](test/taskEscortWorkspace/sidebar.test.tsx).

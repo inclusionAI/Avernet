@@ -61,6 +61,7 @@ async fn runtime_header_policy_preserves_json_and_provider_auth() {
             };
             let transport = HttpProviderTransport::allowing_private_networks_for_tests();
             let command = |body: &ProviderWebhookRequest| BotDeliveryCommand {
+                a2a_test_user: None,
                 target: target.clone(), run_id: body.id.clone(),
                 frame: bcs_protocol::BcsFrame::Request(bcs_protocol::RequestFrame::new(
                     &body.id, &body.method, Some(serde_json::json!({

@@ -2,6 +2,8 @@
 
 ## Provides
 
+- Independent DocumentCas and StrictLease contracts; their presence does not
+  widen AtomicJson or ordinary TTL guarantees.
 - StorePlugin capability declaration and independent ordinary/versioned KV,
   atomic JSON, sorted-set and stream operation traits.
 - Shared version, expiry, operation outcome and uncertainty contracts.

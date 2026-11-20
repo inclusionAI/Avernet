@@ -272,7 +272,7 @@ async fn publish(
         sender_role: ParticipantRole::Driver, sender_label: "BCS".into(),
         kind: ChannelOutboundEventKind::System, purpose: ChannelOutboundPurpose::Conversation,
         text: Some(text), raw_payload: serde_json::json!({"state":"delivery_status", "message_id":row.source_message_id}),
-        render_hint: ChannelRenderHint::Render, source_im_message_id: Some(source.into()), source_is_channel: false,
+        render_hint: ChannelRenderHint::Render, source_im_message_id: Some(source.into()), caller_dispatch: false, source_is_channel: false,
     }).await.map_err(|_| bcs_service_api::ServiceError::InternalError("delivery IM notification failed".into()))
 }
 
@@ -322,6 +322,7 @@ async fn publish_reaction(
             ))?,
             render_hint: ChannelRenderHint::IgnoreByDefault,
             source_im_message_id: Some(source.into()),
+            caller_dispatch: false,
             source_is_channel: false,
         })
         .await

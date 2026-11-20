@@ -156,6 +156,8 @@ pub struct OutboundMessage {
     pub render_hint: ChannelRenderHint,
     /// Original IM message id when this run was started by a channel message.
     pub source_im_message_id: Option<String>,
+    /// Trusted BCS dispatch mode; never inferred from a Bot event payload.
+    pub caller_dispatch: bool,
     /// 该消息是否来自 IM(防回环:来自 IM 的不再转发回去)。
     pub source_is_channel: bool,
 }
@@ -166,6 +168,18 @@ pub trait ChannelService: Send + Sync {
     /// Chat 型 session 调 MessageFlowService,StateMachine 触发 runtime task。
     /// Errors are classified for the delivery adapter to provide actionable feedback.
     async fn handle_inbound(&self, msg: InboundMessage) -> Result<(), ChannelInboundError>;
+
+    /// Resolve the sole Human speaker of a server-owned, single-Bot channel
+    /// Session. Implementations must verify the live binding and conversation
+    /// mapping. The Group carries the projected Session participants; an
+    /// unproven or shared Session returns `None`.
+    async fn exclusive_session_speaker(
+        &self,
+        _session: &bcs_domain::Session,
+        _group: &bcs_domain::Group,
+    ) -> Result<Option<String>, ChannelUseCaseError> {
+        Ok(None)
+    }
 
     /// 出站 hook:若 session 绑定了 channel 会话且可见性允许,则投递到 IM。
     /// 无绑定 / 不可见 / 来自 IM(防回环)→ no-op。

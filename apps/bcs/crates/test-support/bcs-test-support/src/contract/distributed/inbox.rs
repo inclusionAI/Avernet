@@ -13,7 +13,7 @@ pub async fn inbox_producer_port_contract_tests(
         AdmitOutcome::Accepted(receipt) => receipt,
         other => panic!("fresh admission was not accepted: {other:?}"),
     };
-    assert_eq!(port.admit(fresh).await?, AdmitOutcome::Duplicate(receipt));
+    assert_eq!(port.admit(fresh).await?, AdmitOutcome::Accepted(receipt));
     assert_eq!(port.admit(changed).await?, AdmitOutcome::ContentConflict);
     Ok(())
 }

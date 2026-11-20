@@ -500,6 +500,7 @@ pub async fn handle_task_message(
     let delivery = flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: delivery_target,
             run_id: run_id.clone(),
             frame,

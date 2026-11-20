@@ -95,8 +95,10 @@ Existing paused ordinary Owner notices remain paused.
   `{ "botRef": "opaque reference", "enabled": true, "version": 0 }` or
   `{ "all": true, "enabled": false }`. The one visible switch writes both
   flags; 0 is the expected version for a missing row. The current owner may
-  configure a non-service Bot. The directory's `bot_type = service` marks
-  platform-managed Bots. A single-Bot write to a service Bot returns 403.
+  configure a production (`env = prod`) personal Bot using OpenClaw or TE.
+  Eligibility uses the existing directory's `bot_type` and `active_engine` fields.
+  Service Bots using either supported engine require platform evaluation before
+  enablement. Desktop Bots and engines other than OpenClaw/TE are unsupported. Single-Bot owner writes to these Bots return 403.
 - An authenticated ClawInsight or global administrator can read or replace a single Bot's
   full configuration within the existing tenant and target-environment scope via `GET` or `PUT`
   `/api/insight/v1/monitoring/configurations/:botRef`. Both return
@@ -108,11 +110,15 @@ Existing paused ordinary Owner notices remain paused.
   Notification channels accept route references and booleans as above.
   Stale versions return 409. Group URLs still come from the shared registry.
 - Bulk operations use the existing owner directory and traverse all keyset
-  pages, irrespective of UI search/page. Bulk writes skip service Bots and
+  pages, irrespective of UI search/page. Bulk writes select only production Bots,
+  skip service/desktop Bots and engines other than OpenClaw/TE and
   cover the current owner's eligible Bots. `{updated, failed}` reports partial
   success; retries reload versions and apply compare-and-swap to switch writes.
 - Bot options/status return the effective recovery switch and mark service Bots
-  with `isServiceBot: true`. Legacy-only
+  with `isServiceBot: true`. Options/status expose `configurationDisabledReason`
+  for service, desktop and unsupported-engine Bots. `activeEngine` and `botType`
+  identify the independent engine and Bot-type dimensions for display. The same centralized rule
+  controls single and bulk owner writes, rechecking live metadata before mutation. Legacy-only
   Bots have `diagnosisEnabled: false`, their legacy recovery state, and version 0.
   The first UI write creates a new row with `team_key: "default"` and explicit
   Owner/group notification flags set to true. This takes complete ownership
@@ -128,9 +134,13 @@ The **诊断自愈** sidebar entry contains **诊断** and **自愈**. The recov
 list shows task state and recovery result in separate columns and preserves
 filters and pagination when opening an existing detail.
 
-**诊断监控设置** shows the current owner's searchable, paginated Bot list.
-The switch appears on when both flags are true. Service Bot switches are
-read-only and show the platform contact. Platform staff use the administrator
+**诊断监控设置** requests `env=prod` from the existing Bot options endpoint,
+which filters the current owner's production Bots before pagination. The optional
+`env` filter must be within the authenticated principal's allowed environments.
+The switch appears on when both flags are true. Unsupported Bot switches remain
+visible, gray and read-only, including when their saved switches are enabled.
+Each row shows its reason, and the notice explains unsupported types/engines
+and the service Bot platform contacts. Existing settings are preserved. Platform staff use the administrator
 configuration endpoint to configure those Bots.
 
 Use `/insight?module=monitoring&openMonitoringSettings=1` as the invitation

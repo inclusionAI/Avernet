@@ -61,6 +61,72 @@ async fn unmanaged_final_preserves_publication_and_legacy_group_fallback() {
 }
 
 #[tokio::test]
+async fn caller_final_recovers_the_original_channel_message_without_a_local_mapping() {
+    use bcs_domain::{DeliveryType, MessageVisibilityDomain, NewMessage, SenderType, message_delivery::DeliveryFlowKind};
+    use bcs_service_api::{DeliveryTransitionCommand, ManagedMessageDeliveryService};
+    use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent;
+    use bcs_service_api::port::repo::message_delivery::{AdmitMessageDeliveries, DeliveryAdmissionTarget};
+
+    let fixture = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let group = fixture.group.get("group-1").await.unwrap();
+    let session_id = "group-1:caller-reply";
+    let session = session_support::test_session(session_id, "group-1", group.participants);
+    let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+    let service = Arc::new(bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()));
+    let flow = BcsMessageFlow::new(fixture.group, fixture.routing, fixture.registry,
+        fixture.bot_delivery, fixture.frontend_delivery)
+        .with_message_repo(repo)
+        .with_managed_deliveries(service.clone())
+        .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session)));
+    let channel = Arc::new(RecordingChannelService::default());
+    assert!(flow.channel_slot().set(channel.clone()).is_ok());
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let row = service.admit(AdmitMessageDeliveries {
+        display_message: None,
+        message_id: "caller-message".into(),
+        flow_kind: DeliveryFlowKind::Group,
+        now_ms: now, expire_at_ms: None, event: None,
+        targets: vec![DeliveryAdmissionTarget {
+            rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send,
+            max_queued: 10, semantic_projection_json: json!({"version":1,"caller_required":true}),
+            run_id: Some("caller-run".into()),
+        }],
+        message: NewMessage {
+            visibility_domain: MessageVisibilityDomain::Chat, audience: None,
+            group_id: "group-1".into(), session_id: session_id.into(), sender_id: "human_1".into(),
+            sender_type: SenderType::Human, message_type: "chat".into(),
+            content: json!({"text":"hello","source_im_message_id":"original-im-message"}),
+            client_msg_id: None, owner_bot_id: None, created_at: now as u64, run_id: String::new(),
+        },
+    }).await.unwrap().deliveries.remove(0);
+    let started = service.transition(DeliveryTransitionCommand {
+        delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
+        event: DeliveryLifecycleEvent::StartSend,
+        caller_cancel: None, caller_dispatch_commit: None, caller_terminal: None,
+        now_ms: now, request_id: None, actor_id: None, reply: None,
+        transport_context_json: Some(json!({
+            "version": 1,
+            "owner": {"kind": "http_provider", "provider_id": "provider", "provider_bot_ref": "bot-driver"},
+            "downstream_session_key": session_id,
+        })),
+        deadline_at_ms: None,
+    }).await.unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-driver".into(), run_id: started.run_id.unwrap(), group_id: "group-1".into(),
+        bcs_session_id: Some(session_id.into()), state: ChatEventState::Final,
+        event_type: "chat.event".into(),
+        event_payload: json!({"message":{"role":"assistant","content":[{"type":"text","text":"reply"}]}}),
+    }).await.unwrap();
+    let outbound = channel.outbound().await;
+    assert_eq!(outbound.len(), 1);
+    assert_eq!(outbound[0].kind, ChannelOutboundEventKind::ChatFinal);
+    assert_eq!(outbound[0].source_im_message_id.as_deref(), Some("original-im-message"));
+    assert!(outbound[0].caller_dispatch);
+}
+
+#[tokio::test]
 async fn queue_reconstruction_never_rewrites_channel_or_frontend_final() {
     use bcs_service_api::ManagedMessageDeliveryService;
     use bcs_service_api::port::repo::MessageRepoPort;
@@ -86,13 +152,14 @@ async fn queue_reconstruction_never_rewrites_channel_or_frontend_final() {
                 (ChatEventState::Delta, "agent", json!({"stream":"tool","data":{"phase":"result","name":"search","toolCallId":"tool","result":"done"}})),
                 (ChatEventState::Delta, "chat.event", json!({"message":{"content":[{"type":"text","text":"工具后"}]}})),
             ] { flow.handle_bot_event(event(state, kind, payload)).await.unwrap(); }
-            let payload = json!({"state":"final","message":{"role":"assistant","content":[{"type":"text","text":final_text}]},"custom":"preserved"});
+            let payload = json!({"state":"final","message":{"role":"assistant","content":[{"type":"text","text":final_text}]},"custom":"preserved","caller_dispatch":true});
             let before = support.frontend_delivery.events().await.len();
             flow.handle_bot_event(event(ChatEventState::Final, "chat.event", payload.clone())).await.unwrap();
             let outbound = channel.outbound().await;
             let finals: Vec<_> = outbound.iter().filter(|m| m.kind == ChannelOutboundEventKind::ChatFinal).collect();
             assert_eq!(finals.len(), 1);
             assert_eq!(finals[0].raw_payload, payload);
+            assert!(!finals[0].caller_dispatch, "a Bot payload cannot assert Caller dispatch");
             assert_eq!(finals[0].text.as_deref().unwrap_or(""), final_text);
             let events = support.frontend_delivery.events().await;
             let final_frame: Value = serde_json::from_str(&events[before]).unwrap();

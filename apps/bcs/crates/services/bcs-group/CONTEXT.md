@@ -14,6 +14,16 @@
 - Group session service implementation for BCS.
 - Group lifecycle, membership, and session coordination rules.
 - Application-facing orchestration for group creation, updates, and state changes.
+- For `chat`, `manager_worker`, and `state_machine` creation, an
+  authenticated Human creating a private normal Group as itself can include
+  a non-hidden `protected` or `private` friend Bot (including the lead Bot).
+  The same Connect service as the friend list checks the requested Bot IDs
+  against current default-profile grants, not legacy mirrors. The exception
+  requires the Human caller to be the originator and rejects registered Bots
+  with Human-shaped IDs. It adds at most one originator registry lookup and
+  one bounded friend-grant read per 100 distinct unchecked Bots. It does not
+  change DM, Bot-originated creation, membership mutations, public-Group
+  visibility, or Provider collaboration scope.
 - `GroupCreateCommand.create_initial_session` controls the initial Session and
   its bootstrap delivery for non-provisional normal Groups, including StateMachine. False
   preserves Group authorization, validation, quota and persistence, with no

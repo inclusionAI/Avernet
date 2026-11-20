@@ -31,11 +31,25 @@ describe("internal API file log retention integration", () => {
 
   it("reports an unavailable destination once and never writes to the root-volume legacy path", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => { throw new Error("stderr unavailable"); });
     const { apiLog } = await loadLogger();
     files.appendFileSync.mockImplementation(() => { throw new Error("disk unavailable"); });
     apiLog("WRITE", "/test", {}); apiLog("WRITE", "/test", {});
     expect(error).toHaveBeenCalledTimes(1);
     expect(files.appendFileSync.mock.calls.every(call => call[0] === "/home/admin/logs/clawweb/clawweb-internal-api.log")).toBe(true);
   });
+});
+
+it.each([[undefined, "INFO"], [200, "INFO"], [404, "ERROR"], [503, "ERROR"]])("labels internal API status %s", async (status, level) => {
+  const { apiLog } = await loadLogger();
+  apiLog("READ", "/test", { status });
+  expect(files.appendFileSync.mock.calls[0][1]).toContain(` ${level} [internal-api] {`);
+});
+
+it("isolates serialization failures from callers", async () => {
+  const { apiLog, apiLogBody } = await loadLogger();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  expect(() => apiLog("WRITE", "/test", { value: BigInt(1) })).not.toThrow();
+  expect(() => apiLogBody("WRITE", "/test", { value: BigInt(1) })).not.toThrow();
+  expect(files.appendFileSync.mock.calls.at(-1)?.[1]).toContain("[unserializable body]");
 });

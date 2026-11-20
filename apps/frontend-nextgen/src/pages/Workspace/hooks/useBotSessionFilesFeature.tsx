@@ -68,33 +68,39 @@ export function useBotSessionFilesFeature(
   // 新版目录接口不下发 call_type,改经 GET /openapi/v1/bots/{id}/caller-context?stage=draft
   // (user_id 由 httpClient 注入登录工号)读聚合 bot_call_type 判定。filesSupported 进门即探测,
   // botId/ownerId 变化重查,同 Bot 会话切换不重复;cleanup cancelled 防切 Bot 晚到回写;
-  // 探测失败/字段缺失静默降级不带(不 toast,对齐 useBotEditor 探测先例)。
+  // 探测失败/字段缺失静默降级不带且零提示(suppressErrorNotification 不投默认错误 toast)。
+  // 三轮勘误(2026-11-19):好友 Bot 照旧探测(二轮「好友不探测」还原)——好友视角按契约
+  // 预期探测失败,但不再据此裁剪;探测失败降级=好友文件写操作因缺少 caller_instance
+  // 定位而关闭访问(f_user_id 路由自明,契约安全)。IAM 链 botChatProvider 同规则。
   const [isCallerRuntimeBot, setIsCallerRuntimeBot] = useState(false);
   const probeBotId = filesSupported ? botId : null;
   useEffect(() => {
     if (!probeBotId) return;
     let cancelled = false;
     botEditorService
-      .getCallerContext(probeBotId, ownerId)
+      .getCallerContext(probeBotId, ownerId, { suppressErrorNotification: true })
       .then((ctx) => {
         if (!cancelled) setIsCallerRuntimeBot(ctx.botCallType === 'caller');
       })
       .catch(() => {
-        /* 探测失败静默降级:不带参,与现状形态一致 */
+        /* 探测失败静默降级:不带参零提示,与现状形态一致 */
       });
     return () => {
       cancelled = true;
     };
   }, [probeBotId, ownerId]);
-  // 取值推导(2026-11-19 需求勘误,IAM 链同规则):我管理的/我协作的 Caller Bot →
-  // service(服务实例池,由 stage(+device_uuid) 定位);好友 Caller Bot → caller_instance
-  // (当前用户独立 Caller 实例,与 f_user_id 并存合法;仅 service 并存会 404)。探测失败
-  // (真好友视角受 Check(MEMBER) 管控 403)静默降级省略——契约安全:f_user_id 路由自明。
+  // 取值推导(三轮勘误还原,与 f_user_id 并存合法;仅 service 并存会 404):
+  // 我管理的/我协作的 Caller Bot → service(服务实例池,由 stage(+device_uuid) 定位);
+  // 好友 Caller Bot → caller_instance(当前用户独立 Caller 实例)。
   const callerRuntimeTarget = !isCallerRuntimeBot
     ? undefined
     : bot?.isFriendBot
       ? ('caller_instance' as const)
       : ('service' as const);
+
+  // 好友会话身份(2026-11-19 需求追加):好友 Bot 全链文件接口携带 f_user_id(与 user_id 同值);
+  // 单一收口,列表/上传/删除/预览/下载全链同源同值,非好友不携带。
+  const friendUserId = bot?.isFriendBot ? userId ?? undefined : undefined;
 
   // 显式位参(2026-11-19 勘误):条件 spread 让缺省位被后值顶替(device_uuid 槽吃 caller 值),
   // 全量位参各归其位;undefined 占位等价可选参数省略。
@@ -103,7 +109,7 @@ export function useBotSessionFilesFeature(
     sessionId,
     userId,
     ownerId,
-    bot?.isFriendBot ? userId ?? undefined : undefined,
+    friendUserId,
     stage,
     deviceUuid,
     callerRuntimeTarget,
@@ -113,6 +119,7 @@ export function useBotSessionFilesFeature(
     sessionId,
     userId,
     ownerId,
+    friendUserId,
     stage,
     deviceUuid,
     callerRuntimeTarget,
@@ -208,6 +215,7 @@ export function useBotSessionFilesFeature(
       stage={stage}
       deviceUuid={deviceUuid}
       callerRuntimeTarget={callerRuntimeTarget}
+      friendUserId={friendUserId}
       files={files}
       upload={upload}
       drawerOpen={drawerOpen}

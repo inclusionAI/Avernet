@@ -3,13 +3,13 @@ import type { BotOption, BotScope, DirectoryBot, DirectoryScope, MonitoringBotDi
   MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
 import { browserDiagnosisQuery, parseWindow, queryKeys } from './browser-validation.js';
 import type { BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
-import { configureBots, isServiceBot, replaceBotConfiguration } from './bot-config-service.js';
+import { botConfigurationDisabledReason, configureBots, isServiceBot, replaceBotConfiguration, type BotEnabledNotifier } from './bot-config-service.js';
 import { recoveryConfigurations } from '../repair/session-recovery/bot-configuration.js';
 import type { RecoveryAppConfigStore } from '../repair/session-recovery/configuration-contracts.js';
 
 export function createMonitoringBrowserService(store: MonitoringStore, directory: MonitoringBotDirectory,
   references: MonitoringReferences, storageScope: DirectoryScope, now: () => number = Date.now,
-  configurations?: BotDiagnosisRecoveryConfigStore, legacyConfig?: RecoveryAppConfigStore): MonitoringBrowserApi {
+  configurations?: BotDiagnosisRecoveryConfigStore, legacyConfig?: RecoveryAppConfigStore, onBotEnabled?: BotEnabledNotifier): MonitoringBrowserApi {
   function authorize(p: MonitoringPrincipal) {
     if (!p.isAuthenticated || !p.staffId?.trim()) throw new MonitoringError('UNAUTHENTICATED', '请先登录。');
     if (!p.tenant || p.tenant !== storageScope.tenant || !p.allowedTargetEnvs.length
@@ -38,6 +38,8 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
     return { botRef: references.encode(bot, tenant), botName: bot.botName, botId: bot.botId, ownerId: bot.ownerId, env: bot.env,
       enrollmentState: summary ? 'ENROLLED' : 'NOT_ENROLLED', monitoring: summary,
       ...(isServiceBot(bot) && { isServiceBot: true }),
+      activeEngine: bot.activeEngine, botType: bot.botType,
+      configurationDisabledReason: botConfigurationDisabledReason(bot),
       configuration: { diagnosisEnabled: config?.diagnosisEnabled ?? false, recoveryEnabled: config?.recoveryEnabled ?? false, version: config?.version ?? 0 },
       capabilities: { canView: true, canRequestEnrollment: !summary } };
   }
@@ -49,12 +51,12 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
     const needle = q.toLowerCase();
     return [bot.botName, bot.botId, bot.ownerId].some(value => value.toLowerCase().includes(needle));
   }
-  async function monitoredDirectory(q: string, after: string | null, limit: number) {
+  async function monitoredDirectory(q: string, after: string | null, limit: number, scope: DirectoryScope) {
     // Monitoring storage is the source of truth for enrollment. Resolve those
     // identities through the directory afterwards instead of scanning the newest
     // directory rows and hoping they contain every monitored target.
     const targets = await store.listCheckedTargets();
-    const resolved = await Promise.all(targets.map(target => directory.get(target, storageScope)));
+    const resolved = await Promise.all(targets.map(target => directory.get(target, scope)));
     const candidates = resolved.filter((bot): bot is DirectoryBot => bot !== null && matchesQuery(bot, q))
       .sort((a, b) => a.directoryId.length !== b.directoryId.length
         ? b.directoryId.length - a.directoryId.length
@@ -65,7 +67,7 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
   return {
     async configure(p, input) {
       authorize(p);
-      return configureBots(configurations, directory, references, p, input);
+      return configureBots(configurations, directory, references, p, input, onBotEnabled);
     },
     async readConfiguration(p, ref) {
       const { bot, store } = await configurationTarget(p, ref);
@@ -73,26 +75,31 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
     },
     async replaceConfiguration(p, ref, input) {
       const { bot, store } = await configurationTarget(p, ref);
-      return replaceBotConfiguration(store, bot, p.staffId, input, legacyConfig);
+      return replaceBotConfiguration(store, bot, p.staffId, input, legacyConfig, onBotEnabled);
     },
     async options(p, query) {
       authorize(p);
-      queryKeys(query, ['scope', 'q', 'limit', 'cursor', 'start', 'end']);
+      queryKeys(query, ['scope', 'q', 'limit', 'cursor', 'start', 'end', 'env']);
       const scope = (query.scope ?? 'mine') as BotScope;
       if (!['mine', 'all', 'monitored'].includes(scope)) throw new MonitoringError('INVALID_EVENT', 'Bot 范围无效。');
       if (scope !== 'mine' && !p.isClawInsightAdmin) throw new MonitoringError('FORBIDDEN', '无权访问此 Bot 范围。');
+      const env = query.env;
+      if (env !== undefined && (typeof env !== 'string' || !p.allowedTargetEnvs.includes(env))) {
+        throw new MonitoringError('INVALID_EVENT', 'Bot 环境无效。');
+      }
+      const principal = env === undefined ? p : { ...p, allowedTargetEnvs: [env] };
       const q = String(query.q ?? '').trim();
       const rawLimit = String(query.limit ?? '20');
       const limit = Number(rawLimit);
       if (q.length > 200 || !/^\d+$/.test(rawLimit) || limit < 1 || limit > 50) throw new MonitoringError('INVALID_EVENT', '搜索条件无效。');
       const window = parseWindow(query, now());
-      const context = JSON.stringify([1, p.staffId, p.isClawInsightAdmin, p.tenant, [...p.allowedTargetEnvs].sort(), scope, q, limit, window]);
+      const context = JSON.stringify([1, p.staffId, p.isClawInsightAdmin, p.tenant, [...principal.allowedTargetEnvs].sort(), scope, q, limit, window]);
       let after = query.cursor ? references.readCursor(String(query.cursor), context) : null;
       let page: { items: DirectoryBot[]; hasMore: boolean };
       if (scope === 'monitored') {
-        page = await monitoredDirectory(q, after, limit);
+        page = await monitoredDirectory(q, after, limit, principal);
       } else {
-        page = await directory.search({ principal: p, scope, q, limit, after });
+        page = await directory.search({ principal, scope, q, limit, after });
       }
       const summaries = await store.summaries(page.items, window);
       const configs = configurations ? await recoveryConfigurations(configurations, page.items, legacyConfig) : undefined;

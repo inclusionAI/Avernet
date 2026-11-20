@@ -3,6 +3,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
+use bcs_service_api::application::ConnectService;
 use bcs_service_api::core::{
     GroupMutationCommand, GroupMutationKind, SessionAuthorizationCoreService,
 };
@@ -72,6 +73,7 @@ pub struct GroupManagement {
     group: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friend: Arc<dyn FriendCoreService>,
+    friend_connect: Option<Arc<dyn ConnectService>>,
     relation: Arc<dyn RelationCoreService>,
     config: GroupConfig,
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
@@ -232,6 +234,7 @@ impl GroupManagement {
             group,
             registry,
             friend,
+            friend_connect: None,
             relation,
             config,
             system_message,
@@ -245,6 +248,12 @@ impl GroupManagement {
 
             caller_config_plane: None,
         }
+    }
+
+    /// Wire live edge-based Human friendship for ordinary Group creation.
+    pub fn with_friend_connect(mut self, connect: Arc<dyn ConnectService>) -> Self {
+        self.friend_connect = Some(connect);
+        self
     }
 
     pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {
@@ -398,8 +407,8 @@ impl GroupManagement {
     /// Select the OpenAPI v1 group-creation reachability policy.
     ///
     /// Legacy instances retain their original caller/originator checks. A
-    /// dedicated V1 instance validates collaboration from the selected driver,
-    /// after the V1 facade has verified Principal-to-driver eligibility.
+    /// dedicated V1 instance validates reachability from the originator after
+    /// the V1 facade authorizes that originator for the selected Principal.
     pub fn for_v1_openapi(mut self) -> Self {
         self.v1_openapi_create_policy = true;
         self

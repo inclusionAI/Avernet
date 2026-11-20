@@ -71,6 +71,7 @@ async fn delivery_ports_are_transport_free_contracts() {
 
     let result = bot_port
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: BotDeliveryTarget::WebSocket {
                 bot_id: "bot-1".to_string(),
             },

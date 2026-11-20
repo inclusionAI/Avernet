@@ -104,13 +104,32 @@ async fn gateway_core_harness_checks_duplicate_receipt() -> ContractResult {
             .expect(
                 "DistGatewayCoreService::admit",
                 (scope(), &request),
-                Ok::<_, DistGatewayCoreError>(CoreAdmission::Accepted(receipt())),
+                Ok::<_, DistGatewayCoreError>(CoreAdmission(receipt())),
             )
             .expect(
                 "DistGatewayCoreService::admit",
                 (scope(), &request),
-                Ok::<_, DistGatewayCoreError>(CoreAdmission::Duplicate(replay)),
+                Ok::<_, DistGatewayCoreError>(CoreAdmission(replay)),
             );
+        let script = if same_receipt {
+            let stranger = TaskScope {
+                tenant: scope().tenant,
+                principal: PrincipalId(format!("{}-another", scope().principal.0)),
+            };
+            script
+                .expect(
+                    "DistGatewayCoreService::session_group",
+                    (scope(), receipt().sid),
+                    Ok::<_, DistGatewayCoreError>(spec().group),
+                )
+                .expect(
+                    "DistGatewayCoreService::session_group",
+                    (stranger, receipt().sid),
+                    Err::<GroupId, _>(DistGatewayCoreError::NotFound),
+                )
+        } else {
+            script
+        };
         let scope = scope();
         let test = dist_gateway_core_service_contract_tests(&script, &scope, request.clone());
         if same_receipt {
@@ -164,14 +183,24 @@ async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() ->
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&caller, input().tid),
+                (&caller, &request.group, input().tid),
                 Ok::<_, GatewayError>(task_view()),
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&unauthorized, input().tid),
+                (&unauthorized, &request.group, input().tid),
                 denied,
             );
+        let another = GroupId(format!("{}-another", request.group.0));
+        let script = if leaks {
+            script
+        } else {
+            script.expect(
+                "DistGatewayService::get_task",
+                (&caller, &another, input().tid),
+                Err::<TaskView, _>(GatewayError::NotFound),
+            )
+        };
         let test =
             dist_gateway_service_contract_tests(&script, &caller, &unauthorized, request.clone());
         if leaks {

@@ -136,6 +136,7 @@ fn nil_frame_params() -> Option<serde_json::Value> {
 
 fn command(bot_id: &str) -> BotDeliveryCommand {
     BotDeliveryCommand {
+        a2a_test_user: None,
         target: BotDeliveryTarget::WebSocket { bot_id: bot_id.to_string() },
         run_id: "run-1".to_string(),
         frame: BcsFrame::Request(RequestFrame::new("frame-1", "chat.send", nil_frame_params())),
@@ -297,7 +298,7 @@ async fn config_read_failure_fails_closed() {
     assert!(transport.delivered.lock().await.is_empty());
 
     let db = sqlite_db().await;
-    let (gate, transport) = gate_with(db).await;
+    let (gate, _transport) = gate_with(db).await;
     let result = gate.deliver(command("ghost")).await.expect("pass-through");
     assert!(result.delivered, "unknown target is the transport's concern");
 }

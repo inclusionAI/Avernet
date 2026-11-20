@@ -64,6 +64,21 @@ describe('AIStudio wire and safe user projection', () => {
     expect(toWatchDto(watchFixture({lastStatus:'token_secret_value'}),200).lastStatus).toBe('unknown');
     expect(toWatchDto(watchFixture({lastStatus:'RUNNING'}),200).lastStatus).toBe('RUNNING');
   });
+  it.each(['error', 'ERROR'])('preserves the known AIS failure status %s', lastStatus => {
+    const record = watchFixture({ phase: 'resolved', lastStatus, resolutionStatus: 'failed' });
+    expect(toWatchDto(record, 200)).toMatchObject({ phase: 'resolved', lastStatus, lastError: null });
+  });
+  it('distinguishes an unrecognized AIS status from a failed query', () => {
+    const record = watchFixture({ lastStatus: 'undocumented_status', lastError: 'AIStudio status unknown' });
+    expect(toWatchDto(record, 200)).toMatchObject({
+      phase: 'waiting', lastStatus: 'unknown', lastError: 'AIStudio returned an unrecognized status',
+    });
+  });
+  it.each(['AIStudio CLI query failed', 'token=secret', 'AIStudio status unknown: token=secret'])(
+    'retains the redacted fallback for nonmatching diagnostic %s', lastError => {
+      expect(toWatchDto(watchFixture({ lastError }), 200).lastError).toBe('AIStudio status query failed');
+    },
+  );
   it('marks mailbox pending and cooldown without changing the plan', () => {
     const dto = toWatchDto(watchFixture({ manualRequestedAt: 199, lastManualRequestedAt: 199 }), 200);
     expect(dto.manualPollPending).toBe(true); expect(dto.manualPollAllowed).toBe(false);

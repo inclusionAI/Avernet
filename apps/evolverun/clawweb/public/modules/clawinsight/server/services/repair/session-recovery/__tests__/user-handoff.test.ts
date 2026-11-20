@@ -632,16 +632,32 @@ it.each([false, true])("finishes recovery found during planning normally (pendin
 
 it("continues an ended failed TE Cron through the original session and completes after verified progress", async () => {
   target = { ...target, provider: "teclaw", activeEngine: "teclaw" };
-  vi.mocked(runtime.request).mockResolvedValue({ status: 200, body: { success: true, data: { runs: [{ status: "error", finishedAtMs: now - 60000 }] } } });
+  vi.mocked(runtime.request)
+    .mockResolvedValueOnce({ status: 200, body: { success: true, data: [{ id: "cron-fixture" }] } })
+    .mockResolvedValueOnce({ status: 200, body: { success: true, data: { runs: [{ status: "error", finishedAtMs: now - 60000 }] } } });
   const trajectory = { read: vi.fn(async (input: { messageMarker?: string }) => ({ source: "aivision_tclog", coverage: "uploaded_records_only",
     traces: [{ traceId: "original-trace", input: [{ role: "user", content: input.messageMarker ? input.messageMarker + "继续剩余步骤" : "生成原业务结果" }] }],
     ...(input.messageMarker ? { delivery_confirmed: true } : {}) })) };
   const teAgent = new SessionRecoveryAgentService({ controlPlaneEnvironment: "pre", tasks, repo, audit: new AgentToolCallRepository(db, "session_recovery"), ais,
     runtime, targets: { resolve: async () => target }, trajectory, business: () => service, publicBaseUrl: "https://service.invalid", snapshotId: 1,
     nasRoots: [], leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: 3600000, now: () => now, actionNotifier });
-  let task = await create("approval", { target: { ...request.target, engine: "TE" }, session_key: "agent:main:cron:finished-run:user:owner" });
+  let task = await create("approval", { target: { ...request.target, engine: "TE" }, session_key: "agent:main:cron:c_fixture:user:owner" });
+  for (const [path, query, code] of [
+    ["/api/v1/bot/cron/running", undefined, "engine_operation_not_allowed"],
+    ["/api/v1/bot/cron/c_fixture/runs", { limit: 5 }, "invalid_teclaw_cron_task_id"],
+    ["/api/v1/bot/cron", { limit: 20 }, "invalid_engine_query"],
+    ["/api/v1/bot/cron/c_fixture", undefined, "invalid_teclaw_cron_task_id"],
+  ] as const) {
+    const rejected = await teAgent.inspect(task, { clientRequestId: `invalid-cron:${path}`, purpose: "核对 Cron",
+      operation: "engine_read", request: { method: "GET", path, ...(query ? { query } : {}) } });
+    expect(rejected).toMatchObject({ status: "failed", result: { dispatched: false, error: { code } } });
+  }
+  expect(runtime.request).not.toHaveBeenCalled();
+  const list = await teAgent.inspect(task, { clientRequestId: "list-cron", purpose: "查找任务 ID", operation: "engine_read",
+    request: { method: "GET", path: "/api/v1/bot/cron" } });
+  expect(list).toMatchObject({ status: "succeeded", result: { body: { data: [{ id: "cron-fixture" }] } } });
   const run = await teAgent.inspect(task, { clientRequestId: "finished-cron", purpose: "核实本轮失败结束", operation: "engine_read",
-    request: { method: "GET", path: "/api/v1/bot/cron/cron-fixture/runs" } });
+    request: { method: "GET", path: "/api/v1/bot/cron/cron-fixture/runs", query: { limit: 5 } } });
   expect(run.status).toBe("succeeded");
   await teAgent.trajectoryRead(await current(task.taskId), { clientRequestId: "original-failure", purpose: "核实失败位置和用户续聊" });
   const sent = await teAgent.retryMessage(await current(task.taskId), { clientRequestId: "continue-failed-cron", purpose: "纠正参数并续接剩余业务",
@@ -654,7 +670,9 @@ it("continues an ended failed TE Cron through the original session and completes
   expect(task.completionReason).toBeUndefined();
   expect(runtime.sendMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sessionKey: task.request.session_key }));
   expect(runtime.executeShell).not.toHaveBeenCalled();
-  expect(runtime.request).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ method: "GET", path: "/api/v1/bot/cron/cron-fixture/runs" }));
+  expect(runtime.request).toHaveBeenCalledTimes(2);
+  expect(runtime.request).toHaveBeenNthCalledWith(1, expect.objectContaining({ method: "GET", path: "/api/v1/bot/cron" }));
+  expect(runtime.request).toHaveBeenNthCalledWith(2, expect.objectContaining({ method: "GET", path: "/api/v1/bot/cron/cron-fixture/runs?limit=5" }));
   expect(notifier.notify).not.toHaveBeenCalled();
 });
 

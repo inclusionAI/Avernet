@@ -247,7 +247,6 @@ async fn anonymous_user_bound_chat_abort_is_unauthorized_after_connect() {
     let mut connection_state = WebClientConnectionState::default();
     let _protected_rx = connection_state.open_protected_queue();
     let auth = WorkbenchConnectionAuth::UserBound { actor_id: None, caller_ingress: None };
-    let auth = WorkbenchConnectionAuth::UserBound { actor_id: None, caller_ingress: None };
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-anonymous",
         "connect",

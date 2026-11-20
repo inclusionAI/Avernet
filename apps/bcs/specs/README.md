@@ -12,6 +12,8 @@ These entries are task-specific records. Inspect their individual status, eviden
 
 - [2026-11-15-distributed-contracts](2026-11-15-distributed-contracts/spec.md) — declarations and ordered tasks; no runtime implementation
 - [2026-11-17-worker-coordination](2026-11-17-worker-coordination/spec.md) — proposed heartbeat, shard ownership, failover and graceful handoff specification; documentation only
+- [2026-11-17-gateway-a2a-inbound](2026-11-17-gateway-a2a-inbound/spec.md) — Gateway inbound A2A server: spec, store mapping, plan, tasks and as-built notes; not wired into a binary
+- [2026-11-18-worker-runtime-phase1](2026-11-18-worker-runtime-phase1/spec.md) — proposed generic Worker execution, recovery, output and provider acceptance; documentation only
 
 - [2026-08-20-bot-task-modes](2026-08-20-bot-task-modes/)
 - [2026-09-09-group-context-api](2026-09-09-group-context-api/)

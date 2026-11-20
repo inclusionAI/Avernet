@@ -163,6 +163,10 @@ impl DeliveryRuntime {
             .filter(|value| !value.is_empty())
             .map(str::to_string);
         if delegate_parent.is_some() {
+            if context.native_credential.is_some() {
+                self.transition_ok(event(row, Event::PreparationFailed)).await;
+                return;
+            }
             self.attempt_caller_delegate_dispatch(
                 pipeline,
                 &context,
@@ -300,11 +304,12 @@ impl DeliveryRuntime {
             "caller protected dispatch: starting claim/prepare/issue/send"
         );
         let outcome = pipeline
-            .dispatch_once(
+            .dispatch_with_credential(
                 &context.target,
                 &context.service_credential,
                 facts,
                 now_ms(),
+                context.native_credential,
             )
             .await;
         // The wired typed commit (§7.5.1) advances the row's state_version

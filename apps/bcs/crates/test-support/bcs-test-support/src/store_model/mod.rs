@@ -6,6 +6,7 @@
 //! inject faults the harness must reject.
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "test-only fixture")]
 mod json;
+mod coordination;
 mod kv;
 mod stream;
 mod zset;
@@ -50,6 +51,7 @@ struct Record<T> {
 #[derive(Default)]
 struct State {
     kv: HashMap<String, Record<Vec<u8>>>,
+    leases: HashMap<String, coordination::LeaseRecord>,
     json: HashMap<String, Record<Value>>,
     zsets: HashMap<String, BTreeMap<String, f64>>,
     streams: HashMap<String, Log>,

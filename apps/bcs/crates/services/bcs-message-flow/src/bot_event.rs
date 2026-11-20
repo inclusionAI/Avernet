@@ -17,6 +17,7 @@ mod persistence;
 pub(crate) use persistence::{extract_message_text};
 use persistence::*;
 
+use bcs_domain::message_delivery::PersistedMessageDelivery;
 use bcs_domain::{
     CoordinationMode, CoordinationSurface, MessageAudience, MessageVisibilityDomain, SenderType,
 };
@@ -177,7 +178,7 @@ pub async fn handle_bot_event(
                 persist_chat_error(flow, &cmd).await?;
             }
             let frontend_deliveries = publish_incoming_event(flow, &cmd, None).await?;
-            try_channel_outbound(flow, &cmd).await;
+            try_channel_outbound(flow, &cmd, managed.as_ref()).await;
             flow.complete_send_context(&cmd.run_id).await?;
             flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
             flow.message_tracker.cleanup_run(&cmd.run_id).await;
@@ -277,7 +278,7 @@ pub async fn handle_bot_event(
         publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await?
     };
     if !managed_terminal && !history_error {
-        try_channel_outbound(flow, &cmd).await;
+        try_channel_outbound(flow, &cmd, managed.as_ref()).await;
     }
     let mut bot_deliveries = Vec::new();
 
@@ -390,7 +391,7 @@ pub async fn handle_bot_event(
             let text = flow.message_tracker.peek_chat_buf(&crate::run_reply::chat_key(&cmd)).await.unwrap_or_default();
             crate::queued_admission::settle_without_relay(flow, &cmd, &text, None).await?;
             frontend_deliveries.extend(publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await?);
-            try_channel_outbound(flow, &cmd).await;
+            try_channel_outbound(flow, &cmd, managed.as_ref()).await;
             flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
             flow.complete_send_context(&cmd.run_id).await?;
         } else {
@@ -409,7 +410,7 @@ pub async fn handle_bot_event(
                 return task_terminal::finish(flow, &row, &cmd, false).await;
             }
             frontend_deliveries.extend(publish_incoming_event(flow, &cmd, Some(&task_id)).await?);
-            try_channel_outbound(flow, &cmd).await;
+            try_channel_outbound(flow, &cmd, managed.as_ref()).await;
             flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
             flow.complete_send_context(&cmd.run_id).await?;
             flow.message_tracker.cleanup_run(&cmd.run_id).await;
@@ -425,7 +426,7 @@ pub async fn handle_bot_event(
             frontend_deliveries.extend(
                 publish_incoming_event(flow, &cmd, Some(&task_id)).await?,
             );
-            try_channel_outbound(flow, &cmd).await;
+            try_channel_outbound(flow, &cmd, managed.as_ref()).await;
             flow.complete_send_context(&cmd.run_id).await?;
             flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
         }
@@ -460,7 +461,7 @@ pub async fn handle_bot_event(
         if managed_terminal {
             crate::queued_admission::settle_without_relay(flow, &cmd, &extract_message_text(&cmd.event_payload), queue_reply.as_ref()).await?;
             frontend_deliveries.extend(publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await?);
-            try_channel_outbound(flow, &cmd).await;
+            try_channel_outbound(flow, &cmd, managed.as_ref()).await;
             flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
             flow.complete_send_context(&cmd.run_id).await?;
         }
@@ -598,7 +599,11 @@ fn terminal_event_text(event: &Value) -> String {
         .to_string()
 }
 
-async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
+async fn try_channel_outbound(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+    managed: Option<&PersistedMessageDelivery>,
+) {
     let Some(channel) = flow.channel.get().cloned() else {
         return;
     };
@@ -607,10 +612,19 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
     };
 
     let (sender_role, sender_label) = resolve_channel_sender(flow, cmd).await;
-    let source_im_message_id = flow
-        .message_tracker
-        .channel_source_message_id(&cmd.run_id)
-        .await;
+    let caller_row = managed.filter(|row| {
+        row.semantic_projection_json.get("caller_required").and_then(Value::as_bool) == Some(true)
+    });
+    let mut source_im_message_id = flow.message_tracker.channel_source_message_id(&cmd.run_id).await;
+    // A terminal can arrive after the local correlation map is lost.
+    if source_im_message_id.is_none()
+        && matches!(kind, ChannelOutboundEventKind::ChatFinal | ChannelOutboundEventKind::System)
+        && let (Some(row), Some(repo)) = (caller_row, flow.message_repo.as_ref())
+        && let Ok(Some(source)) = repo.get_message_by_id(&row.session_id, &row.source_message_id).await
+    {
+        source_im_message_id = source.content.get("source_im_message_id")
+            .and_then(Value::as_str).map(str::to_owned);
+    }
     let text = channel_outbound_text(kind, cmd);
     let raw_payload = if kind == ChannelOutboundEventKind::System {
         serde_json::json!({ "state": channel_terminal_state(&cmd.state) })
@@ -641,6 +655,7 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
             raw_payload,
             render_hint,
             source_im_message_id,
+            caller_dispatch: caller_row.is_some(),
             source_is_channel: false,
         })
         .await

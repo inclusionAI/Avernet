@@ -172,6 +172,7 @@ class CardUpdates(CardManagementService):
         search_config,
         *,
         labels=None,
+        label_updates=None,
         document_mapping=UNSET_MAPPING,
     ):
         explicit = document_mapping is not UNSET_MAPPING
@@ -185,6 +186,7 @@ class CardUpdates(CardManagementService):
             resource_type,
             search_config,
             labels=labels,
+            **({"label_updates": label_updates} if label_updates is not None else {}),
             document_mapping=document_mapping,
             validate_mapping=partial(self._validate_mapping, validate_keys=explicit),
         )

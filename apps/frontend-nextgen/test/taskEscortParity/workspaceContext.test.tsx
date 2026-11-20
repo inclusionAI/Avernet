@@ -143,3 +143,51 @@ it.each(['not-accessible', ''])(
     expect(history.location.hash).toBe('#keep');
   },
 );
+
+it('keeps identity-bound creation ready for an empty list without enabling workflow leaves', async () => {
+  read.mockResolvedValue([]);
+  const { result } = renderHook(() => useTaskEscortWorkspaceContext(scope));
+  await waitFor(() => expect(result.current.context.loading).toBe(false));
+  expect(result.current.context).toMatchObject({ creationReady: true, ready: false, workflow: null });
+  await act(async () => {
+    result.current.context.refreshWorkflows();
+    result.current.context.navigate('editor', { workflowId: 'new-flow' });
+  });
+  expect(new URLSearchParams(history.location.search).get('workflowId')).toBe('new-flow');
+  expect(new URLSearchParams(history.location.search).get('view')).toBe('editor');
+});
+
+it('navigates to a newly created workflow before list refresh and clears unrelated focus', async () => {
+  history.replace(
+    '/evolution-factory/task-escort?view=runs&workflowId=a&runId=old&analysisId=old&nodeId=old&baseline=old&host=yes#keep',
+  );
+  const { result } = renderHook(() => useTaskEscortWorkspaceContext(scope));
+  await waitFor(() => expect(result.current.context.ready).toBe(true));
+  act(() => result.current.context.navigate('editor', { workflowId: 'new-flow' }));
+  expect(new URLSearchParams(history.location.search).get('workflowId')).toBe('new-flow');
+  expect(history.location.search).not.toMatch(/runId|analysisId|nodeId|baseline/);
+  expect(history.location.search).toContain('host=yes');
+  expect(history.location.hash).toBe('#keep');
+});
+
+it('defers post-create refresh until editor navigation is committed, preserving a blocked dirty editor', async () => {
+  history.replace('/evolution-factory/task-escort?view=editor&workflowId=a');
+  const { result } = renderHook(() => useTaskEscortWorkspaceContext(scope));
+  await waitFor(() => expect(result.current.context.ready).toBe(true));
+  let proceed!: () => void;
+  const unblock = history.block((transition) => {
+    proceed = transition.retry;
+  });
+  act(() => result.current.context.openCreatedWorkflow?.('new-flow'));
+  expect(result.current.context.ready).toBe(true);
+  expect(result.current.context.workflowId).toBe('a');
+  expect(read).toHaveBeenCalledTimes(1);
+  read.mockResolvedValue([...rows, { ...rows[0], id: 'new-flow', title: 'New' }]);
+  await act(async () => {
+    unblock();
+    proceed();
+  });
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(result.current.context.workflowId).toBe('new-flow'));
+  expect(result.current.context.ready).toBe(true);
+});

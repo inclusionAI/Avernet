@@ -151,6 +151,9 @@ pub async fn wire(flow: BcsMessageFlow, config: &crate::BcsConfig) -> crate::Res
 /// Dev-side entry compatible name (bot-authority refactor): the plain
 /// leader-scoped wiring without the caller components — the production
 /// caller assembly uses `wire_with_caller_assembly` from server.rs.
+/// Retained as a documented wiring seam (docs/caller-container-gateway.md);
+/// nothing in this crate calls it today.
+#[allow(dead_code)]
 pub async fn wire_with_leader(
     flow: BcsMessageFlow,
     config: &crate::BcsConfig,

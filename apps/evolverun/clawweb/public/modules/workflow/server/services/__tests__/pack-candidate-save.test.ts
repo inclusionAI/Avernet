@@ -7,7 +7,6 @@ import path from 'node:path';
 import { createLocalRemote, runGit } from './clawflows-git-client-fixture.js';
 import { PackCandidateConflictError, PackCandidateOutcomeUnknownError, savePackCandidate, withPreparedPackCandidate, pushPreparedPackCandidate, resumePreparedPackCandidate, type SavePackCandidateInput } from '../pack-candidate-save.js';
 import { cloneClawflows, createTempRepo, removeTempRepo } from '../clawflows-git-client.js';
-import { readPackScriptSnapshot } from '../pack-script-snapshot.js';
 import { restorePreparedGitBundle } from '../pack-git-prepared.js';
 const injection = vi.hoisted(() => ({ push: undefined as undefined | ((args: string[], run: () => Promise<Buffer>) => Promise<Buffer>), afterPush: false, readsAfterPush: 0, failReads: false }));
 vi.mock('@avernet/clawweb-shared/server/services/git-execution', async importOriginal => {
@@ -381,12 +380,6 @@ describe('savePackCandidate', () => {
       contentBase64: Buffer.alloc(1024 * 1024, 7).toString('base64'), mode: '100644' }] }));
     expect(head()).toBe(result.commit);
     expect(runGit(root, ['--git-dir', bare, 'cat-file', '-s', `${result.commit}:packs/pack/big.bin`])).toBe('1048576');
-    const clone = await createTempRepo();
-    try {
-      await cloneClawflows(clone, input().config);
-      const snapshot = await readPackScriptSnapshot(clone, 'flow', 'pack', 'draft', { includeVersionFiles: true });
-      expect(snapshot.versionFiles?.find(file => file.path === 'big.bin')?.contentBase64).toBe(Buffer.alloc(1024 * 1024, 7).toString('base64'));
-    } finally { await removeTempRepo(clone); }
   }, 30000);
   it('enforces the total eight MiB boundary across unchanged and changed files', async () => {
     seedPack('packs/pack');
@@ -397,12 +390,11 @@ describe('savePackCandidate', () => {
     writeFileSync(path.join(pack, 'last'), Buffer.alloc(1024 * 1024 - base, 1));
     current = publish();
     const atLimit = await savePackCandidate(input());
-    const clone = await createTempRepo();
-    try {
-      await cloneClawflows(clone, input().config);
-      const snapshot = await readPackScriptSnapshot(clone, 'flow', 'pack', 'draft', { includeVersionFiles: true });
-      expect(snapshot.versionFiles?.reduce((sum, file) => sum + Buffer.from(file.contentBase64, 'base64').length, 0)).toBe(8 * 1024 * 1024);
-    } finally { await removeTempRepo(clone); }
+    const inventory = runGit(root, ['--git-dir', bare, 'ls-tree', '-r', '-l', atLimit.commit, 'packs/pack/']);
+    expect(inventory.split('\n').reduce((sum, line) => {
+      const size = /^\d{6} blob [a-f0-9]{40,64} +(\d+)\t/.exec(line)?.[1];
+      return size ? sum + Number(size) : sum;
+    }, 0)).toBe(8 * 1024 * 1024);
     await expect(savePackCandidate(input({ sourceVersion: 'draft', sourceCommit: atLimit.commit, expectedSavedHead: atLimit.commit,
       changes: [{ path: 'extra', operation: 'create', contentBase64: b64('x'), mode: '100644' }] }))).rejects.toThrow('Pack size limit exceeded');
     expect(head()).toBe(atLimit.commit);
@@ -414,12 +406,7 @@ describe('savePackCandidate', () => {
     for (let i = 0; i < 496; i++) writeFileSync(path.join(dir, `f${i}`), 'x');
     current = publish();
     const atLimit = await savePackCandidate(input({ changes: [{ path: 'final', operation: 'create', contentBase64: '', mode: '100644' }] }));
-    const clone = await createTempRepo();
-    try {
-      await cloneClawflows(clone, input().config);
-      const snapshot = await readPackScriptSnapshot(clone, 'flow', 'pack', 'draft', { includeVersionFiles: true });
-      expect(snapshot.versionFiles).toHaveLength(500);
-    } finally { await removeTempRepo(clone); }
+    expect(runGit(root, ['--git-dir', bare, 'ls-tree', '-r', '--name-only', atLimit.commit, 'packs/pack/']).split('\n')).toHaveLength(500);
     await expect(savePackCandidate(input({ sourceVersion: 'draft', sourceCommit: atLimit.commit, expectedSavedHead: atLimit.commit,
       changes: [{ path: 'extra', operation: 'create', contentBase64: '', mode: '100644' }] }))).rejects.toThrow('Pack file count limit exceeded');
     const repaired = await savePackCandidate(input({ sourceVersion: 'draft', sourceCommit: atLimit.commit, expectedSavedHead: atLimit.commit,

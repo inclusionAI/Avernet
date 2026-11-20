@@ -8,7 +8,11 @@ use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
 impl A2aChat {
     pub(crate) async fn prepare_direct(&self, flow: &crate::BcsMessageFlow, row: &PersistedMessageDelivery) -> ServiceResult<PreparedManagedDelivery> {
         let p: DirectProjection = serde_json::from_value(row.semantic_projection_json.clone()).map_err(|_| invalid("invalid direct projection"))?;
-        if p.version != 1 || row.flow_kind != DeliveryFlowKind::DirectA2a || !row.group_id.is_empty() { return Err(invalid("invalid direct projection scope")); }
+        if !matches!((p.version, p.a2a_test_user.is_some()), (1, false) | (2, true))
+            || row.flow_kind != DeliveryFlowKind::DirectA2a || !row.group_id.is_empty()
+        {
+            return Err(invalid("invalid direct projection scope"));
+        }
         let sessions = self.session_management.as_ref().ok_or_else(|| invalid("direct session service unavailable"))?;
         let registration = sessions.session_registration(&row.session_id).await.map_err(|_| invalid("direct session read failed"))?
             .ok_or_else(|| invalid("session_registry_missing"))?;
@@ -30,6 +34,11 @@ impl A2aChat {
         let text = message.content.get("text").and_then(Value::as_str).ok_or_else(|| invalid("direct source text missing"))?;
         self.authorize_queued_text(run, &p.from_bot_id, &row.target_bot_id, text).await?;
         let target = self.registry.resolve_delivery_target(&row.target_bot_id).await?;
+        if let Some(selection) = &p.a2a_test_user {
+            if selection.caller_bot_id != p.from_bot_id || !queued::supports_test_user_selection(&target) {
+                return Err(invalid("direct A2A test user scope changed"));
+            }
+        }
         let headers = bcs_config_api::queued_provider_headers::snapshot(&p.provider_route_headers, &flow.queue_persistable_headers).map_err(invalid)?;
         let connection_id = if target.is_gateway() { None } else {
             Some(self.bot_delivery.connection_identity(&target).await.ok_or_else(|| invalid("direct connection unavailable"))?)
@@ -44,7 +53,7 @@ impl A2aChat {
             downstream_run_id: None, cancel_reason: None, task_timeout: false, downstream_session_key: row.session_id.clone(),
             provider_route_headers: headers.clone(), relay_route_headers: None };
         Ok(PreparedManagedDelivery {
-            command: BotDeliveryCommand { target, run_id: run.into(), frame, delivery_kind: BotDeliveryKind::Send,
+            command: BotDeliveryCommand { a2a_test_user: p.a2a_test_user, target, run_id: run.into(), frame, delivery_kind: BotDeliveryKind::Send,
                 provider_transport: if p.client.as_deref().is_some_and(|c| c.starts_with("bcs-cli")) { ProviderTransportPreference::Callback } else { ProviderTransportPreference::SseFirst },
                 provider_bypass_headers: headers },
             transport_context_json: serde_json::to_value(transport)?,

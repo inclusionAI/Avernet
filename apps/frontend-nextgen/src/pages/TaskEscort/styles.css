@@ -24,7 +24,8 @@
   min-width: 0;
 }
 .task-escort-workspace .guard-sidebar {
-  width: 264px;
+  width: var(--guard-sidebar-width, 264px);
+  position: relative;
   flex-shrink: 0;
   background: hsl(var(--background));
   border-right: 1px solid hsl(var(--border) / 0.7);
@@ -46,14 +47,14 @@
 }
 .task-escort-workspace .guard-nav-group .nav-group {
   margin-bottom: 8px;
-  font-size: 9px;
+  font-size: 12px;
 }
 .task-escort-workspace .guard-nav-item {
   justify-content: flex-start !important;
   width: 100%;
-  height: 38px !important;
+  height: 44px !important;
   padding: 0 12px !important;
-  font-size: 11px !important;
+  font-size: 14px !important;
   font-weight: 400 !important;
   gap: 10px !important;
   color: hsl(var(--muted-foreground));
@@ -323,15 +324,8 @@
   max-height: 650px;
 }
 @media (min-width: 1850px) {
-  .task-escort-workspace .guard-sidebar {
-    width: 200px;
-  }
   .task-escort-workspace .content-area {
     padding: 32px 36px;
-  }
-  .task-escort-workspace .guard-nav-item {
-    font-size: 12px !important;
-    height: 42px !important;
   }
   .task-escort-workspace .panel {
     padding: 24px;
@@ -341,9 +335,6 @@
   }
 }
 @media (max-width: 1350px) {
-  .task-escort-workspace .guard-sidebar {
-    width: 162px;
-  }
   .task-escort-workspace .content-area {
     padding: 24px 20px;
   }
@@ -358,9 +349,6 @@
   }
 }
 @media (max-width: 1050px) {
-  .task-escort-workspace .guard-sidebar {
-    width: 264px;
-  }
   .task-escort-workspace .guard-brand {
     padding: 20px 12px;
     gap: 8px;
@@ -414,8 +402,8 @@
     width: auto !important;
     white-space: nowrap;
     margin: 0;
-    height: 34px !important;
-    font-size: 10px !important;
+    height: 44px !important;
+    font-size: 14px !important;
     gap: 6px !important;
     padding: 0 10px !important;
   }
@@ -507,7 +495,7 @@
 
 /* Reference workspace shell. Scope every rule to avoid changing the host application. */
 .task-escort-workspace .guard-sidebar-compact {
-  width: 68px;
+  width: 72px;
 }
 .task-escort-workspace .guard-sidebar-compact .guard-brand {
   padding: 16px;
@@ -569,5 +557,37 @@
   .task-escort-workspace .workspace-context-actions,
   .task-escort-workspace .workspace-workflow-picker {
     width: 100%;
+  }
+}
+
+.task-escort-workspace .guard-nav-item:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+.task-escort-workspace .guard-nav-item svg {
+  flex-shrink: 0;
+}
+.task-escort-workspace .guard-sidebar-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 8px;
+  z-index: 10;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.task-escort-workspace .guard-sidebar-resize:hover,
+.task-escort-workspace .guard-sidebar-resize:focus-visible {
+  background: hsl(var(--primary) / 0.18);
+}
+.task-escort-workspace .guard-sidebar-resize:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
+@media (max-width: 767px) {
+  .task-escort-workspace .guard-sidebar-resize {
+    display: none;
   }
 }

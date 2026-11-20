@@ -27,6 +27,7 @@ class CardWrites:
         search_config,
         *,
         labels=None,
+        label_updates=None,
         document_mapping=UNSET_MAPPING,
         validate_mapping=None,
     ):
@@ -46,8 +47,11 @@ class CardWrites:
             data = merge_fields(original, fields)
             if not data:
                 raise ValueError("card required for creation")
-            merged = dict(current.card.labels) if active else {}
-            for key, values in (labels or {}).items():
+            # Omitted labels preserve the snapshot; a supplied map replaces it.
+            merged = dict(current.card.labels) if active and labels is None else {}
+            # Internal legacy adapters update individual labels inside each CAS
+            # attempt, rather than sending a replacement from a stale read.
+            for key, values in {**(labels or {}), **(label_updates or {})}.items():
                 if (
                     not is_label_filter("labels." + key)
                     or not isinstance(values, list)
@@ -58,7 +62,12 @@ class CardWrites:
                     merged[key] = list(dict.fromkeys(values))
                 else:
                     merged.pop(key, None)
-            self.validate_labels(kind, merged, creating=not active, patch=labels)
+            self.validate_labels(
+                kind,
+                merged,
+                creating=not active,
+                patch=labels if labels is not None else label_updates,
+            )
             stored_config = dict(current.config or {}) if current else {}
             if document_mapping is not UNSET_MAPPING:
                 if document_mapping:

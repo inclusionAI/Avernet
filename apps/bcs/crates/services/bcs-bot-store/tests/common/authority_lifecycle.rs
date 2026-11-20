@@ -469,6 +469,7 @@ mod retirement_races;
 mod reactivation;
 pub use registration::*;
 pub use retirement::*;
+#[allow(unused_imports)]
 pub use retirement_races::*;
 #[allow(unused_imports)]
 pub use reactivation::*;

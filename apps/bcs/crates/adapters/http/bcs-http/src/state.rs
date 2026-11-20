@@ -139,7 +139,7 @@ impl ChainUserIdentityPort {
         if principal.bot_uuid.is_some() || principal.owner_id.is_some() {
             return Err(CallerIngressExtractionError::Unsupported);
         }
-        let mut staff_no = principal
+        let staff_no = principal
             .user_id
             .clone()
             .ok_or(CallerIngressExtractionError::Unsupported)?;
@@ -489,6 +489,7 @@ fn purge_expired(runs: &mut HashMap<String, AdminInvocationRun>) {
 #[derive(Clone)]
 pub struct HttpAppState {
     pub services: Services,
+    pub a2a_test_user_admission: Option<Arc<bcs_config_api::a2a_test_user::A2aTestUserAdmission>>,
     pub group_application: Option<Arc<dyn GroupService>>,
     pub session_application: Option<Arc<dyn SessionService>>,
     pub session_file_application: Option<Arc<dyn SessionFileApplicationService>>,
@@ -585,6 +586,7 @@ impl HttpAppState {
             allowed_switch_provider_ids: Arc::new(Vec::new()),
             provider_stream_gray_list: Arc::new(ProviderStreamGrayList::default()),
             provider_bypass_header_names: Arc::new(Vec::new()),
+            a2a_test_user_admission: None,
             judge_enabled: false,
             channel_http_ingress: None,
             auth_chain: None,
@@ -764,6 +766,11 @@ impl HttpAppState {
         gray_list: Arc<ProviderStreamGrayList>,
     ) -> Self {
         self.provider_stream_gray_list = gray_list;
+        self
+    }
+
+    pub fn with_a2a_test_user_admission(mut self, admission: Option<bcs_config_api::a2a_test_user::A2aTestUserAdmission>) -> Self {
+        self.a2a_test_user_admission = admission.map(Arc::new);
         self
     }
 

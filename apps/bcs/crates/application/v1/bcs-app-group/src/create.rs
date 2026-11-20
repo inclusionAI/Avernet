@@ -20,8 +20,8 @@ impl GroupServiceImpl {
         // The driver↔originator reachability gate runs in the core loop
         // (GroupManagement::create_group), where every Bot participant —
         // including the driver when it differs from the originator — is
-        // anchored on the originator (public, owned-by-human, or a friend of a
-        // bot originator).
+        // anchored on the originator, applying the ordinary Group visibility,
+        // management and friendship rules.
         self.ensure_driver_is_registered_bot(&request.driver_bot_uuid)
             .await?;
         if request

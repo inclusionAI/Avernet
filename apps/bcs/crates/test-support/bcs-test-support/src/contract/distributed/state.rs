@@ -26,7 +26,7 @@ pub async fn session_spec_admission_contract_tests(
     assert_eq!(store.get_spec(sid).await?, Some(expected.clone()));
     assert_eq!(
         producer.admit(request.clone()).await?,
-        AdmitOutcome::Duplicate(receipt)
+        AdmitOutcome::Accepted(receipt)
     );
     assert_eq!(store.get_spec(sid).await?, Some(expected));
     Ok(())
@@ -159,6 +159,7 @@ pub async fn membership_port_contract_tests(
         .register(
             instance.clone(),
             RuntimeRole::Worker,
+            "http://worker.example.test:8080".into(),
             Duration::from_secs(60),
         )
         .await?;

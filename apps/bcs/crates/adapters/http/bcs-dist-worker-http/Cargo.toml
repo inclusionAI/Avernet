@@ -1,0 +1,19 @@
+[package]
+name = "bcs-dist-worker-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+[dependencies]
+axum.workspace = true
+bcs-dist-model.workspace = true
+bcs-service-api.workspace = true
+serde.workspace = true
+[dev-dependencies]
+async-trait.workspace = true
+reqwest.workspace = true
+bcs-dist-worker-client.workspace = true
+tokio.workspace = true
+[lints]
+workspace = true

@@ -479,6 +479,7 @@ impl CallerDispatchPipeline {
             execution_token_expires_at_ms: proof.expires_at_ms(),
             proof_format: proof_format_string(proof.format()),
             proof_type: self.identity.proof_type().to_string(),
+            channel_supplied_proof: false,
             control_revision: facts.control_revision,
             not_after_ms: effective_deadline,
             request_digest: committed_digest.clone(),

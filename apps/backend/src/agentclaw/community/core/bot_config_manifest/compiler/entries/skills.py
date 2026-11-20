@@ -15,6 +15,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 from agentclaw.community.core.apply_engine.skill_validation import PackageRefusal, validate_package
 from agentclaw.community.core.apply_engine.desired_state import (
+    BotSyncedLocalSkill,
     Declaration,
     DesiredSkill,
     EntryFailure,
@@ -24,9 +25,16 @@ from agentclaw.community.core.apply_engine.desired_state import (
     CenterSkillRef,
     CenterSkillByCode,
 )
+from agentclaw.community.core.apply_engine.support_matrix import SourceKind
 from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import EntryDelivery
-from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import (
+    DeclaredSourceResolver,
+    declared_protocol,
+)
 from agentclaw.community.core.bot_config_manifest.compiler.entries._fetch import EntryFetchError, fetch, file_tree
+from agentclaw.community.core.bot_config_manifest.compiler.entries.bot_file_sync import (
+    resolve_bot_identity,
+)
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     ARCHIVE_MEMBER_LIMIT,
@@ -103,6 +111,28 @@ async def compile_skills(
                     name,
                     "a skills entry is a package (SKILL.md + the files it names) — inline 'content' cannot be one; "
                     "declare 'source'",
+                )
+            )
+            continue
+        # ``protocol: bot`` source — a local skill whose package arrives via
+        # bot file-sync (``from: from_bot``), not via a content-store fetch.
+        # Declared here as the addressing-only ``BotSyncedLocalSkill``: the
+        # materialiser reverse-looks-up the source bot's ``ac_skill`` row and
+        # recomputes the dst workspace path; the package is not fetched, filed,
+        # validated or uploaded by the compiler.
+        if declared_protocol(session, entry) is SourceKind.BOT:
+            try:
+                source_bot_id, source_owner_id = resolve_bot_identity(session, entry)
+            except EntryFetchError as exc:
+                failures.append(EntryFailure(name, exc.reason))
+                continue
+            desired.append(
+                DesiredSkill(
+                    name,
+                    BotSyncedLocalSkill(
+                        source_bot_id=source_bot_id,
+                        source_owner_id=source_owner_id,
+                    ),
                 )
             )
             continue

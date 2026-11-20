@@ -283,7 +283,7 @@ async fn policy_less_bots_get_a_no_policy_wait_marker() -> Result<(), Box<dyn st
     orphan.targets[0].target_bot_id = "unknown-bot".into();
     service.admit(orphan).await?;
 
-    let marked = tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let rows = service.snapshot(None).await?;
             if let Some(row) = rows.iter().find(|r| r.source_message_id == "orphan") {
@@ -295,7 +295,6 @@ async fn policy_less_bots_get_a_no_policy_wait_marker() -> Result<(), Box<dyn st
         }
     })
     .await??;
-    drop(marked);
     assert!(service.snapshot(None).await?.iter().find(|r| r.source_message_id == "orphan").unwrap().wait_reason
         == Some(bcs_domain::message_delivery::DeliveryWaitReason::NoPolicy));
     stop.send(true)?;

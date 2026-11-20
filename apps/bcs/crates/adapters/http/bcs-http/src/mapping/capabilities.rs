@@ -8,6 +8,8 @@ pub fn to_core_skill(skill: wire::Skill) -> Skill {
     Skill {
         name: skill.name,
         description: skill.description,
+        // The wire protocol has no tags field; they travel on the AgentCard only.
+        tags: Vec::new(),
     }
 }
 

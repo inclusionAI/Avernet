@@ -1,8 +1,15 @@
 import { getCapabilities } from '@/capabilities';
-import type { BotHealthCapability, BotHealthCheckSummary, BotHealthCheckTarget } from '@/domain/botHealthCheck';
+import type {
+  BotHealthCapability,
+  BotHealthCheckSummary,
+  BotHealthCheckTarget,
+  BotHealthPatchPreview,
+} from '@/domain/botHealthCheck';
 import {
+  applyHarnessPatch,
   getHarnessDimHistory,
   getHarnessDimReport,
+  previewHarnessPatch,
   startHarnessDiagnose,
   type HarnessDimHistoryResponseDto,
   type HarnessDimReportResponseDto,
@@ -86,6 +93,42 @@ export const botHealthCheckService = {
       scan_type: 'full',
       layer: 'L1',
       bot_publish_id: target.context.botPublishId,
+    });
+  },
+  /** 预览补丁修复效果（不落盘）。与老前端 Harness 流程对齐，目标文件为 AGENTS.md。 */
+  async previewPatch(target: BotHealthCheckTarget, patchId: string | number): Promise<BotHealthPatchPreview> {
+    const response = await previewHarnessPatch({
+      botId: target.botId,
+      userId: target.userId,
+      data: {
+        entity_type: target.context.entityType,
+        entity_id: target.context.entityId,
+        file_type: 'AGENTS.md',
+        patch_id_list: [Number(patchId)],
+      },
+    });
+    // DTO → Domain：Hook/组件只消费 Domain 类型，避免后端协议变化扩散到 UI
+    return {
+      risk_level: response.risk_level,
+      operations: (response.operations ?? []).map((operation) => ({
+        op: operation.op ?? 'patch',
+        target: operation.target ?? '',
+        diff: operation.diff ?? undefined,
+        op_summary: operation.op_summary ?? undefined,
+      })),
+    };
+  },
+  /** 应用补丁。已发布版本带 bot_publish_id，由后端在对应发布物上完成修复。 */
+  async applyPatch(target: BotHealthCheckTarget, patchId: string | number) {
+    return applyHarnessPatch({
+      botId: target.botId,
+      userId: target.userId,
+      data: {
+        entity_type: target.context.entityType,
+        entity_id: target.context.entityId,
+        patch_id_list: [Number(patchId)],
+        bot_publish_id: target.context.botPublishId,
+      },
     });
   },
 };

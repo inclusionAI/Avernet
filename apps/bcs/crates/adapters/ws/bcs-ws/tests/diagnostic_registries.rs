@@ -10,6 +10,7 @@ async fn closed_bot_channel_reports_failed_delivery_with_request_id() {
     registry.connect("disconnected-bot".into(), tx).await;
     drop(rx);
     let (result, logs) = bcs_test_support::capture_request_logs("failed-bot-delivery", registry.deliver(BotDeliveryCommand {
+        a2a_test_user: None,
         target: BotDeliveryTarget::WebSocket { bot_id: "disconnected-bot".into() },
         run_id: "run-delivery".into(),
         frame: BcsFrame::Request(RequestFrame::new("run-delivery", "chat.send", None)),

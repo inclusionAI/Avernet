@@ -19,6 +19,7 @@ async fn caller_extensions_reach_callback_and_sse_without_replacing_provider_aut
             "caller_wait_mode": "detached"
         });
         let result = transport.deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: provider_target_v2(url), run_id: "caller-run".into(),
             frame: BcsFrame::Request(RequestFrame::new("caller-run", "chat.send", Some(json!({
                 "bcs_session_id":"session-1", "bcs_group_id":"group-1", "message":{"text":"hello"},

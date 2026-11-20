@@ -24,6 +24,9 @@ import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from caller_identity_story import WorkbenchSocket, segment
+from group_session_ws_probe import _gateway_principal_token
+
 
 TRACE_QUERY_MARKER = 'redact-this-value'
 
@@ -45,7 +48,12 @@ class Provider(BaseHTTPRequestHandler):
         # this story's user sends, including any invalid sends that leak through.
         if 'caller-e2e-message' in json.dumps(body.get('message', {})):
             self.server.received.put((body, self.headers.get('Authorization'), self.headers.get('X-E2E-Caller')))
-        if self.path == '/sse':
+        if body.get('method') == 'caller.container.ensure':
+            payload = json.dumps({'ok': True, 'isolation': {
+                'level': 'container_bound', 'binding_ref': body['id'],
+                'expires_at_ms': int(time.time() * 1000) + 600_000}}).encode()
+            content_type = 'application/json'
+        elif self.path == '/sse':
             payload = ('event: chat\ndata: ' + json.dumps({'runId': body['id'], 'seq': 1,
                 'state': 'final', 'message': {'role': 'assistant',
                 'content': [{'type': 'text', 'text': 'done'}]}}) + '\n\n').encode()
@@ -95,11 +103,12 @@ class Story:
             {'X-E2E-Ingress-Key': self.key})
         return body
 
-    def binding(self, bot, mode='caller', status=200, target=None):
+    def binding(self, bot, mode='caller', status=200, target=None, group_chat_scope=None):
         account = uuid.uuid4().hex
         result = self.request('POST', '/channels/bindings', {
             'channel_type': 'caller-e2e', 'account_ref': account,
             'target': target or {'bot': {'bot_id': bot}}, 'outbound_visibility': 'full_transcript',
+            'group_chat_scope': group_chat_scope,
             'env': self.environment, 'config': {'execution_mode': mode}}, status)
         return account, result
 
@@ -141,6 +150,11 @@ class Story:
         })
         self.registration = self.request('POST', '/providers', {
             'name': 'Caller E2E', 'auth': {'mode': 'static_bearer'}, 'protocol_version': '2.0',
+            'caller_capabilities': {
+                'container_routing': 'ensure', 'supports_caller': True,
+                'supports_isolation_binding': True, 'supports_observe_inject': False,
+                'token_visibility': 'runtime_only',
+            },
             'webhook_url': f'http://127.0.0.1:{self.provider.server_port}/callback?{trace_query}'})
         bot = self.request('POST', '/providers/' + self.registration['provider_id'] + '/bots', {
             'name': 'Caller E2E Bot', 'owners': ['callere2eowner'], 'provider_bot_ref': 'caller-bot'},
@@ -199,6 +213,92 @@ class Story:
         self.policy(True)
         self.callback(account, credential='test-token-lost', conversation='lost-conversation')
         print(f'Caller HTTP/queue/provider E2E: {self.checks} HTTP assertions passed', flush=True)
+
+    def exclusive_channel_speaking(self, db_path, signing_key, business_log):
+        """Compare channel and Workbench admission to the same real Session."""
+        bot_id = self.bot['bot_uuid']
+        bot_ref = segment(self.bot['provider_bot_ref'])
+        provider_id = segment(self.registration['provider_id'])
+        applied = self.request('PATCH', f'/providers/{provider_id}/bots/{bot_ref}/caller', {
+            'snapshot': {'source_revision': 1, 'caller_identity': {'enabled': True}},
+        }, headers={'Authorization': 'Bearer ' + self.registration['provider_admin_token']})
+        assert applied['sync_status'] == 'applied', 'Caller snapshot not applied'
+        # Hold dispatch while comparing the two ingress paths.
+        self.policy(True)
+        account, _ = self.binding(bot_id, 'default', group_chat_scope='per_sender')
+        shared, _ = self.binding(bot_id, 'default', group_chat_scope='conversation_shared')
+        sender = 'callere2eowner'
+
+        def deliveries():
+            with sqlite3.connect(f'file:{db_path}?mode=ro', uri=True) as db:
+                return db.execute(
+                    'SELECT group_id, session_id, status, '
+                    "json_extract(semantic_projection_json, '$.caller_required') "
+                    "FROM bcs_message_deliveries WHERE target_bot_id = ? AND status = 'queued'",
+                    (bot_id,),
+                ).fetchall()
+
+        self.callback(account, sender=sender, credential=None, kind='2', status=422)
+        self.callback(shared, sender=sender, kind='2', status=422, attest_sender=True)
+        assert deliveries() == [], 'missing Caller identity or a shared Session bypassed admission'
+        channel_message = self.callback(account, sender=sender, kind='2', attest_sender=True)
+        rows = deliveries()
+        assert len(rows) == 1 and rows[0][2:] == ('queued', 1), 'channel did not enqueue protected Caller work'
+        group_id, session_id = rows[0][:2]
+
+        # The Human is a Session member, not a Group member. Use the public
+        # Session token so lease.acquire authorizes against this same Session.
+        principal = _gateway_principal_token(user_id=sender, username=sender,
+            tenant='alipay', signing_key=signing_key, issuer='gateway')
+        ticket = self.request('POST', f'/openapi/v1/collaboration/sessions/{segment(session_id)}/token',
+            headers={'X-Avernet-Principal': principal})
+        ws = WorkbenchSocket(self.base, sender, group_id, session_id, session_ticket=ticket['data']['token'])
+        try:
+            connected = ws.receive(ws.connect_id)
+            assert connected.get('ok') is True, connected
+            params = {'group_id': group_id, 'session_id': session_id,
+                      'bot_id': 'human_' + sender, 'mentions': [bot_id]}
+            ws.send({'type': 'req', 'id': 'web-without-lease', 'method': 'chat.send',
+                     'params': {**params, 'message': 'web must still be fenced'}})
+            # The next request on this connection is a barrier after the
+            # rejected submission, which need not produce a response frame.
+            ws.send({'type': 'req', 'id': 'web-lease', 'method': 'lease.acquire',
+                     'params': {'groupId': group_id}})
+            acquired = ws.receive('web-lease')
+            assert acquired.get('ok') is True, acquired
+            assert deliveries() == rows, 'Workbench bypassed the lease in a channel Session'
+            lease = acquired['payload']
+            ws.send({'type': 'req', 'id': 'web-with-lease', 'method': 'chat.send',
+                     'params': {**params, 'message': 'web with lease',
+                                'leaseId': lease['leaseId'], 'leaseEpoch': lease['epoch']}})
+            admitted = ws.receive('web-with-lease')
+            assert admitted.get('ok') is True, admitted
+            assert deliveries() == rows * 2, 'Workbench with a lease did not enqueue protected work'
+        finally:
+            ws.close()
+        print('Exclusive channel Caller admission and unchanged Workbench lease fence: PASS', flush=True)
+
+        self.policy(False)
+        body = self.receive()
+        assert body['extensions']['caller_execution_token']['type'] == self.credential_type
+        assert body['extensions']['caller_execution_token']['token'] == channel_message['credential']
+        deadline = time.monotonic() + 15
+        with business_log.open('rb') as log:
+            while time.monotonic() < deadline:
+                position = log.tell()
+                line = log.readline()
+                if not line.endswith(b'\n'):
+                    log.seek(position)
+                    time.sleep(0.05)
+                    continue
+                event = json.loads(line)
+                if event.get('message') == 'caller e2e channel final' and event.get('run_id') == body['id']:
+                    assert event.get('source_im_message_id') == channel_message['message_id']
+                    assert event.get('caller_dispatch') is True
+                    break
+            else:
+                raise AssertionError('protected Caller reply never reached the originating channel')
+        print('Protected Caller reply preserved the original channel message and Caller flag: PASS', flush=True)
 
 
 def verify_network_traces(path, provider):
@@ -332,6 +432,15 @@ def run_story(binary, environment, credential_type='iam-token'):
             'database': {'type': 'sqlite', 'sqlite': {'path': str(root / 'bcs.db')}},
             'security': {'outbound_url': {'block_private_networks': True, 'allow_loopback': True}},
             'llm': {'type': 'none'}, 'bcsfuse': {'enabled': False}})
+        if environment == 'local' and credential_type == 'iam-token':
+            signing_key = subprocess.check_output(['openssl', 'genpkey', '-algorithm', 'ED25519'])
+            public_key = subprocess.check_output(['openssl', 'pkey', '-pubout'], input=signing_key)
+            config['caller_identity'] = {'plugin': 'jwt', 'jwt': {
+                'issuer': 'bcs-caller-e2e', 'signing_kid': 'local-fixture',
+                'signing_key_pem': signing_key.decode(), 'pseudonym_key_hex': uuid.uuid4().hex * 2,
+                'public_keys': [{'kid': 'local-fixture', 'public_pem': public_key.decode()}],
+                'max_ttl_seconds': 300,
+            }}
         config['logging'].update(default_level='debug', console=True)
         # Both production formatters see the same real request events. Keep
         # outputs inside this process fixture; no formatter/core calls in tests.
@@ -408,6 +517,9 @@ def run_story(binary, environment, credential_type='iam-token'):
                     raise AssertionError('missing caller credential did not fail closed')
                 assert provider.received.empty(), 'cache loss fell back to provider identity'
                 print('Durable queue/cache-loss restart fails closed: PASS', flush=True)
+                if environment == 'local' and credential_type == 'iam-token':
+                    story.exclusive_channel_speaking(root / 'bcs.db', env['CALLER_E2E_SIGNING_KEY'],
+                                                    root / 'business.json.log')
             finally:
                 process.send_signal(signal.SIGTERM)
                 process.wait(timeout=30)

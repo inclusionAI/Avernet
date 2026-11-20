@@ -86,6 +86,7 @@ class CenterEnsureResponseSchema(BaseModel):
 class RuntimeLayoutProbeRequest(BaseModel):
     engine: str
     layout_contract_version: str
+    for_service_build: bool = False
 
 
 class ResolvedFilesystemLayoutEvidence(BaseModel):
@@ -114,6 +115,10 @@ class RuntimeLayoutProbeEvidence(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    source_layout: Literal["legacy"] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     resolved_layout: ResolvedFilesystemLayoutEvidence | None = Field(
         default=None,
         exclude_if=lambda value: value is None,

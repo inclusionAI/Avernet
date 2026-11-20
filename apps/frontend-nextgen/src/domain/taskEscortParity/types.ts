@@ -9,10 +9,12 @@ export interface TaskEscortWorkflowSummary {
   ownerId: string | null;
 }
 
-/** Shared read-only port for all formal TaskEscort secondary/tertiary pages. */
+/** Shared workspace port for formal TaskEscort pages. */
 export interface TaskEscortParityContext {
   scopeKey: string;
   ready: boolean;
+  /** Identity is resolved; creating must not require an existing workflow. */
+  creationReady?: boolean;
   loading?: boolean;
   error?: string;
   userId?: string;
@@ -21,4 +23,6 @@ export interface TaskEscortParityContext {
   query: Record<string, string | undefined>;
   navigate: (page: PageId, params?: Record<string, string | undefined>) => void;
   refreshWorkflows: () => void;
+  /** Defer refreshing until navigation is committed, preserving dirty-editor blockers. */
+  openCreatedWorkflow?: (workflowId: string) => void;
 }

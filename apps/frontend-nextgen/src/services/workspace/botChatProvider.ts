@@ -179,13 +179,19 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
    *  undefined(判据死参数事故的根因);改探测 GET /openapi/v1/bots/{id}/caller-context
    *  (stage=draft,聚合 bot_call_type 存量存于 Bot 行,与运行 stage 无关)。
    *  取值:我管理的/我协作的 → service(服务实例池,实例仍由 stage/device_uuid 定位);
-   *  好友 Bot → caller_instance(当前用户独立 Caller 实例)。探测失败/非 caller
-   *  静默不带(好友视角探测受 Check(MEMBER) 管控时降级省略,契约安全:f_user_id 路由
-   *  自明)。单飞缓存:结果跨多次换签定格,失效面(改调用身份)随 provider 重建刷新。 */
+   *  好友 Bot → caller_instance(当前用户独立 Caller 实例)。
+   *  三轮勘误(2026-11-19):好友探测照旧发起——gateway 契约本接口仅授权 Bot 的
+   *  owner/collaborator,好友视角探测预期失败,但无论成败 caller_runtime_target
+   *  电文均可能无法落地,不再据此裁剪请求面;探测失败/非 caller 一律静默降级不带
+   *  且零提示(请求层 suppressErrorNotification 不投 httpClient 默认错误 toast,
+   *  契约安全:f_user_id 路由自明)。
+   *  单飞缓存:结果跨多次换签定格,失效面(改调用身份)随 provider 重建刷新。 */
   private resolveCallerRuntimeTarget(): Promise<'service' | 'caller_instance' | undefined> {
     if (this.options.bot.botType === 'desktop') return Promise.resolve(undefined);
     this.callerRuntimeTargetPromise ??= botEditorService
-      .getCallerContext(this.options.bot.realBotId, this.options.bot.ownerId)
+      .getCallerContext(this.options.bot.realBotId, this.options.bot.ownerId, {
+        suppressErrorNotification: true,
+      })
       .then((ctx) =>
         ctx.botCallType === 'caller'
           ? (this.options.bot.isFriendBot ? ('caller_instance' as const) : ('service' as const))
@@ -285,11 +291,12 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         ...(this.options.bot.isFriendBot
           ? { friendUserId: params.user_id, ownerId: this.options.bot.ownerId }
           : {}),
-        // 生产运行态多实例服务 Bot:IAM 换签带选中实例 device_uuid(与 getChatUrl 的实例选址同源
+        // 多实例服务 Bot:IAM 换签带选中实例 device_uuid(与 getChatUrl 的实例选址同源
         // options.range,避免 Token 与实际实例不一致)。range 产出已由 useBotSessionRange /
-        // supportsConversationInstanceScope 收口(服务 Bot+非好友+非 teclaw+已选实例),
-        // 此处只补 online 门(仅生产运行态需要,openspec add-servicebot-iam-device-uuid)。
-        ...(this.options.range?.stage === 'online' && this.options.range.deviceUuid
+        // supportsConversationInstanceScope 收口(服务 Bot+非好友+非 teclaw+已选实例)。
+        // 2026-11-19 口径勘误:不再门控 stage=online——选定实例即定位目标,任意运行态
+        // (含草稿/验证)多实例 Token 都须与建连同实例(openspec add-servicebot-iam-device-uuid)。
+        ...(this.options.range?.deviceUuid
           ? { deviceUuid: this.options.range.deviceUuid }
           : {}),
         ...(callerRuntimeTarget

@@ -35,6 +35,9 @@ from agentclaw.community.core.task.task_dispatch.task_settings import (
     TaskSettingsService,
     TaskSettingsServiceProtocol,
 )
+from agentclaw.community.api.task.bot_grant_reconciliation_service import (
+    BotGrantReconciliationServiceProtocol,
+)
 from agentclaw.community.api.task.feedback_service import FeedbackServiceProtocol
 from agentclaw.community.api.task.forum_digest_service import (
     ForumDigestReportServiceProtocol,
@@ -63,6 +66,7 @@ from agentclaw.community.core.repository.implementations.task.forum import (
     ForumPersonalCenterActivityRepository as ForumPersonalCenterActivityRepositoryImpl,
     ForumRepository,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.task import (
     TaskCallbackCorrelationRepositoryProtocol,
     TaskCallbackRepositoryProtocol,
@@ -90,6 +94,9 @@ from agentclaw.community.core.repository.protocols.task.forum_digest import (
     ForumDigestReportRepositoryProtocol,
 )
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
+from agentclaw.community.core.task.services.bot_grant_reconciliation_service import (
+    BotGrantReconciliationService,
+)
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_center.task_intake import TaskIntakeHandler
 from agentclaw.community.core.task.task_center.bot_intake_skill import (
@@ -345,30 +352,38 @@ class TaskModule(Module):
         injector: Injector,
         task_dispatch: TaskDispatchConfig,
     ) -> ContextCollabExecutor:
-        """Build the ContextCollab BCS executor, failing closed when unbound."""
+        """Build direct Todo execution with optional legacy BCS compatibility."""
+        try:
+            openapi_bot = injector.get(OpenApiBotPort)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] OpenApiBotPort unavailable: %s",
+                exc,
+            )
+            return UnavailableContextCollabExecutor(str(exc))
+        if openapi_bot is None:
+            return UnavailableContextCollabExecutor("OpenApiBotPort resolved to None")
         try:
             bcs = injector.get(BcsClientPort)
         except Exception as exc:  # noqa: BLE001 lightweight deployment
             logger.info(
-                "[task][context-collab] BcsClientPort unavailable: %s",
+                "[task][context-collab] BcsClientPort unavailable; "
+                "legacy group-backed Todo resume disabled: %s",
                 exc,
             )
-            return UnavailableContextCollabExecutor(str(exc))
-        if bcs is None:
-            return UnavailableContextCollabExecutor(
-                "BcsClientPort resolved to None"
-            )
+            bcs = None
         try:
             bot_tokens = injector.get(BcsBotTokenProvider)
         except Exception as exc:  # noqa: BLE001 lightweight deployment
             logger.info(
                 "[task][context-collab] BcsBotTokenProvider unavailable; "
-                "using empty provider: %s",
+                "legacy group-backed Todo resume disabled: %s",
                 exc,
             )
             bot_tokens = NullBcsBotTokenProvider()
         return ContextCollabExecutor(
-            bcs,
+            openapi_bot,
+            bcs=bcs,
             bot_tokens=bot_tokens,
             backend_url=task_dispatch.backend_url,
         )
@@ -714,6 +729,17 @@ class TaskModule(Module):
     @inject
     def task_service_protocol(self, svc: TaskService) -> TaskServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def bot_grant_reconciliation_service(
+        self,
+        bots: BotRepository,
+        grants: TaskClaimGrantServiceProtocol,
+    ) -> BotGrantReconciliationServiceProtocol:
+        """Best-effort convergence of secbaas grants for Human-owned Bots."""
+        return BotGrantReconciliationService(bots=bots, grants=grants)
 
     @singleton
     @provider

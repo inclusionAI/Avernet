@@ -44,6 +44,16 @@ and filter metadata from its own Profile/Card. No Worker-ID matching, TC fragmen
 aggregation, Fuse, Card parsing or audience policy is implicit in this pipeline.
 Failures propagate as `SearchUnavailable`; fallback policy is not invented here.
 
+Providers can use `stage_timing(name, emit_progress=True)` within an active search
+to emit `search_progress` records with `phase=started` and `phase=finished`.
+Finished records contain elapsed milliseconds, outcome and the exception type on
+failure. Use fixed stage names and bounded numeric annotations. The host-owned
+worker's copied context retains the original trace and request identifiers after
+a caller timeout or cancellation, so its eventual completion remains observable.
+Running synchronous provider work continues under its own network timeout.
+These records use the existing bounded INFO log queue. Logging does not extend
+the caller deadline or publish a late result to its response or metadata cache.
+
 `QdrantRetrievalIndex` requires Qdrant Server >=1.20 through an explicit
 `QdrantConnection`. Dense and native BM25 collections share that Server.
 Python Local cannot execute multilingual BM25 and is rejected, without fallback.
@@ -138,3 +148,14 @@ Keyword deadlines can be set independently through `emergencyConfig.keyword_time
 (positive, at most 4000 ms). When omitted by older DRM payloads, the host startup
 `SearchSettings.keyword_timeout` applies (shared default: 0.5 seconds).
 This setting does not change vector-index or Card metadata deadlines.
+
+Card enrichment has its own `SearchSettings.card_metadata_timeout` (shared
+default: 0.5 seconds), independently adjustable with
+`emergencyConfig.card_metadata_timeout_ms`. Omitted DRM fields use the host's
+startup value. Timeout responses retain valid cached Cards and report
+`card_metadata_unavailable` plus `card_metadata_timeout`. A host can opt into
+`CardMetadataRetrieval.project_timeout` to return indexed summaries for timed-out
+IDs; the default still drops them. Confirmed missing/deleted Cards and other
+database failures do not use this projection. Final catalog eligibility still
+applies. Running synchronous work can finish and log after the response but
+does not refill the cache after timeout.

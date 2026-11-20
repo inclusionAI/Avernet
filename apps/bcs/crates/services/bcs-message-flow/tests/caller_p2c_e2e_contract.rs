@@ -83,6 +83,7 @@ impl bcs_service_api::ManagedDeliveryPreparationService for OrdinaryIo {
         let row_run_id = _row.run_id.clone().unwrap_or_else(|| "run".into());
         Ok(bcs_service_api::PreparedManagedDelivery {
             command: BotDeliveryCommand {
+                a2a_test_user: None,
                 target: BotDeliveryTarget::WebSocket { bot_id: "bot".into() },
                 run_id: row_run_id,
                 frame,
@@ -103,6 +104,7 @@ impl bcs_service_api::ManagedDeliveryPreparationService for OrdinaryIo {
         row: &PersistedMessageDelivery,
     ) -> Option<bcs_service_api::CallerDispatchContext> {
         Some(bcs_service_api::CallerDispatchContext {
+            native_credential: None,
             target: BotDeliveryTarget::HttpProvider {
                 bot_id: row.target_bot_id.clone(),
                 provider_id: "provider-e2e".into(),

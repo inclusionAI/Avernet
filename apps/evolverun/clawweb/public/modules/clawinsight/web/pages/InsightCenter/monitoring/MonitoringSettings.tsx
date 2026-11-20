@@ -20,7 +20,7 @@ export function MonitoringSettings({ onClose, onChanged, practiceUrl }: { onClos
   useEffect(() => {
     const controller = new AbortController(); let active = true; setPage(null); setLoadError('');
     const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), 15000);
-    monitoringApi.options('mine', search, { startDate: '', endDate: '' }, cursor, controller.signal)
+    monitoringApi.options('mine', search, { startDate: '', endDate: '' }, cursor, controller.signal, 'prod')
       .then(value => { if (!controller.signal.aborted) setPage(value); })
       .catch(failure => { if (active) setLoadError(monitoringErrorText(controller.signal.reason ?? failure)); })
       .finally(() => clearTimeout(timer));
@@ -50,24 +50,30 @@ export function MonitoringSettings({ onClose, onChanged, practiceUrl }: { onClos
       </div>
     </div>
     <div className="settings-notice settings-operation-notice"><Icon name="text" /><span>用 Bot 旁的开关可单独开启或关闭，也可以点击「一键全开」或「一键全关」批量设置。</span></div>
-    <div className="settings-notice settings-service-notice"><Icon name="alert" /><span>服务 Bot 配置请联系山宗、安远、沐荛。</span></div>
+    <div className="settings-notice settings-service-notice"><Icon name="alert" /><span>仅支持 OpenClaw、TE 引擎，桌面 Bot 暂不支持。服务 Bot 需评估后由平台开启，请联系山宗、安远、沐荛。</span></div>
     <div className="records-toolbar settings-toolbar"><label className="search-box"><Icon name="search" /><input type="search" aria-label="搜索我的 Bot" placeholder="搜索 Bot 名称或 ID" value={q} disabled={busy} onChange={event => setQ(event.target.value)} /></label>
       <div className="settings-actions" role="group" aria-label="批量设置诊断自愈">
         <button type="button" className="copy-btn" disabled={busy} onClick={() => void save({ all: true, enabled: false })}>一键全关</button>
         <button type="button" className="copy-btn settings-primary" disabled={busy} onClick={() => void save({ all: true, enabled: true })}>一键全开</button>
       </div></div>
-    <p className="settings-hint">批量操作覆盖名下所有可自行设置的 Bot，包含当前搜索和分页之外的 Bot。</p>
+    <p className="settings-hint">仅展示生产环境 Bot。批量操作覆盖名下所有可自行设置的生产 Bot，包含当前搜索和分页之外的 Bot。</p>
     {(error || loadError) && <p role="alert" className="error-banner">{error || loadError}<button type="button" disabled={busy} onClick={() => { setError(''); setRevision(value => value + 1); }}>刷新</button></p>}
     {message && <p role="status" className="settings-feedback">{message}</p>}
     {!page && !loadError && <p className="monitoring-empty" role="status">正在加载…</p>}
     {page?.items.length === 0 && <p className="monitoring-empty">没有找到 Bot。</p>}
     <ul className="settings-bots">{page?.items.map(bot => {
       const config = bot.configuration, enabled = config?.diagnosisEnabled === true && config.recoveryEnabled === true;
-      return <li key={bot.botRef} className={bot.isServiceBot ? 'settings-service-bot' : undefined}><span className="bot-glyph"><Icon name="bot" /></span>
-        <div className="record-text"><strong className="record-title">{bot.botName}</strong><small className="record-session mono">{bot.botId} · {bot.ownerId} · {bot.env}</small>
-          {bot.isServiceBot && <span className="settings-bot-note">服务 Bot 请联系平台</span>}</div>
-        <span className={`settings-state${enabled && !bot.isServiceBot ? ' enabled' : ''}`}>{enabled ? '已开启' : '已关闭'}</span>
-        <button type="button" role="switch" aria-label={`${bot.botName} 诊断监控`} aria-checked={enabled} className="monitoring-switch" disabled={busy || bot.isServiceBot}
+      const disabledReason = bot.configurationDisabledReason;
+      const engine = bot.activeEngine?.trim().toLowerCase();
+      const engineLabel = engine === 'openclaw' ? 'OpenClaw' : engine === 'teclaw' ? 'TE' : bot.activeEngine?.trim() || '引擎未知';
+      const type = bot.botType?.trim().toLowerCase();
+      const typeLabel = type === 'service' ? '服务 Bot' : type === 'desktop' ? '桌面 Bot' : type === 'personal' ? '个人 Bot' : bot.botType?.trim() || '类型未知';
+      return <li key={bot.botRef} className={disabledReason ? 'settings-disabled-bot' : undefined}><span className="bot-glyph"><Icon name="bot" /></span>
+        <div className="record-text"><div className="settings-bot-heading"><strong className="record-title">{bot.botName}</strong>
+          <span className="settings-bot-tags"><span className="enrollment-badge">{engineLabel}</span><span className="enrollment-badge">{typeLabel}</span></span></div><small className="record-session mono">{bot.botId} · {bot.ownerId} · {bot.env}</small>
+          {disabledReason && <span className="settings-bot-note">{disabledReason}</span>}</div>
+        <span className={`settings-state${enabled && !disabledReason ? ' enabled' : ''}`}>{enabled ? '已开启' : '已关闭'}</span>
+        <button type="button" role="switch" aria-label={`${bot.botName} 诊断监控`} aria-checked={enabled} className="monitoring-switch" disabled={busy || Boolean(disabledReason)} title={disabledReason}
           onClick={() => void save({ botRef: bot.botRef, version: config?.version ?? 0, enabled: !enabled })}><span /></button></li>;
     })}</ul>
     <footer className="settings-footer"><button type="button" className="copy-btn" disabled={busy || cursors.length === 1} onClick={() => setCursors(value => value.slice(0, -1))}>上一页</button>

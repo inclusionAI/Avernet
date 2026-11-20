@@ -130,7 +130,7 @@ describe('WorkOrderCard 详情入口', () => {
 describe('通知列表不再展示分类图标', () => {
   it.each(['APPROVAL', 'NOTIFICATION'])('%s 保留类型文字但不渲染图标', (itemType) => {
     const { container } = render(<WorkOrderCard workOrder={buildWorkOrder({ item_type: itemType })} />);
-    expect(screen.getByText(itemType === 'APPROVAL' ? '审批' : '通知')).toBeInTheDocument();
+    expect(screen.getByText(itemType === 'APPROVAL' ? '审批类' : '通知类')).toBeInTheDocument();
     expect(container.querySelector('img')).toBeNull();
   });
 });

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from agentclaw.community.core.apply_engine.desired_state import (
+    BotSyncedLocalSkill,
     CenterSkillByCode,
     CenterSkillRef,
     LocalSkillPackage,
@@ -17,7 +18,7 @@ from agentclaw.community.core.skill_center.skill_reference_contract import (
     ReadySharedSkill,
     SkillAccessScope,
 )
-from .capabilities_types import Skill, asset_key, center_key, local_owned
+from .capabilities_types import FromBotSource, Skill, asset_key, center_key, local_owned
 
 
 def access_scope(ctx):
@@ -55,6 +56,34 @@ async def resolve_skill(materialiser, ctx, snapshot, entry):
             str(existing["id"]) if existing else None,
             frozenset(existing["mcp_codes"]) if existing else frozenset(),
             package=package.canonical_zip,
+            note=entry.note,
+        )
+    if isinstance(source, BotSyncedLocalSkill):
+        # file-sync carries the package bytes; this road never reads them and
+        # never uploads. ``resolve`` is read-only: it reads the existing dst
+        # ``ac_skill`` row straight off the in-memory snapshot for identity —
+        # the same read the ``LocalSkillPackage`` branch makes, metadata only,
+        # never the skill file — and defers the create-or-replace to the
+        # capabilities writer via ``from_bot``. A ``dry_run`` stops after
+        # ``plan`` and never reaches the writer, so the dst ``ac_skill`` table
+        # is left untouched; the upload-port method is not called here.
+        matches = [
+            a
+            for a in snapshot.skills
+            if a["name"] == entry.name and local_owned(a, snapshot)
+        ]
+        if len(matches) > 1:
+            raise ValueError("multiple Bot Local assets have this runtime name")
+        existing = matches[0] if matches else None
+        if existing and existing.get("resolution_error"):
+            raise ValueError(str(existing["resolution_error"]))
+        return Skill(
+            entry.name,
+            asset_key(existing) if existing else "local:" + entry.name,
+            str(existing["id"]) if existing else None,
+            frozenset(existing["mcp_codes"]) if existing else frozenset(),
+            package=None,
+            from_bot=FromBotSource(source.source_bot_id, source.source_owner_id),
             note=entry.note,
         )
     if isinstance(source, CenterSkillRef):

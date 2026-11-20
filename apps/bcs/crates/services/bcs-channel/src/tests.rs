@@ -730,6 +730,7 @@ fn outbound(
         raw_payload: serde_json::json!({"type": "chat.final"}),
         render_hint: ChannelRenderHint::Render,
         source_im_message_id: None,
+        caller_dispatch: false,
         source_is_channel,
     }
 }

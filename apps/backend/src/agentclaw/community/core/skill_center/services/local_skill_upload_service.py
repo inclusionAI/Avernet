@@ -45,6 +45,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     RuntimeProjectionResult,
 )
+from agentclaw.community.core.skill_center.services.local_skill_upload_dst_asset import (
+    LocalSkillUploadDstAssetMixin,
+)
 from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
     LocalSkillPackageRuntime,
     LocalSkillPackageRuntimeResult,
@@ -82,7 +85,9 @@ SECURITY_HANDOFF_TIMEOUT_SECONDS = 2.0
 SECURITY_FAILURE_RECORD_TIMEOUT_SECONDS = 0.25
 
 
-class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
+class LocalSkillUploadService(
+    LocalSkillUploadDstAssetMixin, LocalSkillUploadServiceProtocol
+):
     """Authorize, validate, persist and associate an inactive Local Skill."""
 
     @inject

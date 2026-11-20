@@ -34,6 +34,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Logs {
 
 fn command(url: String, protocol: &str, method: &str, token_type: &str) -> BotDeliveryCommand {
     BotDeliveryCommand {
+        a2a_test_user: None,
         target: BotDeliveryTarget::HttpProvider {
             bot_id: "test-bot".into(),
             provider_id: "test-provider".into(),

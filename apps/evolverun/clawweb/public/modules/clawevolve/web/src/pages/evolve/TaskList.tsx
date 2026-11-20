@@ -90,6 +90,7 @@ export function TaskList({ version = 'internalversion' }: { version?: 'openversi
   const [tasks, setTasks] = useState<EvolveTask[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [localVisibility, setLocalVisibility] = useState(false)
 
   const loadTasks = async () => {
     setLoading(true)
@@ -104,6 +105,7 @@ export function TaskList({ version = 'internalversion' }: { version?: 'openversi
         status: filter,
         query: debouncedQuery,
       })
+      setLocalVisibility(evolve.spaceExpansion === 'disabled-in-dev')
       setTasks(evolve.tasks)
       setTotal(evolve.total)
       setTotalPages(evolve.totalPages)
@@ -147,6 +149,11 @@ export function TaskList({ version = 'internalversion' }: { version?: 'openversi
 
   return (
     <div className="w-full px-3 py-6 sm:px-4 lg:px-5">
+      {localVisibility && !adminMode && (
+        <p role="status" className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          本地开发模式：当前展示本地权限可确认的数据，未加载团队空间扩展数据。
+        </p>
+      )}
       <PageTitle
         action={
           <div className="flex items-center gap-2">

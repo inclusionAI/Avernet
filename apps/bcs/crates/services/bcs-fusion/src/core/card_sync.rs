@@ -89,11 +89,6 @@ pub fn agent_card(bot: &BotControlPlaneRecord, agent_card: Option<&Value>) -> Re
     if let Some(domains) = domains { caps.domains = domains; }
     if let Some(skills) = skills { caps.skills = skills; }
     if let Some(scopes) = scopes { caps.scopes = scopes; }
-    // Fuse's default converter indexes description and skill text, not root domains.
-    // Include domains here as well so domain-only Agents remain searchable.
-    let description = std::iter::once(caps.summary.as_str())
-        .chain(caps.domains.iter().map(String::as_str))
-        .filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n");
     Ok(Some(CardWriteRequest {
         resource_type: CardResourceType::Agent,
         labels: [
@@ -106,11 +101,11 @@ pub fn agent_card(bot: &BotControlPlaneRecord, agent_card: Option<&Value>) -> Re
         ].into(),
         card: json!({
             "name": if bot.name.trim().is_empty() { &bot.bot_id } else { &bot.name },
-            "description": description,
+            "description": caps.summary,
             "skills": caps.skills.iter().map(|skill| json!({
                 "id": skill.name, "name": skill.name,
                 "description": skill.description.as_deref().unwrap_or_default(),
-                "tags": caps.domains,
+                "tags": skill.tags,
             })).collect::<Vec<_>>(),
             "domains": caps.domains,
             "scopes": caps.scopes,
@@ -243,8 +238,11 @@ mod tests {
         assert_eq!(card.card["description"], "");
         assert_eq!(card.card["skills"], json!([]));
         assert!(card.card.get("visibility").is_none());
+        bot.descriptor.summary = "Invoicing agent".into();
         bot.descriptor.domains = vec!["invoicing".into()];
-        assert_eq!(agent_card(&bot, None).unwrap().unwrap().card["description"], "invoicing");
+        let fuse_card = agent_card(&bot, None).unwrap().unwrap();
+        assert_eq!(fuse_card.card["description"], "Invoicing agent");
+        assert_eq!(fuse_card.card["domains"], json!(["invoicing"]));
         for visibility in ["public", "protected", "private"] {
             for user_visibility in [UserVisibility::Public, UserVisibility::Protected, UserVisibility::Private] {
                 bot.visibility = visibility.into();
@@ -310,8 +308,9 @@ mod tests {
         let ids=projected["skills"].as_array().unwrap().iter()
             .map(|skill|skill["id"].as_str().unwrap()).collect::<Vec<_>>();
         assert_eq!(ids,["orders"]);
-        assert_eq!(projected["description"],"Card summary\nbilling");
+        assert_eq!(projected["description"],"Card summary");
         assert_eq!(projected["skills"][0]["description"],"Order queries");
+        assert_eq!(projected["skills"][0]["tags"],json!(["orders","billing"]));
         assert_eq!(projected["domains"],json!(["billing"]));
         assert_eq!(projected["scopes"],json!(["orders:read"]));
 

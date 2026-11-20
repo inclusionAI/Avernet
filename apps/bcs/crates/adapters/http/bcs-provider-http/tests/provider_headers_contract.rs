@@ -23,6 +23,7 @@ type Requests = Arc<Mutex<Vec<(HeaderMap, Value)>>>;
 enum Downlink {
     Ordinary,
     CallerSend,
+    ChannelCallerSend,
     Ensure,
     Observe,
     HistoryMessage,
@@ -82,10 +83,15 @@ async fn assert_common_headers(downlink: Downlink) {
             assert_eq!(headers["authorization"], "Bearer provider-test");
             assert_eq!(headers["content-type"], "application/json; charset=utf-8");
             match downlink {
-                Downlink::Ordinary | Downlink::CallerSend => {
+                Downlink::Ordinary | Downlink::CallerSend | Downlink::ChannelCallerSend => {
                     assert_eq!(body["method"], "chat.send");
                     assert_eq!(body["id"], "run-1");
-                    if matches!(downlink, Downlink::CallerSend) && version == "2.0" {
+                    if matches!(downlink, Downlink::ChannelCallerSend) {
+                        assert_eq!(body["extensions"]["caller_execution_token"]["type"], "test");
+                        assert_eq!(body["extensions"]["caller_execution_token"]["token"], "test-proof");
+                    }
+                    assert!(!headers.contains_key("x-test-channel-proof"));
+                    if matches!(downlink, Downlink::CallerSend | Downlink::ChannelCallerSend) && version == "2.0" {
                         assert_eq!(headers["accept"], "text/event-stream, application/json");
                         assert_eq!(headers["x-bcn-transport"], "sse");
                     } else {
@@ -115,6 +121,7 @@ async fn send(transport: &HttpProviderTransport, target: &BotDeliveryTarget, dow
     match downlink {
         Downlink::Ordinary => {
             let result = transport.deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: target.clone(), run_id: "run-1".into(),
                 frame: BcsFrame::Request(RequestFrame::new("run-1", "chat.send", Some(json!({
                     "bcs_session_id": "session-1", "message": {"text": "hello"},
@@ -125,7 +132,7 @@ async fn send(transport: &HttpProviderTransport, target: &BotDeliveryTarget, dow
             }).await.unwrap();
             assert!(result.delivered);
         }
-        Downlink::CallerSend => {
+        Downlink::CallerSend | Downlink::ChannelCallerSend => {
             let deadline = bcs_protocol::now_ms() as i64 + 300_000;
             let ack = transport.send_caller_execution(target, &service_credential, SendCallerExecutionCommand {
                 association: CallerDispatchAssociation {
@@ -140,6 +147,7 @@ async fn send(transport: &HttpProviderTransport, target: &BotDeliveryTarget, dow
                 caller_context_expires_at_ms: deadline,
                 execution_token: CallerOpaqueRef::new("test-proof"), execution_token_expires_at_ms: deadline,
                 proof_format: "opaque".into(), proof_type: "test".into(), control_revision: 0,
+                channel_supplied_proof: matches!(downlink, Downlink::ChannelCallerSend),
                 not_after_ms: deadline, request_digest: DIGEST.into(),
                 channel_actor_id: "actor-1".into(), channel_actor_name: "Test actor".into(),
                 cross_group_lineage: None, callback_timeout_ms: 3_000, now_ms: 1, history: None,
@@ -188,6 +196,27 @@ async fn send(transport: &HttpProviderTransport, target: &BotDeliveryTarget, dow
 #[tokio::test]
 async fn ordinary_downlink_common_headers() {
     assert_common_headers(Downlink::Ordinary).await;
+}
+
+struct ChannelHeaderPolicy;
+
+impl bcs_service_api::port::provider_request_headers::ProviderRequestHeaderPolicy for ChannelHeaderPolicy {
+    fn headers(
+        &self,
+        context: &bcs_service_api::port::provider_request_headers::ProviderRequestHeaderContext<'_>,
+    ) -> Vec<(String, RedactedToken)> {
+        context.extensions
+            .and_then(|extensions| extensions["caller_execution_token"]["token"].as_str())
+            .map(|token| vec![("x-test-channel-proof".into(), RedactedToken::new(token))])
+            .unwrap_or_default()
+    }
+}
+
+#[tokio::test]
+async fn protected_channel_proof_uses_json_without_the_header_policy() {
+    bcs_provider_http::install_provider_request_header_policy(Arc::new(ChannelHeaderPolicy)).unwrap();
+    assert_common_headers(Downlink::ChannelCallerSend).await;
+    assert_common_headers(Downlink::CallerSend).await;
 }
 
 #[tokio::test]

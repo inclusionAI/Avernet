@@ -1,11 +1,11 @@
 import { createBotTaskHistoryReader } from '@/services/tasks/panel/taskPanelHistoryAdapter';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 /**
- * useChatHeaderPanels —— 对话页头部五图标域的开合编排（chat-header-panels）。
+ * useChatHeaderPanels —— 对话页头部六图标域的开合编排（chat-header-panels）。
  *
- * 五图标（dmore 实测语义）：
+ * 六图标（dmore 实测语义）：
  * - 收藏会话：动作开关，复用 useConversationFavorites.toggleFavorite；
- * - 会话管理 / 历史消息：右缘面板互斥开合（新面板打开关闭旧面板）；
+ * - 会话管理 / 历史消息 / 任务护航 DEMO：右缘面板互斥开合（新面板打开关闭旧面板）；
  * - 资源管理：收敛既有会话文件副屏（openFileDrawer / closeFileDrawer，同一容器）；
  * - 副屏：closePanel 关闭；打开走 reopenSidePaneTabsFromMessages 按消息标记幂等重建
  *   （sidePaneOpen 经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 保持为真实开合态——含
@@ -37,7 +37,7 @@ export { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sid
 export type { UseSessionHistorySearchModel } from './sessionHistorySearchModel';
 
 /** 头部右侧承载的右缘面板类型（资源面板走既有文件副屏，不在此枚举内）。 */
-export type ChatHeaderPanelKind = 'detail' | 'history';
+export type ChatHeaderPanelKind = 'detail' | 'history' | 'escort';
 
 export interface ChatHeaderFavoritesModel {
   favorite: boolean;
@@ -138,6 +138,7 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
         if (next !== null) {
           options.closeFileDrawer();
           sidePaneMutex.dismissSidePaneForPanels();
+          if (next === 'escort') setSidePaneOpen(false);
         }
         return next;
       });
@@ -151,10 +152,11 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   }, [options]);
 
   // 会话切换即复位开合态（面板内容按当前会话呈现）。
-  const lastSessionIdRef = useRef<string | null>(sessionId);
+  const sessionKey = JSON.stringify([options.botId, sessionId]);
+  const lastSessionKeyRef = useRef(sessionKey);
   const [sessionEpoch, setSessionEpoch] = useState(0);
-  if (lastSessionIdRef.current !== sessionId) {
-    lastSessionIdRef.current = sessionId;
+  if (lastSessionKeyRef.current !== sessionKey) {
+    lastSessionKeyRef.current = sessionKey;
     setOpenPanel(null);
     setHighlightMessageId(null);
     // 副屏同步复位（兜底）：useBotChat 在同边界 closePanelForce 强关面板并清空 tabs，

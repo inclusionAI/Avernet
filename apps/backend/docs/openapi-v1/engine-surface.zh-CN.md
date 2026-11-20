@@ -102,26 +102,31 @@ C1 的权威清单是 `apps/frontend/src/requestConfig.ts:189-205` 里的 proxyp
 | PUT | `…/{bot_id}/sessions/{session_id}/favorite` | `PUT /api/session-favorites/{encoded_session_id}` | 幂等收藏 → `Envelope[SessionFavorite]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}/favorite` | `DELETE /api/session-favorites/{encoded_session_id}` | 幂等取消收藏 → `Envelope[SessionFavorite]` |
 
-### 好友会话文件列表
+### 好友会话文件
 
 好友会话读取（列表、收藏列表、详情、消息、文件列表）区分认证操作者 `user_id`
 与会话归属人 `f_user_id`。Bot owner 可在好友鉴权通过后读取该好友的会话；
 共享实例使用认证 owner 获取设备连接，但仍按好友筛选后端会话索引。
 普通好友不会自动提升为 owner；Caller 模式仍选择好友的独立实例，不切换为
-owner 实例。此处不新增前端参数，也不开放 owner 代好友修改／删除会话。
+owner 实例。好友文件操作只作用于经过归属校验的该好友会话，不授予 Bot 管理权限。
 
 `GET /openapi/v1/bots/{bot_id}/sessions/{session_id}/files` 支持可选
 `f_user_id`：好友对话传当前好友用户 ID，`user_id` 仍为认证调用者，
 `owner_id` 仍为 Bot 所有者。省略 `f_user_id` 时保持 owner／MEMBER 协作者鉴权。
 
-显式好友模式仅支持默认 `stage=draft`，必须同时满足：调用者是该好友或
+好友模式必须同时满足：调用者是该好友或
 Bot owner、BCN 确认好友关系有效、ExpertChat 的后端会话索引确认会话属于该好友。
 不依据 session key 的用户后缀推断归属；未通过鉴权返回隐藏资源存在性的 404，
 好友关系源不可用时返回服务不可用错误，不回退放行。
 
-响应结构不变，仍只返回指定 owner／Bot／会话下已就绪的资源记录。
-此次仅扩展列表查询，不开放好友上传、删除、物化状态和文件内容访问权限。
-新版前端“我的好友 Bot”文件列表须显式传 `f_user_id`；其他调用无需迁移。
+非 TeClaw 好友 Bot 支持与 owner／显式 MEMBER 协作者一致的会话文件生命周期：
+申请上传凭证、完成上传、查询物化状态、列表、内容读取和删除。好友上传与删除必须
+显式选择 `caller_runtime_target=caller_instance`；上传接口兼容不携带 `f_user_id`
+的现有前端请求，但仍先尝试 operator 权限，只有失败后才按认证用户执行上述好友及
+会话归属校验。TeClaw 好友 Bot 不进入这条文件写入路径。
+
+响应结构不变，仍只返回指定 owner／Bot／本人会话下的资源记录。新版前端文件列表、
+内容与删除请求应继续显式传 `f_user_id`；owner／协作者调用无需迁移。
 
 这一组有两点不是读者会默认的形状：
 

@@ -11,7 +11,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use bcs_test_support::{NoopAuthPlugin, NoopUserIdentityPort};
 use super::routes::{
-    cookie_unsafe_origin_allowed, encode_cookie_change, extract_login_challenge,
+    extract_login_challenge,
     presented_session_cookie,
 };
 
@@ -463,7 +463,7 @@ impl AuthService for ScriptedAuthService {
                     cookie_changes: vec![BrowserCookieChange::ClearSession],
                 }
             }
-            Some(session) => {
+            Some(_session) => {
                 self.calls.lock().unwrap().push("logout-revoke");
                 AuthFlowReply {
                     result: Ok(LogoutData {}),
@@ -517,7 +517,7 @@ async fn response_parts(
         .and_then(|value| value.to_str().ok())
         .map(str::to_string)
         .unwrap_or_default();
-    let bytes = to_bytes(response.into_body(), usize::MAX)
+    let _bytes = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("body");
     (status, cookies, location, cache)

@@ -208,15 +208,18 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
         delivery: &PersistedMessageDelivery,
     ) -> Option<bcs_service_api::CallerDispatchContext> {
         let flow = self.flow.upgrade()?;
-        if let Err(reason) = revalidate_queued_access(&flow, delivery).await {
-            tracing::warn!(
-                delivery_id = %delivery.delivery_id,
-                bot_id = %delivery.target_bot_id,
-                reason = %reason,
-                "CALLER_ACCESS_REVOKED: the queued caller row failed dispatch-time access revalidation, staying closed"
-            );
-            return None;
-        }
+        let source = match revalidate_queued_access(&flow, delivery).await {
+            Ok((_, source)) => source,
+            Err(reason) => {
+                tracing::warn!(
+                    delivery_id = %delivery.delivery_id,
+                    bot_id = %delivery.target_bot_id,
+                    reason = %reason,
+                    "CALLER_ACCESS_REVOKED: the queued caller row failed dispatch-time access revalidation, staying closed"
+                );
+                return None;
+            }
+        };
         let target = flow
             .registry
             .resolve_delivery_target(&delivery.target_bot_id)
@@ -281,11 +284,28 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             );
             return None;
         }
+        let source_im_message_id = source.content.get("source_im_message_id").and_then(|v| v.as_str());
+        let native_credential = match crate::caller_execution::load_native(
+            &flow, delivery, &target, source_im_message_id,
+        ).await {
+            Ok(credential) => credential,
+            Err(error) => {
+                tracing::warn!(delivery_id = %delivery.delivery_id, %error,
+                    "native channel Caller credential unavailable");
+                return None;
+            }
+        };
+        // Protected sends skip ordinary before_send, but their channel
+        // callbacks still need the originating IM message for reaction cleanup.
+        if let (Some(run_id), Some(message_id)) = (delivery.run_id.as_deref(), source_im_message_id) {
+            flow.message_tracker.cache_channel_source_message_id(run_id, message_id).await;
+        }
         Some(bcs_service_api::CallerDispatchContext {
             service_credential: bcs_to_provider_token.clone(),
             provider_id: provider_id.clone(),
             provider_bot_ref: provider_bot_ref.clone(),
             target,
+            native_credential,
         })
     }
 
@@ -918,6 +938,7 @@ async fn prepare_queued_group_bounded(
     transport_json["context_selection"] = serde_json::to_value(payload.selection).map_err(|_| invalid("queue selection encoding failed"))?;
     Ok(PreparedManagedDelivery {
         command: BotDeliveryCommand {
+            a2a_test_user: None,
             target: delivery_target,
             run_id: run_id.clone(),
             frame,

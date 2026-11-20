@@ -14,10 +14,8 @@ use super::*;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use bcs_test_support::NoopUserIdentityPort;
 
 use async_trait::async_trait;
-use axum::body::to_bytes;
 use bcs_auth_api::{AuthError, AuthPlugin, AuthPluginChain, AuthPrincipal, UserIdentityInfo};
 use bcs_test_support::capture_request_logs;
 use serde_json::Value;

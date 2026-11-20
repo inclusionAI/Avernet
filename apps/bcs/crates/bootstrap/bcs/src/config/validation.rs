@@ -123,6 +123,20 @@ pub(super) fn validate_loaded_config_for_environment(
     environment: crate::config_loader::Environment,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validate_loaded_config(config)?;
+    if let Some(test_user) = &config.a2a_test_user {
+        if !matches!(environment, crate::config_loader::Environment::Pre) {
+            return Err(crate::BcsError::InvalidConfig("a2a_test_user is pre-release only".into()).into());
+        }
+        test_user.validate().map_err(|message| crate::BcsError::InvalidConfig(message.into()))?;
+        if config.provider_http.bypass_headers.iter().any(|name| name.trim().eq_ignore_ascii_case(&test_user.header_name)) {
+            return Err(crate::BcsError::InvalidConfig("A2A test user header conflicts with Provider bypass configuration".into()).into());
+        }
+        let url = reqwest::Url::parse(&test_user.interface_url)
+            .map_err(|_| crate::BcsError::InvalidConfig("invalid a2a_test_user URL".into()))?;
+        if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
+            return Err(crate::BcsError::InvalidConfig("a2a_test_user requires an HTTPS interface URL".into()).into());
+        }
+    }
     validate_eventing_environment_policy(config, environment).map_err(|error| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, error))
             as Box<dyn std::error::Error>

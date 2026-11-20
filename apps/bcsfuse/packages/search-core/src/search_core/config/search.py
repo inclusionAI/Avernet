@@ -9,6 +9,7 @@ class SearchSettings:
     max_inflight_requests: int = 32
     embedding_timeout: float = 1.0
     index_timeout: float = 0.5
+    card_metadata_timeout: float = 0.5
     keyword_timeout: float = 0.5
     reranker_timeout: float = 1.5
     request_timeout: float = 4.0
@@ -50,6 +51,7 @@ class SearchSettings:
         for name in (
             "embedding_timeout",
             "index_timeout",
+            "card_metadata_timeout",
             "keyword_timeout",
             "reranker_timeout",
             "request_timeout",

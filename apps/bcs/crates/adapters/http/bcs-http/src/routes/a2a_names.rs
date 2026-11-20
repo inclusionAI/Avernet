@@ -44,17 +44,49 @@ pub async fn register(State(state):State<HttpAppState>,Path(provider_name):Path<
         Err(failure)=>error(failure),
     }
 }
+#[derive(Deserialize)]
+pub struct NamedChatRequest {
+    test_user_ref: Option<String>,
+    #[serde(flatten)]
+    chat: super::bot_chat::ChatRequest,
+}
+
+fn chat_error(status: StatusCode, message: &'static str) -> Response {
+    (status, Json(json!({"error": message}))).into_response()
+}
+
 /// Keep the established caller authentication and chat admission checks intact.
 pub async fn chat(State(state):State<HttpAppState>,Path((provider_name,provider_bot_ref)):Path<(String,String)>,
-    headers:HeaderMap,uri:axum::http::Uri,Json(body):Json<super::bot_chat::ChatRequest>)->Response {
+    headers:HeaderMap,uri:axum::http::Uri,Json(body):Json<NamedChatRequest>)->Response {
     let Some(service)=&state.services.a2a_bot_management else {return unavailable()};
-    if let Err(failure)=super::bot_chat::resolve_bot_caller(&state,&headers).await {
-        return (failure.into_response().status(),Json(json!({"error":"Caller authentication required"}))).into_response();
-    }
+    let caller = match super::bot_chat::resolve_bot_caller(&state, &headers).await {
+        Ok(caller) => caller,
+        Err(failure) => return chat_error(failure.into_response().status(), "Caller authentication required"),
+    };
+    let admission = if let Some(alias) = body.test_user_ref.as_deref() {
+        let Some(admission) = &state.a2a_test_user_admission else {
+            return chat_error(StatusCode::FORBIDDEN, "A2A test user selection unavailable");
+        };
+        if admission.selection.caller_bot_id != caller {
+            return chat_error(StatusCode::FORBIDDEN, "A2A test user selection denied");
+        }
+        if !bcs_config_api::a2a_test_user::valid_ref(alias) || alias != admission.selection.alias
+            || body.chat.session_id.is_some()
+        {
+            return chat_error(StatusCode::BAD_REQUEST, "Invalid A2A test user selection");
+        }
+        Some(admission)
+    } else {
+        None
+    };
     let target=match service.resolve_provider_ref_target(&provider_name,&provider_bot_ref).await {
         Ok(target)=>target,Err(failure)=>return error(failure),
     };
-    match super::bot_chat::bot_chat_async(State(state),Path(target),headers,uri,Json(body)).await {
+    if admission.is_some_and(|admission| admission.target_bot_id != target) {
+        return chat_error(StatusCode::FORBIDDEN, "A2A test user selection denied");
+    }
+    let selection = admission.map(|admission| admission.selection.clone());
+    match super::bot_chat::submit_async_chat(state, target, headers, uri, body.chat, selection).await {
         Ok((status,Json(result)))=>(status,Json(json!({"provider_name":provider_name,"provider_bot_ref":provider_bot_ref,
             "run_id":result["run_id"],"session_id":result["session_id"],"status":result["status"],
             "expires_at_ms":result["expires_at_ms"]}))).into_response(),

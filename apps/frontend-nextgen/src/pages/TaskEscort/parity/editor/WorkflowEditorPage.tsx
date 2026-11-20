@@ -1,21 +1,47 @@
 import { Button } from '@/components/ui/Button';
-import { editorYaml } from '@/domain/taskEscortParity/editor';
+import type { EditorSpec } from '@/domain/taskEscortParity/editorTypes';
 import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
+import { useEditorAuthoring } from '@/hooks/taskEscortParity/useEditorAuthoring';
+import { useEditorAuthoringNavigation } from '@/hooks/taskEscortParity/useEditorAuthoringNavigation';
+import { useEditorAuthoringPublish } from '@/hooks/taskEscortParity/useEditorAuthoringPublish';
 import { useTaskEscortEditor } from '@/hooks/taskEscortParity/useTaskEscortEditor';
-import { useEffect, useMemo, useState } from 'react';
-import { EditorGraph } from './EditorGraph';
+import { useEffect, useState } from 'react';
+import { WorkflowCreationDialog } from '../WorkflowCreationDialog';
+import { EditorAuthoringToolbar } from './EditorAuthoringToolbar';
+import { EditorAiPanel } from './EditorAiPanel';
+import { EditorLeaveDialog, EditorPublishDialog, EditorPublishReviewDialog } from './EditorAuthoringDialogs';
 import { EditorHistory } from './EditorHistory';
-import { EditorInspector, EditorSettings } from './EditorInspector';
-import { EditorCode, EditorDialog, EmptyState, LoadingState, StateView, Tabs } from './EditorPrimitives';
+import { EditorSettings } from './EditorInspector';
+import { EditorWorkspaceBody } from './EditorWorkspaceBody';
+import './editor-workspace.css';
+import { EditorDialog, EmptyState, LoadingState, StateView, Tabs } from './EditorPrimitives';
 import { EditorScripts } from './EditorScripts';
 
 type Workspace = 'workflow' | 'scripts';
 type Mode = 'visual' | 'split' | 'yaml';
 
-function EditorSession({ context }: { context: TaskEscortParityContext }) {
-  const { access, workflow } = useTaskEscortEditor(context);
+function EditorAuthoringSession({
+  context,
+  original,
+  canEdit,
+  refresh,
+}: {
+  context: TaskEscortParityContext;
+  original: EditorSpec;
+  canEdit: boolean;
+  refresh: () => void;
+}) {
+  const authoring = useEditorAuthoring(context, original, canEdit);
+  const publication = useEditorAuthoringPublish(context, authoring.yaml, canEdit, authoring.save);
+  const busy = !!authoring.phase || !!publication.phase;
+  const [nodePending, setNodePending] = useState(false);
+  const [settingsPending, setSettingsPending] = useState(false);
+  const pendingFields = nodePending || settingsPending;
+  const navigation = useEditorAuthoringNavigation(authoring.dirty || busy || pendingFields);
   const [workspace, setWorkspace] = useState<Workspace>('workflow');
   const [mode, setMode] = useState<Mode>('visual');
+  const [aiOpen, setAiOpen] = useState(false);
+  const [generationOpen, setGenerationOpen] = useState(false);
   const queryNodeId = context.query.nodeId;
   const [selection, setSelection] = useState<{ queryNodeId: string | undefined; id: string | null }>({
     queryNodeId,
@@ -24,15 +50,160 @@ function EditorSession({ context }: { context: TaskEscortParityContext }) {
   useEffect(() => setSelection({ queryNodeId, id: queryNodeId ?? null }), [queryNodeId]);
   const [settings, setSettings] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const spec = workflow.data;
-  const yaml = useMemo(() => (spec ? editorYaml(spec) : ''), [spec]);
-  // Query updates (back/forward or another view) remain authoritative when provided.
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const spec = authoring.spec;
   const focusId = selection.queryNodeId === queryNodeId ? selection.id : queryNodeId ?? null;
-  const node = spec?.nodes.find((item) => item.id === focusId);
+  const node = spec.nodes.find((item) => item.id === focusId);
   const select = (id: string | null) => {
+    if (nodePending) return;
     setSelection({ queryNodeId, id });
     context.navigate('editor', { nodeId: id ?? undefined });
   };
+  return (
+    <section aria-label="工作流编辑器" className="editor-authoring-workspace min-w-0 text-foreground">
+      <div className="editor-workspace-tabs flex flex-wrap items-center justify-between gap-3">
+        <Tabs
+          value={workspace}
+          onChange={(next) => { if (!pendingFields) setWorkspace(next); }}
+          label="编辑器工作区"
+          options={[
+            { value: 'workflow', label: '工作流编排' },
+            { value: 'scripts', label: '脚本文件' },
+          ]}
+        />
+        {workspace === 'workflow' && (
+          <Tabs
+            value={mode}
+            onChange={(next) => { if (!pendingFields) setMode(next); }}
+            label="流程视图"
+            options={[
+              { value: 'visual', label: '画布' },
+              { value: 'split', label: '对照' },
+              { value: 'yaml', label: 'YAML' },
+            ]}
+          />
+        )}
+      </div>
+      <EditorAuthoringToolbar authoring={authoring} canEdit={canEdit} busy={busy || pendingFields}
+        onSettings={() => setSettings(true)} onHistory={() => setHistoryOpen(true)}
+        onRefresh={() => navigation.requestLeave(refresh)} onGenerate={() => setGenerationOpen(true)}
+        onModify={() => setAiOpen((open) => !open)} onPublish={() => setPublishOpen(true)} />
+      <p
+        id="editor-authoring-help"
+        className="m-0 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
+      >
+        {canEdit
+          ? '从左侧添加节点，连接输出与输入，再选择节点填写当前任务。修改仅保留在当前会话，保存与发布需分别确认。'
+          : '当前身份只有查看权限，不能 AI 修改、编辑 YAML、保存或发布。'}{' '}
+        未应用的 YAML 请先校验并应用；脚本文件使用独立的 Pack 快照，不随画布修改自动保存。
+      </p>
+      <div aria-live="polite">
+        {authoring.persistence.loading && (
+          <p role="status" className="text-xs text-muted-foreground">
+            正在读取保存基线…
+          </p>
+        )}
+        {authoring.persistence.error && (
+          <div role="alert" className="text-xs text-destructive">
+            {authoring.persistence.error}
+            <Button size="sm" variant="outline" onClick={authoring.persistence.retry}>
+              重试保存基线
+            </Button>
+          </div>
+        )}
+        {publication.error && !publication.candidate && (
+          <p role="alert" className="text-xs text-destructive">
+            {publication.error}
+          </p>
+        )}
+        {publication.notice && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {publication.notice}
+          </p>
+        )}
+        {authoring.error && (
+          <p
+            role="alert"
+            className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive"
+          >
+            {authoring.error}
+          </p>
+        )}
+        {authoring.notice && (
+          <p role="status" className="rounded-lg border border-input bg-muted/30 p-3 text-xs">
+            {authoring.notice}
+          </p>
+        )}
+        {busy && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {authoring.phase === 'validate'
+              ? '正在校验当前草稿…'
+              : authoring.phase === 'save'
+              ? '正在保存工作流…'
+              : '正在保存工作流…'}
+          </p>
+        )}
+      </div>
+      {workspace === 'workflow' && (
+        <div
+          className={`grid min-w-0 items-start gap-4 ${aiOpen && canEdit ? '2xl:grid-cols-[minmax(0,1fr)_420px]' : ''}`}
+        >
+          <EditorWorkspaceBody
+            authoring={authoring}
+            canEdit={canEdit}
+            busy={busy}
+            mode={mode}
+            node={node}
+            focusId={focusId}
+            select={select}
+            nodePending={nodePending}
+            onPendingChange={setNodePending}
+          />
+          {aiOpen && canEdit && (
+            <EditorAiPanel
+              context={context}
+              yaml={authoring.yaml}
+              spec={spec}
+              blockedReason={busy || pendingFields ? '正在保存或校验，请等待操作完成。' : undefined}
+              onApply={authoring.replaceDraft}
+              onClose={() => setAiOpen(false)}
+            />
+          )}
+        </div>
+      )}
+      {workspace === 'scripts' && <EditorScripts context={context} canEdit={canEdit} />}
+      {generationOpen && <WorkflowCreationDialog context={context} initialSource="ai" onClose={() => setGenerationOpen(false)} />}
+      <EditorDialog title="发布历史" open={historyOpen} onOpenChange={setHistoryOpen}>
+        {historyOpen && <EditorHistory context={context} />}
+      </EditorDialog>
+      <EditorSettings spec={spec} open={settings} onOpenChange={setSettings}
+        onChange={authoring.replaceDraft} disabled={!canEdit || busy || authoring.pendingYaml || nodePending} onPendingChange={setSettingsPending} />
+      <EditorPublishDialog
+        open={publishOpen}
+        busy={busy}
+        note={note}
+        onNote={setNote}
+        onClose={() => setPublishOpen(false)}
+        onPublish={() => {
+          setPublishOpen(false);
+          void publication.prepare(note.trim() || undefined);
+        }}
+      />
+      {publication.candidate && (
+        <EditorPublishReviewDialog key={publication.candidate.review.candidateCommit} publication={publication} />
+      )}
+      <EditorLeaveDialog
+        open={!!navigation.leave}
+        onStay={navigation.cancelLeave}
+        onLeave={navigation.discardAndLeave}
+      />
+    </section>
+  );
+}
+
+function EditorSession({ context }: { context: TaskEscortParityContext }) {
+  const { access, workflow } = useTaskEscortEditor(context);
   if (access.loading || access.error) return <StateView {...access} retry={access.refresh} />;
   if (access.data?.canView !== true)
     return (
@@ -47,112 +218,22 @@ function EditorSession({ context }: { context: TaskEscortParityContext }) {
       />
     );
   if (workflow.loading || workflow.error) return <StateView {...workflow} retry={workflow.refresh} />;
-  if (!spec)
+  if (!workflow.data)
     return <EmptyState title="没有可展示的工作流规格" description="未使用本地示例或默认节点替代服务端响应。" />;
   return (
-    <section aria-label="工作流编辑器" className="min-w-0 space-y-4 text-foreground">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="m-0 break-words text-lg font-semibold">{spec.title}</h2>
-          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-            {spec.id} · {spec.version === undefined ? '未提供版本' : `v${spec.version}`} ·{' '}
-            {access.data.canEdit ? '有编辑权限 · 本轮只读' : '只读权限'}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => setSettings(true)}>
-            流程设置
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
-            发布历史
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              access.refresh();
-              workflow.refresh();
-            }}
-          >
-            刷新规格
-          </Button>
-          <Button variant="outline" size="sm" disabled aria-describedby="editor-readonly-reason">
-            保存工作流
-          </Button>
-          <Button size="sm" disabled aria-describedby="editor-readonly-reason">
-            发布工作流
-          </Button>
-        </div>
-      </header>
-      <p
-        id="editor-readonly-reason"
-        role="status"
-        className="m-0 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
-      >
-        本轮未接入保存、发布和节点写入；所有内容只读，不会模拟成功。YAML 不可编辑，因此没有未保存草稿。
-      </p>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs
-          value={workspace}
-          onChange={setWorkspace}
-          label="编辑器工作区"
-          options={[
-            { value: 'workflow', label: '工作流编排' },
-            { value: 'scripts', label: '脚本文件' },
-          ]}
-        />
-        {workspace === 'workflow' && (
-          <Tabs
-            value={mode}
-            onChange={setMode}
-            label="流程视图"
-            options={[
-              { value: 'visual', label: '画布' },
-              { value: 'split', label: '对照' },
-              { value: 'yaml', label: 'YAML' },
-            ]}
-          />
-        )}
-      </div>
-      {workspace === 'workflow' && (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="m-0 text-xs text-muted-foreground">
-              选择节点查看完整属性；对照模式同时显示画布和保存态 YAML。
-            </p>
-            <Button variant="outline" size="sm" disabled>
-              添加节点
-            </Button>
-          </div>
-          {focusId && !node && (
-            <p role="status" className="rounded-lg border border-border p-3 text-xs text-muted-foreground">
-              所选节点 {focusId} 不在当前规格中，请重新选择。
-            </p>
-          )}
-          <div className={`grid min-w-0 gap-4 ${mode !== 'yaml' ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : ''}`}>
-            <div className={`grid min-w-0 gap-4 ${mode === 'split' ? 'xl:grid-cols-2' : ''}`}>
-              {mode !== 'yaml' && <EditorGraph spec={spec} selectedId={node?.id ?? null} select={select} />}
-              {mode !== 'visual' && (
-                <section aria-label="工作流规格 YAML" className="min-w-0 space-y-2">
-                  <h3 className="m-0 text-xs font-semibold">保存态 YAML · 只读</h3>
-                  <EditorCode label="工作流 YAML" text={yaml} />
-                </section>
-              )}
-            </div>
-            {mode !== 'yaml' && <EditorInspector node={node} close={() => select(null)} />}
-          </div>
-        </>
-      )}
-      {workspace === 'scripts' && <EditorScripts context={context} canEdit={access.data.canEdit} />}
-      <EditorDialog title="发布历史" open={historyOpen} onOpenChange={setHistoryOpen}>
-        {historyOpen && <EditorHistory context={context} />}
-      </EditorDialog>
-      <EditorSettings spec={spec} open={settings} onOpenChange={setSettings} />
-    </section>
+    <EditorAuthoringSession
+      context={context}
+      original={workflow.data}
+      canEdit={access.data.canEdit && !!context.userId}
+      refresh={() => {
+        access.refresh();
+        workflow.refresh();
+      }}
+    />
   );
 }
 
-/** A keyed session clears local focus before a new identity/workflow can paint old evidence. */
+/** Keying the whole authoring session prevents old identity/workflow results from painting. */
 export function WorkflowEditorPage({ context }: { context: TaskEscortParityContext }) {
   if (context.loading) return <LoadingState />;
   if (context.error) return <StateView loading={false} error={context.error} retry={context.refreshWorkflows} />;

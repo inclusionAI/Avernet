@@ -167,13 +167,19 @@ _VERDICTS: dict[tuple[Category, SourceKind], SourceRefusal | None] = {
     (Category.CAPABILITIES, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
     (Category.CAPABILITIES, SourceKind.OSS): None,
     (Category.CAPABILITIES, SourceKind.GIT): None,
-    (Category.CAPABILITIES, SourceKind.BOT): _BOT_SOURCE_IS_RESOURCES_ONLY,
+    # A bot source carries a local skill whose package arrives via bot copy's
+    # file-sync (``from: from_bot``), not via a content-store fetch; the
+    # materialiser reads the source bot's ac_skill row for name/description/
+    # digest and recomputes the dst workspace path, so the (CAPABILITIES, BOT)
+    # cell is open for that one honest case.
+    (Category.CAPABILITIES, SourceKind.BOT): None,
     (Category.RESOURCES, SourceKind.BOT): None,
     # A skill is a package; only a fetch can deliver one — never a bot source.
     (Category.SKILLS, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
     (Category.SKILLS, SourceKind.OSS): None,
     (Category.SKILLS, SourceKind.GIT): None,
-    (Category.SKILLS, SourceKind.BOT): _BOT_SOURCE_IS_RESOURCES_ONLY,
+    # Same from:from_bot local-skill case as CAPABILITIES above.
+    (Category.SKILLS, SourceKind.BOT): None,
     # A tool is an executable file; same reasoning, different noun.
     (Category.CLI_TOOLS, SourceKind.CONTENT): _CLI_TOOL_IS_AN_EXECUTABLE,
     (Category.CLI_TOOLS, SourceKind.OSS): None,

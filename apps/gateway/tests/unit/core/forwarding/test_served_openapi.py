@@ -12,11 +12,17 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import (
     DomainMap,
     build_combined_openapi,
     build_served_openapi,
+)
+from gateway.community.core.forwarding._openapi import (
+    _inheritance_descendants,
+    _isolate_conflicting_schemas,
 )
 
 _FIXTURE = Path(__file__).resolve().parents[3] / "fixtures" / "bots.openapi.json"
@@ -36,6 +42,218 @@ _SHIPPED_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application
 _METHODS = {"get", "post", "put", "delete", "patch"}
 _RULES = RouteSecurity.from_table({"/**": {"user": "optional", "app": "optional"}})
 _SHIPPED_RULES = RouteSecurity.from_yaml(_SHIPPED_CONFIG)
+
+
+def test_inheritance_descendants_handles_cycles() -> None:
+    assert _inheritance_descendants(
+        {"Pet": {"Cat"}, "Cat": {"Pet", "Kitten"}, "Kitten": {"Cat"}}, "Pet"
+    ) == {"Cat", "Kitten"}
+
+
+@pytest.mark.parametrize("mapping", [None, {"feline": "#/components/schemas/Cat"}])
+def test_conflicting_discriminator_preserves_implicit_values(mapping) -> None:
+    def doc(domain: str, field: str) -> dict[str, Any]:
+        discriminator: dict[str, Any] = {"propertyName": "kind"}
+        if mapping is not None:
+            discriminator["mapping"] = mapping
+        return {
+            "paths": {
+                f"/openapi/v1/{domain}": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {"$ref": "#/components/schemas/Pet"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "components": {
+                "schemas": {
+                    "Pet": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/Cat"},
+                            {"$ref": "#/components/schemas/Dog"},
+                        ],
+                        "discriminator": discriminator,
+                    },
+                    "Cat": {"properties": {field: {"type": "string"}}},
+                    "Dog": {"properties": {field: {"type": "string"}}},
+                }
+            },
+        }
+
+    source = {"one": doc("one", "first"), "two": doc("two", "second")}
+    result = build_served_openapi(
+        source, source.__getitem__, _RULES, title="gateway", version="1"
+    )
+    discriminator = result["components"]["schemas"]["two__Pet"]["discriminator"]
+    assert discriminator["mapping"]["Dog"] == "#/components/schemas/two__Dog"
+    if mapping is None:
+        assert discriminator["mapping"]["Cat"] == "#/components/schemas/two__Cat"
+        assert (
+            "mapping"
+            not in source["two"]["components"]["schemas"]["Pet"]["discriminator"]
+        )
+    else:
+        assert discriminator["mapping"]["feline"] == "#/components/schemas/two__Cat"
+
+
+def test_inherited_implicit_discriminator_preserves_children() -> None:
+    def doc(domain: str, field: str) -> dict[str, Any]:
+        return {
+            "paths": {
+                f"/openapi/v1/{domain}": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {"$ref": "#/components/schemas/Pet"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "components": {
+                "schemas": {
+                    "Pet": {
+                        "discriminator": {"propertyName": "kind"},
+                        "properties": {field: {"type": "string"}},
+                    },
+                    "Cat": {"allOf": [{"$ref": "#/components/schemas/Pet"}]},
+                    "Kitten": {"allOf": [{"$ref": "#/components/schemas/Cat"}]},
+                }
+            },
+        }
+
+    source = {"one": doc("one", "first"), "two": doc("two", "second")}
+    result = build_served_openapi(
+        source, source.__getitem__, _RULES, title="gateway", version="1"
+    )
+    schemas = result["components"]["schemas"]
+    assert "Cat" in schemas and "Kitten" in schemas
+    assert "two__Cat" in schemas and "two__Kitten" in schemas
+    mapping = schemas["two__Pet"]["discriminator"]["mapping"]
+    assert mapping["Cat"] == "#/components/schemas/two__Cat"
+    assert mapping["Kitten"] == "#/components/schemas/two__Kitten"
+
+
+def test_isolated_schema_names_avoid_existing_names_and_rewrite_lists() -> None:
+    doc = {
+        "components": {"schemas": {"Cat": {"type": "string"}}},
+        "items": [{"$ref": "#/components/schemas/Cat"}],
+    }
+    existing = {"schemas": {"Cat": {"type": "number"}, "pets__Cat": {}}}
+    result = _isolate_conflicting_schemas(doc, existing, "pets")
+    assert result["items"][0]["$ref"] == "#/components/schemas/pets__Cat_"
+    assert "pets__Cat_" in result["components"]["schemas"]
+
+
+def test_conflicting_discriminator_mapping_preserves_target_schemas() -> None:
+    def doc(domain: str, field: str) -> dict[str, Any]:
+        return {
+            "paths": {
+                f"/openapi/v1/{domain}": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {"$ref": "#/components/schemas/Pet"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "components": {
+                "schemas": {
+                    "Pet": {
+                        "discriminator": {
+                            "propertyName": "kind",
+                            "mapping": {
+                                "cat": "Cat",
+                                "dog": "#/components/schemas/Dog",
+                                "remote": "https://example.com/Pet",
+                            },
+                        }
+                    },
+                    "Cat": {"properties": {field: {"type": "string"}}},
+                    "Dog": {"properties": {field: {"type": "string"}}},
+                }
+            },
+        }
+
+    source = {"one": doc("one", "one"), "two": doc("two", "two")}
+    result = build_served_openapi(
+        source, source.__getitem__, _RULES, title="gateway", version="1"
+    )
+    schemas = result["components"]["schemas"]
+    mapping = schemas["two__Pet"]["discriminator"]["mapping"]
+    assert mapping == {
+        "cat": "two__Cat",
+        "dog": "#/components/schemas/two__Dog",
+        "remote": "https://example.com/Pet",
+    }
+    assert "two" in schemas["two__Cat"]["properties"]
+
+
+def test_conflicting_domain_schemas_keep_their_own_references() -> None:
+    def description(domain: str, field: str) -> dict[str, Any]:
+        return {
+            "paths": {
+                f"/openapi/v1/{domain}": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "$ref": "#/components/schemas/Parent"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "components": {
+                "schemas": {
+                    "Parent": {
+                        "properties": {"child": {"$ref": "#/components/schemas/Child"}}
+                    },
+                    "Child": {"properties": {field: {"type": "string"}}},
+                }
+            },
+        }
+
+    source = {"one": description("one", "first"), "two": description("two", "second")}
+    doc = build_served_openapi(
+        source, source.__getitem__, _RULES, title="gateway", version="1"
+    )
+    schemas = doc["components"]["schemas"]
+    assert "first" in schemas["Child"]["properties"]
+    assert "second" in schemas["two__Child"]["properties"]
+    assert (
+        schemas["two__Parent"]["properties"]["child"]["$ref"]
+        == "#/components/schemas/two__Child"
+    )
+    assert (
+        doc["paths"]["/openapi/v1/two"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        == "#/components/schemas/two__Parent"
+    )
+    assert "Parent" in source["two"]["components"]["schemas"]
 
 
 def _served() -> dict[str, Any]:

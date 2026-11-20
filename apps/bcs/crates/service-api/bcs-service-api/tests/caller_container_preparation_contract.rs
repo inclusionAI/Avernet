@@ -156,7 +156,7 @@ async fn a_late_clock_never_refuses_the_container_preparation() {
     let service = prep(gateway.clone());
     let mut command = ensure();
     command.now_ms = IDENTITY_DEADLINE;
-    let outcome = service
+    let _outcome = service
         .prepare(&delivery_target(), &RedactedToken::new("svc-token"), command, NOW)
         .await
         .expect("a late clock is never a preparation refusal");

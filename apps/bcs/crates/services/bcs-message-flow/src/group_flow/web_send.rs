@@ -183,7 +183,10 @@ pub(super) async fn handle_web_send_with_result(
     }
 
     flow.group.reset_message_count(&cmd.group_id).await?;
-    apply_session_participant_scope(flow, &mut group, cmd.session_id.as_deref()).await?;
+    let mut scoped_session = load_session_participant_scope(flow, &group, cmd.session_id.as_deref()).await?;
+    if let Some(session) = scoped_session.as_mut() {
+        group.participants = std::mem::take(&mut session.participants);
+    }
     backfill_bot_names(flow.registry.as_ref(), &mut group).await;
 
     let overlay = build_route_overlay(flow, &group).await;
@@ -214,19 +217,6 @@ pub(super) async fn handle_web_send_with_result(
         }
     }
 
-    if let Some(caller) = &cmd.caller_execution {
-        // A channel caller is never a general-purpose credential for routing fan-out.
-        if group.group_strategy != GroupStrategy::Chat || decision.targets.len() != 1
-            || decision.targets[0].bot_uuid != caller.target_bot_id
-            || decision.targets[0].delivery_type != DeliveryType::Send
-            || !flow.registry.resolve_delivery_target(&caller.target_bot_id).await?.is_http_provider() {
-            return Err(ServiceError::InvalidOperation {
-                message: "caller execution requires one direct HTTP provider Bot".into(), request_id: None,
-            });
-        }
-        crate::caller_execution::store(flow, &cmd).await?;
-    }
-
     log_routing_digest(
         &cmd,
         &decision,
@@ -236,18 +226,6 @@ pub(super) async fn handle_web_send_with_result(
 
     let sender_display_name = preferred_sender_display_name(flow, &cmd).await;
     let from_bot_owner = from_bot_owner(flow, &cmd.from_actor_id).await;
-    let (mention_source, mention_message_text): (Option<&[String]>, String) =
-        if group.group_kind == GroupKind::Dm {
-            (None, String::new())
-        } else if !cmd.mentions.is_empty() {
-            // 显式 mention 路径：使用人类发送者看到的原始消息文本。
-            (Some(cmd.mentions.as_slice()), cmd.message.clone())
-        } else {
-            (
-                Some(decision.mentions.as_slice()),
-                decision.cleaned_message.clone(),
-            )
-        };
     let sender_type = if cmd.from_actor_id.starts_with("human_") {
         SenderType::Human
     } else {
@@ -357,6 +335,21 @@ pub(super) async fn handle_web_send_with_result(
         }
     }
     let caller_deps = if caller_admission_targets.is_empty() { None } else { flow.caller_admission.clone() };
+    crate::caller_execution::prepare_channel_credential(
+        flow, &mut cmd, &group, &decision.targets, &caller_admission_targets,
+    ).await?;
+    let (mention_source, mention_message_text): (Option<&[String]>, String) =
+        if group.group_kind == GroupKind::Dm {
+            (None, String::new())
+        } else if !cmd.mentions.is_empty() {
+            // 显式 mention 路径：使用人类发送者看到的原始消息文本。
+            (Some(cmd.mentions.as_slice()), cmd.message.clone())
+        } else {
+            (
+                Some(decision.mentions.as_slice()),
+                decision.cleaned_message.clone(),
+            )
+        };
     // Owner→caller identity relay (spec L62 direction): with the deployment's
     // allowlist naming a relay-capable middle hop among the routed
     // participants, the authenticated Human's ingress is captured against
@@ -431,6 +424,13 @@ pub(super) async fn handle_web_send_with_result(
         }
         match bcs_domain::speaking_lease::resolve_speaking_mode(has_human_member, any_bot_caller_enabled) {
             bcs_domain::speaking_lease::SessionSpeakingMode::Plain => None,
+            bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired
+                if decision.targets.len() == 1
+                    && decision.targets[0].bot_uuid == group.driver_bot
+                    && decision.targets[0].delivery_type == DeliveryType::Send
+                    && channel_speech::is_exclusive_channel_submission(
+                        flow, &cmd, &group, scoped_session.as_ref(),
+                    ).await? => None,
             bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired => {
                 // Fail closed when the composition cannot decide leases.
                 let repo = flow.speaking_leases.as_ref().ok_or_else(|| {
@@ -1084,6 +1084,7 @@ pub(super) async fn handle_web_send_with_result(
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: delivery_target,
                 run_id: run_id.clone(),
                 frame,

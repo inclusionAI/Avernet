@@ -66,6 +66,7 @@ impl bcs_service_api::ManagedDeliveryPreparationService for RecordingIo {
             return None;
         }
         Some(bcs_service_api::CallerDispatchContext {
+            native_credential: None,
             target: BotDeliveryTarget::HttpProvider {
                 bot_id: row.target_bot_id.clone(),
                 provider_id: "provider-runtime".into(),
@@ -90,6 +91,7 @@ impl bcs_service_api::ManagedDeliveryPreparationService for RecordingIo {
         ));
         Ok(bcs_service_api::PreparedManagedDelivery {
             command: BotDeliveryCommand {
+                a2a_test_user: None,
                 target: BotDeliveryTarget::WebSocket { bot_id: row.target_bot_id.clone() },
                 run_id: row.run_id.clone().unwrap(),
                 frame,

@@ -18,6 +18,7 @@ import Repair from './Repair'
 import { evolveTaskRegistry, isEvolveTaskType } from '../features/evolve/task-registry'
 import EvolveBotPicker from '../components/EvolveBotPicker'
 import { evolveBotOptionKey } from '../components/evolveBotIdentity'
+import { resolveEvolveBotPrefill } from '../components/evolveBotPrefill'
 import EvolveModelFields, { EVOLVE_CUSTOM_MODEL } from '../components/EvolveModelFields'
 import { useEvolveModelConfig } from '../hooks/useEvolveModelConfig'
 import EvolveTaskOverview from '../components/EvolveTaskOverview'
@@ -438,6 +439,11 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const requestedSourceKind = searchParams.get('sourceKind')?.trim() ?? ''
   const requestedSourceRound = Number.parseInt(searchParams.get('sourceRound')?.trim() ?? '', 10)
   const requestedBotEnv = searchParams.get('botEnv')?.trim() ?? ''
+  const externalBotQuery = taskType === 'full' && !improvementSource
+    && searchParams.get('target') !== 'skill' && searchParams.has('botId')
+    ? new URLSearchParams(['botId', 'ownerId', 'entityId', 'botEnv'].map(key => [key, searchParams.get(key) ?? ''])).toString()
+    : ''
+
   const [restorePacks, setRestorePacks] = useState<Awaited<ReturnType<typeof api.evolve.listPacks>>['items']>([])
   const [restorePacksLoading, setRestorePacksLoading] = useState(false)
   const [restorePacksError, setRestorePacksError] = useState('')
@@ -596,9 +602,11 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             : result.bots
           setBots(availableBots)
           setBotsOwnerId(evolveUserId)
+          const prefill = externalBotQuery ? resolveEvolveBotPrefill(externalBotQuery, availableBots) : {}
+          if (prefill.error) setBotsError(prefill.error)
           const sourceBot = sourceBotId
             ? availableBots.find((bot) => bot.botId === sourceBotId)
-            : undefined
+            : prefill.bot
           setBotSelectionKey(sourceBot ? evolveBotOptionKey(sourceBot) : '')
           setBotId(sourceBot?.botId ?? '')
           setBotEnv(sourceBot?.env ?? '')
@@ -616,7 +624,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
         })
     })
     return () => { active = false }
-  }, [activeHandoff?.improvement.botId, activeHandoff?.improvement.botOwnerUserId, evolveUserId, fixedSkillAssetId, currentUserId, canSelectOwner])
+  }, [activeHandoff?.improvement.botId, activeHandoff?.improvement.botOwnerUserId, evolveUserId, fixedSkillAssetId, currentUserId, canSelectOwner, externalBotQuery])
 
   useEffect(() => {
     if (taskType !== 'optimize' || !evolveUserId || !botId) return
@@ -970,6 +978,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
                   emptyText={!evolveUserId ? '请先输入目标 Owner 工号' : botsLoading ? '正在加载 Bot…' : '当前用户没有可用 Bot'}
                   onChange={(key, bot) => {
                     if (fixedSkillAssetId || botsOwnerId !== evolveUserId) return
+                    if (externalBotQuery) setBotsError('')
                     setBotSelectionKey(key)
                     setBotId(bot.botId)
                     setBotEnv(bot.env ?? '')

@@ -474,6 +474,10 @@ _DIRECTORY_USER_ID = {("get", f"{PUBLIC_API_PREFIX}/org/user")}
 # caller-selectable ``user_id``. They may still document a domain-specific 403
 # (the Join Request operation is mounted with the Space authorization errors).
 _AUTHENTICATED_SELF = {
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bot-grants/reconcile",
+    ),
     ("post", f"{PUBLIC_API_PREFIX}/bots/spaces/{{space_id}}/join-requests"),
     # README resolves the acting user from the verified principal; callers do
     # not get a second, steerable user_id query parameter.
@@ -661,10 +665,13 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Todo adds one list operation with an optional bot_id query and nine operations
 # with no Bot dimension: query 1 -> 2, none 147 -> 156.
 # Team-space deletion adds one user-scoped operation with no Bot dimension:
-# none 156 -> 157. The standard evaluation workflow adds seven Bot-path-addressed
-# user-scoped operations under /bots/{bot_id}/eval: path 226 -> 233.
+# none 156 -> 157. Owned-Bot grant reconciliation adds one authenticated-self
+# operation. Its optional body filter only narrows compensation; it is not a
+# path/query Bot resource address: none 157 -> 158. The standard evaluation
+# workflow adds seven Bot-path-addressed user-scoped operations under
+# /bots/{bot_id}/eval: path 226 -> 233.
 # Admin Caller expiry correction adds one Bot-addressed operation: 233 -> 234.
-_BOT_ID_PLACEMENT = {"path": 235, "query": 2, "none": 157}
+_BOT_ID_PLACEMENT = {"path": 235, "query": 2, "none": 158}
 # Read-only Caller status adds one Bot-path operation: 234 -> 235.
 
 

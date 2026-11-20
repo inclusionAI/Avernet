@@ -164,6 +164,7 @@ async fn the_whole_protocol_journey_rides_one_transport_and_one_webhook() {
         execution_token_expires_at_ms: now() + 285_000,
         proof_format: "jwt".into(),
         proof_type: "jwt".into(),
+        channel_supplied_proof: false,
         control_revision: 0,
         not_after_ms: now() + 280_000,
         request_digest: DIGEST.to_string(),

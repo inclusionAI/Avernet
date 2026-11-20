@@ -8,7 +8,6 @@
 use std::sync::Arc;
 
 use bcs_auth_api::{AuthError, AuthPlugin, AuthPluginChain, AuthPrincipal};
-use std::sync::Mutex as _;
 use bcs_http::state::{CallerIngressExtractionError, ChainUserIdentityPort};
 use axum::http::HeaderMap;
 

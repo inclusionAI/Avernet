@@ -1,7 +1,11 @@
 """Durable Card storage consumed by the management service.
 
 Writes commit before returning; failed persistence must raise. Implementations
-own internal conflict retries. Callers do not supply revisions.
+own internal conflict retries. Callers do not supply revisions. Omitted labels
+preserve stored labels; a supplied map replaces them as one field. Hosts validate
+required labels before committing the entire write.
+Internal legacy adapters may supply label_updates, applied to the latest labels
+inside each conflict retry. This is not a Card HTTP request field.
 """
 
 from collections.abc import Callable, Iterator
@@ -20,6 +24,7 @@ class CardStore(Protocol):
         search_config: dict[str, Any],
         *,
         labels: dict[str, list[str]] | None = None,
+        label_updates: dict[str, list[str]] | None = None,
         document_mapping: dict | None | UnsetMapping = UNSET_MAPPING,
         validate_mapping: Callable | None = None,
     ) -> CardRecord: ...

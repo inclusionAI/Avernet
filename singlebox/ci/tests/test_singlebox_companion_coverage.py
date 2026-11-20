@@ -164,7 +164,8 @@ def test_run_only_wrappers_use_prebuilt_bins_without_touching_shared_evidence(tm
         grpc_peer.chmod(0o755)
     shared = runtime / 'bcs-shared.profraw'
     shared.write_text('shared')
-    names = (['caller_execution_story.py', 'task_cache_story.py', 'custom_binding_story.py', 'custom_binding_story.py']
+    names = (['caller_execution_story.py', 'task_cache_story.py', 'custom_binding_story.py',
+              'custom_binding_story.py', 'a2a_test_user_story.py']
              if name == 'caller' else ['oauth/story.py'])
     events = tmp_path / 'events'
     for story in names:
@@ -182,6 +183,10 @@ def test_run_only_wrappers_use_prebuilt_bins_without_touching_shared_evidence(tm
     cargo = tools / 'cargo'
     cargo.write_text('#!/bin/sh\nexit 99\n')
     cargo.chmod(0o755)
+    # Exercise the CI TLS branch on every host running the wrapper test.
+    uname = tools / 'uname'
+    uname.write_text('#!/bin/sh\ntest "$1" = -s && echo Linux\n')
+    uname.chmod(0o755)
     diagnostics = tmp_path / 'reports/grpc-binding'
     env = {**os.environ, 'EVENTS': str(events), 'PATH': str(tools) + ':' + os.environ['PATH'],
            'BCS_E2E_DIAGNOSTICS_DIR': str(diagnostics)}

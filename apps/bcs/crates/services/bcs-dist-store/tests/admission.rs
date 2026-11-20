@@ -5,15 +5,18 @@ mod common;
 
 use bcs_dist_model::*;
 use bcs_dist_store::codec::decode_inbox_entry;
+use bcs_dist_store::coordination::CoordinationStore;
 use bcs_dist_store::error::NEED_CONTRACT;
 use bcs_dist_store::inbox::{InboxProducerConfig, StoreInboxProducer, read_listener};
 use bcs_dist_store::layout::KeyLayout;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::inbox::*;
+use bcs_service_api::port::repo::distributed::session::SessionStorePort;
+use bcs_store_api::document::DocumentStorePlugin;
 use bcs_store_api::json::{JsonMutation, JsonStorePlugin};
 use bcs_store_api::stream::StreamStorePlugin;
 use bcs_store_api::zset::{ZSetRange, ZSetStorePlugin};
-use bcs_store_api::{Expiry, Version, WriteCondition};
+use bcs_store_api::{Expiry, StoreCapability, Version, WriteCondition};
 use bcs_test_support::store_model::Model;
 use common::*;
 use std::num::NonZeroU32;
@@ -70,8 +73,9 @@ async fn writes_happen_in_the_fixed_order() {
         store.calls(),
         vec![
             "kv.get bcn:v1:c01:main:s0042:admit:adm-9c41e7",
-            "json.mutate bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
-            "json.mutate bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            "document.create bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
+            "document.create bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            "zset.add bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
             "stream.append bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
             "zset.add bcn:v1:c01:main:s0042:active",
             "stream.append bcn:v1:c01:main:s0042:wake",
@@ -113,7 +117,7 @@ async fn same_input_twice_is_one_success() {
     let AdmitOutcome::Accepted(receipt) = first else {
         panic!("first admission not accepted: {first:?}");
     };
-    assert_eq!(second, AdmitOutcome::Duplicate(receipt));
+    assert_eq!(second, AdmitOutcome::Accepted(receipt));
     assert_eq!(store.calls().len(), 1, "an admitted input is answered from admit");
     assert_eq!(inbox_len(&store).await, 1);
 }
@@ -130,13 +134,14 @@ async fn same_id_with_other_content_is_a_conflict() {
 
 #[tokio::test]
 async fn a_lost_response_at_any_step_is_unknown_and_a_retry_completes() {
-    // Writes of a new-session admission: spec, task, inbox, active, wake, trim, admit.
-    for step in 1..=7 {
+    // Writes of a new-session admission: spec, task, task index, inbox, active,
+    // wake, trim, admit.
+    for step in 1..=8 {
         let store = Arc::new(Recorder::default());
         let p = producer(&store);
         store.lose_write(step);
         let first = p.admit(new_task_request("adm-9c41e7", "hello")).await;
-        if step == 6 {
+        if step == 7 {
             // The wake trim is best effort; its loss doesn't fail admission.
             assert!(matches!(first, Ok(AdmitOutcome::Accepted(_))), "step {step}");
             continue;
@@ -150,7 +155,7 @@ async fn a_lost_response_at_any_step_is_unknown_and_a_retry_completes() {
         );
         let retry = p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
         assert!(
-            matches!(retry, AdmitOutcome::Accepted(ref r) | AdmitOutcome::Duplicate(ref r) if r.tid.0 == TID),
+            matches!(retry, AdmitOutcome::Accepted(ref r) if r.tid.0 == TID),
             "step {step}: {retry:?}"
         );
         assert!(inbox_len(&store).await >= 1, "step {step}");
@@ -187,9 +192,72 @@ async fn a_spec_of_another_group_is_a_conflict() {
     let store = Arc::new(Recorder::default());
     let p = producer(&store);
     p.admit(new_task_request("adm-1", "hello")).await.unwrap();
+    let key = "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c";
+    let original = store.model.read_document(key).await.unwrap().unwrap();
     let mut other = new_task_request("adm-2", "again");
     other.create_session = Some(spec("grp-other"));
     assert_eq!(p.admit(other).await.unwrap(), AdmitOutcome::ContentConflict);
+    assert_eq!(store.model.read_document(key).await.unwrap().unwrap(), original);
+    assert_eq!(inbox_len(&store).await, 1);
+}
+
+#[tokio::test]
+async fn repeated_creation_preserves_the_first_spec_and_task() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    p.admit(new_task_request("adm-1", "hello")).await.unwrap();
+    let spec_key = "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c";
+    let task_key = "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e";
+    let original_spec = store.model.read_document(spec_key).await.unwrap().unwrap();
+    let original_task = store.model.read_document(task_key).await.unwrap().unwrap();
+    let mut retry = new_task_request("adm-2", "again");
+    // Rebuilding a request from newer configuration cannot change a frozen
+    // session, nor reset the task under the same identity.
+    retry.create_session.as_mut().unwrap().workflow.revision = "4".into();
+    retry.create_task.as_mut().unwrap().content.status = TaskStatus::Working;
+    assert!(matches!(p.admit(retry).await.unwrap(), AdmitOutcome::Accepted(_)));
+    assert_eq!(store.model.read_document(spec_key).await.unwrap().unwrap(), original_spec);
+    assert_eq!(store.model.read_document(task_key).await.unwrap().unwrap(), original_task);
+    assert_eq!(original_spec.version, Version(1));
+    assert_eq!(original_task.version, Version(1));
+}
+
+#[tokio::test]
+async fn admission_does_not_require_full_atomic_json() {
+    let store = Arc::new(Recorder::without_capability(StoreCapability::AtomicJson));
+    assert!(matches!(
+        producer(&store).admit(new_task_request("adm-1", "hello")).await.unwrap(),
+        AdmitOutcome::Accepted(_)
+    ));
+    assert!(store.calls().iter().all(|call| !call.starts_with("json.")));
+}
+
+#[tokio::test]
+async fn worker_reads_the_admitted_spec_through_the_same_document_api() {
+    let store = Arc::new(Recorder::without_capability(StoreCapability::AtomicJson));
+    let request = new_task_request("adm-1", "hello");
+    let expected = request.create_session.clone();
+    producer(&store).admit(request).await.unwrap();
+    let sessions = CoordinationStore::new(
+        store.clone(), Arc::new(Model::default()), store.clone(),
+        KeyLayout::new("c01", "main").unwrap(),
+    ).unwrap();
+    store.clear();
+    assert_eq!(sessions.get_spec(&Sid(SID.into())).await.unwrap(), expected);
+    assert_eq!(store.calls(), vec!["document.read bcn:v1:c01:main:s0042:spec:s0042.7f3a9c"]);
+}
+
+#[test]
+fn admission_requires_document_cas() {
+    let store = Arc::new(Recorder::without_capability(StoreCapability::DocumentCas));
+    let built = StoreInboxProducer::new(
+        store.clone(), store.clone(), store.clone(), store.clone(),
+        KeyLayout::new("c01", "main").unwrap(),
+        Arc::new(FixedClock(NOW)),
+        InboxProducerConfig::new(BackendId("tbase".into())),
+    );
+    assert!(matches!(built, Err(StoreError::NotApplied { ref code }) if code.contains("DocumentCas")));
+    assert!(store.calls().is_empty());
 }
 
 #[tokio::test]
@@ -348,7 +416,7 @@ async fn a_new_task_must_match_the_frozen_session_scope() {
         .unwrap();
     assert_eq!(outcome, AdmitOutcome::ContentConflict);
     assert!(
-        store.calls().iter().all(|c| c.starts_with("kv.get") || c.starts_with("json.get")),
+        store.calls().iter().all(|c| c.starts_with("kv.get") || c.starts_with("document.read")),
         "no writes: {:?}",
         store.calls()
     );
@@ -418,4 +486,165 @@ async fn documents_of_an_unsupported_version_are_never_written() {
         );
         assert!(store.calls().is_empty(), "{which}: nothing read or written");
     }
+}
+
+async fn task_index(store: &Recorder) -> Vec<bcs_store_api::zset::ZSetEntry> {
+    ZSetStorePlugin::range(
+        &store.model,
+        "bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
+        &ZSetRange {
+            min: Bound::Unbounded,
+            max: Bound::Unbounded,
+            after: None,
+            limit: NonZeroU32::new(10).unwrap(),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn new_task_is_listed_in_the_session_index_once() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    // A second input for the same task (other id) lists nothing new and keeps the score.
+    let mut later = new_task_request("adm-51d0b2", "again");
+    later.create_task.as_mut().unwrap().created_at = TimestampMillis(1_794_371_299_000);
+    p.admit(later).await.unwrap();
+    let index = task_index(&store).await;
+    assert_eq!(index.len(), 1);
+    assert_eq!(index[0].member, TID);
+    assert_eq!(index[0].score, 1_794_371_200_000_f64);
+}
+
+#[tokio::test]
+async fn retry_after_a_failed_index_write_repairs_the_index() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    // Writes: 1 spec, 2 task, 3 task index.
+    store.fail_write(3);
+    let first = p.admit(new_task_request("adm-9c41e7", "hello")).await;
+    assert_eq!(
+        first,
+        Err(StoreError::OutcomeUnknown {
+            operation_id: "adm-9c41e7".into()
+        })
+    );
+    assert!(task_index(&store).await.is_empty());
+    let retry = p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    assert!(matches!(retry, AdmitOutcome::Accepted(_)));
+    assert_eq!(task_index(&store).await.len(), 1);
+}
+
+#[tokio::test]
+async fn an_input_without_a_new_task_does_not_touch_the_index() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    store.clear();
+    let reply = AdmitRequest {
+        input: user_input("adm-77d2", "more"),
+        create_session: None,
+        create_task: None,
+    };
+    p.admit(reply).await.unwrap();
+    assert!(!store.calls().iter().any(|c| c.contains(":tasks:")));
+}
+
+/// Spec and task as a first attempt left them, without the index entry.
+async fn preload_spec_and_task(store: &Recorder, created_at: i64) {
+    let mut first = task();
+    first.created_at = TimestampMillis(created_at);
+    for (key, doc) in [
+        ("bcn:v1:c01:main:s0042:spec:s0042.7f3a9c", bcs_dist_store::codec::encode_json(&spec("grp-research-01")).unwrap()),
+        ("bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e", bcs_dist_store::codec::encode_json(&first).unwrap()),
+    ] {
+        store
+            .model
+            .create_document(key, &doc)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_repairing_index_insert_counts_as_a_write_of_the_call() {
+    let store = Arc::new(Recorder::default());
+    preload_spec_and_task(&store, 1_794_371_200_000).await;
+    // Writes of this retry: 1 spec (exists), 2 task (exists), 3 index (repairs), 4 inbox.
+    store.fail_write(4);
+    let outcome = producer(&store).admit(new_task_request("adm-9c41e7", "hello")).await;
+    assert_eq!(
+        outcome,
+        Err(StoreError::OutcomeUnknown {
+            operation_id: "adm-9c41e7".into()
+        }),
+        "something was written, so the failure is not definite"
+    );
+    assert_eq!(task_index(&store).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_repaired_index_entry_is_scored_with_the_stored_creation_time() {
+    let store = Arc::new(Recorder::default());
+    preload_spec_and_task(&store, 1_794_371_200_000).await;
+    // The retry computes a later creation time; the task keeps its first one.
+    let mut retry = new_task_request("adm-9c41e7", "hello");
+    retry.create_task.as_mut().unwrap().created_at = TimestampMillis(1_794_371_299_000);
+    producer(&store).admit(retry).await.unwrap();
+    let index = task_index(&store).await;
+    assert_eq!(index.len(), 1);
+    assert_eq!(index[0].score, 1_794_371_200_000_f64);
+}
+
+#[tokio::test]
+async fn a_conflicting_task_is_not_listed() {
+    let store = Arc::new(Recorder::default());
+    // A task of another scope already holds the id.
+    let mut foreign = task();
+    foreign.scope.principal = PrincipalId("someone-else".into());
+    store
+        .model
+        .create_document("bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e", &bcs_dist_store::codec::encode_json(&foreign).unwrap())
+        .await
+        .unwrap();
+    preload_only_spec(&store).await;
+    let outcome = producer(&store).admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    assert_eq!(outcome, AdmitOutcome::ContentConflict);
+    assert!(task_index(&store).await.is_empty());
+}
+
+async fn preload_only_spec(store: &Recorder) {
+    store
+        .model
+        .create_document("bcn:v1:c01:main:s0042:spec:s0042.7f3a9c", &bcs_dist_store::codec::encode_json(&spec("grp-research-01")).unwrap())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_new_task_in_an_existing_session_writes_in_the_fixed_order() {
+    let store = Arc::new(Recorder::default());
+    preload_only_spec(&store).await;
+    let request = AdmitRequest {
+        input: user_input("adm-9c41e7", "hello"),
+        create_session: None,
+        create_task: Some(task()),
+    };
+    producer(&store).admit(request).await.unwrap();
+    assert_eq!(
+        store.calls(),
+        vec![
+            "kv.get bcn:v1:c01:main:s0042:admit:adm-9c41e7",
+            "document.read bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
+            "document.create bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            "zset.add bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
+            "stream.append bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
+            "zset.add bcn:v1:c01:main:s0042:active",
+            "stream.append bcn:v1:c01:main:s0042:wake",
+            "stream.trim bcn:v1:c01:main:s0042:wake",
+            "kv.put_if_absent bcn:v1:c01:main:s0042:admit:adm-9c41e7",
+        ]
+    );
 }

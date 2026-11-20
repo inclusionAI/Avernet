@@ -286,7 +286,7 @@ class CallerIdentityModule(Module):
         bot_repository: BotRepository,
         auth_plugin: AuthPlugin,
     ) -> CallerIamTokenServiceProtocol:
-        """Expose Caller through a Caller-first independent plugin wrapper."""
+        """Expose Caller alongside the independent token plugin pipeline."""
         return TokenExchangeOrchestrator(
             caller_service=caller_service,
             token_pipeline=token_pipeline,

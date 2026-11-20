@@ -213,6 +213,7 @@ impl A2aChatRunService for RecordingA2aChat {
             return Err(ServiceError::NotFriends(bot_ids));
         }
         self.commands.lock().await.push(A2aChatCommand {
+            a2a_test_user: None,
             caller: cmd.caller,
             target_bot_id: cmd.target_bot_id.clone(),
             message: cmd.message,

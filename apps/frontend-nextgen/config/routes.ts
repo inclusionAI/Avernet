@@ -83,6 +83,8 @@ export const routes = [
     path: '/design-system',
     component: './Demo/DesignSystem',
   },
+  // 独立聊天演示：不挂 AppLayout，与真实任务护航工作台和其数据源隔离。
+  { path: '/demo/task-escort', component: '@/pages/Demo/TaskEscort' },
   // Open 形态对外欢迎页:顶层独立路由(同 /design-system 范式,AppLayout 外,不进工作台 Shell/侧栏)。
   // internal overlay 声明 '/welcome' 覆盖项物理取消本条 + stale 深链兜底(见 routes.internal.ts)。
   { path: '/welcome', component: '@/pages/Welcome' },

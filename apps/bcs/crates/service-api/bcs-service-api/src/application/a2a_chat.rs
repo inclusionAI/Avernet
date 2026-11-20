@@ -44,6 +44,7 @@ pub struct A2aChatCommand {
     pub caller_wait_mode: Option<String>,
     pub organization_code: Option<String>,
     pub provider_bypass_headers: Vec<(String, String)>,
+    pub a2a_test_user: Option<crate::a2a_test_user::A2aTestUserSelection>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +74,7 @@ pub struct AsyncA2aChatCommand {
     pub caller_wait_mode: Option<String>,
     pub organization_code: Option<String>,
     pub provider_bypass_headers: Vec<(String, String)>,
+    pub a2a_test_user: Option<crate::a2a_test_user::A2aTestUserSelection>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

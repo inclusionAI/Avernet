@@ -36,6 +36,21 @@ impl A2aChat {
             .session_key
             .clone()
             .unwrap_or_else(|| format!("chat:{}", &run_id[..run_id.len().min(8)]));
+        match &cmd.a2a_test_user {
+            Some(selection) if selection.caller_bot_id != from_bot_id
+                || session_key != format!("a2a-test:{run_id}") =>
+            {
+                return Err(ServiceError::Forbidden("A2A test user session denied".into()));
+            }
+            None if session_key.starts_with("a2a-test:") =>
+            {
+                return Err(ServiceError::InvalidOperation {
+                    message: "session_id uses the reserved A2A test namespace".into(),
+                    request_id: None,
+                });
+            }
+            _ => {}
+        }
         let timeout_ms = cmd.timeout_ms.unwrap_or(self.default_timeout_ms);
         let now_ms = now_ms();
         let expires_at_ms = now_ms.saturating_add(timeout_ms);
@@ -48,6 +63,9 @@ impl A2aChat {
         }
         if cmd.async_mode && match selected_queue_mode { Some(queued) => queued, None => self.queue_enabled(&cmd.target_bot_id).await } {
             return self.admit_direct(&cmd, &from_bot_id, &run_id, &session_key, expires_at_ms).await;
+        }
+        if cmd.a2a_test_user.is_some() {
+            return Err(ServiceError::Conflict("A2A test user selection requires queued direct chat".into()));
         }
         self.guard_legacy(&cmd.target_bot_id, &session_key).await?;
         let delivery_target = bcs_observability::observe_result("chat.delivery.resolve", self
@@ -225,6 +243,7 @@ impl A2aChat {
         let delivery = match bcs_observability::observe_result("chat.delivery.send", self
             .bot_delivery
             .deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: delivery_target,
                 run_id: run_id.clone(),
                 frame,

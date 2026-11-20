@@ -58,6 +58,7 @@ struct RecordingIo {
     /// target-resolution guard (review P1-5) without a Provider container.
     refuse_caller_target: bool,
     hang_caller_target: bool,
+    use_native_caller: bool,
 }
 
 #[async_trait]
@@ -103,6 +104,15 @@ impl bcs_service_api::ManagedDeliveryPreparationService for RecordingIo {
             return None;
         }
         Some(bcs_service_api::CallerDispatchContext {
+            native_credential: self.use_native_caller.then(|| {
+                bcs_service_api::application::caller_execution::NativeCallerCredential {
+                    proof: CallerExecutionToken::new(
+                        CallerProofFormat::Opaque, "native-value".into(), now_ms() + 300_000,
+                    ).unwrap(),
+                    token_type: "channel-proof".into(),
+                    user_id: "S12345".into(),
+                }
+            }),
             target: BotDeliveryTarget::HttpProvider {
                 bot_id: row.target_bot_id.clone(),
                 provider_id: "provider-runtime".into(),
@@ -127,6 +137,7 @@ impl bcs_service_api::ManagedDeliveryPreparationService for RecordingIo {
         ));
         Ok(bcs_service_api::PreparedManagedDelivery {
             command: BotDeliveryCommand {
+                a2a_test_user: None,
                 target: BotDeliveryTarget::WebSocket { bot_id: "bot".into() },
                 run_id: "run".into(),
                 frame,
@@ -185,7 +196,7 @@ impl CallerContainerGatewayPort for StubGateway {
     }
 }
 
-struct StubIdentity;
+struct StubIdentity { forbid_issue: bool }
 
 #[async_trait]
 impl CallerIdentityPlugin for StubIdentity {
@@ -193,6 +204,7 @@ impl CallerIdentityPlugin for StubIdentity {
         &self,
         input: bcs_caller_identity_api::EstablishCallerSubject,
     ) -> Result<bcs_caller_identity_api::EstablishedCallerSubject, bcs_caller_identity_api::CallerIdentityError> {
+        assert!(!self.forbid_issue, "channel proof must skip subject establishment");
         // Subject establishment is owned by the selected identity plugin.
         // The runtime stub derives an advisory subject lifetime from the
         // issuance clock the way the real JWT plugin does.
@@ -216,6 +228,7 @@ impl CallerIdentityPlugin for StubIdentity {
         &self,
         input: bcs_caller_identity_api::IssueCallerExecution<'_>,
     ) -> Result<CallerExecutionToken, bcs_caller_identity_api::CallerIdentityError> {
+        assert!(!self.forbid_issue, "channel proof must skip execution issuance");
         CallerExecutionToken::new(
             CallerProofFormat::Jwt,
             "runtime-proof".into(),
@@ -235,6 +248,7 @@ impl CallerIdentityPlugin for StubIdentity {
 struct StubSender {
     ack: CallerDispatchAck,
     error: Option<bcs_service_api::port::CallerSendError>,
+    expect_native: bool,
     histories: std::sync::Mutex<Vec<Option<bcs_service_api::port::CallerExecutionHistory>>>,
 }
 
@@ -246,6 +260,11 @@ impl CallerExecutionSendPort for StubSender {
         _credential: &RedactedToken,
         command: bcs_service_api::port::SendCallerExecutionCommand,
     ) -> Result<CallerDispatchAck, bcs_service_api::port::CallerSendError> {
+        assert_eq!(command.channel_supplied_proof, self.expect_native);
+        if self.expect_native {
+            assert_eq!(command.proof_type, "channel-proof");
+            assert_eq!(command.execution_token.expose(), "native-value");
+        }
         self.histories
             .lock()
             .unwrap()
@@ -270,8 +289,8 @@ fn caller_pipeline_with_error(
     Arc::new(CallerDispatchPipeline::new(
         handoff as Arc<dyn HumanCallerDeliveryHandoffService>,
         preparation,
-        Arc::new(StubIdentity),
-        Arc::new(StubSender { ack, error, histories: std::sync::Mutex::new(Vec::new()) }),
+        Arc::new(StubIdentity { forbid_issue: false }),
+        Arc::new(StubSender { ack, error, expect_native: false, histories: std::sync::Mutex::new(Vec::new()) }),
         600_000,
     ))
 }
@@ -356,6 +375,13 @@ fn runtime(service: Arc<ManagedMessageDelivery>, io: Arc<RecordingIo>, pipeline:
 }
 
 async fn seeded_handoff(message_id: &str) -> Arc<HumanCallerDeliveryHandoff> {
+    seeded_handoff_with_source(message_id, HumanCallerAuthSource::HttpAuth).await
+}
+
+async fn seeded_handoff_with_source(
+    message_id: &str,
+    source: HumanCallerAuthSource,
+) -> Arc<HumanCallerDeliveryHandoff> {
     let handoff = Arc::new(HumanCallerDeliveryHandoff::new(8));
     // P3.4: the group scope routes the canonical turn lineage; the seeded
     // harness mirrors the production seam (group_id = admission's group).
@@ -372,7 +398,7 @@ async fn seeded_handoff(message_id: &str) -> Arc<HumanCallerDeliveryHandoff> {
             &scope,
             AuthenticatedHumanCallerIngress::new(
                 HumanActor { actor_id: "human_alice".into(), staff_no: "S12345".into() },
-                HumanCallerAuthSource::HttpAuth,
+                source,
                 now_ms(),
                 "local".to_string(),
             )
@@ -450,6 +476,34 @@ async fn accepted_ack_converges_submitted_without_touching_the_transport() {
     // The ordinary transport never sees a caller row.
     assert!(io.sent.lock().await.is_empty(), "protected path must not send via the ordinary transport");
     assert_eq!(io.prepared.load(std::sync::atomic::Ordering::SeqCst), 0, "no ordinary prepare either");
+}
+
+#[tokio::test]
+async fn protected_channel_caller_sends_the_native_proof_without_issuing() {
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    let io = Arc::new(RecordingIo { use_native_caller: true, ..Default::default() });
+    let handoff = seeded_handoff_with_source("caller-ok", HumanCallerAuthSource::ChannelIngress).await;
+    let sender = Arc::new(StubSender {
+        ack: CallerDispatchAck::Rejected { error_code: "CANCELLED".into(), retryable: false },
+        error: None,
+        expect_native: true,
+        histories: std::sync::Mutex::new(Vec::new()),
+    });
+    let pipeline = Arc::new(CallerDispatchPipeline::new(
+        handoff,
+        Arc::new(CallerContainerPreparation::new(Arc::new(StubGateway))),
+        Arc::new(StubIdentity { forbid_issue: true }),
+        sender.clone(),
+        600_000,
+    ));
+    service.admit(admission("caller-ok", builder_projection(true, true, true))).await.unwrap();
+
+    let (stop, task) = start(runtime(service.clone(), io.clone(), Some(pipeline)));
+    run_until_status(&service, "caller-ok", |row| row.state.status == Status::Failed).await;
+    worker_stop(stop, task).await;
+
+    assert_eq!(sender.histories.lock().unwrap().len(), 1);
+    assert!(io.sent.lock().await.is_empty());
 }
 
 #[tokio::test]
@@ -757,13 +811,14 @@ async fn a_delegate_row_dispatches_through_the_lineage_issued_address_chain() {
     let sender = Arc::new(StubSender {
         ack: CallerDispatchAck::Accepted { control_revision: 0, request_digest: DIGEST.into() },
         error: None,
+        expect_native: false,
         histories: std::sync::Mutex::new(Vec::new()),
     });
     let pipeline = Arc::new(
         CallerDispatchPipeline::new(
             Arc::new(HumanCallerDeliveryHandoff::new(8)) as Arc<dyn HumanCallerDeliveryHandoffService>,
             preparation,
-            Arc::new(StubIdentity),
+            Arc::new(StubIdentity { forbid_issue: false }),
             sender.clone() as Arc<dyn CallerExecutionSendPort>,
             600_000,
         )

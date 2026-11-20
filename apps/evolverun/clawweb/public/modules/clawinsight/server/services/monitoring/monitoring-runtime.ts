@@ -10,6 +10,7 @@ import { createMonitoringService } from './monitoring-service.js';
 import { createMonitoringBrowserService } from './monitoring-browser-service.js';
 import { createTargetResolver } from './target-resolver.js';
 import { createMonitoringReferences } from './target-ref.js';
+import type { BotEnabledNotifier } from './bot-config-service.js';
 
 /** Trusted host integration, registered at bootstrap, not from request JSON/headers. */
 export type MonitoringIntegration = {
@@ -19,6 +20,7 @@ export type MonitoringIntegration = {
   isolatedStorageTenant: string;
   bindings?: readonly LegacyReportBinding[];
   recovery?: MonitoringRecoveryTrigger;
+  onBotEnabled?: BotEnabledNotifier;
   principal: (request: Request) => Promise<MonitoringPrincipal>;
 };
 let configuredIntegration: MonitoringIntegration | null = null;
@@ -52,7 +54,7 @@ export function createMonitoringRuntime(
       const resolver = createTargetResolver(integration.directory, integration.scope, integration.bindings);
       const references = createMonitoringReferences(now);
       assembled = { integration, service: createMonitoringService(repository, resolver, now, integration.recovery),
-        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now, new BotDiagnosisRecoveryConfigRepository(getDb()), new AppConfigRepository(getDb())) };
+        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now, new BotDiagnosisRecoveryConfigRepository(getDb()), new AppConfigRepository(getDb()), integration.onBotEnabled) };
       return assembled;
     } catch (error) {
       if (error instanceof MonitoringError) throw error;

@@ -577,10 +577,13 @@ def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
         ("patch", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
-        # Read-only file operations use the same owned friend-session guard.
+        # Session file operations use the same owned friend-session guard.
         ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
+        ("post", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents"),
+        ("post", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status"),
+        ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
         ("put", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),

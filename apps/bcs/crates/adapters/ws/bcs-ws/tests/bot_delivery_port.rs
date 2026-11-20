@@ -20,6 +20,7 @@ async fn pinned_operations_never_cross_a_bot_reconnection() {
     let new_id = registry.connection_identity(&target).await.unwrap();
     assert_ne!(old_id, new_id);
     let command = || BotDeliveryCommand {
+        a2a_test_user: None,
         target: target.clone(), run_id: "run-pinned".into(),
         frame: BcsFrame::Request(RequestFrame::new("request-pinned", "chat.send", None)),
         delivery_kind: BotDeliveryKind::Send,
@@ -47,6 +48,7 @@ async fn bot_registry_delivers_frame_to_connected_bot() {
     let frame = BcsFrame::Request(RequestFrame::new("run-1", "chat.send", None));
     let result = registry
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: BotDeliveryTarget::WebSocket {
                 bot_id: "bot-1".to_string(),
             },
@@ -74,6 +76,7 @@ async fn bot_registry_returns_not_delivered_when_bot_disconnected() {
     let frame = BcsFrame::Request(RequestFrame::new("run-1", "chat.send", None));
     let result = registry
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: BotDeliveryTarget::WebSocket {
                 bot_id: "missing-bot".to_string(),
             },

@@ -180,6 +180,7 @@ pub async fn handle_group_callback(
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
+                a2a_test_user: None,
                 target: delivery_target,
                 run_id: run_id.clone(),
                 frame,

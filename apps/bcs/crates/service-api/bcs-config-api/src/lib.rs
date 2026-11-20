@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 
+pub mod a2a_test_user;
 pub mod bcsfuse;
 pub mod fixed_loop;
 pub mod message_delivery;

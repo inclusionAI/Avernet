@@ -30,6 +30,8 @@ pub struct BotDeliveryCommand {
     /// Opaque inbound HTTP headers explicitly allowlisted by BCS configuration
     /// for forwarding to HTTP provider webhooks. Empty for non-HTTP ingress.
     pub provider_bypass_headers: Vec<(String, String)>,
+    /// Pre-authorized selection for a named A2A smoke request.
+    pub a2a_test_user: Option<crate::a2a_test_user::A2aTestUserSelection>,
 }
 
 impl std::fmt::Debug for BotDeliveryCommand {

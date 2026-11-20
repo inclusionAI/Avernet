@@ -1,6 +1,6 @@
 /** BaaS-backed run actions. Run reads and local control remain in their existing routers. */
 import { Router, type Request, type Response } from "express";
-import type { FlowRunRepository } from "../repositories/flow-run-repository.js";
+import type { FlowRunRepository, RunOriginScope } from "../repositories/flow-run-repository.js";
 import type { FlowEventRepository } from "../repositories/event-repository.js";
 import type { FacadeBindingRepository } from "../repositories/facade-binding-repository.js";
 import { sendIntervention } from "@avernet/clawevolve/server/services/baas-intervention";
@@ -84,6 +84,9 @@ export function createRunBaasRouter(
       res.status(503).json({ error: "Service Unavailable", message: "Database not configured" });
       return;
     }
+    // Only the internal host sets this local after authorization. Never accept it from the request.
+    const expectedScope = res.locals.authorizedRunOrigin as RunOriginScope | undefined;
+    const denyScope = () => res.status(403).json({ error: "Forbidden", message: "Run origin no longer matches authorized scope" });
     try {
       const flowId = String(req.params.flowId);
       const { originBotId, originSessionKey, originSessionId } = req.body as {
@@ -101,9 +104,10 @@ export function createRunBaasRouter(
         return;
       }
 
-      const run = await flowRunRepo.findByFlowId(flowId);
+      const run = await flowRunRepo.findByFlowId(flowId, expectedScope);
       if (!run) {
-        res.status(404).json({ error: "Not Found", message: `Flow ${flowId} not found` });
+        if (expectedScope) denyScope();
+        else res.status(404).json({ error: "Not Found", message: `Flow ${flowId} not found` });
         return;
       }
 
@@ -111,10 +115,23 @@ export function createRunBaasRouter(
         originBotId,
         originSessionKey,
         originSessionId,
-      });
+      }, expectedScope);
 
       if (!updated) {
-        res.status(500).json({ error: "Internal Server Error", message: "Failed to update session info" });
+        if (expectedScope) denyScope();
+        else res.status(500).json({ error: "Internal Server Error", message: "Failed to update session info" });
+        return;
+      }
+
+      if (expectedScope) {
+        // A reread could observe a different owner. Use only the scoped snapshot and the applied patch.
+        res.json({
+          ok: true,
+          flowId,
+          originBotId: originBotId !== undefined ? originBotId : run.origin_bot_id,
+          originSessionKey: originSessionKey !== undefined ? originSessionKey : run.origin_session_key,
+          originSessionId: originSessionId !== undefined ? originSessionId : run.origin_session_id,
+        });
         return;
       }
 
@@ -128,7 +145,7 @@ export function createRunBaasRouter(
         originSessionId: refreshed?.origin_session_id ?? null,
       });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = expectedScope ? "Failed to update session info" : (error instanceof Error ? error.message : String(error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));

@@ -50,8 +50,10 @@ export function logRepairEvent(scope: "session-recovery" | "agent-execution-moni
     const now = new Date();
     const line = `[${scope}] ` + JSON.stringify({ ...safe, job, event,
       environment: fields.environment ?? getCurrentEnv(), instance: hostname(), pid: process.pid, ts: now.toISOString() });
-    if (scope === "session-recovery") writeRecoveryLog(`${localTimestamp(now)} ${line}`);
-    else console.info(line);
+    if (scope === "session-recovery") {
+      const failed = fields.outcome === "failed" || fields.outcome === "remote_stop_failed" || /_failed$/i.test(event);
+      writeRecoveryLog(`${localTimestamp(now)} ${failed ? "ERROR" : "INFO"} ${line}`);
+    } else console.info(line);
   } catch { /* Observability must never change task execution or settlement. */ }
 }
 

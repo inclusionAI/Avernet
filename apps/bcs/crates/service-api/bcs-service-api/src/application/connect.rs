@@ -2,10 +2,12 @@
 //!
 //! Route-facing; called by `routes/friends.rs`. Orchestrates `PermissionRequestRepo`,
 //! `EdgeGrantRepo`, `PermissionProfileRepo` (wired in a later installment).
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestKind, RequestStatus};
 
-use crate::core::error::ServiceResult;
+use crate::core::error::{ServiceError, ServiceResult};
 use crate::principal::RequestAuthHeaders;
 pub use crate::port::repo::edge_grant::FriendListQuery;
 
@@ -114,6 +116,16 @@ pub trait ConnectService: Send + Sync {
         actor: &str,
         query: FriendListQuery,
     ) -> ServiceResult<FriendEntriesPage>;
+
+    /// Return the requested Bot IDs with active friendship from this Human in
+    /// the service environment. Never consult legacy relation mirrors.
+    async fn find_human_friend_bots(
+        &self,
+        _human_id: &str,
+        _bot_ids: &[String],
+    ) -> ServiceResult<HashSet<String>> {
+        Err(ServiceError::InternalError("Human friend lookup is unavailable".into()))
+    }
 
     /// Owner inbox / sent list (`GET /friends/requests`). Paginated.
     /// Generated reverse Connect mirrors are excluded before totals and pagination.

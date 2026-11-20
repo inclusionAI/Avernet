@@ -632,6 +632,7 @@ impl BcsChannelService {
                 }),
                 render_hint: crate::ChannelRenderHint::Render,
                 source_im_message_id: source_im_message_id.map(str::to_string),
+                caller_dispatch: false,
             })
             .await?;
         if !result.delivered {

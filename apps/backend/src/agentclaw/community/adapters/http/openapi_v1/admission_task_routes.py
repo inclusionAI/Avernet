@@ -149,6 +149,10 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # Grant/revoke are stateless relays to secbaas (api-key server-side; the
     # human Cookie/Referer authorizes the action) — OPEN at the gate, secbaas
     # authorizes. Same shape as the other task public operations.
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bot-grants/reconcile",
+    ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
     # task_config match: a typed config probe (spec 2026-11-02). No addressed

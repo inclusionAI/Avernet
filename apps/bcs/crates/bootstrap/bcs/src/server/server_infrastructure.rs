@@ -367,8 +367,7 @@ impl BcsServer {
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let a2a_transport = super::a2a_wiring::build_delivery(db_plugin.clone(), db_flavor,
-            provider_repos.provider_credentials.clone(), outbound_url_guard.clone(),
-            config.a2a_grpc.as_ref(), config.a2a_http_identity.as_ref())?;
+            provider_repos.provider_credentials.clone(), outbound_url_guard.clone(), &config)?;
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
             bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()).with_a2a(a2a_transport.clone()),

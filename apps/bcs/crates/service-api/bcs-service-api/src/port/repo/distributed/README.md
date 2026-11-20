@@ -42,7 +42,9 @@ database calls. The total remains 23 service/port traits.
 
 Successful `admit` means all required facts are recoverable: immutable session
 definition if new, initial Submitted task if new, the logical input and durable
-activation. A retry repairs an unfinished admission before returning Duplicate.
+activation. A retry repairs an unfinished admission before returning Accepted;
+an input already admitted with the same digest is Accepted too, with no
+separate duplicate outcome.
 The provider owns the atomic transaction or durable reconciliation protocol.
 Initial task creation is create-once as part of Gateway admission; a delayed
 retry must not replace a task already advanced by Worker. Session specification
@@ -251,3 +253,11 @@ conformance. Future fixtures must extend them with at least:
 
 See [ordered tasks](../../../../../../../specs/2026-11-15-distributed-contracts/tasks.md)
 and [validation](../../../../../../../specs/2026-11-15-distributed-contracts/validation.md).
+
+
+Worker coordination uses addressable MemberRecord and full ShardRecord views.
+ShardClaim/ShardOwner still contain no public storage revision. Exact-version
+fencing is implemented in the repository provider. `release_local` drops only a
+quiescent local cache; it cannot delete durable state. Peer controls bind exact
+instances through the application boundary. See the Worker coordination SPEC and
+its implementation record for provider prerequisites and initialization scheme A.

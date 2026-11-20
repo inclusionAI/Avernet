@@ -16,7 +16,6 @@ use bcs_service_api::{
 use bcs_service_api::InteractionService;
 use bcs_session_store::MemorySpeakingLeaseRepo;
 use bcs_ws::shared::RunChannelManager;
-use bcs_service_api::application::v1::DeliveryAdmissionService;
 use bcs_ws::web::{
     WebDispatchState, WorkbenchConnectionAuth,
     WebDispatchOutcome, WorkbenchConnectionRegistry, dispatch_client_frame,

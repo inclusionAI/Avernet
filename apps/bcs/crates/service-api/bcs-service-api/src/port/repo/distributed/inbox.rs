@@ -12,8 +12,9 @@ pub struct AdmitRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdmitOutcome {
+    /// The input is admitted: by this call, by an earlier attempt, or by a
+    /// compensating writer. The same digest under the same id is one success.
     Accepted(AdmissionReceipt),
-    Duplicate(AdmissionReceipt),
     ContentConflict,
     Quarantined,
 }
@@ -28,7 +29,7 @@ pub struct AppendAgentEvent {
 #[async_trait]
 pub trait InboxProducerPort: Send + Sync {
     /// Success requires recoverable input, initial task/spec and durable activation.
-    /// Retry completes partial activation before returning Duplicate. Conflicting
+    /// Retry completes partial activation before returning Accepted. Conflicting
     /// content under the same scoped InputId never returns success.
     async fn admit(&self, request: AdmitRequest) -> Result<AdmitOutcome, StoreError>;
     /// Intermediate events only; retry keeps (did, holder epoch, seq) unchanged.

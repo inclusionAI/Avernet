@@ -54,6 +54,11 @@ export type FlowRunRow = {
   evolution_analysis_status: string | null;
 };
 
+export type RunOriginScope = {
+  workflowId: string;
+  originBotId: string | null;
+};
+
 export type FlowRunInsert = {
   flowId: string;
   workflowId: string;
@@ -160,19 +165,37 @@ export class FlowRunRepository {
     });
   }
 
+  private flowIdPredicate(flowId: string, expectedScope?: RunOriginScope) {
+    const conditions = ["flow_id = ?"];
+    const params = [flowId];
+    if (expectedScope) {
+      // Scope IDs are identities, not text to compare under the table's collation.
+      const exact = (column: "workflow_id" | "origin_bot_id") => this.db.dialect.driver === "mysql2"
+        ? `BINARY ${column} = BINARY ?`
+        : `${column} COLLATE BINARY = ?`;
+      conditions.push(exact("workflow_id"));
+      params.push(expectedScope.workflowId);
+      if (expectedScope.originBotId === null) {
+        conditions.push("origin_bot_id IS NULL");
+      } else {
+        conditions.push(exact("origin_bot_id"));
+        params.push(expectedScope.originBotId);
+      }
+    }
+    return { sql: conditions.join(" AND "), params };
+  }
+
   // ── Read methods ──
 
   /**
    * Find a flow run by flow_id, returning only lightweight columns (no TEXT blobs).
    * Prefer this method for status checks, UI listings, and metadata-only access.
    */
-  async findByFlowId(flowId: string): Promise<FlowRunRow | null> {
+  async findByFlowId(flowId: string, expectedScope?: RunOriginScope): Promise<FlowRunRow | null> {
+    const { sql, params } = this.flowIdPredicate(flowId, expectedScope);
     const tryQuery = async (legacy: boolean): Promise<FlowRunRow[]> => {
       const cols = FlowRunRepository.listColumns(legacy).join(", ");
-      return this.db.query<FlowRunRow>(
-        `SELECT ${cols} FROM flow_runs WHERE flow_id = ?`,
-        [flowId],
-      );
+      return this.db.query<FlowRunRow>(`SELECT ${cols} FROM flow_runs WHERE ${sql}`, params);
     };
     try {
       const rows = await tryQuery(false);
@@ -186,10 +209,12 @@ export class FlowRunRepository {
         } catch (error2) {
           const msg2 = error2 instanceof Error ? error2.message : String(error2);
           console.warn(`[db] FlowRunRepository.findByFlowId failed: ${msg2}`);
+          if (expectedScope) throw error2;
           return null;
         }
       }
       console.warn(`[db] FlowRunRepository.findByFlowId failed: ${msg}`);
+      if (expectedScope) throw error;
       return null;
     }
   }
@@ -679,12 +704,15 @@ export class FlowRunRepository {
     }
   }
 
-  /** Update BaaS session info (origin_bot_id, origin_session_key, origin_session_id) for a flow run. */
+  /**
+   * Update BaaS session info, optionally only if the stored origin still matches.
+   * With a scope, DB errors propagate so a failed write is distinguishable from a denied one.
+   */
   async updateSessionInfo(flowId: string, patch: {
     originBotId?: string | null;
     originSessionKey?: string | null;
     originSessionId?: string | null;
-  }): Promise<boolean> {
+  }, expectedScope?: RunOriginScope): Promise<boolean> {
     try {
       const now = this.db.dialect.now();
       const sets: string[] = [];
@@ -703,16 +731,16 @@ export class FlowRunRepository {
       }
       if (sets.length === 0) return false;
       sets.push("gmt_modified = ?");
-      params.push(now);
-      params.push(flowId);
+      const where = this.flowIdPredicate(flowId, expectedScope);
       const result = await this.db.exec(
-        `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ?`,
-        params,
+        `UPDATE flow_runs SET ${sets.join(", ")} WHERE ${where.sql}`,
+        [...params, now, ...where.params],
       );
       return result.affectedRows > 0;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.updateSessionInfo failed: ${msg}`);
+      if (expectedScope) throw error;
       return false;
     }
   }

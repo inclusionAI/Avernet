@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_dist_store::inbox::Clock;
+use bcs_store_api::document::DocumentStorePlugin;
 use bcs_store_api::json::*;
 use bcs_store_api::kv::KvStorePlugin;
 use bcs_store_api::stream::*;
@@ -22,6 +23,7 @@ use std::time::Duration;
 #[derive(Default)]
 pub struct Recorder {
     pub model: Model,
+    disabled: Option<StoreCapability>,
     calls: Mutex<Vec<String>>,
     writes: Mutex<usize>,
     lose_write: Mutex<Option<usize>>,
@@ -29,6 +31,12 @@ pub struct Recorder {
 }
 
 impl Recorder {
+    pub fn without_capability(capability: StoreCapability) -> Self {
+        Self {
+            disabled: Some(capability),
+            ..Self::default()
+        }
+    }
     pub fn with_model(model: Model) -> Self {
         Self {
             model,
@@ -99,7 +107,7 @@ macro_rules! run {
 
 impl StorePlugin for Recorder {
     fn supports(&self, capability: StoreCapability) -> bool {
-        self.model.supports(capability)
+        self.disabled != Some(capability) && self.model.supports(capability)
     }
 }
 
@@ -126,6 +134,20 @@ impl KvStorePlugin for Recorder {
     }
     async fn ttl(&self, key: &str) -> StoreResult<KeyTtl> {
         KvStorePlugin::ttl(&self.model, key).await
+    }
+}
+
+#[async_trait]
+impl DocumentStorePlugin for Recorder {
+    async fn read_document(&self, key: &str) -> StoreResult<Option<Versioned<Value>>> {
+        self.read("document.read", key);
+        self.model.read_document(key).await
+    }
+    async fn create_document(&self, key: &str, value: &Value) -> StoreResult<WriteOutcome> {
+        run!(self.write("document.create", key), self.model.create_document(key, value).await)
+    }
+    async fn replace_document(&self, key: &str, expected: Version, value: &Value) -> StoreResult<WriteOutcome> {
+        run!(self.write("document.replace", key), self.model.replace_document(key, expected, value).await)
     }
 }
 

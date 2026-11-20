@@ -20,19 +20,28 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    USER_SCOPED_403,
+    Envelope,
+    Page,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
+from agentclaw.community.adapters.http.openapi_v1.principal import refuse_app_only_caller
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
     page as page_envelope,
+)
+from agentclaw.community.adapters.http.openapi_v1.task.schemas_bot_grant_reconciliation import (
+    BotGrantReconciliationAcceptedDTO,
+    BotGrantReconciliationRequestDTO,
 )
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
 from agentclaw.community.adapters.http.task.schemas_artifact import (
@@ -63,6 +72,9 @@ from agentclaw.community.adapters.http.task.schemas import (
 from agentclaw.community.adapters.http.task.schemas_task_session import (
     BySessionDTO,
     by_session_refs_to_dto,
+)
+from agentclaw.community.api.task.bot_grant_reconciliation_service import (
+    BotGrantReconciliationServiceProtocol,
 )
 from agentclaw.community.api.task.task_artifact_service import (
     TaskArtifactApiServiceProtocol,
@@ -355,6 +367,39 @@ async def list_bbs_tasks(
         [bbs_task_overview_to_dto(r) for r in records],
         request,
     )
+
+
+@router.post(
+    "/bot-grants/reconcile",
+    response_model=Envelope[BotGrantReconciliationAcceptedDTO],
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=USER_SCOPED_403,
+    dependencies=[Depends(refuse_app_only_caller)],
+)
+@envelope_errors
+async def reconcile_owned_bot_grants(
+    body: BotGrantReconciliationRequestDTO,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    principal: PrincipalDep,
+    service: BotGrantReconciliationServiceProtocol = Injected(
+        BotGrantReconciliationServiceProtocol
+    ),  # noqa: B008
+) -> Envelope[BotGrantReconciliationAcceptedDTO]:
+    """Schedule best-effort secbaas grant convergence for the caller's Bots.
+
+    The verified Human principal is the only owner source. Cookie and Referer
+    remain in this process solely for the short-lived background call; failures
+    never alter the login or Bot-creation response that initiated compensation.
+    """
+    background_tasks.add_task(
+        service.reconcile,
+        owner_id=principal.user_id,
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        bot_id=body.bot_id,
+    )
+    return envelope(BotGrantReconciliationAcceptedDTO(accepted=True), request)
 
 
 @router.post("/grant", response_model=Envelope[TaskGrantResultDTO])

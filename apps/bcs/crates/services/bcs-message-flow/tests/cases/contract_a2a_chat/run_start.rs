@@ -24,6 +24,7 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
 
     service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -46,6 +47,7 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
         .unwrap();
     service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -97,6 +99,7 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
 
     let outcome = service
         .chat(A2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -186,6 +189,7 @@ async fn chat_records_original_request_as_wrapped_chat_send_frame() {
 
     service
         .chat(A2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -278,6 +282,7 @@ async fn detached_provider_async_run_submits_after_downlink_ack_then_runs_on_cal
 
     let accepted = service
         .start_async_chat(AsyncA2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -407,6 +412,7 @@ async fn a2a_chat_blocking_interceptor_prevents_bot_delivery() {
 
     let result = service
         .chat(A2aChatCommand {
+            a2a_test_user: None,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),

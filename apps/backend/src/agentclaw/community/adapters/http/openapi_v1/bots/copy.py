@@ -190,18 +190,18 @@ def _serialize_skill_sets(
     from the source's ``SkillSetApplySnapshot`` — the apply-engine source of
     truth that carries every Set's members by origin (Spec §6).
 
-    Default-enabled is decided by whether the snapshot carries a default set;
-    each ordinary Set's members are serialized by origin (center/repo/local)
-    per Spec §1, and MCP members become ``{server_code}`` rows (Spec §0).
+    Default-enabled is decided by whether the snapshot carries a default set.
+    Each ordinary Set's members are serialized by origin from the snapshot's
+    ``skills`` catalog: center → ``{name, origin: center, skill_uuid}``,
+    repo → ``{name, origin: repo, repo_path}``, local → ``{name, origin:
+    local, from: from_bot}``, and MCP members become ``{server_code}`` rows
+    (Spec §0). Local members reference the top-level ``sources.from_bot``
+    named source — wave-1 opened the ``(SKILLS, BOT)`` ``support_matrix`` cell
+    and wave-2's ``BotSyncedLocalSkill`` resolve reverse-looks-up the source
+    bot's ``ac_skill`` row and registers the dst row without uploading (the
+    physical package rides the copy's ``resources: workspace/`` file-sync).
     ``None`` is returned when the snapshot has no sets at all — the source is a
     brand-new bot and the dst inherits the same baseline.
-
-    Local-package members (``local://``) are skipped at the declaration layer:
-    the manifest schema refuses a bare local SkillSet member and a
-    ``protocol: bot`` source for SKILLS (Spec §1), so there is no honest
-    vocabulary to declare them in. Their physical packages still arrive via
-    the copy's ``resources: workspace/`` file-sync entry, and the operator can
-    re-link them through the dst bot's Add-Skill flow.
 
     The function is pure: it neither reads nor writes any store. Its output is
     fed back into ``validate_capabilities`` (``skill_sets.py``) and the
@@ -222,15 +222,14 @@ def _derive_skill_sets_from_snapshot(
     → enabled (emit ``{name: default}``), absent → disabled. Skill members are
     serialized by origin from the snapshot's ``skills`` catalog — center →
     ``{name, origin: center, skill_uuid}``, repo → ``{name, origin: repo,
-    repo_path}``. Local-package members (``git_path`` starts with
-    ``local://``) are skipped: the manifest schema refuses a bare local
-    declaration (no fetchable source selector for the SKILLS category over a
-    bot source; see ``support_matrix.py:170`` ``_BOT_SOURCE_IS_RESOURCES_ONLY``),
-    and Spec §1's ``from: from_bot`` workaround is rejected by the same rule
-    — the honest representation is the file-sync ``resources: workspace/``
-    entry carrying the physical packages + the Set without local members (the
-    operator can re-link local skills through Add-Skill on the dst bot if
-    needed). MCP members are serialized as ``{server_code}``.
+    repo_path}``, local → ``{name, origin: local, from: from_bot}``, MCP →
+    ``{server_code}``. Local members reference the top-level ``sources.from_bot``
+    named source that ``_build_manifest_document`` emits for the file-sync
+    entry — wave-1 opened the ``(SKILLS, BOT)`` ``support_matrix`` cell so
+    ``validate_document`` accepts that declaration, and wave-2's
+    ``BotSyncedLocalSkill`` resolve reverse-looks-up the source bot's
+    ``ac_skill`` row and registers the dst row without uploading (the
+    physical package rides the copy's ``resources: workspace/`` file-sync).
 
     ``None`` is returned when the snapshot has no sets at all — the source is
     a brand-new bot and the dst inherits the same baseline (Spec §0).
@@ -271,29 +270,39 @@ def _derive_skill_sets_from_snapshot(
                 skill_entry["origin"] = "center"
                 skill_entry["skill_uuid"] = asset.get("skill_uuid")
             elif git_path.startswith("local://"):
-                # Spec §1 names local skills ``{origin: local, name}`` riding
-                # on ``resources: workspace/`` file-sync, but the manifest
-                # schema refuses a bare local member: ``validate_skill_entry``
-                # routes origin=local through the SKILLS-category source gate,
-                # which demands one of from/source/content AND refuses a
-                # ``protocol: bot`` source for SKILLS
-                # (``_BOT_SOURCE_IS_RESOURCES_ONLY`` at
-                # ``support_matrix.py:170``). The Genome snapshot's
-                # ``local://`` rows carry no git/oss address, so there is no
-                # honest source selector to declare. The physical packages
-                # still arrive via the file-sync ``resources: workspace/``
-                # entry, so the dst's workspace/skills/skills-local tree is
-                # populated; the dst SkillSet declaration lists only the
-                # repo/center members the manifest vocabulary can express, and
-                # the operator can re-link local skills through the edit-bot
-                # Add-Skill flow if needed. Skip the member rather than emit
-                # a declaration the schema would reject (which would drop the
-                # whole Set under Spec §3's "category-internal failure = no
-                # write" rule).
-                continue
+                # Spec §1.4 — local skill members reference the top-level
+                # ``sources.from_bot`` named source that ``_build_manifest_document``
+                # emits for the file-sync entry. Wave-1 opened
+                # ``support_matrix._VERDICTS`` ``(SKILLS, BOT)`` (and
+                # ``(CAPABILITIES, BOT)``) so ``validate_skill_entry``'s
+                # ``resolve_source`` accepts the declaration; wave-2's
+                # ``BotSyncedLocalSkill`` resolve reverse-looks-up the source
+                # bot's ``ac_skill`` row (name/description/digest) and
+                # recomputes the dst git_path without uploading — the package
+                # arrives via the ``resources: workspace/`` file-sync. Name is
+                # taken verbatim from the snapshot asset row (the same field
+                # the source declared), and ``from: from_bot`` is the literal
+                # named-source key the document carries.
+                skill_entry["origin"] = "local"
+                skill_entry["from"] = "from_bot"
             else:
+                # Git-sourced skills store their location as ``git://<scope>/<path>``
+                # (e.g. ``git://infra/todo-runner``): a logical path the platform's
+                # registry resolves, not a fetchable URL. The manifest's
+                # ``repo_path`` is that bare path — ``RepoSkillPath`` accepts only
+                # the ``[A-Za-z0-9._/-]`` vocabulary — so the ``git://`` scheme
+                # prefix is stripped here. The scope (``business``/``infra``/
+                # ``third-party``) stays as the leading path segment. The dst's
+                # resolve closes the loop symmetrically: ``find_repo_skill`` re-prefices
+                # ``git://`` onto ``path`` before the ``get_by_git_path`` lookup
+                # (``skill_query_service.py``), so the bare path round-trips back to
+                # the same registry row. The pre-strip behaviour was a double fault:
+                # ``invalid_path`` at schema validation on the ``:``, and a
+                # ``git://git://...`` double prefix at dst resolve.
                 skill_entry["origin"] = "repo"
-                skill_entry["repo_path"] = git_path
+                skill_entry["repo_path"] = (
+                    git_path[len("git://"):] if git_path.startswith("git://") else git_path
+                )
             skills.append(skill_entry)
         mcp_entries = [{"server_code": code} for code in group.mcp_codes]
         row: dict[str, Any] = {

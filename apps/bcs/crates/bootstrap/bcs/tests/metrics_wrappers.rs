@@ -537,6 +537,7 @@ impl A2aChatRunService for A2aRunFake {
 
 fn async_chat_cmd() -> AsyncA2aChatCommand {
     AsyncA2aChatCommand {
+        a2a_test_user: None,
         caller: CallerContext::Public,
         target_bot_id: "bot-target".to_string(),
         message: "hello".to_string(),
@@ -799,6 +800,7 @@ fn task_complete_cmd() -> TaskCompleteCommand {
 
 fn bot_delivery_cmd(delivery_kind: BotDeliveryKind) -> BotDeliveryCommand {
     BotDeliveryCommand {
+        a2a_test_user: None,
         target: BotDeliveryTarget::WebSocket {
             bot_id: "bot-target".to_string(),
         },

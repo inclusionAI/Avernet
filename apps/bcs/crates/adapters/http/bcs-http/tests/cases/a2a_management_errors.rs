@@ -591,7 +591,16 @@ impl bcs_service_api::A2aChatRunService for Runs {
         if command.message == "reject" {
             return Err(ServiceError::Forbidden(PRIVATE.into()));
         }
-        assert_eq!(command.message, "hello");
+        if command.message == "test user" {
+            let selection = command.a2a_test_user.as_ref().unwrap();
+            assert_eq!(selection.alias, "weather-smoke");
+            assert_eq!(selection.binding_ref, "fixture-v1");
+            assert_eq!(selection.caller_bot_id, "caller-bot");
+            assert_eq!(command.session_key, format!("a2a-test:{}", command.run_id));
+        } else {
+            assert_eq!(command.message, "hello");
+            assert!(command.a2a_test_user.is_none());
+        }
         Ok(bcs_service_api::AsyncA2aChatAccepted {
             run_id: command.run_id,
             bot_uuid: command.target_bot_id,
@@ -654,14 +663,34 @@ async fn assert_named_chat_and_run_routes(prefix: &str) {
         failure: None,
         calls: AtomicUsize::new(0),
     });
-    let app = build_router(HttpAppState::new(
+    let state = HttpAppState::new(
         Services::builder()
             .registry(registry)
             .a2a_bot_management(management.clone())
             .a2a_chat_runs(Arc::new(Runs))
             .build_for_test(),
-    ));
+    );
     let path = format!("{prefix}/a2a/providers/orders/bots/remote/chat-async");
+    let disabled = build_router(state.clone()).oneshot(request("POST", &path,
+        r#"{"message":"test user","test_user_ref":"weather-smoke"}"#)).await.unwrap();
+    assert_eq!(disabled.status(), StatusCode::FORBIDDEN);
+    use bcs_service_api::a2a_test_user::{A2aTestUserAdmission, A2aTestUserSelection};
+    let app = build_router(state.with_a2a_test_user_admission(Some(A2aTestUserAdmission {
+        selection: A2aTestUserSelection {
+            alias: "weather-smoke".into(), binding_ref: "fixture-v1".into(), caller_bot_id: "caller-bot".into(),
+        },
+        target_bot_id: "target-bot".into(),
+    })));
+    for (payload, status) in [
+        (r#"{"message":"test user","test_user_ref":"unknown"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"message":"test user","test_user_ref":"weather-smoke","sessionId":"reuse"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"message":"test user","test_user_ref":"weather-smoke"}"#, StatusCode::ACCEPTED),
+    ] {
+        let response = app.clone().oneshot(request("POST", &path, payload)).await.unwrap();
+        assert_eq!(response.status(), status);
+        let json = read(response).await;
+        assert!(json.get("test_user_ref").is_none());
+    }
     let response = app
         .clone()
         .oneshot(request("POST", &path, r#"{"message":"hello"}"#))
@@ -720,7 +749,7 @@ async fn assert_named_chat_and_run_routes(prefix: &str) {
         read(response).await,
         json!({"error":"Chat admission failed","status":403})
     );
-    assert_eq!(management.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(management.calls.load(Ordering::SeqCst), 3);
 }
 
 #[tokio::test]

@@ -28,14 +28,14 @@ use bcs_message_flow::caller_dispatch_pipeline::{
 use bcs_service_api::application::caller_container::CallerContainerPreparation;
 use bcs_service_api::application::caller_handoff::HumanCallerDeliveryHandoffService;
 use bcs_service_api::application::caller_identity::{
-    AuthenticatedHumanCallerIngress, CallerExecutionPurpose, CallerExecutionToken,
+    AuthenticatedHumanCallerIngress, CallerExecutionToken,
     CallerProofFormat, CallerSubjectKind, CallerSubjectRef, CallerSubjectRefType,
     HumanCallerAuthSource,
 };
 use bcs_service_api::application::principal::HumanActor;
 use bcs_service_api::port::{
     CallerContainerDescriptor, CallerContainerError, CallerContainerGatewayPort,
-    CallerContainerIsolation, CallerDispatchAck, CallerExecutionSendPort, CallerOpaqueRef,
+    CallerContainerIsolation, CallerDispatchAck, CallerExecutionSendPort,
     EnsureCallerContainer, SendCallerExecutionCommand,
 };
 use bcs_caller_identity_api::{
@@ -43,7 +43,6 @@ use bcs_caller_identity_api::{
     IssueCallerExecution, VerifyCallerExecution, VerifiedCallerExecution,
 };
 
-const NOW: i64 = 1_780_000_000_000;
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn now_clock() -> i64 {

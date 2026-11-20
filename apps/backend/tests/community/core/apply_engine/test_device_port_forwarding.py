@@ -196,6 +196,30 @@ async def test_device_skill_package_port_uses_explicit_upload_and_delete_service
     assert len(upload.calls) == 1
 
 
+@pytest.mark.asyncio
+async def test_device_skill_package_port_forwards_ensure_dst_local_skill_asset_to_upload_service() -> None:
+    """``ensure_dst_local_skill_asset`` delegates to the upload Service.
+
+    The ``from: from_bot`` member registration rides the same Service the
+    upload road already binds, so the port wrapper does nothing but forward
+    every keyword. Swapping ``source_bot_id``/``source_owner_id``/``name`` or
+    dropping one would silently break the dst-row registration without other
+    tests noticing — pin the exact kwargs arriving on the inner here.
+    """
+    upload = _Recorder()
+    upload._async_names = frozenset({"ensure_dst_local_skill_asset"})
+    delete = _Recorder()
+    delegate = DeviceSkillPackageUpload(upload, delete)
+
+    args = _sentinels(SkillPackageUploadPort, "ensure_dst_local_skill_asset")
+    await delegate.ensure_dst_local_skill_asset(**args)
+
+    # The wrapper passes every parameter through, untouched, to ``_inner``;
+    # the delete service is never consulted on this road.
+    assert upload.calls == [("ensure_dst_local_skill_asset", (), args)]
+    assert delete.calls == []
+
+
 @pytest.mark.parametrize(
     ("impl", "expected"), [(DeviceActivation, True), (PlatformActivation, False)],
     ids=["device projects", "platform records only"],

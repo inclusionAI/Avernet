@@ -98,6 +98,11 @@ def test_the_matrix_is_the_contract_the_spec_publishes():
         # The bot-to-bot workspace sync this change opens: only resources move
         # a workspace tree wholesale, so this is the one open bot cell.
         (Category.RESOURCES, SourceKind.BOT),
+        # A bot source also carries a from:from_bot local skill (its package
+        # arrives via file-sync, not a content-store fetch) — open for that one
+        # honest case on SKILLS and CAPABILITIES.
+        (Category.SKILLS, SourceKind.BOT),
+        (Category.CAPABILITIES, SourceKind.BOT),
         (Category.SKILLS, SourceKind.OSS),
         (Category.SKILLS, SourceKind.GIT),
         (Category.CAPABILITIES, SourceKind.OSS),

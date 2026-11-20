@@ -1,7 +1,8 @@
 //! Admission in the fixed write order of the design:
 //!
-//! 1. read `admit`: same digest → duplicate; different → conflict;
-//! 2. create `spec` (new session) and `task` (new task), create-once;
+//! 1. read `admit`: same digest → accepted; different → conflict;
+//! 2. create `spec` (new session) and `task` (new task) only when absent, and
+//!    list a new task in the session's task index (`tasks`, insert-only);
 //! 3. append the input to `inbox`;
 //! 4. read the listener (delayed contract D1, see [`read_listener`]);
 //! 5. register the session in `active` with the lower score;
@@ -14,10 +15,17 @@
 //! retry may append a second `inbox` entry with the same input id; the Worker
 //! drops repeats by input id.
 //!
-//! The merged port separates `Accepted` (this call wrote `admit`) from
-//! `Duplicate` (the answer comes from an `admit` written earlier, by a previous
-//! attempt or by the Worker's compensation). Decision 24: callers treat both as
-//! the same success; a different digest is `ContentConflict`.
+//! Decision 24: an `admit` record with the same digest is `Accepted`, whoever
+//! wrote it (this call, a previous attempt or the Worker's compensation); a
+//! different digest is `ContentConflict`.
+//!
+//! `spec` and `task` use the persistent `DocumentCas` namespace also read by
+//! the session store. Existing documents are checked, never overwritten by
+//! admission; no epoch or business sequence is used as a creation version.
+//! Their keys must not expire, be deleted, or be recreated while old requests
+//! can arrive. This narrower capability does not require full `AtomicJson`.
+//! The change does not add store calls: a new session still has two document
+//! creates; an existing document may add one identity read before proceeding.
 
 use super::Clock;
 use super::listener::{ListenerState, read_listener};
@@ -26,18 +34,17 @@ use crate::codec::{AdmitRecord, encode_inbox_entry, encode_json, encode_wake_ent
 use crate::error::{from_read, from_write};
 use crate::identity::{digest_fields, digest_json, hex_of};
 use crate::layout::KeyLayout;
-use crate::version;
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::inbox::{
     AdmitOutcome, AdmitRequest, AppendAgentEvent, InboxProducerPort,
 };
-use bcs_store_api::json::{JsonMutation, JsonStorePlugin};
+use bcs_store_api::document::DocumentStorePlugin;
 use bcs_store_api::kv::KvStorePlugin;
 use bcs_store_api::stream::{AppendId, StreamId, StreamStorePlugin, TrimPolicy};
 use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetStorePlugin};
-use bcs_store_api::{Expiry, StoreCapability, WriteCondition, WriteOutcome};
+use bcs_store_api::{Expiry, StoreCapability, WriteOutcome};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -68,7 +75,7 @@ pub const LOG_GENERATION: &str = "1";
 
 pub struct StoreInboxProducer {
     kv: Arc<dyn KvStorePlugin>,
-    json: Arc<dyn JsonStorePlugin>,
+    documents: Arc<dyn DocumentStorePlugin>,
     zset: Arc<dyn ZSetStorePlugin>,
     stream: Arc<dyn StreamStorePlugin>,
     layout: KeyLayout,
@@ -78,10 +85,10 @@ pub struct StoreInboxProducer {
 }
 
 impl StoreInboxProducer {
-    /// Fails when a store lacks `Kv`, `AtomicJson`, `ZSet` or `Stream`.
+    /// Fails when a store lacks `Kv`, `DocumentCas`, `ZSet` or `Stream`.
     pub fn new(
         kv: Arc<dyn KvStorePlugin>,
-        json: Arc<dyn JsonStorePlugin>,
+        documents: Arc<dyn DocumentStorePlugin>,
         zset: Arc<dyn ZSetStorePlugin>,
         stream: Arc<dyn StreamStorePlugin>,
         layout: KeyLayout,
@@ -90,7 +97,7 @@ impl StoreInboxProducer {
     ) -> Result<Self, StoreError> {
         capability::require(&[
             (kv.as_ref(), StoreCapability::Kv),
-            (json.as_ref(), StoreCapability::AtomicJson),
+            (documents.as_ref(), StoreCapability::DocumentCas),
             (zset.as_ref(), StoreCapability::ZSet),
             (stream.as_ref(), StoreCapability::Stream),
         ])?;
@@ -101,7 +108,7 @@ impl StoreInboxProducer {
         }
         Ok(Self {
             kv,
-            json,
+            documents,
             zset,
             stream,
             layout,
@@ -117,14 +124,29 @@ impl StoreInboxProducer {
         let input = &request.input;
         self.layout.inbox(&input.sid)?;
         encode_inbox_entry(input)?;
-        let spec_doc = request.create_session.as_ref().map(encode_json).transpose()?;
+        let spec = match &request.create_session {
+            Some(spec) => Some(PreparedSpec {
+                doc: encode_json(spec)?,
+                scope: spec.scope.clone(),
+                group: spec.group.clone(),
+            }),
+            None => None,
+        };
         let task = match &request.create_task {
-            Some(task) => Some((self.layout.task(&task.tid)?, encode_json(task)?)),
+            Some(task) => Some(PreparedTask {
+                key: self.layout.task(&task.tid)?,
+                doc: encode_json(task)?,
+                index_key: self.layout.tasks(&task.sid)?,
+                tid: task.tid.clone(),
+                sid: task.sid.clone(),
+                scope: task.scope.clone(),
+                created_at: task.created_at,
+            }),
             None => None,
         };
         Ok(Prepared {
             spec_key: self.layout.spec(&input.sid)?,
-            spec_doc,
+            spec,
             task,
             admit_key: self.layout.admit(&input.sid, &input.input_id)?,
         })
@@ -132,7 +154,7 @@ impl StoreInboxProducer {
 
     /// Reads and decodes a stored JSON document.
     async fn stored<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>, StoreError> {
-        match self.json.get_json(key).await.map_err(|e| from_read(&e))? {
+        match self.documents.read_document(key).await.map_err(|e| from_read(&e))? {
             Some(doc) => crate::codec::decode_json(doc.value).map(Some),
             None => Ok(None),
         }
@@ -148,21 +170,16 @@ impl StoreInboxProducer {
     }
 
     /// Creates a once-only document; `Ok(false)` = it already existed.
-    async fn create_once(&self, key: &str, doc: serde_json::Value) -> Result<bool, bcs_store_api::StoreError> {
+    async fn create_once(&self, key: &str, doc: &serde_json::Value) -> Result<bool, bcs_store_api::StoreError> {
         let outcome = self
-            .json
-            .mutate_json(
-                key,
-                WriteCondition::Newer(version::CREATE),
-                JsonMutation::Replace(doc),
-                Expiry::Persistent,
-            )
+            .documents
+            .create_document(key, doc)
             .await?;
         Ok(matches!(outcome, WriteOutcome::Applied { .. }))
     }
 
     /// `true` when the stored spec belongs to the same scope and group.
-    async fn same_spec(&self, key: &str, spec: &SessionSpec) -> Result<bool, StoreError> {
+    async fn same_spec(&self, key: &str, spec: &PreparedSpec) -> Result<bool, StoreError> {
         Ok(self
             .stored::<SessionSpec>(key)
             .await?
@@ -181,7 +198,7 @@ impl StoreInboxProducer {
             .await
             .map_err(|e| Failure::Before(from_write(&e, op)))?;
 
-        let listener = match read_listener(self.json.as_ref(), &self.layout, &input.sid).await {
+        let listener = match read_listener(self.documents.as_ref(), &self.layout, &input.sid).await {
             Ok(state) => state,
             Err(error) => {
                 tracing::debug!(code = ?error, "listener read failed; writing wake");
@@ -212,7 +229,7 @@ impl StoreInboxProducer {
             .await
             .map_err(|_| Failure::After)?;
         let n = self.wake_appends.fetch_add(1, Ordering::Relaxed);
-        if n % self.config.wake_trim_every == 0 {
+        if n.is_multiple_of(self.config.wake_trim_every) {
             // `wake` is only a hint: a failed trim is retried on a later sample.
             let trimmed = self
                 .stream
@@ -237,11 +254,32 @@ impl StoreInboxProducer {
     }
 }
 
+/// Everything an admission writes, built and checked before its first read.
+/// Each part also carries the fields of its source the write steps compare,
+/// so those steps read one value instead of pairing it with the request.
 struct Prepared {
     spec_key: String,
-    spec_doc: Option<serde_json::Value>,
-    task: Option<(String, serde_json::Value)>,
+    /// Set for a new session.
+    spec: Option<PreparedSpec>,
+    /// Set for a new task.
+    task: Option<PreparedTask>,
     admit_key: String,
+}
+
+struct PreparedSpec {
+    doc: serde_json::Value,
+    scope: TaskScope,
+    group: GroupId,
+}
+
+struct PreparedTask {
+    key: String,
+    doc: serde_json::Value,
+    index_key: String,
+    tid: Tid,
+    sid: Sid,
+    scope: TaskScope,
+    created_at: TimestampMillis,
 }
 
 enum Delivered {
@@ -270,7 +308,7 @@ impl InboxProducerPort for StoreInboxProducer {
         let unknown = || StoreError::OutcomeUnknown {
             operation_id: op.to_owned(),
         };
-        if let (Some(task), None) = (&request.create_task, &request.create_session) {
+        if let (Some(task), None) = (&prepared.task, &prepared.spec) {
             // A new task of an existing session must belong to its frozen scope.
             match self.stored::<SessionSpec>(&prepared.spec_key).await? {
                 Some(spec) if spec.scope == task.scope => {}
@@ -284,8 +322,8 @@ impl InboxProducerPort for StoreInboxProducer {
         }
         let mut wrote = false;
 
-        if let (Some(spec), Some(doc)) = (&request.create_session, prepared.spec_doc) {
-            match self.create_once(&prepared.spec_key, doc).await {
+        if let Some(spec) = &prepared.spec {
+            match self.create_once(&prepared.spec_key, &spec.doc).await {
                 Ok(true) => wrote = true,
                 Ok(false) => {
                     if !self.same_spec(&prepared.spec_key, spec).await? {
@@ -295,17 +333,38 @@ impl InboxProducerPort for StoreInboxProducer {
                 Err(e) => return Err(from_write(&e, op)),
             }
         }
-        if let (Some(task), Some((key, doc))) = (&request.create_task, prepared.task) {
+        if let Some(task) = &prepared.task {
             // "Already exists" is fine: never replace a task the Worker advanced.
-            match self.create_once(&key, doc).await {
+            // The index is scored with the creation time of the task as stored,
+            // so a repairing retry lists it where the first attempt would have.
+            let mut created_at = task.created_at;
+            match self.create_once(&task.key, &task.doc).await {
                 Ok(true) => wrote = true,
-                Ok(false) if !wrote => match self.stored::<TaskSnapshot>(&key).await? {
-                    Some(stored) if stored.scope != task.scope || stored.sid != task.sid => {
-                        return Ok(AdmitOutcome::ContentConflict);
+                Ok(false) => {
+                    let stored = match self.stored::<TaskSnapshot>(&task.key).await {
+                        Ok(stored) => stored,
+                        Err(_) if wrote => return Err(unknown()),
+                        Err(e) => return Err(e),
+                    };
+                    if let Some(stored) = stored {
+                        if !wrote && (stored.scope != task.scope || stored.sid != task.sid) {
+                            return Ok(AdmitOutcome::ContentConflict);
+                        }
+                        created_at = stored.created_at;
                     }
-                    _ => {}
-                },
-                Ok(false) => {}
+                }
+                Err(_) if wrote => return Err(unknown()),
+                Err(e) => return Err(from_write(&e, op)),
+            }
+            // Listed even when the task already existed: insert-only keeps the
+            // first score, so a retry repairs a missing index entry.
+            let entry = ZSetEntry {
+                member: task.tid.0.clone(),
+                score: created_at.0 as f64,
+            };
+            match self.zset.add(&task.index_key, &[entry], ZAddMode::InsertOnly).await {
+                // A repairing insert is a write of this call too.
+                Ok(inserted) => wrote |= inserted > 0,
                 Err(_) if wrote => return Err(unknown()),
                 Err(e) => return Err(from_write(&e, op)),
             }
@@ -351,12 +410,11 @@ impl InboxProducerPort for StoreInboxProducer {
     }
 }
 
-/// Answer from a stored `admit` record: the same digest is the same input
-/// admitted earlier (`Duplicate`, which callers treat as success, decision 24);
-/// a different digest is a conflict.
+/// Answer from a stored `admit` record: the same digest is the same input,
+/// already admitted (decision 24); a different digest is a conflict.
 fn compare(input: &InputEnvelope, stored: &AdmitRecord) -> AdmitOutcome {
     if stored.digest == input.business_digest {
-        AdmitOutcome::Duplicate(receipt(input, stored))
+        AdmitOutcome::Accepted(receipt(input, stored))
     } else {
         AdmitOutcome::ContentConflict
     }

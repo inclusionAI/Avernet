@@ -173,9 +173,14 @@ export function RoutineFormDialog({
                     </Select>
                   </div>
                 )}
-                {!original && form.runtime_stage && instanceMode !== 'unknown' && targetError && (
+                {!original && targetError && (
                   <p className="text-xs text-destructive sm:col-span-2" role="status">
                     {targetError}
+                  </p>
+                )}
+                {!original && !targetError && instanceMode === 'defer' && (
+                  <p className="text-xs text-muted-foreground sm:col-span-2" role="status">
+                    该环境暂无已确认的运行实例清单，保存后由服务端解析目标；若环境未就绪，会提示先发布该环境。
                   </p>
                 )}
                 {original && (

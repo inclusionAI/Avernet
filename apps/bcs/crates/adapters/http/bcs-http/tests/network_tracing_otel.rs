@@ -129,6 +129,7 @@ impl Drop for Peer { fn drop(&mut self) { self.task.abort(); } }
 async fn deliver(url: String) {
     bcs_provider_http::HttpProviderTransport::allowing_private_networks_for_tests()
         .deliver(BotDeliveryCommand {
+            a2a_test_user: None,
             target: BotDeliveryTarget::HttpProvider {
                 bot_id: "bot-provider".into(), provider_id: "provider".into(), provider_bot_ref: "bot".into(),
                 webhook_url: url, bcs_to_provider_token: RedactedToken::new("test-fixture"), protocol_version: "1.0".into(),

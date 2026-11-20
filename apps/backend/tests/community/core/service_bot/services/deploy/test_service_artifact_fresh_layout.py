@@ -18,6 +18,7 @@ from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    CurrentRuntimeLayoutProbeService,
     MAPPING_CONTRACT_VERSION,
     MAPPING_V3_CONTRACT_VERSION,
 )
@@ -285,3 +286,73 @@ def test_legacy_manifest_requires_center_delivery_iff_center_skills_exist() -> N
     ):
         with pytest.raises(ServiceSkillsManifestError):
             validate_service_skills_manifest_for_release(invalid, _bot())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("v3_supported", "store_ready", "expected_error"),
+    [
+        (True, True, None),
+        (False, True, ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_UNAVAILABLE),
+        (True, False, ServiceArtifactBuildErrorCode.CENTER_STORE_NOT_READY),
+    ],
+)
+def test_legacy_center_build_without_pool_preparation(
+    v3_supported, store_ready, expected_error
+) -> None:
+    active = "/home/admin/.openclaw/workspace/skills"
+    mappings = [MAPPING_CONTRACT_VERSION]
+    if v3_supported:
+        mappings.append(MAPPING_V3_CONTRACT_VERSION)
+    wire_response = {
+        "success": True,
+        "data": {
+            "status": "READY",
+            "engine": "openclaw",
+            "layout_contract_version": "skills-pool-p3-v1",
+            "preparation_id": None,
+            "evidence": {
+                "source_layout": "legacy",
+                "supported_mapping_contract_versions": mappings,
+                "resolved_layout": {
+                    "engine": "openclaw",
+                    "layout_contract_version": "skills-pool-p3-v1",
+                    "active_root": active,
+                    "local_root": f"{active}/skills-local",
+                    "repo_root": f"{active}/skills-repo",
+                    "pool_center": _CENTER_ROOT,
+                },
+            },
+        },
+    }
+    normal_probe = CurrentRuntimeLayoutProbeService._parse_response(
+        wire_response, engine="openclaw"
+    )
+    assert normal_probe.status is RuntimeLayoutProbeStatus.INVALID
+    service_probe = CurrentRuntimeLayoutProbeService._parse_response(
+        wire_response, engine="openclaw", for_service_build=True
+    )
+    observed = ServiceArtifactLayoutObservation.from_probe(
+        service_probe, expected_engine="openclaw"
+    )
+
+    asset = _center_asset()
+    builder = _builder(
+        _legacy_state(), _Reader((asset,), (asset,)), _Store(ready=store_ready)
+    )
+    if expected_error is not None:
+        with pytest.raises(ServiceSkillsManifestError) as raised:
+            builder.capture(bot=_bot(), layout_observation=observed)
+        assert raised.value.code is expected_error
+        return
+
+    captured = builder.capture(bot=_bot(), layout_observation=observed)
+    manifest = builder.finalize(captured=captured, bot=_bot())
+    assert manifest["active_layout"] == "legacy"
+    assert manifest["center_skills"][0]["sc_version_number"] == "1.0.0"
+    assert [item["corpus"] for item in manifest["shared_corpora"]] == ["center"]
+
+    pool_builder = _builder(_pool_state(), _Reader((asset,)))
+    with pytest.raises(ServiceSkillsManifestError) as raised:
+        pool_builder.capture(bot=_bot(), layout_observation=observed)
+    assert raised.value.code is ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_INVALID

@@ -371,3 +371,208 @@ def test_a_same_name_row_owned_by_someone_else_is_never_replaced() -> None:
     with pytest.raises(ManagedSkillOwnerConflict):
         _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ))
     assert skills.updates == []
+
+
+# ── ensure_dst_local_skill_asset (bot-file-synced member registration) ──────
+#
+# The port stores its package through BOT_FILE_SYNC and registers the dst
+# ``ac_skill`` row separately. The three branches below exercise every line
+# of ``_ensure_dst_local_skill_asset`` through the public async wrapper:
+# ``asyncio.to_thread`` runs the sync body in a worker, so the test asserts
+# the wrapper's awaitable return, not the sync result directly.
+
+
+def _ensure_port(skills: FakeSkillRepository) -> PlatformSkillPackageUpload:
+    # ``_ensure_dst_local_skill_asset`` only touches ``self._skills``: neither
+    # the store, the validator nor the security hook are exercised. Real
+    # construction (real store/validator) keeps the test honest about the
+    # port's own wiring, but a Mock store is enough — the seam never reads it.
+    return PlatformSkillPackageUpload(
+        Mock(), validator=Mock(), skill_repository=skills, security_hook=Mock(),
+    )
+
+
+def _src_row(*, description: str = "synced payload") -> dict[str, Any]:
+    # A source-bot local-skill row reverse-looked-up by name+owner.
+    return {
+        "id": 41, "name": "quality-check", "description": description,
+        "git_path": "local://skills-local/quality-check",
+        "user_id": "u_src", "bolt_id": "src-bot",
+    }
+
+
+def test_ensure_dst_local_skill_asset_creates_row_when_no_existing_match() -> None:
+    import pytest  # noqa: F401  # kept for parity with the suite's import style
+
+    skills = FakeSkillRepository()
+    skills.rows[41] = _src_row()
+    port = _ensure_port(skills)
+
+    result = _run(port.ensure_dst_local_skill_asset(
+        bot_id="b_1", owner_id="u_owner", actor_id="u_actor",
+        source_bot_id="src-bot", source_owner_id="u_src", name="quality-check",
+    ))
+
+    # Created on a fresh locator with the source description propagated; the
+    # operation matches the materialiser's expected ``created`` string and the
+    # inactive ``active=False`` state the prepare-only path requires.
+    assert result["operation"] == "created"
+    assert result["actor_id"] == "u_actor"
+    assert result["skill"]["name"] == "quality-check"
+    assert result["skill"]["description"] == "synced payload"
+    assert result["skill"]["git_path"] == "local://skills-local/quality-check"
+    assert result["skill"]["user_id"] == "u_owner"
+    assert result["skill"]["bolt_id"] == "b_1"
+    assert result["skill"]["active"] is False
+    assert len(skills.creates) == 1
+    created = skills.creates[0]
+    assert created["name"] == "quality-check"
+    assert created["source_type"] == "upload"
+    assert created["git_path"] == "local://skills-local/quality-check"
+    assert skills.updates == []
+
+
+def test_ensure_dst_local_skill_asset_replaces_existing_match_in_place() -> None:
+    import pytest  # noqa: F401
+
+    skills = FakeSkillRepository()
+    # Source bot owns the row reverse-looked up by name + source_owner.
+    skills.rows[41] = _src_row(description="fresh description")
+    # The dst bot already owns the same-name row that file-sync owns the
+    # package under: ``_own_row`` returns it, the replace branch runs.
+    existing_id = 101
+    skills.rows[existing_id] = {
+        "id": existing_id, "name": "quality-check",
+        "description": "stale", "git_path": "local://skills-local/quality-check",
+        "user_id": "u_owner", "bolt_id": "b_1",
+    }
+    port = _ensure_port(skills)
+
+    result = _run(port.ensure_dst_local_skill_asset(
+        bot_id="b_1", owner_id="u_owner", actor_id="u_actor",
+        source_bot_id="src-bot", source_owner_id="u_src", name="quality-check",
+    ))
+
+    # ``replaced`` (not ``updated`` — the port deliberately diverges from the
+    # upload road here); the locator is reasserted, the description is refreshed
+    # from the source row, and no new create ran.
+    assert result["operation"] == "replaced"
+    assert result["skill"]["id"] == existing_id
+    assert result["skill"]["description"] == "fresh description"
+    assert result["skill"]["git_path"] == "local://skills-local/quality-check"
+    assert result["skill"]["active"] is False
+    assert skills.creates == []
+    assert len(skills.updates) == 1
+    sid, values = skills.updates[0]
+    assert sid == str(existing_id)
+    assert values == {
+        "description": "fresh description",
+        "git_path": "local://skills-local/quality-check",
+    }
+
+
+def test_ensure_dst_local_skill_asset_raises_not_found_when_source_has_no_owned_row() -> None:
+    import pytest
+    from agentclaw.community.core.skill_center.errors import (
+        LocalSkillNotFoundError,
+    )
+
+    skills = FakeSkillRepository()
+    # Source bot has a legacy unowned row for this name: ``src_owned`` filters
+    # to zero rows and the manifest-vs-source disagreement surfaces as NotFound.
+    skills.rows[41] = {
+        "id": 41, "name": "quality-check", "description": "x",
+        "git_path": "local://skills-local/quality-check",
+        "user_id": "somebody-else", "bolt_id": "src-bot",
+    }
+    port = _ensure_port(skills)
+
+    with pytest.raises(LocalSkillNotFoundError):
+        _run(port.ensure_dst_local_skill_asset(
+            bot_id="b_1", owner_id="u_owner", actor_id="u_actor",
+            source_bot_id="src-bot", source_owner_id="u_src", name="quality-check",
+        ))
+
+    # Nothing on the dst bot was written.
+    assert skills.creates == [] and skills.updates == []
+
+
+def test_ensure_dst_local_skill_asset_raises_not_found_when_source_has_several_owned_rows() -> None:
+    import pytest
+    from agentclaw.community.core.skill_center.errors import (
+        LocalSkillNotFoundError,
+    )
+
+    skills = FakeSkillRepository()
+    # Two source rows owned by the same owner — the manifest and source bot
+    # disagree, the same NotFound currency the upload road uses.
+    skills.rows[41] = _src_row(description="a")
+    skills.rows[42] = _src_row(description="b")
+    port = _ensure_port(skills)
+
+    with pytest.raises(LocalSkillNotFoundError):
+        _run(port.ensure_dst_local_skill_asset(
+            bot_id="b_1", owner_id="u_owner", actor_id="u_actor",
+            source_bot_id="src-bot", source_owner_id="u_src", name="quality-check",
+        ))
+
+    assert skills.creates == [] and skills.updates == []
+
+
+def test_ensure_dst_local_skill_asset_uses_empty_description_when_source_row_omits_it() -> None:
+    # ``description = src.get("description") or ""`` — a missing/None description
+    # on the source row must surface as the empty string, never ``None``.
+    skills = FakeSkillRepository()
+    skills.rows[41] = {
+        "id": 41, "name": "quality-check", "description": None,
+        "git_path": "local://skills-local/quality-check",
+        "user_id": "u_src", "bolt_id": "src-bot",
+    }
+    port = _ensure_port(skills)
+
+    result = _run(port.ensure_dst_local_skill_asset(
+        bot_id="b_1", owner_id="u_owner", actor_id="u_actor",
+        source_bot_id="src-bot", source_owner_id="u_src", name="quality-check",
+    ))
+
+    assert result["operation"] == "created"
+    assert result["skill"]["description"] == ""
+    assert skills.creates[0]["description"] == ""
+
+
+def test_ensure_dst_local_skill_asset_replaced_path_treats_update_returning_none_as_existing() -> None:
+    # The branch ``or existing`` falls back to the existing row when the repo's
+    # ``update`` returns ``None`` (e.g. a concurrently deleted row) — the
+    # registration still succeeds with the row the materialiser was about to
+    # write, never with ``None``.
+    skills = FakeSkillRepository()
+    skills.rows[41] = _src_row(description="fresh")
+    existing_id = 101
+    skills.rows[existing_id] = {
+        "id": existing_id, "name": "quality-check", "description": "stale",
+        "git_path": "local://skills-local/quality-check",
+        "user_id": "u_owner", "bolt_id": "b_1",
+    }
+    # Force ``update`` to return None: a stub class wrapping the real fake.
+    class _UpdateReturnsNone(FakeSkillRepository):
+        def update(self, skill_id, skill_data):  # type: ignore[override]
+            super().update(skill_id, skill_data)
+            return None
+    skills = _UpdateReturnsNone()
+    skills.rows[41] = _src_row(description="fresh")
+    skills.rows[existing_id] = {
+        "id": existing_id, "name": "quality-check", "description": "stale",
+        "git_path": "local://skills-local/quality-check",
+        "user_id": "u_owner", "bolt_id": "b_1",
+    }
+    port = _ensure_port(skills)
+
+    result = _run(port.ensure_dst_local_skill_asset(
+        bot_id="b_1", owner_id="u_owner", actor_id="u_actor",
+        source_bot_id="src-bot", source_owner_id="u_src", name="quality-check",
+    ))
+
+    assert result["operation"] == "replaced"
+    # The fallback keeps the existing description untouched and the same id.
+    assert result["skill"]["id"] == existing_id
+    assert result["skill"]["description"] == "stale"

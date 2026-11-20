@@ -69,6 +69,8 @@ export type ClawevolveModuleOptions = {
   workflowRuntime?: InternalEvolveWorkflowRuntime;
   hostLocalSkills?: BotSkillGateway;
   hostSpaces?: SpaceDirectory;
+  /** Host opt-in for local development: omit team membership expansion in the legacy task list. */
+  localTaskVisibilityOnly?: boolean;
   hostTeamclawBots?: TeamclawBotDirectory;
   hostTeamclawSpaces?: SpaceDirectory;
   resolveGeneratedBenchBotSpace?: GeneratedBenchBotSpaceResolver;
@@ -155,6 +157,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     botWorkflowPermissionRepo: botWorkflowPermission,
     hostLocalSkills: options.hostLocalSkills ?? null,
     hostSpaces: options.hostSpaces,
+    localTaskVisibilityOnly: options.localTaskVisibilityOnly,
     hostExtensions: options.hostExtensions,
     stageSkillRepo: stageSkill,
     skillAssetRepo: skillAsset,

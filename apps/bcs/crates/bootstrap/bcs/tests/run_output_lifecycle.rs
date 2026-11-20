@@ -155,6 +155,7 @@ async fn direct_result(gated: bool, accepted_alias: bool) {
     let run = "direct-run";
     let session = "direct-session";
     a2a.start_async_chat(AsyncA2aChatCommand {
+        a2a_test_user: None,
         caller: CallerContext::Bot(BotActor { bot_uuid:"bot-driver".into() }), target_bot_id:"bot-observer".into(),
         message:"hello".into(), from_actor_id:None, run_channel_from:None, authenticated_staff_id:None,
         run_id:run.into(), session_key:session.into(), timeout_ms:10000, client:None, tags:vec![],

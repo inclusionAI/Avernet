@@ -1,9 +1,11 @@
 //! `EdgeGrantRepoPort` — persistence port for `edge_grants`.
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use bcs_domain::edge_permission::EdgeGrant;
 use bcs_domain::ActorKind;
 
-use crate::core::error::ServiceResult;
+use crate::core::error::{ServiceError, ServiceResult};
 
 /// Transport-neutral friend query. None includes both actor kinds.
 /// Callers supply limit in 1..=100 and offset <= i64::MAX.
@@ -50,6 +52,18 @@ pub trait EdgeGrantRepoPort: Send + Sync {
         env: &str,
         query: FriendListQuery,
     ) -> ServiceResult<FriendIdsPage>;
+
+    /// Candidate-bound Human → Bot friendship read: approved edges on each
+    /// requested Bot's active default permission profile in `env`.
+    /// Storage errors must fail the read, not become missing or allowed edges.
+    async fn find_human_friend_bots(
+        &self,
+        _human_id: &str,
+        _env: &str,
+        _bot_ids: &[String],
+    ) -> ServiceResult<HashSet<String>> {
+        Err(ServiceError::InternalError("Human friend lookup is unavailable".into()))
+    }
 
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64>;
 

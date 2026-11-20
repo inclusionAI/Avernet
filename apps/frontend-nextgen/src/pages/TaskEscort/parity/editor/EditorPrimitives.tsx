@@ -57,17 +57,19 @@ export function EditorDialog({
   onOpenChange,
   title,
   children,
+  description = '当前工作流的真实配置与发布记录。',
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
+  description?: string;
   children: ReactNode;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <ModalContent size="xl">
         <ModalTitle>{title}</ModalTitle>
-        <ModalDescription>来自当前工作流的真实配置，仅供查看；未接入保存和发布。</ModalDescription>
+        <ModalDescription>{description}</ModalDescription>
         {children}
       </ModalContent>
     </Dialog>

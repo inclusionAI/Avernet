@@ -229,7 +229,7 @@ describe('botChatProvider', () => {
     expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'online', rangeContext);
   });
 
-  it('range.stage 非 online(草稿调试 Bot)时 IAM chatContext 不带 device_uuid', async () => {
+  it('range.stage 非 online(草稿调试 Bot)时多实例 IAM 仍带选中实例 device_uuid', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,
       data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws?token=1' }] },
@@ -244,7 +244,12 @@ describe('botChatProvider', () => {
     });
     await p.connect();
 
-    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'draft', { sessionKey: 'sid-1' });
+    // 2026-11-19 口径勘误:device_uuid 门 = 非 teclaw + 已选实例,不再要求 stage=online
+    // (草稿/验证态多实例的 Token 同样要与建连同实例)。
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'draft', {
+      sessionKey: 'sid-1',
+      deviceUuid: 'device-a',
+    });
   });
 
   // ── Caller 判据运行时化(2026-11-19 需求变更):新版目录接口不下发 call_type,
@@ -279,10 +284,11 @@ describe('botChatProvider', () => {
     expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'online', callerContext);
     // 单飞缓存:换签三次只探测一次(结果定格,失效面随 provider 重建刷新)。
     expect(mockGetCallerContext).toHaveBeenCalledTimes(1);
-    expect(mockGetCallerContext).toHaveBeenCalledWith('b', '2088');
+    // 404/失败零提示:探测请求层携带 suppressErrorNotification(不投默认错误 toast)。
+    expect(mockGetCallerContext).toHaveBeenCalledWith('b', '2088', { suppressErrorNotification: true });
   });
 
-  it('好友 Caller Bot:探测 caller 时 IAM chatContext 带 caller_runtime_target=caller_instance 且与好友参数并存', async () => {
+  it('好友 Caller Bot:探测 caller 时 IAM chatContext 带 caller_runtime_target=caller_instance 且与好友参数并存(三轮勘误还原)', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,
       data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
@@ -301,6 +307,8 @@ describe('botChatProvider', () => {
       ownerId: '2088',
       callerRuntimeTarget: 'caller_instance',
     });
+    // 三轮勘误:好友探测照旧发起;探测请求失败一律零提示(suppress 透传)。
+    expect(mockGetCallerContext).toHaveBeenCalledWith('b', '2088', { suppressErrorNotification: true });
   });
 
   it('探测结果非 caller(owner)与探测失败均不带 caller_runtime_target(静默降级)', async () => {

@@ -22,6 +22,15 @@ must not appear in the database. Both local and preproduction environments run:
 local logs remain redacted; temporary preproduction diagnostics must match the
 Provider wire values in console, text and JSON outputs.
 
+The local story also enables a Bot's Caller snapshot and checks admission
+through the live channel callback. An authenticated single-sender Session
+queues protected Caller work without a lease; a shared Session or missing
+identity is refused. The same single-sender Session still requires a lease for
+its Workbench connection. After checking queue admission, the story resumes
+dispatch, verifies that the mock Provider received the original channel
+credential, and confirms that the final channel reply carries both the
+original IM message ID and the BCS-owned Caller flag.
+
 The recording network provider implements the optional read-only log identity
 hook. The story compares real HTTP success, authentication and validation error
 logs with completed network records and checks matching identity pairs in the

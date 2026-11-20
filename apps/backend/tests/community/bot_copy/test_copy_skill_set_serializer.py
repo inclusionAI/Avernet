@@ -18,10 +18,12 @@ Scenarios map to Spec §4 S1:
 * ④  snapshot with a default set + one ordinary set → derived segment
   re-validates.
 * ⑤  empty snapshot → ``None`` (omit the segment).
-* local-skill members (``local://``) are skipped — the manifest schema refuses
-  a bare local member (Spec §1), so the physical packages ride the copy's
-  ``resources: workspace/`` file-sync entry and the dst operator re-links via
-  Add-Skill.
+* local-skill members (``local://``) are serialized as
+  ``{name, origin: local, from: from_bot}`` — wave-1 opened the
+  ``(SKILLS, BOT)`` ``support_matrix`` cell so the declaration validates, and
+  wave-2's ``BotSyncedLocalSkill`` resolve reverse-looks-up the source bot's
+  ``ac_skill`` row and registers the dst row without uploading (the physical
+  packages ride the copy's ``resources: workspace/`` file-sync entry).
 * ``None`` snapshot → omit segment.
 """
 
@@ -198,16 +200,17 @@ def test_scenario_5_snapshot_without_sets_returns_none():
     assert _default_enabled(segment) is True
 
 
-def test_branch_b_local_skill_member_is_skipped_schema_cannot_express_it():
-    # The manifest schema refuses a local skill member whose ``from`` names a
-    # ``protocol: bot`` source (``support_matrix.py:170``
-    # ``_BOT_SOURCE_IS_RESOURCES_ONLY``), and a bare ``origin: local`` entry
-    # fails the SKILLS-category source gate
-    # (``validate_skill_entry``→``resolve_source``). So a snapshot that carries
-    # ``local://`` members must skip them in the derived segment — the physical
-    # packages still ride the copy's ``resources: workspace/`` file-sync entry,
-    # and the dst operator can re-link local skills via Add-Skill. Repo/center
-    # members of the same Set must still come through.
+def test_branch_b_local_skill_member_serialized_as_from_from_bot():
+    # Wave-1 opened the ``(SKILLS, BOT)`` ``support_matrix`` cell so a local
+    # member can name the file-sync ``protocol: bot`` source, and wave-2's
+    # ``BotSyncedLocalSkill`` resolve reverse-looks-up the source bot's
+    # ``ac_skill`` row + registers the dst row without uploading. So a
+    # snapshot carrying a ``local://`` member now emits
+    # ``{name, origin: local, from: from_bot}`` referencing the top-level
+    # ``sources.from_bot`` named source ``_build_manifest_document`` emits —
+    # no longer dropped. The physical package rides the copy's
+    # ``resources: workspace/`` file-sync entry; repo/center members of the
+    # same Set still come through unchanged.
     members = (
         {
             "id": 101,
@@ -238,13 +241,81 @@ def test_branch_b_local_skill_member_is_skipped_schema_cannot_express_it():
     assert segment is not None
     ordinary_rows = [row for row in segment if row.get("name") == "mixed"]
     assert len(ordinary_rows) == 1
-    # The repo member survived; the local member was dropped.
-    origins = {skill["origin"] for skill in ordinary_rows[0]["skills"]}
-    assert origins == {"repo"}
-    names = {skill["name"] for skill in ordinary_rows[0]["skills"]}
-    assert "local-only" not in names
-    # The derived segment re-validates against the schema (no local-only
-    # member that the SKILLS source gate would refuse).
+    # Both the repo and the local member survive; the local one carries
+    # ``from: from_bot`` referencing the file-sync source.
+    skills_out = ordinary_rows[0]["skills"]
+    origins = {skill["origin"] for skill in skills_out}
+    assert origins == {"repo", "local"}
+    local_skill = next(s for s in skills_out if s["origin"] == "local")
+    assert local_skill["name"] == "local-only"
+    assert local_skill["from"] == "from_bot"
+    repo_skill = next(s for s in skills_out if s["origin"] == "repo")
+    assert repo_skill["name"] == "repo-tool"
+    assert repo_skill["repo_path"] == "tools/repo-tool"
+    # The derived segment re-validates against the schema (the
+    # ``sources.from_bot`` declaration must be provided for the ``from:``
+    # reference to resolve).
+    _assert_skill_sets_validate(
+        segment,
+        sources={
+            "from_bot": {
+                "protocol": "bot",
+                "bot_id": "src_1",
+                "owner_id": "u1",
+            }
+        },
+    )
+
+
+def test_git_sourced_skill_strips_git_scheme_prefix_into_repo_path():
+    # Git-sourced skills store their location as ``git://<scope>/<path>`` — a
+    # logical path the platform's registry resolves, not a fetchable URL. The
+    # manifest's ``repo_path`` (``RepoSkillPath``) accepts only the
+    # ``[A-Za-z0-9._/-]`` vocabulary, so the ``git://`` scheme prefix must be
+    # stripped; the scope segment (``business``/``infra``/``third-party``)
+    # stays as the leading path segment and the dst re-resolves it through the
+    # same registry the source used. Without the strip the segment would fail
+    # ``validate_document`` with ``invalid_path`` on the ``:`` the scheme
+    # carries — which is the pre-stripping failure every git-sourced member
+    # hit (``ac_skill.git_path`` for git skills is overwhelmingly
+    # ``git://<scope>/...``).
+    members = (
+        {
+            "id": 101,
+            "name": "todo-runner",
+            "git_path": "git://infra/todo-runner",
+            "skill_uuid": None,
+        },
+        {
+            "id": 102,
+            "name": "app-diagnose-deep",
+            "git_path": "git://business/ha-duty/app-diagnose-deep",
+            "skill_uuid": None,
+        },
+    )
+    ordinary = SkillSetSnapshot(
+        id=2,
+        name="git-sourced",
+        description=None,
+        is_default=False,
+        is_active=True,
+        skill_ids=(101, 102),
+        mcp_codes=(),
+        skill_references=(),
+    )
+    snapshot = _snapshot(sets=(ordinary,), skills=members)
+
+    segment = _serialize_skill_sets(snapshot=snapshot)
+    assert segment is not None
+    ordinary_rows = [row for row in segment if row.get("name") == "git-sourced"]
+    assert len(ordinary_rows) == 1
+    skills_out = ordinary_rows[0]["skills"]
+    assert {skill["origin"] for skill in skills_out} == {"repo"}
+    by_name = {skill["name"]: skill for skill in skills_out}
+    assert by_name["todo-runner"]["repo_path"] == "infra/todo-runner"
+    assert by_name["app-diagnose-deep"]["repo_path"] == "business/ha-duty/app-diagnose-deep"
+    # The derived segment re-validates: a bare ``repo`` path with no scheme
+    # is the vocabulary ``RepoSkillPath`` accepts.
     _assert_skill_sets_validate(segment)
 
 
@@ -284,4 +355,87 @@ def test_build_manifest_document_emits_skill_sets_when_provided():
     )
     assert "skill_sets" in document
     # The builder's output must pass the same validator.
+    validate_document(document, _CAPS)
+
+
+def test_default_plus_ordinary_set_with_local_member_end_to_end_round_trip():
+    """Spec §1.4 / 波3 — source snapshot carries a default Set + an ordinary
+    Set with a repo/center/local member → ``_serialize_skill_sets`` emits the
+    ordinary Set with the local member as ``{name, origin: local,
+    from: from_bot}``; ``_build_manifest_document`` embeds the segment with the
+    matching top-level ``sources.from_bot`` declaration; ``validate_document``
+    re-accepts the full document (wave-1 opened the ``(SKILLS, BOT)`` cell, so
+    the local member's ``from: from_bot`` reference resolves against
+    ``sources.from_bot``)."""
+    from agentclaw.community.adapters.http.openapi_v1.bots.copy import (
+        _build_manifest_document,
+    )
+
+    ordinary_skills = (
+        {
+            "id": 201,
+            "name": "repo-tool",
+            "git_path": "tools/repo-tool",
+            "skill_uuid": None,
+        },
+        {
+            "id": 202,
+            "name": "center-tool",
+            "git_path": "center://center-fixture",
+            "skill_uuid": "44444444-4444-4444-4444-444444444444",
+        },
+        {
+            "id": 203,
+            "name": "local-tool",
+            "git_path": "local://some/local/pkg",
+            "skill_uuid": None,
+        },
+    )
+    default_set = SkillSetSnapshot(
+        id=1,
+        name="default",
+        description=None,
+        is_default=True,
+        is_active=True,
+        skill_ids=(),
+        mcp_codes=(),
+        skill_references=(),
+    )
+    ordinary_set = SkillSetSnapshot(
+        id=2,
+        name="full-mixed",
+        description=None,
+        is_default=False,
+        is_active=True,
+        skill_ids=(201, 202, 203),
+        mcp_codes=("gh",),
+        skill_references=(),
+    )
+    snapshot = _snapshot(
+        sets=(default_set, ordinary_set), skills=ordinary_skills
+    )
+
+    segment = _serialize_skill_sets(snapshot=snapshot)
+    assert segment is not None
+    assert _default_enabled(segment) is True
+    ordinary = next(row for row in segment if row.get("name") == "full-mixed")
+    by_origin = {skill["origin"]: skill for skill in ordinary["skills"]}
+    assert set(by_origin) == {"repo", "center", "local"}
+    assert by_origin["local"]["name"] == "local-tool"
+    assert by_origin["local"]["from"] == "from_bot"
+    assert by_origin["repo"]["repo_path"] == "tools/repo-tool"
+    assert by_origin["center"]["skill_uuid"] == "44444444-4444-4444-4444-444444444444"
+    assert ordinary["mcp"] == [{"server_code": "gh"}]
+
+    # Build the full manifest document and re-validate — the local member's
+    # ``from: from_bot`` resolves against the document's top-level
+    # ``sources.from_bot`` (declared by ``_build_manifest_document`` for the
+    # file-sync entry); wave-1 opened the support_matrix cell so
+    # ``validate_document`` accepts the declaration.
+    document = _build_manifest_document(
+        script_body="echo hi",
+        source_bot_id="src_1",
+        source_owner_id="u1",
+        skill_sets=segment,
+    )
     validate_document(document, _CAPS)
