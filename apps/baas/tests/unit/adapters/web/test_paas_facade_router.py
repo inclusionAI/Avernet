@@ -17,8 +17,6 @@ from secbaas.community.adapters.web.routers.paas_service.paas_facade_router impo
     router as _router,
 )
 from secbaas.community.api.device_manage import (
-    ArcaCreationResult,
-    ArcaDeviceConfig,
     CommandResult,
 )
 from secbaas.community.api.health_check.bot import TTLInfo
@@ -73,7 +71,6 @@ def mock_facade():
                 app.dependency_overrides[dep.call] = lambda: mock
 
     yield {
-        "create_device": mock.create_device,
         "destroy_device": mock.destroy_device,
         "execute_command": mock.execute_command,
         "resolve_ws_conn_info": mock.resolve_ws_conn_info,
@@ -86,169 +83,6 @@ def mock_facade():
 
     # Restore the original dependency
     app.dependency_overrides = old_overrides
-
-
-@pytest.mark.unit
-class TestCreateDeviceEndpoint:
-    """Test POST /api/v1/paas/devices endpoint."""
-
-    def test_create_device_arca_success(self, client, mock_facade):
-        """Successfully create an ARCA device via HTTP endpoint with new signature."""
-        mock_result = ArcaCreationResult(
-            platform="arca",
-            status="RUNNING",
-            template_id="template-123",
-            sandbox_id="sandbox-abc123@42",
-        )
-        mock_facade["create_device"].return_value = mock_result
-
-        # NEW request format: tenant_name + optional device_template_uuid + optional detail_config
-        request_data = {
-            "tenant_name": "test-tenant",
-            "device_template_uuid": "template-uuid-123",
-            "detail_config": {
-                "ttl_in_minutes": 60,
-                "name": "test-device",
-                "description": "Test device",
-            },
-        }
-
-        response = client.post("/api/v1/paas/devices", json=request_data)
-
-        assert response.status_code == 200
-        result = response.json()
-        assert result["data"]["platform"] == "arca"
-        assert result["data"]["status"] == "RUNNING"
-
-        # Verify facade called with new parameters
-        mock_facade["create_device"].assert_called_once()
-        call_kwargs = mock_facade["create_device"].call_args
-        assert call_kwargs.kwargs["tenant_name"] == "test-tenant"
-        assert call_kwargs.kwargs["device_template_uuid"] == "template-uuid-123"
-        assert isinstance(call_kwargs.kwargs["detail_config"], ArcaDeviceConfig)
-
-    def test_create_device_validation_error_missing_tenant_name(self, client):
-        """Validation error when tenant_name is missing (required field)."""
-        request_data = {
-            "device_template_uuid": "template-uuid",
-            "detail_config": {"name": "test"},
-            # tenant_name is missing - required per D-04
-        }
-
-        response = client.post("/api/v1/paas/devices", json=request_data)
-
-        assert response.status_code == 422  # Validation error
-
-    def test_create_device_without_template_uuid_uses_default(
-        self, client, mock_facade
-    ):
-        """Create device without template UUID uses tenant default."""
-        mock_result = ArcaCreationResult(
-            platform="arca",
-            status="RUNNING",
-            template_id="default-template",
-            sandbox_id="sandbox-default@42",
-        )
-        mock_facade["create_device"].return_value = mock_result
-
-        # Omit device_template_uuid - should use tenant default
-        request_data = {
-            "tenant_name": "test-tenant",
-            # device_template_uuid not provided - triggers default lookup
-            "detail_config": None,
-        }
-
-        response = client.post("/api/v1/paas/devices", json=request_data)
-
-        assert response.status_code == 200
-
-        call_kwargs = mock_facade["create_device"].call_args
-        assert call_kwargs.kwargs["tenant_name"] == "test-tenant"
-        assert call_kwargs.kwargs["device_template_uuid"] is None
-        assert call_kwargs.kwargs["detail_config"] is None
-
-    def test_create_device_facade_error_mapping(self, client, mock_facade):
-        """DeviceFacadeException is correctly mapped to HTTP status codes."""
-        # Setup facade to raise DeviceFacadeException
-        original_error = PaasError(
-            ErrorCode.DEVICE_CREATION_FAILED, "Failed to create device"
-        )
-        facade_exception = DeviceFacadeException(
-            operation="create_device",
-            platform_type="ARCA",
-            template_id=42,
-            paas_device_id=None,
-            original_error=original_error,
-        )
-        mock_facade["create_device"].side_effect = facade_exception
-
-        request_data = {
-            "tenant_name": "test-tenant",
-            "device_template_uuid": "template-uuid",
-            "detail_config": {"name": "test-device"},
-        }
-
-        response = client.post("/api/v1/paas/devices", json=request_data)
-
-        # Verify: 500 for DEVICE_CREATION_FAILED
-        assert response.status_code == 500
-        result = response.json()
-        assert result["detail"]["error_code"] == "DEVICE_CREATION_FAILED"
-        assert "create_device" in result["detail"]["context"]["operation"]
-
-    def test_create_device_platform_unavailable(self, client, mock_facade):
-        """PLATFORM_UNAVAILABLE error maps to 503 status code."""
-        original_error = PaasError(
-            ErrorCode.PLATFORM_UNAVAILABLE, "Arca platform is not reachable"
-        )
-        facade_exception = DeviceFacadeException(
-            operation="create_device",
-            platform_type="ARCA",
-            template_id=42,
-            paas_device_id=None,
-            original_error=original_error,
-        )
-        mock_facade["create_device"].side_effect = facade_exception
-
-        request_data = {
-            "tenant_name": "test-tenant",
-            "device_template_uuid": "template-uuid",
-            "detail_config": {"name": "test-device"},
-        }
-
-        response = client.post("/api/v1/paas/devices", json=request_data)
-
-        # Verify: 503 for PLATFORM_UNAVAILABLE
-        assert response.status_code == 503
-        result = response.json()
-        assert result["detail"]["error_code"] == "PLATFORM_UNAVAILABLE"
-
-    def test_create_device_config_invalid(self, client, mock_facade):
-        """CONFIG_INVALID error maps to 400 status code."""
-        original_error = PaasError(
-            ErrorCode.CONFIG_INVALID, "Invalid template_id format"
-        )
-        facade_exception = DeviceFacadeException(
-            operation="create_device",
-            platform_type="ARCA",
-            template_id=42,
-            paas_device_id=None,
-            original_error=original_error,
-        )
-        mock_facade["create_device"].side_effect = facade_exception
-
-        request_data = {
-            "tenant_name": "test-tenant",
-            "device_template_uuid": "template-uuid",
-            "detail_config": {"name": "test-device"},
-        }
-
-        response = client.post("/api/v1/paas/devices", json=request_data)
-
-        # Verify: 400 for CONFIG_INVALID
-        assert response.status_code == 400
-        result = response.json()
-        assert result["detail"]["error_code"] == "CONFIG_INVALID"
 
 
 @pytest.mark.unit
@@ -492,15 +326,9 @@ class TestErrorResponseFormat:
 
     def test_internal_error_response(self, client, mock_facade):
         """Unexpected errors return INTERNAL_ERROR format."""
-        mock_facade["create_device"].side_effect = Exception("Unexpected error")
+        mock_facade["destroy_device"].side_effect = Exception("Unexpected error")
 
-        request_data = {
-            "tenant_name": "test-tenant",
-            "device_template_uuid": "template-uuid",
-            "detail_config": {"name": "test-device"},
-        }
-
-        response = client.post("/api/v1/paas/devices", json=request_data)
+        response = client.delete("/api/v1/paas/devices/sandbox-abc@42")
 
         assert response.status_code == 500
         result = response.json()

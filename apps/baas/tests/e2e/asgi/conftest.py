@@ -134,12 +134,48 @@ from tests.e2e.conftest import (  # noqa: E402
     call_device_callback,
     call_teclaw_callback,
     cleanup_bot,
-    create_paas_device,
     create_test_bot,
     destroy_paas_device,
     find_existing_bot,
     set_mock_paas_failure,
 )
+
+# ── Override create_paas_device with in-process facade call ──────────────
+# The E2E conftest's create_paas_device uses HTTP POST to the paas device endpoint.
+# When running under ASGI transport, replace it with a direct call to
+# PaasServiceFacade.create_device() to avoid going through the (now-removed) HTTP
+# endpoint while keeping the same return dict shape so 112 call sites need zero changes.
+
+
+async def create_paas_device(
+    api: APITestHelper,
+    unique_id: str,
+    template_uuid: str = TEMPLATE_ARCA,
+    detail_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create a PaaS device via in-process PaasServiceFacade.
+
+    Replaces the HTTP POST version in tests/e2e/conftest.py with a direct
+    facade call. The return dict shape is kept identical so all existing
+    callers work without changes.
+    """
+    from secbaas.community.api.device_manage import ArcaDeviceConfig
+    from secbaas.community.bootstrap import get_container
+
+    if detail_config is None:
+        detail_config = {
+            "name": f"e2e-device-{unique_id}",
+            "ttl_in_minutes": 60,
+        }
+    facade = get_container().services.paas_facade()
+    config = ArcaDeviceConfig(**detail_config)
+    result = await facade.create_device(
+        tenant_name=api.tenant,
+        device_template_uuid=template_uuid,
+        detail_config=config,
+    )
+    # Convert result to dict (matches the shape returned by the HTTP endpoint)
+    return result.model_dump(mode="json")
 from tests.e2e.hook_helpers import (  # noqa: E402
     _ColorLogger,
     approve_publish,

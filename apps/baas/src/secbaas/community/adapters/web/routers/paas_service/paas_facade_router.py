@@ -3,7 +3,6 @@
 Exposes PaasServiceFacade methods as HTTP endpoints for testing and external access.
 
 Endpoints:
-- POST /api/v1/paas/devices - Create device via PaasServiceFacade
 - DELETE /api/v1/paas/devices/{paas_device_id} - Destroy device via PaasServiceFacade
 - POST /api/v1/paas/devices/{paas_device_id}/commands - Execute command via PaasServiceFacade
 - GET /api/v1/paas/devices/{paas_device_id}/ws-info - Get WebSocket connection info via PaasServiceFacade
@@ -18,7 +17,7 @@ Endpoints:
 import base64
 import binascii
 from datetime import datetime
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 from dependency_injector.wiring import Provide, inject
 from fastapi import (
@@ -35,8 +34,6 @@ from pydantic import BaseModel, Field
 
 from secbaas.community.api import ApiResponse, SuccessResponse
 from secbaas.community.api.device_manage import (
-    ArcaCreationResult,
-    ArcaDeviceConfig,
     CommandResult,
     DeviceFacadeException,
     DeviceInfo,
@@ -46,8 +43,6 @@ from secbaas.community.api.device_manage import (
     OutBoundOperationRule,
     OutBoundOperationRuleUpdatedMode,
     PaasServiceFacade,
-    SigmaCreationResult,
-    SigmaDeviceConfig,
 )
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
@@ -112,29 +107,6 @@ def _filter_headers(headers: dict[str, str]) -> dict[str, str]:
 # ============================================================================
 # Pydantic Models
 # ============================================================================
-
-
-class CreateDeviceRequest(BaseModel):
-    """Request model for creating a device.
-
-    Uses tenant_name + device_template_uuid + detail_config pattern per D-03.
-    Platform type is derived from resolved template, not specified directly.
-    """
-
-    tenant_name: str = Field(
-        ...,  # Required per D-04
-        min_length=1,
-        description="租户名称，用于业务层隔离和设备创建授权",
-    )
-    device_template_uuid: str | None = Field(
-        default=None,
-        description="设备模板UUID (可选，不提供则使用租户默认模板)",
-    )
-    detail_config: ArcaDeviceConfig | SigmaDeviceConfig | None = Field(
-        default=None,
-        description="详细配置 (可选，会覆盖模板配置中的相同字段)",
-    )
-
 
 class ExecuteCommandRequest(BaseModel):
     """Request model for executing a command on a device."""
@@ -249,64 +221,6 @@ def _handle_facade_exception(exc: DeviceFacadeException) -> HTTPException:
 # ============================================================================
 # Endpoints
 # ============================================================================
-
-
-@router.post(
-    "/devices",
-    response_model=ApiResponse[ArcaCreationResult | SigmaCreationResult],
-)
-@inject
-async def create_device(
-    request: CreateDeviceRequest,
-    facade: PaasServiceFacade = Depends(
-        Provide[ApplicationContainer.services.paas_facade]
-    ),
-) -> ApiResponse[ArcaCreationResult | SigmaCreationResult]:
-    """Create a device via PaasServiceFacade.
-
-    Args:
-        request: Device creation request with tenant name, optional template UUID,
-                 and optional detail config for template overrides
-
-    Returns:
-        DeviceCreationResult with created device details
-
-    Raises:
-        HTTPException: On creation failure with appropriate status code:
-            - 400: CONFIG_INVALID or ValueError
-            - 500: DEVICE_CREATION_FAILED
-            - 503: PLATFORM_UNAVAILABLE
-    """
-    logger.info(
-        "Creating device via facade router: tenant_name=%s, device_template_uuid=%s",
-        request.tenant_name,
-        request.device_template_uuid,
-    )
-
-    try:
-        result = await facade.create_device(
-            tenant_name=request.tenant_name,
-            device_template_uuid=request.device_template_uuid,
-            detail_config=request.detail_config,
-        )
-        logger.info("Device created successfully: %s", result)
-        return ApiResponse(data=cast(ArcaCreationResult | SigmaCreationResult, result))
-
-    except DeviceFacadeException as e:
-        logger.error("Device creation failed: %s", e.message)
-        raise _handle_facade_exception(e)
-
-    except Exception as e:
-        logger.error("Unexpected error during device creation: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error_code": "INTERNAL_ERROR",
-                "message": str(e),
-                "context": {"operation": "create_device"},
-            },
-        )
-
 
 @router.delete("/devices/{paas_device_id}", response_model=ApiResponse[SuccessResponse])
 @inject

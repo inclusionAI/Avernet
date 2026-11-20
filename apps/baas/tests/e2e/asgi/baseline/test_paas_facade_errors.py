@@ -7,50 +7,6 @@ from tests.e2e.asgi.conftest import APITestHelper
 pytestmark = [pytest.mark.e2e_asgi]
 
 
-class TestCreateDeviceErrors:
-    """Validation errors for POST /api/v1/paas/devices."""
-
-    @pytest.mark.asyncio
-    async def test_create_device_empty_body(self, api: APITestHelper) -> None:
-        """POST /api/v1/paas/devices with empty body → 422."""
-        response = await api.client.post("/api/v1/paas/devices", json={})
-        assert response.status_code == 422
-
-    @pytest.mark.asyncio
-    async def test_create_device_missing_tenant(self, api: APITestHelper) -> None:
-        """Missing tenant_name returns 422."""
-        response = await api.client.post(
-            "/api/v1/paas/devices",
-            json={"device_template_uuid": "x", "detail_config": {"name": "test"}},
-        )
-        assert response.status_code == 422
-
-    @pytest.mark.asyncio
-    async def test_create_device_empty_tenant_name(self, api: APITestHelper) -> None:
-        """Empty tenant_name string returns 422 (min_length=1)."""
-        response = await api.client.post(
-            "/api/v1/paas/devices",
-            json={
-                "tenant_name": "",
-                "device_template_uuid": "TEMPLATE-x",
-            },
-        )
-        assert response.status_code == 422
-
-    @pytest.mark.asyncio
-    async def test_create_device_invalid_extra_field(self, api: APITestHelper) -> None:
-        """Unknown field in request body is tolerated or returns 422."""
-        response = await api.client.post(
-            "/api/v1/paas/devices",
-            json={
-                "tenant_name": "team_claw",
-                "bogus_field": "should-not-exist",
-            },
-        )
-        # FastAPI by default ignores extra fields; stub may also return 500
-        assert response.status_code in (200, 422, 500)
-
-
 class TestDestroyDeviceErrors:
     """Error cases for DELETE /api/v1/paas/devices/{paas_device_id}."""
 

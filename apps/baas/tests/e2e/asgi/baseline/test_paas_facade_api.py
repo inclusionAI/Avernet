@@ -1,7 +1,6 @@
-"""E2E tests for paas_facade_router — all 9 endpoints.
+"""E2E tests for paas_facade_router — all 8 endpoints.
 
 Tests cover:
-- POST   /api/v1/paas/devices                           — Create device
 - DELETE /api/v1/paas/devices/{paas_device_id}          — Destroy device
 - POST   /api/v1/paas/devices/{paas_device_id}/commands  — Execute command
 - GET    /api/v1/paas/devices/{paas_device_id}/ws-info   — Get WebSocket info
@@ -42,52 +41,6 @@ def _assert_not_di_error(response: Any) -> None:
 
 
 pytestmark = [pytest.mark.e2e_asgi]
-
-
-class TestCreateDeviceEndpoint:
-    """Tests for POST /api/v1/paas/devices."""
-
-    @pytest.mark.asyncio
-    async def test_create_device(self, api: APITestHelper, unique_id: str) -> None:
-        """Create a PaaS device with the new signature."""
-        response = await api.client.post(
-            api.paas_device_url(),
-            params=api.params(),
-            json={
-                "tenant_name": api.tenant,
-                "device_template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
-                "detail_config": {
-                    "name": f"e2e-test-device-{unique_id}",
-                    "ttl_in_minutes": 60,
-                },
-            },
-        )
-        _assert_not_di_error(response)
-
-    @pytest.mark.asyncio
-    async def test_create_device_missing_tenant(self, api: APITestHelper) -> None:
-        """Missing tenant_name returns 422."""
-        response = await api.client.post(
-            api.paas_device_url(),
-            params=api.params(),
-            json={
-                "device_template_uuid": "TEMPLATE-x",
-            },
-        )
-        assert response.status_code == 422
-
-    @pytest.mark.asyncio
-    async def test_create_device_empty_tenant(self, api: APITestHelper) -> None:
-        """Empty tenant_name returns 422."""
-        response = await api.client.post(
-            api.paas_device_url(),
-            params=api.params(),
-            json={
-                "tenant_name": "",
-                "device_template_uuid": "TEMPLATE-x",
-            },
-        )
-        assert response.status_code == 422
 
 
 class TestDestroyDeviceEndpoint:
