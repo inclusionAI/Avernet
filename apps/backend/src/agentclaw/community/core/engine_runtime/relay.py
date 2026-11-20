@@ -22,6 +22,7 @@ public surface existed.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from injector import inject
@@ -72,6 +73,18 @@ from agentclaw.community.core.engine_runtime.engine_runtime_service_protocol imp
 
 logger = get_logger()
 
+
+#: HTTP status codes that indicate a transient upstream condition worth retrying
+#: for idempotent requests (GET, HEAD). 503 Service Unavailable is the primary
+#: target — the sandbox may be temporarily overloaded or restarting.
+_RETRYABLE_STATUSES: frozenset[int] = frozenset({503})
+
+#: Maximum number of retry attempts for transient upstream failures.
+_MAX_RETRIES = 2
+
+#: Backoff delays in seconds for each retry attempt (index 0 = first retry).
+_RETRY_BACKOFF: tuple[float, ...] = (1.0, 3.0)
+
 #: The engine answers 501 for a capability it does not declare
 #: (``engine/adapter/.../api/caps.py``). That is the one upstream status with a
 #: distinct public meaning, so it gets its own error rather than folding into
@@ -82,6 +95,20 @@ _CAPABILITY_UNSUPPORTED_STATUS = 501
 #: ``ac_bots.binding_id`` names. See
 #: :meth:`EngineRuntimeRelay._resolve_published_device`.
 _SERVICE_BOT_TYPE = SERVICE_BOT_TYPE
+
+def _should_retry(method: str, status_code: int | None) -> bool:
+    """Return *True* when a transient upstream failure is safe to retry.
+
+    Only idempotent methods are eligible.  For ``DeviceAdapterHTTPStatusError``
+    the *status_code* must be in :data:`_RETRYABLE_STATUSES`; for transport
+    failures (*status_code* is ``None``) every idempotent method is eligible.
+    """
+    if method not in ("GET", "HEAD"):
+        return False
+    if status_code is None:
+        return True  # transport-level failure (ValueError)
+    return status_code in _RETRYABLE_STATUSES
+
 
 
 class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
@@ -380,41 +407,62 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         ``DeviceAdapterTimeoutError`` is deliberately **not** caught: it is
         already a precise, publicly meaningful failure and the adapter maps it
         straight to 504. Wrapping it would lose that.
+
+        For idempotent requests (GET, HEAD) this method retries transient
+        upstream failures — HTTP 503 and transport-level errors
+        (``ValueError``) — up to :data:`_MAX_RETRIES` times with exponential
+        backoff. Non-idempotent methods and non-retryable status codes are
+        never retried.
         """
-        try:
-            return await self._transport.invoke(
-                ctx.conn_info, method, path, body=body, params=params, timeout=timeout
-            )
-        except DeviceAdapterEndpointNotFoundError as exc:
-            # Any adapter 404, NOT just "this runtime has no such route" — the
-            # engine returns 404 for an unknown session id, an unknown model id,
-            # an unknown engine name. Mapping it to "capability unsupported"
-            # would tell a caller polling a deleted session that its bot lost
-            # the sessions capability. A capability the engine does not declare
-            # arrives as a 501 below, which is a different status entirely.
-            raise EngineResourceNotFoundError(f"engine returned 404 for {path}") from exc
-        except DeviceAdapterHTTPStatusError as exc:
-            if exc.status_code == _CAPABILITY_UNSUPPORTED_STATUS:
-                raise EngineCapabilityUnsupportedError(
-                    f"engine does not support {path}"
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                return await self._transport.invoke(
+                    ctx.conn_info, method, path, body=body, params=params, timeout=timeout
+                )
+            except DeviceAdapterEndpointNotFoundError as exc:
+                # Any adapter 404, NOT just "this runtime has no such route" — the
+                # engine returns 404 for an unknown session id, an unknown model id,
+                # an unknown engine name. Mapping it to "capability unsupported"
+                # would tell a caller polling a deleted session that its bot lost
+                # the sessions capability. A capability the engine does not declare
+                # arrives as a 501 below, which is a different status entirely.
+                raise EngineResourceNotFoundError(f"engine returned 404 for {path}") from exc
+            except DeviceAdapterHTTPStatusError as exc:
+                if exc.status_code == _CAPABILITY_UNSUPPORTED_STATUS:
+                    raise EngineCapabilityUnsupportedError(
+                        f"engine does not support {path}"
+                    ) from exc
+                if _should_retry(method, exc.status_code) and attempt < _MAX_RETRIES:
+                    logger.warning(
+                        "retry attempt %d/%d for %s %s after HTTP %d: %s",
+                        attempt + 1, _MAX_RETRIES, method, path, exc.status_code, exc,
+                    )
+                    await asyncio.sleep(_RETRY_BACKOFF[attempt])
+                    continue
+                raise EngineUpstreamError(
+                    f"engine returned HTTP {exc.status_code} for {path}"
                 ) from exc
-            raise EngineUpstreamError(
-                f"engine returned HTTP {exc.status_code} for {path}"
-            ) from exc
-        except ValueError as exc:
-            # The transport contract documents a bare ``ValueError`` for
-            # transport/HTTP failure in the production implementation, and
-            # ``httpx``'s ``.json()`` raises ``JSONDecodeError`` — itself a
-            # ``ValueError`` — on a non-JSON body. Neither is engine-runtime
-            # specific, so without this they would escape to the app catch-all
-            # as a 500. Worse, ``JSONDecodeError`` is already mapped globally to
-            # "Malformed engine configuration", which would point a caller at
-            # their engine config when the real fault is a malfunctioning
-            # device. Both are upstream failures: 502.
-            #
-            # Listed after the two specific subclasses above, which are also
-            # ``ValueError``s and must keep their own meanings.
-            raise EngineUpstreamError(f"engine transport failed for {path}") from exc
+            except ValueError as exc:
+                # The transport contract documents a bare ``ValueError`` for
+                # transport/HTTP failure in the production implementation, and
+                # ``httpx``'s ``.json()`` raises ``JSONDecodeError`` — itself a
+                # ``ValueError`` — on a non-JSON body. Neither is engine-runtime
+                # specific, so without this they would escape to the app catch-all
+                # as a 500. Worse, ``JSONDecodeError`` is already mapped globally to
+                # "Malformed engine configuration", which would point a caller at
+                # their engine config when the real fault is a malfunctioning
+                # device. Both are upstream failures: 502.
+                #
+                # Listed after the two specific subclasses above, which are also
+                # ``ValueError``s and must keep their own meanings.
+                if _should_retry(method, None) and attempt < _MAX_RETRIES:
+                    logger.warning(
+                        "retry attempt %d/%d for %s %s after transport failure: %s",
+                        attempt + 1, _MAX_RETRIES, method, path, exc,
+                    )
+                    await asyncio.sleep(_RETRY_BACKOFF[attempt])
+                    continue
+                raise EngineUpstreamError(f"engine transport failed for {path}") from exc
 
     # ── normalisation ─────────────────────────────────────────────────────
 
