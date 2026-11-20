@@ -72,6 +72,23 @@ closed. Friend approval and BCS friend-auth synchronization use the same
 compatibility locator, then send the resolved current Owner as the AgentPass
 operator. The strict repository `get_by_id_and_owner` contract is unchanged.
 
+The friend flows above rely on this compatibility matching; their contract is
+the [owner-handoff addressing spec](../../../../../specs/2026-10-18-owner-handoff-addressing/spec.md).
+`bot_id` is not unique across entities, so a historical locator can resolve to a
+single but wrong Bot when it equals another entity's `entity_id` or `owner_id`.
+Relying on single-match behavior where historical locators may collide across
+entities requires explicit product/security acceptance; no such acceptance is
+recorded. The risk is not limited to this module: other modules (for example
+`bot_app_grant`, `bot_public_risk`, `expert_chat` and `service_bot`) also call
+`BotAddressResolver.resolve(legacy_owner_id=...)` and must be assessed
+separately. The repository `get_by_id_and_owner` method itself is unchanged;
+whether a caller or an authorization decision uses the compatibility resolver
+is a per-module review question. Sources: Avernet PR #3918 and the owner-handoff
+spec for the compatibility addressing; `bot_management/addressing.py` and the
+repository legacy-locator query for the match behavior;
+`test_transferred_bot_reuses_friend_record` and
+`test_transferred_bot_is_loaded_by_stable_entity` for the transfer scenarios.
+
 ### BCSFuse publication synchronization
 
 - Legacy `POST /api/bots/{bot_id}/public` syncs user publication through
