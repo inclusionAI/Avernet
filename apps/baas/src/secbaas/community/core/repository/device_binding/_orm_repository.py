@@ -406,7 +406,7 @@ class OrmDeviceBindingRepository(OrmConnectionMixin, DeviceBindingRepository):
         支持 keyset 游标分页：仅以 id 排序，``id > last_id`` 保证游标逐页推进，
         不会因 TTL 续期失败/相同而困在队列头部。
         """
-        from sqlalchemy import func
+        from sqlalchemy import func, or_
 
         due_ttl = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -420,6 +420,14 @@ class OrmDeviceBindingRepository(OrmConnectionMixin, DeviceBindingRepository):
                     "",
                 ).op("<=")(due_ttl),
                 DeviceBindingModel.id > last_id,
+                # Per-Caller container bindings (apply_reason=caller_instance:*)
+                # are deliberately outside the TTL renewal universe so idle
+                # caller containers can expire; see the arca_ttl repository for
+                # the shared identifier contract.
+                or_(
+                    DeviceBindingModel.apply_reason.is_(None),
+                    ~DeviceBindingModel.apply_reason.like("caller_instance:%"),
+                ),
             )
             .order_by(DeviceBindingModel.id.asc())
             .limit(limit)
@@ -1478,9 +1486,12 @@ class OrmDeviceBindingRepository(OrmConnectionMixin, DeviceBindingRepository):
 
         支持 keyset 游标分页：仅以 id 排序，``id > last_id`` 保证游标逐页推进。
         """
-        from sqlalchemy import func
+        from sqlalchemy import func, select
 
         due_ttl = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+        caller_device_ids = select(DeviceBindingModel.device_id).where(
+            DeviceBindingModel.apply_reason.like("caller_instance:%")
+        )
 
         rows = (
             self._session.query(DeviceModel)
@@ -1495,6 +1506,9 @@ class OrmDeviceBindingRepository(OrmConnectionMixin, DeviceBindingRepository):
                     "",
                 ).op("<=")(due_ttl),
                 DeviceModel.id > last_id,
+                # Exclude the baas_device row of any per-Caller container so
+                # both legacy TTL groups agree on caller exclusion.
+                ~DeviceModel.device_uuid.in_(caller_device_ids),
             )
             .order_by(DeviceModel.id.asc())
             .limit(limit)

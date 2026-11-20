@@ -10,13 +10,19 @@ anti-join (find_unregistered) with dialect-aware JSON extraction.
 Semantics honor the enterprise raw-SQL reference clause-for-clause;
 binding-side hot-table queries carry no ``is_deleted`` filter because
 production ``ac_entity_device_binding`` has no such column (D-16').
+
+Per-Caller containers are outside the renewal universe: rows whose
+``apply_reason`` starts with ``caller_instance:`` (and the matching
+``baas_device`` row) are excluded from due, discovery and hot-count queries
+so an idle container keeps its own TTL. See
+``docs/2026-11-18-caller-instance-ttl-renewal-exclusion.md``.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import and_, func, literal, select, text, update
+from sqlalchemy import and_, exists, func, literal, or_, select, text, update
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -29,6 +35,36 @@ from ._orm_model import TtlRenewalScheduleModel
 from ._protocol import TtlRenewalScheduleRepository
 
 log = get_logger("orm")
+
+# Stable identifier for a per-Caller container instance (see the
+# ``list_active_caller_instance_bindings`` contract): the backend records the
+# caller container binding as ``apply_reason=caller_instance:<bot_id>``. Caller
+# containers are intentionally excluded from the ARCA TTL renewal universe so
+# an idle caller container can expire instead of being renewed forever; the
+# activity-based reclaim policy is a separate follow-up.
+CALLER_INSTANCE_APPLY_REASON_PREFIX = "caller_instance:"
+
+
+def _not_caller_instance_binding():
+    """SQL predicate: the binding row is not a Caller container binding."""
+    return or_(
+        DeviceBindingModel.apply_reason.is_(None),
+        ~DeviceBindingModel.apply_reason.like(
+            f"{CALLER_INSTANCE_APPLY_REASON_PREFIX}%"
+        ),
+    )
+
+
+def _caller_instance_device_exists():
+    """SQL predicate: the baas_device row backs a Caller container binding."""
+    return exists().where(
+        and_(
+            DeviceBindingModel.device_id == DeviceModel.device_uuid,
+            DeviceBindingModel.apply_reason.like(
+                f"{CALLER_INSTANCE_APPLY_REASON_PREFIX}%"
+            ),
+        )
+    )
 
 
 class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepository):
@@ -126,6 +162,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     DeviceModel.is_deleted == 0,
                     DeviceModel.env == env,
                     DeviceModel.provider_device_id.isnot(None),
+                    ~_caller_instance_device_exists(),
                 )
             )
         elif hot_side == "ac_entity_device_binding":
@@ -153,6 +190,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     self._json_unquote(
                         DeviceBindingModel.device_props, "$.sandbox_id"
                     ).isnot(None),
+                    _not_caller_instance_binding(),
                 )
             )
         else:
@@ -339,6 +377,12 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         else:
             raise ValueError(f"Unsupported source_table: {source_table}")
 
+        caller_exclusion = (
+            ~_caller_instance_device_exists()
+            if source_table == "baas_device"
+            else _not_caller_instance_binding()
+        )
+
         stmt = (
             select(
                 TtlRenewalScheduleModel.id,
@@ -357,6 +401,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                 TtlRenewalScheduleModel.source_table == source_table,
                 TtlRenewalScheduleModel.env == env,
                 TtlRenewalScheduleModel.next_renew_at < now,
+                caller_exclusion,
             )
             .order_by(TtlRenewalScheduleModel.next_renew_at.asc())
             .limit(limit)
@@ -585,6 +630,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     DeviceModel.is_deleted == 0,
                     DeviceModel.env == env,
                     DeviceModel.provider_device_id.isnot(None),
+                    ~_caller_instance_device_exists(),
                     TtlRenewalScheduleModel.id.is_(None),
                 )
                 .order_by(DeviceModel.id.asc())
@@ -629,6 +675,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     self._json_unquote(
                         DeviceBindingModel.device_props, "$.sandbox_id"
                     ).isnot(None),
+                    _not_caller_instance_binding(),
                     TtlRenewalScheduleModel.id.is_(None),
                 )
                 .order_by(DeviceBindingModel.id.asc())
@@ -704,6 +751,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                 DeviceModel.is_deleted == 0,
                 DeviceModel.env == env,
                 DeviceModel.provider_device_id.isnot(None),
+                ~_caller_instance_device_exists(),
             )
         )
         result = self._session.execute(stmt).scalar()
@@ -731,6 +779,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                 self._json_unquote(
                     DeviceBindingModel.device_props, "$.sandbox_id"
                 ).isnot(None),
+                _not_caller_instance_binding(),
             )
         )
         result = self._session.execute(stmt).scalar()
