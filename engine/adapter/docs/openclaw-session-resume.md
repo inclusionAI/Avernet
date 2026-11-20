@@ -59,5 +59,5 @@ selection and terminal TTL rules apply. Event-sequence growth indicates runtime
 activity, not business progress; a quiet tool call may emit no new events.
 
 SecBaaS owns Bot authorization, lifecycle and service-Bot affinity routing.
-See the [cross-app observation flow](../../../docs/flows/session-runtime-observation.md)
-for the Harness policy, failure boundaries and deployment order.
+Deploy Engine, then SecBaaS, then Backend. A missing observation does not prove
+execution failure and must not by itself trigger Harness recovery.

@@ -16,7 +16,7 @@ frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Pytho
 Bot 会话通过 SecBaaS 查询 Engine 的同一 run 事件序号，而非仅以可见消息判断静默。
 首次观测、run 更换或序号回退重建观察基线；查询不可用不触发恢复或失败。
 事件活动不等于业务进展，不改变 Relay 上报和 S1～S6。
-完整链路、部署顺序与限制见[运行活动观测](../../../../../../../docs/flows/session-runtime-observation.md)。
+部署顺序为 Engine → SecBaaS → Backend；多实例复用现有会话亲和路由，不保证跨实例恢复。
 
 ## BBS 回复通知
 

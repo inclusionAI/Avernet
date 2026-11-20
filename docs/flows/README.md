@@ -10,5 +10,4 @@ Do not copy app-local internals or incident transcripts.
 
 Use the [repository knowledge standard](../agents/knowledge-standard.md) and link existing authoritative sources.
 
-- [Backend runtime targeting](backend-runtime-targeting.md)
-- [Session runtime observation](session-runtime-observation.md)
+Current entry: [Backend runtime targeting](backend-runtime-targeting.md).

@@ -6,7 +6,6 @@ Start with [Publish Lifecycle](publish-lifecycle.md). Use these existing contrac
 - [Bot, device and publish states](../adr/0004-lifecycle-state-machines.md)
 - [Gated publish pipeline](../adr/0005-gated-publish-pipeline.md)
 - [Sandbox provider selection](../adr/0006-paas-provider-abstraction.md)
-- [Session runtime observation](../../../../docs/flows/session-runtime-observation.md)
 - [BCN interaction transport](../adr/0012-sse-bcn-downlink-interactions.md)
 
 For cross-app flows start at the [repository flow index](../../../../docs/flows/README.md). Add app-local flow pages here only when existing documents do not cover the needed boundary.
