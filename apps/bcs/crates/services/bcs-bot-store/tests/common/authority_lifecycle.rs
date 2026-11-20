@@ -242,7 +242,7 @@ impl DbPlugin for FailInjectDb {
             let sql = match step {
                 DbTransactionStep::Query(statement) => statement.sql(),
                 DbTransactionStep::Execute(statement) => statement.sql(),
-                DbTransactionStep::ExecuteChecked { statement, .. } => statement.sql(),
+                DbTransactionStep::ExecuteChecked { statement, .. } | DbTransactionStep::QueryChecked { statement, .. } => statement.sql(),
             };
             self.armed(sql)
         });

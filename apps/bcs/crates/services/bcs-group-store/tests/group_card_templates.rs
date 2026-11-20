@@ -175,7 +175,7 @@ impl DbPlugin for ProbeDb {
         let competing = std::mem::take(&mut *self.before_transaction.lock().unwrap());
         if !competing.is_empty() { self.inner.transaction(competing).await?; }
         let sql = steps.iter().map(|step| match step {
-            DbTransactionStep::Execute(s) | DbTransactionStep::Query(s) | DbTransactionStep::ExecuteChecked { statement: s, .. } => s.sql().to_owned(),
+            DbTransactionStep::Execute(s) | DbTransactionStep::Query(s) | DbTransactionStep::ExecuteChecked { statement: s, .. } | DbTransactionStep::QueryChecked { statement: s, .. } => s.sql().to_owned(),
         }).collect::<Vec<_>>();
         if self.fail_template.load(std::sync::atomic::Ordering::SeqCst) {
             for (step, sql) in steps.iter_mut().zip(&sql) {
