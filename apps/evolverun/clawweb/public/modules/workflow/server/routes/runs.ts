@@ -394,7 +394,11 @@ export function createRunsRouter(
     try {
       const flowId = String(req.params.flowId);
 
-      const run = await flowRunRepo.findByFlowId(flowId);
+      const scope = res.locals.authorizedRun as { flowId: string; workflowId: string } | undefined;
+      const verifiedOperator = res.locals.authorizedAbortActorId as string | undefined;
+      const run = scope
+        ? scope.flowId === flowId && verifiedOperator ? await flowRunRepo.findByFlowId(flowId, scope.workflowId) : null
+        : await flowRunRepo.findByFlowId(flowId);
       if (!run) {
         res.status(404).json({ error: "Not Found", message: `Flow ${flowId} not found` });
         return;
@@ -410,9 +414,10 @@ export function createRunsRouter(
         return;
       }
 
-      // Get operator identity
-      const operatorId = (req.headers["x-user-id"] as string | undefined)?.trim() || "unknown";
-      const operatorName = (req.headers["x-user-name"] as string | undefined)?.trim() || operatorId;
+      // A host which verified this mutation also supplies the audit identity.
+      // Keep the legacy standalone router's attribution when no host scope exists.
+      const operatorId = verifiedOperator ?? ((req.headers["x-user-id"] as string | undefined)?.trim() || "unknown");
+      const operatorName = verifiedOperator ?? ((req.headers["x-user-name"] as string | undefined)?.trim() || operatorId);
       const reason = (req.body as { reason?: string })?.reason ?? `用户 ${operatorName} 手动中止工作流`;
 
       // 1. Update flow_runs status to "cancelled" with abort info, set completed_at

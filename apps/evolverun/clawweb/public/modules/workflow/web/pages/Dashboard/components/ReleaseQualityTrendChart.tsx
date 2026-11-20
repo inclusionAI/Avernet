@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import ReactECharts from 'echarts-for-react'
-import { dashboardApi } from '../api'
+import { dashboardApi, type DashboardQueryScope } from '../api'
 import type { TrendGranularity } from '../../../types/dashboard'
 import { WidgetRangeSelector } from './WidgetRangeSelector'
 import { resolveWidgetRange, type WidgetRange } from './widget-range'
 
 interface ReleaseQualityTrendChartProps {
+  scope: DashboardQueryScope
   from: number
   to: number
   globalRangeLabel: string
@@ -30,14 +31,14 @@ function fmtBucket(b: string): string {
  * 给"发布效能"区块看迭代效果 —— 发布质量有没有随版本变好。
  * MySQL only;SQLite 库显示"暂不可算"。
  */
-export function ReleaseQualityTrendChart({ from, to, globalRangeLabel }: ReleaseQualityTrendChartProps) {
+export function ReleaseQualityTrendChart({ scope, from, to, globalRangeLabel }: ReleaseQualityTrendChartProps) {
   const [gran, setGran] = useState<TrendGranularity>('week')
   const [range, setRange] = useState<WidgetRange>('global')
   const window = resolveWidgetRange(range, { from, to, label: globalRangeLabel })
 
   const q = useQuery({
-    queryKey: ['dashboard', 'release-quality-trend', gran, window.from, window.to],
-    queryFn: () => dashboardApi.releaseQualityTrend(gran, window.from, window.to),
+    queryKey: ['dashboard', scope, 'release-quality-trend', gran, window.from, window.to],
+    queryFn: () => dashboardApi.releaseQualityTrend(gran, window.from, window.to, scope.demo),
   })
 
   const points = q.data?.points ?? []

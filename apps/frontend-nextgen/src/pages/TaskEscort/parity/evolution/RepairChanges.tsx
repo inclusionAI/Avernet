@@ -4,15 +4,20 @@ import { useTaskEscortEvolutionRead } from '@/hooks/taskEscortParity/useTaskEsco
 import { repairService } from '@/services/taskEscortParity/repairService';
 import { useCallback, useState } from 'react';
 import { JsonDetails, NoData, ReadSelect, ReadState, ReadTabs } from './ReadPrimitives';
+import { RepairPublication } from './RepairPublication';
 import { RepairTrialsPanel } from './RepairTrialsPanel';
 export function RepairChanges({
   context,
   detail,
   revision,
+  canEdit,
+  onRefresh,
 }: {
   context: TaskEscortParityContext;
   detail: RepairTask;
   revision: RepairRevision;
+  canEdit: boolean;
+  onRefresh: () => void;
 }) {
   const [tab, setTab] = useState<'diff' | 'checks'>('diff'),
     [base, setBase] = useState<'baseline' | 'parent'>('baseline');
@@ -27,6 +32,18 @@ export function RepairChanges({
     read,
     tab === 'diff' && detail.capabilities.diff && !!candidate,
   );
+  const diff = result.data;
+  const completeDiff =
+    !!diff &&
+    tab === 'diff' &&
+    base === 'baseline' &&
+    candidate === diff.candidateCommit &&
+    diff.baseCommit === revision.input.baseline.packCommit &&
+    !diff.truncated &&
+    diff.files.length > 0 &&
+    diff.files.every(
+      (file) => !file.truncated && (file.binary || (typeof file.patch === 'string' && !!file.patch.trim())),
+    );
   return (
     <section className="space-y-4">
       <h3 className="font-semibold">本版改动</h3>
@@ -118,6 +135,15 @@ export function RepairChanges({
           )}
         </>
       )}
+      <RepairPublication
+        key={JSON.stringify([revision.revision, candidate, revision.draft?.packDigest])}
+        context={context}
+        detail={detail}
+        revision={revision}
+        canEdit={canEdit}
+        completeDiff={completeDiff}
+        onRefresh={onRefresh}
+      />
       <section aria-label="发布记录">
         <h3 className="font-semibold">实际发布记录</h3>
         {detail.release?.deployments

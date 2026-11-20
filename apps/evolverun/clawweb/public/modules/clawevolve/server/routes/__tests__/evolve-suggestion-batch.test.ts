@@ -74,6 +74,12 @@ beforeEach(async () => {
     botWorkflowPermissionRepo: permissionRepo,
     artifactUrlStore: { createSignedUrl: vi.fn().mockResolvedValue("https://oss.example.test/signed") },
   }));
+  app.use("/verified/evolve", createEvolveRouter(repo, {
+    db, dispatch, botWorkflowPermissionRepo: permissionRepo,
+    // Test host identity; unverified legacy identity headers are not consulted here.
+    resolveWorkflowActionPrincipal: async req => req.get("x-fixture-auth") === "verified"
+      ? { actorId: "owner-1", isAdmin: false } : null,
+  }));
   app.use("/api/internal/task-guard", createInternalTaskGuardRouter(repo));
   const startedServer = await new Promise<ReturnType<express.Application["listen"]>>((resolve) => {
     const instance = app.listen(0, () => resolve(instance));
@@ -91,6 +97,43 @@ afterEach(async () => {
 });
 
 describe("suggestion batch application", () => {
+  it("shares verified can_view with the issue group read, independently of Editor edit", async () => {
+    const groups = vi.spyOn(IssueAggregationRepository.prototype, 'list').mockResolvedValue([]);
+    await db.exec("UPDATE bot_workflow_permissions SET can_edit = 0 WHERE workflow_id = 'wf-1'");
+    const url = `${baseUrl}/verified/evolve/issue-groups`;
+    const headers = { 'X-Fixture-Auth': 'verified' };
+    expect((await fetch(`${url}?workflowId=wf-1`)).status).toBe(401);
+    expect((await fetch(`${url}?workflowId=wf-hidden`, { headers })).status).toBe(403);
+    expect(groups).not.toHaveBeenCalled();
+    const permitted = await fetch(`${url}?workflowId=wf-1`, { headers });
+    expect(permitted.status).toBe(200);
+    expect(await permitted.json()).toEqual({ groups: [] });
+    expect(groups).toHaveBeenCalledWith('wf-1', expect.anything(), undefined, undefined);
+  });
+
+  it('uses the verified workflow viewer for group actions without widening target eligibility', async () => {
+    const group = { workflowId: 'wf-1', signature: 'sig', inputDigest: 'digest', sources: [
+      { sourceId: 'a', flowId: 'run-a', analysisId: 'an-a', reasoning: 'reason-a', proposal: { summary: 'fix a', operations: [] } },
+    ] };
+    const groups = vi.spyOn(IssueAggregationRepository.prototype, 'list').mockResolvedValue([group as never]);
+    vi.spyOn(BotWorkflowPermissionRepository.prototype, 'hasEditPermission').mockResolvedValue(false);
+    await db.exec("INSERT INTO workflow_specs (workflow_id, spec_json, title) VALUES ('wf-1', '{}', 'workflow')");
+    const url = `${baseUrl}/verified/evolve/group-repairs`;
+    const headers = { 'X-Fixture-Auth': 'verified', 'X-User-Id': 'untrusted-other-user', 'Content-Type': 'application/json' };
+    // The caller grant and concrete Bot's existing grant are independently checked.
+    expect((await fetch(`${url}?workflowId=wf-1&signature=sig`, { headers: { 'X-User-Id': 'owner-1' } })).status).toBe(401);
+    expect((await fetch(`${url}?workflowId=wf-other&signature=sig`, { headers })).status).toBe(403);
+    expect(groups).not.toHaveBeenCalled();
+    const loaded = await (await fetch(`${url}?workflowId=wf-1&signature=sig`, { headers })).json();
+    expect(loaded.bots.map((bot: { botId: string }) => bot.botId)).toEqual(['bot-1']);
+    const input = { workflowId: 'wf-1', signature: 'sig', inputDigest: loaded.inputDigest,
+      candidateIds: loaded.candidates.map((candidate: { id: string }) => candidate.id), botEnv: 'dev', botId: 'bot-1' };
+    const submit = (body: object) => fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    expect((await submit({ ...input, botId: 'other-bot' })).status).toBe(403);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect((await submit(input)).status).toBe(200);
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ userId: 'owner-1', botId: 'bot-1' }));
+  });
   it('freezes selected group candidates, gates old plugins, and rejects incomplete or conflicting deployment results', async () => {
     const group = { workflowId: 'wf-1', signature: 'sig', inputDigest: 'digest', sources: [
       { sourceId: 'a', flowId: 'run-a', analysisId: 'an-a', reasoning: 'reason-a', proposal: { summary: 'fix a', operations: [] } },
@@ -282,6 +325,80 @@ describe("suggestion batch application", () => {
     expect(analysis).toMatchObject({ status: "failed", error_code: "DISPATCH_FAILED" });
     const task = (await db.query<{ config_json: string }>("SELECT config_json FROM ce_tasks WHERE task_id = ?", [analysis.task_id]))[0];
     expect(JSON.parse(task.config_json)).toMatchObject({ flowId: "flow-iam", analysisId: expect.stringMatching(/^AN-/) });
+  });
+
+  it("freezes only evidence bound to each suggestion's persisted workflow and related runs", async () => {
+    for (const [flowId, workflowId] of [["related", "wf-1"], ["other-run", "wf-1"], ["out-of-scope", "wf-1"], ["foreign-run", "wf-2"]]) {
+      await db.exec("INSERT INTO flow_runs (flow_id, workflow_id, status, started_at) VALUES (?, ?, 'failed', 1)", [flowId, workflowId]);
+    }
+    for (const [eventId, flowId, workflowId] of [
+      ["bound-event", "related", "wf-1"], ["wrong-workflow", "related", "WF-1"],
+      ["wrong-run", "other-run", "wf-1"], ["mislabeled-run", "foreign-run", "wf-1"],
+    ]) {
+      await db.exec(`INSERT INTO workflow_run_evidence_events
+        (event_id, payload_digest, flow_id, workflow_id, event_type, producer, event_seq, occurred_at_ms, payload_json)
+        VALUES (?, 'digest', ?, ?, 'node.error', 'fixture', 1, 2, ?)`, [eventId, flowId, workflowId, JSON.stringify({ message: eventId })]);
+    }
+    const projected = (diagnosisId: string, flowIds: string[]) => ({
+      diagnosisId, flowIds, nodeId: "fetch", failureSignature: "first", failureMode: "timeout",
+      severity: "high", reasoning: diagnosisId, evidenceEventIds: ["bound-event", "wrong-workflow", "wrong-run", "mislabeled-run"],
+    });
+    const result = { schemaVersion: "workflow-evolution-analysis/v1", analysisId: "AN-BOUND", facts: [], inferences: [], unknowns: [],
+      diagnoses: [projected("valid-projection", ["related"]), projected("incorrect-analysis-scope", ["out-of-scope"]),
+        projected("foreign-flow-in-projection", ["related", "foreign-run"])] };
+    await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+      (analysis_id, request_key, scope_type, scope_json, flow_id, workflow_id, status, analysis_version, result_json, requested_at_ms)
+      VALUES ('AN-BOUND', 'key', 'single_run', '{}', 'related', 'wf-1', 'completed', 'v1', ?, 1)`, [JSON.stringify(result)]);
+    for (const [diagnosisId, flowId, workflowId, signature] of [
+      ["foreign-legacy", "related", "WF-1", "first"], ["mislabeled-legacy", "foreign-run", "wf-1", "first"],
+      ["unrelated-legacy", "other-run", "wf-1", "first"], ["verified-legacy", "other-run", "wf-1", "second"],
+      ["missing-run-legacy", "missing", "wf-1", "second"],
+    ]) {
+      await repo.createDiagnosis({ diagnosisId, flowId, workflowId, failureSignature: signature,
+        failureMode: "timeout", nodeId: diagnosisId, errorText: diagnosisId });
+    }
+    const first = await repo.createSuggestion({ workflowId: "wf-1", failureSignature: "first", fixSpec: "fix first",
+      sourceDiagnosisIds: ["valid-projection", "incorrect-analysis-scope", "foreign-flow-in-projection",
+        "foreign-legacy", "mislabeled-legacy", "unrelated-legacy"], impactRunIds: ["related", "foreign-run", "out-of-scope"] });
+    const second = await repo.createSuggestion({ workflowId: "wf-1", failureSignature: "second", fixSpec: "fix second",
+      sourceDiagnosisIds: ["verified-legacy", "missing-run-legacy"] });
+    const headers = { "Content-Type": "application/json", "X-Fixture-Auth": "verified" };
+    const response = await fetch(`${baseUrl}/verified/evolve/suggestions/apply-batch`, {
+      method: "POST", headers, body: JSON.stringify({ botId: "bot-1", suggestionIds: [first.id, second.id] }),
+    });
+    expect(response.status).toBe(200);
+    const { taskId, stepId } = await response.json();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const command = String(dispatch.mock.calls[0][0].command);
+    const { taskContext: { claimToken } } = JSON.parse(command.slice(command.indexOf("{")));
+    const claim = await fetch(`${baseUrl}/api/internal/task-guard/suggestion-applications/${taskId}/steps/${stepId}/claim`, {
+      method: "POST", headers, body: JSON.stringify({ botId: "bot-1", claimToken }),
+    });
+    expect(claim.status).toBe(200);
+    const { input } = await claim.json();
+    expect(input.diagnosisContext).toMatchObject({ schemaVersion: "task-guard-diagnosis-context/v1", readOnly: true, diagnoses: [
+      { diagnosisId: "valid-projection", flowIds: ["related"], problemSources: [{ eventId: "bound-event", summary: "message: bound-event" }] },
+      { diagnosisId: "verified-legacy", flowIds: ["other-run"], conclusion: "verified-legacy", problemSources: [] },
+    ] });
+  });
+
+  it("does not treat malformed legacy run metadata as an unqualified source link", async () => {
+    await db.exec("INSERT INTO flow_runs (flow_id, workflow_id, status, started_at) VALUES ('flow', 'wf-1', 'failed', 1)");
+    await repo.createDiagnosis({ diagnosisId: "legacy-source", workflowId: "wf-1", flowId: "flow", failureSignature: "timeout",
+      failureMode: "timeout", errorText: "legacy evidence" });
+    const suggestion = await repo.createSuggestion({ workflowId: "wf-1", failureSignature: "timeout", fixSpec: "fix timeout",
+      sourceDiagnosisIds: ["legacy-source"], impactRunIds: ["flow"] });
+    await db.exec("UPDATE workflow_healing_suggestions SET impact_run_ids = ? WHERE id = ?", ['["flow",7]', suggestion.id]);
+    const response = await fetch(`${baseUrl}/api/evolve/suggestions/${suggestion.id}/apply`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({ botId: "bot-1", impactRunIds: ["flow"] }),
+    });
+    expect(response.status).toBe(200);
+    const { taskId } = await response.json();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const task = await repo.findTask(taskId);
+    expect(task).not.toBeNull();
+    expect(JSON.parse(task!.config_json).applicationInput).not.toHaveProperty("diagnosisContext");
   });
 
   it("dispatches typed proposals to the selected Bot and tracks application progress", async () => {

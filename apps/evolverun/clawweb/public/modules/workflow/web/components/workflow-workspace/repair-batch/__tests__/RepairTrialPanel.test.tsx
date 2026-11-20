@@ -15,7 +15,7 @@ beforeEach(() => {
   api.trialOptions.mockResolvedValue({ inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string' } } },
     inputSchemaDigest: 'schema', targets: [{ id: 'prod:owner:bot', label: 'Production Bot' }] })
 })
-const panel = (rev = revision) => <MemoryRouter><RepairTrialPanel taskId="task" revision={rev} enabled open onClose={() => {}} onTrials={() => {}} /></MemoryRouter>
+const panel = (rev = revision) => <MemoryRouter><RepairTrialPanel taskId="task" revision={rev} canStart legacyCanStop open onClose={() => {}} onTrials={() => {}} /></MemoryRouter>
 it('ends a historical unregistered trial explicitly without dispatching and preserves the current form', async () => {
   const old = { ...trial, flowId: null, mode: 'pinned', status: 'unknown' }
   api.trials.mockResolvedValue({ configured: true, trials: [old] })
@@ -52,7 +52,7 @@ it.each([false, true])('handles a removed selected Bot on reopen while preservin
     await userEvent.click(screen.getByRole('button', { name: '开始试跑' }))
     await screen.findByRole('button', { name: '核对并重试原请求' })
   }
-  view.rerender(<MemoryRouter><RepairTrialPanel taskId="task" revision={revision} enabled open={false} onClose={() => {}} onTrials={() => {}} /></MemoryRouter>)
+  view.rerender(<MemoryRouter><RepairTrialPanel taskId="task" revision={revision} canStart legacyCanStop open={false} onClose={() => {}} onTrials={() => {}} /></MemoryRouter>)
   api.trialOptions.mockResolvedValue({ inputSchema: { properties: { query: { type: 'string' } } }, inputSchemaDigest: 'schema', targets: [] })
   view.rerender(panel())
   await screen.findByText('没有已授权且支持工作流运行的生产 Bot。')
@@ -174,7 +174,7 @@ it('renders old-host field maps and initializes falsy defaults only once for a c
   expect(screen.getByRole('checkbox', { name: 'enabled' })).not.toBeChecked()
   const input = screen.getByRole('textbox', { name: 'taskId' })
   await userEvent.clear(input); await userEvent.type(input, 'edited')
-  view.rerender(<MemoryRouter><RepairTrialPanel taskId="task" revision={revision} enabled open={false} onClose={() => {}} onTrials={() => {}} /></MemoryRouter>)
+  view.rerender(<MemoryRouter><RepairTrialPanel taskId="task" revision={revision} canStart legacyCanStop open={false} onClose={() => {}} onTrials={() => {}} /></MemoryRouter>)
   view.rerender(panel())
   expect(await screen.findByRole('textbox', { name: 'taskId' })).toHaveValue('edited')
   expect(screen.queryByRole('textbox', { name: '输入参数 JSON' })).not.toBeInTheDocument()
@@ -222,7 +222,7 @@ it('ignores options returned after closing, including after a later reopen', asy
   api.trialOptions.mockImplementationOnce(() => new Promise(resolve => { late = resolve }))
   const view = render(panel())
   await waitFor(() => expect(api.trialOptions).toHaveBeenCalledOnce())
-  view.rerender(<MemoryRouter><RepairTrialPanel taskId="task" revision={revision} enabled open={false} onClose={() => {}} onTrials={() => {}} /></MemoryRouter>)
+  view.rerender(<MemoryRouter><RepairTrialPanel taskId="task" revision={revision} canStart legacyCanStop open={false} onClose={() => {}} onTrials={() => {}} /></MemoryRouter>)
   view.rerender(panel())
   expect(await screen.findByRole('textbox', { name: 'query' })).toBeInTheDocument()
   await act(async () => late({ inputSchema: { properties: { obsolete: { type: 'string' } } }, targets: [], inputSchemaDigest: 'old' }))
@@ -574,4 +574,25 @@ it('omits a cleared constrained dynamic string while retaining declared fields',
   const input = api.startTrial.mock.calls[0][1].input
   expect(input).toEqual({ fixed: 'fixed' })
   expect(new Ajv({ strict: false }).compile(schema)(input)).toBe(true)
+})
+
+it('allows a viewer without execute to end only their indicated unregistered pinned trial', async () => {
+  const own = { ...trial, id: 'own', flowId: null, mode: 'pinned', status: 'unknown', canStopUnstarted: true }
+  api.trials.mockResolvedValue({ configured: true, trials: [
+    own,
+    { ...own, id: 'other', canStopUnstarted: false },
+    { ...own, id: 'legacy-host', canStopUnstarted: undefined },
+    { ...own, id: 'started', flowId: 'registered' },
+    { ...own, id: 'running', status: 'running' },
+    { ...own, id: 'saved', mode: 'saved' },
+  ] })
+  api.stopTrial.mockResolvedValue({})
+  render(<MemoryRouter><RepairTrialPanel taskId="task" revision={revision} canStart={false} legacyCanStop={false} open onClose={() => {}} onTrials={() => {}} /></MemoryRouter>)
+  expect(await screen.findByRole('combobox', { name: '执行 Bot' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '开始试跑' })).toBeDisabled()
+  const stops = await screen.findAllByRole('button', { name: '结束未启动请求' })
+  expect(stops).toHaveLength(1)
+  await userEvent.click(stops[0])
+  expect(api.stopTrial).toHaveBeenCalledExactlyOnceWith('task', 'own')
+  expect(api.startTrial).not.toHaveBeenCalled()
 })

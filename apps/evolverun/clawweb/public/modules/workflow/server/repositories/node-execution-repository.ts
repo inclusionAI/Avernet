@@ -4,6 +4,8 @@
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 
+import { exactRunKey, runEvidenceWhere } from "./run-evidence-scope.js";
+
 const MAX_ERROR_LENGTH = 4000;
 
 function truncateError(errorText: string | null | undefined): string | null {
@@ -105,32 +107,23 @@ export class NodeExecutionRepository {
     }
   }
 
-  async findByFlowId(flowId: string, options: FindNodeExecutionsOptions = {}): Promise<NodeExecutionRow[]> {
+  async findByFlowId(flowId: string, options: FindNodeExecutionsOptions = {}, workflowId?: string): Promise<NodeExecutionRow[]> {
     const limit = options.limit ?? 20;
     const offset = options.offset ?? 0;
-
+    const [scope, params] = runEvidenceWhere(this.db, flowId, workflowId);
+    const where = [scope];
+    if (options.nodeId) {
+      where.push(exactRunKey(this.db, "node_id"));
+      params.push(options.nodeId);
+    }
+    if (options.status) {
+      where.push("status = ?");
+      params.push(options.status);
+    }
     try {
-      if (options.nodeId && options.status) {
-        return await this.db.query<NodeExecutionRow>(
-          "SELECT * FROM node_executions WHERE flow_id = ? AND node_id = ? AND status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
-          [flowId, options.nodeId, options.status, limit, offset],
-        );
-      }
-      if (options.nodeId) {
-        return await this.db.query<NodeExecutionRow>(
-          "SELECT * FROM node_executions WHERE flow_id = ? AND node_id = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
-          [flowId, options.nodeId, limit, offset],
-        );
-      }
-      if (options.status) {
-        return await this.db.query<NodeExecutionRow>(
-          "SELECT * FROM node_executions WHERE flow_id = ? AND status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
-          [flowId, options.status, limit, offset],
-        );
-      }
       return await this.db.query<NodeExecutionRow>(
-        "SELECT * FROM node_executions WHERE flow_id = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
-        [flowId, limit, offset],
+        `SELECT * FROM node_executions WHERE ${where.join(" AND ")} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+        [...params, limit, offset],
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -139,18 +132,19 @@ export class NodeExecutionRepository {
     }
   }
 
-  async findLatestByFlowId(flowId: string): Promise<NodeExecutionRow[]> {
+  async findLatestByFlowId(flowId: string, workflowId?: string): Promise<NodeExecutionRow[]> {
+    const [where, params] = runEvidenceWhere(this.db, flowId, workflowId);
     try {
       return await this.db.query<NodeExecutionRow>(
         `SELECT ne.* FROM node_executions ne
          INNER JOIN (
-           SELECT node_id, MAX(attempt) AS max_attempt, MAX(id) AS max_id
+           SELECT MAX(attempt) AS max_attempt, MAX(id) AS max_id
            FROM node_executions
-           WHERE flow_id = ?
+           WHERE ${where}
            GROUP BY node_id
-         ) latest ON ne.node_id = latest.node_id AND ne.attempt = latest.max_attempt AND ne.id = latest.max_id AND ne.flow_id = ?
+         ) latest ON ne.attempt = latest.max_attempt AND ne.id = latest.max_id
          ORDER BY ne.started_at ASC`,
-        [flowId, flowId],
+        params,
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

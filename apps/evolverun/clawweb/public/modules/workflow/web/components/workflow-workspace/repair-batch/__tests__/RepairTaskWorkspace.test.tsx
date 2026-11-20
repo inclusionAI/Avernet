@@ -125,7 +125,7 @@ it('persists the inspection tab across a close and reopen without opening the sc
 it('allows read-only navigation but disables publish and source editing',async()=>{
  mount(fixture(),{canEdit:false});expect(await screen.findByRole('button',{name:'发布此版本'})).toBeDisabled();
  await userEvent.click(screen.getByRole('tab',{name:'优化目标'}));
- expect(screen.getByText('当前只有查看权限。')).toBeVisible();expect(screen.getByRole('button',{name:'调整建议与要求'})).toBeDisabled();
+ expect(screen.getByText('当前无权限调整此修复任务。')).toBeVisible();expect(screen.getByRole('button',{name:'调整建议与要求'})).toBeDisabled();
  await userEvent.click(screen.getByRole('tab',{name:'发布后效果'}));expect(screen.getByRole('tab',{name:'改动与发布'})).toBeEnabled();
 });
 it('retains the same publication request after a lost response and inspection tab switches',async()=>{

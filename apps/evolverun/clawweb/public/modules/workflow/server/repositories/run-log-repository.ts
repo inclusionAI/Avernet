@@ -5,6 +5,7 @@
  * keyed by flow_id for run archive generation.
  */
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
+import { runFlowWhere } from "./run-evidence-scope.js";
 import { truncateRunLogMessage } from "../utils/run-log-message.js";
 
 export type RunLogInsert = {
@@ -67,11 +68,12 @@ export class RunLogRepository {
     }
   }
 
-  async findByFlowId(flowId: string): Promise<RunLogRow[]> {
+  async findByFlowId(flowId: string, workflowId?: string): Promise<RunLogRow[]> {
     try {
+      const [where, params] = runFlowWhere(this.db, flowId, workflowId);
       const rows = await this.db.query<Row>(
-        `SELECT * FROM run_logs WHERE flow_id = ? ORDER BY seq ASC`,
-        [flowId],
+        `SELECT * FROM run_logs WHERE ${where} ORDER BY seq ASC`,
+        params,
       );
       return rows.map((r) => ({
         id: Number(r.id),

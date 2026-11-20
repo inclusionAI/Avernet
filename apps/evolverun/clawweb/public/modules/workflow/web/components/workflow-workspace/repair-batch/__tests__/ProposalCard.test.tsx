@@ -12,7 +12,7 @@ const raw=(id:string,value:string):RepairInboxItem=>({itemId:id,workflowId:'wf',
 const originals=[raw('a','validate input'),raw('b','use exec'),raw('c','limit raw data')];
 const card={...originals[0],aggregation:{id:'plan',fingerprint:'fp',itemIds:['a','b','c'],title:'完善查询输入与输出',changes:['校验输入','明确工具','限制输出'],relation:'complementary',status:'ready',flowIds:['run-1','run-2'],originals,conflicts:[]}} as RepairInboxItem;
 it('shows one plan/selection and keeps all original text and evidence folded',()=>{
- const toggle=vi.fn();render(<IssueRepairPreview items={[card]} total={1} selected={[]} canEdit limit={100} onToggle={toggle} onDetail={vi.fn()} onMore={vi.fn()}/>);
+ const toggle=vi.fn();render(<IssueRepairPreview items={[card]} total={1} selected={[]} canOptimize limit={100} onToggle={toggle} onDetail={vi.fn()} onMore={vi.fn()}/>);
  expect(screen.getAllByRole('checkbox')).toHaveLength(1);expect(screen.getByText('完善查询输入与输出')).toBeVisible();
  expect(screen.getByText(/校验输入/)).toBeVisible();expect(screen.getByText(/依据覆盖 2 个运行/)).toBeVisible();
  expect(screen.getByText('原始建议与证据（3）').closest('details')).not.toHaveAttribute('open');
@@ -24,7 +24,7 @@ it('shows one plan/selection and keeps all original text and evidence folded',()
 });
 it('shows background aggregation status without blocking manual goal selection',()=>{
  const queued={...card,aggregation:{...card.aggregation!,status:'retryable' as const}};
- render(<IssueRepairPreview items={[queued]} total={1} selected={[]} canEdit limit={100} onToggle={vi.fn()} onDetail={vi.fn()} onMore={vi.fn()}/>);
+ render(<IssueRepairPreview items={[queued]} total={1} selected={[]} canOptimize limit={100} onToggle={vi.fn()} onDetail={vi.fn()} onMore={vi.fn()}/>);
  expect(screen.getByText('聚合待重试')).toBeVisible();expect(proposalConflicts(expandProposalCards([queued]))).toEqual([]);
  expect(screen.getByRole('checkbox')).toBeEnabled();
  expect(proposalPending(expandProposalCards([queued]))).toBe(true);
@@ -40,7 +40,7 @@ it('loads full original evidence explicitly while retaining one complete plan se
  const summary={...originals[0],proposal:{summary:'原建议a'},instruction:'摘要',sources:[],context:{},readSummary:{sourceCount:110,runCount:110,diagnosisCount:110,originalBytes:1110714,operations:[],conflictsComplete:true}};
  const compact={...card,aggregation:{...card.aggregation!,originals:[summary,...originals.slice(1)]}};
  api.item.mockResolvedValue({...originals[0],context:{proof:'full-original-evidence'}});
- const view=render(<IssueRepairPreview items={[compact]} total={1} selected={[]} canEdit limit={100} onToggle={vi.fn()} onDetail={vi.fn()} onMore={vi.fn()}/>);
+ const view=render(<IssueRepairPreview items={[compact]} total={1} selected={[]} canOptimize limit={100} onToggle={vi.fn()} onDetail={vi.fn()} onMore={vi.fn()}/>);
  expect(screen.queryByText(/full-original-evidence/)).not.toBeInTheDocument();
  fireEvent.click(screen.getByText('原始建议与证据（3）'));
  expect(screen.getByText(/110 条来源/)).toBeVisible();
@@ -48,6 +48,6 @@ it('loads full original evidence explicitly while retaining one complete plan se
  expect(await screen.findByText(/full-original-evidence/)).toBeVisible();
  expect(api.item).toHaveBeenCalledWith('wf','a',true);
  expect(expandProposalCards([compact]).map(row=>row.itemId)).toEqual(['a','b','c']);
- view.rerender(<IssueRepairPreview items={[{...compact,aggregation:{...compact.aggregation!,fingerprint:'updated-evidence'}}]} total={1} selected={[]} canEdit limit={100} onToggle={vi.fn()} onDetail={vi.fn()} onMore={vi.fn()}/>);
+ view.rerender(<IssueRepairPreview items={[{...compact,aggregation:{...compact.aggregation!,fingerprint:'updated-evidence'}}]} total={1} selected={[]} canOptimize limit={100} onToggle={vi.fn()} onDetail={vi.fn()} onMore={vi.fn()}/>);
  expect(screen.queryByText(/full-original-evidence/)).not.toBeInTheDocument();
 });

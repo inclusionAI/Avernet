@@ -66,6 +66,9 @@ export type ClawevolveModuleOptions = {
   taskSourceService?: EvolveRouterDeps["taskSourceService"];
   publicBaseUrl?: string;
   trustedPublicOrigins?: readonly string[];
+  /** Verified login and server-owned role for browser workflow optimization. */
+  resolveWorkflowActionPrincipal?: EvolveRouterDeps["resolveWorkflowActionPrincipal"];
+  workflowPermissions?: BotWorkflowPermissionRepository | null;
   workflowRuntime?: InternalEvolveWorkflowRuntime;
   hostLocalSkills?: BotSkillGateway;
   hostSpaces?: SpaceDirectory;
@@ -123,7 +126,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const stageSkill = new StageSkillRepository(db);
   const appConfig = new AppConfigRepository(db);
   const skillAsset = new SkillAssetRepository(db, options.botDb);
-  const botWorkflowPermission = new BotWorkflowPermissionRepository(db);
+  const botWorkflowPermission = options.workflowPermissions ?? new BotWorkflowPermissionRepository(db);
   const taskSourceService = options.taskSourceService ?? null;
   const dispatch = options.dispatch ?? ((input) => dispatchEvolveCommand({ ...input, ...options.resolveExecutionOptions?.(input) }, {
     artifactStore: options.artifactStore, artifactUrlStore: options.artifactUrlStore,
@@ -155,6 +158,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     aisArtifactUrlStore: options.aisArtifactUrlStore,
     aisStatusHandlers: options.aisStatusHandlers,
     botWorkflowPermissionRepo: botWorkflowPermission,
+    resolveWorkflowActionPrincipal: options.resolveWorkflowActionPrincipal,
     hostLocalSkills: options.hostLocalSkills ?? null,
     hostSpaces: options.hostSpaces,
     localTaskVisibilityOnly: options.localTaskVisibilityOnly,

@@ -8,6 +8,7 @@ import RepairCandidateReview from './RepairCandidateReview'
 import RepairTaskScope from './RepairTaskScope'
 import RepairReleaseFlow from './RepairReleaseFlow'
 import RepairVerification from './RepairVerification'
+import { isAutomaticRepair } from './repair-permissions'
 import RepairFailureDetails from './RepairFailureDetails'
 const views=[['scope','优化目标'],['candidate','改动与发布'],['observe','发布后效果']] as const
 type View=typeof views[number][0]
@@ -17,8 +18,8 @@ function initialRevision(detail:RepairTaskDetail){
  const published=detail.release?.deployments.find(row=>row.status==='succeeded')
  return (['failed','no_change'].includes(detail.latestAttempt.phase)&&published?published.revision:detail.latestSuccessful?.revision)??detail.latestAttempt.revision
 }
-export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,onCancel,onRetryDispatch,onRetryGeneration,onRefresh,onHistoryPageChange,dispatchError,busy}:{
- detail:RepairTaskDetail;canEdit:boolean;onFeedback:()=>void;onCancel:()=>void;busy:boolean;onRetryGeneration:()=>void;
+export default function RepairTaskPanel({detail,canEdit,canOptimize=canEdit,canExecute=false,onFeedback,onNextRound,onCancel,onRetryDispatch,onRetryGeneration,onRefresh,onHistoryPageChange,dispatchError,busy}:{
+ detail:RepairTaskDetail;canEdit:boolean;canOptimize?:boolean;canExecute?:boolean;onFeedback:()=>void;onCancel:()=>void;busy:boolean;onRetryGeneration:()=>void;
  onRefresh:()=>void;onRetryDispatch:()=>void;dispatchError:string;onHistoryPageChange?:(page:number)=>void;onNextRound?:(publishedRevision:number)=>void;
 }){
  const storageKey=`repair-workspace:${detail.workflowId}:${detail.taskId}`
@@ -42,7 +43,8 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
  const alreadyPublished=detail.revisions.some(row=>row.phase==='published')||!!detail.release?.deployments.some(row=>row.status==='succeeded')
  const publishedRevision=published?revision.revision:detail.release?.deployments.find(row=>row.status==='succeeded'&&!!row.receipt)?.revision
  const automatic=!!latest.input.automation?.roundId
- const canGenerate=canEdit&&detail.capabilities.generation&&!busy&&!alreadyPublished
+ const canOptimizeTask=isAutomaticRepair(detail)?canEdit:canOptimize
+ const canGenerate=canOptimizeTask&&detail.capabilities.generation&&!busy&&!alreadyPublished
  const [observations,setObservations]=useState<Record<string,string>>({})
  const onObservation=useCallback((summary:string)=>{if(deployment)setObservations(previous=>previous[deployment.id]===summary?previous:{...previous,[deployment.id]:summary})},[deployment?.id])
  const status=published?`已发布部署 #${deployment.receipt!.deployNumber} · ${observations[deployment.id]??'观察状态待读取'}`:automatic && revision.revision===latest.revision && detail.automaticProgress ? detail.automaticProgress.publishable?'整轮核对完成，待审阅发布':`整轮核对中（${detail.automaticProgress.completedBatches}/${detail.automaticProgress.totalBatches}）`:candidateLabel(detail,revision)
@@ -52,7 +54,7 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
  const completeAutomatic=!!detail.automaticProgress&&detail.automaticProgress.completedBatches===detail.automaticProgress.totalBatches
  const feedbackPhase=['review','blocked','no_change'].includes(latest.phase)||latest.phase==='failed'&&!automatic
  const canCancel=!alreadyPublished&&['drafting','review','blocked','failed','no_change'].includes(latest.phase)
- const taskActions=alreadyPublished?(publishedRevision!==undefined&&onNextRound?<button type="button" className={primary} disabled={!canEdit||busy} onClick={()=>onNextRound(publishedRevision)}>开始下一轮优化</button>:null):<>
+ const taskActions=alreadyPublished?(publishedRevision!==undefined&&onNextRound?<button type="button" className={primary} disabled={!canOptimizeTask||busy} onClick={()=>onNextRound(publishedRevision)}>开始下一轮优化</button>:null):<>
   {latest.phase==='failed'&&<p className="w-full text-xs leading-5 text-muted-foreground">{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'只读取原候选，不会重复生成。':automatic?'重试生成沿用本次建议、修复要求与反馈，在同一任务下继续失败的自动批次。':'重试生成沿用本次建议、修复要求与反馈，在同一任务下生成新版本；修改建议、要求或反馈，请选择“调整建议与要求”。'}</p>}
   {latest.phase==='failed'&&<button type="button" className={primary} disabled={!canGenerate} onClick={onRetryGeneration}>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'重新读取候选':'重试生成'}</button>}
   {latest.phase==='drafting'&&detail.execution&&['created','dispatch_failed'].includes(detail.execution.status)&&<button type="button" className={button} disabled={!canGenerate} onClick={onRetryDispatch}>重试派发</button>}
@@ -68,7 +70,7 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
     <div className="min-w-0 w-full sm:w-auto sm:flex-1"><p className="text-xs text-muted-foreground">{detail.workflowId}</p><h2 className="mt-1 break-words text-lg font-semibold">{detail.title??presentation.title}</h2><div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><span className="rounded border border-input px-2 py-1 text-muted-foreground">{source}</span><span className="rounded bg-primary/10 px-2 py-1 font-medium text-primary" aria-live="polite">{status}</span><span className="text-muted-foreground">当前查看 v{revision.revision}</span></div></div>
     <label className="text-xs text-muted-foreground">生成版本<select aria-label="查看修复版本" className="ml-2 max-w-full rounded border border-input bg-background p-2 text-foreground" value={revision.revision} onChange={event=>switchRevision(Number(event.target.value))}>{revisions.map(row=><option key={row.revision} value={row.revision}>v{row.revision} · {candidateLabel(detail,row)}</option>)}</select></label>
    </div>
-   {!canEdit&&<p className="mt-3 text-xs text-warning-foreground">当前只有查看权限。</p>}
+   {!canOptimizeTask&&<p className="mt-3 text-xs text-warning-foreground">当前无权限调整此修复任务。</p>}
    {latest.revision!==revision.revision&&<p className="mt-3 text-xs text-muted-foreground">最近一次生成 v{latest.revision}：{candidateLabel(detail,latest)}；当前展示 v{revision.revision} 的内容。</p>}
    {latest.revision===revision.revision&&latest.phase==='failed'&&<div className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
     <p>{latest.error?.code==='GIT_RESULT_UNAVAILABLE'?'原候选结果尚未读取成功，请核对原结果。':detail.latestSuccessful?'最新生成失败，已有候选保留。':'首次生成失败，尚无候选。'}</p>
@@ -93,7 +95,7 @@ export default function RepairTaskPanel({detail,canEdit,onFeedback,onNextRound,o
   <section role="tabpanel" id={`${id}-observe-panel`} aria-labelledby={`${id}-observe`} hidden={view!=='observe'} className="rounded-lg border border-input bg-card p-4">
    {view==='observe'&&(published?<RepairVerification key={deployment.id} detail={detail} deployment={deployment} canEdit={canEdit} onSummary={onObservation}/>:<div className="space-y-3 text-sm"><h3 className="font-semibold">本版本尚未发布</h3><p>{deployment&&['created','dispatching','running','uncertain'].includes(deployment.status)?'发布结果尚未确认，请先核对同一个发布请求。':'此候选尚未发布，暂无对应部署的观察证据。'}</p></div>)}
   </section>
-  <RepairReleaseFlow detail={detail} selectedRevision={revision.revision} canEdit={canEdit} onRefresh={onRefresh} actions={taskActions}/>
+  <RepairReleaseFlow detail={detail} selectedRevision={revision.revision} canEdit={canEdit} canOptimize={canOptimizeTask} canExecute={canExecute} onRefresh={onRefresh} actions={taskActions}/>
   <details className="text-xs text-muted-foreground"><summary>历史生成记录</summary><ul className="mt-2 space-y-2">{detail.revisions.map(row=><li key={row.revision}>v{row.revision} · {candidateLabel(detail,row)}</li>)}</ul>
    {detail.revisionPage&&detail.revisionPage.totalPages>1&&<div className="mt-3 space-y-2"><p>历史记录第 {detail.revisionPage.page}/{detail.revisionPage.totalPages} 页 · 共 {detail.revisionPage.total} 次</p><button className={button} disabled={busy||detail.revisionPage.page<=1} onClick={()=>onHistoryPageChange?.(detail.revisionPage!.page-1)}>较新记录</button><button className={button} disabled={busy||detail.revisionPage.page>=detail.revisionPage.totalPages} onClick={()=>onHistoryPageChange?.(detail.revisionPage!.page+1)}>较早记录</button></div>}
 

@@ -495,10 +495,12 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   }
   task(taskId: string): Promise<RepairTaskDetail> { return serial(this.db, () => this.readTask(this.db, taskId)); }
 
-  async create(actorId: string, raw: RepairSelectionRequest): Promise<RepairRevision> {
+  async create(actorId: string, raw: RepairSelectionRequest, scope?: 'own-manual-only'): Promise<RepairRevision> {
     this.actor(actorId);
+    const ownManualOnly = scope === 'own-manual-only';
+    if (ownManualOnly && raw?.automation !== undefined) fail('FORBIDDEN', 'Workflow access denied');
     const request = selection(raw);
-    return this.generate(actorId, null, request);
+    return this.generate(actorId, null, request, undefined, ownManualOnly);
   }
   async revise(actorId: string, taskId: string, raw: RepairFeedbackRequest): Promise<RepairRevision> {
     this.actor(actorId);
@@ -522,14 +524,16 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       });
     }
   }
-  private async generate(actorId: string, taskId: string | null, request: RepairSelectionRequest | RepairFeedbackRequest, previousTask?: RepairTaskDetail): Promise<RepairRevision> {
+  private async generate(actorId: string, taskId: string | null, request: RepairSelectionRequest | RepairFeedbackRequest,
+    previousTask?: RepairTaskDetail, ownManualOnly = false): Promise<RepairRevision> {
     if (!this.execution) fail('CAPABILITY_UNAVAILABLE', 'Repair generation provider is unavailable');
     const digest = digestRepairJson({ actorId, taskId, request });
     // A committed retry uses its original baseline even if current sources or deployment changed.
     const prior = await serial(this.db, () => new RepairBatchRepository(this.db).findRequest(request.workflowId, request.requestId, digest));
     let revision = prior;
-    if (!revision) {
-      const baseline = previousTask ? previousTask.latestAttempt.input.baseline : await this.generationBaseline(request.workflowId, request.automation ? undefined : 'draft');
+    if (!revision || ownManualOnly) {
+      const baseline = prior?.input.baseline ?? (previousTask ? previousTask.latestAttempt.input.baseline
+        : await this.generationBaseline(request.workflowId, request.automation ? undefined : 'draft'));
       if (taskId && request.automation?.roundId && canonicalRepairJson(await this.generationBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '自动优化的生效基线已变化，请重新评估', { reasonCode: 'BASELINE_STALE' });
       if (baseline.workflowId !== request.workflowId) fail('CONTENT_MISMATCH', 'Provider resolved a different workflow');
       if (request.automation && !taskId && canonicalRepairJson(await this.generationBaseline(request.workflowId)) !== canonicalRepairJson(baseline)) fail('STATE_CONFLICT', '生效版本在准备期间再次变化，选择与要求保留', { reasonCode: 'BASELINE_STALE' });
@@ -537,7 +541,12 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const repo = new RepairBatchRepository(tx);
         await repo.lockWorkflow(tx, request.workflowId);
         const retry = await repo.findRequest(request.workflowId, request.requestId, digest);
-        if (retry) return retry;
+        if (retry) {
+          // The digest binds the verified actor and exact request; recheck the persisted origin under the lock.
+          if (ownManualOnly && (retry.revision !== 1 || retry.input.automation)) fail('FORBIDDEN', 'Workflow access denied');
+          return retry;
+        }
+        if (prior) fail('STATE_CONFLICT', 'Repair request changed; refresh before retrying');
         const previous = taskId ? await this.readTask(tx, taskId) : null;
         if (previous && previous.workflowId !== request.workflowId) fail('ITEM_NOT_FOUND', 'Task is not in the requested workflow');
         await new RepairTaskRepository(tx).ensureNoLegacyApply(request.workflowId);
@@ -554,7 +563,11 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
           if (occupied.length === request.itemIds.length && occupied.every(item => item.state === 'processing') && taskIds.length === 1) {
             const active = await this.readTask(tx, taskIds[0]);
             if (canonicalRepairJson(active.latestAttempt.input.items.map(item => item.itemId).sort()) === canonicalRepairJson([...request.itemIds].sort())
-              && active.latestAttempt.input.instructions === request.instructions) return active.latestAttempt;
+              && active.latestAttempt.input.instructions === request.instructions) {
+              // Selection equality alone does not authorize dispatch of an existing task.
+              if (ownManualOnly) fail('FORBIDDEN', 'Workflow access denied');
+              return active.latestAttempt;
+            }
           }
         }
         const selected: RepairItem[] = [];

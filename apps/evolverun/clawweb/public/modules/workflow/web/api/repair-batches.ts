@@ -7,14 +7,19 @@ import type { RepairItem, RepairRevision, StoredRepairItem } from '../../server/
 import type { RepairConfirmRequest, RepairDeployRequest, RepairApproval, RepairDeployment, RepairReleaseTarget } from '../../server/contracts/repair-release'
 import type { RepairVerificationEvidence, RepairVerificationConclusion } from '../../server/contracts/repair-verification'
 
+// Optional on the wire so older repair hosts remain readable.
+export type RepairCandidatePage = RepairCandidatesResponse & { canOptimize?: boolean }
+type RepairSelectionSnapshot = RepairSelectionState & { canOptimize?: boolean }
+export type RepairTrialRow = RepairTrial & { canStopUnstarted?: boolean }
+
 const base = '/api/workflow-repairs'
 const segment = encodeURIComponent
 const post = <T,>(url: string, body: unknown) => fetchJson<T>(url, { method: 'POST', body: JSON.stringify(body) })
 // Coalesce only concurrent identical reads, scoped to the logged-in principal. Never cache a completed result.
-const candidateReads = new Map<string, Promise<RepairCandidatesResponse>>()
-async function readCandidates(workflowId: string, query: RepairCandidatesQuery): Promise<RepairCandidatesResponse> {
-  const readPage = (metadataPage: number): Promise<RepairCandidatesResponse> => {
-    if (query.previewSignatures !== undefined) return readOnlyJson<RepairCandidatesResponse>(
+const candidateReads = new Map<string, Promise<RepairCandidatePage>>()
+async function readCandidates(workflowId: string, query: RepairCandidatesQuery): Promise<RepairCandidatePage> {
+  const readPage = (metadataPage: number): Promise<RepairCandidatePage> => {
+    if (query.previewSignatures !== undefined) return readOnlyJson<RepairCandidatePage>(
       `${base}/candidates/query`, undefined, { ...query, workflowId, metadataPage })
     const params = new URLSearchParams({ workflowId })
     params.set('metadataPage', String(metadataPage))
@@ -28,13 +33,14 @@ async function readCandidates(workflowId: string, query: RepairCandidatesQuery):
     if (query.nodeId) params.set('nodeId', query.nodeId)
     if (query.failureMode) params.set('failureMode', query.failureMode)
     if (query.signature) params.set('signature', query.signature)
-    return readOnlyJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
+    return readOnlyJson<RepairCandidatePage>(`${base}/candidates?${params}`)
   }
   const result = await readPage(query.metadataPage ?? 1)
   if (query.metadataPage !== undefined) return result
   const totalPages = result.metadata?.totalPages ?? 1
   for (let page = 2; page <= totalPages; page++) {
     const next = await readPage(page)
+    if (next.canEdit !== result.canEdit || next.canOptimize !== result.canOptimize) throw new Error('修复权限已变化，请重试读取。')
     if (next.inputDigest !== result.inputDigest || next.metadata?.digest !== result.metadata?.digest || next.metadata?.totalPages !== totalPages) throw new Error('建议来源已变化，请重试读取。')
     result.tasks.push(...next.tasks); result.repairSignatureKeys.push(...next.repairSignatureKeys)
     result.facets.nodes.push(...next.facets.nodes); result.facets.failureModes.push(...next.facets.failureModes)
@@ -42,9 +48,9 @@ async function readCandidates(workflowId: string, query: RepairCandidatesQuery):
   return result
 }
 export const repairBatches = {
-  selection: (workflowId: string, itemIds: string[], includeHistorical: boolean) => readOnlyJson<RepairSelectionState>(`${base}/selection/query`, undefined, { workflowId, itemIds, includeHistorical }),
+  selection: (workflowId: string, itemIds: string[], includeHistorical: boolean) => readOnlyJson<RepairSelectionSnapshot>(`${base}/selection/query`, undefined, { workflowId, itemIds, includeHistorical }),
   retryProposalIntegration: (workflowId: string) => post<{ ok: true }>(`${base}/proposal-integration/retry`, { workflowId }),
-  trials: (taskId: string, offset = 0) => readOnlyJson<{ configured: boolean; nextOffset?: number | null; trials: RepairTrial[] }>(`${base}/${segment(taskId)}/trials?offset=${offset}`),
+  trials: (taskId: string, offset = 0) => readOnlyJson<{ configured: boolean; nextOffset?: number | null; trials: RepairTrialRow[] }>(`${base}/${segment(taskId)}/trials?offset=${offset}`),
   trialOptions: (taskId: string, revision: number) => readOnlyJson<RepairTrialOptions & { inputSchemaDigest: string; targets: RepairTrialTarget[] }>(`${base}/${segment(taskId)}/trials/options?revision=${revision}`),
   startTrial: (taskId: string, request: RepairTrialRequest) => post<RepairTrial>(`${base}/${segment(taskId)}/trials`, request),
   stopTrial: (taskId: string, trialId: string) => post<RepairTrial>(`${base}/${segment(taskId)}/trials/${segment(trialId)}/stop`, {}),

@@ -4,6 +4,8 @@
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 
+import { runEvidenceWhere } from "./run-evidence-scope.js";
+
 export type FlowEventRow = {
   id: number;
   event_id: string;
@@ -46,13 +48,14 @@ export class FlowEventRepository {
 
   // ── Read methods ──
 
-  async findByFlowId(flowId: string, options: FindFlowEventsOptions = {}): Promise<FlowEventRow[]> {
+  async findByFlowId(flowId: string, options: FindFlowEventsOptions = {}, workflowId?: string): Promise<FlowEventRow[]> {
     const limit = options.limit ?? 50;
     const offset = options.offset ?? 0;
+    const [where, params] = runEvidenceWhere(this.db, flowId, workflowId);
     try {
       return await this.db.query<FlowEventRow>(
-        "SELECT * FROM flow_events WHERE flow_id = ? ORDER BY time DESC LIMIT ? OFFSET ?",
-        [flowId, limit, offset],
+        `SELECT * FROM flow_events WHERE ${where} ORDER BY time DESC LIMIT ? OFFSET ?`,
+        [...params, limit, offset],
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

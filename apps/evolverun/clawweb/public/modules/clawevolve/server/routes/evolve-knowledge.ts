@@ -1,12 +1,14 @@
+import type { createEvolveWorkflowActionAccess } from './evolve-workflow-action-access.js';
 import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db"
-import type { EvolveRepository } from "../repositories/evolve-repository.js"
+import type { EvolveLessonRow, EvolveRepository, EvolveRunDiagnosisRow } from "../repositories/evolve-repository.js"
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository"
 import { requireWorkflowAccess } from "@avernet/clawweb-shared/server/services/workflow-access"
-import { WorkflowEvolutionRepository } from "../repositories/workflow-evolution-repository.js"
+import { WorkflowEvolutionRepository, type WorkflowEvolutionAnalysisRow } from "../repositories/workflow-evolution-repository.js"
 import { IssueAggregationRepository } from '../repositories/issue-aggregation-repository.js';
 import { ISSUE_AGGREGATION_INPUT_V2 } from '../services/evolution/issue-aggregation.js';
+import { validateWorkflowEvolutionAnalysisResult } from '../services/evolution/contracts.js';
 
 function lessonSuccessRate(hitCount: number, rescuedCount: number): number {
   if (!hitCount) return 0;
@@ -59,19 +61,105 @@ function parseJsonStringArray(value: string | null | undefined): string[] {
   }
 }
 
+// Browser grants bind exact workflow IDs regardless of the storage collation.
+function exactWorkflowKey(db: IDatabase): string {
+  return db.dbType === "mysql" || db.dbType === "zdas" ? "CAST(workflow_id AS BINARY)" : "workflow_id COLLATE BINARY";
+}
+
+async function listScopedLessons(
+  db: IDatabase,
+  workflowIds: readonly string[],
+  { status, query, limit, offset }: { status: string | null; query: string | null; limit: number; offset: number },
+): Promise<{ rows: EvolveLessonRow[]; total: number }> {
+  if (!workflowIds.length) return { rows: [], total: 0 };
+  const clauses = [`${exactWorkflowKey(db)} IN (${workflowIds.map(() => "?").join(", ")})`];
+  const params: string[] = [...workflowIds];
+  if (status) { clauses.push("status = ?"); params.push(status); }
+  if (query) {
+    const columns = ["lesson_id", "workflow_id", "node_id", "failure_signature", "failure_mode", "executor_type", "fix_kind", "fix_spec", "note"];
+    clauses.push(`(${columns.map(column => `${column} LIKE ?`).join(" OR ")})`);
+    params.push(...columns.map(() => `%${query}%`));
+  }
+  const where = clauses.join(" AND ");
+  const [total] = await db.query<{ total: number }>(`SELECT COUNT(*) AS total FROM workflow_healing_lessons WHERE ${where}`, params);
+  const rows = await db.query<EvolveLessonRow>(
+    `SELECT * FROM workflow_healing_lessons WHERE ${where} ORDER BY gmt_create DESC, id DESC LIMIT ? OFFSET ?`,
+    [...params, limit, offset],
+  );
+  return { rows, total: Number(total?.total ?? rows.length) };
+}
+
+async function listScopedDiagnosisSources(db: IDatabase, workflowId: string, options: {
+  flowId: string | null; analysisId: string | null; query: string | null; limit: number;
+}): Promise<Array<Record<string, unknown>>> {
+  const { flowId, analysisId, query, limit } = options;
+  const workflow = `${exactWorkflowKey(db)} = ?`;
+  const legacySearchColumns = ["diagnosis_id", "flow_id", "run_id", "node_id", "failure_signature", "failure_mode",
+    "executor_type", "weak_node_id", "suggested_fix_kind", "lesson_id_hit", "error_text"];
+  const legacySearch = query ? ` AND (${legacySearchColumns.map(column => `${column} LIKE ?`).join(" OR ")})` : "";
+  const [legacy, analyses] = await Promise.all([
+    analysisId ? [] : db.query<EvolveRunDiagnosisRow>(
+      `SELECT * FROM workflow_healing_diagnoses WHERE ${workflow}${legacySearch} ORDER BY gmt_create DESC, id DESC LIMIT ?`,
+      [workflowId, ...(query ? legacySearchColumns.map(() => `%${query}%`) : []), limit],
+    ),
+    db.query<Pick<WorkflowEvolutionAnalysisRow, "analysis_id" | "flow_id" | "workflow_id" | "result_json" | "completed_at_ms">>(
+      `SELECT analysis_id, flow_id, workflow_id, result_json, completed_at_ms FROM workflow_evolution_analysis_runs
+       WHERE ${workflow} AND status = 'completed' AND result_json IS NOT NULL AND scope_type <> 'issue_aggregate'
+       ${flowId ? 'AND flow_id = ?' : ''} ${analysisId ? 'AND analysis_id = ?' : ''} ORDER BY id DESC LIMIT 500`,
+      [workflowId, ...(flowId ? [flowId] : []), ...(analysisId ? [analysisId] : [])],
+    ),
+  ]);
+  const projected = analyses.flatMap(analysis => {
+    try {
+      const result = validateWorkflowEvolutionAnalysisResult(JSON.parse(analysis.result_json!));
+      return result.diagnoses.map(diagnosis => ({
+        id: `${analysis.analysis_id}:${diagnosis.diagnosisId}`, diagnosis_id: diagnosis.diagnosisId, analysis_id: analysis.analysis_id,
+        flow_id: diagnosis.flowIds[0] ?? analysis.flow_id, flow_ids: diagnosis.flowIds, workflow_id: analysis.workflow_id,
+        run_id: diagnosis.flowIds[0] ?? analysis.flow_id, node_id: diagnosis.nodeId, failure_signature: diagnosis.failureSignature,
+        failure_mode: diagnosis.failureMode, weak_node_id: diagnosis.nodeId, suggested_fix_kind: diagnosis.proposal ? "workflow_patch" : null,
+        reasoning: diagnosis.reasoning, evidence_event_ids: diagnosis.evidenceEventIds, error_text: null,
+        gmt_create: analysis.completed_at_ms, gmt_modified: analysis.completed_at_ms,
+      }));
+    } catch { return []; } // Legacy corrupt analysis results are not displayable.
+  });
+  const matched = query ? projected.filter(row => JSON.stringify(row).toLowerCase().includes(query.toLowerCase())) : projected;
+  return [...legacy, ...matched.slice(0, limit)];
+}
+
 export function createEvolveKnowledgeRouter(
   _db: IDatabase,
   repo: EvolveRepository | null,
   botPermRepo: BotWorkflowPermissionRepository | null = null,
+  browserAccess?: ReturnType<typeof createEvolveWorkflowActionAccess>,
 ): Router {
   const router = Router();
   const workflowEvolutionRepo = new WorkflowEvolutionRepository(_db);
+  async function requireView(req: Request, res: Response, workflowId: string): Promise<boolean> {
+    if (!browserAccess) return requireWorkflowAccess(req, res, botPermRepo, workflowId, 'view');
+    const actor = await browserAccess.actor(req, res);
+    return actor !== null && await browserAccess.require(req, res, workflowId, actor, 'view');
+  }
+
+  async function requireGlobalView(req: Request, res: Response): Promise<boolean> {
+    if (browserAccess) {
+      const actor = await browserAccess.actor(req, res);
+      if (!actor) return false;
+      if (actor.verifiedAdmin) return true;
+      res.status(403).json({ error: "Forbidden", message: "Administrator access required" });
+      return false;
+    }
+    // Standalone without an ACL keeps its original unscoped behavior; the
+    // legacy ACL mode still requires a workflow filter or its admin flag.
+    if (!botPermRepo || req.isAdmin) return true;
+    res.status(400).json({ error: "Bad Request", message: "workflowId is required" });
+    return false;
+  }
 
   router.get('/issue-groups', async (req: Request, res: Response) => {
     const workflowId = textOrNull(req.query.workflowId);
     if (!workflowId) { res.status(400).json({ error: 'workflowId is required' }); return; }
-    if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, 'view')) return;
     try {
+      if (!await requireView(req, res, workflowId)) return;
       // Browser eligibility uses supported compaction; Bot preparation still negotiates its version.
       const signature = textOrNull(req.query.signature);
       const versionScope=textOrNull(req.query.versionScope)??undefined;
@@ -114,12 +202,25 @@ export function createEvolveKnowledgeRouter(
     }
     try {
       const workflowId = textOrNull(req.query.workflowId);
-      if (workflowId && !await requireWorkflowAccess(req, res, botPermRepo, workflowId, "view")) return;
+      let scope: readonly string[] | null = null;
+      if (browserAccess) {
+        const actor = await browserAccess.actor(req, res);
+        if (!actor) return;
+        if (workflowId) {
+          if (!await browserAccess.require(req, res, workflowId, actor, "view")) return;
+          scope = [workflowId];
+        } else if (!actor.verifiedAdmin) {
+          scope = [...(await botPermRepo?.listBrowserViewableWorkflowIds(actor.actorId) ?? [])]
+            .filter(id => id.length > 0 && id === id.trim());
+        }
+      } else if (workflowId ? !await requireView(req, res, workflowId) : !await requireGlobalView(req, res)) return;
       const status = textOrNull(req.query.status);
       const query = textOrNull(req.query.query);
       const limit = positiveInt(req.query.limit, 50, 200);
       const offset = Math.max(Number(req.query.offset ?? 0) || 0, 0);
-      const result = await repo.listLessons({ workflowId, status, query, limit, offset });
+      const result = scope === null
+        ? await repo.listLessons({ workflowId, status, query, limit, offset })
+        : await listScopedLessons(_db, scope, { status, query, limit, offset });
       res.json({ lessons: result.rows.map((row) => withLessonStats(row)), total: result.total, limit, offset });
     } catch (error) {
       res.status(500).json({ error: "Internal Server Error", message: error instanceof Error ? error.message : String(error) });
@@ -137,7 +238,7 @@ export function createEvolveKnowledgeRouter(
         res.status(404).json({ error: "Not Found", message: "Lesson not found" });
         return;
       }
-      if (row.workflow_id && !await requireWorkflowAccess(req, res, botPermRepo, row.workflow_id, "view")) return;
+      if (row.workflow_id ? !await requireView(req, res, row.workflow_id) : !await requireGlobalView(req, res)) return;
       res.json({ lesson: withLessonStats(row) });
     } catch (error) {
       res.status(500).json({ error: "Internal Server Error", message: error instanceof Error ? error.message : String(error) });
@@ -259,32 +360,34 @@ export function createEvolveKnowledgeRouter(
     }
     try {
       const workflowId = textOrNull(req.query.workflowId);
-      if (!workflowId && botPermRepo && !req.isAdmin) {
-        res.status(400).json({ error: "Bad Request", message: "workflowId is required" });
-        return;
-      }
-      if (workflowId && !await requireWorkflowAccess(req, res, botPermRepo, workflowId, "view")) return;
+      if (workflowId ? !await requireView(req, res, workflowId) : !await requireGlobalView(req, res)) return;
       const flowId = textOrNull(req.query.flowId);
       const analysisId = textOrNull(req.query.analysisId);
       const query = textOrNull(req.query.query);
       const limit = positiveInt(req.query.limit, 50, 200);
       const offset = Math.max(Number(req.query.offset ?? 0) || 0, 0);
       const sourceLimit = Math.min(offset + limit, 200);
-      const [legacy, projected] = await Promise.all([
-        analysisId
-          ? Promise.resolve({ rows: [], total: 0 })
-          : repo.listDiagnoses({ workflowId, query, limit: sourceLimit, offset: 0 }),
-        workflowEvolutionRepo.listProjectedDiagnoses({
-          workflowId: workflowId ?? undefined,
-          flowId: flowId ?? undefined,
-          analysisId: analysisId ?? undefined,
-          query: query ?? undefined,
-          limit: sourceLimit,
-          offset: 0,
-        }),
-      ]);
+      let rows: Array<Record<string, unknown>>;
+      if (browserAccess && workflowId) {
+        rows = await listScopedDiagnosisSources(_db, workflowId, { flowId, analysisId, query, limit: sourceLimit });
+      } else {
+        const [legacy, projected] = await Promise.all([
+          analysisId
+            ? Promise.resolve({ rows: [], total: 0 })
+            : repo.listDiagnoses({ workflowId, query, limit: sourceLimit, offset: 0 }),
+          workflowEvolutionRepo.listProjectedDiagnoses({
+            workflowId: workflowId ?? undefined,
+            flowId: flowId ?? undefined,
+            analysisId: analysisId ?? undefined,
+            query: query ?? undefined,
+            limit: sourceLimit,
+            offset: 0,
+          }),
+        ]);
+        rows = [...legacy.rows, ...projected.rows];
+      }
       const seen = new Set<string>();
-      const diagnoses = [...legacy.rows, ...projected.rows]
+      const diagnoses = rows
         .filter((row) => !flowId || String(row.flow_id ?? row.run_id ?? "") === flowId)
         .filter((row) => {
           const flowId = String(row.flow_id ?? row.run_id ?? "");
@@ -318,7 +421,7 @@ export function createEvolveKnowledgeRouter(
         res.status(404).json({ error: "Not Found", message: "Diagnosis not found" });
         return;
       }
-      if (!await requireWorkflowAccess(req, res, botPermRepo, row.workflow_id, "view")) return;
+      if (!await requireView(req, res, row.workflow_id)) return;
       res.json({ diagnosis: row });
     } catch (error) {
       res.status(500).json({ error: "Internal Server Error", message: error instanceof Error ? error.message : String(error) });
@@ -413,7 +516,7 @@ export function createEvolveKnowledgeRouter(
         res.status(400).json({ error: "Bad Request", message: "workflowId is required" });
         return;
       }
-      if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, "view")) return;
+      if (!await requireView(req, res, workflowId)) return;
       const status = textOrNull(req.query.status);
       const limit = positiveInt(req.query.limit, 50, 200);
       const offset = Math.max(Number(req.query.offset ?? 0) || 0, 0);
@@ -516,7 +619,7 @@ export function createEvolveKnowledgeRouter(
         res.status(400).json({ error: "Bad Request", message: "workflowId is required" });
         return;
       }
-      if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, "view")) return;
+      if (!await requireView(req, res, workflowId)) return;
       const limit = positiveInt(req.query.limit, 50, 200);
       const offset = Math.max(Number(req.query.offset ?? 0) || 0, 0);
       const result = await repo.listWeakLinks({ workflowId, limit, offset });

@@ -20,10 +20,10 @@ export function DashboardSummary({
   return (
     <>
       <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <section className={`${panel} bg-muted/20`} aria-label="全局运行健康">
-          <h2 className="text-base font-semibold">全局运行健康</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{rangeLabel} · 管理员全量视角</p>
-          <DashboardReadState resource={resource} title="全局运行健康">
+        <section className={`${panel} bg-muted/20`} aria-label="运行健康">
+          <h2 className="text-base font-semibold">运行健康</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{rangeLabel} · 当前权限范围</p>
+          <DashboardReadState resource={resource} title="运行健康">
             {(data) => {
               const delta =
                 data.successRate !== null &&
@@ -118,7 +118,7 @@ export function DashboardSummary({
               <h2 className="text-base font-semibold">护航待办</h2>
               <p className="mt-1 text-xs text-muted-foreground">先处理复发，再清理验证积压</p>
             </div>
-            <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">全局</span>
+            <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">当前权限范围</span>
           </div>
           <DashboardReadState resource={resource} title="护航待办">
             {({ evolution }) => {

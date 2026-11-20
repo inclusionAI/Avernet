@@ -3,28 +3,22 @@ import { displayDate, statusLabels } from '@/domain/taskEscortParity/evolution';
 import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
 import { useTaskEscortRepairTask } from '@/hooks/taskEscortParity/useTaskEscortRepair';
 import { useState } from 'react';
-import {
-  JsonDetails,
-  NoData,
-  ReadCapabilities,
-  ReadPager,
-  ReadSelect,
-  ReadState,
-  ReadTabs,
-  WriteUnavailable,
-} from './ReadPrimitives';
+import { JsonDetails, NoData, ReadCapabilities, ReadPager, ReadSelect, ReadState, ReadTabs } from './ReadPrimitives';
 import { RepairChanges } from './RepairChanges';
 import { RepairEffect } from './RepairEffect';
 import { RepairTargets } from './RepairTargets';
-export function RepairTaskWorkspace({
-  context,
-  taskId,
-  canEdit,
-}: {
+interface RepairTaskWorkspaceProps {
   context: TaskEscortParityContext;
   taskId: string;
   canEdit: boolean;
-}) {
+}
+export function RepairTaskWorkspace(props: RepairTaskWorkspaceProps) {
+  const { context, taskId } = props;
+  return (
+    <RepairTaskDetail key={JSON.stringify([context.scopeKey, context.userId, context.workflowId, taskId])} {...props} />
+  );
+}
+function RepairTaskDetail({ context, taskId, canEdit }: RepairTaskWorkspaceProps) {
   const [historyPage, setHistoryPage] = useState(1),
     [selected, setSelected] = useState<number | null>(null),
     [tab, setTab] = useState<'targets' | 'changes' | 'effect'>('targets');
@@ -36,9 +30,9 @@ export function RepairTaskWorkspace({
     ? [
         ...new Map(
           [
-            detail.latestAttempt,
-            ...(detail.latestSuccessful ? [detail.latestSuccessful] : []),
             ...detail.revisions,
+            ...(detail.latestSuccessful ? [detail.latestSuccessful] : []),
+            detail.latestAttempt,
           ].map((r) => [r.revision, r]),
         ).values(),
       ].sort((a, b) => b.revision - a.revision)
@@ -124,6 +118,8 @@ export function RepairTaskWorkspace({
                   context={context}
                   detail={detail}
                   revision={revision}
+                  canEdit={canEdit}
+                  onRefresh={result.refresh}
                 />
               ) : (
                 <RepairEffect
@@ -140,11 +136,9 @@ export function RepairTaskWorkspace({
           <ReadCapabilities capabilities={detail.capabilities} canEdit={canEdit} />
           <JsonDetails label="任务实际执行状态" value={detail.executions ?? detail.execution ?? null} />
           {detail.automaticProgress && <JsonDetails label="自动批次进度" value={detail.automaticProgress} />}
-          <WriteUnavailable
-            canEdit={canEdit}
-            reason={detail.capabilities.reason}
-            actions={['重新生成', '应用建议', '发布', '启动试运行']}
-          />
+          <p className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+            此详情页不提供重新生成、应用建议或启动试运行。
+          </p>
         </>
       )}
     </section>

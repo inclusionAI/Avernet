@@ -12,6 +12,16 @@ import { fixDurationMs, computeAvailableInterventions, allowsRuntimeMetadataFrom
 import type { RunSubworkflowsReader, RunReadInspection } from "../contracts/run-subworkflows.js";
 import { installFanoutReadHandlers, projectRun, projectNodes, sendRunReadError } from "./run-subworkflows-http.js";
 
+// Set only by a host that has verified the principal and the exact persisted run.
+function authorizedWorkflow(res: Response, flowId: string): string | undefined {
+  const scope = res.locals.authorizedRun as { flowId: string; workflowId: string } | undefined;
+  if (!scope) return undefined;
+  if (scope.flowId !== flowId || !scope.workflowId) {
+    throw new Error("Inconsistent authorized run scope");
+  }
+  return scope.workflowId;
+}
+
 /**
  * Resolve view permission filter for runs/workflow-types endpoints.
  * Returns null if unrestricted (show all), or { restrictedIds, viewableIds } for filtering.
@@ -275,12 +285,14 @@ export function createRunReadRouter(
     }
     try {
       const inspection = res.locals.runRead as RunReadInspection | undefined;
-      const run = inspection?.run ?? await flowRunRepo.findFullByFlowId(String(req.params.flowId));
+      const flowId = String(req.params.flowId);
+      const workflowId = authorizedWorkflow(res, flowId);
+      const run = inspection?.run ?? await flowRunRepo.findFullByFlowId(flowId, workflowId);
       if (!run) {
         res.status(404).json({ error: "Not Found", message: `Flow ${req.params.flowId} not found` });
         return;
       }
-      const nodes = await nodeExecRepo.findLatestByFlowId(run.flow_id);
+      const nodes = await nodeExecRepo.findLatestByFlowId(run.flow_id, workflowId);
       const availableInterventions = res.locals.runRead?.managed || res.locals.runRead?.sensitiveChild ? [] : computeAvailableInterventions(run);
       // Never expose credentials_json; add safe derived fields
       const safeRun = projectRun(toSafeRunFields(fixDurationMs(run) as Record<string, unknown>), inspection);
@@ -306,7 +318,7 @@ export function createRunReadRouter(
     try {
       const flowId = String(req.params.flowId);
       const full = req.query.full === "true";
-      const nodes = projectNodes(await nodeExecRepo.findByFlowId(flowId, { limit: 500 }), res.locals.runRead);
+      const nodes = projectNodes(await nodeExecRepo.findByFlowId(flowId, { limit: 500 }, authorizedWorkflow(res, flowId)), res.locals.runRead);
 
       if (!full) {
         const TRUNCATE_LIMIT = 10 * 1024;
@@ -333,7 +345,7 @@ export function createRunReadRouter(
     try {
       const flowId = String(req.params.flowId);
       const limit = Math.min(parseInt(req.query.limit as string, 10) || 200, 1000);
-      const events = await eventRepo.findByFlowId(flowId, { limit });
+      const events = await eventRepo.findByFlowId(flowId, { limit }, authorizedWorkflow(res, flowId));
       res.json(res.locals.runRead?.managed || res.locals.runRead?.sensitiveChild ? [] : events);
     } catch (error) {
       sendRunReadError(res, error);
@@ -348,7 +360,7 @@ export function createRunReadRouter(
     }
     try {
       const flowId = String(req.params.flowId);
-      const run = res.locals.runRead?.run ?? await flowRunRepo.findFullByFlowId(flowId);
+      const run = res.locals.runRead?.run ?? await flowRunRepo.findFullByFlowId(flowId, authorizedWorkflow(res, flowId));
       if (!run) {
         res.status(404).json({ error: "Not Found", message: `Flow ${flowId} not found` });
         return;
@@ -393,33 +405,34 @@ export function createRunReadRouter(
     }
     try {
       const flowId = String(req.params.id);
+      const workflowId = authorizedWorkflow(res, flowId);
 
       // Find injected nodes from step logs (step_type = 'inject')
       const injectSteps = await executionStepLogRepo.getStepsByFlow(flowId, {
         stepType: "inject",
         limit: 1000,
-      });
+      }, workflowId);
 
       // Find materialized nodes from step logs (step_type = 'materialize')
       const materializeSteps = await executionStepLogRepo.getStepsByFlow(flowId, {
         stepType: "materialize",
         limit: 1000,
-      });
+      }, workflowId);
 
       // Find LLM evaluation steps (step_type = 'llm_evaluate' or 'goal_check')
       const [llmEvaluateSteps, goalCheckSteps] = await Promise.all([
-        executionStepLogRepo.getStepsByFlow(flowId, { stepType: "llm_evaluate", limit: 1000 }),
-        executionStepLogRepo.getStepsByFlow(flowId, { stepType: "goal_check", limit: 1000 }),
+        executionStepLogRepo.getStepsByFlow(flowId, { stepType: "llm_evaluate", limit: 1000 }, workflowId),
+        executionStepLogRepo.getStepsByFlow(flowId, { stepType: "goal_check", limit: 1000 }, workflowId),
       ]);
 
       // Find budget events
       const [budgetWarnings, budgetExhausted] = await Promise.all([
-        executionStepLogRepo.getStepsByFlow(flowId, { stepType: "budget_warning", limit: 100 }),
-        executionStepLogRepo.getStepsByFlow(flowId, { stepType: "budget_exhausted", limit: 100 }),
+        executionStepLogRepo.getStepsByFlow(flowId, { stepType: "budget_warning", limit: 100 }, workflowId),
+        executionStepLogRepo.getStepsByFlow(flowId, { stepType: "budget_exhausted", limit: 100 }, workflowId),
       ]);
 
       // Identify orchestrator nodes from node_executions (executor_type contains 'llm-orchestrator')
-      const allNodes = await nodeExecRepo.findByFlowId(flowId, { limit: 500 });
+      const allNodes = await nodeExecRepo.findByFlowId(flowId, { limit: 500 }, workflowId);
       const orchestratorNodes = allNodes.filter(
         (n) => n.executor_type === "llm-orchestrator" || n.node_id.includes("__step"),
       );
@@ -485,8 +498,9 @@ export function createRunReadRouter(
     try {
       const flowId = String(req.params.id);
 
-      // Get the flow run to find its workflow_id
-      const run = await flowRunRepo.findByFlowId(flowId);
+      // An enterprise request must not re-resolve this run under a looser key.
+      const workflowId = authorizedWorkflow(res, flowId);
+      const run = await flowRunRepo.findByFlowId(flowId, workflowId);
       if (!run) {
         res.status(404).json({ error: "Not Found", message: `Flow ${flowId} not found` });
         return;
@@ -495,7 +509,7 @@ export function createRunReadRouter(
       // Get the workflow spec for static node definitions
       const specRow = await workflowSpecRepo.findByWorkflowId(run.workflow_id);
       let staticNodes: unknown[] = [];
-      if (specRow?.spec_json) {
+      if (specRow?.spec_json && (workflowId === undefined || specRow.workflow_id === workflowId)) {
         try {
           const spec = JSON.parse(specRow.spec_json);
           staticNodes = (spec.nodes ?? []).map((n: Record<string, unknown>) => ({
@@ -512,7 +526,7 @@ export function createRunReadRouter(
       }
 
       // Get all executed nodes to find dynamic ones
-      const executedNodes = await nodeExecRepo.findByFlowId(flowId, { limit: 500 });
+      const executedNodes = await nodeExecRepo.findByFlowId(flowId, { limit: 500 }, workflowId);
       const staticNodeIds = new Set((staticNodes as Array<{ id: string }>).map((n) => n.id));
 
       // Dynamic nodes: executed but not in static spec
@@ -536,10 +550,10 @@ export function createRunReadRouter(
       // Get materialize/inject step logs for expansion details
       const [materializeSteps, injectSteps] = await Promise.all([
         executionStepLogRepo
-          ? executionStepLogRepo.getStepsByFlow(flowId, { stepType: "materialize", limit: 500 })
+          ? executionStepLogRepo.getStepsByFlow(flowId, { stepType: "materialize", limit: 500 }, workflowId)
           : Promise.resolve([]),
         executionStepLogRepo
-          ? executionStepLogRepo.getStepsByFlow(flowId, { stepType: "inject", limit: 500 })
+          ? executionStepLogRepo.getStepsByFlow(flowId, { stepType: "inject", limit: 500 }, workflowId)
           : Promise.resolve([]),
       ]);
 
@@ -592,6 +606,7 @@ export function createRunReadRouter(
     }
     try {
       const flowId = typeof req.params.id === "string" ? req.params.id : String(req.params.id ?? "");
+      const workflowId = authorizedWorkflow(res, flowId);
       const nodeId = typeof req.query.nodeId === "string" ? req.query.nodeId : undefined;
       const stepType = typeof req.query.stepType === "string" ? req.query.stepType : undefined;
       const limit = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : 100;
@@ -602,8 +617,8 @@ export function createRunReadRouter(
         stepType,
         limit,
         offset,
-      });
-      const count = await executionStepLogRepo.getStepCountByFlow(flowId, { nodeId, stepType });
+      }, workflowId);
+      const count = await executionStepLogRepo.getStepCountByFlow(flowId, { nodeId, stepType }, workflowId);
 
       res.json({ success: true, data: steps, meta: { total: count, limit, offset } });
     } catch (error) {
@@ -620,10 +635,11 @@ export function createRunReadRouter(
     try {
       const flowId = typeof req.params.id === "string" ? req.params.id : String(req.params.id ?? "");
 
+      const workflowId = authorizedWorkflow(res, flowId);
       const steps = await executionStepLogRepo.getStepsByFlow(flowId, {
         limit: 10000,
         offset: 0,
-      });
+      }, workflowId);
 
       res.json({ success: true, data: steps });
     } catch (error) {

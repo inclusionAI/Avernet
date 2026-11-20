@@ -50,9 +50,9 @@ function ChangeValue({ value }: { value: unknown }) {
   </div>
 }
 
-export default function RepairItemDetail({ item, detail, loading, error, onLoad, selected, onToggle, canEdit, limitReached, onDisposition, showSelection = true, embedded = false, targetSnapshotKey }: {
+export default function RepairItemDetail({ item, detail, loading, error, onLoad, selected, onToggle, canEdit, canOptimize = canEdit, limitReached, onDisposition, showSelection = true, embedded = false, targetSnapshotKey }: {
   item: RepairInboxItem; detail?: RepairInboxItem; loading?: boolean; error?: string;
-  onLoad: (id: string) => void; selected: boolean; onToggle: (id: string) => void; canEdit: boolean;
+  onLoad: (id: string) => void; selected: boolean; onToggle: (id: string) => void; canEdit: boolean; canOptimize?: boolean;
   limitReached: boolean; onDisposition: (item: RepairInboxItem, action: 'no_action' | 'restore') => void;
   targetSnapshotKey?: string; showSelection?: boolean;
   embedded?: boolean;
@@ -71,7 +71,7 @@ export default function RepairItemDetail({ item, detail, loading, error, onLoad,
       <p className="text-xs text-slate-500">{states[item.state]} · {runs === null ? '来源运行数未知' : `本建议来源覆盖 ${runs} 个运行`}</p>
       <h4 className="text-base font-semibold leading-7 text-slate-900">{itemTitle(shown)}</h4>
       {showSelection && <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" className="h-4 w-4 accent-blue-600"
-        aria-label={`选择 ${itemTitle(item)}`} checked={selected} disabled={!canEdit || !!reason || (!selected && limitReached)} onChange={() => onToggle(item.itemId)} />纳入本次修复</label>}
+        aria-label={`选择 ${itemTitle(item)}`} checked={selected} disabled={!canOptimize || !!reason || (!selected && limitReached)} onChange={() => onToggle(item.itemId)} />纳入本次修复</label>}
       {reason && <p className="text-xs text-amber-700">{reason}</p>}
     </header>}
     <section aria-label="修改内容" className="space-y-3 border-t border-slate-100 pt-4">

@@ -1,3 +1,4 @@
+import { exactRunKey } from "./run-evidence-scope.js";
 import { normalizeFlowRunMarkers } from '../services/flow-run-markers.js';
 import { OrdinaryRunRequestService } from '../services/ordinary-run-request.js';
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
@@ -165,21 +166,20 @@ export class FlowRunRepository {
     });
   }
 
-  private flowIdPredicate(flowId: string, expectedScope?: RunOriginScope) {
+  private flowIdPredicate(flowId: string, expectedScope?: RunOriginScope | string) {
     const conditions = ["flow_id = ?"];
     const params = [flowId];
-    if (expectedScope) {
+    if (expectedScope !== undefined) {
       // Scope IDs are identities, not text to compare under the table's collation.
-      const exact = (column: "workflow_id" | "origin_bot_id") => this.db.dialect.driver === "mysql2"
-        ? `BINARY ${column} = BINARY ?`
-        : `${column} COLLATE BINARY = ?`;
-      conditions.push(exact("workflow_id"));
-      params.push(expectedScope.workflowId);
-      if (expectedScope.originBotId === null) {
-        conditions.push("origin_bot_id IS NULL");
-      } else {
-        conditions.push(exact("origin_bot_id"));
-        params.push(expectedScope.originBotId);
+      conditions.push(exactRunKey(this.db, "flow_id"), exactRunKey(this.db, "workflow_id"));
+      params.push(flowId, typeof expectedScope === "string" ? expectedScope : expectedScope.workflowId);
+      if (typeof expectedScope !== "string") {
+        if (expectedScope.originBotId === null) {
+          conditions.push("origin_bot_id IS NULL");
+        } else {
+          conditions.push(exactRunKey(this.db, "origin_bot_id"));
+          params.push(expectedScope.originBotId);
+        }
       }
     }
     return { sql: conditions.join(" AND "), params };
@@ -191,7 +191,7 @@ export class FlowRunRepository {
    * Find a flow run by flow_id, returning only lightweight columns (no TEXT blobs).
    * Prefer this method for status checks, UI listings, and metadata-only access.
    */
-  async findByFlowId(flowId: string, expectedScope?: RunOriginScope): Promise<FlowRunRow | null> {
+  async findByFlowId(flowId: string, expectedScope?: RunOriginScope | string): Promise<FlowRunRow | null> {
     const { sql, params } = this.flowIdPredicate(flowId, expectedScope);
     const tryQuery = async (legacy: boolean): Promise<FlowRunRow[]> => {
       const cols = FlowRunRepository.listColumns(legacy).join(", ");
@@ -223,11 +223,11 @@ export class FlowRunRepository {
    * Find a flow run by flow_id, including large TEXT columns (params_json, input_json,
    * result_json, credentials_json). Use only when you need the full row data.
    */
-  async findFullByFlowId(flowId: string): Promise<FlowRunRow | null> {
+  async findFullByFlowId(flowId: string, workflowId?: string): Promise<FlowRunRow | null> {
     try {
       const rows = await this.db.query<FlowRunRow>(
-        "SELECT * FROM flow_runs WHERE flow_id = ?",
-        [flowId],
+        `SELECT * FROM flow_runs WHERE flow_id = ? AND ${exactRunKey(this.db, "flow_id")}${workflowId === undefined ? "" : ` AND ${exactRunKey(this.db, "workflow_id")}`}`,
+        workflowId === undefined ? [flowId, flowId] : [flowId, flowId, workflowId],
       );
       if (!rows[0]) return null;
       // SELECT * must retain legacy fields, but internal incarnation markers

@@ -3,12 +3,11 @@ import { Link } from 'react-router-dom'
 import type { RepairRevision } from '../../../../server/contracts/repair-batch'
 import { normalizeTrialInputDefinition, TrialInputDefinitionError } from '../../../../server/contracts/repair-trial-input-definition'
 import RepairTrialInputs, { parseTrialJson, readTrialFormInput, trialInputDefaults, trialInputEntries, type TrialParameterEntry } from './RepairTrialInputs'
-import type { RepairTrial, RepairTrialOptions, RepairTrialRequest, RepairTrialTarget } from '../../../../server/contracts/repair-trial'
-import { repairBatches } from '../../../api/repair-batches'
+import type { RepairTrialOptions, RepairTrialRequest, RepairTrialTarget } from '../../../../server/contracts/repair-trial'
+import { repairBatches, type RepairTrialRow } from '../../../api/repair-batches'
 import { repairReleaseError } from '../../../api/repair-release-error'
 import { button, primary, RepairDialog } from './repair-view'
 
-type TrialView = RepairTrial
 const labels = { dispatching: '已下发，等待接收', awaiting_run: '等待运行登记', running: '执行中', waiting: '等待审批或人工输入', succeeded: '运行成功', failed: '运行失败', unknown: '结果未知，核对原请求' }
 function capabilityRejectedBeforeCreation(reason: unknown): boolean {
   const failure = reason as { status?: number; body?: string }
@@ -16,11 +15,11 @@ function capabilityRejectedBeforeCreation(reason: unknown): boolean {
   try { return JSON.parse(failure.body)?.code === 'CAPABILITY_UNAVAILABLE' }
   catch { return false }
 }
-export default function RepairTrialPanel({ taskId, revision, enabled, open, onClose, onTrials }: {
-  taskId: string; revision: RepairRevision; enabled: boolean; open: boolean; onClose: () => void; onTrials: (trials: TrialView[], configured: boolean) => void;
+export default function RepairTrialPanel({ taskId, revision, canStart, legacyCanStop, open, onClose, onTrials }: {
+  taskId: string; revision: RepairRevision; canStart: boolean; legacyCanStop: boolean; open: boolean; onClose: () => void; onTrials: (trials: RepairTrialRow[], configured: boolean) => void;
 }) {
   const [nextOffset, setNextOffset] = useState<number | null>(null)
-  const [records, setRecords] = useState<TrialView[]>([])
+  const [records, setRecords] = useState<RepairTrialRow[]>([])
   const [options, setOptions] = useState<(RepairTrialOptions & { inputSchemaDigest: string; targets: RepairTrialTarget[] }) | null>(null)
   const [targetId, setTargetId] = useState('')
   const [loadError, setLoadError] = useState('')
@@ -62,10 +61,10 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
     return () => clearInterval(timer)
   }, [scope, records, uncertain])
   useEffect(() => {
-    if (!open || !enabled) return
+    if (!open) return
     let active = true
     const mine = scope
-    setLoadError('')
+    setLoadError(''); setOptions(null)
     void repairBatches.trialOptions(taskId, revision.revision).then(value => {
       if (!active || current.current !== mine) return
       const normalized = normalizeTrialInputDefinition(value.inputSchema == null ? undefined : { schema: value.inputSchema })
@@ -78,12 +77,12 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
       setOptions(next)
     }).catch(reason => { if (active && current.current === mine) setLoadError(reason instanceof TrialInputDefinitionError ? reason.message : '无法读取候选参数和授权 Bot，请重试。') })
     return () => { active = false }
-  }, [scope, open, enabled, loadAttempt])
+  }, [scope, open, loadAttempt, canStart])
   const definition = { inputSchema: options?.inputSchema ?? null, inputDefinition: options?.inputDefinition ?? 'missing' as const }
   const selectedTarget = options?.targets.find(bot => bot.id === targetId)
   // An unknown request only reconciles its frozen identity; it never selects a new Bot.
   const targetUnavailable = !uncertain && (!selectedTarget || selectedTarget.executionMode === 'unavailable' || selectedTarget.executionMode === 'saved')
-  const locked = busy || uncertain || submitted
+  const locked = !canStart || busy || uncertain || submitted
   function toggleAdvanced() {
     try {
       if (advanced) {
@@ -94,7 +93,7 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
     } catch (reason) { setError(reason instanceof SyntaxError ? '参数 JSON 格式无效，请检查对象、逗号和引号。' : (reason as Error).message) }
   }
   async function start() {
-    if (!options || loadError || !targetId || !enabled || targetUnavailable || inFlight.current === scope || submitted && !uncertain) return
+    if (!options || loadError || !targetId || !canStart || targetUnavailable || inFlight.current === scope || submitted && !uncertain) return
     const mine = scope
     inFlight.current = mine; setSubmitted(true); setBusy(true); setError('')
     try {
@@ -111,8 +110,12 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
       setError(failedBeforeDispatch ? reason instanceof SyntaxError ? '参数 JSON 格式无效，请检查对象、逗号和引号。' : (reason as Error).message : repairReleaseError(reason)); setUncertain(!!request.current); await refresh()
     } finally { if (inFlight.current === mine) inFlight.current = null; if (current.current === mine) setBusy(false) }
   }
-  async function stop(row: TrialView) {
-    if (!enabled || inFlight.current === scope) return
+  function canStopRow(row: RepairTrialRow) {
+    return row.mode === 'pinned' && !row.flowId && ['dispatching', 'awaiting_run', 'unknown'].includes(row.status)
+      && (row.canStopUnstarted === undefined ? legacyCanStop : row.canStopUnstarted === true)
+  }
+  async function stop(row: RepairTrialRow) {
+    if (!canStopRow(row) || inFlight.current === scope) return
     const mine = scope
     inFlight.current = mine; setBusy(true); setError('')
     try {
@@ -127,8 +130,8 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
     } finally { if (inFlight.current === mine) inFlight.current = null; if (current.current === mine) setBusy(false) }
   }
   const actions = <div className="flex flex-wrap gap-2">
-    <button className={primary} disabled={!options || !!loadError || !targetId || !enabled || targetUnavailable || busy || submitted && !uncertain} onClick={() => void start()}>{busy ? '提交中…' : uncertain ? '核对并重试原请求' : submitted ? '试跑已提交' : '开始试跑'}</button>
-    {submitted && !uncertain && records.some(row => row.revision === revision.revision && ['succeeded', 'failed'].includes(row.status)) && <button className={button} onClick={() => { setSubmitted(false); request.current = null }}>新建试跑</button>}
+    <button className={primary} disabled={!options || !!loadError || !targetId || !canStart || targetUnavailable || busy || submitted && !uncertain} onClick={() => void start()}>{busy ? '提交中…' : uncertain ? '核对并重试原请求' : submitted ? '试跑已提交' : '开始试跑'}</button>
+    {canStart && submitted && !uncertain && records.some(row => row.revision === revision.revision && ['succeeded', 'failed'].includes(row.status)) && <button className={button} onClick={() => { setSubmitted(false); request.current = null }}>新建试跑</button>}
     <button className={button} onClick={onClose}>返回审阅</button>
   </div>
   const history = records.length > 0 && <details open={open}><summary className="cursor-pointer text-sm">试跑记录（{records.length}）</summary><div className="max-h-96 space-y-3 overflow-auto py-3">{records.map(row => <article key={row.id} className="rounded border border-input bg-background p-3 text-sm">
@@ -136,9 +139,9 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
     {row.mode === 'saved' && <p className="text-muted-foreground">未固定候选、仅供参考；此结果不代表已验证候选 v{row.revision}。</p>}
     <p className="mt-1 text-muted-foreground">{row.target.label} · {new Date(row.createdAtMs).toLocaleString()} {row.durationMs != null && `· ${row.durationMs} ms`}</p>
     {row.error && <p className="mt-2 text-destructive">{row.error}</p>}
-    {['dispatching', 'awaiting_run', 'unknown'].includes(row.status) && row.mode === 'pinned' && !row.flowId && <div className="mt-2 space-y-2">
+    {canStopRow(row) && <div className="mt-2 space-y-2">
       <p>尚未登记运行。可以结束这条请求后重新试跑；不会自动重试，也不会停止已登记的运行。</p>
-      <button className={button} disabled={!enabled || busy} onClick={() => void stop(row)}>结束未启动请求</button>
+      <button className={button} disabled={busy} onClick={() => void stop(row)}>结束未启动请求</button>
     </div>}
     {row.output && <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">{row.output}</pre>}
     {row.flowId && <Link className="mt-2 inline-block text-primary underline" to={`/runs/${encodeURIComponent(row.flowId)}`}>运行详情、节点与日志</Link>}
@@ -147,8 +150,9 @@ export default function RepairTrialPanel({ taskId, revision, enabled, open, onCl
   const readFailure = loadError && <div className="space-y-2"><p role="alert" className="text-sm text-destructive">{loadError}</p><button className={button} onClick={() => setLoadAttempt(value => value + 1)}>重新读取参数</button></div>
   if (!open && !error && !records.length) return null
   return <section aria-label="候选试跑" className="mt-4 space-y-3 border-t border-input pt-4">
-    {open && <RepairDialog title={`先试跑候选 v${revision.revision}`} onClose={onClose} footer={actions}><div className="space-y-3">
+    {open && <RepairDialog title={`${canStart ? '先试跑候选' : '查看候选试跑选项'} v${revision.revision}`} onClose={onClose} footer={actions}><div className="space-y-3">
       <p className="text-sm text-muted-foreground">这是真实执行，可能调用 MCP 或写入业务系统。不会自动发布，也不计入正式版本效果。</p>
+      {!canStart && <p className="text-sm text-muted-foreground">当前不可启动试跑。启动需要工作流执行权限，自动任务还需要编辑权限。</p>}
       {readFailure}
       {!options ? loadError ? null
         : <p role="status">正在读取候选参数和授权生产 Bot…</p> : <>

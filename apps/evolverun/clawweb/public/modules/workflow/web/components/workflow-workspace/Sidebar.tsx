@@ -8,7 +8,6 @@ type NavItem = { key: WorkspaceView; label: string; icon: WorkspaceIcon; count?:
 interface SidebarProps {
   activeView: WorkspaceView
   onViewChange: (view: WorkspaceView) => void
-  isAdmin: boolean
   hasWorkflow: boolean
   counts?: { diagnosis?: number; remedies?: number }
   compact?: boolean
@@ -37,7 +36,7 @@ function NavButton({ item, active, onClick, compact = false }: { item: NavItem; 
   </button>
 }
 
-export default function Sidebar({ activeView, onViewChange, isAdmin, hasWorkflow, counts, compact = false }: SidebarProps) {
+export default function Sidebar({ activeView, onViewChange, hasWorkflow, counts, compact = false }: SidebarProps) {
   const analysisItems: NavItem[] = [
     { key: 'overview', label: '运行概览', icon: 'overview' },
     { key: 'diagnosis', label: '问题与优化', icon: 'diagnosis', count: counts?.diagnosis },
@@ -56,7 +55,7 @@ export default function Sidebar({ activeView, onViewChange, isAdmin, hasWorkflow
       </div>
     </div>
     <div className={`relative min-h-0 flex-1 overflow-y-auto ${compact ? 'px-2' : 'px-3'} py-4`}>
-      <div className="mb-5"><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>全局</p>{isAdmin && <NavButton compact={compact} item={{ key: 'dashboard', label: '数据大盘', icon: 'dashboard' }} active={activeView === 'dashboard'} onClick={() => onViewChange('dashboard')} />}<NavButton compact={compact} item={{ key: 'workbench', label: '工作台', icon: 'workbench' }} active={activeView === 'workbench'} onClick={() => onViewChange('workbench')} /></div>
+      <div className="mb-5"><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>全局</p><NavButton compact={compact} item={{ key: 'dashboard', label: '数据大盘', icon: 'dashboard' }} active={activeView === 'dashboard'} onClick={() => onViewChange('dashboard')} /><NavButton compact={compact} item={{ key: 'workbench', label: '工作台', icon: 'workbench' }} active={activeView === 'workbench'} onClick={() => onViewChange('workbench')} /></div>
 
       {hasWorkflow && <><div className="mb-5"><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>分析与改进</p><div className="space-y-0.5">{analysisItems.map((item) => <NavButton compact={compact} key={item.key} item={item} active={activeView === item.key} onClick={() => onViewChange(item.key)} />)}</div></div><div><p className={compact ? 'sr-only' : 'mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'}>工作流配置</p><div className="space-y-0.5">{configItems.map((item) => <NavButton compact={compact} key={item.key} item={item} active={activeView === item.key} onClick={() => onViewChange(item.key)} />)}</div></div></>}
     </div>

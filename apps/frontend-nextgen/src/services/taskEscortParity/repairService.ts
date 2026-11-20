@@ -1,9 +1,10 @@
 import type { RepairQuery, RepairVerification, RepairVerificationScope } from '@/domain/taskEscortParity/repairTypes';
-import { repairController as api } from '@/services/backendApi/harnessFlow/repairController';
+import { repairController as api, type CreateManualRepairRequest } from '@/services/backendApi/harnessFlow/repairController';
 import { array, count, match, object, text } from './evolutionMapper';
 import { evolutionRead } from './evolutionService';
 import { candidatesView, repairItemView, taskView } from './repairMapper';
 export const repairService = {
+  createManual: (input: CreateManualRepairRequest, user: string, signal: AbortSignal) => api.createManual(input, user, signal),
   candidates: (wf: string, user: string, query: RepairQuery, signal: AbortSignal) =>
     evolutionRead(async () => {
       const first = await api.candidates(wf, user, { ...query, metadataPage: 1 }, signal);
@@ -13,6 +14,8 @@ export const repairService = {
         signal.throwIfAborted();
         const next = await api.candidates(wf, user, { ...query, metadataPage: page }, signal);
         if (
+          next.canEdit !== first.canEdit ||
+          next.canOptimize !== first.canOptimize ||
           next.inputDigest !== first.inputDigest ||
           next.metadata?.digest !== first.metadata?.digest ||
           next.metadata?.totalPages !== pages

@@ -114,22 +114,34 @@ beforeEach(() => {
   request.mockImplementation(async (url) => payload(url.replace(base, '')) as any);
 });
 
-it('runs the actual Dashboard → hook → real service → gateway controller with no demo/sample route', async () => {
-  const ui = render(<Dashboard demo={demo} scope={{ key: 'identity:space', ready: false }} />);
-  expect(request).not.toHaveBeenCalled();
-  ui.rerender(<Dashboard demo={demo} scope={{ key: 'identity:space', ready: true }} />);
-  expect(await screen.findByText('1,234')).toBeTruthy();
-  expect(screen.getByText('87.5%')).toBeTruthy();
-  expect(request).toHaveBeenCalledTimes(5);
-  request.mock.calls.forEach(([url, options]) => {
-    expect(url.startsWith(base)).toBe(true);
-    expect(options?.method).toBe('GET');
-    expect(options?.params).not.toHaveProperty('workflowId');
-    expect(options?.params).not.toHaveProperty('demo');
-    expect((options?.params?.to as number) - (options?.params?.from as number)).toBe(604800);
-  });
-  expect(screen.queryByText(/演示|研发效能|模拟快照/)).toBeNull();
-});
+it.each(['ordinary-user:space', 'admin-selector:space'])(
+  'reads the same five scoped GETs for ready identity %s without forwarding selector roles or IDs',
+  async (identityKey) => {
+    const ui = render(<Dashboard demo={demo} scope={{ key: identityKey, ready: false }} />);
+    expect(request).not.toHaveBeenCalled();
+    ui.rerender(<Dashboard demo={demo} scope={{ key: identityKey, ready: true }} />);
+    expect(await screen.findByText('1,234')).toBeTruthy();
+    expect(screen.getByText('87.5%')).toBeTruthy();
+    expect(request).toHaveBeenCalledTimes(5);
+    expect(request.mock.calls.map(([url]) => url).sort()).toEqual(
+      ['overview', 'daily-trend', 'failure-hotspots', 'workflow-health', 'workflow-release-stats']
+        .map((route) => `${base}${route}`)
+        .sort(),
+    );
+    expect(screen.getAllByText(/当前权限范围$/)).toHaveLength(2);
+    request.mock.calls.forEach(([url, options]) => {
+      expect(url.startsWith(base)).toBe(true);
+      expect(Object.keys(options?.params ?? {}).sort()).toEqual(
+        url === `${base}failure-hotspots` ? ['from', 'limit', 'to'] : ['from', 'to'],
+      );
+      expect(options?.method).toBe('GET');
+      expect(options?.params).not.toHaveProperty('workflowId');
+      expect(options?.params).not.toHaveProperty('demo');
+      expect((options?.params?.to as number) - (options?.params?.from as number)).toBe(604800);
+    });
+    expect(screen.queryByText(/演示|研发效能|模拟快照|管理员|全局运行健康|全局数据|全量视角/)).toBeNull();
+  },
+);
 it('drives real local time requests, filtering/sorting and workflow navigation through accessible controls', async () => {
   const user = userEvent.setup();
   render(<Dashboard demo={demo} scope={{ key: 'identity:space', ready: true }} />);
@@ -159,14 +171,19 @@ it('drives real local time requests, filtering/sorting and workflow navigation t
   expect(demo.navigate).toHaveBeenCalledWith('workbench');
   expect(demo.setWorkflowId).toHaveBeenCalledWith('workflow-high');
 });
-it('handles a genuine forbidden error at the protocol boundary with no partial data leakage', async () => {
+it.each([
+  Object.assign(new Error('Access denied'), { status: 403 }),
+  Object.assign(new Error('Access denied'), { data: { code: 'FORBIDDEN' } }),
+  new Error('只有管理员可以查看全局数据大盘'),
+])('handles forbidden error %s with generic guidance and no partial data leakage', async (error) => {
   request.mockImplementation(async (url) => {
-    if (url.endsWith('failure-hotspots'))
-      throw Object.assign(new Error('只有管理员可以查看全局数据大盘'), { status: 403 });
+    if (url.endsWith('failure-hotspots')) throw error;
     return payload(url.replace(base, '')) as any;
   });
   render(<Dashboard demo={demo} scope={{ key: 'identity:space', ready: true }} />);
-  expect(await screen.findByText('只有管理员可以查看全局数据大盘')).toBeTruthy();
+  expect(await screen.findByText('当前无法查看大盘数据')).toBeTruthy();
+  expect(screen.getByText('请确认当前身份与空间是否有访问权限，或联系权限负责人后重试')).toBeTruthy();
+  expect(screen.queryByText(/管理员|全局运行健康|全局数据|全量视角/)).toBeNull();
   expect(screen.queryByText('1,234')).toBeNull();
   expect(screen.queryByRole('table', { name: '工作流列表' })).toBeNull();
 });

@@ -46,11 +46,15 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
     return new BotWorkflowPermissionRepository(db, this.botDirectory);
   }
 
+  private browserKey(column: "workflow_id" | "bot_id" | "bot_owner_id"): string {
+    return this.db.dbType === "sqlite" ? `${column} COLLATE BINARY` : `CAST(${column} AS BINARY)`;
+  }
+
   /** Web users inherit only exact Bot grants, never the Bot owner's personal grants.
    * Directory failures remove this additional access path; direct grants still work.
    * Do not cache relationships here: membership removal must take effect on the next check.
    */
-  private async inheritedGrants(userId: string, workflowId?: string): Promise<BotWorkflowPermissionRow[]> {
+  private async inheritedGrants(userId: string, workflowId?: string, browser = false): Promise<BotWorkflowPermissionRow[]> {
     if (!this.botDirectory) return [];
     let bots: DirectoryBot[];
     try {
@@ -61,22 +65,25 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
     }
     const identities = new Map<string, { botId: string; ownerId: string }>();
     for (const bot of bots) {
-      const botId = bot.botId?.trim();
-      const ownerId = bot.ownerId?.trim();
+      const botId = browser ? bot.botId : bot.botId?.trim();
+      const ownerId = browser ? bot.ownerId : bot.ownerId?.trim();
       if (!botId || botId === "*" || !ownerId || ownerId === "*") continue;
       identities.set(JSON.stringify([botId, ownerId]), { botId, ownerId });
     }
     const pairs = [...identities.values()];
     const grants: BotWorkflowPermissionRow[] = [];
+    const botKey = browser ? this.browserKey("bot_id") : "bot_id";
+    const ownerKey = browser ? this.browserKey("bot_owner_id") : "bot_owner_id";
+    const workflowKey = browser ? this.browserKey("workflow_id") : "workflow_id";
     // Bound SQL placeholders for users with many Bots on both SQLite and MySQL.
     for (let offset = 0; offset < pairs.length; offset += 100) {
       const batch = pairs.slice(offset, offset + 100);
-      const conditions = batch.map(() => "(bot_id = ? AND (bot_owner_id = ? OR bot_owner_id = '*'))");
+      const conditions = batch.map(() => `(${botKey} = ? AND (${ownerKey} = ? OR ${ownerKey} = '*'))`);
       const params = batch.flatMap(({ botId, ownerId }) => [botId, ownerId]);
       if (workflowId) params.push(workflowId);
       const rows = await this.db.query<BotWorkflowPermissionRow>(
         `SELECT ${SELECT_COLUMNS} FROM bot_workflow_permissions
-         WHERE (${conditions.join(" OR ")})${workflowId ? " AND workflow_id = ?" : ""}`,
+         WHERE (${conditions.join(" OR ")})${workflowId ? ` AND ${workflowKey} = ?` : ""}`,
         params,
       );
       grants.push(...rows);
@@ -313,6 +320,44 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
       else scopes.set(row.workflow_id, { bots: [bot] });
     }
     return scopes;
+  }
+
+  /**
+   * The browser workflow capability is strictly can_view, including exact
+   * collaborative Bot grants and explicit global grants. An empty result is a
+   * whitelist with no grants, not the legacy unrestricted-list sentinel.
+   * This does not change runtime, edit, or legacy run-view policy.
+   */
+  async listBrowserViewableWorkflowIds(userId: string, workflowId?: string): Promise<Set<string>> {
+    if (!userId || userId === "*" || userId !== userId.trim() || workflowId === "") return new Set();
+    const owner = this.browserKey("bot_owner_id"), bot = this.browserKey("bot_id"), workflow = this.browserKey("workflow_id");
+    // No case-folding DISTINCT: two exact IDs may share an otherwise insensitive collation.
+    const direct = await this.db.query<Pick<BotWorkflowPermissionRow, "workflow_id">>(
+      `SELECT workflow_id FROM bot_workflow_permissions
+       WHERE can_view = 1 AND (${owner} = ?
+         OR (${owner} = '*' AND (bot_id IS NULL OR ${bot} IN ('', '*'))))
+         ${workflowId === undefined ? "" : `AND ${workflow} = ?`}`,
+      workflowId === undefined ? [userId] : [userId, workflowId],
+    );
+    const inherited = await this.inheritedGrants(userId, workflowId, true);
+    const ids = new Set(direct.map(row => row.workflow_id));
+    for (const row of inherited) {
+      if (row.can_view === 1) ids.add(row.workflow_id);
+    }
+    return ids;
+  }
+
+  /** Exact checks for newly exposed browser actions; concrete Bot checks do
+   * not inherit any additional collaborative grants or runtime shortcuts. */
+  async hasBrowserPermission(workflowId: string, userId: string, field: 'can_view' | 'can_edit' | 'can_execute', botId?: string): Promise<boolean> {
+    if (!workflowId || !userId || userId === '*' || userId !== userId.trim()) return false;
+    const owner = this.browserKey("bot_owner_id"), bot = this.browserKey("bot_id"), workflow = this.browserKey("workflow_id");
+    const allBots = `(bot_id IS NULL OR ${bot} IN ('', '*'))`;
+    const direct = await this.db.query<{ matched: number }>(`SELECT 1 AS matched FROM bot_workflow_permissions
+      WHERE ${workflow} = ? AND ${field} = 1 AND ((${owner} = '*' AND ${allBots})
+        OR (${owner} = ?${botId ? ` AND (${allBots} OR ${bot} = ?)` : ''})) LIMIT 1`,
+      botId ? [workflowId, userId, botId] : [workflowId, userId]);
+    return direct.length > 0 || !botId && (await this.inheritedGrants(userId, workflowId, true)).some(row => row[field] === 1);
   }
 
   /**

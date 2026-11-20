@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { dashboardApi, isDemoMode } from './api'
+import { isDevAuthMode } from '@avernet/clawweb-shared/web/hooks/useClientUser'
+import { dashboardApi, isDemoMode, type DashboardQueryScope } from './api'
 import { TimeRangeSelector } from './components/TimeRangeSelector'
 import { KpiCard } from './components/KpiCard'
 import { WorkflowFullTable } from './components/WorkflowFullTable'
@@ -17,15 +18,50 @@ import type { TimeRangeKey, MetricKey, TrendGranularity } from '../../types/dash
 
 type TabKey = 'efficiency' | 'guardian'
 
-const DEMO_TABS: Array<{ key: TabKey; label: string; desc: string }> = [
+const TABS: Array<{ key: TabKey; label: string; desc: string }> = [
   { key: 'guardian', label: '任务护航', desc: '全局运行健康与处置进展' },
   { key: 'efficiency', label: '研发效能', desc: '工作流交付与发布质量' },
 ]
 
-// demo 模式在本次会话内固定(URL/env 触发整页重载),故取常量即可
-const DEMO = isDemoMode()
+type DashboardIdentity = Pick<DashboardQueryScope, 'userId' | 'isAdmin'>
 
 export default function DashboardPage({ embedded = false }: { embedded?: boolean }) {
+  const [user, setUser] = useState<DashboardIdentity | 'signed-out' | 'unavailable' | null>(null)
+  useEffect(() => {
+    // Use the app's /auth/me identity, but require a fresh role before reading
+    // the cache. The synchronous user can be a TERN hint or a prior session.
+    const controller = new AbortController()
+    const readIdentity = async () => {
+      const response = await fetch(isDevAuthMode() ? '/api/auth/me?dev=1' : '/api/auth/me', {
+        credentials: 'include', cache: 'no-store', signal: controller.signal,
+      })
+      if (response.status === 401) return 'signed-out' as const
+      if (!response.ok) return 'unavailable' as const
+      const { userId, isAdmin } = await response.json() as { userId?: unknown; isAdmin?: unknown }
+      if (typeof userId !== 'string' || !userId || typeof isAdmin !== 'boolean') return 'unavailable' as const
+      return { userId, isAdmin }
+    }
+    void readIdentity().then((identity) => {
+      if (!controller.signal.aborted) setUser(identity)
+    }).catch(() => {
+      if (!controller.signal.aborted) setUser('unavailable')
+    })
+    return () => controller.abort()
+  }, [])
+
+  if (!user || typeof user === 'string') {
+    return <p role="status" className="p-6 text-sm text-muted-foreground">{
+      user === 'signed-out' ? '请登录后查看数据大盘'
+        : user === 'unavailable' ? '暂无法确认数据大盘访问权限，请稍后重试。'
+        : '正在确认数据大盘访问权限…'
+    }</p>
+  }
+  const scope = { userId: user.userId, isAdmin: user.isAdmin, demo: user.isAdmin && isDemoMode() }
+  return <DashboardContent key={JSON.stringify(scope)} embedded={embedded} scope={scope} />
+}
+
+function DashboardContent({ embedded, scope }: { embedded: boolean; scope: DashboardQueryScope }) {
+  const { isAdmin, demo } = scope
   const [timeRange, setTimeRange] = useState<TimeRangeKey>('7d')
   const [guardianMetric, setGuardianMetric] = useState<GuardianMetricKind | null>(null)
   const [qualityRange, setQualityRange] = useState<WidgetRange>('global')
@@ -85,37 +121,37 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
 
   // ── Queries ──
   const overviewQ = useQuery({
-    queryKey: ['dashboard', 'overview', timeRange],
-    queryFn: () => dashboardApi.overview(from, to),
+    queryKey: ['dashboard', scope, 'overview', timeRange],
+    queryFn: () => dashboardApi.overview(from, to, demo),
     refetchInterval: 30_000,
   })
   const dailyTrendQ = useQuery({
-    queryKey: ['dashboard', 'daily-trend', from, to],
-    queryFn: () => dashboardApi.dailyTrend(from, to),
+    queryKey: ['dashboard', scope, 'daily-trend', from, to],
+    queryFn: () => dashboardApi.dailyTrend(from, to, demo),
   })
   const qualityTrendQ = useQuery({
-    queryKey: ['dashboard', 'daily-trend', qualityWindow.from, qualityWindow.to],
-    queryFn: () => dashboardApi.dailyTrend(qualityWindow.from, qualityWindow.to),
+    queryKey: ['dashboard', scope, 'daily-trend', qualityWindow.from, qualityWindow.to],
+    queryFn: () => dashboardApi.dailyTrend(qualityWindow.from, qualityWindow.to, demo),
   })
   const releaseQ = useQuery({
-    queryKey: ['dashboard', 'release-efficiency', timeRange],
-    queryFn: () => dashboardApi.releaseEfficiency(from, to),
+    queryKey: ['dashboard', scope, 'release-efficiency', timeRange],
+    queryFn: () => dashboardApi.releaseEfficiency(from, to, demo),
   })
   const failureQ = useQuery({
-    queryKey: ['dashboard', 'failure-hotspots', hotspotWindow.from, hotspotWindow.to],
-    queryFn: () => dashboardApi.failureHotspots(hotspotWindow.from, hotspotWindow.to),
+    queryKey: ['dashboard', scope, 'failure-hotspots', hotspotWindow.from, hotspotWindow.to],
+    queryFn: () => dashboardApi.failureHotspots(hotspotWindow.from, hotspotWindow.to, demo),
   })
   const releaseStatsQ = useQuery({
-    queryKey: ['dashboard', 'workflow-release-stats', workflowWindow.from, workflowWindow.to],
-    queryFn: () => dashboardApi.workflowReleaseStats(workflowWindow.from, workflowWindow.to),
+    queryKey: ['dashboard', scope, 'workflow-release-stats', workflowWindow.from, workflowWindow.to],
+    queryFn: () => dashboardApi.workflowReleaseStats(workflowWindow.from, workflowWindow.to, demo),
   })
   const healthQ = useQuery({
-    queryKey: ['dashboard', 'workflow-health', workflowWindow.from, workflowWindow.to],
-    queryFn: () => dashboardApi.workflowHealth(workflowWindow.from, workflowWindow.to),
+    queryKey: ['dashboard', scope, 'workflow-health', workflowWindow.from, workflowWindow.to],
+    queryFn: () => dashboardApi.workflowHealth(workflowWindow.from, workflowWindow.to, demo),
   })
   const guardianHealthQ = useQuery({
-    queryKey: ['dashboard', 'workflow-health', from, to],
-    queryFn: () => dashboardApi.workflowHealth(from, to),
+    queryKey: ['dashboard', scope, 'workflow-health', from, to],
+    queryFn: () => dashboardApi.workflowHealth(from, to, demo),
   })
 
   const overview = overviewQ.data
@@ -136,9 +172,9 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
 
   // 不可算指标占位:真实模式后端返 null → "—"+"暂不可算 · 需X";demo 模式走 mock 值
   const naNum = (v: number | null | undefined): number | string =>
-    !DEMO && v == null ? '—' : v ?? 0
+    !demo && v == null ? '—' : v ?? 0
   const naSub = (v: number | null | undefined, hint: string, normal?: string) =>
-    !DEMO && v == null ? `暂不可算 · 需${hint}` : normal
+    !demo && v == null ? `暂不可算 · 需${hint}` : normal
   // 研发效能的发布相关:SQLite 库无 workflow_deploy_history
   const deployNaSub = (v: number | null | undefined, normal?: string) =>
     naSub(v, 'MySQL deploy_history(当前库无此表)', normal)
@@ -149,19 +185,21 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold tracking-tight text-slate-950">管理员数据大盘</h1>
-            {DEMO && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">示例数据</span>}
+            <h1 className="text-xl font-semibold tracking-tight text-slate-950">{isAdmin ? '管理员数据大盘' : '数据大盘'}</h1>
+            {demo && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">示例数据</span>}
           </div>
-          <p className="mt-1 text-sm text-slate-500">全局运行健康、护航进展与风险工作流</p>
+          <p className="mt-1 text-sm text-slate-500">{isAdmin ? '全局运行健康、护航进展与风险工作流' : '仅统计您有权查看的工作流 · 运行健康、护航进展与发布质量'}</p>
         </div>
         <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
       </div>
 
-      {/* ── 两模块大盘(真实模式默认;?demo=1 走 mock 预览)── */}
+      {overviewQ.isError && <p role="alert" className="mb-4 text-sm text-destructive">数据大盘暂不可用，请稍后重试。</p>}
+
+      {/* ── 两模块大盘(真实模式默认;管理员可用 ?demo=1 预览)── */}
       <>
           {/* 模块切换 */}
           <div className="mb-6 inline-flex rounded-lg border border-slate-200 bg-slate-100/70 p-1">
-            {DEMO_TABS.map((t) => (
+            {TABS.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
@@ -172,7 +210,7 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
                 }`}
               >
                 <span className="font-medium">{t.label}</span>
-                <span className={`ml-2 hidden text-[11px] sm:inline ${tab === t.key ? 'text-slate-500' : 'text-slate-400'}`}>{t.desc}</span>
+                <span className={`ml-2 hidden text-[11px] sm:inline ${tab === t.key ? 'text-slate-500' : 'text-slate-400'}`}>{!isAdmin && t.key === 'guardian' ? '运行健康与处置进展' : t.desc}</span>
               </button>
             ))}
           </div>
@@ -219,18 +257,19 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
                 />
               </div>
               <div className="mb-6">
-                <ReleaseQualityTrendChart from={from} to={to} globalRangeLabel={rangeLabel} />
+                <ReleaseQualityTrendChart scope={scope} from={from} to={to} globalRangeLabel={rangeLabel} />
               </div>
 
               {/* 工作流列表(运行+发布全景,分页;点行→L3) */}
               <div className="mb-6 rounded-xl bg-white p-5 shadow-sm">
                 <div className="mb-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><h3 className="text-sm font-semibold text-gray-900">工作流列表</h3><p className="mt-0.5 text-[11px] text-gray-400">{workflowWindow.label}运行与发布口径 · 研发周期/最近部署为全周期口径 · 点行进单工作流详情</p></div>
+                    <div><h3 className="text-sm font-semibold text-gray-900">工作流列表</h3><p className="mt-0.5 text-[11px] text-gray-400">{workflowWindow.label}运行与发布口径 · 研发周期/最近部署为全周期口径{isAdmin && ' · 点行进单工作流详情'}</p></div>
                     <WidgetRangeSelector ariaLabel="工作流列表时间范围" value={workflowRange} globalLabel={rangeLabel} onChange={setWorkflowRange} />
                   </div>
                 </div>
                 <WorkflowFullTable
+                  canOpenDetails={isAdmin}
                   healthRows={healthQ.data?.workflows ?? []}
                   releaseRows={releaseStatsQ.data?.available ? releaseStatsQ.data.workflows : null}
                   isLoading={healthQ.isLoading || releaseStatsQ.isLoading}
@@ -248,15 +287,15 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
                 <section className="rounded-2xl border border-slate-200 bg-slate-50/40 p-5" aria-labelledby="global-health-heading">
                   <div className="mb-4 flex items-end justify-between gap-4">
                     <div>
-                      <h2 id="global-health-heading" className="text-base font-semibold text-slate-950">全局运行健康</h2>
-                      <p className="mt-1 text-xs text-slate-500">{rangeLabel} · 管理员全量视角</p>
+                      <h2 id="global-health-heading" className="text-base font-semibold text-slate-950">{isAdmin ? '全局运行健康' : '运行健康'}</h2>
+                      <p className="mt-1 text-xs text-slate-500">{rangeLabel} · {isAdmin ? '管理员全量视角' : '授权工作流'}</p>
                     </div>
                     <button onClick={() => setGuardianMetric('incomplete')} className="text-xs font-medium text-blue-600 hover:text-blue-700">查看异常结束</button>
                   </div>
                   <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                     <KpiCard
                       label="运行数"
-                      value={overviewQ.isPending ? '—' : (overview?.totalRuns ?? 0).toLocaleString()}
+                      value={overview?.totalRuns.toLocaleString() ?? '—'}
                       color="blue"
                       sub={`${rangeLabel}全部运行`}
                       onClick={() => setGuardianMetric('runs')}
@@ -271,7 +310,7 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
                     />
                     <KpiCard
                       label="异常结束"
-                      value={overviewQ.isPending ? '—' : (overview?.failedCount ?? 0).toLocaleString()}
+                      value={overview?.failedCount.toLocaleString() ?? '—'}
                       color="rose"
                       sub="失败、终止或取消"
                       onClick={() => setGuardianMetric('incomplete')}
@@ -293,7 +332,7 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
                     ] as const).map(([status, label]) => (
                       <button key={status} type="button" onClick={() => setGuardianMetric(status)} className="flex items-center justify-between rounded-lg bg-white px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200 transition hover:border-blue-200 hover:text-blue-700">
                         <span>{label}</span>
-                        <span className="font-semibold tabular-nums text-slate-950">{overviewQ.isPending ? '—' : overview?.statusDistribution?.[status] ?? 0}</span>
+                        <span className="font-semibold tabular-nums text-slate-950">{overview ? overview.statusDistribution[status] ?? 0 : '—'}</span>
                       </button>
                     ))}
                   </div>
@@ -305,7 +344,7 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
                       <h2 id="escort-todo-heading" className="text-base font-semibold text-slate-950">护航待办</h2>
                       <p className="mt-1 text-xs text-slate-500">先处理复发，再清理验证积压</p>
                     </div>
-                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600">全局</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600">{isAdmin ? '全局' : '授权工作流'}</span>
                   </div>
                   <div className="mt-4 divide-y divide-slate-100 border-y border-slate-100">
                     {[
@@ -357,7 +396,7 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
                 </div>
               </section>
 
-              {(!DEMO && (healRate == null || overview?.onlineSuccessRate == null)) && (
+              {(!demo && (healRate == null || overview?.onlineSuccessRate == null)) && (
                 <div className="mb-6 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-2.5 text-[11px] text-slate-500">
                   数据能力待接入：自愈事件收口、线上与测试运行分轨。接入前不进入核心指标区。
                 </div>
@@ -374,12 +413,13 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
                   <div>
                     <h3 className="text-sm font-semibold text-slate-950">工作流列表</h3>
                     <p className="mt-0.5 text-[11px] text-slate-400">
-                      {workflowWindow.label}运行与发布数据 · 默认按运行成功率从低到高 · 点击行查看详情
+                      {workflowWindow.label}运行与发布数据 · 默认按运行成功率从低到高{isAdmin && ' · 点击行查看详情'}
                     </p>
                   </div>
                   <WidgetRangeSelector ariaLabel="工作流列表时间范围" value={workflowRange} globalLabel={rangeLabel} onChange={setWorkflowRange} />
                 </div>
                 <WorkflowFullTable
+                  canOpenDetails={isAdmin}
                   healthRows={healthQ.data?.workflows ?? []}
                   releaseRows={releaseStatsQ.data?.available ? releaseStatsQ.data.workflows : null}
                   isLoading={healthQ.isLoading || releaseStatsQ.isLoading}
@@ -393,6 +433,7 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
 
       {guardianMetric && overview && (
         <GuardianMetricDrawer
+          scope={scope}
           kind={guardianMetric}
           overview={overview}
           trend={trend?.dates ?? []}
@@ -406,6 +447,7 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
 
       {trendModal && (
         <MetricTrendModal
+          scope={scope}
           open
           metric={trendModal.metric}
           label={trendModal.label}

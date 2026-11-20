@@ -1,10 +1,11 @@
 import { workflowSnapshotKey, type WorkflowSnapshotRef } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
 import { itemSnapshotKey } from '../../../../server/contracts/repair-version-scope'
 import { useEffect, useRef, useState } from 'react'
-import { repairBatches } from '../../../api/repair-batches'
+import { repairBatches, type RepairCandidatePage } from '../../../api/repair-batches'
 import { repairActionFailure, type RepairRecoveryAction } from '../../../api/repair-action-error'
 import { repairReadError } from '../../../api/repair-read-error'
-import type { RepairCandidatesResponse, RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
+import type { RepairTaskDetail } from '../../../../server/contracts/repair-workbench'
+import { allowsRepairOptimization, isAutomaticRepair } from './repair-permissions'
 import RepairTaskPanel from './RepairTaskPanel'
 import RepairWorkspace from './RepairWorkspace'
 import { button, primary, RepairDialog } from './repair-view'
@@ -17,8 +18,8 @@ function feedbackItems(detail: RepairTaskDetail) {
   return [...new Map([...rows].sort((a,b)=>a.revision-b.revision).flatMap(row=>row.input.items.map(item=>[item.itemId,item] as const))).values()]
 }
 
-export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged, onNextRound, onPreviousRound, onWorkflowMismatch }: {
-  workflowId: string; taskId: string; includeHistorical: boolean; canEdit: boolean;
+export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, canOptimize = canEdit, canExecute = false, onClose, onChanged, onNextRound, onPreviousRound, onWorkflowMismatch }: {
+  workflowId: string; taskId: string; includeHistorical: boolean; canEdit: boolean; canOptimize?: boolean; canExecute?: boolean;
   onClose: () => void; onChanged: () => void; onNextRound?: (publishedRevision: number) => void; onPreviousRound?: () => void;
   onWorkflowMismatch?: () => void;
 }) {
@@ -39,7 +40,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const [feedbackItemIds, setFeedbackItemIds] = useState<string[]>([])
   const [frozenFeedbackItems, setFrozenFeedbackItems] = useState<RepairTaskDetail['latestAttempt']['input']['items']>([])
   const loadedFeedbackScope=useRef('')
-  const [feedbackCandidates, setFeedbackCandidates] = useState<RepairCandidatesResponse | null>(null)
+  const [feedbackCandidates, setFeedbackCandidates] = useState<RepairCandidatePage | null>(null)
   const [feedbackCandidatesLoading, setFeedbackCandidatesLoading] = useState(false)
   const [feedbackCandidatesError, setFeedbackCandidatesError] = useState('')
   const [feedbackPage, setFeedbackPage] = useState(1)
@@ -52,6 +53,9 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   workflowMismatch.current = onWorkflowMismatch
   const feedbackHasTarget = !!detail?.latestAttempt.input.items[0]?.context?.targetSnapshot
   const feedbackHistory = feedbackHasTarget || includeHistorical
+  const canOptimizeTask = !!detail && !loading && !taskError && (isAutomaticRepair(detail) ? canEdit : canOptimize)
+  const canEditTask = canEdit && !taskError && !loading && !recoveryAction
+  const feedbackDenied = !!feedbackCandidates && !allowsRepairOptimization(feedbackCandidates, canEdit)
 
   useEffect(() => {
     let current = true
@@ -124,7 +128,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const effectiveRecoveryAction = recoveryAction ?? (resultNeedsRead ? 'retry-result' : null)
   const reload = () => { setRefresh(value => value + 1); onChanged() }
   const openSelection = () => {
-    if (!detail || busy) return
+    if (!detail || busy || !canOptimizeTask || recoveryAction) return
     const key = `${taskId}:${detail.latestAttempt.revision}`
     if (editorRevision.current !== key) {
       editorRevision.current = key
@@ -151,7 +155,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     }
     setBusy(true); setError(''); setNotice(''); setDispatchError('')
     try {
-      if (effectiveRecoveryAction === 'retry-result' && canEdit) await repairBatches.retryResult(taskId, detail.latestAttempt.revision)
+      if (effectiveRecoveryAction === 'retry-result' && canOptimizeTask) await repairBatches.retryResult(taskId, detail.latestAttempt.revision)
       const result = acceptTask(await repairBatches.task(taskId))
       if (['drafting', 'publishing'].includes(result.latestAttempt.phase)) setRefresh(value => value + 1)
       setRecoveryAction(null)
@@ -164,17 +168,17 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     } finally { setBusy(false) }
   }
   const recoveryButton = (effectiveRecoveryAction || taskError) && <button type="button" className={button} disabled={busy} onClick={() => void recover()}>
-    {effectiveRecoveryAction === 'retry-result' && canEdit ? '核对原结果' : effectiveRecoveryAction === 'refresh-sources' ? '重新读取建议' : '核对任务状态'}
+    {effectiveRecoveryAction === 'retry-result' && canOptimizeTask ? '核对原结果' : effectiveRecoveryAction === 'refresh-sources' ? '重新读取建议' : '核对任务状态'}
   </button>
   const retryDispatch = async () => {
-    if (!detail || busy) return
+    if (!detail || busy || !canOptimizeTask || recoveryAction) return
     setBusy(true); setDispatchError('')
     try { await repairBatches.retryDispatch(taskId, detail.latestAttempt.revision); reload() }
     catch (reason) { setDispatchError(repairActionFailure(reason).message) }
     finally { setBusy(false) }
   }
   const retryGeneration = async () => {
-    if (!detail || busy) return
+    if (!detail || busy || !canOptimizeTask || recoveryAction) return
     const key = `retry:${detail.latestAttempt.revision}`
     if (!requestId.current || requestPayloadKey.current !== key) {
       requestId.current = globalThis.crypto.randomUUID(); requestPayloadKey.current = key
@@ -189,7 +193,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     } finally { setBusy(false) }
   }
   const cancel = async () => {
-    if (!detail || busy) return
+    if (!detail || busy || !canEditTask) return
     setBusy(true); setError('')
     try { await repairBatches.cancel(taskId, detail.latestAttempt.revision); setMode('detail'); reload() }
     catch (reason) { setError(repairActionFailure(reason).message) }
@@ -197,7 +201,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   }
   const feedbackAllowed=!!detail&&['failed','review','blocked','no_change'].includes(detail.latestAttempt.phase)
   const revise = async () => {
-    if (!detail || !feedbackCandidates || !feedbackItemIds.length || feedbackCandidatesLoading || feedbackCandidatesError || taskError || busy || effectiveRecoveryAction || !canEdit || !feedbackCandidates.canEdit
+    if (!detail || !feedbackCandidates || !feedbackItemIds.length || feedbackCandidatesLoading || feedbackCandidatesError || taskError || busy || effectiveRecoveryAction || !canOptimizeTask || feedbackDenied
       || !detail.capabilities.generation || !feedbackAllowed || feedbackItemIds.length>feedbackCandidates.limits.maxItems
       || editorRevision.current !== `${taskId}:${detail.latestAttempt.revision}`) return
     const target = detail.latestAttempt.input.items[0]?.context?.targetSnapshot as WorkflowSnapshotRef | undefined
@@ -236,9 +240,9 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     const frozenIds = new Set(frozenItems.map(item => item.itemId))
     const selectableItems = [...frozenItems, ...(feedbackCandidates?.items ?? []).filter(item => !frozenIds.has(item.itemId))]
     const maxItems = feedbackCandidates?.limits.maxItems ?? 100
-    const readOnly = !canEdit || feedbackCandidates?.canEdit === false || !detail.capabilities.generation || !feedbackAllowed
+    const readOnly = !canOptimizeTask || feedbackDenied || !detail.capabilities.generation || !feedbackAllowed
     const blocker = busy ? '正在提交或核对任务，请稍候…' : taskError ? '任务读取失败，请先核对任务状态。'
-      : !canEdit || feedbackCandidates?.canEdit === false ? '当前只有查看权限，不能生成候选。'
+      : !canOptimizeTask || feedbackDenied ? '当前只有查看权限，不能生成候选。'
       : !detail.capabilities.generation ? '生成服务尚未接入，仍可查看范围与候选。'
       : !feedbackAllowed ? '当前任务状态不允许生成新一轮；可返回审核查看进度。'
       : editorRevision.current !== `${taskId}:${detail.latestAttempt.revision}` ? '任务已进入新轮次，请返回审核后重新确认范围。'
@@ -291,7 +295,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   if (mode === 'cancel' && detail) return <RepairDialog title="取消修复任务" busy={busy} onClose={() => setMode('detail')}>
     <p className="text-xs leading-5 text-muted-foreground">取消任务会保留候选稿与历史记录，并释放处理项供后续重新选择。远端停止需另行核对；迟到结果不会重新激活本任务。</p>
     {error && <p role="alert" className="mt-3 text-xs text-destructive">{error}</p>}
-    <button type="button" className={`${primary} mt-4`} disabled={busy} onClick={() => void cancel()}>{busy ? '取消中…' : '确认取消任务'}</button>
+    <button type="button" className={`${primary} mt-4`} disabled={busy || !canEditTask} onClick={() => void cancel()}>{busy ? '取消中…' : '确认取消任务'}</button>
   </RepairDialog>
 
   return <section aria-label="Workflow 修复工作区" className="mx-auto max-w-[96rem] space-y-5 pb-8">
@@ -301,7 +305,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     {taskError && <p role="alert" className="text-xs text-destructive">{taskError} <button type="button" className={button} disabled={busy} onClick={reload}>重试读取任务</button></p>}
     {(error || notice || effectiveRecoveryAction) && <div className="flex flex-wrap items-center gap-3 rounded-lg border border-input bg-card p-4"><p role={error ? 'alert' : 'status'} className="text-xs text-muted-foreground">{error || notice || dispatchError}</p>{recoveryButton}</div>}
     {detail && <RepairTaskPanel key={detail.taskId}
-      detail={detail} onHistoryPageChange={setHistoryPage} canEdit={canEdit && !taskError && !loading && !recoveryAction} busy={busy} dispatchError={recoveryAction ? '' : dispatchError}
+      detail={detail} onHistoryPageChange={setHistoryPage} canEdit={canEditTask} canOptimize={canOptimizeTask && !recoveryAction} canExecute={canExecute && !taskError && !loading && !recoveryAction} busy={busy} dispatchError={recoveryAction ? '' : dispatchError}
       onFeedback={openSelection}
       onNextRound={onNextRound}
       onCancel={() => { setError(''); setMode('cancel') }} onRetryDispatch={() => void retryDispatch()} onRetryGeneration={() => void retryGeneration()} onRefresh={reload} />}

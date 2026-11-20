@@ -4,6 +4,8 @@
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 
+import { exactRunKey } from "./run-evidence-scope.js";
+
 export type NodeStepTraceRow = {
   id: number;
   flow_id: string;
@@ -178,17 +180,17 @@ export class NodeStepTraceRepository {
       if (options?.stepType) {
         return await this.db.query<NodeStepTraceRow>(
           `SELECT * FROM node_step_traces
-           WHERE flow_id = ? AND node_id = ? AND attempt = ? AND step_type = ?
+           WHERE flow_id = ? AND ${exactRunKey(this.db, "flow_id")} AND ${exactRunKey(this.db, "node_id")} AND attempt = ? AND step_type = ?
            ORDER BY step_seq ASC LIMIT ? OFFSET ?`,
-          [flowId, nodeId, attempt, options.stepType, limit, offset],
+          [flowId, flowId, nodeId, attempt, options.stepType, limit, offset],
         );
       }
 
       return await this.db.query<NodeStepTraceRow>(
         `SELECT * FROM node_step_traces
-         WHERE flow_id = ? AND node_id = ? AND attempt = ?
+         WHERE flow_id = ? AND ${exactRunKey(this.db, "flow_id")} AND ${exactRunKey(this.db, "node_id")} AND attempt = ?
          ORDER BY step_seq ASC LIMIT ? OFFSET ?`,
-        [flowId, nodeId, attempt, limit, offset],
+        [flowId, flowId, nodeId, attempt, limit, offset],
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -206,10 +208,10 @@ export class NodeStepTraceRepository {
     try {
       return await this.db.query<NodeStepTraceRow>(
         `SELECT * FROM node_step_traces
-         WHERE flow_id = ?
+         WHERE flow_id = ? AND ${exactRunKey(this.db, "flow_id")}
          ORDER BY node_id, attempt, step_seq ASC
          LIMIT ? OFFSET ?`,
-        [flowId, limit, offset],
+        [flowId, flowId, limit, offset],
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -227,9 +229,9 @@ export class NodeStepTraceRepository {
     try {
       const rows = await this.db.query<NodeStepTraceRow>(
         `SELECT * FROM node_step_traces
-         WHERE flow_id = ? AND node_id = ? AND attempt = ? AND step_seq = ?
+         WHERE flow_id = ? AND ${exactRunKey(this.db, "flow_id")} AND ${exactRunKey(this.db, "node_id")} AND attempt = ? AND step_seq = ?
          LIMIT 1`,
-        [flowId, nodeId, attempt, stepSeq],
+        [flowId, flowId, nodeId, attempt, stepSeq],
       );
       return rows[0] ?? null;
     } catch (error) {
@@ -250,9 +252,9 @@ export class NodeStepTraceRepository {
            SUM(CASE WHEN step_type = 'tool_call' THEN 1 ELSE 0 END) AS tool_call_count,
            SUM(CASE WHEN is_error = 1 THEN 1 ELSE 0 END) AS tool_error_count
          FROM node_step_traces
-         WHERE flow_id = ?
+         WHERE flow_id = ? AND ${exactRunKey(this.db, "flow_id")}
          GROUP BY node_id, attempt`,
-        [flowId],
+        [flowId, flowId],
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

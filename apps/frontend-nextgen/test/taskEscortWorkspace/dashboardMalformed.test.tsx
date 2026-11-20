@@ -38,7 +38,7 @@ it.each([
     render(<Dashboard demo={demo} scope={{ key: 'real-user:real-space', ready: true }} />);
     await screen.findByText(/大盘接口返回了非预期的数据结构，请重试/);
     expect(screen.getByText('1,234')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '管理员数据大盘' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '任务护航数据大盘' })).toBeTruthy();
     const calls = request.mock.calls.length;
     corrupt = false;
     fireEvent.click(screen.getByRole('button', { name: retryLabel }));

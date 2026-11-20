@@ -20,6 +20,8 @@ import * as mock from './mock'
 
 const BASE = '/api'
 
+export type DashboardQueryScope = Readonly<{ userId: string; isAdmin: boolean; demo: boolean }>
+
 /**
  * Demo 模式:打开后大盘展示"目标形态"(指标体系设计 spec §6 的可视化),
  * 数据全部来自 mock.ts,不调后端。后端发布机制/场景能力落地后,
@@ -54,12 +56,12 @@ export function isDemoMode(): boolean {
 }
 
 export const dashboardApi = {
-  overview(from: number, to: number): Promise<IDashboardOverview> {
-    if (isDemoMode()) return Promise.resolve(mock.mockOverview(from, to))
+  overview(from: number, to: number, demo = isDemoMode()): Promise<IDashboardOverview> {
+    if (demo) return Promise.resolve(mock.mockOverview(from, to))
     return fetchJson<IDashboardOverview>(`${BASE}/dashboard/overview?from=${from}&to=${to}`)
   },
-  dailyTrend(from: number, to: number): Promise<IDashboardDailyTrend> {
-    if (isDemoMode()) return Promise.resolve(mock.mockDailyTrend(from, to))
+  dailyTrend(from: number, to: number, demo = isDemoMode()): Promise<IDashboardDailyTrend> {
+    if (demo) return Promise.resolve(mock.mockDailyTrend(from, to))
     return fetchJson<IDashboardDailyTrend>(`${BASE}/dashboard/daily-trend?from=${from}&to=${to}`)
   },
   durationDistribution(from: number, to: number): Promise<IDashboardDurationDistribution> {
@@ -80,30 +82,30 @@ export const dashboardApi = {
     if (isDemoMode()) return Promise.resolve(mock.mockSceneBreakdown(from, to))
     return fetchJson<IDashboardSceneBreakdown>(`${BASE}/dashboard/scene-breakdown?from=${from}&to=${to}`)
   },
-  releaseEfficiency(from: number, to: number): Promise<IDashboardReleaseEfficiency> {
-    if (isDemoMode()) return Promise.resolve(mock.mockReleaseEfficiency(from, to))
+  releaseEfficiency(from: number, to: number, demo = isDemoMode()): Promise<IDashboardReleaseEfficiency> {
+    if (demo) return Promise.resolve(mock.mockReleaseEfficiency(from, to))
     return fetchJson<IDashboardReleaseEfficiency>(`${BASE}/dashboard/release-efficiency?from=${from}&to=${to}`)
   },
-  failureHotspots(from: number, to: number): Promise<IDashboardFailureHotspots> {
-    if (isDemoMode()) return Promise.resolve(mock.mockFailureHotspots(from, to))
+  failureHotspots(from: number, to: number, demo = isDemoMode()): Promise<IDashboardFailureHotspots> {
+    if (demo) return Promise.resolve(mock.mockFailureHotspots(from, to))
     return fetchJson<IDashboardFailureHotspots>(`${BASE}/dashboard/failure-hotspots?from=${from}&to=${to}`)
   },
-  metricTrend(metric: MetricKey, granularity: TrendGranularity, from: number, to: number): Promise<IDashboardMetricTrend> {
-    if (isDemoMode()) return Promise.resolve(mock.mockMetricTrend(metric, granularity, from, to))
+  metricTrend(metric: MetricKey, granularity: TrendGranularity, from: number, to: number, demo = isDemoMode()): Promise<IDashboardMetricTrend> {
+    if (demo) return Promise.resolve(mock.mockMetricTrend(metric, granularity, from, to))
     return fetchJson<IDashboardMetricTrend>(`${BASE}/dashboard/metric-trend?metric=${metric}&granularity=${granularity}&from=${from}&to=${to}`)
   },
-  releaseQualityTrend(granularity: TrendGranularity, from: number, to: number): Promise<IDashboardReleaseQualityTrend> {
-    if (isDemoMode()) return Promise.resolve(mock.mockReleaseQualityTrend(granularity, from, to))
+  releaseQualityTrend(granularity: TrendGranularity, from: number, to: number, demo = isDemoMode()): Promise<IDashboardReleaseQualityTrend> {
+    if (demo) return Promise.resolve(mock.mockReleaseQualityTrend(granularity, from, to))
     return fetchJson<IDashboardReleaseQualityTrend>(`${BASE}/dashboard/release-quality-trend?granularity=${granularity}&from=${from}&to=${to}`)
   },
-  workflowReleaseStats(from: number, to: number): Promise<IWorkflowReleaseStats> {
-    if (isDemoMode()) return Promise.resolve(mock.mockWorkflowReleaseStats(from, to))
+  workflowReleaseStats(from: number, to: number, demo = isDemoMode()): Promise<IWorkflowReleaseStats> {
+    if (demo) return Promise.resolve(mock.mockWorkflowReleaseStats(from, to))
     return fetchJson<IWorkflowReleaseStats>(`${BASE}/dashboard/workflow-release-stats?from=${from}&to=${to}`)
   },
 
   // ── L2/L3 下钻端点 ──
-  workflowHealth(from: number, to: number): Promise<IWorkflowHealthResponse> {
-    if (isDemoMode()) return Promise.resolve(mock.mockWorkflowHealth(from, to))
+  workflowHealth(from: number, to: number, demo = isDemoMode()): Promise<IWorkflowHealthResponse> {
+    if (demo) return Promise.resolve(mock.mockWorkflowHealth(from, to))
     return fetchJson<IWorkflowHealthResponse>(`${BASE}/dashboard/workflow-health?from=${from}&to=${to}`)
   },
   workflowMetrics(workflowId: string, from: number, to: number): Promise<IWorkflowMetricsResponse> {

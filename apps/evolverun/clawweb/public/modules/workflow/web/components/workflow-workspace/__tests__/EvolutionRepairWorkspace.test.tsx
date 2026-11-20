@@ -2,10 +2,45 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
-import { render, repairApi, repairItem, repairPage, openIssueRepairs, closeIssue } from './evolution-issue-fixture'
+import { render, repairApi, repairItem, repairPage, lifecycle, applyBatch, mutate, openIssueRepairs, closeIssue } from './evolution-issue-fixture'
 import EvolutionTab from '../EvolutionTab'
 
 describe('repair selection workspace', () => {
+  it('lets an optimizing viewer select and generate a manual draft without granting disposition or legacy apply', async () => {
+    lifecycle.canEdit = false
+    repairApi.candidates.mockResolvedValue({ ...repairPage(), canEdit: false, canOptimize: true })
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await openIssueRepairs()
+    expect(screen.queryByRole('button', { name: /暂不处理 将超时阈值/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '应用建议' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
+    await closeIssue()
+    await userEvent.click(screen.getByRole('button', { name: '生成优化草稿（1）' }))
+    const workspace = screen.getByRole('region', { name: 'Workflow 修复工作区' })
+    await userEvent.click(await within(workspace).findByRole('button', { name: '查看问题与证据 ↗' }))
+    const evidence = screen.getByRole('dialog', { name: '问题、建议与证据' })
+    expect(within(evidence).getByRole('checkbox', { name: /选择 将超时阈值/ })).toBeEnabled()
+    expect(within(evidence).queryByRole('button', { name: /暂不处理 将超时阈值/ })).not.toBeInTheDocument()
+    await userEvent.click(within(evidence).getByRole('button', { name: '关闭' }))
+    await userEvent.type(within(workspace).getByRole('textbox', { name: '本次修复要求' }), '保持现有分支')
+    await userEvent.click(within(workspace).getByRole('button', { name: '生成 Pack 草稿' }))
+    expect(repairApi.create).toHaveBeenCalledOnce()
+    expect(repairApi.create.mock.calls[0][0]).toMatchObject({ itemIds: ['item-1'], instructions: '保持现有分支' })
+    expect(repairApi.create.mock.calls[0][0]).not.toHaveProperty('automation')
+    expect(repairApi.disposition).not.toHaveBeenCalled()
+    expect(applyBatch).not.toHaveBeenCalled()
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, false])('keeps viewer selection disabled with canOptimize=%s', async canOptimize => {
+    lifecycle.canEdit = false
+    repairApi.candidates.mockResolvedValue({ ...repairPage(), canEdit: false, canOptimize })
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await openIssueRepairs(false)
+    expect(screen.getByRole('checkbox', { name: /选择 将超时阈值/ })).toBeDisabled()
+    expect(repairApi.create).not.toHaveBeenCalled()
+  })
+
   it('finds a committed task after losing the create response without creating another task', async () => {
     let committed = false
     repairApi.candidates.mockImplementation(() => Promise.resolve(repairPage({ tasks: committed
@@ -41,9 +76,12 @@ describe('repair selection workspace', () => {
     expect(repairApi.create).toHaveBeenCalledTimes(1)
   })
 
-  it('rechecks changed sources and retains unchanged selections and requirements', async () => {
+  it.each([false, true])('rechecks changed sources and retains selection and requirements (viewer=%s)', async viewer => {
     let changed = false
-    repairApi.candidates.mockImplementation(() => Promise.resolve({ ...repairPage(), inputDigest: (changed ? 'f' : 'c').repeat(64) }))
+    lifecycle.canEdit = !viewer
+    const permissions = { canEdit: !viewer, ...(viewer ? { canOptimize: true } : {}) }
+    repairApi.candidates.mockImplementation(() => Promise.resolve({ ...repairPage(), ...permissions, inputDigest: (changed ? 'f' : 'c').repeat(64) }))
+    repairApi.selection.mockImplementation(() => Promise.resolve({ ...permissions, inputDigest: 'f'.repeat(64), items: [repairItem()], missing: [] }))
     repairApi.create.mockImplementationOnce(() => {
       changed = true
       return Promise.reject({ status: 409, body: JSON.stringify({ code: 'SOURCE_CHANGED' }) })

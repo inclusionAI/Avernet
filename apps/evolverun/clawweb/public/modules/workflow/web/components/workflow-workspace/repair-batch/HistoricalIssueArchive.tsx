@@ -2,11 +2,12 @@ import { useState, type ReactNode } from 'react'
 import { workflowSnapshotKey, type WorkflowSnapshotBinding } from '@avernet/clawweb-shared/server/contracts/workflow-snapshot'
 import { snapshotLabel } from '../../../../server/contracts/repair-version-scope'
 import { useIssueGroups } from '../issue-groups'
-import type { RepairCandidatesResponse, RepairInboxItem } from '../../../../server/contracts/repair-workbench'
+import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
+import type { RepairCandidatePage } from '../../../api/repair-batches'
 import IssueRepairSuggestions from './IssueRepairSuggestions'
 
-type Props = { workflowId: string; selected: string[]; canEdit: boolean; onToggle: (id: string) => void;
-  onResult: (result: RepairCandidatesResponse) => void; renderItem: (item: RepairInboxItem, canEdit: boolean) => ReactNode }
+type Props = { workflowId: string; selected: string[]; canEdit: boolean; canOptimize?: boolean; onToggle: (id: string) => void;
+  onResult: (result: RepairCandidatePage) => void; renderItem: (item: RepairInboxItem, canEdit: boolean, canOptimize: boolean) => ReactNode }
 type Group = NonNullable<ReturnType<typeof useIssueGroups>['data']>['groups'][number]
 // Archive previews carry version-local evidence, never a mixed-version summary or digest.
 type ArchivedGroup = Pick<Group, 'signature' | 'sources'>
