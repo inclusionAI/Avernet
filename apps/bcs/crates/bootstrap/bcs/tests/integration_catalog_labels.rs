@@ -125,6 +125,31 @@ async fn agent_http_persistence_retry_restart_and_full_payload(){
     let endpoint=format!("http://{addr}/api/v1/collaboration/a2a/agents/{id}/agent-card");
     let saved:Value=http.get(&endpoint).bearer_auth(&token).send().await.unwrap().json().await.unwrap();assert_eq!(saved["data"]["catalog_labels"],json!({"stage":["running"]}));
     let from=count(&mock);let response=http.put(&endpoint).bearer_auth(&token).json(&json!({"visibility":"private"})).send().await.unwrap();assert!(response.status().is_success());
-    let clear=payload(&mock,from,id,None).await;assert_eq!(clear["labels"]["visibility"],json!(["private"]));
+    let preserved=payload(&mock,from,id,Some("running")).await;assert_eq!(preserved["labels"]["visibility"],json!(["private"]));
+    // Both canonical URL aliases and Provider-ID legacy Card updates keep omission distinct from {}.
+    let provider_id=provider.provider_id;
+    for (endpoint,enveloped) in [
+        (endpoint.clone(),true),
+        (format!("http://{addr}/a2a/agents/{id}/agent-card"),false),
+        (format!("http://{addr}/providers/{provider_id}/bots/{id}/a2a"),false),
+    ] {
+        for expected in [None,Some(0)] {
+            let legacy_read:Value=http.get(format!("http://{addr}/providers/{provider_id}/bots/{id}/a2a")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+            let mut request=json!({"agent_card":raw_card()});
+            if expected.is_some() && endpoint.contains("/providers/") {request["expected_revision"]=legacy_read["revision"].clone();}
+            let from=count(&mock);
+            let response=http.put(&endpoint).bearer_auth(&token).json(&request).send().await.unwrap();
+            let status=response.status();let text=response.text().await.unwrap();assert_eq!(status,StatusCode::OK,"endpoint={endpoint}, response={text}");let saved:Value=serde_json::from_str(&text).unwrap();
+            let saved=if enveloped {&saved["data"]}else{&saved};assert_eq!(saved["catalog_labels"],json!({"stage":["running"]}));
+            assert_eq!(payload(&mock,from,id,Some("running")).await["labels"]["visibility"],json!(["private"]));
+        }
+        let from=count(&mock);
+        let response=http.put(&endpoint).bearer_auth(&token).json(&json!({"agent_card":raw_card(),"catalog_labels":{}})).send().await.unwrap();
+        assert!(response.status().is_success());assert!(payload(&mock,from,id,None).await["labels"].get("stage").is_none());
+        let response=http.put(&endpoint).bearer_auth(&token).json(&json!({"agent_card":raw_card(),"catalog_labels":{"stage":["running"]}})).send().await.unwrap();
+        assert!(response.status().is_success());
+        let saved:Value=http.get(&endpoint).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+        assert_eq!(if enveloped {&saved["data"]["catalog_labels"]}else{&saved["catalog_labels"]},&json!({"stage":["running"]}));
+    }
     state.lifecycle.lock().await.shutdown_all().await.unwrap();server.abort();catalog_task.abort();
 }

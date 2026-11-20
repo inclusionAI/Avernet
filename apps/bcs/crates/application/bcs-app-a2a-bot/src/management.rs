@@ -171,7 +171,7 @@ impl A2aBotManagement {
     ) -> ServiceResult<ManagedA2aCard> {
         let (provider, label, _) = self.public_provider(token).await?;
         if source.is_none() && visibility.is_none() && labels.is_none() {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
-        let labels=self.policy.normalize(labels.unwrap_or_default())?;
+        let labels=labels.map(|input|self.policy.normalize(input)).transpose()?;
         let target = self.public_record_by_id(&provider, bot_id).await?;
         let loaded = match source {Some(source)=>Some(self.public_load(source).await?),None=>None};
         // Retry only local CAS races, never the outbound fetch. Each attempt
@@ -194,7 +194,8 @@ impl A2aBotManagement {
                 .checked_add(1)
                 .ok_or_else(|| failure(Code::InternalError, "", "REVISION_EXHAUSTED"))?;
             let next = A2aBotRecord {
-                catalog_labels: labels.clone(),
+                // Omission preserves this CAS attempt's latest labels, not the pre-fetch snapshot.
+                catalog_labels: labels.clone().unwrap_or_else(||current.catalog_labels.clone()),
                 agent_card_url: url.clone(),
                 agent_card: raw,
                 revision,

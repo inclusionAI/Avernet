@@ -47,7 +47,7 @@ catalog-change notification. Existing authorization and response envelopes apply
 | Operation | Omitted | Explicit `{}` | Nonempty normalized object |
 | --- | --- | --- | --- |
 | Agent registration | initialize empty | empty | replace |
-| Agent otherwise-valid explicit update | **clear** | clear | replace |
+| Agent otherwise-valid explicit update | **preserve** | clear | replace |
 | Agent label-only update | no operation; existing UPDATE_REQUIRED | valid clear | replace |
 | Group creation | initialize new resource empty; preserve on reuse | empty | replace |
 | Group PATCH | **preserve** | clear | replace |
@@ -72,7 +72,12 @@ writes materialize a missing template in the Group transaction; reads do not
 backfill.
 
 Agent writes use the existing identity/revision CAS and transaction; label-only
-updates advance the same revision. Superseded refreshes fail rather than replay
+updates advance the same revision. Omitted update labels are taken from the latest
+record on each local CAS attempt, not the initial/pre-fetch snapshot. Provider-ID
+legacy updates without an expected revision retry at most three times; a supplied
+revision never retries. URL sources are fetched once outside the retry loop.
+Each preserve attempt adds one bounded Card read and binding/authorization checks;
+there are no per-label queries or extra outbound fetches. Superseded refreshes fail rather than replay
 stale metadata. Group writes explicitly preserve or replace labels in the
 existing Group/event transaction; template display upserts never overwrite them.
 Invalidation/catalog notification occurs only after commit. The joined Group
@@ -92,13 +97,13 @@ removal is externally owned and is **not** proven by BCS payload tests.
 
 Service API **7.0.0** adds required Rust struct fields; external literals and
 consumers rebuild together. `UpdateAgentCommand`/`A2aBotManagementService::update_agent`
-carry source/visibility/label presence. Legacy update methods remain and clear
-labels by omission. New unsupported trait methods refuse explicit label data;
+carry source/visibility/label presence. Legacy update methods remain and preserve
+labels on omission. New unsupported trait methods refuse explicit label data;
 there is no default that drops nonempty data. `upsert_with_catalog_labels` is the
 Group Core/repo preserve/replace boundary. No Java or Group Triple API is added.
 
-Old requests are not universally label-preserving: old Agent updates can clear
-labels. New writers are rejected by old closed REST DTOs; strict old response
+Old Agent requests handled by the new server preserve labels on omission,
+including source/visibility-only updates and local CAS retries. New writers are rejected by old closed REST DTOs; strict old response
 readers can reject the new field. Expand schema and provision the file, roll all
 server replicas, verify nonempty readback, then enable label-aware clients.
 Standalone public source availability is not an embedded host upgrade. OCB must

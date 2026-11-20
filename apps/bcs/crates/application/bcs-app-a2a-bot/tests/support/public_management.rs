@@ -313,3 +313,6 @@ async fn visibility_only_update_preserves_card_and_combined_update_rolls_back_on
 
 #[path="catalog_labels.rs"]
 mod catalog_labels;
+
+#[path="catalog_label_updates.rs"]
+mod catalog_label_updates;

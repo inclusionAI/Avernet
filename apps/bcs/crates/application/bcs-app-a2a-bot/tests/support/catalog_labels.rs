@@ -39,11 +39,11 @@ async fn register_get_find_replace_clear_and_refresh_persist_labels() {
         assert!(service.update_agent(update(&registered.bot_id,Some(input(labels)))).await.unwrap().catalog_labels.is_empty());
         service.update_agent(update(&registered.bot_id,Some(input(json!({"stage":["trial"]}))))).await.unwrap();
     }
-    // Legacy visibility-only update intentionally clears; label-only absence remains invalid.
+    // Legacy visibility-only update preserves labels; label-only absence remains invalid.
     assert!(service.update_agent(update(&registered.bot_id,None)).await.is_err());
-    assert!(service.update_agent_by_id_with_visibility("test-admin",&registered.bot_id,None,Some(Default::default())).await.unwrap().catalog_labels.is_empty());
+    assert_eq!(service.update_agent_by_id_with_visibility("test-admin",&registered.bot_id,None,Some(Default::default())).await.unwrap().catalog_labels.as_map()["stage"],["trial"]);
     let rows=chain.db.query(DbStatement::with_params("SELECT catalog_labels,bot_info FROM bcs_bots WHERE bot_uuid=?",vec![registered.bot_id.clone().into()])).await.unwrap();
-    assert_eq!(rows[0].get_string("catalog_labels").unwrap().as_deref(),Some("{}"));
+    assert_eq!(rows[0].get_string("catalog_labels").unwrap().as_deref(),Some("{\"stage\":[\"trial\"]}"));
     assert!(!rows[0].get_string("bot_info").unwrap().unwrap().contains("catalog_labels"));
     // Model a remote URL whose next declaration changes: refresh owns the Card,
     // not the independently persisted labels, for both manual and scheduled paths.

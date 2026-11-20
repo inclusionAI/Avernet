@@ -47,6 +47,15 @@
 ## 7. Deployment acceptance (separate authorization and evidence)
 
 - [ ] 7.1 Expand target schema and stage policy before new server rollout; verify runner/history compatibility and all-instance policy hashes.
-- [ ] 7.2 Upgrade all standalone/public server replicas before enabling label-aware REST writers; inventory legacy Agent writers and explicitly control omission-clearing risk.
+- [ ] 7.2 Upgrade all standalone/public server replicas before enabling label-aware REST writers; verify legacy Agent omission-preservation on every new-server replica.
 - [ ] 7.3 Record actual runtime/schema/config versions and write/read/clear/refresh/full-payload smoke evidence; downstream host integration and catalog full-replacement remain separate gates.
 - [ ] 7.4 Rehearse rollback with client disablement, retained columns/data/history and documented legacy writer/publication degradation; never perform unrequested destructive down migrations.
+
+
+## 8. PR #4256 omission-preserving compatibility revision
+
+- [x] 8.1 Adopt review feedback: public and Provider legacy Agent update omission preserves latest labels; explicit objects replace/clear; registration omission remains empty.
+- [x] 8.2 Retain presence through delivery/Service API, preserve latest labels on each bounded CAS attempt, fetch once, and keep supplied revisions single-attempt.
+- [x] 8.3 Cover omission/explicit clear, deterministic competing SQLite CAS commits, concurrent label writes during URL fetch, and real HTTP readback/publication across canonical aliases and Provider legacy routes.
+- [x] 8.4 Fix legacy Group create mapping: catalog-label `InvalidRequest` becomes structured HTTP 400 before Group/event-subscription writes; preserve unrelated management errors as before. Add with/without inline-subscription regression coverage.
+- [ ] 8.5 Run fresh local unit/coverage gates with remote thresholds and record pass-rate/coverage denominators plus any platform/environment gaps. Do not push or update PR until separately authorized.

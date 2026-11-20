@@ -1,11 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Agent management replacement and readback
-Agent registration and explicit updates SHALL accept top-level `catalog_labels`, separate from raw Card JSON. Registration omission SHALL initialize empty labels. An otherwise valid Agent explicit update omitting labels SHALL replace existing labels with empty; supplying an object SHALL replace the entire collection after shared validation. A label-only explicit object, including `{}`, SHALL be a valid update. Existing completely empty update requests SHALL remain invalid. Register/Get/Find/Update/Refresh views SHALL return normalized labels.
+Agent registration and explicit updates SHALL accept top-level `catalog_labels`, separate from raw Card JSON. Registration omission SHALL initialize empty labels. An otherwise valid Agent explicit update omitting labels SHALL preserve existing labels from the latest record on each CAS attempt; supplying an object SHALL replace the entire collection after shared validation. A label-only explicit object, including `{}`, SHALL be a valid update. Existing completely empty update requests SHALL remain invalid. Register/Get/Find/Update/Refresh views SHALL return normalized labels.
 
-#### Scenario: Legacy Agent writer clears labels
+#### Scenario: Legacy Agent writer preserves labels
 - **WHEN** a valid source-only or visibility-only update omits labels for an Agent previously labeled running
-- **THEN** labels become `{}` and the response/publication reflect that result
+- **THEN** existing labels remain unchanged and the response/publication reflect that result
 
 #### Scenario: Label-only replacement
 - **WHEN** an authorized caller updates only `catalog_labels` to `{"lifecycle":["offline"]}` or `{}`

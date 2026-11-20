@@ -32,7 +32,7 @@ pub struct ConfigureRequest {
     pub catalog_labels:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     pub agent_card_url: Option<String>,
     pub agent_card: Option<serde_json::Value>,
-    /// Optional legacy compare-and-set; omission performs an atomic last-write-wins replacement.
+    /// Optional legacy compare-and-set; omission permits bounded retries against the latest revision.
     pub expected_revision: Option<u64>,
 }
 
@@ -61,7 +61,7 @@ pub async fn configure(
         },
         Err(error)=>return provider_error(error),
     };
-    let command = ConfigureA2aBotCommand {catalog_labels:request.catalog_labels.unwrap_or_default(), provider_id, provider_admin_token: token, bot_uuid,
+    let command = ConfigureA2aBotCommand {catalog_labels:request.catalog_labels, provider_id, provider_admin_token: token, bot_uuid,
         source, expected_revision: request.expected_revision, now_ms: now_ms() };
     match service.configure(command).await {
         Ok(record) => Json(record).into_response(),

@@ -7,8 +7,8 @@ Agent and Group discovery Cards need a governed, flat label map without mutating
 - Add `catalog_labels` as platform management metadata, stored once in `bcs_bots` and once in `bcs_group_agent_cards`; old SQL NULL values read as `{}`.
 - Add a startup-loaded, environment-independent `catalog-labels.toml` dictionary with required `allow_multiple` on every key. Initial `lifecycle` values: `draft`, `trial`, `running`, `offline`; `allow_multiple = false`.
 - Add Agent registration/update/readback and Group create/PATCH/detail support. Reject a null label object; remove keys with null/empty-list values; validate all supplied keys and values before any write.
-- Distinguish Group PATCH omission (preserve) from Agent explicit-update omission (replace with empty). Refresh/background operations preserve labels.
-- **BREAKING semantic caveat for label-bearing resources:** a legacy Agent update omitting the new field clears labels after they have been populated. Do not claim unconditional old-writer compatibility.
+- Preserve labels on Group PATCH and Agent explicit-update omission. Explicit objects replace the collection; refresh/background operations preserve labels.
+- **Legacy writer compatibility:** Agent updates omitting the new field preserve current labels, including after a concurrent label-only write; explicit empty objects clear them.
 - Publish complete system plus custom labels to the catalog. Do not implement downstream incremental-label deletion or alter search APIs.
 - Deliver public implementation first; downstream hosts integrate a published, validated public revision afterwards. Implementation evidence is tracked separately in validation.md; no release is implied.
 

@@ -3,12 +3,13 @@ use crate::{ServiceResult, port::repo::a2a_bot::A2aBotRecord};
 
 #[derive(Clone)]
 pub struct ConfigureA2aBotCommand {
-    pub catalog_labels: crate::types::catalog_labels::CatalogLabelsInput,
+    /// Omission preserves current labels; an explicit object replaces the whole collection.
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     pub provider_id: String,
     pub provider_admin_token: String,
     pub bot_uuid: String,
     pub source: crate::types::a2a_bot::A2aCardSource,
-    /// Optional legacy compare-and-set; omission performs an atomic last-write-wins replacement.
+    /// Optional legacy compare-and-set; omission permits bounded retries against the latest revision.
     pub expected_revision: Option<u64>,
     pub now_ms: i64,
 }
@@ -60,7 +61,7 @@ pub struct UpdateAgentCommand {
     pub bot_id: String,
     pub source: Option<crate::types::a2a_bot::A2aCardSource>,
     pub visibility: Option<crate::types::a2a_bot::A2aRegistrationVisibility>,
-    /// None is legacy omission (clear), not preserve; Some(empty) is a valid label-only clear.
+    /// None preserves the latest labels on each CAS attempt; Some(empty) is a valid label-only clear.
     pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
 }
 

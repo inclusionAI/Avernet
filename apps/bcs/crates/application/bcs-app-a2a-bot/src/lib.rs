@@ -73,6 +73,44 @@ impl A2aBotManagement {
         self.core.commit_card(A2aBotRecord {catalog_labels:labels,bot_uuid,provider_id,provider_bot_ref:binding.provider_bot_ref,
             agent_card_url,agent_card:card.raw,revision},expected).await
     }
+
+    async fn configure_preserving_labels(
+        &self, command: ConfigureA2aBotCommand,
+    ) -> ServiceResult<A2aBotRecord> {
+        let binding=self.core.provider_binding(&command.provider_id,&command.bot_uuid).await?;
+        let (agent_card_url,card)=self.load_card(&command.provider_id,command.source).await?;
+        // Fetch once outside the retry loop. Omission must merge with the latest
+        // committed labels on every attempt, including a label-only CAS race.
+        for _ in 0..3 {
+            self.authorize(&command.provider_id,&command.provider_admin_token).await?;
+            let latest=self.core.provider_binding(&command.provider_id,&command.bot_uuid).await?;
+            if latest.provider_bot_ref!=binding.provider_bot_ref {
+                return Err(ServiceError::Conflict("A2A Bot binding changed".into()));
+            }
+            let current=self.core.get_card(&command.bot_uuid).await?;
+            if current.as_ref().is_some_and(|record|record.provider_id!=command.provider_id
+                || record.provider_bot_ref!=binding.provider_bot_ref) {
+                return Err(ServiceError::Conflict("A2A Bot binding changed".into()));
+            }
+            let expected=current.as_ref().map(|record|record.revision).unwrap_or(0);
+            if command.expected_revision.is_some_and(|revision|revision!=expected) {
+                return Err(ServiceError::Conflict("A2A revision changed".into()));
+            }
+            let revision=expected.checked_add(1)
+                .ok_or_else(||ServiceError::Conflict("A2A revision exhausted".into()))?;
+            let next=A2aBotRecord {
+                catalog_labels:current.map(|record|record.catalog_labels).unwrap_or_default(),
+                bot_uuid:command.bot_uuid.clone(),provider_id:command.provider_id.clone(),
+                provider_bot_ref:binding.provider_bot_ref.clone(),
+                agent_card_url:agent_card_url.clone(),agent_card:card.raw.clone(),revision,
+            };
+            match self.core.commit_card(next,expected).await {
+                Err(ServiceError::Conflict(_)) if command.expected_revision.is_none()=>continue,
+                result=>return result,
+            }
+        }
+        Err(ServiceError::Conflict("A2A configuration changed concurrently".into()))
+    }
     async fn refresh_card(&self,old:A2aBotRecord)->ServiceResult<A2aBotRecord> {
         let url=old.agent_card_url.ok_or_else(||ServiceError::InvalidOperation {message:"inline Card has no source URL; submit an explicit update".into(),request_id:None})?;
         // Failure never rewrites the last validated snapshot or increments revision.
@@ -148,7 +186,10 @@ impl A2aBotManagementService for A2aBotManagement {
     }
     async fn configure(&self,command:ConfigureA2aBotCommand)->ServiceResult<A2aBotRecord> {
         self.authorize(&command.provider_id,&command.provider_admin_token).await?;
-        let labels=self.policy.normalize(command.catalog_labels)?;
+        let Some(labels)=command.catalog_labels else {
+            return self.configure_preserving_labels(command).await;
+        };
+        let labels=self.policy.normalize(labels)?;
         if let Some(expected)=command.expected_revision {
             return self.commit(command.provider_id,command.bot_uuid,command.source,expected,false,labels).await;
         }

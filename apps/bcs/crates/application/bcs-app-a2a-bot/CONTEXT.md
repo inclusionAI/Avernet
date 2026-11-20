@@ -19,8 +19,10 @@ public Card validation. It never creates an ordinary webhook Bot first or
 mutates persistence directly. Core repeats Provider admission after the fetch
 and commits the existing ownership/Card composite atomically, recording the
 Provider principal. A2A duplicates conflict. Explicit updates without an expected
-revision replace the complete Card atomically; legacy supplied revisions retain
-CAS behavior. Refreshes always retain internal CAS protection.
+revision retry local CAS conflicts at most three times; legacy supplied revisions retain
+single-attempt CAS behavior. Omitted labels are preserved from the latest record on
+each attempt, while explicit label objects replace the collection. Card fetches
+are performed once outside the retry loop. Refreshes always retain internal CAS protection.
 Registration wiring also requires `BotRegistryCoreService`. After the atomic
 ownership/Card registration succeeds, URL and inline registrations apply an
 explicit avatar Set or Clear through `update_avatar_existing`; Keep issues no

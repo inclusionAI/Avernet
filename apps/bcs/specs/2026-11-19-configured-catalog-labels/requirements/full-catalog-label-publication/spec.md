@@ -23,7 +23,7 @@ Publication SHALL queue identities, re-read committed current state on every ret
 - **THEN** custom labels do not make it newly publishable
 
 ### Requirement: Expand-first upstream-first deployment and honest compatibility
-Release SHALL expand schema and distribute the policy before new binaries, roll every backend before enabling label-aware callers, and publish the tested public revision before downstream-host integration. The release record SHALL distinguish API acceptance, DB persistence, payload publication and downstream application. Old-writer omission-clearing, closed old REST DTO rejection and strict old response decoder risks SHALL be tested and documented; no unverified downgrade SHALL be called label-preserving.
+Release SHALL expand schema and distribute the policy before new binaries, roll every backend before enabling label-aware callers, and publish the tested public revision before downstream-host integration. The release record SHALL distinguish API acceptance, DB persistence, payload publication and downstream application. Old-writer omission-preservation, closed old REST DTO rejection and strict old response decoder risks SHALL be tested and documented; no unverified downgrade SHALL be called label-preserving.
 
 #### Scenario: New client reaches old REST server
 - **WHEN** a new label request targets the pre-change closed DTO

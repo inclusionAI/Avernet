@@ -20,7 +20,7 @@ This directory is the review/delivery copy intended for version control (current
 - Name: `catalog_labels`, a flat string-to-string-list management metadata object, separate from raw Card documents.
 - Agent and Group support; persistence owned by `bcs_bots` and `bcs_group_agent_cards`.
 - Reject outer `null`; known per-key null/empty arrays remove the key; a supplied object replaces the whole collection.
-- Group PATCH omission preserves; Agent otherwise-valid explicit-update omission clears; registration/create omission initializes empty.
+- Group PATCH and Agent otherwise-valid explicit-update omission preserve; registration/create omission initializes empty.
 - URL/manual/background refresh and unrelated internal maintenance preserve persisted labels.
 - Config declares allowed values AND whether each key allows multiple distinct values. Initial `lifecycle`: `draft`, `trial`, `running`, `offline`; `allow_multiple = false`.
 - No business dictionary literals in production code; system visibility labels remain system-owned.
@@ -33,7 +33,7 @@ This directory is the review/delivery copy intended for version control (current
 2. **OCB:** verified available public gitlink, typed Agent Triple and production wrapper/assembly, independent product policy packaging, integration tests.
 3. **Runtime/client release:** expand schema → provision config → upgrade all servers → verify non-empty persisted readback → enable later client writers. Public source publication is not embedded-host deployment.
 
-Old Agent writers can clear existing labels. New Triple clients can have fields silently ignored by old servers. Neither compatibility risk is solved by additive Proto tags alone; consult the explicit release gates before enabling writers. Rollback retains columns/data/history and disables new writers first.
+Old requests handled by the new server preserve existing labels when the field is omitted. New Triple clients can have fields silently ignored by old servers. Neither compatibility risk is solved by additive Proto tags alone; consult the explicit release gates before enabling writers. Rollback retains columns/data/history and disables new writers first.
 
 ## Baseline and ownership
 

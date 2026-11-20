@@ -50,14 +50,14 @@ For a supplied object: validate every key against the policy, including keys who
 | Operation | Omitted field | Explicit `{}` | Non-null object |
 | --- | --- | --- | --- |
 | Agent registration | empty | empty | normalize and store |
-| Agent explicit management update with source/visibility | replace with empty | replace with empty | replace entire collection |
+| Agent explicit management update with source/visibility | preserve | replace with empty | replace entire collection |
 | Agent label-only management update | no operation requested if no other field exists | valid clear | valid replacement |
 | Group creation | empty | empty | normalize and store |
 | Group PATCH | preserve | clear | replace entire collection |
 | Agent URL/manual/background refresh | preserve | no label parameter | no label parameter |
 | Internal template refresh, unrelated Group mutation, catalog retry | preserve | no implicit clearing | use persisted state |
 
-For Group PATCH, omitted keys inside a supplied object are removed, not preserved. For Agent updates, an old caller changing only visibility deliberately clears labels; this user-selected exception cannot be described as harmless additive compatibility. Auth, Provider scoping, owner/manager checks and existing error envelopes remain authoritative. Return field-specific invalid-request details (`catalog_labels`, `catalog_labels.<key>`, or list index) for null object, unknown key/value, wrong type and disallowed multiplicity without introducing hardcoded business errors.
+For Group PATCH, omitted keys inside a supplied object are removed, not preserved. For Agent updates, old callers changing only source or visibility preserve current labels. On every CAS attempt, omission uses the latest record, never an earlier snapshot. Explicit objects still replace the entire collection. Auth, Provider scoping, owner/manager checks and existing error envelopes remain authoritative. Return field-specific invalid-request details (`catalog_labels`, `catalog_labels.<key>`, or list index) for null object, unknown key/value, wrong type and disallowed multiplicity without introducing hardcoded business errors.
 
 ### D4. Persistence and Group eligibility
 
@@ -83,7 +83,7 @@ Agent canonical endpoints remain `/api/v1/collaboration/a2a/agents` and `/{bot_i
 
 ## Risks / Trade-offs
 
-- [Legacy Agent omission clears populated labels] → document and test; do not enable persistent labels for a resource until every writer is label-aware or omission-clearing is explicitly accepted. Old Group PATCH writers preserve labels.
+- [Legacy Agent omission preserves populated labels] → test canonical and legacy entries, visibility/source updates and concurrent label-only writes. Old server binaries and publication still require separate compatibility validation.
 - [New field sent to old REST DTO] → old closed DTO rejects; keep callers label-disabled until every backend replica is upgraded. An ordinary successful request is not a capability probe.
 - [New policy configuration breaks startup] → distribute the standalone file first and test startup with old/new packages; no new inline config section is sent to old closed config schemas.
 - [Cross-product dictionary drift] → record policy checksum per application rollout and compare intended content; no shared-file coupling is required.

@@ -171,3 +171,147 @@ OpenSpec progress is **25/32 tasks complete**. The remaining unchecked tasks are
 - **6.4 — not authorized:** no implementation commit SHA exists, no push/PR/merge or GitHub/internal-mirror publication verification was performed. OCB may read the local handoff but must not finalize its gitlink against this uncommitted baseline.
 - **7.1–7.4 — not authorized / NOT_RUN:** target schema expansion, all-instance policy hashes, all-replica server rollout, client enablement, deployed smoke and rollback rehearsal. No online DDL or destructive down migration was executed.
 - Fuse server stale-custom-key removal/full-replacement application is **external NOT_VERIFIED**; BCS payload completeness is proven locally, downstream application is not.
+
+
+## PR #4256 review revision: omitted Agent labels preserve
+
+This section supersedes the omission-clears contract descriptions above. Earlier
+counts remain historical evidence for their recorded snapshots, not proof of this
+local revision. The user explicitly accepted the review feedback and requested
+local validation only; no commit, push, PR edit, merge or deployment is authorized.
+
+### Corrected contract and implementation
+
+- Public `UpdateAgentCommand.catalog_labels = None` preserves the current labels
+  on every CAS attempt. `Some(object)` replaces the whole collection; `{}` and
+  known-key deletion objects clear it. Source/visibility/label absence still fails
+  `UPDATE_REQUIRED`. Registration omission still initializes empty labels.
+- Provider legacy `ConfigureA2aBotCommand.catalog_labels` is now
+  `Option<CatalogLabelsInput>`; HTTP forwards presence instead of defaulting
+  omission to an empty object. Omitted labels use at most three local CAS attempts,
+  re-reading labels, authorization and binding on each attempt, with one Card load
+  outside the loop. An explicit expected revision never retries. Explicit label
+  objects retain the existing atomic replace/single-CAS paths.
+- Each preserve attempt adds a bounded Card read and binding/authorization checks;
+  no per-label query, new cache, extra URL fetch, migration or transaction spanning
+  network I/O is introduced. Persistence failures still propagate.
+
+### Fresh local evidence
+
+All commands run inside the dedicated configured-catalog-labels worktree, based on
+HEAD `27e13268a16fc380ad29a21db8fa7e694b1befe6`; Rust is pinned to 1.94.0,
+matching the GitHub BCS workflow. Uncommitted source hashes are recorded in
+`apps/bcs/testresult/pr4256-omission-source-manifest.json` (ignored local artifact).
+
+- Red regression: the updated existing lifecycle test failed on the pre-fix
+  implementation because visibility-only omission lost `stage: trial`.
+- `cargo test --locked -p bcs-service-api -p bcs-app-a2a-bot -p bcs-http -p bcs-api-http`:
+  **1518 passed, 0 failed, 0 ignored**, including doctests.
+- `cargo test --locked -p bcs --test integration_catalog_labels`:
+  **1 passed, 0 failed**. Real HTTP -> application/Core -> SQLite -> full Fuse mock
+  payload, persistence/restart, omitted-label preservation and explicit clear/replace
+  through `/api/v1/collaboration/a2a`, root `/a2a` (its existing unwrapped response)
+  and Provider-ID legacy routes. The test preserves each route's existing envelope.
+- Deterministic race tests insert real competing SQLite CAS commits immediately
+  before the tested commit; both public/legacy retry paths preserve the newly
+  committed labels. Explicit replacements keep their requested intent, continuous
+  races stop after three attempts, supplied revisions never retry, and URL-fetch
+  races fetch once without restoring earlier labels.
+- OpenSpec strict validation and `git diff --check`: passed. All ten modified/new
+  Rust files remain below the 1000-line ceiling.
+- Architecture checks remain failed on baseline findings: 3 dependency edges and
+  83 matched imports are already in fetched `origin/dev`; both affected Cargo
+  manifests are byte-identical to that baseline. No gate/allowlist was weakened.
+- Supplementary `test_bcs_cov_gate.py`: 9 passed, 1 error during temporary `.git`
+  directory cleanup (`OSError: Directory not empty`), not a product assertion.
+  This unsuccessful run is retained, not counted as an all-green gate.
+
+### Pending acceptance boundaries
+
+Fresh full-workspace unit coverage is running with
+`bash scripts/ci_test.sh --coverage --reuse-build`, nextest retries=0 and 2 test
+threads. Required gate: pass rate 100%, overall lines >87%, PR changed lines >85%
+when at least 51 instrumentable lines map to the diff against the fetched dev
+merge base. The runner's outer success alone is not gate proof; the final JUnit,
+Cobertura and `scripts/cov_gate.py` result must be inspected.
+
+Singlebox shared-stack acceptance/coverage and native MySQL/OceanBase contracts
+are NOT_RUN for this local revision: Docker daemon is unavailable, no local Qdrant
+Server listens on 6333, and the local Backend environment lacks qdrant-client.
+Do not substitute the already-green remote HEAD's evidence for this unpushed
+revision or declare all remote requirements satisfied.
+
+
+## PR #4256 review revision: legacy Group create error mapping
+
+The second P2 review comment is addressed locally. `GroupUseCaseError::Service`
+now maps only `A2aManagement(InvalidRequest)` errors whose field is
+`catalog_labels` or `catalog_labels.*` to structured HTTP 400. The response
+retains `field`, `reason`, and the stable `invalid_request` parameter code.
+Other A2A management invalid requests continue through the existing internal
+error fallback, so unrelated error semantics are not widened. The validation is
+performed before Group creation or inline event-subscription provisioning.
+
+Fresh local evidence:
+
+- Group HTTP suite: **129 passed, 0 failed, 0 ignored**.
+- Focused translation regression: **1 passed, 0 failed**.
+- New regression covers unknown key, unknown deletion key, unknown value, and
+  single-value multiplicity violations through both no-subscription and inline-
+  subscription request shapes; invalid requests return 400 and do not create a
+  Group or provision subscriptions.
+- `git diff --check`: passed. No commit, push, PR edit, or remote write performed.
+
+
+## PR #4256 final local rerun and publication authorization (2026-11-20)
+
+This section supersedes the pending-run wording above. After reviewing the local
+results, the user explicitly authorized committing and pushing these review fixes.
+The authorization does not make unsuccessful validation pass or authorize merging,
+deployment, gate relaxation, or dropping tests.
+
+Final local runs used Rustup Rust 1.94.0, `CARGO_INCREMENTAL=0`, and one test
+thread in the dedicated configured-catalog-labels worktree:
+
+- `cargo test --locked -p bcs-service-api -p bcs-app-a2a-bot -p bcs-http -p bcs-api-http -- --test-threads=1`:
+  **1519 passed, 0 failed, 0 ignored**, including doctests.
+- `cargo test --locked -p bcs-http --test suite_groups -- --test-threads=1`:
+  **129 passed, 0 failed, 0 ignored**. These tests also appear in the package run
+  above; the two counts must not be added as unique coverage.
+- `cargo test --locked -p bcs --test integration_catalog_labels -- --test-threads=1`:
+  **1 passed, 0 failed**.
+- `cargo test --workspace --locked --no-fail-fast -- --test-threads=1`:
+  exit **101**, **8935 passed, 79 failed, 74 ignored** across the reported test
+  and doctest results; **8935 / 9014 executed = 99.1236%**, not the required 100%.
+  Nine test targets failed. Eight BCS startup cases explicitly report child
+  `SIGKILL`; the other 71 failures are in bcs-cli subprocess suites, reporting
+  interrupted processes, absent exit codes/output, or downstream assertions.
+  Direct shell execution of the same bcs-cli `--help` and `--version` succeeds.
+  This is evidence of a local subprocess-execution problem, not proof that every
+  failure is environmental or that the complete suite passes elsewhere.
+- The clean nextest round2 build completed, but its test-list subprocess phase
+  did not complete normally and was interrupted. It is not a passing test run.
+- No final LLVM coverage report was regenerated. Earlier intermediate-source
+  coverage percentages are historical only and do not certify this revision.
+- OpenSpec strict validation and `git diff --check` passed. All 13 changed/new
+  Rust source and test files are below the 1000-line limit.
+
+Ignored local logs are retained under `apps/bcs/testresult/`:
+`pr4256-focused-packages-final.log`, `pr4256-suite-groups-final.log`,
+`pr4256-integration-catalog-labels-final.log`, and
+`pr4256-full-unit-no-fail-fast.log`, with matching exit receipts. They are not
+committed as generated artifacts. Only stale build output from this worktree was
+cleaned during earlier testing; no active target was deleted. Disk availability
+at publication preflight was approximately 42 GiB.
+
+The normal repository pre-push hook remains enabled. Its default lint-only mode
+and credential scan do not constitute full CI, 100% tests, coverage, Singlebox
+acceptance, or deployment proof. Fresh remote checks on the new commit remain
+necessary. No test, coverage threshold, or allowlist was weakened.
+
+
+The user subsequently confirmed that local security software affects some test
+subprocesses and explicitly accepted these local failures as non-blocking for
+this push. The user also authorized updating the PR description to match the
+final commit. The raw failures above remain recorded; neither this confirmation
+nor publication is a claim that all local tests or final coverage passed.

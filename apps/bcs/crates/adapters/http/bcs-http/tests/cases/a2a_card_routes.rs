@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 #[derive(Default)]
-struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>>, owners: std::sync::Mutex<Vec<Option<Vec<String>>>> }
+struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>>, owners: std::sync::Mutex<Vec<Option<Vec<String>>>>, labels: std::sync::Mutex<Vec<Option<Value>>> }
 
 fn record() -> A2aBotRecord {
     A2aBotRecord { catalog_labels:Default::default(), bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
@@ -75,6 +75,7 @@ impl A2aBotManagementService for Management {
     }
     async fn refresh_due(&self, _now: i64) -> ServiceResult<usize> { panic!("HTTP must not call background maintenance"); }
     async fn configure(&self, command: ConfigureA2aBotCommand) -> ServiceResult<A2aBotRecord> {
+        self.labels.lock().unwrap().push(command.catalog_labels.map(|v|serde_json::to_value(v).unwrap()));
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(command.provider_id, "provider");
         assert_eq!(command.bot_uuid, "bot");
@@ -343,4 +344,21 @@ async fn versioned_a2a_routes_are_not_owned_by_legacy_adapter() {
             .body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(),StatusCode::NOT_FOUND);
     }
+}
+
+#[tokio::test]
+async fn legacy_source_update_forwards_label_presence_without_defaulting_omission() {
+    let management=Arc::new(Management::default());
+    let app=build_router(HttpAppState::new(Services::builder().a2a_bot_management(management.clone()).build_for_test()));
+    for labels in [None,Some(json!({})),Some(json!({"stage":["running"]}))] {
+        let mut body=json!({"agent_card_url":"https://example.org/card","expected_revision":0});
+        if let Some(labels)=&labels {body["catalog_labels"]=labels.clone();}
+        let response=app.clone().oneshot(request("PUT","",Some("test-admin"),body)).await.unwrap();
+        assert_eq!(response.status(),StatusCode::OK);
+        assert_eq!(management.labels.lock().unwrap().last().unwrap(),&labels);
+    }
+    let before=management.calls.load(Ordering::SeqCst);
+    let response=app.oneshot(request("PUT","",Some("test-admin"),json!({"agent_card_url":"https://example.org/card","catalog_labels":null}))).await.unwrap();
+    assert!(response.status().is_client_error());
+    assert_eq!(management.calls.load(Ordering::SeqCst),before);
 }
