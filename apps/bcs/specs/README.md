@@ -19,6 +19,7 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-11-18-worker-runtime-phase1](2026-11-18-worker-runtime-phase1/spec.md) — proposed generic Worker execution, recovery, output and provider acceptance; documentation only
 - [2026-11-26-distributed-runner-spi](2026-11-26-distributed-runner-spi/spec.md) — proposed distributed multi-mode Runner API/SPI and Direct A2A / StateMachine migration specification; documentation only
 - [2026-11-17-connector-runtime](2026-11-17-connector-runtime/spec.md) — Connector engine, store providers and A2A adapter implemented; not wired into the binary; see [validation](2026-11-17-connector-runtime/validation.md)
+- [2026-11-20-fsm-group-a2a-discussion](2026-11-20-fsm-group-a2a-discussion/spec.md) — discussion: exposing FSM groups over A2A; distributed admission, publication and recovery questions, not an adopted contract
 
 - [2026-08-20-bot-task-modes](2026-08-20-bot-task-modes/)
 - [2026-09-09-group-context-api](2026-09-09-group-context-api/)
