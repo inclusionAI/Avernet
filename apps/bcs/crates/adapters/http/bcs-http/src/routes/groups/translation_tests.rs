@@ -30,6 +30,29 @@ async fn coverage_group_error_translation_preserves_status_details_and_opening_m
     let response = group_use_case_error_to_http(E::InvalidProposal("invalid_opening_message:  empty content ".into())).into_response();
     let body = json(response).await;
     assert_eq!(body["code"], "invalid_opening_message"); assert_eq!(body["message"], "empty content");
+    let response = group_use_case_error_to_http(E::Service(ServiceError::A2aManagement(
+        bcs_service_api::types::a2a_bot::a2a_management::ManagementError::new(
+            bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::InvalidRequest,
+            "catalog_labels.stage",
+            "UNKNOWN_VALUE",
+        ),
+    ))).into_response();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = json(response).await;
+    assert_eq!(body["code"], "bad_request");
+    assert_eq!(body["params"]["code"], "invalid_request");
+    assert_eq!(body["params"]["field"], "catalog_labels.stage");
+    assert_eq!(body["params"]["reason"], "UNKNOWN_VALUE");
+
+    let response = group_use_case_error_to_http(E::Service(ServiceError::A2aManagement(
+        bcs_service_api::types::a2a_bot::a2a_management::ManagementError::new(
+            bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::InvalidRequest,
+            "agent_card",
+            "INVALID_FIELDS",
+        ),
+    ))).into_response();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
     let response = group_use_case_error_to_http(E::Service(ServiceError::ExistNonPublicBots {
         bots: vec![("unnamed".into(), None), ("named".into(), Some("Display name".into()))],
     })).into_response();

@@ -10,14 +10,14 @@ async fn database() -> Arc<LocalSqliteDbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_info TEXT DEFAULT '{}', bot_uuid TEXT NOT NULL, env TEXT NOT NULL, name TEXT, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,is_deleted) VALUES ('bot', 'test', 'provider', 'remote', 'gateway', 0), ('bot', 'other', 'provider', 'remote', 'gateway', 0), ('plugin', 'test', 'provider', 'plugin', 'plugin', 0)")).await.unwrap();
-    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")].concat()).into_iter() {
+    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql"),"ALTER TABLE bcs_bots ADD COLUMN catalog_labels TEXT NULL;"].concat()).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     db
 }
 
 fn record() -> A2aBotRecord {
-    A2aBotRecord {
+    A2aBotRecord { catalog_labels:Default::default(),
         bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
         agent_card_url:Some("https://example.org/a2a/remote/card".into()),
         agent_card:json!({"name":"Agent", "supportedInterfaces":[{"url":"https://example.org/a2a/remote","protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}], "skills":[{"id":"lookup", "name":"查询", "description":"完整说明", "futureField":{"nested":true}}]}), revision:1,}
@@ -249,7 +249,7 @@ async fn source_key_lookup_is_exact_bounded_and_propagates_read_failures() {
     let mut value=record();
     value.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"first_party"}}]});
     setup.compare_and_set(&value,0).await.unwrap();
-    let db=Arc::new(CountedDb {inner:inner.clone(),queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
+    let db=Arc::new(CountedDb {inner:inner.clone(),transactions:Default::default(),queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
     let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
     assert_eq!(store.get_by_provider_ref("provider","remote").await.unwrap(),Some(value.clone()));
     assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
@@ -267,6 +267,7 @@ async fn source_key_lookup_is_exact_bounded_and_propagates_read_failures() {
 }
 
 struct CountedDb {
+    transactions:std::sync::Mutex<Vec<usize>>,
     inner:Arc<LocalSqliteDbPlugin>,
     queries:std::sync::atomic::AtomicUsize,
     fail:std::sync::atomic::AtomicBool,
@@ -279,7 +280,7 @@ impl DbPlugin for CountedDb {
         self.inner.query(statement).await
     }
     async fn execute(&self,statement:DbStatement)->bcs_db_api::DbResult<bcs_db_api::DbExecuteResult> {self.inner.execute(statement).await}
-    async fn transaction(&self,steps:Vec<bcs_db_api::DbTransactionStep>)->bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {self.inner.transaction(steps).await}
+    async fn transaction(&self,steps:Vec<bcs_db_api::DbTransactionStep>)->bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {self.transactions.lock().unwrap().push(steps.len());self.inner.transaction(steps).await}
     async fn health_check(&self)->bcs_db_api::DbResult<bcs_db_api::DbHealth> {self.inner.health_check().await}
 }
 
@@ -293,7 +294,7 @@ async fn refresh_and_availability_have_one_bounded_query_even_on_failure() {
         inner.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,agent_card,agent_card_url,agent_card_revision) VALUES (?,'test','provider',?,'gateway',?,?,1)",
             vec![format!("batch-{n:03}").into(),format!("remote-{n}").into(),record().agent_card.to_string().into(),"https://example.org/card".into()])).await.unwrap();
     }
-    let db=Arc::new(CountedDb {inner,queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
+    let db=Arc::new(CountedDb {inner,transactions:Default::default(),queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
     let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
     assert_eq!(store.refreshable(None,u32::MAX).await.unwrap().len(),16);
     assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
@@ -391,4 +392,66 @@ async fn source_classification_can_be_removed_without_affecting_provider_identit
     assert_eq!(next.provider_bot_ref,saved.provider_bot_ref);
     assert_eq!(next.bot_uuid,saved.bot_uuid);
     assert_eq!(next.agent_card["capabilities"]["extensions"],json!([]));
+}
+
+#[tokio::test]
+async fn labels_have_constant_read_and_atomic_write_round_trips() {
+    use std::sync::atomic::{AtomicUsize,AtomicBool,Ordering};
+    let inner=database().await;
+    let db=Arc::new(CountedDb {inner,transactions:Default::default(),queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    for (revision,keys) in [(1,0),(2,1),(3,64)] {
+        let mut card=record();card.revision=revision;
+        let labels=(0..keys).map(|key|(format!("key-{key}"),vec!["value".to_string()])).collect::<std::collections::BTreeMap<_,_>>();
+        card.catalog_labels=serde_json::from_value(serde_json::to_value(labels).unwrap()).unwrap();
+        db.queries.store(0,Ordering::SeqCst);db.transactions.lock().unwrap().clear();
+        assert!(store.compare_and_set(&card,revision-1).await.unwrap());
+        assert_eq!(db.queries.load(Ordering::SeqCst),1);assert_eq!(*db.transactions.lock().unwrap(),vec![2]);
+        db.queries.store(0,Ordering::SeqCst);assert_eq!(store.get("bot").await.unwrap().unwrap().catalog_labels,card.catalog_labels);
+        assert_eq!(db.queries.load(Ordering::SeqCst),1);
+        db.queries.store(0,Ordering::SeqCst);assert_eq!(store.get_by_provider_ref("provider","remote").await.unwrap().unwrap().catalog_labels,card.catalog_labels);
+        assert_eq!(db.queries.load(Ordering::SeqCst),1);
+    }
+}
+
+#[tokio::test]
+async fn catalog_labels_accept_driver_bytes_without_relaxing_storage_validation() {
+    use bcs_db_api::DbValue;
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    assert!(store.compare_and_set(&record(), 0).await.unwrap());
+    let raw = r#"{"stage":["trial"],"region":["杭州","a"]}"#;
+    let labels: bcs_service_api::types::catalog_labels::CatalogLabels = serde_json::from_str(raw).unwrap();
+    // SQLite preserves BLOB parameters as DbValue::Bytes, matching the native
+    // MySQL JSON result shape without requiring a local database service.
+    for (stored, expected) in [
+        (DbValue::String(raw.into()), labels.clone()),
+        (DbValue::Bytes(raw.as_bytes().to_vec()), labels),
+        (DbValue::Null, Default::default()),
+    ] {
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET catalog_labels=? WHERE env='test' AND bot_uuid='bot'",
+            vec![stored],
+        )).await.unwrap();
+        assert_eq!(store.get("bot").await.unwrap().unwrap().catalog_labels, expected);
+        assert_eq!(store.get_by_provider_ref("provider", "remote").await.unwrap().unwrap().catalog_labels, expected);
+        assert_eq!(store.refreshable(None, 16).await.unwrap()[0].catalog_labels, expected);
+    }
+    for stored in [
+        DbValue::Bytes(vec![0xff]),
+        DbValue::Bytes(b"not-json".to_vec()),
+        DbValue::Bytes(b"null".to_vec()),
+        DbValue::Bytes(b"[]".to_vec()),
+        DbValue::Bytes(br#"{"stage":[]}"#.to_vec()),
+        DbValue::Bytes(br#"{"stage":["trial","trial"]}"#.to_vec()),
+        DbValue::I64(1),
+    ] {
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET catalog_labels=? WHERE env='test' AND bot_uuid='bot'",
+            vec![stored],
+        )).await.unwrap();
+        assert!(store.get("bot").await.is_err());
+        assert!(store.get_by_provider_ref("provider", "remote").await.is_err());
+        assert!(store.refreshable(None, 16).await.is_err());
+    }
 }

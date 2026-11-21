@@ -309,6 +309,7 @@ class Story:
 @contextmanager
 def bcs_process(binary, root, config, catalog):
     path = root / "bcs-config.json"
+    (root / "catalog-labels.toml").write_bytes((Path(__file__).resolve().parents[2] / "configs/catalog-labels.toml").read_bytes())
     path.write_text(json.dumps(config))
     env = {key: value for key, value in os.environ.items()
            if key.lower() not in {"http_proxy", "https_proxy", "all_proxy"}

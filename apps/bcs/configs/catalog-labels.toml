@@ -1,0 +1,3 @@
+[labels.lifecycle]
+allowed_values = ["draft", "trial", "running", "offline"]
+allow_multiple = false

@@ -62,3 +62,13 @@ Promoted from `mix/` in Phase 3. `LocalFusionService` is the offline fallback; `
 
 - `cargo test --package bcs-fusion --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-fusion --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## Configured catalog labels
+
+The [BCS label contract](../../../docs/catalog-labels.md) owns dictionary,
+omission, atomic persistence, refresh fencing and complete-publication semantics.
+Service API 7.0.0 adds typed metadata and explicit preserve/replace commands;
+external Rust consumers rebuild together. Labels are not raw Card or authorization
+state. Bootstrap loads the independent policy file once; no environment overlay
+or request can extend it. See the change validation record for actual test and
+release evidence; local code is not a published or deployed revision.

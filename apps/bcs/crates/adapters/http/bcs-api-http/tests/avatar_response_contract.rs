@@ -176,7 +176,7 @@ fn v1_summary_row(actor_id: &str, avatar: Option<&str>) -> ParticipantSummary {
 }
 
 fn group_detail() -> GroupDetail {
-    GroupDetail::Collaboration(CollaborationGroupDetail {
+    GroupDetail::Collaboration(CollaborationGroupDetail { catalog_labels:Default::default(),
         group_id: "group-1".into(),
         version: 1,
         name: Some("Avatar Regression".into()),

@@ -238,6 +238,8 @@ impl From<CollaborationRequest> for CollaborationConfiguration {
 #[serde(tag = "group_kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CreateGroupRequest {
     Normal {
+        #[serde(default, deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+        catalog_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
         #[serde(default)]
         human_mention_notify_mode: HumanMentionNotifyMode,
         name: Option<String>,
@@ -252,6 +254,8 @@ pub enum CreateGroupRequest {
         event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
     },
     Dm {
+        #[serde(default, deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+        catalog_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
         target_actor_id: String,
         name: Option<String>,
         context: Option<String>,
@@ -268,7 +272,7 @@ impl CreateGroupRequest {
     ) -> Result<(CreateGroupSpec, Vec<InlineGroupEventSubscriptionRequest>), ApplicationError> {
         Ok(match self {
             CreateGroupRequest::Normal {
-                human_mention_notify_mode,
+                catalog_labels,                human_mention_notify_mode,
                 name,
                 context,
                 opening_message,
@@ -279,7 +283,7 @@ impl CreateGroupRequest {
                 event_subscriptions,
             } => (
                 CreateGroupSpec::Collaboration(CreateCollaborationGroup {
-                    human_mention_notify_mode,
+                    catalog_labels,                    human_mention_notify_mode,
                     name,
                     context,
                     opening_message,
@@ -300,7 +304,7 @@ impl CreateGroupRequest {
                 event_subscriptions,
             ),
             CreateGroupRequest::Dm {
-                target_actor_id,
+                catalog_labels,                target_actor_id,
                 name,
                 context,
                 opening_message,
@@ -314,7 +318,7 @@ impl CreateGroupRequest {
                 }
                 (
                     CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
-                        name,
+                        catalog_labels,                        name,
                         context,
                         target_actor_id,
                     }),
@@ -328,6 +332,8 @@ impl CreateGroupRequest {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateGroupRequest {
+    #[serde(default, deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    pub catalog_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub name: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
@@ -353,6 +359,7 @@ where
 impl From<UpdateGroupRequest> for GroupPatch {
     fn from(value: UpdateGroupRequest) -> Self {
         Self {
+            catalog_labels:value.catalog_labels,
             name: value.name,
             context: value.context,
             opening_message: value.opening_message,
@@ -457,3 +464,7 @@ mod tests {
         assert!(GroupPatch::default().is_empty());
     }
 }
+
+#[cfg(test)]
+#[path="catalog_labels_tests.rs"]
+mod catalog_labels_tests;

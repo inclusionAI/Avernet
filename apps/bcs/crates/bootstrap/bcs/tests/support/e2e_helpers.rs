@@ -11,7 +11,7 @@
 
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -135,6 +135,16 @@ impl ProcessManager {
         }
         let config_file = configs_dir.join("bcs-config.json");
         std::fs::write(&config_file, serde_json::to_string_pretty(&config_content)?)?;
+        // Config loading requires the catalog label policy file in the
+        // selected config directory; stage the repository dictionary.
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let policy_src = manifest_dir
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .map(|root| root.join("configs/catalog-labels.toml"))
+            .expect("bcs root from CARGO_MANIFEST_DIR");
+        std::fs::copy(&policy_src, configs_dir.join("catalog-labels.toml"))?;
 
         let mut cmd = Command::new(&bcs_bin);
         cmd.arg("-c").arg(&configs_dir)

@@ -26,6 +26,7 @@ mod message_history;
 mod metrics;
 mod principal;
 mod root;
+mod catalog_labels;
 mod security;
 mod session_files;
 mod telemetry;

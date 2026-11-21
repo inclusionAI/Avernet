@@ -13,6 +13,7 @@ pub struct A2aCardInput {
 }
 
 pub struct RegisterA2aAgent {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     pub token: String,
     pub provider_bot_ref: String,
     pub owners: Option<Vec<String>>,
@@ -22,6 +23,7 @@ pub struct RegisterA2aAgent {
 }
 
 pub struct RegisterNamedA2aAgent {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     pub token: String,
     pub provider_name: String,
     pub provider_bot_ref: String,
@@ -31,6 +33,7 @@ pub struct RegisterNamedA2aAgent {
 }
 
 pub struct UpdateA2aAgent {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     pub token: String,
     pub bot_id: String,
     pub source: A2aCardInput,

@@ -283,6 +283,7 @@ impl ProviderRegistrationCore {
             };
         if let Some(card) = card {
             let card = bcs_service_api::port::repo::a2a_bot::A2aBotRecord {
+                catalog_labels:card.catalog_labels,
                 bot_uuid:record.bot_uuid.clone(),provider_id:record.provider_id.clone(),
                 provider_bot_ref:record.provider_bot_ref.clone(),agent_card_url:card.agent_card_url,
                 agent_card:card.agent_card,revision:1,

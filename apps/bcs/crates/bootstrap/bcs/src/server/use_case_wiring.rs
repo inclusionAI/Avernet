@@ -144,6 +144,7 @@ pub(super) fn build_use_case_bundle(
             system_message.clone(),
         )
         .with_friend_connect(connect.clone())
+        .with_catalog_label_policy(config.catalog_label_policy.clone())
         .with_channel_binding_cleanup(channel_binding_cleanup)
         .with_participant_view_bindings(participant_view_bindings)
         .with_bot_runtime(bot_use_cases.clone())

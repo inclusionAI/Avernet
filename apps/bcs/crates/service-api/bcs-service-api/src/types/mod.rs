@@ -29,6 +29,7 @@ pub use event::*;
 /// preserving interfaces, skills and extensions; reads never persist a backfill.
 #[derive(Debug, Clone)]
 pub struct GroupCardSnapshot {
+    pub catalog_labels: catalog_labels::CatalogLabels,
     pub group_id: String,
     pub group_kind: GroupKind,
     pub group_strategy: GroupStrategy,
@@ -44,6 +45,8 @@ pub struct GroupCardSnapshot {
 /// participants, routing extensions, or other state changed concurrently.
 #[derive(Debug, Clone, Default)]
 pub struct GroupMutableFieldsPatch {
+    /// None preserves; Some replaces the entire normalized collection.
+    pub catalog_labels: Option<catalog_labels::CatalogLabels>,
     pub label: Option<String>,
     pub context: Option<String>,
     /// Outer `None` leaves the field unchanged; `Some(None)` restores the default.
@@ -72,3 +75,5 @@ pub mod a2a_bot;
 pub mod a2a_card_projection;
 
 pub mod run_budget;
+
+pub mod catalog_labels;

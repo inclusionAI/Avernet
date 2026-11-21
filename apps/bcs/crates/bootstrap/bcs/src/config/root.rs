@@ -30,6 +30,9 @@ use super::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BcsConfig {
+    /// Loaded only from the selected config directory's standalone policy file.
+    #[serde(skip)]
+    pub catalog_label_policy: std::sync::Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>,
     /// Drafts are disabled unless explicitly enabled; revision availability lives in the database.
     #[serde(default)]
     pub collaboration_drafts: Option<crate::collaboration_drafts::CollaborationDraftConfig>,
@@ -465,6 +468,7 @@ fn default_bot_run_context_store() -> String {
 impl Default for BcsConfig {
     fn default() -> Self {
         Self {
+            catalog_label_policy:std::sync::Arc::default(),
             collaboration_drafts: None,
             caller_identity: None,
             a2a_http_identity: None,

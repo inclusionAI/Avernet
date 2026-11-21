@@ -184,6 +184,11 @@ prepare_bcs_runtime_config() {
     fi
 
     mkdir -p "$config_dir"
+    if [ ! -f "${BCS_DIR}/configs/catalog-labels.toml" ]; then
+        log_error "Missing BCS catalog-labels.toml policy"
+        return 1
+    fi
+    cp "${BCS_DIR}/configs/catalog-labels.toml" "${config_dir}/catalog-labels.toml"
     cp "$template" "$base_config"
     cp "$template" "$local_config"
     if [ "${SINGLEBOX_COVERAGE:-0}" = "1" ] && [ "${BCS_E2E_APP_IDENTITY:-0}" = "1" ]; then

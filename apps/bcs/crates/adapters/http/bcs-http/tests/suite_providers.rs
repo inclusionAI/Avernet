@@ -17,3 +17,6 @@ mod provider_routes_contract;
 mod provider_slug_contract;
 #[path = "cases/provider_webhook_routes_contract.rs"]
 mod provider_webhook_routes_contract;
+
+#[path = "cases/catalog_label_type_errors.rs"]
+mod catalog_label_type_errors;

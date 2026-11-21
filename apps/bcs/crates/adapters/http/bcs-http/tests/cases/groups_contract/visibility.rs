@@ -33,7 +33,7 @@ impl GroupQueryService for RecordingGroupQuery {
         cmd: GroupDetailCommand,
     ) -> Result<GroupDetailResult, bcs_service_api::GroupUseCaseError> {
         self.detail_calls.lock().await.push(cmd.clone());
-        Ok(GroupDetailResult {
+        Ok(GroupDetailResult { catalog_labels:Default::default(),
             group_id: cmd.group_id,
             label: Some("Queried group".to_string()),
             status: GroupStatus::Active,

@@ -1,5 +1,5 @@
 //! Provider-admin Card configuration and explicit refresh.
-use axum::{Json, extract::{Path, State}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}};
+use axum::{Json, extract::{Path, State, rejection::JsonRejection}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}};
 use bcs_service_api::application::a2a_bot::ConfigureA2aBotCommand;
 use serde::Deserialize;
 use serde_json::json;
@@ -28,9 +28,11 @@ fn provider_error(error: ServiceError) -> Response {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigureRequest {
+    #[serde(default,deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    pub catalog_labels:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     pub agent_card_url: Option<String>,
     pub agent_card: Option<serde_json::Value>,
-    /// Optional legacy compare-and-set; omission performs an atomic last-write-wins replacement.
+    /// Optional legacy compare-and-set; omission permits bounded retries against the latest revision.
     pub expected_revision: Option<u64>,
 }
 
@@ -45,16 +47,22 @@ fn unavailable() -> Response {
 
 pub async fn configure(
     State(state): State<HttpAppState>, Path((provider_id, bot_uuid)): Path<(String, String)>,
-    headers: HeaderMap, Json(request): Json<ConfigureRequest>,
+    headers: HeaderMap, body: Result<Json<ConfigureRequest>, JsonRejection>,
 ) -> Response {
+    let Json(request)=match body {Ok(body)=>body,Err(error)=>return super::catalog_label_errors::rejection_response(error)};
     let token = match bearer_token(&headers) { Ok(v) => v, Err(e) => return e.into_response() };
     let Some(service) = &state.services.a2a_bot_management else { return unavailable(); };
     let source=match bcs_service_api::types::a2a_bot::A2aCardSource::from_parts(request.agent_card_url,request.agent_card) {
         Ok(Some(source))=>source,
-        Ok(None)=>return provider_error(ServiceError::InvalidOperation {message:"agent_card_url or agent_card is required".into(),request_id:None}),
+        Ok(None)=>{
+            let Some(labels)=request.catalog_labels else {return provider_error(ServiceError::InvalidOperation {message:"agent_card_url, agent_card or catalog_labels is required".into(),request_id:None})};
+            return match service.configure_catalog_labels(&provider_id,&token,&bot_uuid,labels,request.expected_revision).await {
+                Ok(record)=>Json(record).into_response(),Err(error)=>provider_error(error),
+            };
+        },
         Err(error)=>return provider_error(error),
     };
-    let command = ConfigureA2aBotCommand { provider_id, provider_admin_token: token, bot_uuid,
+    let command = ConfigureA2aBotCommand {catalog_labels:request.catalog_labels, provider_id, provider_admin_token: token, bot_uuid,
         source, expected_revision: request.expected_revision, now_ms: now_ms() };
     match service.configure(command).await {
         Ok(record) => Json(record).into_response(),

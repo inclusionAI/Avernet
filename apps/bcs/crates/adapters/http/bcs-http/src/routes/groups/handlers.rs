@@ -81,6 +81,9 @@ pub async fn patch_group(
     let Json(body) = match body {
         Ok(body) => body,
         Err(error) => {
+            if let Some(response)=crate::routes::catalog_label_errors::label_type_response(&error) {
+                return response;
+            }
             return legacy_group_error_response(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",

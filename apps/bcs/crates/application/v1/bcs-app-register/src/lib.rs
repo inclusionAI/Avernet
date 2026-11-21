@@ -38,6 +38,7 @@ pub const REGISTER_TOKEN_TTL_SECONDS: u64 = 21600; // 6 hours
 const REGISTER_TOKEN_NOTE: &str = "Use this token for bot registration within 6 hours";
 
 pub struct RegisterServiceImpl {
+    catalog_label_policy:Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>,
     /// Registry core of the trusted (ownership-initialized)
     /// registration chain. Its Bot Store performs the atomic
     /// lifecycle transaction; the application never touches
@@ -51,6 +52,7 @@ pub struct RegisterServiceImpl {
 impl RegisterServiceImpl {
     pub fn new(token_secret: Vec<u8>) -> Self {
         Self {
+            catalog_label_policy:Arc::default(),
             registry: None,
             token_secret,
             a2a_cards: None,
@@ -58,6 +60,9 @@ impl RegisterServiceImpl {
         }
     }
 
+    pub fn with_catalog_label_policy(mut self,policy:Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>)->Self {
+        self.catalog_label_policy=policy;self
+    }
     pub fn with_a2a_cards(mut self, cards: Arc<dyn bcs_service_api::port::a2a_card::A2aCardPort>) -> Self {
         self.a2a_cards = Some(cards); self
     }
@@ -113,6 +118,8 @@ impl RegisterServiceImpl {
         payload: ProviderRegisterTokenPayload,
         source: Option<bcs_service_api::types::a2a_bot::A2aCardSource>,
     ) -> Result<BotRegistration, ApplicationError> {
+        let catalog_labels=self.catalog_label_policy.normalize(command.catalog_labels.clone().unwrap_or_default()).map_err(|error|ApplicationError::invalid("invalid_request",error.to_string()))?;
+        if source.is_none() && !catalog_labels.is_empty() {return Err(ApplicationError::invalid("invalid_request","catalog_labels requires an AgentCard"));}
         let mode = command.mode.unwrap_or(ProviderRegistrationMode::Plugin);
         if !payload.allowed_modes.contains(&mode) {
             return Err(ApplicationError::forbidden("registration mode is not authorized"));
@@ -150,6 +157,7 @@ impl RegisterServiceImpl {
                 .map_err(|_|ApplicationError::internal("registration clock unavailable"))?.as_millis())
                 .map_err(|_|ApplicationError::internal("registration clock overflow"))?;
             let card = bcs_service_api::types::a2a_bot::A2aRegistrationCard {
+                catalog_labels,
                 visibility: Default::default(),
                 agent_card_url:url,
                 agent_card:fetched.raw,interface:fetched.interface,
@@ -298,6 +306,8 @@ impl RegisterService for RegisterServiceImpl {
 
 impl RegisterServiceImpl {
     async fn register_impl(&self, command: RegisterBot, source: Option<bcs_service_api::types::a2a_bot::A2aCardSource>) -> Result<BotRegistration, ApplicationError> {
+        let labels=self.catalog_label_policy.normalize(command.catalog_labels.clone().unwrap_or_default()).map_err(|error|ApplicationError::invalid("invalid_request",error.to_string()))?;
+        if source.is_none() && !labels.is_empty() {return Err(ApplicationError::invalid("invalid_request","catalog_labels requires an AgentCard"));}
         let bot_name = command.bot_name.trim();
         let name_len = bot_name.chars().count();
         if (source.is_none() || !command.bot_name.is_empty()) && (name_len < 2 || name_len > 64) {
@@ -617,7 +627,7 @@ mod tests {
             .await
             .expect("issue");
         let registration = svc
-            .register_bot(RegisterBot {
+            .register_bot(RegisterBot { catalog_labels:Default::default(),
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -657,7 +667,7 @@ mod tests {
             SECRET,
         );
         let error = svc
-            .register_bot(RegisterBot {
+            .register_bot(RegisterBot { catalog_labels:Default::default(),
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -688,7 +698,7 @@ mod tests {
             .await
             .expect("issue");
         let registration = svc
-            .register_bot(RegisterBot {
+            .register_bot(RegisterBot { catalog_labels:Default::default(),
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -718,7 +728,7 @@ mod tests {
             .expect("issue");
         for bad in ["not-a-token"] {
             let error = svc
-                .register_bot(RegisterBot {
+                .register_bot(RegisterBot { catalog_labels:Default::default(),
                     mode: None,
                     provider_bot_ref: None,
                     webhook_url: None,
@@ -739,7 +749,7 @@ mod tests {
             b"other-secret",
         );
         let error = svc
-            .register_bot(RegisterBot {
+            .register_bot(RegisterBot { catalog_labels:Default::default(),
                 mode: None,
                 provider_bot_ref: None,
                 webhook_url: None,
@@ -757,7 +767,7 @@ mod tests {
         let too_long = "x".repeat(65);
         for bad in ["a", too_long.as_str()] {
             let error = svc
-                .register_bot(RegisterBot {
+                .register_bot(RegisterBot { catalog_labels:Default::default(),
                     mode: None,
                     provider_bot_ref: None,
                     webhook_url: None,
