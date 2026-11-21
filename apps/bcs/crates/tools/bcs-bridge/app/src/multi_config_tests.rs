@@ -205,3 +205,22 @@ fn provider_level_cli_endpoint_is_rejected() {
     ]);
     assert!(Document::parse(&toml::to_string(&root).unwrap()).is_err());
 }
+
+#[test]
+fn a2a_startup_reuses_runtime_credentials_in_legacy_and_multi_provider_documents() {
+    struct Credentials;
+    impl CredentialSource for Credentials {
+        fn webhook_token(&self, provider: &str) -> anyhow::Result<String> { Ok(format!("runtime-{provider}")) }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bridge.toml");
+    let gateway = "provider_id='a'\nlisten='127.0.0.1:21100'\nstate_path='a.db'\nbcs_to_provider_token='fake'\n[a2a]\npublic_url='https://agents.example/prefix'\n[[bot]]\nprovider_bot_ref='coder'\nengine='codex'\ncwd='/tmp'\n";
+    for text in [gateway.to_owned(), format!("schema_version=2\n[[provider]]\n{}", gateway.replace("[a2a]", "[provider.a2a]").replace("[[bot]]", "[[provider.bot]]"))] {
+        std::fs::write(&path, &text).unwrap();
+        let providers = load(&path, &Credentials).unwrap();
+        assert_eq!(providers[0].config.a2a.as_ref().unwrap().public_url, "https://agents.example/prefix");
+        assert_eq!(providers[0].config.bcs_to_provider_token.as_deref(), Some("runtime-a"));
+        assert!(providers[0].config.bots[0].bot_id.is_none(), "standalone A2A does not require BCS registration");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+}
