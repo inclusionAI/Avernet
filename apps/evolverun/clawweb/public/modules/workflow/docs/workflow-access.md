@@ -19,10 +19,30 @@ The host may inject `Pick<BotDirectory, "listBots">` into
 
 The workflow detail API needs only the workflow ID and the existing authenticated
 identity. No new frontend parameters are required. For authenticated browser list
-requests, `botOwnerId`/`botId` select the asset scope; the result is intersected with
-the caller's effective access. The existing non-browser list compatibility path
-is unchanged. Lists cache workflow summaries, not authorization results, and use
-`Cache-Control: no-store` so membership revocation is checked on every request.
+requests, `botOwnerId`/`botId` select the asset scope; they never identify or
+authenticate the caller. The result is intersected with the caller's effective
+access. The existing non-browser list compatibility path is unchanged. Lists cache
+workflow summaries, not authorization results, and use `Cache-Control: no-store`
+so membership revocation is checked on every request.
+
+Workflow lists retain view semantics by default. Task-launch lists explicitly send
+`permission=execute` to `/api/workflows` and `/api/workflows/list`. Non-admin
+callers require an authenticated principal; administrators retain the established
+administrator bypass and can list all workflows. An attacker cannot bypass
+filtering by supplying another user's `botOwnerId`: it only selects the asset
+scope. The server resolves the direct and exact-Bot-inherited execute grants for
+the authenticated caller and intersects them with that asset scope.
+
+Execute lists are deny-by-default. An empty permission table yields no
+executable workflows, and a non-admin request also fails closed when no
+permission repository is configured. View lists retain their unrestricted
+compatibility path for empty/missing permission storage. View, edit, and deploy
+capabilities do not imply execute visibility.
+
+Browser deployments must set identity headers and cookies through their trusted
+ingress or public host. In that trust boundary, `resolveWorkflowActorId` uses the
+injected principal and the route treats it as the caller; externally supplied
+identity headers must be stripped or overwritten before they reach ClawWeb.
 
 Membership is resolved on each check. An unavailable Bot directory contributes no
 inherited grants and emits a warning; direct grants continue working. Permission
