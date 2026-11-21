@@ -671,7 +671,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # workflow adds seven Bot-path-addressed user-scoped operations under
 # /bots/{bot_id}/eval: path 226 -> 233.
 # Admin Caller expiry correction adds one Bot-addressed operation: 233 -> 234.
-_BOT_ID_PLACEMENT = {"path": 235, "query": 2, "none": 158}
+_BOT_ID_PLACEMENT = {"path": 237, "query": 2, "none": 158}
 # Read-only Caller status adds one Bot-path operation: 234 -> 235.
 
 
@@ -897,7 +897,8 @@ def test_the_pinned_number_of_operations_take_it():
     # destroy, and result save: 309 -> 316.
     # Admin Caller expiry correction keeps the verified actor user_id: 316 -> 317.
     # Read-only Caller status adds one user-taking operation: 317 -> 318.
-    assert len(taking) == 318
+    # Bot MCP config read and update both name the acting user.
+    assert len(taking) == 320
 
 
 def test_the_exempt_operations_take_none():

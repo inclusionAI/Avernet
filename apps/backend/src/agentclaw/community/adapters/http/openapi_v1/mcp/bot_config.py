@@ -31,6 +31,8 @@ ServerCode = Annotated[
 
 
 class BotMcpConfigWrite(BaseModel):
+    """Sparse updates to the Bot’s explicit MCP overrides."""
+
     model_config = ConfigDict(extra="forbid")
 
     headers: dict[str, StrictStr | None] = Field(
@@ -46,7 +48,9 @@ class BotMcpConfigWrite(BaseModel):
 
 
 class BotMcpConfig(BaseModel):
-    server_code: str
+    """Redacted view of one Bot’s explicitly stored MCP overrides."""
+
+    server_code: str = Field(description="Opaque identifier of the MCP server.")
     headers: dict[str, str] = Field(
         description="Explicit Header names with redacted values."
     )
@@ -54,8 +58,12 @@ class BotMcpConfig(BaseModel):
 
 
 class BotMcpConfigWriteResult(BotMcpConfig):
-    desired_state: DesiredStateResult
-    runtime_projection: RuntimeProjectionResult
+    """Committed Bot MCP overrides and the outcome of the delivery attempt."""
+
+    desired_state: DesiredStateResult = Field(description="Durable override write result.")
+    runtime_projection: RuntimeProjectionResult = Field(
+        description="Delivery status for this Bot and MCP."
+    )
 
 
 def _redacted_config(server_code: str, config: dict[str, Any]) -> BotMcpConfig:

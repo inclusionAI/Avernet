@@ -3,6 +3,7 @@
     "schemas": {
       "BotMcpConfigWrite": {
         "additionalProperties": false,
+        "description": "Sparse updates to the Bot’s explicit MCP overrides.",
         "properties": {
           "headers": {
             "additionalProperties": {
@@ -78,9 +79,11 @@
         "type": "object"
       },
       "BotMcpConfigWriteResult": {
+        "description": "Committed Bot MCP overrides and the outcome of the delivery attempt.",
         "properties": {
           "desired_state": {
-            "$ref": "#/components/schemas/DesiredStateResult"
+            "$ref": "#/components/schemas/DesiredStateResult",
+            "description": "Durable override write result."
           },
           "headers": {
             "additionalProperties": {
@@ -91,9 +94,11 @@
             "type": "object"
           },
           "runtime_projection": {
-            "$ref": "#/components/schemas/RuntimeProjectionResult"
+            "$ref": "#/components/schemas/RuntimeProjectionResult",
+            "description": "Delivery status for this Bot and MCP."
           },
           "server_code": {
+            "description": "Opaque identifier of the MCP server.",
             "title": "Server Code",
             "type": "string"
           },
@@ -163,6 +168,7 @@
         "type": "object"
       },
       "BotMcpConfig": {
+        "description": "Redacted view of one Bot’s explicitly stored MCP overrides.",
         "properties": {
           "headers": {
             "additionalProperties": {
@@ -173,6 +179,7 @@
             "type": "object"
           },
           "server_code": {
+            "description": "Opaque identifier of the MCP server.",
             "title": "Server Code",
             "type": "string"
           },

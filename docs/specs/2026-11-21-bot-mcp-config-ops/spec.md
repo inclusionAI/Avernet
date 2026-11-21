@@ -78,4 +78,4 @@
 - 实现包含 Backend GET/PUT 和 Gateway OpenAPI，接口说明见 [MCP 配置模块](../../../apps/backend/src/agentclaw/community/core/mcp/README.md)。GET 与 PUT 响应会遮盖所有显式 Header 值及完整 URL。
 - Backend 定向回归覆盖合成签名的 App 主体、权限降级、编辑锁、账号级配置兼容、Manifest Apply，以及设备配置生成。另用本地 MariaDB 11.4 验证两次并发增量写及旧账号级写入与增量写共用 Bot 行锁。
 - 投影状态记录该次下发的结果。行锁保证数据库合并读取最新提交的覆盖值。并发设备写入的到达顺序由运行时链路决定。
-- 验证在本地完成。真实 App 身份经 Gateway 到测试设备的端到端验收待执行。此交付进入以 `dev` 为目标的草稿 PR。
+- 验证在本地完成。真实 App 身份经 Gateway 到测试设备的端到端验收待执行。此交付进入以 `dev` 为目标的 [草稿 PR #4293](https://github.com/inclusionAI/Avernet/pull/4293)。
