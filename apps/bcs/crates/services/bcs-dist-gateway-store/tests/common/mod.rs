@@ -62,9 +62,11 @@ pub fn snapshot(tid: &str, status: TaskStatus, covered: Option<EventId>, created
         content: TaskContent {
             status,
             interactions: vec![],
-            snapshot: Payload::Inline(serde_json::json!({ "artifacts": [] })),
+            snapshot: Payload::Inline(serde_json::json!({ "format_version": 1, "units": [] })),
             result_ref: None,
         },
+        output_limits: PHASE_ONE_OUTPUT_LIMITS,
+        output_usage: OutputUsage::default(),
         snapshot_event_id: covered,
         source_commit: CommitSeq(covered.map_or(0, |e| e.commit.0)),
         created_at: TimestampMillis(created_at),
@@ -89,8 +91,11 @@ pub fn text_event(tid: &str, id: EventId, text: &str) -> OutputEvent {
         tid: Tid(tid.into()),
         body: OutputBody::Artifact {
             node: NodeId("n1".into()),
+            artifact_id: ArtifactId("a-1".into()),
             class: OutputClass::Output,
-            content: Payload::Inline(serde_json::json!({ "text": text })),
+            update: ArtifactUpdate::Upsert {
+                content: Payload::Inline(serde_json::json!(text)),
+            },
         },
     }
 }
@@ -110,7 +115,7 @@ impl FakeWorker {
         self.publish(task).await;
         ZSetStorePlugin::add(
             self.model.as_ref(),
-            &layout().tasks(&task.sid).unwrap(),
+            &layout().session_tasks(&task.sid).unwrap(),
             &[ZSetEntry {
                 member: task.tid.0.clone(),
                 score: task.created_at.0 as f64,
@@ -270,7 +275,9 @@ pub fn final_record(tid: &str) -> FinalTaskRecord {
         sid: Sid(SID.into()),
         tid: Tid(tid.into()),
         status: TerminalStatus::Completed,
-        snapshot: Payload::Inline(serde_json::json!({ "artifacts": ["final"] })),
+        snapshot: Payload::Inline(serde_json::json!({ "format_version": 1, "units": [
+            { "node": "n1", "artifact_id": "a-1", "class": "output", "content": "final" }
+        ] })),
         result: Payload::Inline(serde_json::json!("done")),
         source_commit: CommitSeq(9),
         finalized_at: TimestampMillis(1_794_371_300_000),
@@ -304,10 +311,7 @@ pub struct MemoryBlobs {
 impl MemoryBlobs {
     pub fn put(&self, key: &str, bytes: &[u8]) -> BlobRef {
         self.blobs.lock().unwrap().insert(key.to_owned(), bytes.to_vec());
-        BlobRef {
-            key: key.to_owned(),
-            digest: Digest("sha256:test".into()),
-        }
+        bcs_dist_store::archive::blob_reference(key, bytes)
     }
 }
 
@@ -386,6 +390,8 @@ pub struct Ports {
 pub fn ports() -> Ports {
     let f = fixture();
     let inbox = bcs_dist_store::inbox::StoreInboxProducer::new(
+        Arc::new(bcs_dist_store::budget::SharedScanBudget::new(Default::default()).unwrap()),
+        Arc::new(bcs_dist_projection::OutputProjectionService),
         f.model.clone(),
         f.model.clone(),
         f.model.clone(),

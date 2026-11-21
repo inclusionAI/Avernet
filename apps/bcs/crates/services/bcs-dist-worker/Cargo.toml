@@ -8,22 +8,33 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+bcs-dist-encoding.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 bcs-dist-model.workspace = true
 bcs-service-api.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+bcs-app-dist-gateway.workspace = true
+bcs-dist-gateway.workspace = true
+bcs-dist-gateway-http.workspace = true
+bcs-dist-a2a-output.workspace = true
+axum.workspace = true
+tower = { workspace = true, features = ["util"] }
+bcs-domain.workspace = true
+bcs-db-local.workspace = true
+bcs-db-migrations.workspace = true
+bcs-dist-projection.workspace = true
 bcs-store-api.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 bcs-dist-store.workspace = true
 bcs-test-support.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

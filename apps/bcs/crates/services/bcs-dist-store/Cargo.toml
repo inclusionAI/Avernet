@@ -8,19 +8,26 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+bcs-dist-encoding.workspace = true
 async-trait = { workspace = true }
 bcs-dist-model = { workspace = true }
+bcs-db-api = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-store-api = { workspace = true }
-hex = { workspace = true }
+futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+bcs-dist-projection = { workspace = true }
 bcs-test-support = { workspace = true }
-tokio = { workspace = true }
+bcs-db-local = { workspace = true }
+bcs-db-migrations = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

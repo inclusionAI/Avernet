@@ -192,6 +192,9 @@ mkdir -p "$cov_dir"
 cat > "$cov_dir/summary.json" <<'JSON'
 {"data":[{"totals":{"lines":{"covered":45,"count":100},"functions":{"covered":40,"count":100},"regions":{"covered":30,"count":100},"branches":{"covered":0,"count":0}}}]}
 JSON
+cat > "$cov_dir/worker_e2e.json" <<'JSON'
+{"status":"passed","store":"memory_mock","durable_store":false,"archive":"sqlite","checks":["gateway_http_retry_conflict_once","gateway_http_concurrent_first_request","gateway_http_sse_get_task_consistency","document_projection_atomic_patch_and_unknown","finish_archive_restore_and_late_cancel","append_archive_restore_and_late_cancel","cancel_independent_of_runner","quarantine_and_control_authorization","blocked_and_control_authorization","memory_store_worker_takeover","graceful_handoff_preserves_pending_task","human_reply_dispatch_input_once","holder_input_acceptance_and_cancel_unknown","live_follow_snapshot_trim_gap_restore","sending_unknown_late_evidence_without_rerun"]}
+JSON
 cat > "$cov_dir/oauth_e2e.json" <<'JSON'
 {"status":"passed","scenarios":["mixed-sqlite","mixed-memory","compatibility-and-chain-selection","pending-capacity","startup-validation"],"checks":[{"path":"/auth/url","status":200}],"provider_calls":{"authorize":1,"exchange":1,"userinfo":1}}
 JSON
@@ -318,7 +321,7 @@ test_default_mode_runs_real_singlebox() {
     fail "summary.md artifact missing"
   [ -s "${tmp}/singlebox/.dependencies/coverage/singlebox/reports/dashboard.html" ] || \
     fail "dashboard.html artifact missing"
-  for artifact in e2e.log oauth_e2e.json cobertura.xml coverage.txt summary.json endpoint_coverage.xml endpoint_coverage.txt cli_command_coverage.txt; do
+  for artifact in e2e.log oauth_e2e.json worker_e2e.json cobertura.xml coverage.txt summary.json endpoint_coverage.xml endpoint_coverage.txt cli_command_coverage.txt; do
     [ -s "${tmp}/singlebox/.dependencies/coverage/singlebox/reports/bcs/${artifact}" ] || \
       fail "BCS artifact missing: ${artifact}"
   done

@@ -62,3 +62,7 @@ pub struct AdmissionReceipt {
     pub input_id: InputId,
     pub business_digest: Digest,
 }
+
+/// Resolved input contents use their own fixed phase-one capacity. Output display
+/// quotas can be smaller without retroactively changing admitted input capacity.
+pub const PHASE_ONE_MAX_INPUT_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;

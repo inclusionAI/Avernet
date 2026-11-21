@@ -78,6 +78,7 @@ async fn dispatch_creation_and_cancel_keep_the_committed_identity() -> ContractR
             "DispatchControlPort::get",
             (&fresh.spec.did,),
             ok(Some(DispatchRecord {
+                terminal_evidence: None,
                 view: dispatch_view(),
                 revision: Revision("dispatch-1".into()),
             })),

@@ -266,8 +266,9 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
     assert_eq!(delivery_lookup.get("name"), Some(&DbValue::String("delivery_session_lookup".into())));
     assert_eq!(
         history.last().expect("chain tail present").get("name"),
-        Some(&DbValue::String("message_activity_indexes".into()))
+        Some(&DbValue::String("dist_immutable_objects".into()))
     );
+    assert!(history.iter().any(|row| row.get("version") == Some(&DbValue::I64(45)) && row.get("name") == Some(&DbValue::String("message_activity_indexes".into()))), "activity indexes migration retained");
     assert!(history.iter().any(|row| row.get("name") == Some(&DbValue::String("auth_session_version".into()))), "session version migration recorded");
     assert!(history.iter().any(|row| row.get("name") == Some(&DbValue::String("group_agent_cards".into()))), "Group Card migration recorded");
     assert!(history.iter().any(|row| row.get("name") == Some(&DbValue::String("bot_avatar".into()))), "avatar migration recorded");

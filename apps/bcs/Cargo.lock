@@ -337,6 +337,8 @@ dependencies = [
  "bcs-app-collaboration-definition",
  "bcs-app-collaboration-draft",
  "bcs-app-collaboration-template",
+ "bcs-app-dist-gateway",
+ "bcs-app-dist-runtime",
  "bcs-app-group",
  "bcs-app-group-context",
  "bcs-app-identity-api",
@@ -375,6 +377,14 @@ dependencies = [
  "bcs-db-local",
  "bcs-db-migrations",
  "bcs-db-mysql",
+ "bcs-dist-a2a-output",
+ "bcs-dist-gateway",
+ "bcs-dist-gateway-http",
+ "bcs-dist-model",
+ "bcs-dist-projection",
+ "bcs-dist-store",
+ "bcs-dist-test-runner",
+ "bcs-dist-worker",
  "bcs-domain",
  "bcs-edge-permission",
  "bcs-edge-permission-store",
@@ -426,6 +436,7 @@ dependencies = [
  "bcs-storage-api",
  "bcs-storage-baas",
  "bcs-storage-local",
+ "bcs-store-api",
  "bcs-system-message",
  "bcs-test-support",
  "bcs-tracing-api",
@@ -683,10 +694,13 @@ name = "bcs-app-dist-gateway"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-dist-a2a-output",
  "bcs-dist-gateway",
  "bcs-dist-gateway-store",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
+ "bcs-dist-worker",
  "bcs-domain",
  "bcs-service-api",
  "bcs-store-api",
@@ -705,6 +719,7 @@ dependencies = [
  "async-trait",
  "bcs-dist-model",
  "bcs-service-api",
+ "bcs-test-support",
  "tokio",
 ]
 
@@ -1483,13 +1498,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-a2a-output"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "bcs-dist-model",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde_json",
+]
+
+[[package]]
+name = "bcs-dist-encoding"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-dist-model",
+ "hex",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "bcs-dist-gateway"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-dist-a2a-output",
  "bcs-dist-gateway-store",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
+ "bcs-dist-worker",
  "bcs-service-api",
  "bcs-store-api",
  "bcs-test-support",
@@ -1507,10 +1546,13 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bcs-app-dist-gateway",
+ "bcs-dist-a2a-output",
  "bcs-dist-gateway",
  "bcs-dist-gateway-store",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
+ "bcs-dist-worker",
  "bcs-domain",
  "bcs-service-api",
  "bcs-store-api",
@@ -1530,6 +1572,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
  "bcs-service-api",
  "bcs-store-api",
@@ -1549,20 +1592,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-projection"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-dist-model",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bcs-dist-store"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-db-migrations",
+ "bcs-dist-encoding",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-service-api",
  "bcs-store-api",
  "bcs-test-support",
- "hex",
+ "futures",
  "serde",
  "serde_json",
- "sha2",
+ "tempfile",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "bcs-dist-test-runner"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-model",
+ "bcs-domain",
+ "bcs-service-api",
+ "serde_json",
 ]
 
 [[package]]
@@ -1570,8 +1641,18 @@ name = "bcs-dist-worker"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "axum",
+ "bcs-app-dist-gateway",
+ "bcs-db-local",
+ "bcs-db-migrations",
+ "bcs-dist-a2a-output",
+ "bcs-dist-encoding",
+ "bcs-dist-gateway",
+ "bcs-dist-gateway-http",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
+ "bcs-domain",
  "bcs-service-api",
  "bcs-store-api",
  "bcs-test-support",
@@ -1580,6 +1661,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "tower",
  "tracing",
  "uuid",
 ]

@@ -7,6 +7,7 @@
 pub mod dispatch;
 pub mod ids;
 pub mod input;
+pub mod output;
 pub mod runner;
 pub mod session;
 pub mod task;
@@ -14,6 +15,7 @@ pub mod task;
 pub use dispatch::*;
 pub use ids::*;
 pub use input::*;
+pub use output::*;
 pub use runner::*;
 pub use session::*;
 pub use task::*;

@@ -6,14 +6,14 @@
   then versioned migrations, then index creation
   (`run_sqlite_bootstrap_tables`, `run_sqlite_versioned_migrations`,
   `run_sqlite_bootstrap_indexes`).
-- The versioned SQLite migration chain (versions 1..42) with per-migration
+- The versioned SQLite migration chain (versions 1..46) with per-migration
   SHA-256 checksums, applied-history validation, repair conditions for legacy
   local databases, and the `bcs_schema_migrations` record bookkeeping.
 - Migration state inspection (`check_sqlite_migrations`) and the apply-report
   summary (`SqliteMigrationReport` / `SqliteMigrationPlan` /
   `run_sqlite_migrations_with_report`), plus `sqlite_target_version()` and
   `sqlite_migration_count()` for CLI reporting.
-- The full behavior test suite (49 tests) that previously registered 30 times
+- The full behavior test suite (54 tests) that previously registered 30 times
   across the workspace via `#[path]` source includes; they now run once here.
 
 ## Allowed dependencies
@@ -54,10 +54,15 @@
 
 ## Tests
 
-- `cargo test -p bcs-db-migrations` — 49 tests, including fresh empty-DB
+- `cargo test -p bcs-db-migrations` — 54 tests, including fresh empty-DB
   init, legacy-database upgrades (pre-existing records / partial steps),
   repeated-startup idempotency, checksum-mismatch and write-failure error
   propagation, cross-dialect migration-content mirrors.
 - MySQL-ignored contract tests in consumer packages remain with their owners;
   running them against a real MySQL database is Task 7 of the measured
   footprint plan, not this crate's default suite.
+
+SQLite 046 / MySQL 048 add the public distributed runtime immutable archive.
+SQLite upgrade tests preserve the prior history and retained object bytes across
+restarts. The MySQL table shape is statically checked; real MySQL/OceanBase
+acceptance is not implied by those checks.

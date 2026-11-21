@@ -13,7 +13,7 @@ use crate::DistGatewayCore;
 use crate::error::{admit_error, read_error};
 use bcs_dist_model::*;
 use bcs_service_api::core::dist_gateway::*;
-use bcs_service_api::port::repo::distributed::inbox::{AdmitOutcome, AdmitRequest};
+use bcs_service_api::port::repo::distributed::inbox::AdmitOutcome;
 use bcs_service_api::port::repo::distributed::task_feed::RestoredTask;
 
 pub(crate) async fn admit(
@@ -23,13 +23,8 @@ pub(crate) async fn admit(
 ) -> Result<CoreAdmission, DistGatewayCoreError> {
     check(core, scope, &command).await?;
     let input_id = command.input.input_id.clone();
-    let request = AdmitRequest {
-        input: command.input,
-        create_session: command.create_session,
-        create_task: command.create_task,
-    };
-    match core.inbox.admit(request).await {
-        Ok(AdmitOutcome::Accepted(receipt)) => Ok(CoreAdmission(receipt)),
+    match core.inbox.admit(scope, command).await {
+        Ok(AdmitOutcome::Accepted(receipt) | AdmitOutcome::Duplicate(receipt)) => Ok(CoreAdmission(receipt)),
         Ok(AdmitOutcome::ContentConflict) => Err(DistGatewayCoreError::ContentConflict),
         Ok(AdmitOutcome::Quarantined) => Err(DistGatewayCoreError::Quarantined),
         Err(error) => Err(admit_error(error, &input_id)),
@@ -42,26 +37,17 @@ async fn check(
     command: &AdmitTaskCommand,
 ) -> Result<(), DistGatewayCoreError> {
     let input = &command.input;
-    match (&command.create_session, &command.create_task) {
-        (Some(spec), Some(task)) => {
-            if &spec.scope != scope || &task.scope != scope {
-                return Err(DistGatewayCoreError::ScopeMismatch);
-            }
-            starts_work(&input.body)
-        }
-        // A session is only created together with its first task.
-        (Some(_), None) => Err(DistGatewayCoreError::InvalidTransition),
-        (None, Some(task)) => {
-            if &task.scope != scope {
-                return Err(DistGatewayCoreError::ScopeMismatch);
-            }
+    match (&command.create_session, command.start_task) {
+        (Some(_), true) => starts_work(&input.body),
+        (Some(_), false) => Err(DistGatewayCoreError::InvalidTransition),
+        (None, true) => {
             match core.sessions.get_spec(&input.sid).await.map_err(read_error)? {
                 Some(spec) if &spec.scope == scope => starts_work(&input.body),
                 Some(_) => Err(DistGatewayCoreError::ScopeMismatch),
                 None => Err(DistGatewayCoreError::NotFound),
             }
         }
-        (None, None) => existing_task(core, scope, input).await,
+        (None, false) => existing_task(core, scope, input).await,
     }
 }
 

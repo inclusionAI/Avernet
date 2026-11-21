@@ -309,3 +309,12 @@ Explicit queue injection with disabled or V1 integration is rejected. The defaul
 startup entry retains configuration-selected construction. Hosts own wiring only,
 not a second synchronization implementation.
 
+
+## Opt-in Worker process verification
+
+The `worker-runtime-e2e` feature builds a separate `bcs-worker-e2e` companion;
+normal bootstrap does not register it. It assembles public distributed services
+with an explicit in-memory Store mock and the existing SQLite Result/Blob
+provider. The external Singlebox story validates functional processing and
+in-process ownership takeover; it cannot certify Store restart persistence or
+capacity. See [companion boundaries and commands](tests/worker_runtime/README.md).
