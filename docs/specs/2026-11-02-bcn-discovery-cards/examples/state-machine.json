@@ -1,0 +1,156 @@
+{
+  "name": "数据库诊断与复核",
+  "description": "State Machine 群：数据库诊断与复核",
+  "version": "12",
+  "supportedInterfaces": [
+    {
+      "url": "local://groups/group-sm-001",
+      "protocolBinding": "LOCAL",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "extensions": [
+      {
+        "uri": "https://schemas.example.com/bcn/discovery-card/v1",
+        "description": "BCN discovery composition",
+        "required": true,
+        "params": {
+          "groupKind": "state_machine",
+          "composition": {
+            "definition": {
+              "definitionId": "definition-db-review",
+              "definitionVersion": 3,
+              "mediaType": "application/yaml",
+              "content": "name: 数据库诊断与复核\nparticipants:\n  analyst:\n    required: true\n  reviewer:\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    nodes:\n      diagnose:\n        kind: bot_task\n        assignee: {type: bot_binding, binding: analyst}\n        instruction: 分析 SQL 并形成诊断结论。\n        transitions:\n          complete: {targets: [review]}\n      review:\n        kind: bot_task\n        assignee: {type: bot_binding, binding: reviewer}\n        instruction: 复核诊断并输出最终报告。\n        final_output: true\n",
+              "sha256": "d387e46c421f41cc4efd2daa6d6dafa98f1018bc66e03b26bea306bca9f28490"
+            },
+            "bindings": {
+              "analyst": [
+                {
+                  "uuid": "bot-analyst-001"
+                }
+              ],
+              "reviewer": [
+                {
+                  "uuid": "bot-reviewer-001"
+                }
+              ]
+            },
+            "agents": {
+              "bot-analyst-001": {
+                "providerName": "platform_x",
+                "revision": "sha256:89abcd1ae98a6922467e61012358037ffcd12f93e95197ac1a530720e6d169a6",
+                "card": {
+                  "name": "SQL 分析师",
+                  "description": "分析 SQL 并形成诊断结论。",
+                  "version": "1.0.0",
+                  "supportedInterfaces": [
+                    {
+                      "url": "https://agents.example.com/a2a/bot-analyst-001",
+                      "protocolBinding": "HTTP+JSON",
+                      "protocolVersion": "1.0"
+                    }
+                  ],
+                  "capabilities": {
+                    "streaming": true,
+                    "extensions": [
+                      {
+                        "uri": "https://example.org/a2a/extensions/source-agent/v1",
+                        "description": "来源平台标识",
+                        "required": false,
+                        "params": {
+                          "agentId": "third-party-agent-analyst-001",
+                          "party": "third_party"
+                        }
+                      }
+                    ]
+                  },
+                  "defaultInputModes": [
+                    "text/plain"
+                  ],
+                  "defaultOutputModes": [
+                    "text/plain"
+                  ],
+                  "skills": [
+                    {
+                      "id": "sql.analyze",
+                      "name": "SQL 分析师",
+                      "description": "分析 SQL 并形成诊断结论。",
+                      "tags": [
+                        "database"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "bot-reviewer-001": {
+                "providerName": "platform_y",
+                "revision": "sha256:af6d2b6d530a9f72f9f2a0d81315e5b86e091af0093abd075daa79306f9f478c",
+                "card": {
+                  "name": "SQL 复核师",
+                  "description": "复核 SQL 诊断结论并形成最终报告。",
+                  "version": "1.0.0",
+                  "supportedInterfaces": [
+                    {
+                      "url": "https://agents.example.com/a2a/bot-reviewer-001",
+                      "protocolBinding": "HTTP+JSON",
+                      "protocolVersion": "1.0"
+                    }
+                  ],
+                  "capabilities": {
+                    "streaming": true,
+                    "extensions": [
+                      {
+                        "uri": "https://example.org/a2a/extensions/source-agent/v1",
+                        "description": "来源平台标识",
+                        "required": false,
+                        "params": {
+                          "agentId": "third-party-agent-reviewer-001",
+                          "party": "third_party"
+                        }
+                      }
+                    ]
+                  },
+                  "defaultInputModes": [
+                    "text/plain"
+                  ],
+                  "defaultOutputModes": [
+                    "text/plain"
+                  ],
+                  "skills": [
+                    {
+                      "id": "sql.review",
+                      "name": "SQL 复核师",
+                      "description": "复核 SQL 诊断结论并形成最终报告。",
+                      "tags": [
+                        "database"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "revision": "sha256:598176c278ec961b8790c2d2668e86d0c5e0cf4e08abac14c37dbaa177554727"
+        }
+      }
+    ]
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "group.execute",
+      "name": "数据库诊断与复核",
+      "description": "State Machine 群：数据库诊断与复核",
+      "tags": [
+        "state_machine"
+      ]
+    }
+  ]
+}

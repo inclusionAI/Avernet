@@ -1,0 +1,23 @@
+name: 数据库诊断与复核
+participants:
+  analyst:
+    required: true
+  reviewer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      diagnose:
+        kind: bot_task
+        assignee: {type: bot_binding, binding: analyst}
+        instruction: 分析 SQL 并形成诊断结论。
+        transitions:
+          complete: {targets: [review]}
+      review:
+        kind: bot_task
+        assignee: {type: bot_binding, binding: reviewer}
+        instruction: 复核诊断并输出最终报告。
+        final_output: true
