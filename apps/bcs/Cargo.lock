@@ -1665,6 +1665,7 @@ dependencies = [
  "bcs-domain",
  "bcs-service-api",
  "bcs-test-support",
+ "fastrand",
  "mysql_async",
  "serde_json",
  "sha2",

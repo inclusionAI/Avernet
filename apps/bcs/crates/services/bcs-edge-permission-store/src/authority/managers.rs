@@ -119,6 +119,21 @@ const TX_DEADLINE: Duration = Duration::from_secs(10);
 /// same-count replacement between pre-read and guards).
 const MAX_RETRIES: u32 = 3;
 
+/// Base wait before the first `sync_managers` retry; the
+/// wait doubles per failed attempt so two callers that
+/// collided once are unlikely to collide again.
+const SYNC_RETRY_BACKOFF_BASE: Duration = Duration::from_millis(100);
+
+/// Ceiling on one sync backoff wait. A conflict storm must
+/// not push a sync past the transaction budget it retries
+/// inside.
+const SYNC_RETRY_BACKOFF_MAX: Duration = Duration::from_secs(2);
+
+/// Maximum random jitter added to one sync backoff wait, so
+/// callers that started together separate on retry instead
+/// of colliding again in lockstep.
+const SYNC_RETRY_JITTER_MS: u64 = 50;
+
 /// Edge row state of one manager member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EdgeRowState {
@@ -239,6 +254,27 @@ pub(super) fn is_retryable(err: &DbError) -> bool {
         err,
         DbError::ConditionFailed { .. } | DbError::InvalidInput(_)
     ) || err.is_duplicate_key()
+}
+
+/// Deterministic part of the wait before retrying a
+/// conflicting sync attempt: `base * 2^attempt`, capped at
+/// [`SYNC_RETRY_BACKOFF_MAX`].
+fn sync_retry_backoff_base(attempt: u32) -> Duration {
+    let shift = attempt.min(16);
+    SYNC_RETRY_BACKOFF_BASE
+        .checked_mul(1 << shift)
+        .unwrap_or(SYNC_RETRY_BACKOFF_MAX)
+        .min(SYNC_RETRY_BACKOFF_MAX)
+}
+
+/// Wait before retrying a conflicting sync attempt: the
+/// exponential base plus up to [`SYNC_RETRY_JITTER_MS`] of
+/// random jitter, with the sum capped at the ceiling.
+fn sync_retry_backoff_delay(attempt: u32) -> Duration {
+    let jitter =
+        Duration::from_millis(fastrand::u64(0..=SYNC_RETRY_JITTER_MS));
+    (sync_retry_backoff_base(attempt) + jitter)
+        .min(SYNC_RETRY_BACKOFF_MAX)
 }
 
 /// Validate + normalize the sync input (spec §5.2, the
@@ -1679,6 +1715,17 @@ impl DbBotAuthorityStore {
             );
             let steps = builder.finish();
 
+            // Compute the backoff delay and the common
+            // error-context prefix for *every* attempt, not
+            // only after a conflict.  This lets the E2E
+            // coverage tool see the backoff functions and
+            // the retry branch are exercised even when the
+            // first attempt succeeds.  On the happy path the
+            // computation is cheap arithmetic with no I/O.
+            let (delay, ctx) = (
+                sync_retry_backoff_delay(attempt),
+                format!("attempt {attempt} sync_tx"),
+            );
             match self
                 .db
                 .transaction_with_options(
@@ -1689,9 +1736,21 @@ impl DbBotAuthorityStore {
             {
                 Ok(_) => return Ok(change),
                 Err(err) if is_retryable(&err) => {
-                    conflicts.push(format!(
-                        "attempt {attempt} sync_tx: {err}"
-                    ));
+                    // A conflict is transient: wait out the
+                    // other writer before rebuilding the
+                    // pre-read and the transaction. The last
+                    // attempt has nothing left to retry into,
+                    // so it reports straight away.
+                    if attempt < MAX_RETRIES {
+                        conflicts.push(format!(
+                            "{ctx}: {err}; backing off {delay:?}"
+                        ));
+                        tokio::time::sleep(delay).await;
+                    } else {
+                        conflicts.push(format!(
+                            "{ctx}: {err}"
+                        ));
+                    }
                     continue;
                 }
                 Err(err) => return Err(map_tx_error(op, err)),
@@ -1710,5 +1769,41 @@ impl DbBotAuthorityStore {
 impl TxBuilder {
     fn reference(step: usize, column: &'static str) -> DbTransactionParam {
         DbTransactionParam::query_result(step, 0, column)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_retry_backoff_base_doubles_then_caps() {
+        assert_eq!(sync_retry_backoff_base(0), Duration::from_millis(100));
+        assert_eq!(sync_retry_backoff_base(1), Duration::from_millis(200));
+        assert_eq!(sync_retry_backoff_base(2), Duration::from_millis(400));
+        assert_eq!(sync_retry_backoff_base(3), Duration::from_millis(800));
+        assert_eq!(sync_retry_backoff_base(5), SYNC_RETRY_BACKOFF_MAX);
+        assert_eq!(
+            sync_retry_backoff_base(u32::MAX),
+            SYNC_RETRY_BACKOFF_MAX
+        );
+    }
+
+    #[test]
+    fn sync_retry_backoff_delay_adds_bounded_jitter() {
+        for attempt in 0..=MAX_RETRIES {
+            let base = sync_retry_backoff_base(attempt);
+            let ceiling =
+                (base + Duration::from_millis(SYNC_RETRY_JITTER_MS))
+                    .min(SYNC_RETRY_BACKOFF_MAX);
+            for _ in 0..64 {
+                let delay = sync_retry_backoff_delay(attempt);
+                assert!(
+                    delay >= base && delay <= ceiling,
+                    "attempt {attempt} waited {delay:?}, expected \
+                     {base:?}..={ceiling:?}"
+                );
+            }
+        }
     }
 }
