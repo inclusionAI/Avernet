@@ -6,7 +6,7 @@ node-local evidence, pending operations and precise continuation belong to Skill
 from __future__ import annotations
 
 import logging
-from agentclaw.community.core.task.domain.models import TaskNode, TaskNodePatch
+from agentclaw.community.core.task.domain.models import Status, TaskNode, TaskNodePatch, TaskNodeQueryCriteria
 from agentclaw.community.core.task.task_harness import relay_recovery_policy as recovery_policy
 from agentclaw.community.core.task.task_harness.relay_runtime_policy import (
     resolve_relay_resume_step, relay_resume_attempts, terminal_success_unreported_seconds,
@@ -38,6 +38,9 @@ async def monitor_relay_runtime(
     if self._runtime_probe is None:
         return None
     key = (task_id, node.node_id)
+    generation_fields = ("relay_token", "session_id", "group_id", "relay_harness_resume_run_id",
+                         "relay_harness_resume_message_id")
+    generation = tuple(node.run_info.extend_props.get(field) for field in generation_fields)
     current = self._runtime_seen.setdefault(
         key,
         {
@@ -65,7 +68,27 @@ async def monitor_relay_runtime(
             state="unknown", error=f"{type(exc).__name__}: {exc}"[:500]
         )
 
-    if result.state != "probe_unavailable":
+    if result.source == "bcs.delivery":
+        # A report or a replacement run may arrive during the asynchronous read.
+        latest = self._graph.query_task_nodes(
+            task_id, TaskNodeQueryCriteria(status=Status.RUNNING, node_ids=[node.node_id]),
+        )
+        if len(latest) != 1 or tuple(
+            latest[0].run_info.extend_props.get(field) for field in generation_fields
+        ) != generation:
+            current.pop("group_failure", None)
+            return None
+        node = latest[0]
+    observation = result.detail or {}
+    if result.source == "bcs.delivery" and observation.get("message_id") and (
+        node.run_info.extend_props.get("relay_harness_delivery_message_id") != observation["message_id"]
+    ):
+        self._report_node_patch(TaskNodePatch(
+            task_id=task_id, node_id=node.node_id,
+            extend_props_patch={"relay_harness_delivery_message_id": observation["message_id"]},
+        ))
+
+    if result.state not in ("probe_unavailable", "activity_unknown"):
         # Successful/observable probes update the cursor; an unavailable probe
         # has no observation and therefore must not overwrite the last known
         # cursor. Otherwise the next successful probe could be misjudged as
@@ -84,10 +107,33 @@ async def monitor_relay_runtime(
         "runtime_status": result.status,
         "runtime_source": result.source,
         "runtime_error": result.error,
+        "runtime_observation": result.detail,
         "resume_step": resume_step,
         "terminal_success_elapsed_seconds": terminal_success_elapsed,
     }
     reason: str | None = None
+    confirmed_group_failure = result.source == "bcs.delivery" and result.state == "terminal_failed"
+    if not confirmed_group_failure:
+        current.pop("group_failure", None)
+    else:
+        observation = result.detail or {}
+        identity = (node.run_info.extend_props.get("relay_token"), observation.get("run_id"),
+                    observation.get("delivery_id"), result.heartbeat_cursor)
+        previous_failure = current.get("group_failure")
+        if not observation.get("run_id") or not observation.get("delivery_id"):
+            current.pop("group_failure", None)
+            return None
+        if previous_failure is None or previous_failure[0] != identity:
+            current["group_failure"] = (identity, now)
+            current["terminal_success_observed_at"] = None
+            logger.info(
+                "[task][harness] group failure awaiting next interval task=%s node=%s run=%s",
+                task_id, node.node_id, observation["run_id"],
+            )
+            return None
+        if now - previous_failure[1] < self._interval:
+            return None
+        detail.update(observation)
 
     if result.state == "terminal_failed":
         current["terminal_success_observed_at"] = None
@@ -108,7 +154,9 @@ async def monitor_relay_runtime(
         current["success_unreported"] = 0
         current["terminal_success_observed_at"] = None
         current["unknown"] = 0
-        if result.progressed:
+        pending_reset = current.pop("activity_baseline_pending", False)
+        baseline_reset = result.baseline_reset or pending_reset
+        if result.progressed or baseline_reset:
             current["no_progress"] = 0
             current["last_activity_at"] = now
         else:
@@ -119,6 +167,19 @@ async def monitor_relay_runtime(
             detail["stagnant_seconds"] = stagnant_seconds
             if stagnant_seconds >= self._active_no_progress_max_cycles * self._runtime_probe_threshold:
                 reason = "runtime_no_progress"
+    elif result.state == "activity_unknown":
+        current["unknown"] = 0
+        current["no_progress"] = 0
+        current["success_unreported"] = 0
+        current["terminal_success_observed_at"] = None
+        current["last_activity_at"] = now
+        current["activity_baseline_pending"] = True
+        current["activity_unknown_count"] = current.get("activity_unknown_count", 0) + 1
+        logger.warning(
+            "[task][harness] runtime activity unobservable task=%s node=%s count=%s reason=%s",
+            task_id, node.node_id, current["activity_unknown_count"], result.detail,
+        )
+        return None
     elif result.state == "probe_unavailable":
         # Transport/app request failure is not Bot unresponsiveness. Predeploy
         # and single-server deployments can make the probe read path itself
@@ -170,9 +231,7 @@ async def monitor_relay_runtime(
         try:
             if self._relay_recovery is None:
                 raise RelaySessionRecoveryError("relay recovery service is not configured")
-            resumed = await self._relay_recovery.resume(
-                node, resume_step=resume_step
-            )
+            resumed = await self._relay_recovery.resume(node, resume_step=resume_step)
             channel = resumed.channel
         except Exception as exc:  # noqa: BLE001
             if isinstance(exc, RelaySessionPreconditionError):
@@ -186,6 +245,7 @@ async def monitor_relay_runtime(
                 max_send_failures=self._relay_resume_max_send_failures,
                 reason=reason, detail=detail, elapsed=elapsed, sla=sla,
             )
+        current.pop("group_failure", None)
         current["last_activity_at"] = now
         current["resume_quiet_until"] = now + self._runtime_probe_threshold
         current["resume_attempts"] = attempts + 1
@@ -210,6 +270,11 @@ async def monitor_relay_runtime(
                         {"relay_harness_resume_run_id": resumed.dispatch_handle}
                         if resumed.dispatch_handle
                         else {}
+                    ),
+                    **(
+                        {"relay_harness_resume_message_id": resumed.message_id,
+                         "relay_harness_delivery_message_id": resumed.message_id}
+                        if resumed.message_id else {}
                     ),
                     "harness_probe": {
                         **detail,

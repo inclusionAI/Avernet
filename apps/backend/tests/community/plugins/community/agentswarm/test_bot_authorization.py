@@ -18,10 +18,25 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
+from agentclaw.community.plugins.community.agentswarm import bot_authorization
+
 from agentclaw.community.core.agentswarm.domain.models import BotState
 from agentclaw.community.plugins.community.agentswarm.bot_authorization import (
     ManifestBotAuthorizationSource,
 )
+
+
+@pytest.fixture(autouse=True)
+def fixed_authorization_clock(monkeypatch):
+    """Keep pending and expired windows independent of the wall clock."""
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 20, 9, 15, tzinfo=tz)
+
+    monkeypatch.setattr(bot_authorization, "datetime", FixedDateTime)
 
 
 class FakeSeam:

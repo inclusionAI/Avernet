@@ -1359,3 +1359,131 @@ class TestListSessions:
         assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert exc.value.detail["code"] == 50001
         assert "Internal server error" in exc.value.detail["message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["draft", "online"])
+async def test_runtime_status_reuses_policy_and_lifecycle_without_send(stage):
+    from secbaas.community.adapters.web.routers.open_api.session_router import (
+        get_session_runtime_status,
+    )
+    from secbaas.community.api.bot_runtime import SessionRuntimeStatus
+
+    runner = AsyncMock()
+    runner.get_session_runtime_status.return_value = SessionRuntimeStatus(
+        session_id=SESSION_ID,
+        found=True,
+        run_id="engine-run",
+        state="running",
+        started_at=1000,
+        last_event_seq=12,
+    )
+    with patch(POLICY_PATH, return_value=BOT_ID) as policy:
+        response = await get_session_runtime_status(
+            session_id=SESSION_ID,
+            bot_id=BOT_ID,
+            lifecycle_stage=stage,
+            api_key_record=_make_api_key_record(),
+            context=_make_context(),
+            bot_runner=runner,
+        )
+    assert response.data.last_event_seq == 12
+    policy.assert_called_once()
+    assert runner.get_session_runtime_status.await_args.kwargs["metadata"] == {
+        "bot_options": {"lifecycle_stage": stage},
+    }
+    runner.deliver_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_rejects_unauthorized_bot_before_query():
+    from secbaas.community.adapters.web.routers.open_api.session_router import (
+        get_session_runtime_status,
+    )
+
+    runner = AsyncMock()
+    with patch(
+        POLICY_PATH, side_effect=HTTPException(status_code=403, detail="denied")
+    ):
+        with pytest.raises(HTTPException) as error:
+            await get_session_runtime_status(
+                session_id=SESSION_ID,
+                bot_id=BOT_ID,
+                lifecycle_stage="draft",
+                api_key_record=_make_api_key_record(),
+                context=_make_context(),
+                bot_runner=runner,
+            )
+    assert error.value.status_code == 403
+    runner.get_session_runtime_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_bot_key_cannot_read_another_bot():
+    from secbaas.community.adapters.web.routers.open_api.session_router import (
+        get_session_runtime_status,
+    )
+
+    runner = AsyncMock()
+    with patch(RESOLVE_PATH, return_value="own-bot:u"):
+        with pytest.raises(HTTPException) as error:
+            await get_session_runtime_status(
+                session_id=SESSION_ID,
+                bot_id="other-bot:u",
+                lifecycle_stage="online",
+                api_key_record=_make_api_key_record(app_type="bot"),
+                context=_make_context(),
+                bot_runner=runner,
+            )
+    assert error.value.status_code == 403
+    runner.get_session_runtime_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_bot_key_resolves_own_identity():
+    from secbaas.community.adapters.web.routers.open_api.session_router import (
+        get_session_runtime_status,
+    )
+    from secbaas.community.api.bot_runtime import SessionRuntimeStatus
+
+    runner = AsyncMock()
+    runner.get_session_runtime_status.return_value = SessionRuntimeStatus(
+        session_id=SESSION_ID,
+        found=False,
+        reason="NO_ACTIVE_RUN",
+    )
+    with patch(RESOLVE_PATH, return_value="own-bot:u"):
+        response = await get_session_runtime_status(
+            session_id=SESSION_ID,
+            bot_id=None,
+            lifecycle_stage="online",
+            api_key_record=_make_api_key_record(app_type="bot"),
+            context=_make_context(),
+            bot_runner=runner,
+        )
+    assert not response.data.found
+    assert runner.get_session_runtime_status.await_args.kwargs["bot_id"] == "own-bot:u"
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_failure_returns_unavailable_not_running():
+    from secbaas.community.adapters.web.routers.open_api.session_router import (
+        get_session_runtime_status,
+    )
+
+    runner = AsyncMock()
+    runner.get_session_runtime_status.side_effect = BotServiceError(
+        "private transport detail"
+    )
+    with patch(POLICY_PATH, return_value=BOT_ID):
+        with pytest.raises(HTTPException) as error:
+            await get_session_runtime_status(
+                session_id=SESSION_ID,
+                bot_id=BOT_ID,
+                lifecycle_stage="draft",
+                api_key_record=_make_api_key_record(),
+                context=_make_context(),
+                bot_runner=runner,
+            )
+    assert error.value.status_code == 503
+    assert "private" not in error.value.detail

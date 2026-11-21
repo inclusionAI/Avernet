@@ -896,3 +896,57 @@ def test_active_silence_exhaustion_does_not_fail_long_running_call(svc, graph):
     patch = asyncio.run(h._relay_runtime_harness("t1", node, elapsed=700, sla=900))
     assert patch is None
     assert node.status == Status.RUNNING
+
+
+def test_activity_query_outage_never_resumes_or_fails_task_and_restarts_window(svc, graph):
+    graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+    _dispatch_running(svc, graph, "c1")
+    node = svc._get_node(graph, "c1")
+    node.run_info.extend_props["session_id"] = "s1"
+    clock = _Clock(0.0)
+    probe = _ScriptedProbe(_runtime_result("active", heartbeat_cursor="runtime:one"))
+    recovery = _FakeRelayRecovery()
+    recorder = Recorder()
+    harness = TaskHarness(svc, recorder, clock=clock, runtime_probe=probe,
+                          runtime_probe_threshold=120, relay_recovery=recovery)
+    harness.register("t1")
+    harness._poll_once()
+    probe.observations = [_runtime_result("activity_unknown")]
+    for _ in range(20):
+        clock.advance(600)
+        harness._poll_once()
+    assert not recovery.nodes
+    assert not recorder.patches
+    assert node.status == Status.RUNNING
+    probe.observations = [_runtime_result("active", heartbeat_cursor="runtime:one")]
+    clock.advance(1200)
+    harness._poll_once()
+    assert not recovery.nodes  # Unobserved time never consumes the quiet window.
+    clock.advance(599)
+    harness._poll_once()
+    assert not recovery.nodes
+    clock.advance(1)
+    harness._poll_once()
+    assert len(recovery.nodes) == 1
+
+
+def test_activity_generation_reset_restarts_silence_window(svc, graph):
+    graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+    _dispatch_running(svc, graph, "c1")
+    clock = _Clock(0.0)
+    probe = _ScriptedProbe(_runtime_result("active", baseline_reset=True))
+    recovery = _FakeRelayRecovery()
+    harness = TaskHarness(svc, Recorder(), clock=clock, runtime_probe=probe,
+                          runtime_probe_threshold=120, relay_recovery=recovery)
+    harness.register("t1")
+    harness._poll_once()
+    clock.advance(700)
+    harness._poll_once()
+    assert not recovery.nodes
+    probe.observations = [_runtime_result("active")]
+    clock.advance(599)
+    harness._poll_once()
+    assert not recovery.nodes
+    clock.advance(1)
+    harness._poll_once()
+    assert len(recovery.nodes) == 1

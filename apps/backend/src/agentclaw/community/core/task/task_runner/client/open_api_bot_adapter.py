@@ -21,6 +21,7 @@ import httpx
 from agentclaw.community.core.task.task_runner.client.ports import (
     ApiKeyProvider,
     BotSendResult,
+    BotSessionRuntimeStatus,
     OpenApiBotError,
     OpenApiBotPort,
 )
@@ -345,6 +346,28 @@ class OpenApiBotAdapter(
         if code is not None and code != 0:
             raise OpenApiError(f"get_run 业务失败 code={code} payload={payload}")
         return payload.get("data") or {}
+
+    async def get_session_runtime_status(
+        self, session_id: str, *, bot_id: str | None = None,
+        lifecycle_stage: str | None = None,
+    ) -> BotSessionRuntimeStatus:
+        params: dict[str, str] = {"session_id": session_id}
+        if bot_id:
+            params["bot_id"] = bot_id
+        if lifecycle_stage:
+            params["lifecycle_stage"] = lifecycle_stage
+        async with self._client_for_current_loop() as client:
+            response = await client.get(
+                "/openapi/v1/sessions/runtime/status", params=params, headers=self._headers(),
+            )
+        _map_status(response)
+        payload = response.json()
+        if payload.get("code") != 0:
+            raise OpenApiError("Runtime observation query rejected")
+        observation = BotSessionRuntimeStatus.model_validate(payload.get("data"))
+        if observation.session_id != session_id:
+            raise OpenApiError("Runtime observation session mismatch")
+        return observation
 
     async def get_session_messages(
         self, session_id: str, *, limit: int = 50, bot_id: str | None = None,

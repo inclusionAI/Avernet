@@ -36,10 +36,11 @@ Scope rules:
 | [0015](0015-one-way-assembly-from-bootstrap.md) | One-way assembly from bootstrap | accepted | all | bootstrap wires all components; reverse `get_container`/service-location outside bootstrap is forbidden (arch-test ratchet) |
 | [0016](0016-wildcard-bot-mapping.md) | Wildcard bot grant in resource-key authorization | superseded by [0017](0017-exact-bot-claim.md) | all | `bot_id = '*'` mapping row authorizes a key for every bot; explicit row only, deny-by-default preserved |
 | [0017](0017-exact-bot-claim.md) | Exact bot claim for service principals | accepted | all | `app.bot_id` claim matches inside the resource-key scope; narrows a token to the one bot it addresses, never a bypass |
+| [0018](0018-session-runtime-observation.md) | Session runtime observation through the Bot boundary | accepted | all | Read-only Engine activity through Bot authorization, lifecycle routing and session affinity; no recovery credentials |
 
 ## Writing the next ADR
 
-1. Next number: **0017**. Create `NNNN-kebab-title.md` here, following the
+1. Next number: **0019**. Create `NNNN-kebab-title.md` here, following the
    scope rules above.
 2. Required sections, in order: `# ADR-NNNN: <Title>`, `## Status`,
    `## Date`, `## Applies to`, `## Context`, `## Decision`,

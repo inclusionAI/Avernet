@@ -256,7 +256,9 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
                                    since_msg_id: str | None = None,
-                                   caller_bearer: str | None = None) -> list[Any]:
+                                   caller_bearer: str | None = None,
+                                   include_pending: bool = False,
+                                   before: int | None = None) -> list[Any]:
         path = f"/sessions/{session_id}/messages"
         ts = str(int(time.time()))
         headers = self._sign("GET", path, ts)
@@ -268,6 +270,10 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         if caller_bearer:
             headers["Authorization"] = f"Bearer {caller_bearer}"
         params: dict[str, Any] = {"limit": limit}
+        if include_pending:
+            params["include_pending"] = "true"
+        if before is not None:
+            params["before"] = before
         if since_msg_id:
             params["since_msg_id"] = since_msg_id
         logger.info("[task][bcs_http] >>> get_session_messages GET path=%s base_url=%s limit=%s since=%s caller_identity=%s",
@@ -280,6 +286,22 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
                     path, r.status_code, int((time.monotonic() - _t0) * 1000), _response_summary(r))
         _map_status(r)
         return r.json()
+
+    async def query_message_deliveries(
+        self, session_id: str, *, message_ids: list[str],
+        caller_bearer: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= len(message_ids) <= 100 or any(not value for value in message_ids):
+            raise ValueError("delivery query requires 1..100 message IDs")
+        response = await self._req(
+            "POST", f"/openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query",
+            json={"message_ids": message_ids},
+            extra_headers={"Authorization": f"Bearer {caller_bearer}"} if caller_bearer else None,
+        )
+        data = response.json()
+        if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+            raise BcsClientError("delivery status response is not an object list")
+        return data
 
     async def start_state_machine_run(self, group_id, *, definition_yaml, definition_ref,
                                       session_id, input) -> str:
