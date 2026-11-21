@@ -579,7 +579,11 @@ class TestBotKindEndToEnd:
 
         async def finish_after_poll(*args, **kwargs):
             if kwargs["trigger"] == CREATE_ON_CONTAINER_TRIGGER:
-                assert polled_running.wait(10), "swarm never polled the running creation Apply"
+                # Full-suite xdist workers can be CPU-starved long enough to
+                # miss the former 10s scheduling window.  Keep the handshake
+                # bounded below the test's outer 60s timeout while preserving
+                # the assertion that RUNNING was actually observed.
+                assert polled_running.wait(30), "swarm never polled the running creation Apply"
             return await compile_and_finish(*args, **kwargs)
 
         def observe_status(bot_id, owner_id=""):

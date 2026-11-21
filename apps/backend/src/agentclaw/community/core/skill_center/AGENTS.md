@@ -16,6 +16,8 @@ SC Public Reference 的 exact package 校验失败使用固定的公开错误码
 
 ## Skill 运行名称准入
 
+Default 的 Apply、Installation 与 Runtime 使用有效供给成员：缺失历史资产、已下线资产及无可供应发布版本的 Center 引用跳过；依赖、服务和权限失败仍报错。exclusion 仍覆盖完整 raw 成员，Apply 不删除共享关系；UUID 别名按稳定身份选取最新已发布版本。
+
 向 SkillSet 添加成员（包括未激活的 Set）或激活 Set 时，先比较候选名称与当前安装及目标 Set 成员。名称相同但运行映射来源不同则拒绝；来源身份相同可共存，无法解析的同名来源按冲突处理。历史冲突不会被自动清理。Skill 成员与激活、Direct Skill、Default Skill 排除、Apply Skill claim 及安装回填写事务在支持行锁的数据库上先锁定同一租户、环境和稳定 entity 下的 Bot 行；SQLite 使用数据库写事务。此锁不覆盖所有 Set 或 MCP 命令、全局 Default 模板修改或提交后的 Runtime 投影。
 
 ## B4 Bot 资源寻址兼容（2026-10-22）
@@ -119,6 +121,7 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - Bot MCP override 独立于 SkillSet 生命周期：普通集增删 MCP、启停、删除、Default exclusion、Installation 对账及能力 restore 均保留当前配置；暂时无有效供应不是孤儿清理依据。Direct MCP 显式卸载、明确配置操作与 Bot 删除仍可清配置。重新供应读取当前值；能力补偿只恢复能力事实，不回写配置快照。
 - Manifest bulk Set 替换把提交前后受影响的 MCP 同时作为 claim/release 候选，Runtime Projector 按提交后有效供应保护仍有来源的配置，并删除已退出的设备配置；它不删除 Bot override。Manifest 后续 MCP Replace 清除仅剩 override 时，updated code 同样作为 release 候选；仍由 Skill 依赖供应的 code 只刷新继承配置。
 - 普通 Default 恢复仅在实际成员或当前 policy 重新供应时检查 Direct/普通集占用；冲突保留 exclusion，过期 exclusion 清理不抢占现有供应。MCP 恢复命令必须显式接收调用方解析的当前 platform policy。
+- Apply 恢复 Default MCP 时，个人调用权限被拒绝不阻止有效供应、Installation 和投影；目录、配置、投递资格和权限服务异常仍须报错。普通 Set 和 Direct 显式 MCP 继续检查个人权限；调用时仍由原有鉴权链控制。
 - `services/bot_capability_state_reader.py` 在读有效态前同步 Installation，然后只从 Installation 读取有效身份。Center 资产在返回前由 `SkillVersionResolver` 解析到精确 PUBLISHED Version。
 - Reader 的 `InstallationReadConfig` 从 `ac_common_config` 按规范化环境读取 `business_code=skill_installation`、`param_code=default_sync_only`。每个环境有独立记录，缺失、禁用、读取失败或非布尔值均 fail-safe 为 `false`（完整同步）；该值在每次 Effective Read 动态读取，因此验收某环境完整 backfill 后可将其单独设为 `true`，也可仅通过 DB 立即回退。旧 YAML 和 `SC_INSTALLATION_DEFAULT_SYNC_ONLY` 环境变量均不生效。该模式仍同步 Default/exclusion，不等于完全取消 DB 补齐。运维 backfill 和新 Bot 的 `initialize_installations` 始终完整执行，不受此读侧配置影响。
 - 普通 Asset、Draft、Version 查询不应为方便而触发 Bot flush。需要回答“Bot 当前应有哪些有效能力”时才使用 Reader。
@@ -267,6 +270,8 @@ Service Bot 的边界在 `community/core/service_bot/services/`：
 Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版本化合同、layout participation 和 Runtime probe 交付逻辑映射；既有路径兼容由 `path_factory.py`、factories/dispatcher 管理。新增引擎路径不得散落进 Router。Legacy/Pool 与 Center 来源正交；Center 不是切 Pool 的理由。
 
 Runtime probe 的 `READY` 通常必须携带迁移 `preparation_id`。OpenClaw 统一稳态 marker 可以省略或保留历史 migration identity：响应必须同时证明 `activation_state=active`，且 checks 中 `active_marker_valid`、`active_root_valid`、`pool_local_valid`、`legacy_storage_entries_absent` 全为 true；省略时 `preparation_id=None`，保留时透传历史 `preparation_id`。`finalizing` 仍走严格迁移 probe，DB phase/generation 决定未完成迁移的 reconcile；只带 preparation/generation 之一的 partial identity 必须 fail closed，不能降级为 steady 或 `NOT_CAPABLE`。合同测试见 `tests/community/core/skill_center/test_runtime_layout_probe.py` 及 Engine OpenClaw layout-probe tests。
+
+排查 OpenClaw Legacy 服务 Bot 的 Center Skill 产物构建时，参见 [服务构建探测](../skills_pool/README.md#openclaw-服务构建探测)。
 
 完整内容库与 active 发现入口分离。逐 Skill 入口可以指向 Repo/Local/Center，不能新增指向整库的 active 桥。受管链接、用户实体目录、悬空链接的降级处理以 Runtime mapping/apply contract 为准；操作结果应保留具体问题项。
 

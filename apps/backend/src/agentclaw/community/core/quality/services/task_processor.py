@@ -279,6 +279,7 @@ class TaskProcessor:
                 eval_headers.get("X-Eval-Id")
                 or f"{task.task_type}-{task.uuid}"
             )
+            ext["eval_start_env"] = env
 
             logger.info("[to_task_created] Calling /eval/start: env=%s, bot_id=%s, set_uuid=%s, version=%s", env, bot_id_with_owner, set_uuid, version)
 
@@ -314,12 +315,21 @@ class TaskProcessor:
             raise ValueError(f"Task {id} missing set_task_uuid in ext field")
 
         logger.info("[to_task_executed] Calling /eval/progress: set_task_uuid=%s", set_task_uuid)
-        progress = self._call_eval_progress_api(set_task_uuid)
+        eval_env = ext.get("eval_env") if isinstance(ext.get("eval_env"), dict) else {}
+        eval_headers = eval_env.get("eval_headers") if isinstance(eval_env.get("eval_headers"), dict) else {}
+        progress_env = str(ext.get("eval_start_env") or eval_headers.get("X-Eval-Id") or "")
+        progress = self._call_eval_progress_api(set_task_uuid, env=progress_env)
         ext["eval_progress"] = progress
         status = progress.get("status")
         logger.info("[to_task_executed] Got progress status=%s", status)
 
         if status not in _TERMINAL_STATUSES:
+            # 长时评测期间避免写放大：仅当 MASA 进度与已落库值不同才持久化中间进度，
+            # 其余轮询保持只读；变化时写入，任务快照才能向前端透出中间进度。
+            previous_ext = task.ext if isinstance(task.ext, dict) else {}
+            previous_progress = previous_ext.get("eval_progress")
+            if not isinstance(previous_progress, dict) or previous_progress != progress:
+                self._repository.update_ext(id, ext)
             return task
 
         self._transition_to(id, TaskStatus.TASK_CREATED.value, TaskStatus.TASK_EXECUTED.value, ext)
@@ -405,9 +415,12 @@ class TaskProcessor:
 
         return set_task_uuid
 
-    def _call_eval_progress_api(self, set_task_uuid: str) -> dict[str, Any]:
-        """Call /eval/progress API and return progress data."""
-        response = self._masa_eval_http.get(f"/eval/progress?set_task_uuid={set_task_uuid}")
+    def _call_eval_progress_api(self, set_task_uuid: str, *, env: str = "") -> dict[str, Any]:
+        """Call /eval/progress with the same Eval-zone env used to start the task."""
+        params: dict[str, str] = {"set_task_uuid": set_task_uuid}
+        if env:
+            params["env"] = env
+        response = self._masa_eval_http.get("/eval/progress", params=params)
         logger.info("[eval_progress] response status=%s body=%s", response.status_code, response.text)
         response.raise_for_status()
 

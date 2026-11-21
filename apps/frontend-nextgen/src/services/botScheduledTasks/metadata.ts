@@ -18,7 +18,8 @@ export async function loadRoutineContext(scope: RoutineScope): Promise<RoutineCo
       : sendRoutineRequest<{ items: Array<{ user_id: string; role: string }> }>(`${path}/editors`, { params }),
     service
       ? sendRoutineRequest<{ bot_call_type: 'caller' | 'owner' }>(`${path}/caller-context`, {
-          params: { ...params, stage: 'draft' },
+          // Caller 配置由后端按 Bot 当前发布状态判定，请求不传 stage。
+          params,
         })
       : Promise.resolve({ bot_call_type: 'owner' }),
   ]);
@@ -35,6 +36,9 @@ export async function loadRoutineContext(scope: RoutineScope): Promise<RoutineCo
     reason: caller && stage !== 'online' ? 'Caller 模式仅支持运行中环境' : '当前尚未取得该环境的可信实例清单',
   }));
   // This existing endpoint reports ONLINE only. Never reuse its UUIDs for draft/verify or Caller bindings.
+  // containers 描述的是 Bot 本身的线上运行属性：无论链接的 runtime_stage 指向哪个阶段
+  // （它只是列表筛选/查看上下文），创建表单都可选择线上目标，线上清单须始终加载；
+  // 草稿/预发从未获得这份清单（只进 environments[2]）。
   if (service && caller === false && engine !== 'teclaw') {
     try {
       const containers = await sendRoutineRequest<{ instances: Array<{ id: string }> }>(`${path}/containers`, {

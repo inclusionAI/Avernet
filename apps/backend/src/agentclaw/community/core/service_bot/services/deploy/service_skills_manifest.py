@@ -261,6 +261,11 @@ class ServiceSkillsManifestBuilder:
                 required_mapping_contract=required_mapping,
             )
             assert ready_observation.resolved_layout is not None
+            if is_pool and ready_observation.resolved_layout.source_layout == "legacy":
+                raise ServiceSkillsManifestError(
+                    "service build runtime reports Legacy for a Pool draft",
+                    code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_INVALID,
+                )
             active_runtime_path = ready_observation.resolved_layout.active_root
 
         if is_pool:

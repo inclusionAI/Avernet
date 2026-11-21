@@ -42,6 +42,8 @@ export interface UseBotSessionFilePreviewParams {
   deviceUuid?: string;
   /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
   callerRuntimeTarget?: 'service' | 'caller_instance';
+  /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
+  friendUserId?: string;
 }
 
 export function useBotSessionFilePreview(
@@ -51,7 +53,7 @@ export function useBotSessionFilePreview(
   const [state, setState] = useState<BotSessionFilePreviewState>(initialState);
   const resourceId = file?.resourceId ?? null;
   const name = file?.displayName ?? '';
-  const { botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget } = params;
+  const { botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget, friendUserId } = params;
 
   useEffect(() => {
     if (!resourceId || !botId || !sessionId || !userId) {
@@ -63,6 +65,7 @@ export function useBotSessionFilePreview(
       setState({ ...initialState, kind });
       return;
     }
+    // 显式位参(2026-11-19 勘误):条件 spread 会让缺省位被后值顶替,undefined 占位等价省略。
     const contentUrl = botSessionFileService.resolveContentUrl(
       botId,
       sessionId,
@@ -70,11 +73,10 @@ export function useBotSessionFilePreview(
       userId,
       ownerId,
       'inline',
-      ...(stage ? ([stage] as const) : []),
-      // 多实例选中实例定位(openspec add-session-files-device-uuid 扩展段),缺省不携带
-      ...(deviceUuid ? ([deviceUuid] as const) : []),
-      // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带
-      ...(callerRuntimeTarget ? ([callerRuntimeTarget] as const) : []),
+      stage,
+      deviceUuid,
+      callerRuntimeTarget,
+      friendUserId,
     );
     if (kind === 'text') {
       // 文本类走自绘：fetch 字节（512KB 截断）转文本渲染，与群聊侧同构。
@@ -88,9 +90,10 @@ export function useBotSessionFilePreview(
           userId,
           ownerId,
           'inline',
-          ...(stage ? [stage] as const : []),
-          ...(deviceUuid ? [deviceUuid] as const : []),
-          ...(callerRuntimeTarget ? [callerRuntimeTarget] as const : []),
+          stage,
+          deviceUuid,
+          callerRuntimeTarget,
+          friendUserId,
         )
         .then(async (result) => {
           if (cancelled) return;
@@ -117,7 +120,7 @@ export function useBotSessionFilePreview(
       };
     }
     setState({ ...initialState, kind, status: 'ready', contentUrl });
-  }, [resourceId, name, botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget]);
+  }, [resourceId, name, botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget, friendUserId]);
 
   return state;
 }

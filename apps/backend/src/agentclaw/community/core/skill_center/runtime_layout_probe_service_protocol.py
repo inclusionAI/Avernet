@@ -20,6 +20,7 @@ class RuntimeLayoutProbeServiceProtocol(Protocol):
         bot_id: str,
         user_id: str,
         engine: str,
+        for_service_build: bool = False,
     ) -> RuntimeLayoutProbeResult: ...
 
 

@@ -7,12 +7,6 @@ from typing import Any
 
 import pytest
 
-from agentclaw.community.core.bot_public.catalog_metadata import (
-    BotCatalogAddress,
-    BotCatalogMetadata,
-    BotCatalogMetadataPage,
-    BotCatalogMetadataUnavailableError,
-)
 from agentclaw.community.core.errors import ValidationError
 from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.core.task.todos.errors import (
@@ -123,42 +117,6 @@ class FakeBots:
     def list_live_by_bot_id(self, bot_id: str):
         self.calls.append(bot_id)
         return self.rows
-
-
-class FakeCatalog:
-    def __init__(
-        self,
-        public_bot_uuids: set[str] | None = None,
-        *,
-        unavailable: bool = False,
-    ) -> None:
-        self.public_bot_uuids = (
-            {"bot_1:another_user"}
-            if public_bot_uuids is None
-            else public_bot_uuids
-        )
-        self.unavailable = unavailable
-        self.calls: list[dict[str, Any]] = []
-
-    def search_public_bot_metadata(self, **kwargs):
-        self.calls.append(kwargs)
-        if self.unavailable:
-            raise BotCatalogMetadataUnavailableError()
-        items = []
-        for bot_uuid in kwargs["bot_uuids"]:
-            if bot_uuid not in self.public_bot_uuids:
-                continue
-            bot_id, owner_id = bot_uuid.rsplit(":", 1)
-            items.append(
-                BotCatalogMetadata(
-                    address=BotCatalogAddress(bot_id=bot_id, entity_id=owner_id),
-                    kind="bot",
-                    bot_uuid=bot_uuid,
-                    actor_kind="bot",
-                    visibility="public",
-                )
-            )
-        return BotCatalogMetadataPage(total=len(items), items=tuple(items))
 
 
 class FakeTodos:
@@ -301,27 +259,20 @@ def _service(
     todos: tuple[TodoRecord, ...] | None = None,
     contexts: tuple[TodoCollaborationContext, ...] = (),
     execution_result: TodoRecord | None = None,
-    public_bot_uuids: set[str] | None = None,
-    catalog_unavailable: bool = False,
 ):
     repository = FakeTodos(todos or (_todo(),))
     access = FakeSpaceAccess(space)
     bots = FakeBots(rows or [])
-    catalog = FakeCatalog(
-        public_bot_uuids,
-        unavailable=catalog_unavailable,
-    )
     collaboration = FakeCollaboration(contexts)
     execution = FakeExecution(execution_result)
     service = TodoService(
         repository,
         access,
         bots,
-        catalog,
         collaboration,
         execution,
     )
-    return service, repository, access, bots, collaboration, catalog
+    return service, repository, access, bots, collaboration, None
 
 
 def _team_bot(name: str = "Team Bot") -> dict[str, Any]:
@@ -334,7 +285,7 @@ def _team_bot(name: str = "Team Bot") -> dict[str, Any]:
 
 
 def test_create_todo_persists_pending_without_creating_or_running_context():
-    service, repository, access, bots, collaboration, catalog = _service(rows=[_team_bot()])
+    service, repository, access, bots, collaboration, _ = _service(rows=[_team_bot()])
 
     created = service.create_todo(
         space_id=7,
@@ -349,10 +300,6 @@ def test_create_todo_persists_pending_without_creating_or_running_context():
     assert created.collab_context_id is None
     assert access.calls == [{"space_id": 7, "user_id": "user_1", "env": "pre"}]
     assert bots.calls == ["bot_1"]
-    assert catalog.calls[0]["bot_uuids"] == ("bot_1:another_user",)
-    assert catalog.calls[0]["filters"].visibility == ("public",)
-    assert catalog.calls[0]["filters"].viewer_actor_type == "bot"
-    assert catalog.calls[0]["filters"].viewer_actor_id == "bot_1:another_user"
     assert collaboration.create_calls == []
     assert collaboration.run_calls == []
     assert repository.calls == [
@@ -368,34 +315,20 @@ def test_create_todo_persists_pending_without_creating_or_running_context():
     ]
 
 
-@pytest.mark.parametrize(
-    "public_bot_uuids,catalog_unavailable,error",
-    [
-        (set(), False, "not public"),
-        (None, True, "visibility is unavailable"),
-    ],
-)
-def test_create_todo_fails_closed_when_bot_is_not_confirmed_public(
-    public_bot_uuids,
-    catalog_unavailable,
-    error,
-):
-    service, repository, _, _, collaboration, _ = _service(
-        rows=[_team_bot()],
-        public_bot_uuids=public_bot_uuids,
-        catalog_unavailable=catalog_unavailable,
+def test_create_todo_does_not_require_public_catalog_visibility():
+    bot = {**_team_bot(), "visibility": "private", "user_visibility": "private"}
+    service, repository, _, _, collaboration, _ = _service(rows=[bot])
+
+    created = service.create_todo(
+        space_id=7,
+        actor_id="user_1",
+        title="title",
+        description="details",
+        bot_id="bot_1",
     )
 
-    with pytest.raises(TodoBotScopeError, match=error):
-        service.create_todo(
-            space_id=7,
-            actor_id="user_1",
-            title="title",
-            description="details",
-            bot_id="bot_1",
-        )
-
-    assert repository.calls == []
+    assert created.status is TodoStatus.PENDING
+    assert repository.calls[-1]["operation"] == "create_todo"
     assert collaboration.create_calls == []
 
 

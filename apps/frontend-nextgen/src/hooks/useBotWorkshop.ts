@@ -13,6 +13,7 @@ import {
   getInventoryActionAvailability,
 } from '@/services/botWorkshop';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
+import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import {
   needsFastInventorySync,
   reconcileRestartPins,
@@ -174,6 +175,8 @@ export function useBotWorkshop() {
     openTaskInstances: (bot: BotDomain) => {
       const params = new URLSearchParams({ bot_id: bot.id, bot_name: bot.name });
       if (bot.ownerId) params.set('owner_id', bot.ownerId);
+      // 与 openDetail 同口径携带阶段：定时任务页的 Caller 配置、实例校验都按它取数。
+      params.set('runtime_stage', resolveBotRuntimeStage(bot.lifecycle));
       history.push(`/bot-workshop/scheduled-tasks?${params.toString()}`);
     },
     // 可见用户可进入；管理操作另行校验 ADMIN/OWNER 与编辑锁。

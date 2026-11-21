@@ -71,9 +71,9 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
             session.flush()
             order_id = order.id
     # This test deliberately pauses the holder. Allow contention to outlive
-    # its 10-second coordination watchdog, including slow coverage/CI work.
+    # its 60-second coordination watchdog, including slow coverage/CI work.
     # Keep the production default and the bounded-failure test below unchanged.
-    race_url = make_url(database._url).update_query_dict({"timeout": "30"})
+    race_url = make_url(database._url).update_query_dict({"timeout": "90"})
     other = CommunitySqliteDatabase(str(race_url))
     sink = BoundedSink()
     sync = synchronizer(database, sink)
@@ -83,7 +83,7 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
     def pause_first_snapshot(db, **kwargs):
         if kwargs["body"]["revision"] == 1:
             roster_read.set()
-            assert release.wait(timeout=10)
+            assert release.wait(timeout=60), "activation was not released after reading the roster"
         return save(db, **kwargs)
 
     monkeypatch.setattr(knowledge_sync, "_save_snapshot", pause_first_snapshot)
@@ -119,26 +119,34 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
             )
         committed.set()
 
+    def await_checkpoint(checkpoint, task, phase):
+        # These are scheduling watchdogs, not database correctness deadlines.
+        # Surface a failed worker instead of hiding it behind an unset Event.
+        if not checkpoint.wait(timeout=30):
+            if task.done():
+                task.result()
+            pytest.fail(f"timed out waiting for {phase}; worker_done={task.done()}")
+
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
             activation = pool.submit(
                 sync.ensure_synced, space_id=space_id, environment="pre"
             )
             try:
-                assert roster_read.wait(timeout=5)
+                await_checkpoint(roster_read, activation, "activation roster read")
                 change = pool.submit(mutate)
-                assert write_attempted.wait(timeout=5)
+                await_checkpoint(write_attempted, change, "source mutation write attempt")
                 # Old implementation commits here without recording an event.
                 # The repair holds a DB write guard, so this wait expires.
                 assert not committed.wait(timeout=0.5)
             finally:
                 release.set()
             try:
-                activation.result(timeout=10)
+                activation.result(timeout=60)
             except SpaceKnowledgeError as exc:
                 # Deletion may win immediately after the first snapshot commits.
                 assert mutation == "delete" and exc.code == "RESOURCE_NOT_FOUND"
-            change.result(timeout=10)
+            change.result(timeout=60)
     finally:
         release.set()
         other._engine.dispose()

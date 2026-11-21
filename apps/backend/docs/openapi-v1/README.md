@@ -1365,9 +1365,32 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/{bot_id}/config-manifest` | Read the bot's configuration manifest (empty when it has none) | `Envelope[ConfigManifest]` |
-| PUT | `/openapi/v1/bots/{bot_id}/config-manifest` | Set/replace it; all-or-nothing, `422` lists every violation | `Envelope[ConfigManifest]` |
+| PUT | `/openapi/v1/bots/{bot_id}/config-manifest` | Set/replace it, or preview the submitted document with `?dry_run=true` | `Envelope[ConfigManifest]` or `Envelope[ConfigManifestApply]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/config-manifest` | Clear it | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/{bot_id}/config-manifest/capabilities` | Which manifest constructs this bot accepts | `Envelope[ConfigManifestCapabilities]` |
+
+`PUT …/config-manifest?dry_run=true` accepts the same `{"document":"<full YAML>"}`
+body and validates its byte limit, schema and engine support like an ordinary
+PUT. It returns HTTP 200 with the full `ConfigManifestApply` plan, including
+entry outcomes, category removals and source resolutions. `trigger` is
+`dry_run` and `apply_id` is empty. With `dry_run=false` or the parameter omitted,
+HTTP 200 still returns `ConfigManifest` and the save starts an Apply as before.
+Generated clients should handle both success payloads for this operation.
+
+The preview uses the PUT's ADMIN authorization and does not take the bot's
+draft edit lock or the Apply lock. It compiles the submitted bytes even when the
+stored manifest changes, and observes available sources and bot state during
+the request. The result is advisory and can differ from a later Apply if those
+inputs change. `POST …/config-manifest/apply?dry_run=true` continues to preview
+the stored document with the POST's authorization and edit-lock requirements.
+
+Preview leaves the stored manifest and Apply history untouched. It stops after
+planning, before publishing a first-time Public Skill, changing installations or
+exclusions from the declaration, or delivering container changes. Sources may
+still be fetched and cached, with acquisition receipts that can inform later
+source resolution. The capability snapshot reads MCP installations and SkillSet
+membership without reconciliation.
+
 
 Dormant lifecycle operations and the status poll take optional `owner_id`
 (defaulting to the caller) because `bot_id` is not globally unique. They use

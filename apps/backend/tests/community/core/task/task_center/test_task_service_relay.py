@@ -312,3 +312,44 @@ async def test_report_precheck_failure_degrades_to_emit() -> None:
 
     assert result.status == TaskReportStatus.APPLIED
     assert len(ctx.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_no_trace_report_skips_observation_precheck_and_writes() -> None:
+    class Graph(_ReportGraph):
+        def query_task_dashboard(self, task_id, node_id=None):
+            pytest.fail("execution report without trace needs no observation read")
+
+    graph = Graph()
+    ctx = _RecordingContextService()
+    service = _ReportService(graph, ctx)
+    command = _report_command("no-trace")
+    assert (await service.report(command)).status == TaskReportStatus.APPLIED
+    assert graph.apply_commands == [command]
+    assert ctx.calls == []
+
+
+@pytest.mark.asyncio
+async def test_no_trace_successor_report_still_hydrates_search_receipts() -> None:
+    class Graph(_ReportGraph):
+        def __init__(self):
+            super().__init__()
+            self.loaded = False
+
+        def load_action_logs(self, graph):
+            self.loaded = True
+
+        def apply_relay_report(self, command):
+            assert self.loaded, "report worker must load persisted search receipts"
+            return super().apply_relay_report(command)
+
+    graph = Graph()
+    ctx = _RecordingContextService()
+    service = _ReportService(graph, ctx)
+    command = replace(
+        _report_command("no-trace-plan"),
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=SimpleNamespace(),
+    )
+    assert (await service.report(command)).status == TaskReportStatus.APPLIED
+    assert ctx.calls == []

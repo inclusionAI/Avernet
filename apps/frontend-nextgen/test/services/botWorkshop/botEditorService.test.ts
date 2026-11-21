@@ -326,6 +326,18 @@ it('读取并持久化 MCP caller 模式，不在前端模拟', async () => {
   expect(controller.updateMcpCallType).toHaveBeenCalledWith('bot-1', 'mcp.weather', 'owner', 'owner-1');
 });
 
+it('getCallerContext 透传 bot_call_type 为 botCallType(openspec add-session-files-caller-runtime-target D6)', async () => {
+  controller.getCallerContext.mockResolvedValue({
+    data: { editable: false, bot_call_type: 'caller', mcp_call_types: {}, cli_call_types: {} },
+  });
+  await expect(botEditorService.getCallerContext('bot-2')).resolves.toEqual({
+    editable: false,
+    botCallType: 'caller',
+    mcpCallTypes: {},
+    cliCallTypes: {},
+  });
+});
+
 it('我的 Skill 仅请求当前 Bot 的 LOCAL 分页，保留激活和未激活项并透传 owner', async () => {
   const items = Array.from({ length: 20 }, (_, i) => ({ skill_id: `local-${i}`, name: `Local ${i}`, active: i === 0 }));
   controller.listSkills.mockImplementation(async (_botId, options) => {
@@ -533,4 +545,15 @@ it('loads shared Bot MCP facts using the same addressed owner as other configura
   expect(result.mcps).toEqual([{ serverCode: 'shared-project-tools', name: 'shared-project-tools', active: true }]);
   expect(result.capabilityLoadError).toBeUndefined();
   expect(result.errors).toBe(0);
+});
+
+it('getCallerContext 透传 options.suppressErrorNotification(2026-11-19 二轮勘误:探测失败零提示)', async () => {
+  controller.getCallerContext.mockResolvedValue({
+    data: { editable: false, bot_call_type: 'owner', mcp_call_types: {}, cli_call_types: {} },
+  });
+  await botEditorService.getCallerContext('bot-3', 'owner-3', { suppressErrorNotification: true });
+  expect(controller.getCallerContext).toHaveBeenCalledWith('bot-3', 'owner-3', { suppressErrorNotification: true });
+  // 缺省形态不带第三参,编辑器既有调用零扰动。
+  await botEditorService.getCallerContext('bot-3', 'owner-3');
+  expect(controller.getCallerContext).toHaveBeenLastCalledWith('bot-3', 'owner-3');
 });

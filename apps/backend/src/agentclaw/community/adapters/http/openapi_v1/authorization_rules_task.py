@@ -25,6 +25,12 @@ TASK_PUBLIC_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): NoCheck(
         "a task, not a bot; paged read of BBS relay tasks"
     ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bot-grants/reconcile",
+    ): NoCheck(
+        "Human self-service compensation; the verified principal fixes the owner and the service loads only that owner's live Bots"
+    ),
     ("POST", "/openapi/v1/collaboration/tasks/grant"): NoCheck(
         "a stateless relay to secbaas; the human Cookie/Referer authorizes the grant, not a bot permission"
     ),

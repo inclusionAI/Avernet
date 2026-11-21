@@ -402,6 +402,37 @@ def test_standard_task_snapshot_covers_each_flow_state(status, expected):
     assert [step["status"] for step in snapshot["steps"]] == expected
 
 
+def test_standard_task_snapshot_separates_environment_and_masafailure_steps():
+    masa_failure = _TaskRecord(
+        status="failed",
+        ext={
+            "set_task_uuid": "masa-task-1",
+            "standard_environment": {"supported": True, "build_status": "active"},
+            "error_msg": "MASA evaluation failed (trace_id: trace-1)",
+        },
+    )
+    snapshot = ServiceBotEvalService._standard_task_snapshot(masa_failure)
+    statuses = [step["status"] for step in snapshot["steps"]]
+    assert statuses == ["DONE", "DONE", "FAILED", "FAILED", "RUNNING"]
+    assert snapshot["steps"][0]["error"] == ""
+    assert "MASA evaluation failed" in snapshot["steps"][2]["error"]
+
+    environment_failure = _TaskRecord(
+        status="failed",
+        ext={
+            "standard_environment": {
+                "supported": True,
+                "build_status": "failed",
+                "error": "Build failed before MASA task creation",
+            },
+        },
+    )
+    snapshot = ServiceBotEvalService._standard_task_snapshot(environment_failure)
+    statuses = [step["status"] for step in snapshot["steps"]]
+    assert statuses == ["FAILED", "WAITING", "WAITING", "WAITING", "RUNNING"]
+    assert snapshot["steps"][0]["error"] == "Build failed before MASA task creation"
+
+
 @pytest.mark.parametrize(
     ("ext", "expected"),
     [
@@ -634,3 +665,73 @@ async def test_current_standard_task_errors_signal_and_pending_save(monkeypatch)
     )
     assert snapshot["task_id"] == 125
     assert snapshot["steps"][-1]["status"] == "RUNNING"
+
+
+@pytest.mark.asyncio
+async def test_prepare_standard_environment_uses_four_hour_default_ttl():
+    """Long-running standard evaluation: env TTL default must cover a full eval run."""
+    svc, plugin, quality_tasks, _, _ = _standard_service()
+    current = _TaskRecord(task_id=123, status="init")
+    plugin.create_standard_environment.return_value = {
+        "supported": True,
+        "build_status": "building",
+    }
+    quality_tasks.update_task_status.return_value = current
+
+    await svc._prepare_standard_environment(current, Mock())
+
+    assert plugin.create_standard_environment.call_args.kwargs["ttl_minutes"] == 240
+
+
+@pytest.mark.asyncio
+async def test_standard_task_driver_progress_poll_backoff(monkeypatch):
+    """task_created polls MASA every 15s for the first 5 minutes, then 60s."""
+    monkeypatch.setattr(service_bot_eval_service, "get_current_env", lambda: "dev")
+    svc, plugin, quality_tasks, task_processor, _ = _standard_service()
+    context = service_bot_eval_service.ServiceBotEvalContext(
+        bot_id="service-eval",
+        bot_version="1",
+        release_id="1",
+        publish_id="1",
+        operator_id="owner",
+        latest_bot_modified_at="2026-11-09T12:00:00",
+    )
+
+    initial = _TaskRecord(task_id=123, status="init", ext={})
+    driver_ext = {
+        "source": "standard_eval",
+        "version": "1",
+        "standard_environment_provider": "service_bot_eval_plugin",
+        "eval_env": {"build_status": "active"},
+    }
+    env_ready = _TaskRecord(task_id=123, status="env_ready", ext=driver_ext)
+    task_created_first = _TaskRecord(task_id=123, status="task_created", ext=driver_ext)
+    task_created_second = _TaskRecord(task_id=123, status="task_created", ext=driver_ext)
+    task_executed = _TaskRecord(task_id=123, status="task_executed", ext=driver_ext)
+    success = _TaskRecord(task_id=123, status="success", ext=driver_ext)
+
+    plugin.create_standard_environment.return_value = {"supported": True, "build_status": "active"}
+    plugin.save_standard_result.return_value = {"saved": True, "gate_status": "PASSED"}
+    plugin.destroy_standard_environment.return_value = {"supported": True, "destroyed": True}
+    quality_tasks.get_task_by_id.return_value = initial
+    quality_tasks.update_task_status.side_effect = [env_ready, success, success]
+    task_processor.process = AsyncMock(
+        side_effect=[
+            task_created_first,
+            task_created_second,
+            task_created_second,
+            task_executed,
+            success,
+        ]
+    )
+    fake_time = Mock()
+    fake_time.monotonic = Mock(side_effect=[0, 160, 320])
+    sleepy = AsyncMock()
+    monkeypatch.setattr(service_bot_eval_service, "time", fake_time)
+    monkeypatch.setattr(service_bot_eval_service.asyncio, "sleep", sleepy)
+
+    await svc._drive_standard_task(
+        123, context=context, trigger_source="manual_restart_standard_eval"
+    )
+
+    assert [call.args[0] for call in sleepy.call_args_list] == [15, 60]

@@ -49,11 +49,12 @@ class TokenPluginPipeline:
                 return TokenPluginResult.skipped(plugin.code)
 
             stage = "prepare_exchange_token_request"
-            prepared = plugin.prepare_exchange_token_request(context)
+            prepared = await asyncio.to_thread(plugin.prepare_exchange_token_request, context)
             stage = "exchange_token"
             token = await plugin.exchange_token(context=context, prepared=prepared)
             stage = "append_to_outbound"
-            plugin.append_to_outbound(
+            await asyncio.to_thread(
+                plugin.append_to_outbound,
                 context=context,
                 prepared=prepared,
                 token=token,

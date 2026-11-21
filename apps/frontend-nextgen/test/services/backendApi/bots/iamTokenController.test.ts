@@ -90,58 +90,61 @@ describe('iamTokenController OpenAPI contract', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
-  test('carries caller_runtime_target=service for a managed caller Bot chat', async () => {
-    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'caller-token' } }),
-    } as Response);
-    await expect(
-      getBotIamToken('bot-1', 'u1', 'owner-1', 'online', {
-        sessionKey: 'online-session',
-        callerRuntimeTarget: 'service',
-      }),
-    ).resolves.toBe('caller-token');
-    expect(fetch).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online&caller_runtime_target=service&session_key=online-session',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-  test('carries caller_runtime_target=caller_instance for a friend caller Bot chat', async () => {
-    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'friend-token' } }),
-    } as Response);
-    await expect(
-      getBotIamToken('bot-1', 'u1', 'entity-1', 'online', {
-        sessionKey: 'friend-session',
-        friendUserId: 'u1',
-        ownerId: 'owner-1',
-        callerRuntimeTarget: 'caller_instance',
-      }),
-    ).resolves.toBe('friend-token');
-    expect(fetch).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=entity-1&stage=online&caller_runtime_target=caller_instance&owner_id=owner-1&f_user_id=u1&session_id=friend-session',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-  test('coexists with device_uuid for an online multi-instance caller Bot', async () => {
-    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'pair-token' } }),
-    } as Response);
-    await getBotIamToken('bot-1', 'u1', 'owner-1', 'online', {
-      sessionKey: 'online-session',
-      deviceUuid: 'device-a',
-      callerRuntimeTarget: 'service',
-    });
-    expect(fetch).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online&device_uuid=device-a&caller_runtime_target=service&session_key=online-session',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
+  // TODO(2026-11-19): 后端 iam_token 接口的 caller_runtime_target 参数暂未就绪,src 侧已注释
+  // 暂不携带,以下三个「会携带」断言用例随之注释;接口上线后与 src/iamTokenController.ts
+  // 同步取消注释恢复(openspec add-iam-caller-runtime-target)。
+  // test('carries caller_runtime_target=service for a managed caller Bot chat', async () => {
+  //   const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+  //     ok: true,
+  //     headers: new Headers({ 'content-type': 'application/json' }),
+  //     json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'caller-token' } }),
+  //   } as Response);
+  //   await expect(
+  //     getBotIamToken('bot-1', 'u1', 'owner-1', 'online', {
+  //       sessionKey: 'online-session',
+  //       callerRuntimeTarget: 'service',
+  //     }),
+  //   ).resolves.toBe('caller-token');
+  //   expect(fetch).toHaveBeenCalledWith(
+  //     '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online&caller_runtime_target=service&session_key=online-session',
+  //     expect.objectContaining({ method: 'POST' }),
+  //   );
+  // });
+  // test('carries caller_runtime_target=caller_instance for a friend caller Bot chat', async () => {
+  //   const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+  //     ok: true,
+  //     headers: new Headers({ 'content-type': 'application/json' }),
+  //     json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'friend-token' } }),
+  //   } as Response);
+  //   await expect(
+  //     getBotIamToken('bot-1', 'u1', 'entity-1', 'online', {
+  //       sessionKey: 'friend-session',
+  //       friendUserId: 'u1',
+  //       ownerId: 'owner-1',
+  //       callerRuntimeTarget: 'caller_instance',
+  //     }),
+  //   ).resolves.toBe('friend-token');
+  //   expect(fetch).toHaveBeenCalledWith(
+  //     '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=entity-1&stage=online&caller_runtime_target=caller_instance&owner_id=owner-1&f_user_id=u1&session_id=friend-session',
+  //     expect.objectContaining({ method: 'POST' }),
+  //   );
+  // });
+  // test('coexists with device_uuid for an online multi-instance caller Bot', async () => {
+  //   const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+  //     ok: true,
+  //     headers: new Headers({ 'content-type': 'application/json' }),
+  //     json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'pair-token' } }),
+  //   } as Response);
+  //   await getBotIamToken('bot-1', 'u1', 'owner-1', 'online', {
+  //     sessionKey: 'online-session',
+  //     deviceUuid: 'device-a',
+  //     callerRuntimeTarget: 'service',
+  //   });
+  //   expect(fetch).toHaveBeenCalledWith(
+  //     '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online&device_uuid=device-a&caller_runtime_target=service&session_key=online-session',
+  //     expect.objectContaining({ method: 'POST' }),
+  //   );
+  // });
   test('omits caller_runtime_target when the chat context has none', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,

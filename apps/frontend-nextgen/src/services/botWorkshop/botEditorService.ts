@@ -50,10 +50,15 @@ async function listAllLocalBotSkills(botId: string, ownerId?: string): Promise<S
 const routineCreationFlights = new Map<string, ReturnType<typeof botEditorController.createRoutine>>();
 
 export const botEditorService = {
-  async getCallerContext(botId: string, ownerId?: string) {
-    const response = await botEditorController.getCallerContext(botId, ownerId);
+  async getCallerContext(botId: string, ownerId?: string, options?: { suppressErrorNotification?: boolean }) {
+    // options 缺省时按原形态(两参)透传,编辑器等既有调用方零扰动。
+    const response = await (options
+      ? botEditorController.getCallerContext(botId, ownerId, options)
+      : botEditorController.getCallerContext(botId, ownerId));
     return {
       editable: response.data?.editable ?? false,
+      // 聚合 Caller 判定透传(openspec add-session-files-caller-runtime-target D6);缺省 undefined=非 caller
+      botCallType: response.data?.bot_call_type,
       mcpCallTypes: response.data?.mcp_call_types ?? {},
       cliCallTypes: response.data?.cli_call_types ?? {},
     };

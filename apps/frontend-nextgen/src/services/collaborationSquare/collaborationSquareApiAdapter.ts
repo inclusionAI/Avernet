@@ -33,7 +33,10 @@ import { getPublicBotTargetId } from '@/domain/collaborationSquare/types';
 import { createBotSession } from '@/services/backendApi/bots/privateBotSessionController';
 import { BOT_ENDPOINTS, listBotMetadata, type BotMetadataDto, type BotMetadataQueryItem } from '@/services/backendApi/bots/botController';
 import { listBbsTasks } from '@/services/backendApi/collaboration/bbsTaskController';
-import { createFriendConnectionRequest } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
+import {
+  cancelFriendConnectionRequest,
+  createFriendConnectionRequest,
+} from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import { getGroup, listPublicGroups } from '@/services/backendApi/collaboration/collaborationGroupController';
 import { getPublicBotProfile, PublicBotCatalogError } from '@/services/backendApi/collaboration/publicBotController';
 import { createSession as createGroupSessionRequest } from '@/services/backendApi/collaboration/sessionController';
@@ -60,29 +63,39 @@ import { readPublicBotPage } from './publicBotCursor';
 
 async function enrichRelationships(bots: PublicBot[], actor?: FriendRequestActor, signal?: AbortSignal) {
   if (!actor || bots.length === 0) return bots;
-  const { friendIds, applyingIds } = await listFriendBotRelationships(actor, signal);
-  return bots.map((bot) => ({
-    ...bot,
-    relationshipStatus: friendIds.has(getPublicBotTargetId(bot))
-      ? ('friend' as const)
-      : applyingIds.has(getPublicBotTargetId(bot))
-      ? ('applying' as const)
-      : bot.relationshipStatus,
-  }));
+  const { friendIds, applyingIds, pendingRequestIdByTargetId } = await listFriendBotRelationships(actor, signal);
+  return bots.map((bot) => {
+    const targetId = getPublicBotTargetId(bot);
+    const requestId = pendingRequestIdByTargetId.get(targetId);
+    return {
+      ...bot,
+      relationshipStatus: friendIds.has(targetId)
+        ? ('friend' as const)
+        : applyingIds.has(targetId)
+        ? ('applying' as const)
+        : bot.relationshipStatus,
+      // 「申请中」带出当前申请单号（重新申请自救入口取消当前申请时使用）。
+      ...(requestId !== undefined ? { pendingFriendRequestId: requestId } : {}),
+    };
+  });
 }
 
 async function enrichPendingRelationships(bots: PublicBot[], actor?: FriendRequestActor, signal?: AbortSignal) {
   if (!actor || bots.length === 0) return bots;
-  const applyingIds = await listPendingFriendBotRelationships(actor, signal);
-  return bots.map((bot) => ({
-    ...bot,
-    relationshipStatus:
-      bot.isOwnedByLoggedInUser || bot.relationshipStatus === 'friend'
-        ? bot.relationshipStatus
-        : applyingIds.has(getPublicBotTargetId(bot))
-        ? ('applying' as const)
-        : bot.relationshipStatus,
-  }));
+  const pendingRequestIdByTargetId = await listPendingFriendBotRelationships(actor, signal);
+  return bots.map((bot) => {
+    const requestId = pendingRequestIdByTargetId.get(getPublicBotTargetId(bot));
+    return {
+      ...bot,
+      relationshipStatus:
+        bot.isOwnedByLoggedInUser || bot.relationshipStatus === 'friend'
+          ? bot.relationshipStatus
+          : requestId !== undefined
+          ? ('applying' as const)
+          : bot.relationshipStatus,
+      ...(requestId !== undefined ? { pendingFriendRequestId: requestId } : {}),
+    };
+  });
 }
 
 /** 目标 Bot 所有者判断始终使用登录用户；viewer 只决定关系与可见范围。 */
@@ -310,6 +323,20 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
       throw new CollaborationSquareError('protocol_error', '好友申请接口返回了无法识别的状态');
     } catch (error) {
       return mapActionError(error, '申请好友权限');
+    }
+  }
+
+  /** 取消当前身份的 pending 好友申请（发起方可撤回自己的 pending；「重新申请」自救入口第一步）。 */
+  async cancelBotFriendRequest(requestId: string): Promise<void> {
+    try {
+      const response = await cancelFriendConnectionRequest(requestId);
+      if (isAceLoginResponse(response))
+        throw new CollaborationSquareError('unauthenticated', '登录状态已失效，请重新登录后重试');
+      if (response.code !== 20000)
+        throw new CollaborationSquareError('protocol_error', '取消好友申请接口返回了无法识别的业务码');
+    } catch (error) {
+      // mapActionError 一律重抛映射后的 CollaborationSquareError（never 返回）。
+      mapActionError(error, '取消好友申请');
     }
   }
 

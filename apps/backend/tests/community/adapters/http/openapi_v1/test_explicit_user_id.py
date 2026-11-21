@@ -468,6 +468,10 @@ _DIRECTORY_USER_ID = {("get", f"{PUBLIC_API_PREFIX}/org/user")}
 # caller-selectable ``user_id``. They may still document a domain-specific 403
 # (the Join Request operation is mounted with the Space authorization errors).
 _AUTHENTICATED_SELF = {
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bot-grants/reconcile",
+    ),
     ("post", f"{PUBLIC_API_PREFIX}/bots/spaces/{{space_id}}/join-requests"),
     # README resolves the acting user from the verified principal; callers do
     # not get a second, steerable user_id query parameter.
@@ -657,12 +661,14 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # operation with no Bot dimension: none 157 -> 158. The ten versioned Todo
 # template management operations are also Space-scoped rather than Bot-addressed:
 # none 158 -> 168. The five template-driven stage lifecycle operations
-# (create-from-template, stage listing, outcome, resume, and cancel) also have
-# no Bot dimension: none 168 -> 173. The standard evaluation workflow adds seven
-# Bot-path-addressed
+# (create-from-template, stage listing, Human-stage completion, resume, and
+# cancel) also have no Bot dimension: none 168 -> 173. Owned-Bot grant
+# reconciliation adds one authenticated-self operation. Its optional body filter
+# only narrows compensation; it is not a path/query Bot resource address:
+# none 173 -> 174. The standard evaluation workflow adds seven Bot-path-addressed
 # user-scoped operations under /bots/{bot_id}/eval: path 226 -> 233.
 # Admin Caller expiry correction adds one Bot-addressed operation: 233 -> 234.
-_BOT_ID_PLACEMENT = {"path": 235, "query": 2, "none": 173}
+_BOT_ID_PLACEMENT = {"path": 235, "query": 2, "none": 174}
 # Read-only Caller status adds one Bot-path operation: 234 -> 235.
 
 

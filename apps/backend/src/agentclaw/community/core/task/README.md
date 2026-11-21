@@ -240,8 +240,21 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
   assignee 或协作群成员必须来自该次候选响应；单 Bot 使用外部权威身份形态，由 Backend
   落图时拆分为产品 `bot_id` 与 `assignee_owner_id`；
   `PLAN_RESULT` 原子地持久化唯一后继节点，`/dispatch` 执行实际投递。
+- Relay 同实例 Harness resume 仅发送短续跑触发；Skill 的
+  `relay_ledger_runtime.py` 统一入口真实读取 S1、读取当前节点本地账本并输出精简决策。后端已接纳状态优先；
+  本地账本负责方法止损、在途等待/对账及细粒度阶段续跑，不上传完整账本，
+  不从节点扩展属性消费第二份恢复投影，不保证跨容器恢复。
+  `relay_runtime_monitor.py` 区分 Runtime 失败、终态未上报、active 无消息活动；
+  active 停滞按最后可观测活动的单调时间计算，默认 5×120 秒（10 分钟）后请求同会话恢复，
+  不因探针临时不可用而清零；活动只证明 Runtime/消息变化，不证明业务验收进展。
+  run/session 的版本与更新时间变化不单独算活动；当前进程同节点恢复互斥，发送后
+  留一个探针观察窗口避免重复介入；active 静默即使耗尽续跑次数也不直接判 HUNG。无后端分布式恢复锁，不保证多进程全局去重。
 - Relay 报告仅有 `EXECUTION_RESULT` 与 `PLAN_RESULT`。`event_id` 用于同一请求重试的幂等回放；
   `relay_token` 是当前节点执行代次的服务端围栏，不写入任务轨迹。
+  通用接口长期保留可选 `trace` 的结构校验、步骤轨迹写入和内容指纹能力；分布式接力
+  Runtime 不要求构造或上报 trace，无 trace 不影响业务校验，也不新增 Bot 步骤轨迹。
+  后继执行者由服务端根据当前代次搜索回执及图谱已用 Bot 身份校验，排除当前/历史执行者，
+  包括持久化组群方案的成员；群 ID 不作为 Bot 身份。
 - `TaskRuntimeProfile` 在建图时冻结策略名和允许的执行模态。
 
 模式差异：
@@ -282,3 +295,24 @@ qualified IDs remain opaque, validated and unchanged. This is the established
 TeamClaw composite addressing contract, not an assumption that arbitrary external
 Providers' `bot_uuid` and `provider_bot_ref` are interchangeable. This resolver
 does not rewrite remote identities or grant permissions.
+
+## Owned-Bot secbaas grant reconciliation
+
+Task exposes a best-effort compensation endpoint for converging secbaas
+`allowed-bots` grants after authentication or Bot creation. A Human login
+schedules a sequential scan of that verified principal's live Bots; successful
+Bot creation may narrow the same operation to the new product Bot ID. Personal
+and service Bots share the established `bcn_bot_reference` identity rule.
+
+The verified `Principal.user_id` is the only Owner authority. A caller cannot
+select another Owner, and a single-Bot request is resolved through
+`get_by_id_and_owner` before any grant call. Browser Cookie and Referer are used
+only by the short-lived in-process compensation and are neither persisted nor
+logged.
+
+Reconciliation is deliberately best effort: it returns `202 Accepted`, runs in
+the process background, visits Bots in order, bounds each secbaas request, and
+isolates lookup, identity and grant failures as warnings. There is no new table,
+durable queue or login/Bot-creation failure coupling; a later login retries and
+converges idempotently. BBS periodic-task creation keeps its existing synchronous
+grant safety gate unchanged.

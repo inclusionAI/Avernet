@@ -1,3 +1,4 @@
+import { reconcileOwnedBotGrants } from '@/services/collaboration/botGrantReconciliationService';
 import type { BotCreateInput } from '@/services/botWorkshop';
 import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { toBotCreateRequest } from '@/services/botWorkshop/botCreatePolicy';
@@ -60,6 +61,7 @@ export function useExpertBotCreation(open: boolean, existingBotId?: string) {
           const submittedAvatar = avatar.current;
           if (next.bot && ['READY', 'APPLY_FAILED'].includes(next.state) && afterCreateStartedFor.current !== next.bot_id) {
             afterCreateStartedFor.current = next.bot_id;
+            if (submitted.current) void reconcileOwnedBotGrants(next.bot_id);
             const agentCoding = submitted.current?.agentCoding;
             if (agentCoding?.template) {
               setInitializing(true);

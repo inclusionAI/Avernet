@@ -8,6 +8,7 @@ import {
   targetParams,
   validateCreateTarget,
   type RoutineAddress,
+  type RoutineStage,
   type ManagedRoutine,
   type RoutineContext,
   type RoutineForm,
@@ -67,8 +68,13 @@ function mapRun(row: RoutineRunDto): RoutineRun {
     duration: Number.isFinite(start) && Number.isFinite(end) && end >= start ? `${(end - start) / 1000} 秒` : undefined,
   };
 }
-export function createRoutineClient(botId: string, ownerId: string | undefined, actorId: string) {
-  const scope: RoutineScope = { botId, userId: actorId, entityId: ownerId };
+export function createRoutineClient(
+  botId: string,
+  ownerId: string | undefined,
+  actorId: string,
+  stage?: RoutineStage,
+) {
+  const scope: RoutineScope = { botId, userId: actorId, entityId: ownerId, stage };
   const base = `/openapi/v1/bots/${encodeURIComponent(botId)}`;
   const params = { user_id: actorId, entity_id: ownerId };
   const path = (id: string) => `/${encodeURIComponent(id)}`;

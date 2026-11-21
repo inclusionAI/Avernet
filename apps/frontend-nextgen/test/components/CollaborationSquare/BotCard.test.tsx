@@ -100,6 +100,32 @@ describe('SquareBotCard', () => {
     expect(onShare).toHaveBeenCalledWith(bot);
   });
 
+  test('申请中提供重新申请自救入口：透传当前 Bot；未提供回调时不渲染', async () => {
+    const user = userEvent.setup();
+    const onResubmit = jest.fn();
+    const props = {
+      activeActor: { type: 'human' as const, id: 'viewer' },
+      busy: false,
+      onShare: jest.fn(),
+      onPrimaryAction: jest.fn(),
+      onResubmit,
+    };
+    const { rerender } = render(<SquareBotCard {...props} bot={{ ...bot, relationshipStatus: 'applying' }} />);
+    const resubmitButton = screen.getByRole('button', { name: '重新申请' });
+    expect(resubmitButton).toHaveClass('h-8', 'w-8', 'rounded-lg');
+    await user.click(resubmitButton);
+    expect(onResubmit).toHaveBeenCalledTimes(1);
+    expect(onResubmit).toHaveBeenCalledWith(expect.objectContaining({ id: bot.id }));
+    // 提交在途：刷新 icon 自身自转并禁用按钮（不出第二个独立 spinner）。
+    rerender(<SquareBotCard {...props} busy bot={{ ...bot, relationshipStatus: 'applying' }} />);
+    const busyButton = screen.getByRole('button', { name: '重新申请' });
+    expect(busyButton).toBeDisabled();
+    expect(busyButton.querySelector('svg')).toHaveClass('animate-spin');
+    // 未提供 onResubmit（其他装配方缺省）时申请中不渲染重试入口。
+    rerender(<SquareBotCard {...props} onResubmit={undefined} bot={{ ...bot, relationshipStatus: 'applying' }} />);
+    expect(screen.queryByRole('button', { name: '重新申请' })).not.toBeInTheDocument();
+  });
+
   test('好友显示对话图标入口；申请中和忙碌状态禁止重复操作', async () => {
     const user = userEvent.setup();
     const onPrimaryAction = jest.fn();

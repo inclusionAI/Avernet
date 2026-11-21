@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { InlineCode } from '@/components/ui/InlineCode';
 import { Modal, ModalContent, ModalDescription, ModalTitle } from '@/components/ui/Modal';
 import type { FriendRequestActor, PublicBot } from '@/domain/collaborationSquare/types';
 
@@ -18,9 +19,9 @@ export function FriendRequestConfirmModal({ bot, actor, actorName, onClose, onCo
         <ModalTitle className="pr-8 text-lg leading-7">Bot好友申请</ModalTitle>
         <ModalDescription className="break-words text-left text-sm leading-6 text-foreground">
           以{isHuman ? '用户' : 'Bot'}{' '}
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.9em]">{actorName}</code>
+          <InlineCode>{actorName}</InlineCode>
           {' '}身份申请添加Bot{' '}
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.9em]">{bot.name}</code>
+          <InlineCode>{bot.name}</InlineCode>
           {' '}为好友
         </ModalDescription>
         <p className="m-0 break-words text-left text-xs leading-5 text-muted-foreground">

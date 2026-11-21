@@ -131,6 +131,8 @@ export interface PublicBot {
   id: string;
   /** 兼容缺少 bot_uuid 的历史数据时使用的好友申请 actor id。 */
   friendRequestBotId?: string;
+  /** 「申请中」对应的 pending 好友申请单号（sent pending 回填）；「重新申请」自救入口取消当前申请时使用。 */
+  pendingFriendRequestId?: string;
   name: string;
   ownerName: string;
   description: string;
@@ -344,6 +346,8 @@ export interface BotCatalogViewModel {
   reload: () => void;
   loadMore: () => void;
   primaryAction: (bot: PublicBot) => void;
+  /** 「申请中」重试入口（重新申请：取消当前 pending 申请并重新发起，触发 owner 通知重发）；缺省时卡片不提供该入口。 */
+  resubmitAction?: (bot: PublicBot) => void;
   share: (bot: PublicBot) => void;
   openProfile: (bot: PublicBot) => void;
   closeProfile: () => void;

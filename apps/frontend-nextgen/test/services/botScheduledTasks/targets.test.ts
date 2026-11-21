@@ -245,45 +245,9 @@ test('an HTTP-success error envelope still preserves uncertainty and never retri
   expect(request).toHaveBeenCalledTimes(1);
 });
 
-test('personal lock reads reuse the general endpoint and honor explicit no-lock state', async () => {
-  request.mockResolvedValue({
-    success: true,
-    data: { locked: false, need_lock: false, has_collaborators: false, is_owner: false, lock: null },
-  });
-  expect(await client().getLock({ ...context, bot_type: 'personal' })).toMatchObject({
-    locked: false,
-    need_lock: false,
-  });
-  expect(request).toHaveBeenCalledWith(
-    '/api/bot/collaborator/lock/info',
-    expect.objectContaining({ method: 'GET', params: { bot_id: 'bot/a', owner_id: 'owner', user_id: 'admin' } }),
-  );
-});
-test('personal lock reads preserve a different holder and do not assume owner exemption', async () => {
-  request.mockResolvedValue({
-    success: true,
-    data: {
-      locked: true,
-      need_lock: true,
-      has_collaborators: true,
-      is_owner: true,
-      lock: { holder_user_id: 'other', holder_name: 'Other' },
-    },
-  });
-  expect(await client().getLock({ ...context, bot_type: 'personal' })).toMatchObject({
-    locked: true,
-    need_lock: true,
-    holder_user_id: 'other',
-  });
-});
-test.each([
-  { success: false, message: 'Lookup failed', request_id: 'lock-trace', data: null },
-  { success: true, data: { locked: false } },
-  { success: true, data: { locked: true, need_lock: true, lock: null } },
-])('failed or incomplete personal lock data never grants no-lock access', async (response) => {
-  request.mockResolvedValue(response);
-  await expect(client().getLock({ ...context, bot_type: 'personal' })).rejects.toThrow();
-  expect(request).toHaveBeenCalledTimes(1);
+test('personal Bots never read any lock endpoint', async () => {
+  await expect(client().getLock({ ...context, bot_type: 'personal' })).rejects.toThrow('个人 Bot');
+  expect(request).not.toHaveBeenCalled();
 });
 test('service lock reads continue using the OpenAPI endpoint and verified owner', async () => {
   request.mockResolvedValue(ok({ locked: false, need_lock: true }));
@@ -346,10 +310,16 @@ describe('instance selection follows the number of distinct reported UUIDs', () 
   test('duplicate UUIDs and empty IDs do not turn a single instance into multiple', () => {
     expect(routineInstanceMode(instanceContext(['uuid', 'uuid', '', ' ']), 'verify')).toBe('single');
   });
-  test('no UUIDs is unknown and never silently treated as single', () => {
+  test('no UUIDs defers instance resolution to the backend, never silently picks one', () => {
     const missing = instanceContext([]);
-    expect(routineInstanceMode(missing, 'verify')).toBe('unknown');
-    expect(() => validateCreateTarget(missing, form, 'admin')).toThrow('就绪');
+    expect(routineInstanceMode(missing, 'verify')).toBe('defer');
+    expect(routineInstanceMode(missing, 'draft')).toBe('defer');
+    expect(routineInstanceMode(missing, 'online')).toBe('defer');
+    // 未取得清单时不携带 device_uuid：后端按 stage 解析 binding，不活跃时返回阶段化发布提示。
+    expect(validateCreateTarget(missing, { ...form, device_uuid: undefined }, 'admin')).toEqual({
+      runtime_stage: 'verify',
+    });
+    expect(validateCreateTarget(missing, { runtime_stage: 'draft' }, 'admin')).toEqual({ runtime_stage: 'draft' });
   });
   test.each([false, true])('Caller=%s single-instance creation omits UUID', async (caller) => {
     const single = instanceContext(['uuid'], caller);

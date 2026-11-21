@@ -51,6 +51,24 @@ Group absent from the current sidebar page/filter is resolved by ID through the
 existing selected-Group detail fallback, including Session-only membership; list
 absence alone never changes the participation filter or discards the requested Session.
 
+Both already-joined and newly accepted invitations support these optional URL
+query parameters. The verified token target, not the editable path segment or
+query, supplies the resource IDs and determines the allowed views.
+
+| Invitation URL path | `view` values | Result |
+| --- | --- | --- |
+| `/workspace/invite/groups/{token}` | `group`, `full` | `group` opens `/workspace/collaboration/group` for the invited Group. |
+| `/workspace/invite/sessions/{token}` | `session`, `group`, `full` | `session` opens `/workspace/collaboration/session` without the session list. `group` opens the parent Group and initially selects the invited Session. Neither view changes membership in the parent Group. |
+
+`view=full` or an omitted, unknown, or unsupported `view` keeps the original
+`/workspace/collaboration` destination and target selection. If the verified
+target lacks the IDs required to open a focused page, the invitation uses that
+same full-workspace fallback. On focused pages, `showReturn=false` hides the
+**Return to full collaboration** button; `showReturn=true`, an omitted value, or
+an unknown value leaves it visible. The full workspace has no such return bar.
+For example, `/workspace/invite/sessions/{token}?view=session&showReturn=false`
+opens the invited Session with no session list or return bar.
+
 An explicit Session deep link issues one sidebar-location request after route
 identity hydration. Once the target Group and Session details are verified,
 location clears obstructing sidebar filters, displays an out-of-list target,
@@ -78,10 +96,34 @@ Regression coverage is in [invitationService.test.ts](test/services/workspace/in
 [useInviteAccept.preview.test.ts](test/pages/Workspace/hooks/useInviteAccept.preview.test.ts),
 [useInviteAccept.readonlyIdentity.test.ts](test/pages/Workspace/hooks/useInviteAccept.readonlyIdentity.test.ts)
 and [InviteAcceptPanel.test.tsx](test/pages/Workspace/InviteAcceptPanel.test.tsx).
+The [focused-page tests](test/pages/Workspace/FocusedCollaboration.test.tsx)
+cover the return bar and preservation of its option when changing Sessions.
 Sidebar and route regressions are covered by
 [invitationSidebarNavigation.test.tsx](test/pages/Workspace/invitationSidebarNavigation.test.tsx),
 [useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
 and [useGroupSessionLocation.deepLink.test.tsx](test/pages/Workspace/hooks/useGroupSessionLocation.deepLink.test.tsx).
+
+## Other-initiated conversation labels
+
+The read-only “他人发起” list identifies human initiators only from explicit
+`user:<id>:` prefixes or trailing `:user:<id>` / `:direct:<id>` segments of
+Session IDs. Synthetic member-task and BCS-CLI owner segments are not human
+creator evidence. Unknown IDs never fall back to the Bot owner or current viewer.
+Each row shows a user avatar/icon and name, falling back to the explicit user ID
+or “用户”. History user messages show the matched name/avatar, or “用户” when
+no name is available; Bot messages keep the Bot's identity. Legacy friend-based
+history retains its explicitly resolved friend name. Viewing remains read-only.
+
+Names use the existing human batch-query API asynchronously, independently of
+session/history loading. Batches contain at most 50 unique humans; in-flight
+lookups are shared. Viewer-scoped memory caching is bounded to 500 entries with
+a five-minute name TTL (30 seconds for missing/failed lookups). Late responses
+cannot label a newly selected session or another viewer. No Backend permission,
+session filtering, runtime-stage or chat-send behavior changes.
+
+Regression coverage: [profile service](test/services/workspace/sessionInitiatorService.test.ts),
+[hook and list](test/pages/Workspace/Chat/hooks/useSessionInitiators.test.tsx), and
+[read-only history](test/pages/Workspace/components/ReadOnlyConversationPanel.test.tsx).
 
 ## Discovery public Bots
 
@@ -209,6 +251,41 @@ visibility policy remains applied without reclassifying Backend source results.
 Deploy Backend source-window support before this frontend: missing/mismatched
 source metadata produces an explicit unsupported error instead of presenting an
 unfiltered list as “mine”. See the [Backend contract](../backend/docs/openapi-v1/engine-surface.md).
+## Lab tasks
+
+The [Lab task list](src/pages/Lab/Tasks/index.tsx) searches displayed task titles within
+its currently loaded page, not Bot names or all pages. Existing status and Owner
+Bot filters remain available. “创建时间” shows `gmt_create`; “更新时间” shows
+`gmt_modified` (the last record modification, not task completion). Missing times
+display a dash. Lab rows do not claim execution duration from these timestamps;
+the default MyTask presentation remains unchanged. Regression coverage lives in
+[`Tasks.test.tsx`](test/pages/Lab/Tasks.test.tsx).
+
+## Notification center detail classification
+
+Approval details loaded through `workOrderService.getDetail` retain the approval
+identity even when the detail response omits `item_type` or `event_type`, or its
+event is not yet in the display catalogue. Notification details loaded through
+`notificationService.getDetail` retain their recipient-notification identity,
+even when they carry an originating approval event. Classification does not depend
+on approval status, read state or the user's current approval permission.
+Approval-result notifications display the category label “审批类”, rather than
+“审批通知”; this presentation choice does not turn a notification into an
+approvable work order or change its read state.
+The [shared category tag](src/components/Admin/WorkOrderCategoryTag.tsx) is used
+by list rows and detail drawers in every view, including pending and processed.
+Approval work orders and approval-result notifications display “审批类”; other
+notifications display “通知类”. All category tags use the same neutral semantic
+colors, independent of event type, read state or processing status. Approval
+status/action colors are unchanged. The shared event catalogue still recognizes
+Skill editor requests for domain metadata.
+
+Regression coverage lives in
+[workOrderService.api.test.ts](test/services/admin/workOrderService.api.test.ts),
+[notificationService.test.ts](test/services/admin/notificationService.test.ts),
+[workOrderMeta.test.ts](test/domain/admin/workOrderMeta.test.ts) and
+[WorkOrderDetailDrawer.test.tsx](test/components/Admin/WorkOrderDetailDrawer.test.tsx) and
+[WorkOrderCategoryTag.test.tsx](test/components/Admin/WorkOrderCategoryTag.test.tsx).
 
 ## Source synchronization
 
@@ -316,3 +393,21 @@ Home/End for the 220–360px bounds (264px default). Width is stored locally und
 editor retains its 72px compact rail and mobile retains horizontal navigation
 without a resize handle. No global selection styles are changed during dragging.
 Regression coverage: [sidebar.test.tsx](test/taskEscortWorkspace/sidebar.test.tsx).
+
+## AgentCoding after-create actions
+
+AgentCoding template creation keeps the open-claw-compatible after-create
+contract: only the architectural Bot onboarding action is emitted. A template may
+declare `afterCreate` or `after_create`, and when the template exposes an
+`architect_name` field the frontend adds the fixed `update_architect_bot_ext`
+action automatically. The action sends
+
+```http
+PATCH /api/public/bots/{bot_id}/ext
+```
+
+with `arch_domain` and `is_domain_bot: true` after direct creation or
+authorization succeeds. An empty submitted architecture-domain value is ignored.
+Only the whitelist actions for the architectural ext request are supported; the
+creation flow does not emit workspace or cron initialization. Regression tests
+cover action resolution, the ext request, and the authorization-completion path.

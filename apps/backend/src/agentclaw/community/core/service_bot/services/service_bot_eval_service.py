@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import date, datetime
 from typing import Annotated, Any, Sequence
 
@@ -27,6 +28,10 @@ from agentclaw.community.core.service_bot.errors import (
     ServicePublicationConflictError,
     ServicePublicationNotFoundError,
 )
+from agentclaw.community.core.service_bot.services.standard_eval_snapshots import (
+    public_standard_environment,
+    standard_task_snapshot,
+)
 from agentclaw.community.core.quality.quality_service_protocol import (
     QualityTaskServiceProtocol,
 )
@@ -46,6 +51,12 @@ logger = get_logger()
 
 _STANDARD_ENV_POLL_INTERVAL_SECONDS = 5
 _STANDARD_ENV_MAX_POLL_SECONDS = 30 * 60
+# 标准评测正常执行可达小时级：环境 TTL 默认 4 小时，覆盖执行时长并留有余量。
+_STANDARD_EVAL_ENV_TTL_MINUTES = 240
+# MASA /eval/progress 自适应退避：启动后前 5 分钟 15s/次，之后 60s/次。
+_EVAL_PROGRESS_FAST_INTERVAL_SECONDS = 15
+_EVAL_PROGRESS_FAST_WINDOW_SECONDS = 5 * 60
+_EVAL_PROGRESS_SLOW_INTERVAL_SECONDS = 60
 
 
 def _iso_time(value: object) -> str:
@@ -299,75 +310,11 @@ class ServiceBotEvalService:
 
     @staticmethod
     def _public_standard_environment(environment: dict[str, Any]) -> dict[str, Any]:
-        """Hide routing headers, device IDs, and infrastructure bindings from clients."""
-        return {
-            "supported": bool(environment.get("supported", True)),
-            "default_tag": str(environment.get("default_tag") or "eval"),
-            "build_status": str(environment.get("build_status") or ""),
-            "build_info": str(environment.get("build_info") or ""),
-            "error": str(environment.get("error") or ""),
-        }
+        return public_standard_environment(environment)
 
-    @classmethod
-    def _standard_task_snapshot(cls, record: Any) -> dict[str, Any]:
-        ext = dict(record.ext) if isinstance(record.ext, dict) else {}
-
-        eval_progress = ext.get("eval_progress") if isinstance(ext.get("eval_progress"), dict) else {}
-        environment = ext.get("standard_environment") if isinstance(ext.get("standard_environment"), dict) else {}
-        progress_status = str(eval_progress.get("status") or "")
-        task_status = str(record.status)
-        report = eval_progress.get("report") if isinstance(eval_progress.get("report"), dict) else {}
-        report_url = str(report.get("reportUrl") or "")
-
-        if task_status in {"init", "env_preparing"}:
-            env_state, sample_state, eval_state, report_state = "RUNNING", "WAITING", "WAITING", "WAITING"
-        elif task_status in {"env_ready", "task_created"}:
-            env_state, sample_state, eval_state, report_state = "DONE", "DONE", "RUNNING", "WAITING"
-        elif task_status == "task_executed":
-            env_state, sample_state, eval_state, report_state = "DONE", "DONE", "DONE", "RUNNING"
-        elif task_status == "success":
-            env_state, sample_state, eval_state, report_state = "DONE", "DONE", "DONE", "DONE" if report_url else "FAILED"
-        elif task_status == "failed":
-            env_state, sample_state, eval_state, report_state = "FAILED", "DONE", "FAILED", "FAILED"
-        else:
-            env_state, sample_state, eval_state, report_state = "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"
-
-        save_state = "WAITING"
-        if task_status in {"success", "failed"}:
-            if ext.get("standard_result_saved") is True:
-                save_state = "DONE"
-            elif str(ext.get("standard_result_save_status") or "").upper() == "SKIPPED":
-                save_state = "DONE"
-            else:
-                save_state = "RUNNING"
-
-        return {
-            "id": record.id,
-            "task_id": record.id,
-            "uuid": record.uuid,
-            "task_type": record.task_type,
-            "biz_type": record.biz_type,
-            "status": task_status,
-            "source_status": ext.get("source_status"),
-            "set_uuid": ext.get("set_uuid"),
-            "set_name": ext.get("sample_set_name"),
-            "sample_count": ext.get("sample_set_count"),
-            "set_task_uuid": ext.get("set_task_uuid"),
-            "environment": cls._public_standard_environment(environment),
-            "environment_status": environment.get("build_status"),
-            "progress": eval_progress,
-            "progress_status": progress_status,
-            "report_url": report_url,
-            "error": ext.get("error") or ext.get("error_msg") or eval_progress.get("error") or "",
-            "steps": [
-                {"key": "create_environment", "status": env_state},
-                {"key": "confirm_sample_set", "status": sample_state},
-                {"key": "execute_evaluation", "status": eval_state},
-                {"key": "evaluation_report", "status": report_state},
-                {"key": "save_evaluation_result", "status": save_state},
-            ],
-        }
-
+    @staticmethod
+    def _standard_task_snapshot(record: Any) -> dict[str, Any]:
+        return standard_task_snapshot(record)
 
     @staticmethod
     def _is_processing_standard_task(record: Any) -> bool:
@@ -430,7 +377,7 @@ class ServiceBotEvalService:
             await self._plugin.create_standard_environment(
                 context,
                 default_tag="eval",
-                ttl_minutes=120,
+                ttl_minutes=_STANDARD_EVAL_ENV_TTL_MINUTES,
             )
         )
         ext = dict(current.ext or {})
@@ -556,9 +503,17 @@ class ServiceBotEvalService:
                 current = await self._prepare_standard_environment(current, context)
 
             poll_elapsed = 0
+            progress_started_at: float | None = None
             while self._is_processing_standard_task(current):
                 status = str(current.status)
                 provider = str((current.ext or {}).get("standard_environment_provider") or "")
+
+                # 记录评测进度轮询起点：task_created 即 MASA /eval/progress 等待阶段。
+                if status == "task_created":
+                    if progress_started_at is None:
+                        progress_started_at = time.monotonic()
+                else:
+                    progress_started_at = None
 
                 if status == "env_preparing" and provider == "service_bot_eval_plugin":
                     if poll_elapsed >= _STANDARD_ENV_MAX_POLL_SECONDS:
@@ -579,7 +534,15 @@ class ServiceBotEvalService:
                 if not processed:
                     return
                 if str(processed.status) == status:
-                    await asyncio.sleep(_STANDARD_ENV_POLL_INTERVAL_SECONDS)
+                    interval = _STANDARD_ENV_POLL_INTERVAL_SECONDS
+                    if progress_started_at is not None:
+                        progress_elapsed = time.monotonic() - progress_started_at
+                        interval = (
+                            _EVAL_PROGRESS_FAST_INTERVAL_SECONDS
+                            if progress_elapsed < _EVAL_PROGRESS_FAST_WINDOW_SECONDS
+                            else _EVAL_PROGRESS_SLOW_INTERVAL_SECONDS
+                        )
+                    await asyncio.sleep(interval)
                 current = processed
 
             if str(current and current.status) not in {"success", "failed"}:
@@ -832,7 +795,9 @@ class ServiceBotEvalService:
         result = await self._plugin.create_standard_environment(
             context,
             default_tag=str(environment.get("default_tag") or "eval"),
-            ttl_minutes=int(environment.get("ttl_minutes") or 120),
+            ttl_minutes=int(
+                environment.get("ttl_minutes") or _STANDARD_EVAL_ENV_TTL_MINUTES
+            ),
         )
         return self._public_standard_environment(self._standard_environment(result))
 

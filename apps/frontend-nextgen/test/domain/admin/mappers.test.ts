@@ -88,14 +88,14 @@ describe('mapWorkOrderDto', () => {
     expect(warnings).toHaveLength(0);
   });
 
-  it('通知类二分 typeLabel/typeTone：审批通知=绿 / 通知=蓝（PRD notifTypeLabel）', () => {
+  it('通知类二分 typeLabel/typeTone：审批类=绿 / 通知=蓝（PRD notifTypeLabel）', () => {
     const approvalNotice = mapWorkOrderDto({
       ...workOrderDto,
       item_type: 'NOTIFICATION',
       notification_category: 'APPROVAL',
     }).item;
     expect(approvalNotice.typeTone).toBe('green');
-    expect(approvalNotice.typeLabel).toBe('审批通知');
+    expect(approvalNotice.typeLabel).toBe('审批类');
     const plainNotice = mapWorkOrderDto({
       ...workOrderDto,
       event_type: 'SPACE_MEMBER_ADDED',

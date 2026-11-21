@@ -146,6 +146,17 @@ class StaleConflictRepository(RecordingContextRepository):
         return super().append_event(collab_context_id, request)
 
 
+class SameRunResumeExecutor(RecordingContextCollabExecutor):
+    """Return the completed run again instead of creating a resumed run."""
+
+    async def resume(self, request):
+        self.resumed_requests.append(request)
+        return ContextCollabRunResult(
+            run_id="run_1",
+            session_id=request.session_id,
+        )
+
+
 class RecordingGroupRuntime:
     """BCS-shaped runtime with group/session handles and no fake run id."""
 
@@ -284,6 +295,50 @@ async def test_context_resume_uses_previous_session_and_persists_new_start():
         "resumed": True,
         "triggered_by_event_id": interaction.event_id,
     }
+
+
+@pytest.mark.asyncio
+async def test_context_resume_rejects_reusing_the_previous_direct_run_id():
+    repository = RecordingContextRepository()
+    runtime = SameRunResumeExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
+    actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="todo")
+    await service.run_context("context_1", actor)
+    runtime.set_run_status_for_test(
+        "run_1",
+        status="COMPLETED",
+        result={"content": "done"},
+        session_id="session_1",
+    )
+    await service.refresh_run("context_1", actor)
+    interaction = service.append_event(
+        "context_1",
+        EventAppendCommand(
+            expected_version=3,
+            event_kind="user_interaction.posted",
+            primitive_type="Message",
+            actor_ref=PrincipalRef("human", "user_1"),
+            parent_event="event_3",
+            visibility="workspace",
+            payload={"content": "Please revise section 2"},
+        ),
+        actor,
+    )
+    event_count = len(repository.events)
+
+    with pytest.raises(
+        ContextCollabValidationError,
+        match="direct Context resume returned the previous run_id",
+    ):
+        await service.resume_context(
+            "context_1",
+            triggered_by_event_id=interaction.event_id,
+            context=actor,
+        )
+
+    assert len(runtime.resumed_requests) == 1
+    assert len(repository.events) == event_count
+    assert repository.events[-1].event_kind == "user_interaction.posted"
 
 
 @pytest.mark.asyncio

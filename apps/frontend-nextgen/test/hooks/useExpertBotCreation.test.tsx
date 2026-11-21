@@ -1,10 +1,14 @@
 /** @jest-environment jsdom */
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useExpertBotCreation } from '@/hooks/useExpertBotCreation';
+import { reconcileOwnedBotGrants } from '@/services/collaboration/botGrantReconciliationService';
 import { backendRequest } from '@/services/backendApi/httpClient';
 import type { BotCreateInput } from '@/services/botWorkshop';
 import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 
+jest.mock('@/services/collaboration/botGrantReconciliationService', () => ({
+  reconcileOwnedBotGrants: jest.fn(),
+}));
 jest.mock('@/services/backendApi/httpClient', () => ({
   ...jest.requireActual('@/services/backendApi/httpClient'),
   backendRequest: jest.fn(),
@@ -15,14 +19,13 @@ const template: AgentCodingTemplate = {
   templateType: 'architect', source: 'official', fields: [], config: {},
   raw: { afterCreate: ['architect_name'] }, capabilityTags: [],
 };
-const dimaTemplate: AgentCodingTemplate = { ...template, raw: {}, config: { capabilities: { dima_workspace: true } } };
 const input: BotCreateInput = {
   scenario: 'cloud', name: '专家架构 Bot', description: '设计架构', engine: 'aicoding',
   spaceId: '10', ownership: 'personal', serviceMode: 'non-service', initialize: true,
   agentCoding: { kind: 'template', template, values: { architect_name: '提交时的架构域' } },
 };
 
-beforeEach(() => request.mockReset());
+beforeEach(() => { request.mockReset(); jest.mocked(reconcileOwnedBotGrants).mockClear(); });
 afterEach(() => jest.useRealTimers());
 
 test('专家任务返回可用 Bot 后沿原创建后动作保存提交的模板配置', async () => {
@@ -39,36 +42,29 @@ test('专家任务返回可用 Bot 后沿原创建后动作保存提交的模板
     method: 'PATCH', data: { arch_domain: '提交时的架构域', is_domain_bot: true },
   })));
   expect(result.current.status?.state).toBe('READY');
+  expect(reconcileOwnedBotGrants).toHaveBeenCalledWith('expert-1');
 });
 
-test('授权完成后只初始化原 Bot 一次，并保留提交时的 DIMA/托管选项', async () => {
+test('授权完成后只初始化原 Bot 一次，并且不再触发 DIMA / 审计类 after-create', async () => {
   jest.useFakeTimers();
   let polls = 0;
-  request.mockImplementation(async (path, options) => {
+  request.mockImplementation(async (path) => {
     if (path.endsWith('/experts/architect/bots')) return { code: 200000, data: { bot_id: 'expert-2', iframe_url: 'https://example.test/auth', redirect_url: '' } };
     if (path.endsWith('/with-manifest/status')) return { code: 200000, data: ++polls === 1
       ? { bot_id: 'expert-2', state: 'AWAITING_AUTHORIZATION' }
       : { bot_id: 'expert-2', state: 'READY', bot: { bot_id: 'expert-2', owner_id: '001', engine: 'claude_code' } } };
-    if (path.endsWith('/dima-workspace')) return { code: 200000, data: { dima_space_id: 'review-space' } };
-    if (path === '/openapi/v1/bots/expert-2') return { code: 200000, data: { status: 'ACTIVE' } };
-    if (path === '/api/cron') return { code: 200000, data: options?.method === 'GET' ? [] : {} };
     return { code: 200000, data: {} };
   });
-  const dimaInput: BotCreateInput = { ...input, agentCoding: {
-    kind: 'template', template: dimaTemplate,
-    values: { is_hosted_24x7: true },
-  } };
-  const { result, rerender } = renderHook(() => useExpertBotCreation(true));
-  await act(async () => result.current.submit('architect', dimaInput));
-  expect(request.mock.calls.filter(([path]) => path.endsWith('/dima-workspace'))).toHaveLength(0);
+  const { result } = renderHook(() => useExpertBotCreation(true));
+  await act(async () => result.current.submit('architect', input));
   await act(async () => { jest.advanceTimersByTime(2000); });
-  expect(request).toHaveBeenCalledWith('/api/aicoding/bot/expert-2/dima-workspace', expect.objectContaining({ params: { user_id: '001' } }));
-  expect(request).toHaveBeenCalledWith('/api/cron', expect.objectContaining({ method: 'POST', data: expect.objectContaining({ bot_id: 'expert-2', owner_id: '001' }) }));
-  rerender();
-  await act(async () => { jest.advanceTimersByTime(10000); });
-  expect(request.mock.calls.filter(([path]) => path.endsWith('/dima-workspace'))).toHaveLength(1);
-  expect(request.mock.calls.filter(([path]) => path.endsWith('/experts/architect/bots'))).toHaveLength(1);
-  jest.useRealTimers();
+  await waitFor(() => expect(result.current.initializing).toBe(false));
+  const extCalls = request.mock.calls.filter(([path]) => path.endsWith('/ext'));
+  expect(extCalls).toHaveLength(1);
+  expect(request).toHaveBeenCalledWith('/api/public/bots/expert-2/ext', expect.objectContaining({
+    method: 'PATCH', data: { arch_domain: '提交时的架构域', is_domain_bot: true },
+  }));
+  expect(request.mock.calls.some(([path]) => path.endsWith('/dima-workspace') || path === '/api/cron')).toBe(false);
 });
 
 test('模板初始化失败单独呈现，保留 Manifest 状态', async () => {
@@ -93,34 +89,31 @@ test('没有可用 Bot 的创建失败不触发模板初始化', async () => {
   const { result } = renderHook(() => useExpertBotCreation(true));
   await act(async () => result.current.submit('architect', input));
   await waitFor(() => expect(result.current.status?.state).toBe('CREATE_FAILED'));
-  expect(request.mock.calls.some(([path]) => path.endsWith('/ext') || path.endsWith('/dima-workspace'))).toBe(false);
+  expect(request.mock.calls.some(([path]) => path.endsWith('/ext'))).toBe(false);
 });
 
 test('关闭重开时，旧模板初始化完成不会把新 Bot 头像写给旧 Bot', async () => {
-  let completeWorkspace!: (value: { code: number; data: { dima_space_id: string } }) => void;
-  const workspace = new Promise<{ code: number; data: { dima_space_id: string } }>((resolve) => { completeWorkspace = resolve; });
+  let completeExt!: (value: { code: number; data?: unknown }) => void;
+  const ext = new Promise<{ code: number; data?: unknown }>((resolve) => { completeExt = resolve; });
   let created = 0;
-  request.mockImplementation(async (path, options) => {
+  request.mockImplementation(async (path) => {
     if (path.endsWith('/experts/architect/bots')) return { code: 200000, data: { bot_id: `avatar-${++created}` } };
     if (path.endsWith('/with-manifest/status')) {
       const botId = path.includes('avatar-1') ? 'avatar-1' : 'avatar-2';
       return { code: 200000, data: { bot_id: botId, state: 'READY', bot: { bot_id: botId, owner_id: '001' } } };
     }
-    if (path.endsWith('/last-apply')) return { code: 200000, data: { apply_id: '', entries: [] } };
-    if (path.endsWith('/dima-workspace')) return workspace;
-    return { code: 200000, data: options?.data };
+    if (path.endsWith('/ext')) return ext;
+    return { code: 200000, data: {} };
   });
   const { result, rerender } = renderHook(({ open }) => useExpertBotCreation(open), { initialProps: { open: true } });
   await act(async () => result.current.submit('architect', {
-    ...input, avatarUrl: 'avatar-first', agentCoding: {
-      kind: 'template', template: dimaTemplate, values: {},
-    },
+    ...input, avatarUrl: 'avatar-first',
   }));
   await waitFor(() => expect(result.current.initializing).toBe(true));
   rerender({ open: false });
   rerender({ open: true });
   await act(async () => result.current.submit('architect', { ...input, engine: 'openclaw', agentCoding: undefined, avatarUrl: 'avatar-second' }));
-  await act(async () => completeWorkspace({ code: 200000, data: { dima_space_id: 'workspace-1' } }));
+  await act(async () => completeExt({ code: 200000, data: {} }));
   await waitFor(() => expect(request).toHaveBeenCalledWith('/openapi/v1/bots/avatar-1/avatar', { method: 'PUT', params: {}, data: { avatar_url: 'avatar-first' } }));
   expect(request).toHaveBeenCalledWith('/openapi/v1/bots/avatar-2/avatar', { method: 'PUT', params: {}, data: { avatar_url: 'avatar-second' } });
 });
@@ -143,6 +136,7 @@ test('管理重新打开只读原创建失败，不用后续 Apply 改写历史'
   expect(request).toHaveBeenCalledWith('/openapi/v1/bots/existing-1/with-manifest/status', {
     method: 'GET', params: {},
   });
+  expect(reconcileOwnedBotGrants).not.toHaveBeenCalled();
 });
 
 test('详情查询失败只显示查询错误，不推断创建失败或重发写请求', async () => {

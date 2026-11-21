@@ -44,6 +44,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   onToggleFavorite,
   isFavoritePending,
   onOpenBotManagement,
+  onRemoveFriend,
   replyingSessionId,
   createSessionPending = false,
   sessionActions,
@@ -60,7 +61,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   const canFavorite = supportsBotSessionFavorites(bot.engine);
   const [searchInputOpen, setSearchInputOpen] = React.useState(false);
   const visibleSessions = React.useMemo(() => {
-    if (!flatCodingSharedSessions || !bot.isAgentCodingBot || !sessions) return sessions;
+    if (isOthers || !flatCodingSharedSessions || !bot.isAgentCodingBot || !sessions) return sessions;
     return {
       ...sessions,
       items: sessions.items.map((session) => ({
@@ -68,7 +69,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         title: formatCodingOtherSessionTitle(session.sessionId, session.title),
       })),
     };
-  }, [flatCodingSharedSessions, bot.isAgentCodingBot, sessions]);
+  }, [isOthers, flatCodingSharedSessions, bot.isAgentCodingBot, sessions]);
   // 多实例服务 Bot 实例范围聚合视图(能力缺省 null → 零渲染零激活):实例行判定/检索输入禁用/圆点口径。
   const {
     scope: instanceScope,
@@ -83,6 +84,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     searchVisible,
     showFilter,
     showMenu,
+    showRemoveFriend,
     stripVisible,
     hoverActionsPadding,
     pinnedMarked,
@@ -100,6 +102,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     supportsArchives,
     searchMarked,
     hasManagement: Boolean(onOpenBotManagement && bot.spaceId),
+    canRemoveFriend: !isManaged && Boolean(onRemoveFriend),
   });
   const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
   const handleSearchToggle = () => {
@@ -212,6 +215,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           onSearchToggle={handleSearchToggle}
           showMenu={showMenu}
           onOpenBotManagement={onOpenBotManagement}
+          showRemoveFriend={showRemoveFriend}
+          onRemoveFriend={onRemoveFriend}
         />
       )}
     </div>
@@ -261,6 +266,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               replyingSessionId={replyingSessionId ?? null}
               emptyTitle={isOthers ? '暂无他人发起的会话' : undefined}
               showCreateHint={!isOthers}
+              showInitiator={isOthers}
             />
           )}
         </div>

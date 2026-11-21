@@ -22,16 +22,17 @@ logger = logging.getLogger("task.harness.relay")
 
 
 RELAY_HARNESS_RESUME_PROMPT = (
-    "继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、"
-    "不要重新提交 execute。请从当前会话历史中获取 S1 到断点前已形成的"
-    "上下文和结果，不要重做已完成步骤；从第一个未完成步骤继续执行，"
-    "直到流程执行完为止。当前步骤无法完成时，请输出明确失败原因并按协议收口。"
+    "继续当前节点 task-loop。按 relay-execution-ledger.md 的统一 resume 入口"
+    "读取 S1 与本节点账本，遵守返回 decision，复用已完成成果直到协议收口。"
+    "不要新建任务、重新澄清或提交 execute；不要重放结果未知的业务操作。"
 )
 
 
 def relay_harness_resume_prompt(resume_step: str | None = None) -> str:
-    """Return the single same-session continuation instruction."""
-    return RELAY_HARNESS_RESUME_PROMPT
+    """Backend hints bound scope; the runtime ledger selects the exact action."""
+    if not resume_step:
+        return RELAY_HARNESS_RESUME_PROMPT
+    return f"{RELAY_HARNESS_RESUME_PROMPT} 后端恢复范围：{resume_step}（不覆盖账本精确阶段）。"
 
 
 
@@ -85,10 +86,11 @@ class RelaySessionRecovery:
                 message=relay_harness_resume_prompt(resume_step),
                 caller_bearer=caller_bearer,
             )
+            if result.get("delivered") is False:
+                raise RelaySessionRecoveryError("existing group session did not accept resume")
             handle = str(
                 result.get("state_machine_run_id")
                 or result.get("run_id")
-                or result.get("session_id")
                 or ""
             )
             logger.info(

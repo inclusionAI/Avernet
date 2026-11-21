@@ -119,7 +119,14 @@ impl MessageFlowService for NopMessageFlow {
     }
 }
 
-struct NopWorkbenchSessions { access: Arc<std::sync::atomic::AtomicBool> }
+struct NopWorkbenchSessions {
+    access: Arc<std::sync::atomic::AtomicBool>,
+    /// Session-only member profile: when set, authorization succeeds ONLY
+    /// through the session facts (the command must carry THIS session id)
+    /// — the group access leg fails, mirroring a Human who joined an
+    /// explicit Session but not the Group.
+    session_only: Option<String>,
+}
 
 #[async_trait]
 impl WorkbenchSessionService for NopWorkbenchSessions {
@@ -138,10 +145,21 @@ impl WorkbenchSessionService for NopWorkbenchSessions {
         &self,
         _command: bcs_service_api::WorkbenchChatAuthorizationCommand,
     ) -> Result<(), WorkbenchUseCaseError> {
+        if !matches!(_command.from_actor_id.as_str(), "human_alice" | "human_bob")
+            || _command.bound_actor_id.as_deref() != Some(_command.from_actor_id.as_str())
+        {
+            return Err(WorkbenchUseCaseError::SenderNotInGroup);
+        }
+        if let Some(required_session) = self.session_only.as_deref() {
+            if _command.group_id == "group-1"
+                && _command.session_id.as_deref() == Some(required_session)
+            {
+                return Ok(());
+            }
+            return Err(WorkbenchUseCaseError::ForbiddenGroupAccess);
+        }
         if self.access.load(std::sync::atomic::Ordering::SeqCst)
-            && _command.group_id == "group-1"
-            && matches!(_command.from_actor_id.as_str(), "human_alice" | "human_bob")
-            && _command.bound_actor_id.as_deref() == Some(_command.from_actor_id.as_str()) {
+            && _command.group_id == "group-1" {
             Ok(())
         } else {
             Err(WorkbenchUseCaseError::SenderNotInGroup)
@@ -209,10 +227,19 @@ fn nop_state_with_idle(
     access: Arc<std::sync::atomic::AtomicBool>,
     idle_timeout_ms: i64,
 ) -> Arc<WebDispatchState> {
+    nop_state_build(leases, access, idle_timeout_ms, None)
+}
+
+fn nop_state_build(
+    leases: Option<Arc<MemorySpeakingLeaseRepo>>,
+    access: Arc<std::sync::atomic::AtomicBool>,
+    idle_timeout_ms: i64,
+    session_only: Option<String>,
+) -> Arc<WebDispatchState> {
     Arc::new(WebDispatchState {
         message_flow: Arc::new(NopMessageFlow),
         collaboration_runtime: Arc::new(bcs_test_support::NoopCollaborationRuntimeService),
-        workbench_sessions: Arc::new(NopWorkbenchSessions { access }),
+        workbench_sessions: Arc::new(NopWorkbenchSessions { access, session_only }),
         interactions: Arc::new(NopInteraction),
         group_session_connections: None,
         frontend_connections: Arc::new(WorkbenchConnectionRegistry::new()),
@@ -280,4 +307,16 @@ pub async fn send_frame(
 
 pub fn lease_state_with_access(access: Arc<std::sync::atomic::AtomicBool>) -> Arc<WebDispatchState> {
     nop_state(Some(Arc::new(MemorySpeakingLeaseRepo::new())), access)
+}
+
+/// Session-only member profile: authorization passes ONLY when the
+/// command carries THIS session id (the group access leg fails for
+/// the configured actors).
+pub fn lease_state_session_only(session_id: &str) -> Arc<WebDispatchState> {
+    nop_state_build(
+        Some(Arc::new(MemorySpeakingLeaseRepo::new())),
+        Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        60_000,
+        Some(session_id.to_string()),
+    )
 }

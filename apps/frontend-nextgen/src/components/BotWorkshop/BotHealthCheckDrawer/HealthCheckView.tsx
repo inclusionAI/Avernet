@@ -10,6 +10,7 @@ import type {
   BotHealthCheckSummary,
   BotHealthDimensionKey,
   BotHealthHistoryItem,
+  BotHealthPatch,
 } from '@/domain/botHealthCheck';
 import { useMemo, useState } from 'react';
 
@@ -20,6 +21,8 @@ interface HealthCheckViewProps {
   loading?: boolean;
   checking?: boolean;
   onReDiagnose: () => void;
+  onApplyPatch?: (patch: BotHealthPatch) => void | Promise<void>;
+  applyingPatch?: boolean;
 }
 
 export function HealthCheckView({
@@ -29,6 +32,8 @@ export function HealthCheckView({
   loading,
   checking,
   onReDiagnose,
+  onApplyPatch,
+  applyingPatch,
 }: HealthCheckViewProps) {
   const firstDimension = summary.dimensions[0]?.key ?? 'configuration';
   const [activeDimensionKey, setActiveDimensionKey] = useState<BotHealthDimensionKey>(firstDimension);
@@ -92,6 +97,8 @@ export function HealthCheckView({
             showHistoryDetails={capability.showLogDetails}
             onViewHistoryDetail={setSelectedHistory}
             onReDiagnose={onReDiagnose}
+            onApplyPatch={onApplyPatch}
+            applyingPatch={applyingPatch}
           />
         ) : null}
       </Card>

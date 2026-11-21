@@ -17,7 +17,6 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
 )
 from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
-    SkillSetControlPlaneNotFoundError,
 )
 from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 from agentclaw.community.core.skill_center.skill_set_apply import (
@@ -141,19 +140,38 @@ def test_apply_retains_stale_raw_default_member_using_current_published_uuid():
         assert (member.skill_id, member.skill_uuid) == (999, UUID)
 
 
+def test_default_stale_alias_selects_latest_published_uuid_in_snapshot_and_write():
+    from agentclaw.community.core.apply_engine.materialisers.capabilities_types import membership_assets
+
+    db, repo = seed()
+    with db.transactional_orm_session() as session:
+        session.get(Skill, 1).status = "DEVELOPING"
+        session.add(SkillVersion(skill_id=1, version_ordinal=2, status="PUBLISHED",
+                                 sc_version_number="2", name="weather-new",
+                                 metadata_json='{"mcp_dependencies":["mcp.new"]}',
+                                 created_by="owner", env="dev"))
+        session.add(SkillVersion(skill_id=1, version_ordinal=3, status="MATERIALIZING",
+                                 sc_version_number="3", name="weather-draft",
+                                 metadata_json='{"mcp_dependencies":["mcp.draft"]}',
+                                 created_by="owner", env="dev"))
+    facts = repo.read_apply_snapshot(scope=SCOPE, platform_default_codes=frozenset())
+    selected = membership_assets(facts, facts.sets[0])[999]
+    assert int(selected["id"]) == 1
+    assert selected["mcp_codes"] == ("mcp.new",)
+    replace(repo)
+    assert snapshot(repo).installations == {1}
+
+
 @pytest.mark.parametrize("restore", [False, True])
-def test_missing_raw_member_without_uuid_still_fails_closed(restore):
+def test_missing_raw_default_member_without_uuid_is_skipped(restore):
     _db, repo = seed(excluded=restore, missing_uuid=True)
-    with pytest.raises(
-        (SkillSetControlPlaneNotFoundError, SkillSetControlPlaneConflictError)
-    ):
-        replace(repo, restore=restore)
+    replace(repo, restore=restore)
     assert [
         row["name"]
         for row in repo.list_sets(
             bot_id="bot", owner_id="owner", engine_type="openclaw"
         )
-    ] == ["default"]
+    ] == ["default", "expert"]
     assert snapshot(repo).installations == set()
 
 
@@ -206,6 +224,11 @@ def test_raw_exclusion_number_does_not_remove_an_unrelated_resolved_current_id()
     state = snapshot(repo)
     assert state.installations == {1}
     assert state.skill_exclusions == frozenset({(10, 1)})
+    repo.sync_default_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    )
+    assert snapshot(repo).installations == {1}
 
 
 def test_stale_raw_default_restore_uses_current_uuid_without_other_supply():

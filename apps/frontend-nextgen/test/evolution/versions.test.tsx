@@ -243,7 +243,7 @@ it.each([
   const comparison = await screen.findByLabelText('test_score');
   expect(comparison).toHaveClass('flex-nowrap', 'whitespace-nowrap');
   expect(comparison).not.toHaveClass('flex-wrap');
-  expect(within(comparison).getByText('0.7 → 0.9')).toBeInTheDocument();
+  expect(within(comparison).getByText('0.7 → 0.9')).toHaveClass('text-foreground');
   expect(within(comparison).getByText(label)).toHaveClass(tone);
 });
 
@@ -345,4 +345,26 @@ it('does not invent missing generation time or Review / Spec data', async () => 
   const cells = within(within(table).getAllByRole('row')[1]).getAllByRole('cell');
   expect(cells[timeIndex]).toHaveTextContent(/^—$/);
   expect(within(table).getByText('— / —')).toBeInTheDocument();
+});
+
+
+it('uses foreground version headers and ordinary values while preserving semantic and secondary colors', async () => {
+  const createdAt = 1789100000000;
+  api.versions.mockResolvedValue({
+    items: [item({ reviewStatus: 'success', specVersion: 'v2', createdAt })],
+  });
+  render(<VersionList />);
+  const table = await screen.findByRole('table', { name: '进化版本列表' });
+  const headers = within(table).getAllByRole('columnheader');
+  expect(headers).toHaveLength(8);
+  for (const header of headers) expect(header).toHaveClass('text-foreground');
+  for (const value of ['success / v2', formatTime(createdAt), '未评测']) {
+    expect(within(table).getByText(value)).toHaveClass('text-foreground');
+    expect(within(table).getByText(value)).not.toHaveClass('text-muted-foreground');
+  }
+  expect(within(table).getByText(formatTime(createdAt))).toHaveClass('whitespace-nowrap');
+  expect(within(table).getByText('pack', { selector: 'p' })).toHaveClass('text-content-icon');
+  expect(within(table).getByText('bot', { selector: 'p.text-xs' })).toHaveClass('text-content-icon');
+  expect(within(table).getByText('已接受')).toHaveClass('text-success');
+  expect(within(table).getByRole('button', { name: '下载' })).toHaveClass('text-primary');
 });

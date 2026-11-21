@@ -23,6 +23,9 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, bind_overrides, endpoint_test
+from agentclaw.community.api.task.bot_grant_reconciliation_service import (
+    BotGrantReconciliationServiceProtocol,
+)
 from agentclaw.community.api.task.task_grant_service import (
     GRANTED,
     REVOKED,
@@ -275,6 +278,87 @@ def list_authenticated():
     expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
 )
 def list_unauthenticated():
+    pass
+
+
+# ── Owned-Bot grant reconciliation (best-effort Human self-service) ───────────
+
+
+def _seed_bot_grant_reconciliation(world, expected_bot_id: str | None) -> None:
+    async def reconcile(
+        _self, *, owner_id, cookie, referer, bot_id=None
+    ):
+        assert owner_id == _CALLER
+        assert cookie == "session=human-cookie"
+        assert referer == "https://frontend.example.test/bots"
+        assert bot_id == expected_bot_id
+
+    bind_overrides(
+        world,
+        BotGrantReconciliationServiceProtocol,
+        {"reconcile": reconcile},
+    )
+
+
+def _reconciliation_headers() -> dict[str, str]:
+    return {
+        **_headers(),
+        "Cookie": "session=human-cookie",
+        "Referer": "https://frontend.example.test/bots",
+    }
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bot-grants/reconcile",
+    scenario="authenticated_all_owned_bots",
+    seed=lambda w: (
+        _boot_verifier(w),
+        _seed_bot_grant_reconciliation(w, None),
+    ),
+    input=CaseInput(headers=_reconciliation_headers(), json_body={}),
+    expect=ExpectSuccess(
+        status=202,
+        json_contains={"code": 200000, "data": {"accepted": True}},
+    ),
+)
+def reconcile_all_owned_bots():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bot-grants/reconcile",
+    scenario="authenticated_single_owned_bot",
+    seed=lambda w: (
+        _boot_verifier(w),
+        _seed_bot_grant_reconciliation(w, "bot-1"),
+    ),
+    input=CaseInput(
+        headers=_reconciliation_headers(),
+        json_body={"bot_id": "bot-1"},
+    ),
+    expect=ExpectSuccess(
+        status=202,
+        json_contains={"code": 200000, "data": {"accepted": True}},
+    ),
+)
+def reconcile_single_owned_bot():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bot-grants/reconcile",
+    scenario="unauthenticated",
+    seed=_boot_verifier,
+    input=CaseInput(json_body={}),
+    expect=ExpectError(
+        status=401,
+        json_contains={"code": 401000, "message": "Unauthorized"},
+    ),
+)
+def reconcile_owned_bots_unauthenticated():
     pass
 
 

@@ -14,8 +14,9 @@ export interface BotIamTokenChatContext {
   /** 好友会话由 OpenAPI 校验归属后再把 session_id 转成内部 session_key。 */
   friendUserId?: string;
   ownerId?: string;
-  /** 生产运行态多实例服务 Bot 的选中实例:后端据此把 Caller 身份签发到选中实例
-   * (openspec add-servicebot-iam-device-uuid)。编排层的注入条件见 botChatProvider.fetchIamToken。 */
+  /** 多实例服务 Bot 的选中实例:后端据此把 Caller 身份签发到选中实例
+   * (openspec add-servicebot-iam-device-uuid)。门控=非 teclaw + 已选实例,
+   * 不按运行态/Caller 模式门控。编排层的注入条件见 botChatProvider.fetchIamToken。 */
   deviceUuid?: string;
   /** Caller 模式 Bot(call_type === 'caller')的运行时目标(openspec add-iam-caller-runtime-target):
    * service=Bot 的服务实例池(我管理的/我协作的服务 Bot 会话,实例仍由 stage/device_uuid 定位);
@@ -53,9 +54,11 @@ export async function getBotIamToken(
         ...(entityId ? { entity_id: entityId } : {}),
         ...(stage ? { stage } : {}),
         ...(chatContext?.deviceUuid ? { device_uuid: chatContext.deviceUuid } : {}),
-        ...(chatContext?.callerRuntimeTarget
-          ? { caller_runtime_target: chatContext.callerRuntimeTarget }
-          : {}),
+        // TODO(2026-11-19): 后端 iam_token 接口的 caller_runtime_target 参数暂未就绪,
+        // 先不携带;接口上线后取消下方注释恢复携带(openspec add-iam-caller-runtime-target)。
+        // ...(chatContext?.callerRuntimeTarget
+        //   ? { caller_runtime_target: chatContext.callerRuntimeTarget }
+        //   : {}),
         ...(chatContext?.friendUserId
           ? {
               owner_id: chatContext.ownerId ?? entityId,
