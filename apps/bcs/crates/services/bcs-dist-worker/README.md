@@ -98,11 +98,12 @@ before returning `Drained`.
 
 ## Control boundary
 
-The application facade validates authenticated source and target incarnations.
+The application facade compares the caller's bound source and target incarnations.
 The runtime checks `source_done` against the exact persisted handoff source.
 `DistWorkerPeerPort` supplies the replaceable outgoing transport. Credentials and
 endpoint policy belong to its adapter/composition, not this crate. Control routes
-must not be enabled without exact authenticated instance binding.
+must bind the exact instance via authentication or a channel restricted to
+mutually trusted Workers.
 
 ## Bounds and verification
 

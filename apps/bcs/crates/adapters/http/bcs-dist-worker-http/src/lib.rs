@@ -1,6 +1,7 @@
-//! Worker peer routes. Mount only behind authentication which installs the
-//! verified exact node/incarnation as an Instance extension. Body/header identity
-//! alone is never authentication; absent middleware identity is rejected.
+//! Worker peer routes. Mount only behind a host policy that binds an exact
+//! node/incarnation as an Instance extension. The host must authenticate the
+//! peer or restrict access to mutually trusted Workers before accepting a
+//! declared instance. Requests without a bound instance are rejected.
 use axum::{
     Extension, Json, Router,
     extract::{DefaultBodyLimit, State},

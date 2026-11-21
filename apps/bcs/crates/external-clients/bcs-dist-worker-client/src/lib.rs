@@ -1,5 +1,5 @@
-//! Instance-bound Worker control client. Authentication is supplied by composition;
-//! credentials must represent this exact registration lifetime at the receiver.
+//! Instance-bound Worker control client. Composition supplies the headers used
+//! to bind this exact registration lifetime at a trusted receiver.
 use async_trait::async_trait;
 use bcs_dist_model::{Instance, RequestId};
 use bcs_service_api::{
@@ -34,6 +34,7 @@ impl HttpWorkerPeer {
             return Err(error("worker_peer_configuration"));
         }
         let client = Client::builder()
+            .no_proxy()
             .timeout(timeout)
             .redirect(reqwest::redirect::Policy::none())
             .build()

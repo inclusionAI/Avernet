@@ -10,7 +10,7 @@ use std::time::Duration;
 /// The engine implements this port without importing application-layer contracts.
 #[async_trait]
 pub trait DistRuntimeControlPort: Send + Sync {
-    /// Called only after the application has bound authenticated peer identity.
+    /// Called only after the application has checked the caller's bound instance.
     async fn accept_handoff(
         &self,
         _request: HandoffRequest,
@@ -41,8 +41,9 @@ pub trait DistRuntimeControlPort: Send + Sync {
 }
 
 /// Replaceable outbound peer transport. Credentials and HTTP details stay outside
-/// the engine. Implementations authenticate and bind the caller's exact instance;
-/// target addresses come from current member records, never arbitrary user input.
+/// the engine. Implementations bind the caller's exact instance using peer
+/// authentication or a deployment channel restricted to mutually trusted Workers.
+/// Target addresses come from current member records, never arbitrary user input.
 #[async_trait]
 pub trait DistWorkerPeerPort: Send + Sync {
     async fn handoff(
