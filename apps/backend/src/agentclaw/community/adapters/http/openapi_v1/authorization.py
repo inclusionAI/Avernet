@@ -335,12 +335,16 @@ def _assert_check_rows_are_enforceable(
         resolve_owner_id,
     )
 
+    from .bot_access import resolve_legacy_bot
     from .bot_address import require_granted_collaboration_bot
 
     divergent = sorted(
         f"{method} {path}"
         for (method, path), endpoint in checked_handlers
-        if not any(_consumes(endpoint, dependency) for dependency in (resolve_owner_id, require_granted_collaboration_bot))
+        if not any(
+            _consumes(endpoint, dependency)
+            for dependency in (resolve_owner_id, resolve_legacy_bot, require_granted_collaboration_bot)
+        )
     )
     if divergent:
         raise PublicRouteNotAuthorized(

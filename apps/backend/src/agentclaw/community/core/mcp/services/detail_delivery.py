@@ -48,6 +48,7 @@ async def deliver_mcp_detail(
     endpoint_env: Optional[str] = None,
     transport_protocol: Optional[str] = None,
     engine_type: Optional[str] = None,
+    scoped_config_projection: bool = False,
 ) -> bool:
     """向单个 bot 的设备推送 MCP 配置。
 
@@ -81,7 +82,7 @@ async def deliver_mcp_detail(
         owner_id=resource_entity_id,
         server_code=server_code,
     )
-    if bot_override:
+    if bot_override and not scoped_config_projection:
         verdict = await asyncio.to_thread(
             config_service.validate_bot_override,
             user_id=user_id,
@@ -107,6 +108,17 @@ async def deliver_mcp_detail(
 
     # 配置合并需读 DB；放入线程池，避免阻塞并发投递的 event loop。
     user_config = await asyncio.to_thread(config_service.get_user_unified_config, user_id, server_code)
+    if scoped_config_projection:
+        verdict = config_service.validate_effective_scoped_config(
+            server_code=server_code,
+            detail=mcp_data,
+            bot_config=bot_override or {},
+            user_config=user_config or {},
+            engine_type=engine_type,
+            allow_custom_url=True,
+        )
+        if not verdict["valid"]:
+            return False
     _api_key, merged_headers, _endpoint_env, _transport_protocol = await asyncio.to_thread(
         config_service.build_mcp_sync_payload,
         user_id=user_id,

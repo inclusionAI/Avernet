@@ -6,8 +6,12 @@ import json
 from typing import Any
 
 from injector import inject
+from sqlalchemy.exc import SQLAlchemyError
 
 from agentclaw.community.core.models.mcp import UserMCPConfig
+from agentclaw.community.core.bot_management.owner_handoff.contracts import HandoffError
+from agentclaw.community.core.bot_management.owner_handoff.guard import assert_bot_mutable
+from agentclaw.community.core.mcp.scoped_config_contract import BotMCPConfigPatch
 from agentclaw.community.core.mcp.errors import McpConfigValueError
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.plugin_api.models import BotModel
@@ -136,3 +140,60 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                     config=config or None,
                     env=env,
                 )
+
+
+    def patch_bot(
+        self, *, bot_pk: int, bot_id: str, entity_id: str, current_owner_id: str,
+        server_code: str, patch: BotMCPConfigPatch,
+    ) -> tuple[dict[str, Any], bool]:
+        env = get_current_env()
+        tenant = get_current_avernet_tenant()
+        try:
+            with self._db.transactional_orm_session() as session:
+                bot = session.query(BotModel).filter(
+                    BotModel.id == bot_pk,
+                    BotModel.avernet_tenant == tenant,
+                    BotModel.env == env,
+                    BotModel.is_delete == 0,
+                    BotModel.bot_id == bot_id,
+                    BotModel.owner_id == current_owner_id,
+                    BotModel.entity_id == entity_id,
+                ).with_for_update().one_or_none()
+                if bot is None:
+                    raise McpConfigValueError("Bot address changed during MCP config update")
+                try:
+                    assert_bot_mutable({"ext": bot.ext})
+                except HandoffError:
+                    raise McpConfigValueError("Bot is temporarily read-only") from None
+
+                previous = mcp_config_reads.get(
+                    session, bot_id=bot_id, owner_id=entity_id, env=env, server_code=server_code,
+                ) or {}
+                config = dict(previous)
+                if patch.get("headers"):
+                    updates = patch["headers"]
+                    names = {name.lower() for name in updates}
+                    headers = {
+                        key: value for key, value in (previous.get("headers") or {}).items()
+                        if key.lower() not in names
+                    }
+                    headers.update({key: value for key, value in updates.items() if value is not None})
+                    if headers:
+                        config["headers"] = headers
+                    elif previous.get("headers"):
+                        config.pop("headers")
+                if "url" in patch:
+                    if patch["url"] is None:
+                        config.pop("url", None)
+                    else:
+                        config["url"] = patch["url"]
+                changed = config != previous
+                if changed:
+                    bot_mcp_configs.replace(
+                        session, bot_id=bot_id, owner_id=entity_id, env=env,
+                        server_code=server_code, config=config or None,
+                    )
+                return config, changed
+        except SQLAlchemyError as exc:
+            # SQLAlchemy can include the bound override JSON in its traceback.
+            raise RuntimeError(f"Bot MCP config persistence failed ({type(exc).__name__})") from None

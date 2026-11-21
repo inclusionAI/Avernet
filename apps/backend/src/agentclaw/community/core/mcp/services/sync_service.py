@@ -21,7 +21,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
-from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver, ResolvedBotContext
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.detail_delivery import deliver_mcp_detail, resolve_detail_bot, resolve_detail_device
 from agentclaw.community.core.mcp.services.detail_fanout import (
@@ -274,6 +274,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         entity_id: Optional[str] = None,
         engine_type: Optional[str] = None,
         device_sync: DeviceSync | None = None,
+        config_target: ResolvedBotContext | None = None,
     ) -> dict[str, Any]:
         """把一批已备齐的 MCP 详情推送到**同一个** bot 的设备。
 
@@ -307,6 +308,11 @@ class MCPSyncService(MCPSyncServiceProtocol):
             resolve_detail_bot, self.bot_repository, bot_id=bot_id,
             entity_id=entity_id, legacy_owner_id=user_id,
         )
+        if config_target is not None and (
+            resource_bot.bot_pk != config_target.bot_pk
+            or resource_bot.current_owner_id != config_target.current_owner_id
+        ):
+            return {"success": False, "error": "Bot address changed before MCP projection"}
         resource_owner_id = resource_bot.entity_id
         effective_engine_type = engine_type
         if device_sync is None:
@@ -333,6 +339,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 bot_id=bot_id,
                 mcp_data=mcp,
                 engine_type=effective_engine_type,
+                scoped_config_projection=config_target is not None,
             ),
             concurrency=_DESIRED_STATE_DETAIL_CONCURRENCY,
             bot_id=bot_id,
@@ -870,6 +877,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         endpoint_env: Optional[str] = None,
         transport_protocol: Optional[str] = None,
         engine_type: Optional[str] = None,
+        scoped_config_projection: bool = False,
     ) -> bool:
         """Delegate one payload to the shared delivery seam."""
         return await deliver_mcp_detail(
@@ -877,6 +885,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
             resource_entity_id=resource_entity_id, bot_id=bot_id, mcp_data=mcp_data, api_key=api_key,
             custom_headers=custom_headers, endpoint_env=endpoint_env,
             transport_protocol=transport_protocol, engine_type=engine_type,
+            scoped_config_projection=scoped_config_projection,
         )
 
     def _enrich_from_mcp_center(self, mcps: list[dict[str, Any]]) -> None:

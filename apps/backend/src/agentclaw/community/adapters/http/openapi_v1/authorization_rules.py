@@ -329,6 +329,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/local/open-folder"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/local/restart"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/mcps"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"): Check(
+        PermissionLevel.MEMBER
+    ),
+    ("PUT", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"): Check(
+        PermissionLevel.ADMIN, EDIT_LOCK, explicit=True
+    ),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(
         PermissionLevel.MEMBER, explicit=True
     ),

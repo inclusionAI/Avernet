@@ -81,6 +81,8 @@ from agentclaw.community.core.mcp.presentation import (
 )
 from agentclaw.community.di import Injected
 
+from .bot_config import get_bot_mcp_config, put_bot_mcp_config
+
 from .schemas import (
     McpConfig,
     McpHeaderGroup,
@@ -106,6 +108,13 @@ bot_mcp_router = APIRouter(
     tags=["mcp"],
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
     route_class=PublicAPIRoute,
+)
+
+bot_mcp_router.add_api_route(
+    "/{server_code}/config", get_bot_mcp_config, methods=["GET"],
+)
+bot_mcp_router.add_api_route(
+    "/{server_code}/config", put_bot_mcp_config, methods=["PUT"],
 )
 
 #: What the *configuration* operations declare: ``REFUSED`` to a machine
