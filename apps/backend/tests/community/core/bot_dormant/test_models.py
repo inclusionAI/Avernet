@@ -34,6 +34,7 @@ def test_dormant_tables_create_all():
         "ac_bot_dormant_whitelist",
         "ac_bot_dormant_external_input",
         "ac_bot_dormant_check_audit",
+        "ac_bot_dormant_auto_reactivate",
     }
     assert tables == expected, f"Expected {expected}, got {tables}"
 
