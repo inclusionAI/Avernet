@@ -116,6 +116,7 @@ class TestDistributedLockSqliteOrmEquivalence:
         )
         repo.update_expire_time(
             lock_name=lock_name,
+            lock_holder=holder,
             expire_time=new_expire,
         )
 
@@ -123,16 +124,40 @@ class TestDistributedLockSqliteOrmEquivalence:
         assert record is not None
         assert record.lock_holder == holder
 
+    def test_update_expire_time_rejects_expired_same_holder(self):
+        repo = get_container().repository.distributed_lock_repository()
+        lock_name = f"expired_renew_{_generate_uuid()[:12]}"
+        holder = _generate_uuid()
+        expired_at = datetime.now() - timedelta(seconds=5)
+
+        assert (
+            repo.try_acquire_lock(
+                lock_name=lock_name,
+                lock_holder=holder,
+                expire_time=expired_at,
+            )
+            is True
+        )
+
+        updated = repo.update_expire_time(
+            lock_name=lock_name,
+            lock_holder=holder,
+            expire_time=datetime.now() + timedelta(minutes=5),
+        )
+
+        assert updated == 0
+
     def test_delete_lock(self):
         repo = get_container().repository.distributed_lock_repository()
         lock_name = f"delete_{_generate_uuid()[:12]}"
+        holder = _generate_uuid()
 
         repo.try_acquire_lock(
             lock_name=lock_name,
-            lock_holder=_generate_uuid(),
+            lock_holder=holder,
             expire_time=datetime.now() + timedelta(minutes=5),
         )
-        deleted = repo.delete_lock(lock_name)
+        deleted = repo.delete_lock(lock_name, lock_holder=holder)
         assert deleted is True
 
         result = repo.get_by_lock_name(lock_name)
@@ -140,7 +165,12 @@ class TestDistributedLockSqliteOrmEquivalence:
 
     def test_delete_nonexistent_lock(self):
         repo = get_container().repository.distributed_lock_repository()
-        assert repo.delete_lock(f"nonexistent_{_generate_uuid()}") is False
+        assert (
+            repo.delete_lock(
+                f"nonexistent_{_generate_uuid()}", lock_holder="missing-holder"
+            )
+            is False
+        )
 
     def test_try_acquire_failfast_leaves_holder_untouched_when_held_unexpired(self):
         """A second caller against an unexpired held lock returns False; the

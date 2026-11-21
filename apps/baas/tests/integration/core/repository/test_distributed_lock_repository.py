@@ -184,6 +184,7 @@ class TestDistributedLockRepositoryProtocol:
 
         updated_rows = distributed_lock_repository.update_expire_time(
             lock_name=lock_name,
+            lock_holder=holder,
             expire_time=new_expire,
         )
         assert updated_rows == 1
@@ -199,6 +200,7 @@ class TestDistributedLockRepositoryProtocol:
     ):
         updated_rows = distributed_lock_repository.update_expire_time(
             lock_name="nonexistent-lock",
+            lock_holder="missing-holder",
             expire_time=datetime.now() + timedelta(minutes=5),
         )
         assert updated_rows == 0
@@ -219,7 +221,7 @@ class TestDistributedLockRepositoryProtocol:
             expire_time=datetime.now() + timedelta(minutes=5),
         )
 
-        deleted = distributed_lock_repository.delete_lock(lock_name)
+        deleted = distributed_lock_repository.delete_lock(lock_name, lock_holder=holder)
         assert deleted is True
 
     def test_delete_lock_returns_false_for_missing_lock(
@@ -227,7 +229,9 @@ class TestDistributedLockRepositoryProtocol:
         distributed_lock_repository: DistributedLockRepository,
         db_transaction,
     ):
-        deleted = distributed_lock_repository.delete_lock("nonexistent-lock")
+        deleted = distributed_lock_repository.delete_lock(
+            "nonexistent-lock", lock_holder="missing-holder"
+        )
         assert deleted is False
 
     # ── 8. fail-fast precheck leaves holder untouched ──
@@ -292,12 +296,13 @@ class TestDistributedLockRepositoryProtocol:
         # Renew
         updated = distributed_lock_repository.update_expire_time(
             lock_name=lock_name,
+            lock_holder=holder,
             expire_time=datetime.now() + timedelta(minutes=30),
         )
         assert updated == 1
 
         # Delete
-        deleted = distributed_lock_repository.delete_lock(lock_name)
+        deleted = distributed_lock_repository.delete_lock(lock_name, lock_holder=holder)
         assert deleted is True
 
         # Verify deleted

@@ -189,6 +189,7 @@ class BotRunner:
             message=message,
             context=context,
             metadata=strip_sensitive_metadata(metadata),
+            callback_function=None,
         )
 
         # 入库后任一步骤失败都将记录标记为 FAILED 并写入 error，便于排查
@@ -335,6 +336,7 @@ class BotRunner:
             message=message,
             context=context,
             metadata=strip_sensitive_metadata(metadata),
+            callback_function=callback if isinstance(callback, str) else None,
         )
 
         # 入库后任一步骤失败都将记录标记为 FAILED 并写入 error，便于排查
@@ -1277,6 +1279,7 @@ class BotRunner:
         message: str,
         context: BotChatContext,
         metadata: dict[str, Any],
+        callback_function: str | None = None,
     ) -> None:
         """入库 PENDING 记录（DB-first）
 
@@ -1293,6 +1296,7 @@ class BotRunner:
                 api_key_prefix=context.api_key_prefix,
                 message_long=message,
                 metadata=metadata,
+                callback_function=callback_function,
             )
         except Exception:
             logger.exception(

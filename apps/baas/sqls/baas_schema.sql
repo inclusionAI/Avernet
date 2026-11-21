@@ -92,10 +92,22 @@ CREATE TABLE IF NOT EXISTS `baas_bot_run` (
   `result_extra` text DEFAULT NULL COMMENT '结果额外信息(JSON)',
   `error` text DEFAULT NULL COMMENT '错误信息',
   `completed_at` timestamp NULL DEFAULT NULL COMMENT '完成时间',
+  `bcn_callback_function` varchar(64) DEFAULT NULL COMMENT 'BCN callback function discriminator',
+  `bcn_callback_eligible` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'Whether durable BCN callback delivery applies',
+  `bcn_callback_state` varchar(32) DEFAULT NULL COMMENT 'PENDING/IN_FLIGHT/SENT/TERMINAL_FAILED',
+  `bcn_callback_sent` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'Durable sent invariant for BCN callback',
+  `bcn_callback_attempts` int(11) NOT NULL DEFAULT '0' COMMENT 'Callback invocation count',
+  `bcn_callback_next_retry_at` timestamp NULL DEFAULT NULL COMMENT 'Next callback recovery time',
+  `bcn_callback_in_flight_until` timestamp NULL DEFAULT NULL COMMENT 'Callback lease expiry',
+  `bcn_callback_lease_token` varchar(128) DEFAULT NULL COMMENT 'Fenced callback lease token',
+  `bcn_callback_lease_generation` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Fenced callback lease generation',
+  `bcn_callback_last_status` varchar(32) DEFAULT NULL COMMENT 'Last HTTP status or transport category',
+  `bcn_callback_last_error_kind` varchar(64) DEFAULT NULL COMMENT 'Last redacted callback error category',
   `message_long` mediumtext DEFAULT NULL COMMENT '用户消息(长文本)',
   `result_content_long` mediumtext DEFAULT NULL COMMENT 'Bot回复内容(长文本)',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_run_id` (`run_id`)
+  UNIQUE KEY `uk_run_id` (`run_id`),
+  KEY `idx_bcn_callback_due` (`bcn_callback_eligible`, `bcn_callback_state`, `bcn_callback_next_retry_at`, `status`)
 ) COMMENT = 'Bot Run 执行记录';
 
 CREATE TABLE IF NOT EXISTS `baas_bot_run_queue` (

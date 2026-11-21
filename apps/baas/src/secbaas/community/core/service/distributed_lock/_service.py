@@ -59,6 +59,7 @@ class LockContext:
     lock_name: str
     lock_holder: str
     expire_time: datetime
+    lease_seconds: int = 30
     reentrant_count: int = 1
     renew_thread: threading.Thread | None = None
     stop_renew: threading.Event = field(default_factory=threading.Event)
@@ -135,14 +136,16 @@ class DistributedLockService:
                 try:
                     # 计算新的过期时间
                     new_expire_time = datetime.now() + timedelta(
-                        seconds=self._default_expire_seconds
+                        seconds=context.lease_seconds
                     )
 
                     # 更新数据库中的过期时间
                     with self._renew_lock:
                         updated = self._repository.update_expire_time(
                             lock_name=context.lock_name,
+                            lock_holder=context.lock_holder,
                             expire_time=new_expire_time,
+                            now=datetime.now(),
                         )
 
                     if updated > 0:
@@ -267,6 +270,7 @@ class DistributedLockService:
             lock_name=lock_name,
             lock_holder=lock_holder,
             expire_time=expire_time,
+            lease_seconds=expire_seconds,
             reentrant_count=1,
             acquired=True,
         )
@@ -390,7 +394,7 @@ class DistributedLockService:
                 self._stop_renew_thread(context)
 
             # 先删除数据库中的锁记录：DB 是真值，删除成功才认为锁被释放。
-            deleted = self._repository.delete_lock(lock_name)
+            deleted = self._repository.delete_lock(lock_name, lock_holder=lock_holder)
             if deleted:
                 # DB 删除成功后再清理本地簿记，避免提前清除导致重试失据。
                 if context is not None:
@@ -416,22 +420,31 @@ class DistributedLockService:
             )
             return False
 
-    def is_lock_held(self, lock_name: str, lock_holder: str | None = None) -> bool:
+    def is_lock_held(
+        self,
+        lock_name: str,
+        lock_holder: str | None = None,
+        *,
+        verify_remote: bool = False,
+    ) -> bool:
         """检查锁是否被持有。
 
         Args:
             lock_name: 锁名称
             lock_holder: 锁持有者，为 None 时检查任意持有者
+            verify_remote: 跳过本地簿记，强制读取并校验数据库租约
 
         Returns:
             是否被持有
         """
-        # 先检查本地上下文
-        with self._local_lock:
-            if lock_name in self._lock_contexts:
-                context = self._lock_contexts[lock_name]
-                if lock_holder is None or context.lock_holder == lock_holder:
-                    return True
+        # A holder-fenced check used by recovery must confirm the database row;
+        # a stale local context is not proof that the lease is still owned.
+        if not verify_remote:
+            with self._local_lock:
+                if lock_name in self._lock_contexts:
+                    context = self._lock_contexts[lock_name]
+                    if lock_holder is None or context.lock_holder == lock_holder:
+                        return True
 
         # 查询数据库
         record = self._repository.get_by_lock_name(lock_name)
@@ -478,7 +491,9 @@ class DistributedLockService:
             new_expire_time = datetime.now() + timedelta(seconds=additional_seconds)
             updated = self._repository.update_expire_time(
                 lock_name=lock_name,
+                lock_holder=lock_holder,
                 expire_time=new_expire_time,
+                now=datetime.now(),
             )
 
             if updated > 0:
@@ -598,6 +613,6 @@ class DistributedLockService:
                 del self._lock_contexts[lock_name]
 
         # 删除数据库记录
-        deleted = self._repository.delete_lock(lock_name)
+        deleted = self._repository.force_delete_lock(lock_name)
         logger.info(f"[force_unlock] Lock '{lock_name}' force unlocked")
         return deleted

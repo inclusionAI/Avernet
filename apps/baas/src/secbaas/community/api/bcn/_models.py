@@ -367,7 +367,15 @@ class ChatEvent:
 
 @dataclass(slots=True)
 class EventResponse:
-    """BCN 上行事件响应"""
+    """BCN 上行事件响应及其有限、结构化分类结果.
+
+    ``body`` is deliberately not retained.  The callback state machine only
+    needs the HTTP status and a bounded classifier result; retaining a response
+    body could accidentally persist provider payloads or credentials.
+    """
 
     ok: bool = False
     deduplicated: bool = False
+    status_code: int | None = None
+    category: str = "unknown"
+    retryable: bool = False

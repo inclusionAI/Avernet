@@ -73,39 +73,53 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
         self,
         *,
         lock_name: str,
+        lock_holder: str,
         expire_time: datetime,
+        now: datetime | None = None,
     ) -> int:
         log.info("update_expire_time: lock_name=%s", lock_name)
+        now = now or datetime.now()
         """Update lock expire time (for renewal)."""
         from sqlalchemy import func
 
-        result = (
-            self._session.query(DistributedLockModel)
-            .filter(DistributedLockModel.lock_name == lock_name)
-            .update(
-                {
-                    "expire_time": expire_time,
-                    "gmt_modified": func.now(),
-                },
-                synchronize_session=False,
-            )
+        query = self._session.query(DistributedLockModel).filter(
+            DistributedLockModel.lock_name == lock_name,
+            DistributedLockModel.lock_holder == lock_holder,
+            DistributedLockModel.expire_time > now,
+        )
+        result = query.update(
+            {
+                "expire_time": expire_time,
+                "gmt_modified": func.now(),
+            },
+            synchronize_session=False,
         )
         result = int(result)
         log.info("[distributed-lock:update_expire_time] result: %s rows", result)
         return result
 
     @with_orm_session
-    def delete_lock(self, lock_name: str) -> bool:
+    def delete_lock(self, lock_name: str, *, lock_holder: str) -> bool:
         log.info("delete_lock: lock_name=%s", lock_name)
         """Delete a lock record."""
+        query = self._session.query(DistributedLockModel).filter(
+            DistributedLockModel.lock_name == lock_name,
+            DistributedLockModel.lock_holder == lock_holder,
+        )
+        result = query.delete(synchronize_session=False)
+        result = int(result) > 0
+        log.info("[distributed-lock:delete_lock] result: %s", result)
+        return result
+
+    @with_orm_session
+    def force_delete_lock(self, lock_name: str) -> bool:
+        """Delete a lock unconditionally for explicit administrative unlocks."""
         result = (
             self._session.query(DistributedLockModel)
             .filter(DistributedLockModel.lock_name == lock_name)
             .delete(synchronize_session=False)
         )
-        result = int(result) > 0
-        log.info("[distributed-lock:delete_lock] result: %s", result)
-        return result
+        return int(result) > 0
 
     @with_orm_session
     def delete_expired_locks_by_prefix(self, prefix: str, *, now: datetime) -> int:

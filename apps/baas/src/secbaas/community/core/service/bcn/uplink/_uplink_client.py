@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ logger = get_logger("core-service")
 
 # 重试退避基数（秒），实际等待 = BASE_BACKOFF * 2^(attempt-1)
 _BASE_BACKOFF = 0.5
+_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429})
 
 
 @dataclass
@@ -100,24 +102,45 @@ class BcnUplinkClient:
     # ───────────────────────── 响应解析 ─────────────────────────
 
     @staticmethod
-    def _parse_response(status: int, body: str) -> EventResponse:
-        """解析 BCN 上行响应
+    def _explicit_deduplication(body: str) -> bool:
+        """Return true only for a structured explicit deduplication result."""
+        if not body or len(body) > 16 * 1024:
+            return False
+        try:
+            parsed = json.loads(body)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        if not isinstance(parsed, dict):
+            return False
+        if parsed.get("deduplicated") is True:
+            return True
+        result = parsed.get("result")
+        return isinstance(result, dict) and result.get("deduplicated") is True
 
-        - 200: 成功
-        - 409: 幂等重复，视为成功（deduplicated=True）
-        - 4xx/5xx: 失败
+    @classmethod
+    def _parse_response(cls, status: int, body: str) -> EventResponse:
+        """Classify a protocol-1.0 final-event response.
+
+        2xx succeeds. A 409 succeeds only when its structured body explicitly
+        proves deduplication; a bare 409 is retryable.
         """
-        ok = status == 200
-        deduplicated = status == 409
-
-        if not ok and not deduplicated:
-            logger.warning(
-                "[uplink] BCN responded with error: status=%d body=%s", status, body
+        deduplicated = status == 409 and cls._explicit_deduplication(body)
+        if 200 <= status < 300:
+            return EventResponse(ok=True, status_code=status, category="success")
+        if deduplicated:
+            return EventResponse(
+                ok=True,
+                deduplicated=True,
+                status_code=status,
+                category="deduplicated",
             )
-
-        return EventResponse(ok=ok, deduplicated=deduplicated)
-
-    # ───────────────────────── 重试发送 ─────────────────────────
+        if status >= 500 or status in _RETRYABLE_STATUS_CODES:
+            return EventResponse(
+                status_code=status, category="retryable_http", retryable=True
+            )
+        return EventResponse(
+            status_code=status, category="terminal_http", retryable=False
+        )
 
     async def _retry_request(
         self,
@@ -148,64 +171,42 @@ class BcnUplinkClient:
             aiohttp.ClientError: 重试耗尽后仍失败
         """
         last_exc: Exception | None = None
-
-        for attempt in range(1, self._config.max_retries + 1):
+        attempts = max(1, int(self._config.max_retries))
+        for attempt in range(1, attempts + 1):
             try:
                 session = await self._get_session()
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    text = await resp.text()
+                async with session.request(
+                    method, url, headers=headers, json=payload
+                ) as resp:
+                    raw_body = await resp.content.read(16 * 1024 + 1)
+                    text = raw_body.decode("utf-8", errors="replace")
+                    result = self._parse_response(resp.status, text)
                     logger.info(
-                        "[uplink] POST /bot/events run_id=%s status=%d body=%s",
+                        "[uplink] response run_id=%s status=%s category=%s attempt=%s/%s",
                         run_id,
-                        resp.status,
-                        text,
+                        result.status_code,
+                        result.category,
+                        attempt,
+                        attempts,
                     )
-
-                    if resp.status >= 500:
-                        # 5xx 服务端错误: 重试
-                        logger.warning(
-                            "[uplink] Server error, will retry: run_id=%s "
-                            "status=%d attempt=%d/%d",
-                            run_id,
-                            resp.status,
-                            attempt,
-                            self._config.max_retries,
-                        )
-                        last_exc = aiohttp.ClientResponseError(
-                            request_info=resp.request_info,
-                            history=resp.history,
-                            status=resp.status,
-                            message=text,
-                        )
-                        # 指数退避
-                        if attempt < self._config.max_retries:
-                            await asyncio.sleep(_BASE_BACKOFF * (2 ** (attempt - 1)))
-                        continue
-
-                    # 4xx / 2xx: 不重试
-                    return self._parse_response(resp.status, text)
-
-            except (TimeoutError, aiohttp.ClientError) as e:
-                last_exc = e
-                logger.warning(
-                    "[uplink] Connection error, will retry: run_id=%s "
-                    "attempt=%d/%d error=%s",
-                    run_id,
-                    attempt,
-                    self._config.max_retries,
-                    e,
-                )
-                # 指数退避
-                if attempt < self._config.max_retries:
+                    if not result.retryable or attempt >= attempts:
+                        return result
                     await asyncio.sleep(_BASE_BACKOFF * (2 ** (attempt - 1)))
-                continue
+            except (TimeoutError, aiohttp.ClientError) as exc:
+                last_exc = exc
+                logger.warning(
+                    "[uplink] transport failure run_id=%s category=%s attempt=%s/%s",
+                    run_id,
+                    "timeout" if isinstance(exc, TimeoutError) else "transport",
+                    attempt,
+                    attempts,
+                )
+                if attempt < attempts:
+                    await asyncio.sleep(_BASE_BACKOFF * (2 ** (attempt - 1)))
 
-        # 重试耗尽
         if last_exc is not None:
             raise last_exc
-        raise RuntimeError(
-            f"Failed to send event after {self._config.max_retries} attempts"
-        )
+        raise RuntimeError("BCN uplink retry exhausted")
 
     # ───────────────────────── 公共接口 ─────────────────────────
 
@@ -232,23 +233,13 @@ class BcnUplinkClient:
         """
         if event_id is None:
             event_id = str(uuid.uuid4())
-
         url = f"{self._config.base_url.rstrip('/')}/bot/events"
         headers = self._build_headers(event_id=event_id, bot_id=bot_id)
-        payload = event.to_dict()
-
-        logger.debug(
-            "[uplink] Sending event: run_id=%s event_id=%s payload=%s",
-            event.run_id,
-            event_id,
-            payload,
-        )
-
         return await self._retry_request(
             "POST",
             url,
             headers=headers,
-            payload=payload,
+            payload=event.to_dict(),
             run_id=event.run_id,
         )
 

@@ -1,6 +1,7 @@
 """Unit tests for DefaultBcnDownlinkService."""
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -569,7 +570,12 @@ async def test_handle_chat_send_deliver_fails(
         error=None,
         result_content_long=None,
         result_extra=None,
-        metadata={},
+        metadata={"request_type": "chat", "bot_options": {"from_bcn": "true"}},
+        bcn_callback_eligible=True,
+        bcn_callback_function="bcn_uplink",
+        bcn_callback_state="PENDING",
+        bcn_callback_sent=False,
+        bcn_callback_attempts=0,
     )
     setattr(failed_run, "bot_id", "bot-001")
 
@@ -580,6 +586,10 @@ async def test_handle_chat_send_deliver_fails(
 
     mock_run_repo.update_error.side_effect = _update_error
     mock_run_repo.get_by_run_id.return_value = failed_run
+    mock_run_repo.claim_bcn_callback_attempt.return_value = SimpleNamespace(
+        record=failed_run, lease_token="lease", lease_generation=1
+    )
+    mock_run_repo.finish_bcn_callback_success.return_value = True
 
     with patch("secbaas.community.core.service.bcn._bcn_service.logger") as mock_logger:
         result = await service.handle_chat_send(_make_chat_send_input())
