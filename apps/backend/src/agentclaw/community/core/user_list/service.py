@@ -74,7 +74,6 @@ class UserListService(UserListServiceProtocol):
 
     def matches_user(
         self, *, entity_id: str, user_list_type: str, env: str, bot_type: str,
-        include_departments: bool = True,
     ) -> bool:
         # COSEC: all is a rule scope, never a trusted actual Bot type.
         if bot_type not in ACTUAL_BOT_TYPES:
@@ -90,9 +89,6 @@ class UserListService(UserListServiceProtocol):
             if self._repository.exists_any(entity_ids=(entity_id,), subject_type="user", **scope):
                 source, reason = "user", "matched"
                 return True
-            if not include_departments:
-                reason = "departments_disabled"
-                return False
             if not self._repository.has_rules(subject_type="department", **scope):
                 return False
             stage = "directory_lookup"
@@ -125,12 +121,11 @@ class UserListService(UserListServiceProtocol):
             logger.info(
                 "user_list.match_decision entity_id=%s user_list_type=%s env=%s bot_type=%s "
                 "matched_source=%s reason=%s department_names=%s department_paths=%s "
-                "dept_no=%s dept_name=%s dept_path=%s include_departments=%s",
+                "dept_no=%s dept_name=%s dept_path=%s",
                 entity_id, user_list_type, env, bot_type, source, reason, names, paths,
                 department.dept_no if department else None,
                 department.dept_name if department else None,
                 department.dept_path if department else None,
-                include_departments,
             )
 
 

@@ -37,13 +37,8 @@ class UserListServiceProtocol(Protocol):
 
     def matches_user(
         self, *, entity_id: str, user_list_type: str, env: str, bot_type: str,
-        include_departments: bool = True,
     ) -> bool:
-        """Match user rules first, then optionally department rules for the Bot.
-
-        Disabling departments preserves exact-user and all-Bot-scope matching,
-        without querying department rules or the staff directory.
-        """
+        """Match user or department rules for an actual service/personal Bot."""
         ...
 
 
