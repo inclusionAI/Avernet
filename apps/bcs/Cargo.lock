@@ -498,11 +498,13 @@ dependencies = [
  "async-trait",
  "axum",
  "bcs-a2a-binding-api",
+ "bcs-a2a-http",
  "bcs-app-identity-api",
  "bcs-bot-store",
  "bcs-chat-run-store",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-dist-model",
  "bcs-domain",
  "bcs-interaction",
  "bcs-message-flow",
@@ -705,6 +707,7 @@ dependencies = [
  "async-trait",
  "bcs-dist-model",
  "bcs-service-api",
+ "bcs-test-support",
  "tokio",
 ]
 
@@ -1478,6 +1481,42 @@ dependencies = [
  "bcs-db-api",
  "bcs-test-support",
  "mysql_async",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "bcs-dist-connector"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-connector-store",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "futures",
+ "hex",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "bcs-dist-connector-store"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "futures",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -2419,7 +2458,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "7.0.0"
+version = "7.1.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",

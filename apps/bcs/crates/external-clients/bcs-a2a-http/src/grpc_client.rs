@@ -155,6 +155,9 @@ struct ErrorInfo {
 }
 
 fn grpc_error(status: Status) -> A2AError {
+    if crate::transport_error::grpc_not_connected(&status) {
+        return A2AError::internal(crate::transport_error::NOT_CONNECTED);
+    }
     let details: Vec<TypedDetail> = if status.details().len() <= 64 * 1024 {
         RpcStatus::decode(status.details()).ok().into_iter().flat_map(|status| status.details)
             .filter(|detail| detail.type_url == "type.googleapis.com/google.rpc.ErrorInfo")
