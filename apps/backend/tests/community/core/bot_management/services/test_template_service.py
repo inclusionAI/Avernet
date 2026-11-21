@@ -73,6 +73,24 @@ class TestTemplateService:
         # Should not raise any exception for valid nested content
         template_service._validate_ext_content(ext_content)
 
+    def test_validate_ext_content_oversized_rejected(self, template_service):
+        """Test _validate_ext_content rejects dict whose serialized JSON exceeds TEXT limit."""
+        # Build a payload whose JSON serialization exceeds 65,535 bytes.
+        # {"key": "<N x's>"} = N + 11 bytes overhead → need N > 65524.
+        payload = "x" * 65530
+        ext_content = {"key": payload}
+        with pytest.raises(
+            TemplateValidationError,
+            match="Template ext content too large",
+        ):
+            template_service._validate_ext_content(ext_content)
+
+    def test_validate_ext_content_within_size_limit_accepted(self, template_service):
+        """Test _validate_ext_content accepts dict just under the TEXT limit."""
+        # A small dict — well within the limit.
+        ext_content = {"key": "value", "number": 42}
+        template_service._validate_ext_content(ext_content)
+
     def test_create_template_success(self, template_service):
         """Test create_template succeeds with valid config."""
         bot_id = "test-bot-id"
