@@ -10,6 +10,8 @@ When a change yields verified reusable knowledge, update its owning documentatio
 
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.
 
+- [2026-11-18 Distributed Group as Agent](2026-11-18-distributed-group-as-agent/spec.md) — review revision pending D0 freeze: Gateway A2A Server and FSM-group integration; parallel development contracts, acceptance criteria, [implementation plans](2026-11-18-distributed-group-as-agent/plan.md) and [research](2026-11-18-distributed-group-as-agent/research.md); no runtime implementation.
+
 - [2026-11-15-distributed-contracts](2026-11-15-distributed-contracts/spec.md) — declarations and ordered tasks; no runtime implementation
 - [2026-11-17-worker-coordination](2026-11-17-worker-coordination/spec.md) — proposed heartbeat, shard ownership, failover and graceful handoff specification; documentation only
 - [2026-11-17-gateway-a2a-inbound](2026-11-17-gateway-a2a-inbound/spec.md) — Gateway inbound A2A server: spec, store mapping, plan, tasks and as-built notes; not wired into a binary
