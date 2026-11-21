@@ -34,6 +34,10 @@ from agentclaw.community.api.task.todo_artifact_service import (
     TodoArtifactServiceProtocol,
 )
 from agentclaw.community.api.task.todo_service import TodoServiceProtocol
+from agentclaw.community.api.task.todo_stage_service import TodoStageServiceProtocol
+from agentclaw.community.api.task.todo_template_creation_service import (
+    TodoTemplateCreationServiceProtocol,
+)
 from agentclaw.community.core.task.todos.artifact_models import TodoArtifactDownload
 from agentclaw.community.core.task.todos.models import (
     MAX_BOT_ID_LENGTH,
@@ -47,12 +51,17 @@ from .schemas import (
     CreateTodoInteractionRequest,
     CreateTodoRequest,
     SubmitTodoAcceptanceRequest,
+    CreateTodoFromTemplateRequest,
     TodoArtifactRecordResponse,
+    TodoStageResponse,
     TodoEventResponse,
     TodoInteractionResponse,
     TodoResponse,
     TodoStatusSchema,
+    CompleteTodoStageRequest,
+    CancelTodoRequest,
 )
+from agentclaw.community.core.task.todos.stage_models import TodoParticipantBindingInput
 
 OwnersDep = Annotated[str, Query(min_length=1, description=USER_ID_DESCRIPTION)]
 
@@ -164,6 +173,43 @@ async def create_todo(
     return created(TodoResponse.from_record(result), request)
 
 
+@router.post("/from-template", response_model=Envelope[TodoResponse])
+@envelope_errors
+async def create_todo_from_template(
+    body: CreateTodoFromTemplateRequest,
+    request: Request,
+    response: Response,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    space_id: int = Query(gt=0, description="Product Space that owns the Todo."),
+    service: TodoTemplateCreationServiceProtocol = Injected(
+        TodoTemplateCreationServiceProtocol
+    ),
+) -> Envelope[TodoResponse]:
+    """Create and expand one Todo from a published product-flow template."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    bindings = {
+        key: TodoParticipantBindingInput(
+            subject_type=value.subject_type,
+            subject_id=value.subject_id,
+            subject_name=value.subject_name,
+        )
+        for key, value in body.participant_bindings.items()
+    }
+    result = await run_in_threadpool(
+        service.create_todo_from_template,
+        space_id=space_id,
+        actor_id=actor_id,
+        template_id=body.template_id,
+        template_version_id=body.template_version_id,
+        title=body.title,
+        description=body.description,
+        bindings=bindings,
+    )
+    response.status_code = 201
+    return created(TodoResponse.from_record(result), request)
+
+
 @router.get("/{todo_id}", response_model=Envelope[TodoResponse])
 @envelope_errors
 async def get_todo(
@@ -197,6 +243,86 @@ async def run_todo(
     result = await service.start_todo(
         todo_id=todo_id,
         actor_id=actor_id,
+    )
+    return envelope(TodoResponse.from_record(result), request)
+
+
+@router.get("/{todo_id}/stages", response_model=Envelope[list[TodoStageResponse]])
+@envelope_errors
+async def list_todo_stages(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoServiceProtocol = Injected(TodoServiceProtocol),
+) -> Envelope[list[TodoStageResponse]]:
+    """Return the immutable expanded stage timeline for one Todo."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    stages = await run_in_threadpool(
+        service.list_stages,
+        todo_id=todo_id,
+        actor_id=actor_id,
+    )
+    return envelope([TodoStageResponse.from_record(item) for item in stages], request)
+
+
+@router.post(
+    "/{todo_id}/stages/{stage_instance_id}/complete",
+    response_model=Envelope[TodoResponse],
+)
+@envelope_errors
+async def complete_human_todo_stage(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    stage_instance_id: Annotated[str, Path(description="Current Human stage instance.")],
+    body: CompleteTodoStageRequest,
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoStageServiceProtocol = Injected(TodoStageServiceProtocol),
+) -> Envelope[TodoResponse]:
+    """Complete the current Human stage as its owner or a Space admin."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    result = await run_in_threadpool(
+        service.complete_human_stage,
+        todo_id=todo_id,
+        stage_instance_id=stage_instance_id,
+        actor_id=actor_id,
+        summary=body.summary,
+        idempotency_key=body.idempotency_key,
+        result=body.result,
+    )
+    return envelope(TodoResponse.from_record(result), request)
+
+
+@router.post("/{todo_id}/resume", response_model=Envelope[TodoResponse])
+@envelope_errors
+async def resume_todo(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoStageServiceProtocol = Injected(TodoStageServiceProtocol),
+) -> Envelope[TodoResponse]:
+    """Resume an interrupted or blocked Todo."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    result = await run_in_threadpool(service.resume, todo_id=todo_id, actor_id=actor_id)
+    return envelope(TodoResponse.from_record(result), request)
+
+
+@router.post("/{todo_id}/cancel", response_model=Envelope[TodoResponse])
+@envelope_errors
+async def cancel_todo(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    body: CancelTodoRequest,
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoStageServiceProtocol = Injected(TodoStageServiceProtocol),
+) -> Envelope[TodoResponse]:
+    """Cancel a Todo explicitly as its creator or a Space admin."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    result = await run_in_threadpool(
+        service.cancel, todo_id=todo_id, actor_id=actor_id, reason=body.reason
     )
     return envelope(TodoResponse.from_record(result), request)
 

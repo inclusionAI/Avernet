@@ -6,5 +6,12 @@ from agentclaw.community.core.repository.implementations.task.todos.todo_artifac
 from agentclaw.community.core.repository.implementations.task.todos.todo_repository import (
     TodoRepository,
 )
+from agentclaw.community.core.repository.implementations.task.todos.todo_template_repository import (
+    TodoTemplateRepository,
+)
 
-__all__ = ["TodoArtifactRepository", "TodoRepository"]
+__all__ = [
+    "TodoArtifactRepository",
+    "TodoRepository",
+    "TodoTemplateRepository",
+]
