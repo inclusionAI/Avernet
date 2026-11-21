@@ -152,6 +152,39 @@ impl WorkerRuntime {
         peers: Arc<dyn DistWorkerPeerPort>,
         initialize: Arc<CheckpointInitializer>,
     ) -> Result<Arc<Self>, RuntimeError> {
+        Self::start_with_peer_factory(
+            node,
+            control_address,
+            config,
+            membership,
+            owners,
+            sessions,
+            inbox,
+            scheduling,
+            |_| Ok(peers),
+            initialize,
+        )
+        .await
+    }
+
+    /// Create one fresh instance and bind it to both the peer transport and
+    /// membership registration.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "explicit injected coordination boundaries"
+    )]
+    pub async fn start_with_peer_factory(
+        node: String,
+        control_address: String,
+        config: WorkerConfig,
+        membership: Arc<dyn MembershipPort>,
+        owners: Arc<dyn ShardLeasePort>,
+        sessions: Arc<dyn SessionStorePort>,
+        inbox: Arc<dyn InboxConsumerPort>,
+        scheduling: Arc<dyn InboxSchedulingPort>,
+        make_peers: impl FnOnce(&Instance) -> Result<Arc<dyn DistWorkerPeerPort>, RuntimeError>,
+        initialize: Arc<CheckpointInitializer>,
+    ) -> Result<Arc<Self>, RuntimeError> {
         config.validate()?;
         if sessions
             .local_session_capacity()
@@ -160,6 +193,7 @@ impl WorkerRuntime {
             return Err(err("session_store_capacity_mismatch"));
         }
         let instance = Self::fresh_instance(node);
+        let peers = make_peers(&instance)?;
         let started = Instant::now();
         let lease = timeout(
             config.request_timeout,

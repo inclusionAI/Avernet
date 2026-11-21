@@ -156,49 +156,60 @@ async fn discovery_survives_deleted_hints_and_completed_repair_watermarks() {
         vec![Sid(SID.into())]
     );
 }
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn durable_fixed_cut_advances_across_provider_restarts_and_new_history() {
+    const PAGE_LIMIT: u32 = 128;
+    const ORIGINAL_CUT: u64 = 140;
+    const EXTENDED_CUT: u64 = 150;
+
     let store = Arc::new(Recorder::default());
     let clock = Arc::new(ClockAt(AtomicI64::new(100)));
     let p = provider(store.clone(), clock.clone(), config());
-    for i in 0..140 {
+    let shard = ShardId(42);
+    let key = layout().admission_scan(shard, "discovery").unwrap();
+    let read_scan = || async { store.read_document(&key).await.unwrap().unwrap().value };
+    for i in 0..ORIGINAL_CUT {
         p.admit(request(&format!("input-{i}"))).await.unwrap();
     }
-    let first = p.discover(ShardId(42)).await.unwrap();
-    assert!(first.examined <= 64);
+
+    // Paused Tokio time prevents the shared scan budget refilling within a
+    // page. A fresh provider restores the full budget on every restart.
+    let first = p.discover(shard).await.unwrap();
+    let initial = read_scan().await;
+    assert_eq!(initial["cut"], ORIGINAL_CUT);
+    let round = initial["round"].as_u64().unwrap();
+    let cursor = initial["cursor"].as_u64().unwrap();
+    assert!((1..=PAGE_LIMIT).contains(&first.examined), "{first:?}");
+    assert_eq!(cursor, u64::from(first.examined));
+    assert_eq!(first.pending, 0, "{first:?}");
     assert!(!first.round_complete);
-    for i in 140..150 {
+
+    for i in ORIGINAL_CUT..EXTENDED_CUT {
         p.admit(request(&format!("input-{i}"))).await.unwrap();
     }
-    let restarted = provider(store.clone(), clock.clone(), config());
-    let second = restarted.discover(ShardId(42)).await.unwrap();
-    assert!(second.examined <= 64);
-    let key = layout().admission_scan(ShardId(42), "discovery").unwrap();
-    let mut previous = store.read_document(&key).await.unwrap().unwrap().value["cursor"]
-        .as_u64()
-        .unwrap();
-    let mut completed = false;
-    // The per-turn time budget can stop before the item limit under contention.
-    // Restart repeatedly while retaining the original cut and continuous cursor.
-    for _ in 0..12 {
-        let restarted = provider(store.clone(), clock.clone(), config());
-        let turn = restarted.discover(ShardId(42)).await.unwrap();
-        assert!(turn.examined <= 64);
-        let scan = store.read_document(&key).await.unwrap().unwrap().value;
-        assert_eq!(scan["cut"], 140);
-        let cursor = scan["cursor"].as_u64().unwrap();
-        assert!(cursor >= previous && cursor <= 140);
-        previous = cursor;
-        if turn.round_complete {
-            assert_eq!(cursor, 140);
-            completed = true;
-            break;
+
+    for (expected_round, cut, mut cursor) in [
+        (round, ORIGINAL_CUT, cursor),
+        (round + 1, EXTENDED_CUT, 0),
+    ] {
+        for _ in cursor..cut {
+            let restarted = provider(store.clone(), clock.clone(), config());
+            let turn = restarted.discover(shard).await.unwrap();
+            let scan = read_scan().await;
+            assert_eq!(scan["round"], expected_round);
+            assert_eq!(scan["cut"], cut);
+            assert!((1..=PAGE_LIMIT).contains(&turn.examined), "{turn:?}");
+            assert_eq!(turn.pending, 0, "{turn:?}");
+            cursor += u64::from(turn.examined);
+            assert!(cursor <= cut, "cursor {cursor} exceeds cut {cut}");
+            assert_eq!(scan["cursor"], cursor);
+            assert_eq!(turn.round_complete, cursor == cut);
+            if turn.round_complete {
+                break;
+            }
         }
+        assert_eq!(cursor, cut, "round {expected_round} did not complete");
     }
-    assert!(
-        completed,
-        "the fixed cut did not complete within bounded restarts"
-    );
 }
 #[tokio::test]
 async fn concurrent_reservation_cannot_spend_control_capacity() {
