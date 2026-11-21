@@ -1,4 +1,4 @@
-"""Stage outcome protocol shared by Bot and Human lifecycle commands."""
+"""Internal stage transition facts used by Todo lifecycle services."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class TodoStageOutcomeKind(StrEnum):
 
 @dataclass(frozen=True)
 class TodoStageOutcome:
-    """A bounded result of one stage attempt, not a Todo product state."""
+    """A bounded internal result of one stage transition, not a Bot-facing protocol."""
 
     todo_id: str
     stage_instance_id: str

@@ -118,7 +118,7 @@
         "source": "user_explicit",
         "requirement_ref": "REQ-2",
         "title": "Bot/Human 阶段与待处理原因",
-        "statement": "模板阶段支持 stage_kind=bot|human；Human stage 激活或 Bot blocked 时 Todo 为 pending_action，并分别记录 planned_human_stage | blocked；Human->Bot 推进后为 in_progress。",
+        "statement": "模板阶段支持 stage_kind=bot|human；Human stage 激活或 Runtime/领域服务判定 Bot execution blocked 时 Todo 为 pending_action，并分别记录 planned_human_stage | blocked；Human->Bot 推进后为 in_progress。",
         "category": "behavior",
         "blocking": true,
         "status": "implemented",
@@ -188,13 +188,13 @@
         "id": "AC-005",
         "source": "user_explicit",
         "requirement_ref": "REQ-5",
-        "title": "Bot outcome、恢复、中断与取消",
-        "statement": "Bot outcome 支持 completed|blocked|failed；failed 仅是 attempt 结果，自动恢复期间 Todo 保持 in_progress，恢复耗尽后才为 interrupted；当前阶段负责人或 Space Admin 可带原因 resume/cancel，completed/cancelled 默认不可恢复。",
+        "title": "Execution 完成、恢复、中断与取消",
+        "statement": "Bot 通过现有产物接口和 /complete 提交 execution 完成内容；阶段状态由 Backend 根据 execution 结果和 Runtime 内部事件投影。failed 仅是 attempt 结果，自动恢复期间 Todo 保持 in_progress，恢复耗尽后才为 interrupted；当前阶段负责人或 Space Admin 可带原因 resume/cancel，completed/cancelled 默认不可恢复。Bot 不直接调用阶段 outcome 接口。",
         "category": "behavior",
         "blocking": true,
         "status": "designed",
         "design_refs": [
-          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#53-failed-与恢复"
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#53-执行状态与产品状态分离"
         ],
         "implementation_refs": [],
         "verification": {
@@ -478,7 +478,7 @@
             "acceptance": {
               "ac_id": "AC-002",
               "title": "Bot/Human 阶段与待处理原因",
-              "statement": "模板阶段支持 stage_kind=bot|human；Human stage 激活或 Bot blocked 时 Todo 为 pending_action，并分别记录 planned_human_stage | blocked；Human->Bot 推进后为 in_progress。",
+              "statement": "模板阶段支持 stage_kind=bot|human；Human stage 激活或 Runtime/领域服务判定 Bot execution blocked 时 Todo 为 pending_action，并分别记录 planned_human_stage | blocked；Human->Bot 推进后为 in_progress。",
               "source": "user_explicit",
               "category": "behavior",
               "blocking": true
@@ -584,7 +584,7 @@
             "acceptance": {
               "ac_id": "AC-002",
               "title": "Bot/Human 阶段与待处理原因",
-              "statement": "模板阶段支持 stage_kind=bot|human；Human stage 激活或 Bot blocked 时 Todo 为 pending_action，并分别记录 planned_human_stage | blocked；Human->Bot 推进后为 in_progress。",
+              "statement": "模板阶段支持 stage_kind=bot|human；Human stage 激活或 Runtime/领域服务判定 Bot execution blocked 时 Todo 为 pending_action，并分别记录 planned_human_stage | blocked；Human->Bot 推进后为 in_progress。",
               "source": "user_explicit",
               "category": "behavior",
               "blocking": true

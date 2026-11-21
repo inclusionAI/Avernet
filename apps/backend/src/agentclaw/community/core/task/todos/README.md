@@ -19,14 +19,18 @@ legacy acceptance-reconciliation path.
 A template Todo is pinned to an immutable published template version. Its
 ordered stage instances are the product workflow:
 
-- A Bot stage runs in `in_progress`; a Bot reports `completed`, `blocked`, or
-  `failed` through the stage outcome contract.
-- `completed` advances the current stage only after its configured hard artifact
+- A Bot stage runs in `in_progress`; the Bot reports its artifacts through
+  `/report` and signals execution completion through `/complete`. The complete
+  request may carry a human-readable `summary` and Skill-defined structured
+  `result`.
+- `/complete` advances the current stage only after its configured hard artifact
   gates pass. A next Bot stage keeps the Todo in `in_progress`; a next Human
   stage enters `pending_action` with `planned_human_stage`; the last completed
-  stage enters `completed`.
-- `blocked` enters `pending_action` with `blocked`, preserving the reason and
-  requested action. It does not advance the stage.
+  stage enters `completed`. Stage advancement is an internal Backend projection
+  from the execution binding, not a separate Bot-facing stage outcome API.
+- Runtime or domain logic may project a blocked condition into `pending_action`
+  with `blocked`, preserving the reason and requested action. It does not
+  advance the stage.
 - `failed` is an execution-attempt result, not a Todo product state. Runtime
   recovery may retry it while the Todo remains `in_progress`; after recovery is
   exhausted, the runtime/domain integration may project `interrupted`, which is
@@ -131,10 +135,14 @@ artifact persistence.
 After at least one artifact is reported successfully, the Bot calls the
 generation-scoped Complete endpoint with `todo_execution_id` and the same
 `X-Todo-Execution-Token`. The endpoint appends one idempotent `task.completed`
-event for that execution. It intentionally leaves the execution credential and
-Todo row unchanged; the existing scheduler observes the resulting Context
+event for that execution and may persist the caller's `summary` and structured
+`result` as completion content. It intentionally leaves the execution credential
+and Todo row unchanged; the existing scheduler observes the resulting Context
 `done` state, invalidates the active credential, and projects the Todo from
-`in_progress` to `pending_acceptance`.
+`in_progress` to `pending_acceptance` for legacy Todos. For template Todos, the
+Backend uses the execution's stage binding to advance the current stage after the
+completion event is durable. There is no separate Bot-facing stage outcome
+endpoint.
 
 Artifact persistence and Context event storage are separate stores. The service
 therefore persists the artifact first and appends `artifact.reported` only after

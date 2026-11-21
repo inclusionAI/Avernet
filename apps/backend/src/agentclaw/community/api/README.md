@@ -147,7 +147,7 @@ internal_dependencies:
   - agentclaw.community.core.task.todos.artifact_service_protocol  # Todo artifact Service API contract re-export
   - agentclaw.community.core.task.todos.template_capability_protocol  # Todo template capability Service API contract re-export
   - agentclaw.community.core.task.todos.template_management_protocol  # Versioned Todo template management Service API contract re-export
-  - agentclaw.community.core.task.todos.stage_outcome_protocol  # Todo stage outcome Service API contract re-export
+  - agentclaw.community.core.task.todos.stage_outcome_protocol  # Todo Human-stage lifecycle Service API contract re-export
   - agentclaw.community.core.task.todos.template_creation_protocol  # Template-driven Todo creation Service API contract re-export
   - agentclaw.community.core.caller_identity.scheduled_refresh  # Scheduled Caller refresh Service API v1
   - agentclaw.community.core.runtime_binding.models # Trusted target for Engine session-file operations

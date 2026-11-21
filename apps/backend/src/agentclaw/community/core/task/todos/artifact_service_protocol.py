@@ -33,6 +33,8 @@ class TodoArtifactServiceProtocol(Protocol):
         todo_id: str,
         todo_execution_id: str,
         execution_token: str,
+        summary: str | None = None,
+        result: dict[str, object] | None = None,
     ) -> None: ...
 
     def report_artifact(
