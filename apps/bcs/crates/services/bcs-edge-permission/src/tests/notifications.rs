@@ -185,23 +185,163 @@ use super::*;
         );
     }
 
+    /// AC-6: a repeated create that hits the existing pending row must retry
+    /// the owner notification instead of silently returning. Without the retry
+    /// a single transient notification failure (empty recipients or a backend
+    /// intake rejection) is frozen forever and the pending request deadlocks.
     #[tokio::test]
-    async fn pending_notification_is_not_duplicated_on_idempotent_create() {
+    async fn pending_request_retries_notification_on_idempotent_create() {
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:pending_idem", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let recorder = RecordingFriendConnectNotificationPort::default();
         let events = recorder.events.clone();
         let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
         let first = svc
-            .create_connect("human_1", "x:pending_idem", None, None)
+            .create_connect("human_1", "x:pending_idem", Some("hi".into()), None)
             .await
             .expect("first pending");
         let second = svc
             .create_connect("human_1", "x:pending_idem", None, None)
             .await
             .expect("idempotent pending");
+        // No new row is inserted; the existing request id is returned.
         assert_eq!(first.request_ids, second.request_ids);
-        assert_eq!(events.lock().await.len(), 1);
+        let events = events.lock().await;
+        assert_eq!(
+            events.len(),
+            2,
+            "re-applying retries the owner approval notification"
+        );
+        assert_eq!(events[0].kind, FriendConnectNotificationKind::ApprovalRequested);
+        assert_eq!(events[1].kind, FriendConnectNotificationKind::ApprovalRequested);
+        assert_eq!(events[1].request_ids, first.request_ids);
+        assert_eq!(events[1].applicant_actor_id, "human_1");
+        assert_eq!(events[1].target_bot_id, "x:pending_idem");
+        assert_eq!(events[1].recipient_user_ids, vec!["85020".to_string()]);
+        // The retry reproduces the stored request's message, not this call's
+        // (absent) one, so the owner still sees the original reason.
+        assert_eq!(events[1].message.as_deref(), Some("hi"));
+    }
+
+    /// Records every attempt and rejects it, so a best-effort retry is
+    /// observable as an attempt that left the returned status unchanged.
+    #[derive(Clone, Default)]
+    struct RecordingFailingNotificationPort {
+        attempts: Arc<tokio::sync::Mutex<usize>>,
+    }
+
+    #[async_trait]
+    impl FriendConnectNotificationPort for RecordingFailingNotificationPort {
+        async fn notify(&self, _command: FriendConnectNotificationCommand) -> ServiceResult<()> {
+            *self.attempts.lock().await += 1;
+            Err(ServiceError::InternalError(
+                "work-order notification rejected".to_string(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_request_retry_failure_keeps_pending_status() {
+        // The retry is best-effort: a failing notification transport must not
+        // turn the idempotent re-create into an error (Spec §12.3), but the
+        // retry must still be attempted.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:pending_retry_fail", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let recorder = RecordingFailingNotificationPort::default();
+        let attempts = recorder.attempts.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let first = svc
+            .create_connect("human_1", "x:pending_retry_fail", None, None)
+            .await
+            .expect("first pending");
+        let second = svc
+            .create_connect("human_1", "x:pending_retry_fail", None, None)
+            .await
+            .expect("retry failure must not fail the re-create");
+        assert_eq!(first.request_ids, second.request_ids);
+        assert_eq!(second.status, ConnectStatus::Pending);
+        assert_eq!(
+            *attempts.lock().await,
+            2,
+            "initial create plus the idempotent re-create each attempt a notification"
+        );
+    }
+
+    /// AC-5: unfriend clears residual pending Connect rows for the pair so a
+    /// later re-apply starts clean (`direction=sent&status=pending` is empty).
+    #[tokio::test]
+    async fn revoke_friend_clears_pending_human_to_bot_request() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:revoke_pending", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service_with_notification(
+            &eg,
+            &pp,
+            &rq,
+            &bc,
+            Arc::new(RecordingFriendConnectNotificationPort::default()),
+        );
+        let pending = svc
+            .create_connect("human_1", "x:revoke_pending", None, None)
+            .await
+            .expect("pending connect");
+        assert_eq!(pending.status, ConnectStatus::Pending);
+        assert!(
+            !rq.list_inbox("x:revoke_pending", "dev", Some(RequestStatus::Pending))
+                .await
+                .expect("inbox before revoke")
+                .is_empty(),
+            "a pending row exists before revoke"
+        );
+
+        svc.revoke_friend("human_1", "x:revoke_pending", None)
+            .await
+            .expect("revoke clears pending");
+
+        let after = rq
+            .list_inbox("x:revoke_pending", "dev", Some(RequestStatus::Pending))
+            .await
+            .expect("inbox after revoke");
+        assert!(
+            after.is_empty(),
+            "no residual pending request after unfriend: {after:?}"
+        );
+    }
+
+    /// AC-5 (bot↔bot): both the forward and the generated reverse pending rows
+    /// are cleared, leaving neither bot's inbox with a pending Connect request.
+    #[tokio::test]
+    async fn revoke_friend_clears_bot_pair_pending_requests() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:bot_a", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        seed_bot(&db, "x:bot_b", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service_with_notification(
+            &eg,
+            &pp,
+            &rq,
+            &bc,
+            Arc::new(RecordingFriendConnectNotificationPort::default()),
+        );
+        let pending = svc
+            .create_connect("x:bot_a", "x:bot_b", None, None)
+            .await
+            .expect("bot→bot pending connect");
+        assert_eq!(pending.status, ConnectStatus::Pending);
+        assert_eq!(pending.request_ids.len(), 2, "forward + reverse pending rows");
+
+        svc.revoke_friend("x:bot_a", "x:bot_b", None)
+            .await
+            .expect("revoke clears both directions");
+
+        for bot in ["x:bot_a", "x:bot_b"] {
+            let after = rq
+                .list_inbox(bot, "dev", Some(RequestStatus::Pending))
+                .await
+                .expect("inbox after revoke");
+            assert!(
+                after.is_empty(),
+                "no residual pending request for {bot}: {after:?}"
+            );
+        }
     }
 
     #[tokio::test]
