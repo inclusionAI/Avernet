@@ -12,7 +12,7 @@ from abc import abstractmethod
 from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    pass
+    from agentclaw.community.core.mcp.scoped_config_contract import BotMCPConfigPatch
 
 
 @runtime_checkable
@@ -96,4 +96,13 @@ class ScopedMCPConfigRepositoryProtocol(Protocol):
         bot_urls: dict[str, str] | None = None,
     ) -> None:
         """When bot_urls is None preserve all URLs; otherwise replace them."""
+        ...
+
+
+    @abstractmethod
+    def patch_bot(
+        self, *, bot_pk: int, bot_id: str, entity_id: str, current_owner_id: str,
+        server_code: str, patch: BotMCPConfigPatch,
+    ) -> tuple[dict[str, Any], bool]:
+        """Merge one Bot override under the Bot mutation lock."""
         ...
