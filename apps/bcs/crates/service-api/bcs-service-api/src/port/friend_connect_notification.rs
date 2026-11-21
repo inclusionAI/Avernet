@@ -31,6 +31,11 @@ pub struct FriendConnectNotificationCommand {
     /// Resolved display name of the target bot. When `None`, the adapter
     /// falls back to `target_bot_id`.
     pub target_bot_name: Option<String>,
+    /// Resolved display name of the applicant Bot's owner/manager. Only
+    /// meaningful for a Bot applicant; the approval card then leads with
+    /// "{owner}的 Bot「{bot}」". When `None` (or for a Human applicant) the
+    /// card keeps the Bot-name-only form.
+    pub applicant_bot_owner_name: Option<String>,
     /// Resolved `applicant_user_id` to send to the backend work-order
     /// API. Only meaningful for a HUMAN applicant: the adapter maps the
     /// command value first, then strips `human_` to a staff_no.

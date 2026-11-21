@@ -292,7 +292,7 @@ def test_list_work_orders_uses_rejected_friend_status_for_title(
 
     assert response.status_code == 200
     item = response.json()["data"]["items"][0]
-    assert item["title"] == "Bot 好友申请未通过"
+    assert item["title"] == "Bot 好友申请已驳回"
 
 
 def test_get_work_order_maps_nested_content(client, work_order_service):

@@ -21,6 +21,7 @@ from agentclaw.community.core.repository.implementations.spaces.space import (
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.plugins.community.staff_dept import NoStaffDept
 from agentclaw.community.core.spaces.models import SpaceRole
 from agentclaw.community.core.spaces.repository.models import SpaceMemberModel
 from agentclaw.community.core.work_orders.errors import (
@@ -94,7 +95,7 @@ def setup():
                 env="dev",
             )
         )
-    repository = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects())
+    repository = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
     yield db, repository, space_id, bot_pk, skill_id
     reset_for_tests()
 

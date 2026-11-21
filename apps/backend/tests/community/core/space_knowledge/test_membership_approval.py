@@ -9,6 +9,7 @@ import pytest
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.plugins.community.staff_dept import NoStaffDept
 from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision,
     WorkOrderStatus,
@@ -49,7 +50,7 @@ def test_approval_membership_delivery(setup, entrypoint, approved):
                 env="pre",
             )
         )
-    repo = WorkOrderRepository(db, Mock(), effects=KnowledgeSpacePersistenceEffects())
+    repo = WorkOrderRepository(db, Mock(), effects=KnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
     if entrypoint == "process_approval":
         repo.process_approval(
             work_order_id=order_id,
@@ -102,7 +103,7 @@ def test_auto_approval_also_records_membership(setup):
         s.add(order)
         s.flush()
         order_id = order.id
-    WorkOrderRepository(db, Mock(), effects=KnowledgeSpacePersistenceEffects()).complete_auto_approval(
+    WorkOrderRepository(db, Mock(), effects=KnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept()).complete_auto_approval(
         work_order_id=order_id,
         recipient_user_ids=["alice"],
         source_event_type="SPACE_JOIN_REQUESTED",

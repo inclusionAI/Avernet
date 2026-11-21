@@ -12,6 +12,7 @@ from agentclaw.community.core.bot_collaborator.models import BotCollaboratorMode
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.plugins.community.staff_dept import NoStaffDept
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
@@ -76,7 +77,7 @@ def setup():
         session.add(bot)
         session.flush()
         bot_pk = bot.id
-    repo = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects())
+    repo = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
     request = dict(
         bot_pk=bot_pk,
         bot_id="bot-1",
