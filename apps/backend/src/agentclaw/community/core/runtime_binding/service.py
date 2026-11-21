@@ -51,11 +51,12 @@ class RuntimeBindingResolutionService:
 
     def resolve(self, request: RuntimeBindingRequest) -> ResolvedRuntimeBinding:
         """Return the current authorized binding for one trusted request."""
-        bot = self._bot_repository.get_by_id_and_owner(
-            request.bot_id,
-            request.owner_id,
-        )
-        if not bot:
+        if request.entity_id is not None:
+            bot = self._bot_repository.get_by_id_and_entity(request.bot_id, request.entity_id)
+        else:
+            bot = self._bot_repository.get_by_id_and_owner(request.bot_id, request.owner_id)
+        # COSEC: retain the exact entity and verify the canonical owner on reread.
+        if not bot or (request.entity_id is not None and str(bot.get("owner_id") or "") != request.owner_id):
             raise RuntimeBotNotFoundError("runtime bot is unavailable")
 
         source = self._source(bot, request)
