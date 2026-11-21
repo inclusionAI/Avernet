@@ -178,11 +178,17 @@ class _Seam:
 
 
 class _Bots:
-    def __init__(self, record=None) -> None:
+    def __init__(self, record=None, *, deleted=False) -> None:
         self.record = record
+        self.deleted = deleted
+        self.deleted_queries = []
 
     def get_by_id_and_entity(self, bot_id, entity_id):
         return self.record
+
+    def is_soft_deleted(self, bot_id, entity_id):
+        self.deleted_queries.append((bot_id, entity_id))
+        return self.deleted
 
 
 class _Relationships:
@@ -245,6 +251,55 @@ def _handler(
         grant_sweep_provider=(lambda: grant_sweep) if grant_sweep is not None else None,
     )
     return handler, applies, seam, created
+
+
+@pytest.mark.parametrize("sequence", list(CreationSequence))
+def test_deleted_bot_stops_creation_without_side_effects(sequence):
+    bots = _Bots(deleted=True)
+    grant_sweep = _GrantSweep()
+    handler, applies, seam, created = _handler(
+        passport_status="ISSUED", bots=bots, grant_sweep=grant_sweep,
+    )
+    payload = {**_PAYLOAD, "entity_id": "team_1", "creation_sequence": sequence.value}
+
+    result = handler.handle(payload)
+
+    assert isinstance(result, Fail)
+    assert result.error == f"{BOT_COULD_NOT_BE_PROVISIONED}: bot was deleted"
+    assert bots.deleted_queries == [("b_1", "team_1")]
+    assert not created and not applies.started and not seam.pre_container_calls
+    assert not seam.discards and not grant_sweep.swept
+
+
+def test_deletion_after_lookup_stops_the_next_attempt():
+    bots = _Bots()
+    applies = _Applies(_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED))
+    handler, _, _, _ = _handler(passport_status="ISSUED", bots=bots, applies=applies)
+
+    def collide(_payload):
+        bots.deleted = True  # deletion commits after the first lookup
+        raise RuntimeError("insert collided")
+
+    handler._complete_authorization = collide
+    with pytest.raises(RuntimeError, match="insert collided"):
+        handler.handle(_PAYLOAD)
+    assert isinstance(handler.handle(_PAYLOAD), Fail)
+
+
+@pytest.mark.integration
+def test_deleted_bot_task_is_failed_and_not_claimed_again():
+    import asyncio
+    from tests.community.core.task_queue.test_task_worker import _world
+    from agentclaw.community.core.task_queue.types import TaskStatus
+
+    handler, _, _, _ = _handler(bots=_Bots(deleted=True))
+    world = _world()
+    world.registry.register(handler)
+    task = world.enqueue(CREATE_JOB_TASK_TYPE, dict(_PAYLOAD))
+
+    assert asyncio.run(world.worker.run_once()) == 1
+    assert world.status_of(task.id) == TaskStatus.FAILED
+    assert asyncio.run(world.worker.run_once()) == 0
 
 
 def test_it_waits_while_authorization_is_pending():
