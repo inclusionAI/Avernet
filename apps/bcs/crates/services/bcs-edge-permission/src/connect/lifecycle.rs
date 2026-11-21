@@ -630,19 +630,17 @@ impl ConnectService for DbConnectService {
 
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>> {
         let ids = self.edge_grants.list_friends(actor, &self.env).await;
-        let entries = ids
+        let mut entries: Vec<FriendListEntry> = ids
             .into_iter()
             .map(|id| FriendListEntry {
                 actor_id: id.clone(),
-                // TODO(installment-3): enrich name/summary/is_online via the
-                // bot registry / presence port. Left None for now; the plan
-                // marks enrichment as optional for T13.
                 name: None,
                 summary: None,
                 is_online: false,
                 kind: actor_kind_of(&id),
             })
             .collect();
+        self.enrich_friend_entries(&mut entries).await;
         Ok(entries)
     }
 
@@ -652,14 +650,16 @@ impl ConnectService for DbConnectService {
         query: FriendListQuery,
     ) -> ServiceResult<FriendEntriesPage> {
         let page = self.edge_grants.list_friends_paginated(actor, &self.env, query).await?;
-        let items = page.items.into_iter().map(|id| FriendListEntry {
+        let mut items: Vec<FriendListEntry> = page.items.into_iter().map(|id| FriendListEntry {
             kind: actor_kind_of(&id),
             actor_id: id,
             name: None,
             summary: None,
             is_online: false,
         }).collect();
-        Ok(FriendEntriesPage { items, total: page.total })
+        let total = page.total;
+        self.enrich_friend_entries(&mut items).await;
+        Ok(FriendEntriesPage { items, total })
     }
 
     async fn find_human_friend_bots(
