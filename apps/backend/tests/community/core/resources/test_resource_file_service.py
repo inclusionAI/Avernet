@@ -98,6 +98,7 @@ async def test_absolute_path_prefers_explicit_provider_path(provider, request_pa
     assert items == [{
         "name": "a.txt", "path": f"{request_path}/a.txt" if request_path else "a.txt",
         "absolute_path": "/data/bot/workspace/a.txt", "is_dir": False,
+        "is_symlink": False,
         "readonly": False, "size": 3, "size_human": "3 B",
         "modified_at": "2026-11-08T00:00:00Z",
     }]

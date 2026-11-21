@@ -87,6 +87,8 @@ export interface BotEditorResource {
   name: string;
   type: 'file' | 'folder';
   size?: number;
+  /** 是否为符号链接；后端支持时才返回 true，默认 false */
+  isSymlink?: boolean;
 }
 
 export type BotEditorResourcePreview =

@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotEditorResource } from '@/domain/botEditor';
-import { ChevronRight, Copy, Download, File, FilePlus, Folder, FolderOpen, FolderPlus, Loader2, Trash2 } from 'lucide-react';
+import { ChevronRight, Copy, Download, File, FilePlus, Folder, FolderOpen, FolderPlus, FolderSymlink, Loader2, Trash2 } from 'lucide-react';
 
 /** 行首留白（px），dmore 052：chevron 距行左缘 8px */
 const ROW_BASE_PADDING = 8;
@@ -104,7 +104,9 @@ export function ResourcePanelRow({
                   )
                 }
               >
-                {isOpen ? (
+                {item.isSymlink ? (
+                  <FolderSymlink aria-hidden className="size-4 shrink-0 text-amber-500" />
+                ) : isOpen ? (
                   <FolderOpen aria-hidden className="size-4 shrink-0 text-warning" />
                 ) : (
                   <Folder aria-hidden className="size-4 shrink-0 text-warning" />
