@@ -1,6 +1,7 @@
 """Per-route authorization inventory; vocabulary lives in models_authorization."""
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from .authorization_rules_bot_mcp import BOT_MCP_AUTHORIZATION
 from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
 from .authorization_rules_metadata import METADATA_AUTHORIZATION
@@ -328,22 +329,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/local/open-folder"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/local/restart"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/mcps"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"): Check(
-        PermissionLevel.MEMBER
-    ),
-    ("PUT", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"): Check(
-        PermissionLevel.ADMIN, EDIT_LOCK, explicit=True
-    ),
-    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(
-        PermissionLevel.MEMBER, explicit=True
-    ),
-    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(
-        PermissionLevel.MEMBER, explicit=True
-    ),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"): Check(
-        PermissionLevel.OWNER, EDIT_LOCK
-    ),
+    **BOT_MCP_AUTHORIZATION,
     ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
     ),
