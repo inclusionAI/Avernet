@@ -178,6 +178,44 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
 
 #: Todo workbench is a browser Human self-service surface; app-only callers are refused.
 TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-template-capabilities",
+    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions",
+    ): AdmissionMode.REFUSED,
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/validate",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/publish",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/archive",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/activate",
+    ): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): AdmissionMode.REFUSED,

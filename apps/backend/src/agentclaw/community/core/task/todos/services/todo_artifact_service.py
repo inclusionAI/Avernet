@@ -49,6 +49,10 @@ from agentclaw.community.core.task.todos.errors import (
     TodoStateConflictError,
 )
 from agentclaw.community.core.task.todos.models import TodoStatus
+from agentclaw.community.core.task.todos.stage_outcome_models import (
+    TodoStageOutcome,
+    TodoStageOutcomeKind,
+)
 
 _SAFE_FILE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -72,7 +76,7 @@ class TodoArtifactService:
         self._config = storage_config
 
     def issue_execution(
-        self, *, todo_id: str, executor_id: str
+        self, *, todo_id: str, executor_id: str, stage_instance_id: str | None = None
     ) -> TodoExecutionCredential:
         todo = self._repository.get_todo(todo_id=todo_id)
         if not todo.collab_context_id:
@@ -80,13 +84,23 @@ class TodoArtifactService:
                 "Todo execution requires a bound collaboration Context"
             )
         token = secrets.token_urlsafe(32)
-        row = self._artifacts.create_execution(
-            todo_id=todo_id,
-            collab_context_id=todo.collab_context_id,
-            token_hash=self._token_hash(token),
-            executor_id=executor_id,
-        )
+        execution_args = {
+            "todo_id": todo_id,
+            "collab_context_id": todo.collab_context_id,
+            "token_hash": self._token_hash(token),
+            "executor_id": executor_id,
+        }
+        if stage_instance_id is not None:
+            execution_args["stage_instance_id"] = stage_instance_id
+        row = self._artifacts.create_execution(**execution_args)
         return TodoExecutionCredential(execution_id=row.execution_id, token=token)
+
+    def authorize_execution(
+        self, *, todo_id: str, todo_execution_id: str, execution_token: str
+    ):
+        return self._authorize(
+            todo_id=todo_id, execution_id=todo_execution_id, token=execution_token
+        )
 
     def bind_run_id(self, *, execution_id: str, run_id: str) -> None:
         self._artifacts.bind_run_id(execution_id=execution_id, run_id=run_id)
@@ -104,10 +118,11 @@ class TodoArtifactService:
         todo_execution_id: str,
         execution_token: str,
     ) -> None:
-        """Append this Bot execution's completion event.
+        """Append the completion event and project templated stage completion.
 
-        The existing scheduler remains the only owner of the A-side Todo
-        transition and execution-token invalidation.
+        Legacy Todos keep their scheduler-owned acceptance projection. A
+        templated execution additionally advances its current stage after the
+        durable collaboration event exists.
         """
         execution = self._authorize(
             todo_id=todo_id,
@@ -129,6 +144,7 @@ class TodoArtifactService:
         if execution.run_id:
             payload["run_id"] = execution.run_id
 
+        event_exists = False
         last_error: TodoCollaborationError | None = None
         for _attempt in range(3):
             context = self._collaboration.get_context(
@@ -140,7 +156,8 @@ class TodoArtifactService:
                 todo_execution_id=todo_execution_id,
                 run_id=execution.run_id,
             ):
-                return
+                event_exists = True
+                break
             if context.status != "in_progress":
                 raise TodoStateConflictError(
                     "Todo collaboration Context is not in progress"
@@ -159,22 +176,36 @@ class TodoArtifactService:
                         payload=payload,
                     ),
                 )
-                return
+                event_exists = True
+                break
             except TodoCollaborationError as exc:
                 last_error = exc
 
-        context = self._collaboration.get_context(
-            collab_context_id=execution.collab_context_id,
-            actor_id=todo.created_by,
-        )
-        if self._has_completion_event(
-            context.events,
-            todo_execution_id=todo_execution_id,
-            run_id=execution.run_id,
-        ):
-            return
-        assert last_error is not None
-        raise last_error
+        if not event_exists:
+            context = self._collaboration.get_context(
+                collab_context_id=execution.collab_context_id,
+                actor_id=todo.created_by,
+            )
+            event_exists = self._has_completion_event(
+                context.events,
+                todo_execution_id=todo_execution_id,
+                run_id=execution.run_id,
+            )
+        if not event_exists:
+            assert last_error is not None
+            raise last_error
+
+        if execution.stage_instance_id is not None:
+            self._repository.apply_stage_outcome(
+                outcome=TodoStageOutcome(
+                    todo_id=todo_id,
+                    stage_instance_id=execution.stage_instance_id,
+                    outcome=TodoStageOutcomeKind.COMPLETED,
+                    summary="Bot reported stage completion",
+                    execution_id=todo_execution_id,
+                    idempotency_key=todo_execution_id,
+                )
+            )
 
     def report_artifact(
         self,
