@@ -176,3 +176,52 @@ def test_personal_repository_value_error_is_not_swallowed(eligibility, monkeypat
         match(eligibility)
     assert "reason=db_error" in caplog.text
     assert "REPOSITORY_FAILURE_SENTINEL" not in caplog.text
+
+
+@pytest.mark.parametrize("rule_type,actual,expected", [
+    ("all", "personal", True), ("all", "service", True),
+    ("personal", "personal", True), ("personal", "service", False),
+    ("service", "personal", False), ("service", "service", True),
+])
+@pytest.mark.parametrize("env", ["pre", "prod"])
+def test_disabling_departments_preserves_user_rules_and_scope(
+    eligibility, monkeypatch, caplog, rule_type, actual, expected, env,
+):
+    caplog.set_level("INFO")
+    add(eligibility, entity_id="staff", subject_type="user", bot_type=rule_type)
+    add(eligibility)
+    has_rules = Mock(side_effect=AssertionError("department rules must not be queried"))
+    monkeypatch.setattr(eligibility.repository, "has_rules", has_rules)
+    eligibility.directory.get_dept_by_work_no.side_effect = AssertionError("directory must not be queried")
+    matched = eligibility.service.matches_user(
+        entity_id="staff", user_list_type="feature", env=env, bot_type=actual,
+        include_departments=False,
+    )
+    assert matched is (expected and env == "pre")
+    has_rules.assert_not_called()
+    eligibility.directory.get_dept_by_work_no.assert_not_called()
+    assert "include_departments=False" in caplog.text
+    assert ("matched_source=user reason=matched" if matched else "reason=departments_disabled") in caplog.text
+
+
+@pytest.mark.parametrize("rule", ["Group/Platform", "Research"])
+def test_explicitly_enabled_departments_retain_existing_path_and_name_matching(eligibility, rule):
+    add(eligibility, entity_id=rule)
+    assert eligibility.service.matches_user(
+        entity_id="staff", user_list_type="feature", env="pre", bot_type="personal",
+        include_departments=True,
+    )
+    eligibility.directory.get_dept_by_work_no.assert_called_once_with(work_no="staff")
+
+
+def test_disabling_departments_does_not_swallow_user_query_errors(eligibility, monkeypatch, caplog):
+    caplog.set_level("INFO")
+    monkeypatch.setattr(eligibility.repository, "exists_any", Mock(side_effect=RuntimeError("USER_DB_SECRET_SENTINEL")))
+    with pytest.raises(RuntimeError, match="USER_DB_SECRET_SENTINEL"):
+        eligibility.service.matches_user(
+            entity_id="staff", user_list_type="feature", env="pre", bot_type="service",
+            include_departments=False,
+        )
+    assert "reason=db_error" in caplog.text
+    assert "USER_DB_SECRET_SENTINEL" not in caplog.text
+    eligibility.directory.get_dept_by_work_no.assert_not_called()
