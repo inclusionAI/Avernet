@@ -218,7 +218,15 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/from-template",
+    ): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages",
+    ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/events"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
@@ -229,4 +237,16 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages/{stage_instance_id}/complete",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/resume",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/cancel",
+    ): AdmissionMode.REFUSED,
 }
