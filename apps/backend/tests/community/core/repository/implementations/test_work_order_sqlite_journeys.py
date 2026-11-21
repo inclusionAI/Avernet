@@ -43,6 +43,7 @@ from agentclaw.community.core.work_orders.callbacks import (
     WorkOrderDecisionCallbackDispatcher,
 )
 from agentclaw.community.core.work_orders.errors import (
+    WorkOrderAlreadyCancelledError,
     WorkOrderAlreadyProcessedError,
     WorkOrderCallbackError,
     WorkOrderLocalFinalizeError,
@@ -53,6 +54,8 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderBizType,
     WorkOrderDecision,
     WorkOrderEventType,
+    WorkOrderItemType,
+    WorkOrderQueryType,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
@@ -538,3 +541,79 @@ def test_auto_friend_success_stages_are_ordered(world, caplog):
     records = [r for r in caplog.records if getattr(r, "phase", "") == "auto_finalize"]
     assert all(r.work_order_id == result.work_order_id for r in records)
     assert all(r.env == "dev" for r in records)
+
+
+def test_cancel_pending_friend_event_withdraws_owner_inbox(world):
+    w = world
+    order_id = friend(w, False).work_order_id
+    assert snapshot(w, order_id)["status"] == "PENDING"
+
+    cancelled = w.service.cancel_pending_friend_event(
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-request",
+        actor_id="applicant-1",
+        reason="friend request cancelled by applicant",
+    )
+    assert cancelled == 1
+    snapshot(w, order_id)  # prints the terminal state for the journey log
+    with w.db.orm_session() as session:
+        order = session.get(WorkOrderModel, order_id)
+        approvers = (
+            session.query(WorkOrderApproverModel)
+            .filter_by(work_order_id=order_id)
+            .all()
+        )
+        notice = (
+            session.query(WorkOrderNotificationModel)
+            .filter_by(work_order_id=order_id)
+            .one()
+        )
+        assert order.status == "CANCELLED"
+        assert order.review_remark == "friend request cancelled by applicant"
+        assert [row.status for row in approvers] == ["CANCELLED"]
+        assert notice.is_read is True
+
+    total, items = w.service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.PENDING_FOR_ME,
+        item_type=WorkOrderItemType.ALL,
+        page_no=1,
+        page_size=20,
+    )
+    assert total == 0
+    assert items == []
+
+    with pytest.raises(WorkOrderAlreadyCancelledError):
+        review(w, order_id)
+
+    # Idempotent: the request is already terminal, so a retry is a no-op.
+    assert (
+        w.service.cancel_pending_friend_event(
+            biz_type=WorkOrderBizType.BOT_FRIEND.value,
+            biz_id="friend-request",
+            actor_id="applicant-1",
+            reason="friend request cancelled by applicant",
+        )
+        == 0
+    )
+
+
+def test_friend_approval_event_retry_reuses_the_pending_work_order(world):
+    w = world
+    first = friend(w, False)
+    second = friend(w, False)
+
+    assert second.work_order_id == first.work_order_id
+    assert second.work_order_no == first.work_order_no
+    assert second.status.value == "PENDING"
+    with w.db.orm_session() as session:
+        assert session.query(WorkOrderModel).count() == 1
+        approval_notices = (
+            session.query(WorkOrderNotificationModel)
+            .filter_by(
+                work_order_id=first.work_order_id,
+                notification_category="APPROVAL",
+            )
+            .count()
+        )
+        assert approval_notices == 1

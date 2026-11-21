@@ -465,7 +465,11 @@ mod connect_fake {
             Err(super::service_err("not used by this test"))
         }
 
-        async fn cancel(&self, _request_id: &str) -> ServiceResult<()> {
+        async fn cancel(
+            &self,
+            _request_id: &str,
+            _request_auth: Option<RequestAuthHeaders>,
+        ) -> ServiceResult<()> {
             Err(super::service_err("not used by this test"))
         }
 

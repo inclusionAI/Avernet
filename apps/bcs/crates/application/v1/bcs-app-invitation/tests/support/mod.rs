@@ -367,7 +367,11 @@ impl ConnectService for FakeConnectService {
         unreachable!("the V1 friendship facade must not call reject")
     }
 
-    async fn cancel(&self, _request_id: &str) -> ServiceResult<()> {
+    async fn cancel(
+        &self,
+        _request_id: &str,
+        _request_auth: Option<RequestAuthHeaders>,
+    ) -> ServiceResult<()> {
         unreachable!("the V1 friendship facade must not call cancel")
     }
 

@@ -231,7 +231,11 @@ impl ConnectService for RecordingConnectService {
         unreachable!("not used")
     }
 
-    async fn cancel(&self, _: &str) -> ServiceResult<()> {
+    async fn cancel(
+        &self,
+        _: &str,
+        _request_auth: Option<bcs_service_api::RequestAuthHeaders>,
+    ) -> ServiceResult<()> {
         unreachable!("not used")
     }
 

@@ -145,6 +145,9 @@ pub struct RejectFriendConnectionRequest {
 pub struct CancelFriendConnectionRequest {
     pub caller: AuthenticatedCaller,
     pub request_id: String,
+    /// Forwarded gateway principal + trace headers so the owner's pending
+    /// approval work order can be invalidated on the backend.
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 #[derive(Debug, Clone)]

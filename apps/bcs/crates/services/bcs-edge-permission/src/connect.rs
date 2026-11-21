@@ -20,8 +20,9 @@ use bcs_service_api::application::connect::{
 };
 use bcs_service_api::port::{
     FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort,
-    FriendConnectNotificationCommand, FriendConnectNotificationKind,
-    FriendConnectNotificationPort, FriendshipWritebackPort,
+    FriendConnectCancellationCommand, FriendConnectNotificationCommand,
+    FriendConnectNotificationKind, FriendConnectNotificationPort,
+    FriendshipWritebackPort,
 };
 use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::port::repo::{

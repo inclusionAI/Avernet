@@ -846,7 +846,7 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
             .map_err(map_service_error)?;
         self.ensure_can_cancel_request(&command.caller, &request).await?;
         connect
-            .cancel(&command.request_id)
+            .cancel(&command.request_id, command.request_auth.clone())
             .await
             .map_err(map_service_error)?;
         let updated = connect

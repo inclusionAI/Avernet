@@ -195,14 +195,20 @@ async fn reject_friend_connection_request(
 
 async fn cancel_friend_connection_request(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Path(request_id_path) =
         path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let request_auth = request_auth_headers(&headers);
     let result = service(&state, &request_id)?
-        .cancel_friend_connection_request(cancel_command(caller, request_id_path))
+        .cancel_friend_connection_request(cancel_command(
+            caller,
+            request_id_path,
+            Some(request_auth),
+        ))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((

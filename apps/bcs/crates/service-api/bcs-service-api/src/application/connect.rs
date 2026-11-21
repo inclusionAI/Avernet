@@ -89,7 +89,14 @@ pub trait ConnectService: Send + Sync {
     ) -> ServiceResult<()>;
 
     /// Caller withdraws a pending request.
-    async fn cancel(&self, request_id: &str) -> ServiceResult<()>;
+    ///
+    /// `request_auth` carries the inbound HTTP principal headers so the
+    /// backend can invalidate the owner's pending approval work order.
+    async fn cancel(
+        &self,
+        request_id: &str,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> ServiceResult<()>;
 
     /// Fetch a request by id for delivery-layer authorization checks.
     async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest>;

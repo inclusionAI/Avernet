@@ -411,6 +411,7 @@ def _is_public_api(request: Request) -> bool:
 def _uses_envelope_contract(request: Request) -> bool:
     return _is_public_api(request) or request.url.path.rstrip("/") in (
         "/api/v1/work-orders/events",
+        "/api/v1/work-orders/events/cancel",
         "/api/internal/bot-friend-auth/sync",
     )
 

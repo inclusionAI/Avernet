@@ -45,6 +45,7 @@ class _WorkOrderListingRepository:
         finished_statuses = (
             WorkOrderStatus.APPROVED.value,
             WorkOrderStatus.REJECTED.value,
+            WorkOrderStatus.CANCELLED.value,
             WorkOrderStatus.FAILED.value,
         )
         with self._db.orm_session() as db:

@@ -71,7 +71,8 @@ pub use event_delivery::*;
 pub use event_metrics::*;
 pub use event_recording::*;
 pub use friend_connect_notification::{
-    FriendConnectNotificationCommand, FriendConnectNotificationKind, FriendConnectNotificationPort,
+    FriendConnectCancellationCommand, FriendConnectNotificationCommand,
+    FriendConnectNotificationKind, FriendConnectNotificationPort,
     NoopFriendConnectNotificationPort,
 };
 pub use friend_auth_sync::{

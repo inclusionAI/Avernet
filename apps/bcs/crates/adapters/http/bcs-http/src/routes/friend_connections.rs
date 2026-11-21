@@ -138,7 +138,10 @@ pub async fn cancel_friend_request(
             id
         )));
     }
-    state.connect.cancel(&id).await?;
+    state
+        .connect
+        .cancel(&id, Some(request_auth_headers(&headers)))
+        .await?;
     Ok(Json(envelope(&StatusResponse {
         status: "cancelled".into(),
     })))

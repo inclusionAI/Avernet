@@ -23,6 +23,7 @@ E2E_TESTS_EDGE_PERMISSION=(
     "test_ep_connect_private_and_discover_branches"
     "test_ep_tc_friend_auth_sync_readdressed_principal"
     "test_ep_dept_scope_parses_object_friend_ext_entries"
+    "test_ep_friend_connections_cancel_work_order_coverage"
 )
 
 # Helper: make an authenticated API call with a bot's Bearer token
@@ -631,6 +632,7 @@ test_ep_connect_private_and_discover_branches() {
 # Kept separate so the authorization/sync story can grow without exceeding
 # the source-file size limit; it remains in E2E_TESTS_EDGE_PERMISSION above.
 source "${SCRIPT_DIR}/tc_friend_auth_sync.sh"
+source "${SCRIPT_DIR}/friend_cancel_work_order.sh"
 
 # friend_ext department-scope parsing: production rows carry
 # {deptNo, deptName} objects (and the admin surfaces keep writing them), so

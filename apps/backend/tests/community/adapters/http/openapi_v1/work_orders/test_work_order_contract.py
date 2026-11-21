@@ -23,6 +23,7 @@ from agentclaw.community.api.work_order_service import (
     WorkOrderServiceProtocol,
 )
 from agentclaw.community.core.work_orders.errors import (
+    WorkOrderAlreadyCancelledError,
     WorkOrderNotFoundError,
 )
 from agentclaw.community.core.work_orders.models import (
@@ -441,6 +442,23 @@ def test_approve_accepts_optional_remark(client, work_order_service, payload, re
     work_order_service.approve.assert_called_once_with(
         work_order_id=11, actor_id="owner-1", review_remark=remark
     )
+
+
+def test_approve_cancelled_friend_request_returns_explicit_cancel_error(
+    client, work_order_service
+):
+    work_order_service.approve.side_effect = WorkOrderAlreadyCancelledError(
+        "the friend request was cancelled by the applicant"
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/work-orders/11/approve",
+        json={"review_remark": "approve"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409210
+    assert response.json()["message"] == "该好友申请已取消，请刷新后重试"
 
 
 def test_notification_count_and_read_all(client, notification_service):

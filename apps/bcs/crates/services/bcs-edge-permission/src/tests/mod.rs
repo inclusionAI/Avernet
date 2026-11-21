@@ -14,8 +14,8 @@ use bcs_service_api::application::connect::{
     ConnectService, ConnectStatus, FriendListQuery, RequestDirection,
 };
 use bcs_service_api::port::{
-    FriendConnectNotificationCommand, FriendConnectNotificationKind,
-    FriendConnectNotificationPort,
+    FriendConnectCancellationCommand, FriendConnectNotificationCommand,
+    FriendConnectNotificationKind, FriendConnectNotificationPort,
 };
 use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::port::repo::{
@@ -210,6 +210,7 @@ use bcs_user_directory_api::{UserDirectoryLookupContext, UserDirectoryPlugin};
     #[derive(Clone, Default)]
     struct RecordingFriendConnectNotificationPort {
         events: Arc<tokio::sync::Mutex<Vec<FriendConnectNotificationCommand>>>,
+        cancellations: Arc<tokio::sync::Mutex<Vec<FriendConnectCancellationCommand>>>,
     }
 
     #[async_trait]
@@ -217,6 +218,27 @@ use bcs_user_directory_api::{UserDirectoryLookupContext, UserDirectoryPlugin};
         async fn notify(&self, command: FriendConnectNotificationCommand) -> ServiceResult<()> {
             self.events.lock().await.push(command);
             Ok(())
+        }
+
+        async fn cancel(&self, command: FriendConnectCancellationCommand) -> ServiceResult<()> {
+            self.cancellations.lock().await.push(command);
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct FailingCancellationNotificationPort;
+
+    #[async_trait]
+    impl FriendConnectNotificationPort for FailingCancellationNotificationPort {
+        async fn notify(&self, _command: FriendConnectNotificationCommand) -> ServiceResult<()> {
+            Ok(())
+        }
+
+        async fn cancel(&self, _command: FriendConnectCancellationCommand) -> ServiceResult<()> {
+            Err(ServiceError::InternalError(
+                "work-order cancel unavailable".to_string(),
+            ))
         }
     }
 

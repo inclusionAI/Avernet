@@ -274,12 +274,12 @@ use super::*;
             .await
             .expect("pending");
         let rid = pending.request_ids[0].clone();
-        svc.cancel(&rid).await.expect("cancel ok");
+        svc.cancel(&rid, None).await.expect("cancel ok");
         let r = rq.get(&rid, "dev").await.expect("request still exists");
         assert_eq!(r.status, RequestStatus::Cancelled);
         // cancelling an already-cancelled request is idempotent (B4e): Ok, not
         // an error. Spec says "已 rejected/cancelled 幂等".
-        svc.cancel(&rid).await.expect("idempotent cancel ok");
+        svc.cancel(&rid, None).await.expect("idempotent cancel ok");
         let r2 = rq.get(&rid, "dev").await.expect("request still exists");
         assert_eq!(r2.status, RequestStatus::Cancelled);
     }
@@ -568,4 +568,125 @@ use super::*;
             .await
             .expect("ok");
         assert_eq!(page2.items.len(), 1, "remainder on page 2");
+    }
+
+    #[tokio::test]
+    async fn cancel_invalidates_pending_owner_work_order() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:cancel_notify", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let cancellations = recorder.cancellations.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let pending = svc
+            .create_connect("human_1", "x:cancel_notify", None, None)
+            .await
+            .expect("manual pending");
+        let rid = pending.request_ids[0].clone();
+
+        svc.cancel(&rid, None).await.expect("cancel ok");
+        svc.cancel(&rid, None)
+            .await
+            .expect("idempotent cancel retries invalidation");
+
+        assert_eq!(
+            rq.get(&rid, "dev").await.expect("request row").status,
+            RequestStatus::Cancelled
+        );
+        let cancellations = cancellations.lock().await;
+        assert_eq!(
+            cancellations.len(),
+            2,
+            "the idempotent retry re-attempts the best-effort invalidation"
+        );
+        assert_eq!(cancellations[0].request_ids, vec![rid]);
+        assert_eq!(cancellations[0].applicant_actor_id, "human_1");
+        assert_eq!(cancellations[0].target_bot_id, "x:cancel_notify");
+    }
+
+    #[tokio::test]
+    async fn revoke_friend_cancels_orphan_pending_requests() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:revoke_pending", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let cancellations = recorder.cancellations.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let pending = svc
+            .create_connect("human_1", "x:revoke_pending", None, None)
+            .await
+            .expect("manual pending");
+        let rid = pending.request_ids[0].clone();
+
+        svc.revoke_friend("human_1", "x:revoke_pending", None)
+            .await
+            .expect("unfriend cleans up");
+
+        let inbox = rq
+            .list_inbox("x:revoke_pending", "dev", Some(RequestStatus::Pending))
+            .await
+            .expect("inbox");
+        assert!(
+            inbox.iter().all(|request| request.from_id != "human_1"),
+            "revoke must not leave the applicant's pending row behind"
+        );
+        assert_eq!(
+            rq.get(&rid, "dev").await.expect("request row").status,
+            RequestStatus::Cancelled
+        );
+        let cancellations = cancellations.lock().await;
+        assert_eq!(cancellations.len(), 1);
+        assert_eq!(cancellations[0].request_ids, vec![rid]);
+    }
+
+    #[tokio::test]
+    async fn cancel_succeeds_when_work_order_invalidation_fails() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:cancel_fail", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service_with_notification(
+            &eg,
+            &pp,
+            &rq,
+            &bc,
+            Arc::new(FailingCancellationNotificationPort),
+        );
+        let pending = svc
+            .create_connect("human_1", "x:cancel_fail", None, None)
+            .await
+            .expect("manual pending");
+        let rid = pending.request_ids[0].clone();
+
+        svc.cancel(&rid, None)
+            .await
+            .expect("a backend invalidation failure must not fail the cancel");
+
+        assert_eq!(
+            rq.get(&rid, "dev").await.expect("request row").status,
+            RequestStatus::Cancelled
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_friend_succeeds_when_work_order_invalidation_fails() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:revoke_fail", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service_with_notification(
+            &eg,
+            &pp,
+            &rq,
+            &bc,
+            Arc::new(FailingCancellationNotificationPort),
+        );
+        let pending = svc
+            .create_connect("human_1", "x:revoke_fail", None, None)
+            .await
+            .expect("manual pending");
+        let rid = pending.request_ids[0].clone();
+
+        svc.revoke_friend("human_1", "x:revoke_fail", None)
+            .await
+            .expect("a backend invalidation failure must not fail the unfriend");
+
+        assert_eq!(
+            rq.get(&rid, "dev").await.expect("request row").status,
+            RequestStatus::Cancelled
+        );
     }

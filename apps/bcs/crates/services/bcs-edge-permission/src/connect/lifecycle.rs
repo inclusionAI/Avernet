@@ -73,10 +73,12 @@ impl ConnectService for DbConnectService {
                 .filter(|request| !is_internal_reverse_connect(request))
                 .map(|request| request.request_id.clone())
                 .collect();
+            let mut resolved_from_opposite_direction = false;
             if request_ids.is_empty() {
                 // A peer creating in the opposite direction finds our generated
                 // reverse mirror. Return the original logical request instead
                 // of an internal ID that cannot be decided directly.
+                resolved_from_opposite_direction = true;
                 request_ids = self
                     .find_pending_connect(to_bot, caller)
                     .await?
@@ -89,6 +91,36 @@ impl ConnectService for DbConnectService {
                 return Err(ServiceError::InternalError(
                     "pending connect pair has no user-authored request".to_string(),
                 ));
+            }
+            // A notification is best-effort at creation time. Re-sending it on
+            // every idempotent retry is what makes a transient transport
+            // failure recoverable instead of a permanent owner-inbox gap: the
+            // pending row is unchanged, only the approval notification is
+            // retried. Still best-effort — never turn a retry into an error.
+            // Only retry for a request this caller actually authored. The
+            // opposite-direction mirror is another actor's pending request:
+            // re-sending it here would notify the wrong owner with the wrong
+            // applicant.
+            if !resolved_from_opposite_direction {
+                if let Err(error) = self
+                    .emit_friend_connect_notification(
+                        FriendConnectNotificationKind::ApprovalRequested,
+                        request_ids.clone(),
+                        caller,
+                        to_bot,
+                        self.target_notification_recipients(to_bot, &cfg).await,
+                        message.as_deref(),
+                        request_auth.clone(),
+                    )
+                    .await
+                {
+                    warn!(
+                        error = %error,
+                        request_ids = ?request_ids,
+                        target_bot_id = %to_bot,
+                        "friend connect notification re-send failed; continuing without it"
+                    );
+                }
             }
             return Ok(ConnectResult {
                 request_ids,
@@ -461,7 +493,11 @@ impl ConnectService for DbConnectService {
         Ok(())
     }
 
-    async fn cancel(&self, request_id: &str) -> ServiceResult<()> {
+    async fn cancel(
+        &self,
+        request_id: &str,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> ServiceResult<()> {
         let req = self
             .requests
             .get(request_id, &self.env)
@@ -477,7 +513,31 @@ impl ConnectService for DbConnectService {
         // (that's an unfriend/revoke, not a cancel).
         match req.status {
             RequestStatus::Pending => {}
-            RequestStatus::Cancelled | RequestStatus::Rejected => return Ok(()),
+            RequestStatus::Cancelled => {
+                // Idempotent retry: the request state is already terminal, but
+                // the owner work-order invalidation is best-effort and may
+                // have failed on the first attempt. Retry only that hop.
+                if let Err(error) = self
+                    .friend_connect_notification
+                    .cancel(FriendConnectCancellationCommand {
+                        env: self.env.clone(),
+                        request_ids: vec![req.request_id.clone()],
+                        applicant_actor_id: req.from_id.clone(),
+                        target_bot_id: req.to_id.clone(),
+                        request_auth: request_auth.clone(),
+                    })
+                    .await
+                {
+                    warn!(
+                        error = %error,
+                        request_id = %req.request_id,
+                        target_bot_id = %req.to_id,
+                        "friend connect work-order cancel retry failed; continuing"
+                    );
+                }
+                return Ok(());
+            }
+            RequestStatus::Rejected => return Ok(()),
             RequestStatus::Approved => {
                 return Err(ServiceError::InvalidOperation {
                     message: format!(
@@ -501,6 +561,7 @@ impl ConnectService for DbConnectService {
                 Some("cancelled by caller"),
             )
             .await?;
+        let mut cancelled_request_ids = vec![req.request_id.clone()];
 
         // Bot↔Bot: cancel the reverse pending request as well.
         if actor_kind_of(&req.from_id) == ActorKind::Bot
@@ -520,6 +581,31 @@ impl ConnectService for DbConnectService {
                         Some("cancelled by caller"),
                     )
                     .await?;
+                cancelled_request_ids.push(r.request_id.clone());
+            }
+        }
+        // The owner's "pending approval" work order must not outlive the
+        // request it describes. Best-effort: a backend hiccup must not fail
+        // the user's successful cancel; the applicant can retry the cancel
+        // (idempotent) to retry the invalidation.
+        for cancelled_request_id in cancelled_request_ids {
+            if let Err(error) = self
+                .friend_connect_notification
+                .cancel(FriendConnectCancellationCommand {
+                    env: self.env.clone(),
+                    request_ids: vec![cancelled_request_id],
+                    applicant_actor_id: req.from_id.clone(),
+                    target_bot_id: req.to_id.clone(),
+                    request_auth: request_auth.clone(),
+                })
+                .await
+            {
+                warn!(
+                    error = %error,
+                    request_id = %req.request_id,
+                    target_bot_id = %req.to_id,
+                    "friend connect work-order cancel failed; continuing"
+                );
             }
         }
         Ok(())
@@ -620,6 +706,48 @@ impl ConnectService for DbConnectService {
         // TODO(installment-5): spec §4.1 models unfriend as a Revoke-kind
         // request that the owner directly approves; this direct-revoke path is
         // sufficient for T13. The revoke-request flow can layer on later.
+
+        // Removing a friend must not leave a pending connect request behind.
+        // A stale pending row blocks every later application through the dedup
+        // branch, and its owner work order can still be approved even though
+        // the friendship was revoked. Clean both directions and invalidate the
+        // corresponding owner work orders (best-effort on the notification
+        // hop, but the request state itself must be committed).
+        let mut cancelled_requests = Vec::new();
+        for (from, to) in [(caller, target), (target, caller)] {
+            for request in self.find_pending_connect(from, to).await? {
+                self.requests
+                    .decide(
+                        request.request_id.as_str(),
+                        &self.env,
+                        RequestStatus::Cancelled,
+                        "system",
+                        Some("revoked by unfriend"),
+                    )
+                    .await?;
+                cancelled_requests.push(request);
+            }
+        }
+        for request in cancelled_requests {
+            if let Err(error) = self
+                .friend_connect_notification
+                .cancel(FriendConnectCancellationCommand {
+                    env: self.env.clone(),
+                    request_ids: vec![request.request_id.clone()],
+                    applicant_actor_id: request.from_id.clone(),
+                    target_bot_id: request.to_id.clone(),
+                    request_auth: request_auth.clone(),
+                })
+                .await
+            {
+                warn!(
+                    error = %error,
+                    request_id = %request.request_id,
+                    target_bot_id = %request.to_id,
+                    "friend connect work-order cancel after unfriend failed; continuing"
+                );
+            }
+        }
 
         // Reverse-sync (coexistence): drop the legacy friendship mirror for
         // unfriends so stale rows cannot keep legacy readers open.
