@@ -18,11 +18,14 @@ from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
     TodoAcceptanceTarget,
     TodoAcceptanceTargetKind,
+    TodoInteractionMention,
+    TodoInteractionMentionActorType,
     TodoPage,
     TodoRecord,
     TodoStatus,
 )
 from agentclaw.community.core.task.todos.services.todo_service import TodoService
+from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationArtifact,
     TodoCollaborationContext,
@@ -116,7 +119,7 @@ class FakeBots:
 
     def list_live_by_bot_id(self, bot_id: str):
         self.calls.append(bot_id)
-        return self.rows
+        return [row for row in self.rows if row.get("bot_id") == bot_id]
 
 
 class FakeTodos:
@@ -275,11 +278,16 @@ def _service(
     return service, repository, access, bots, collaboration, None
 
 
-def _team_bot(name: str = "Team Bot") -> dict[str, Any]:
+def _team_bot(
+    name: str = "Team Bot",
+    *,
+    bot_id: str = "bot_1",
+    space_id: int = 7,
+) -> dict[str, Any]:
     return {
-        "bot_id": "bot_1",
+        "bot_id": bot_id,
         "bot_name": name,
-        "space_id": 7,
+        "space_id": space_id,
         "owner_id": "another_user",
     }
 
@@ -313,6 +321,96 @@ def test_create_todo_persists_pending_without_creating_or_running_context():
             "created_by": "user_1",
         }
     ]
+
+
+def test_create_todo_normalizes_and_forwards_dima_source():
+    service, repository, _, _, _, _ = _service(rows=[_team_bot()])
+
+    service.create_todo(
+        space_id=7,
+        actor_id="user_1",
+        title="title",
+        description="details",
+        bot_id="bot_1",
+        source=TodoSourceInput(
+            source_type="dima",
+            container_id="  P1  ",
+            item_id="  work_1  ",
+            url="  https://dima.example/items/work_1  ",
+            updated_at="  2026-11-20T12:00:00Z  ",
+        ),
+    )
+
+    assert repository.calls[-1]["source"] == TodoSourceInput(
+        source_type="dima",
+        container_id="P1",
+        item_id="work_1",
+        url="https://dima.example/items/work_1",
+        updated_at="2026-11-20T12:00:00Z",
+    )
+
+
+@pytest.mark.parametrize(
+    "source,match",
+    [
+        (
+            TodoSourceInput(
+                source_type="github",  # type: ignore[arg-type]
+                container_id="P1",
+                item_id="work_1",
+            ),
+            "source type",
+        ),
+        (
+            TodoSourceInput(
+                source_type="dima",
+                container_id=" ",
+                item_id="work_1",
+            ),
+            "container_id",
+        ),
+        (
+            TodoSourceInput(
+                source_type="dima",
+                container_id="P1",
+                item_id=" ",
+            ),
+            "item_id",
+        ),
+        (
+            TodoSourceInput(
+                source_type="dima",
+                container_id="P1",
+                item_id="work_1",
+                url="not-a-url",
+            ),
+            "source url",
+        ),
+        (
+            TodoSourceInput(
+                source_type="dima",
+                container_id="P1",
+                item_id="work_1",
+                updated_at="yesterday",
+            ),
+            "updated_at",
+        ),
+    ],
+)
+def test_create_todo_rejects_invalid_source(source, match):
+    service, repository, _, _, _, _ = _service(rows=[_team_bot()])
+
+    with pytest.raises(ValidationError, match=match):
+        service.create_todo(
+            space_id=7,
+            actor_id="user_1",
+            title="title",
+            description="details",
+            bot_id="bot_1",
+            source=source,
+        )
+
+    assert repository.calls == []
 
 
 def test_create_todo_does_not_require_public_catalog_visibility():
@@ -609,6 +707,152 @@ async def test_create_interaction_persists_event_and_claim_without_execution():
     }
     assert repository.todos["todo_1"].status is TodoStatus.IN_PROGRESS
     assert execution.calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_interaction_persists_reply_and_same_space_bot_mentions():
+    reply = _event(2, "artifact.reported", actor_type="bot")
+    todo = _todo(
+        status=TodoStatus.PENDING_ACCEPTANCE,
+        collab_context_id="context_todo_1",
+    )
+    service, repository, _, bots, collaboration, _ = _service(
+        rows=[_team_bot("Review Bot", bot_id="bot_2")],
+        todos=(todo,),
+        contexts=(_context(events=(reply,)),),
+    )
+
+    event = await service.create_interaction(
+        todo_id="todo_1",
+        actor_id="user_1",
+        author_name=None,
+        message="please verify this result",
+        reply_to_event_id="event_2",
+        mentions=(
+            TodoInteractionMention(
+                actor_type=TodoInteractionMentionActorType.BOT,
+                actor_id="bot_2",
+            ),
+        ),
+    )
+
+    assert event.payload == {
+        "content": "please verify this result",
+        "reply_to_event_id": "event_2",
+        "mentions": [{"actor_type": "bot", "actor_id": "bot_2"}],
+    }
+    assert bots.calls == ["bot_2"]
+    assert repository.todos["todo_1"].status is TodoStatus.IN_PROGRESS
+    assert collaboration.append_calls[0][1].parent_event == "event_2"
+
+
+@pytest.mark.asyncio
+async def test_create_interaction_rejects_unknown_reply_before_claiming_status():
+    todo = _todo(
+        status=TodoStatus.PENDING_ACCEPTANCE,
+        collab_context_id="context_todo_1",
+    )
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(todo,),
+        contexts=(_context(events=(_event(1, "task.started"),)),),
+    )
+
+    with pytest.raises(ValidationError, match="visible interaction event"):
+        await service.create_interaction(
+            todo_id="todo_1",
+            actor_id="user_1",
+            author_name=None,
+            message="reply",
+            reply_to_event_id="event_1",
+        )
+
+    assert repository.todos["todo_1"].status is TodoStatus.PENDING_ACCEPTANCE
+    assert collaboration.append_calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_interaction_rejects_completion_notice_as_reply_target():
+    todo = _todo(
+        status=TodoStatus.PENDING_ACCEPTANCE,
+        collab_context_id="context_todo_1",
+    )
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(todo,),
+        contexts=(_context(events=(_event(1, "task.completed"),)),),
+    )
+
+    with pytest.raises(ValidationError, match="visible interaction event"):
+        await service.create_interaction(
+            todo_id="todo_1",
+            actor_id="user_1",
+            author_name=None,
+            message="reply",
+            reply_to_event_id="event_1",
+        )
+
+    assert repository.todos["todo_1"].status is TodoStatus.PENDING_ACCEPTANCE
+    assert collaboration.append_calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_interaction_rejects_duplicate_mentions_before_claiming_status():
+    todo = _todo(
+        status=TodoStatus.PENDING_ACCEPTANCE,
+        collab_context_id="context_todo_1",
+    )
+    mention = TodoInteractionMention(
+        actor_type=TodoInteractionMentionActorType.BOT,
+        actor_id="bot_2",
+    )
+    service, repository, _, bots, collaboration, _ = _service(
+        rows=[_team_bot(bot_id="bot_2")],
+        todos=(todo,),
+        contexts=(_context(),),
+    )
+
+    with pytest.raises(ValidationError, match="unique"):
+        await service.create_interaction(
+            todo_id="todo_1",
+            actor_id="user_1",
+            author_name=None,
+            message="mention twice",
+            mentions=(mention, mention),
+        )
+
+    assert bots.calls == []
+    assert repository.todos["todo_1"].status is TodoStatus.PENDING_ACCEPTANCE
+    assert collaboration.append_calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_interaction_rejects_mentioned_bot_outside_todo_space():
+    todo = _todo(
+        status=TodoStatus.PENDING_ACCEPTANCE,
+        collab_context_id="context_todo_1",
+    )
+    service, repository, _, bots, collaboration, _ = _service(
+        rows=[_team_bot(bot_id="bot_2", space_id=8)],
+        todos=(todo,),
+        contexts=(_context(),),
+    )
+
+    with pytest.raises(TodoBotScopeError):
+        await service.create_interaction(
+            todo_id="todo_1",
+            actor_id="user_1",
+            author_name=None,
+            message="mention outside space",
+            mentions=(
+                TodoInteractionMention(
+                    actor_type=TodoInteractionMentionActorType.BOT,
+                    actor_id="bot_2",
+                ),
+            ),
+        )
+
+    assert bots.calls == ["bot_2"]
+    assert repository.todos["todo_1"].status is TodoStatus.PENDING_ACCEPTANCE
+    assert collaboration.append_calls == []
 
 
 @pytest.mark.asyncio

@@ -74,6 +74,7 @@ beforeEach(() => {
   mockedService.loadTodoInteractions.mockResolvedValue([]);
   mockedService.loadTodoEvents.mockResolvedValue([]);
   mockedService.loadTodoArtifacts.mockResolvedValue([]);
+  mockedService.loadTodoMentionBots.mockResolvedValue([]);
 });
 
 test('切换待办时立即清理旧详情，避免先渲染上一个待办', async () => {
@@ -178,7 +179,7 @@ test('事件时序可独立重试且按 eventSeq 排序', async () => {
   expect(result.current.events.map((item) => item.eventSeq)).toEqual([1, 2]);
 });
 
-test('待验收互动只提交 message，不再组装本快照事件', async () => {
+test('待验收互动保留稳定回复和结构化 mention，只修剪 message', async () => {
   mockedService.loadTodo.mockResolvedValue(awaitingAcceptanceTodo);
   mockedService.addTodoInteraction.mockResolvedValue(event(3, { eventType: 'user_interaction.posted' }));
 
@@ -186,11 +187,37 @@ test('待验收互动只提交 message，不再组装本快照事件', async () 
   await waitFor(() => expect(result.current.selectedTodo).toEqual(awaitingAcceptanceTodo));
 
   await act(async () => {
-    expect(await result.current.interact(' 补充回滚方案 ')).toBe(true);
+    expect(
+      await result.current.interact({
+        message: ' @复核助手 补充回滚方案 ',
+        replyToEventId: 'event-2',
+        mentions: [{ actorType: 'bot', actorId: 'bot-review' }],
+      }),
+    ).toBe(true);
   });
 
-  expect(mockedService.addTodoInteraction).toHaveBeenCalledWith('todo-1', { message: '补充回滚方案' });
+  expect(mockedService.addTodoInteraction).toHaveBeenCalledWith('todo-1', {
+    message: '@复核助手 补充回滚方案',
+    replyToEventId: 'event-2',
+    mentions: [{ actorType: 'bot', actorId: 'bot-review' }],
+  });
   expect(mockedService.startTodoRun).not.toHaveBeenCalled();
+});
+
+test('空间 Bot 候选加载失败不阻断待办详情和互动历史', async () => {
+  mockedService.loadTodoInteractions.mockResolvedValue([event(1)]);
+  mockedService.loadTodoMentionBots.mockRejectedValue(new Error('Bot 目录暂不可用'));
+
+  const { result } = renderHook(() => useTodoDetail('todo-1'));
+
+  await waitFor(() => expect(result.current.selectedTodo).toEqual(awaitingAcceptanceTodo));
+  await waitFor(() => expect(result.current.mentionBotsLoading).toBe(false));
+
+  expect(mockedService.loadTodoMentionBots).toHaveBeenCalledWith(10);
+  expect(result.current.interactions).toHaveLength(1);
+  expect(result.current.mentionBots).toEqual([]);
+  expect(result.current.mentionBotsError).toBe('Bot 目录暂不可用');
+  expect(result.current.error).toBeNull();
 });
 
 test('拒绝验收提交稳定决策与问题目标，不再调用 Run 接口', async () => {

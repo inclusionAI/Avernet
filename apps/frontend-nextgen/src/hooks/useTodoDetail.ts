@@ -1,5 +1,5 @@
 import { notifySuccess } from '@/components/ui/notify';
-import type { TodoAcceptanceInput } from '@/domain/todos/models';
+import type { CreateTodoInteractionInput, TodoAcceptanceInput } from '@/domain/todos/models';
 import { canInteractWithTodo } from '@/domain/todos/status';
 import {
   acceptTodo,
@@ -13,6 +13,7 @@ import {
 import { useTodoStore } from '@/stores/todoStore';
 import { safeReportError } from '@/utils/errorToast';
 import { useCallback, useEffect, useRef } from 'react';
+import { useTodoMentionBots } from './useTodoMentionBots';
 
 const RUNNING_POLL_INTERVAL_MS = 5_000;
 
@@ -51,6 +52,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
 
   // Store 是全局详情缓存；换 ID 时先按当前 ID 派生空数据，避免路由先渲染上一个 Todo。
   const selectedTodo = storedSelectedTodo?.todoId === todoId ? storedSelectedTodo : null;
+  const mentionBots = useTodoMentionBots(selectedTodo?.spaceId);
   const hasCurrentDetail = selectedTodo !== null;
   const interactions = hasCurrentDetail ? storedInteractions : [];
   const events = hasCurrentDetail ? storedEvents : [];
@@ -145,19 +147,19 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
   }, [refresh, selectedTodo?.status, todoId]);
 
   const interact = useCallback(
-    async (message: string) => {
+    async (input: CreateTodoInteractionInput) => {
       if (!todoId || !selectedTodo || !canInteractWithTodo(selectedTodo.status)) {
         safeReportError(new Error('当前状态不允许互动'), { title: '互动失败' });
         return false;
       }
-      const text = message.trim();
+      const text = input.message.trim();
       if (!text) {
         safeReportError(new Error('请输入互动内容'), { title: '互动失败' });
         return false;
       }
       setMutationLoading(true);
       try {
-        await addTodoInteraction(todoId, { message: text });
+        await addTodoInteraction(todoId, { ...input, message: text });
         notifySuccess('互动已提交');
         await refresh();
         await onListRefresh?.();
@@ -220,6 +222,9 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     error,
     eventsError,
     artifactsError,
+    mentionBots: mentionBots.bots,
+    mentionBotsLoading: mentionBots.loading,
+    mentionBotsError: mentionBots.error,
     refresh,
     refreshEvents,
     refreshArtifacts,

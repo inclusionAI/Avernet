@@ -57,7 +57,10 @@ TASK_PUBLIC_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ): NoCheck(
         "a collab event, not a bot; the actor resolves to the gateway-authenticated principal and delivery refuses a forged actor_ref"
     ),
-    ("GET", "/openapi/v1/collaboration/task/context_collab/{collab_context_id}"): NoCheck(
+    (
+        "GET",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}",
+    ): NoCheck(
         "a collab context read, not a bot; visibility filtering happens in the service projection"
     ),
 }
@@ -199,6 +202,17 @@ TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/collaboration/tasks/todos"): NoCheck(
         "Todo creation validates Space membership and Bot eligibility in the service"
     ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos/sources/dima/projects"): NoCheck(
+        "Human self-service source read is bound to the verified principal"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items",
+    ): NoCheck("Human self-service Dima project read; no addressed bot"),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items/{work_item_id}",
+    ): NoCheck("Human self-service Dima item read; no addressed bot"),
     ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): NoCheck(
         "Todo detail derives the human actor and verifies the Todo Space in the service"
     ),

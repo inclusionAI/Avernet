@@ -6,6 +6,9 @@ import type {
   TodoEvent,
   TodoListQuery,
   TodoRecord,
+  TodoSourceDraft,
+  TodoSourceProject,
+  TodoSourceWorkItem,
   TodoStatus,
 } from '@/domain/todos/models';
 import { BackendRequestError } from '../httpClient';
@@ -13,17 +16,23 @@ import { isEnvelopeSuccess, type BackendApiEnvelope, type BackendApiPage } from 
 import {
   createTodo,
   createTodoInteraction,
+  downloadTodoArtifactContent as downloadTodoArtifactContentRequest,
   getTodo,
+  getTodoSourceDraft,
   listTodoArtifacts,
   listTodoEvents,
   listTodoInteractions,
   listTodos,
-  downloadTodoArtifactContent as downloadTodoArtifactContentRequest,
+  listTodoSourceProjects,
+  listTodoSourceWorkItems,
   runTodo,
   submitTodoAcceptance,
   type TodoArtifactDto,
   type TodoDto,
   type TodoEventDto,
+  type TodoSourceDraftDto,
+  type TodoSourceProjectDto,
+  type TodoSourceWorkItemDto,
 } from './todoController';
 import { mapTodoArtifactDto, mapTodoDto, mapTodoEventDto } from './todoMapper';
 
@@ -123,4 +132,67 @@ export function downloadTodoArtifactContent(
   disposition: 'inline' | 'attachment' = 'attachment',
 ): Promise<Blob> {
   return downloadTodoArtifactContentRequest(todoId, artifactId, disposition);
+}
+
+function requiredText(value: unknown, path: string, response: unknown): string {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw invalidResponse(path, 'Dima 待办来源响应无效', response);
+  }
+  const text = String(value).trim();
+  if (!text) throw invalidResponse(path, 'Dima 待办来源响应无效', response);
+  return text;
+}
+
+function sourceCategory(value: unknown, path: string, response: unknown): 'req' | 'task' | 'bug' {
+  if (value === 'req' || value === 'task' || value === 'bug') return value;
+  throw invalidResponse(path, 'Dima 待办来源响应无效', response);
+}
+
+function mapSourceProject(dto: TodoSourceProjectDto, path: string): TodoSourceProject {
+  return { id: requiredText(dto.id, path, dto), name: requiredText(dto.name, path, dto) };
+}
+
+function mapSourceWorkItem(dto: TodoSourceWorkItemDto, path: string): TodoSourceWorkItem {
+  return {
+    id: requiredText(dto.id, path, dto),
+    projectId: requiredText(dto.project_id, path, dto),
+    category: sourceCategory(dto.category, path, dto),
+    title: requiredText(dto.title, path, dto),
+    status: typeof dto.status === 'string' && dto.status.trim() ? dto.status : undefined,
+    updatedAt: typeof dto.updated_at === 'string' && dto.updated_at.trim() ? dto.updated_at : undefined,
+  };
+}
+
+function mapSourceDraft(dto: TodoSourceDraftDto, path: string): TodoSourceDraft {
+  if (dto.source_type !== 'dima') throw invalidResponse(path, 'Dima 待办来源响应无效', dto);
+  return {
+    sourceType: 'dima',
+    projectId: requiredText(dto.project_id, path, dto),
+    workItemId: requiredText(dto.work_item_id, path, dto),
+    category: sourceCategory(dto.category, path, dto),
+    title: requiredText(dto.title, path, dto),
+    description: typeof dto.description === 'string' ? dto.description : '',
+    sourceUrl: typeof dto.source_url === 'string' && dto.source_url.trim() ? dto.source_url : undefined,
+    sourceUpdatedAt:
+      typeof dto.source_updated_at === 'string' && dto.source_updated_at.trim() ? dto.source_updated_at : undefined,
+  };
+}
+
+export async function loadTodoSourceProjects(): Promise<TodoSourceProject[]> {
+  const path = '/openapi/v1/collaboration/tasks/todos/sources/dima/projects';
+  return unwrap(await listTodoSourceProjects(), path).map((item) => mapSourceProject(item, path));
+}
+
+export async function loadTodoSourceWorkItems(projectId: string, query?: string): Promise<TodoSourceWorkItem[]> {
+  const path = `/openapi/v1/collaboration/tasks/todos/sources/dima/projects/${encodeURIComponent(
+    projectId,
+  )}/work-items`;
+  return unwrap(await listTodoSourceWorkItems(projectId, query), path).map((item) => mapSourceWorkItem(item, path));
+}
+
+export async function loadTodoSourceDraft(projectId: string, workItemId: string): Promise<TodoSourceDraft> {
+  const path = `/openapi/v1/collaboration/tasks/todos/sources/dima/projects/${encodeURIComponent(
+    projectId,
+  )}/work-items/${encodeURIComponent(workItemId)}`;
+  return mapSourceDraft(unwrap(await getTodoSourceDraft(projectId, workItemId), path), path);
 }

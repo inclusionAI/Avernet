@@ -36,6 +36,7 @@ jest.mock('@/services/todos/todoService', () => ({
   addTodoInteraction: jest.fn(),
   loadTodoEvents: jest.fn(),
   loadTodoArtifacts: jest.fn(),
+  loadTodoMentionBots: jest.fn(),
   downloadTodoArtifactContent: jest.fn(),
   startTodoRun: jest.fn(),
 }));
@@ -190,6 +191,10 @@ beforeEach(() => {
     event(8, { eventType: 'user_interaction.posted', actorType: 'human', content: '请补充价格来源' }),
   ]);
   mockedService.loadTodoArtifacts.mockResolvedValue(artifacts);
+  mockedService.loadTodoMentionBots.mockResolvedValue([
+    { botId: 'bot-1', botName: '数据分析助手' },
+    { botId: 'bot-review', botName: '复核助手' },
+  ]);
   mockedService.downloadTodoArtifactContent.mockResolvedValue(new Blob(['file']));
   mockedService.addTodoInteraction.mockResolvedValue(event(5, { content: '补充价格来源' }));
   mockedService.acceptTodo.mockResolvedValue({ ...todo, status: 'completed' });
@@ -310,6 +315,122 @@ describe('TodoDetailPage', () => {
       expect(mockedService.addTodoInteraction).toHaveBeenCalledWith('todo-1', { message: '补充价格来源' }),
     );
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
+  });
+
+  it('按楼层回复时提交稳定事件 ID，并可在发送前取消回复', async () => {
+    render(<TodoDetailPage />);
+    await screen.findByText('发起待办：Q3 竞品分析');
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    const feedbackFloor = within(interactionView).getByText('请补充价格来源').closest('li') as HTMLElement;
+    fireEvent.click(within(feedbackFloor).getByRole('button', { name: '回复 f8' }));
+    expect(within(interactionView).getByText('回复 f8 · 风太')).toBeInTheDocument();
+
+    fireEvent.change(within(interactionView).getByPlaceholderText('告诉 Bot 需要补充或修改的内容'), {
+      target: { value: '我会在这个楼层补充' },
+    });
+    fireEvent.click(within(interactionView).getByRole('button', { name: '发送互动' }));
+
+    await waitFor(() =>
+      expect(mockedService.addTodoInteraction).toHaveBeenCalledWith('todo-1', {
+        message: '我会在这个楼层补充',
+        replyToEventId: 'event-8',
+      }),
+    );
+    expect(mockedService.startTodoRun).not.toHaveBeenCalled();
+
+    fireEvent.click(within(feedbackFloor).getByRole('button', { name: '回复 f8' }));
+    fireEvent.click(within(interactionView).getByRole('button', { name: '取消回复' }));
+    fireEvent.change(within(interactionView).getByPlaceholderText('告诉 Bot 需要补充或修改的内容'), {
+      target: { value: '这次不引用楼层' },
+    });
+    fireEvent.click(within(interactionView).getByRole('button', { name: '发送互动' }));
+
+    await waitFor(() => expect(mockedService.addTodoInteraction).toHaveBeenCalledTimes(2));
+    expect(mockedService.addTodoInteraction).toHaveBeenLastCalledWith('todo-1', {
+      message: '这次不引用楼层',
+    });
+  });
+
+  it('展示刷新后持久化的回复引用', async () => {
+    mockedService.loadTodoInteractions.mockResolvedValue([
+      event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
+      event(2, {
+        eventType: 'user_interaction.posted',
+        actorType: 'human',
+        content: '请继续核验',
+        payload: { reply_to_event_id: 'event-1' },
+      }),
+    ]);
+    mockedService.loadTodoEvents.mockResolvedValue([
+      event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
+      event(2, {
+        eventType: 'user_interaction.posted',
+        actorType: 'human',
+        content: '请继续核验',
+        payload: { reply_to_event_id: 'event-1' },
+      }),
+    ]);
+
+    render(<TodoDetailPage />);
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const replyFloor = screen.getByText('请继续核验').closest('li') as HTMLElement;
+    const quote = within(replyFloor).getByRole('blockquote');
+    expect(within(quote).getByText('f1')).toBeInTheDocument();
+    expect(within(quote).getByText(todo.description)).toBeInTheDocument();
+  });
+
+  it('可从待办所属空间选择 Bot mention，并提交结构化 Bot ID', async () => {
+    render(<TodoDetailPage />);
+    await screen.findByText('发起待办：Q3 竞品分析');
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    await waitFor(() => expect(mockedService.loadTodoMentionBots).toHaveBeenCalledWith(10));
+    fireEvent.click(within(interactionView).getByRole('button', { name: '@ Bot' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: '@复核助手' }));
+    expect(within(interactionView).getByLabelText('已选择的 Bot')).toHaveTextContent('@复核助手');
+
+    fireEvent.change(within(interactionView).getByPlaceholderText('告诉 Bot 需要补充或修改的内容'), {
+      target: { value: '@复核助手 请核验价格来源' },
+    });
+    fireEvent.click(within(interactionView).getByRole('button', { name: '发送互动' }));
+
+    await waitFor(() =>
+      expect(mockedService.addTodoInteraction).toHaveBeenCalledWith('todo-1', {
+        message: '@复核助手 请核验价格来源',
+        mentions: [{ actorType: 'bot', actorId: 'bot-review' }],
+      }),
+    );
+    expect(mockedService.startTodoRun).not.toHaveBeenCalled();
+  });
+
+  it('仅可回复有稳定事件 ID 的消息和产物，通知与孤立产物不可回复', async () => {
+    const orphanArtifact: TodoArtifact = {
+      artifactId: 'artifact-orphan',
+      todoId: 'todo-1',
+      executionId: 'execution-1',
+      artifactName: '历史孤立产物',
+      kind: 'text',
+      content: { text: '没有 backing event 的历史产物', isFinalArtifact: false },
+      createdAt: '2026-11-08T07:00:00Z',
+    };
+    mockedService.loadTodoArtifacts.mockResolvedValue([...artifacts, orphanArtifact]);
+
+    render(<TodoDetailPage />);
+    await screen.findByText('发起待办：Q3 竞品分析');
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    const artifactFloor = within(interactionView).getByText('已完成三款产品的定价对比。').closest('li') as HTMLElement;
+    expect(within(artifactFloor).getByRole('button', { name: '回复 f3' })).toBeInTheDocument();
+    const noticeFloor = within(interactionView).getByText('转为待处理，等待发起人验收').closest('li') as HTMLElement;
+    expect(within(noticeFloor).queryByRole('button', { name: /回复/ })).not.toBeInTheDocument();
+    const orphanFloor = within(interactionView).getByText('没有 backing event 的历史产物').closest('li') as HTMLElement;
+    expect(within(orphanFloor).queryByRole('button', { name: /回复/ })).not.toBeInTheDocument();
   });
 
   it('互动页从 task.created 的 objective 展示原始待办内容，不展示事件类型', async () => {

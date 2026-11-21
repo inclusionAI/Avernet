@@ -385,9 +385,11 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     _TodoErrors.TodoArtifactObjectNotFoundError: 404,
     _TodoErrors.TodoArtifactStorageNotConfiguredError: 503,
     _TodoErrors.TodoArtifactStorageError: 502,
+    _TodoErrors.TodoSourceAuthError: 401, _TodoErrors.TodoSourceAlreadyImportedError: 409,
+    _TodoErrors.TodoSourceUnavailableError: 503, _TodoErrors.TodoSourceResponseError: 502,
+    _TodoErrors.TodoSourceWorkItemNotFoundError: 404,
     **ACLI_CLI_ERROR_STATUS,
     **CONTEXT_COLLAB_ERROR_STATUS,
-
 }
 
 _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {

@@ -20,9 +20,12 @@ no-arg service is stateless w.r.t. the four MCP-related Protocol
 methods (callers always pass explicit ``entity_id`` / ``bot_id`` /
 ``engine_type``).
 """
+
 from __future__ import annotations
 
-from agentclaw.community.api.digital_employee_service import DigitalEmployeeServiceProtocol
+from agentclaw.community.api.digital_employee_service import (
+    DigitalEmployeeServiceProtocol,
+)
 
 from typing import Callable
 
@@ -31,8 +34,11 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
+from agentclaw.community.api.mcp_tool_call_service import MCPToolCallServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
-from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
+from agentclaw.community.api.mcp_scoped_config_service import (
+    MCPScopedConfigServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
@@ -46,6 +52,7 @@ from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
     EffectiveMCPStateReaderProtocol,
 )
 from agentclaw.community.core.mcp.services.market_service import MCPMarketService
+from agentclaw.community.core.mcp.services.tool_call_service import MCPToolCallService
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.core.repository.protocols.bot import (
     BotMCPConfigRepositoryProtocol,
@@ -70,7 +77,9 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
-from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository as UnifiedUserMCPConfigRepository
+from agentclaw.community.core.repository.implementations.bot.user_mcp_config import (
+    UserMCPConfigRepository as UnifiedUserMCPConfigRepository,
+)
 from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import (
     BotMCPConfigRepository,
 )
@@ -95,6 +104,7 @@ class McpModule(Module):
         DI cycle (see ``mcp_sync_service`` provider docstring).
         """
         binder.bind(MCPMarketService, to=MCPMarketService, scope=singleton)
+        binder.bind(MCPToolCallService, to=MCPToolCallService, scope=singleton)
         binder.bind(MCPAuthService, to=MCPAuthService, scope=singleton)
         binder.bind(MCPConfigService, to=MCPConfigService, scope=singleton)
         binder.bind(MCPScopedConfigService, to=MCPScopedConfigService, scope=singleton)
@@ -132,6 +142,7 @@ class McpModule(Module):
         # ``MCPAuthPlugin`` is bound per-profile (corp=Prod, community=permissive,
         # test=Local) by the infrastructure mcp_center column module — not here,
         # so the base module carries no plugins.prod auth import.
+
     # ── Cross-Protocol bindings ───────────────────────────────────────────
 
     @singleton
@@ -188,7 +199,9 @@ class McpModule(Module):
             caller_identity_repository=caller_identity_repository,
             resolver_provider=lambda: injector.get(DeviceContextResolver),
             device_sync_dispatcher_provider=lambda: injector.get(DeviceSyncDispatcher),
-            employee_service_provider=lambda: injector.get(DigitalEmployeeServiceProtocol),
+            employee_service_provider=lambda: injector.get(
+                DigitalEmployeeServiceProtocol
+            ),
         )
 
     @singleton
@@ -200,7 +213,9 @@ class McpModule(Module):
     @singleton
     @provider
     @inject
-    def _mcp_config_service_protocol(self, svc: MCPConfigService) -> MCPConfigServiceProtocol:
+    def _mcp_config_service_protocol(
+        self, svc: MCPConfigService
+    ) -> MCPConfigServiceProtocol:
         return svc
 
     @singleton
@@ -214,7 +229,17 @@ class McpModule(Module):
     @singleton
     @provider
     @inject
-    def _mcp_market_service_protocol(self, svc: MCPMarketService) -> MCPMarketServiceProtocol:
+    def _mcp_market_service_protocol(
+        self, svc: MCPMarketService
+    ) -> MCPMarketServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _mcp_tool_call_service_protocol(
+        self, svc: MCPToolCallService
+    ) -> MCPToolCallServiceProtocol:
         return svc
 
     @singleton
