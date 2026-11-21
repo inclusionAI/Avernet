@@ -7,7 +7,8 @@ use std::time::Duration;
 /// No business submission API; inputs arrive through SessionInbox.
 #[async_trait]
 pub trait DistWorkerRuntimeService: Send + Sync {
-    /// authenticated_source must come from service authentication, not the JSON
+    /// The host binds the source via instance authentication or a channel
+    /// restricted to mutually trusted Workers. Do not derive it from the JSON
     /// request body. The application checks it against the precise source claim.
     async fn accept_handoff(
         &self,
