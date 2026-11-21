@@ -1,4 +1,5 @@
 """Tests for mcp_live_fetcher."""
+
 import json
 from unittest.mock import MagicMock, patch
 
@@ -14,22 +15,38 @@ class TestPickBestEndpoint:
 
     def test_prefers_streamable_http(self):
         endpoints = [
-            {"networkType": "INTERNET", "url": "https://sse.example.com", "transportProtocol": "SSE"},
-            {"networkType": "OFFICE", "url": "https://http.example.com", "transportProtocol": "STREAMABLE_HTTP"},
+            {
+                "networkType": "INTERNET",
+                "url": "https://sse.example.com",
+                "transportProtocol": "SSE",
+            },
+            {
+                "networkType": "OFFICE",
+                "url": "https://http.example.com",
+                "transportProtocol": "STREAMABLE_HTTP",
+            },
         ]
         result = _pick_best_endpoint(endpoints)
         assert result == "https://http.example.com"
 
     def test_falls_back_to_sse(self):
         endpoints = [
-            {"networkType": "INTERNET", "url": "https://sse.example.com", "transportProtocol": "SSE"},
+            {
+                "networkType": "INTERNET",
+                "url": "https://sse.example.com",
+                "transportProtocol": "SSE",
+            },
         ]
         result = _pick_best_endpoint(endpoints)
         assert result == "https://sse.example.com"
 
     def test_skips_intranet(self):
         endpoints = [
-            {"networkType": "INTRANET", "url": "https://internal.example.com", "transportProtocol": "SSE"},
+            {
+                "networkType": "INTRANET",
+                "url": "https://internal.example.com",
+                "transportProtocol": "SSE",
+            },
         ]
         result = _pick_best_endpoint(endpoints)
         assert result is None
@@ -52,11 +69,16 @@ class TestFetchToolsFromEndpoint:
                     {"name": "tool_a", "description": "desc a"},
                     {"name": "tool_b", "description": "desc b"},
                 ]
-            }
+            },
         }
 
-        with patch("agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post", return_value=mock_response):
-            tools = fetch_tools_from_endpoint("https://example.com/mcp", access_token="test_token")
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            return_value=mock_response,
+        ):
+            tools = fetch_tools_from_endpoint(
+                "https://example.com/mcp", access_token="test_token"
+            )
 
         assert tools is not None
         assert len(tools) == 2
@@ -65,12 +87,12 @@ class TestFetchToolsFromEndpoint:
     def test_no_auth_header_when_token_missing(self):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "jsonrpc": "2.0",
-            "result": {"tools": []}
-        }
+        mock_response.json.return_value = {"jsonrpc": "2.0", "result": {"tools": []}}
 
-        with patch("agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post", return_value=mock_response) as mock_post:
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            return_value=mock_response,
+        ) as mock_post:
             fetch_tools_from_endpoint("https://example.com/mcp")
 
         call_args = mock_post.call_args
@@ -81,8 +103,13 @@ class TestFetchToolsFromEndpoint:
         mock_response = MagicMock()
         mock_response.status_code = 401
 
-        with patch("agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post", return_value=mock_response):
-            tools = fetch_tools_from_endpoint("https://example.com/mcp", access_token="test_token")
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            return_value=mock_response,
+        ):
+            tools = fetch_tools_from_endpoint(
+                "https://example.com/mcp", access_token="test_token"
+            )
 
         assert tools is None
 
@@ -94,14 +121,23 @@ class TestFetchToolsFromEndpoint:
             "error": {"code": -52302, "message": "auth failed"},
         }
 
-        with patch("agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post", return_value=mock_response):
-            tools = fetch_tools_from_endpoint("https://example.com/mcp", access_token="test_token")
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            return_value=mock_response,
+        ):
+            tools = fetch_tools_from_endpoint(
+                "https://example.com/mcp", access_token="test_token"
+            )
 
         assert tools is None
 
     def test_request_exception_returns_none(self):
         import requests
-        with patch("agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post", side_effect=requests.exceptions.RequestException("network error")):
+
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            side_effect=requests.exceptions.RequestException("network error"),
+        ):
             tools = fetch_tools_from_endpoint("https://example.com/mcp")
 
         assert tools is None
@@ -114,7 +150,10 @@ class TestFetchToolsFromEndpoint:
             "result": {"tools": "not_a_list"},
         }
 
-        with patch("agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post", return_value=mock_response):
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            return_value=mock_response,
+        ):
             tools = fetch_tools_from_endpoint("https://example.com/mcp")
 
         assert tools is None
@@ -131,8 +170,8 @@ class TestFetchToolsFromEndpoint:
         tools_response.headers = {"Content-Type": "text/event-stream"}
         tools_response.content = (
             "event: message\n"
-            "data: {\"jsonrpc\":\"2.0\",\"id\":\"agentclaw-live-fetch\","
-            "\"result\":{\"tools\":[{\"name\":\"sse_tool\"}]}}\n"
+            'data: {"jsonrpc":"2.0","id":"agentclaw-live-fetch",'
+            '"result":{"tools":[{"name":"sse_tool"}]}}\n'
         ).encode("utf-8")
 
         with patch(
@@ -180,11 +219,18 @@ class TestFetchToolsLive:
         center_data = {
             "serverCode": "mcp.test",
             "endpoints": [
-                {"networkType": "INTERNET", "url": "https://example.com/mcp", "transportProtocol": "STREAMABLE_HTTP"},
+                {
+                    "networkType": "INTERNET",
+                    "url": "https://example.com/mcp",
+                    "transportProtocol": "STREAMABLE_HTTP",
+                },
             ],
         }
 
-        with patch("agentclaw.community.core.mcp.services.mcp_live_fetcher.fetch_tools_from_endpoint", return_value=[{"name": "live_tool"}]):
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.fetch_tools_from_endpoint",
+            return_value=[{"name": "live_tool"}],
+        ):
             tools = fetch_tools_live(center_data, access_token="token")
 
         assert tools is not None
@@ -199,12 +245,21 @@ class TestFetchToolsLive:
     def test_string_endpoints_parsed(self):
         center_data = {
             "serverCode": "mcp.test",
-            "endpoints": json.dumps([
-                {"networkType": "INTERNET", "url": "https://example.com/mcp", "transportProtocol": "SSE"},
-            ]),
+            "endpoints": json.dumps(
+                [
+                    {
+                        "networkType": "INTERNET",
+                        "url": "https://example.com/mcp",
+                        "transportProtocol": "SSE",
+                    },
+                ]
+            ),
         }
 
-        with patch("agentclaw.community.core.mcp.services.mcp_live_fetcher.fetch_tools_from_endpoint", return_value=[{"name": "t"}]):
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.fetch_tools_from_endpoint",
+            return_value=[{"name": "t"}],
+        ):
             tools = fetch_tools_live(center_data)
 
         assert tools is not None
@@ -213,11 +268,143 @@ class TestFetchToolsLive:
         center_data = {
             "serverCode": "mcp.test",
             "endpoints": [
-                {"networkType": "INTERNET", "url": "https://example.com/mcp", "transportProtocol": "STREAMABLE_HTTP"},
+                {
+                    "networkType": "INTERNET",
+                    "url": "https://example.com/mcp",
+                    "transportProtocol": "STREAMABLE_HTTP",
+                },
             ],
         }
 
-        with patch("agentclaw.community.core.mcp.services.mcp_live_fetcher.fetch_tools_from_endpoint", return_value=None):
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.fetch_tools_from_endpoint",
+            return_value=None,
+        ):
             tools = fetch_tools_live(center_data, access_token="token")
 
         assert tools is None
+
+
+class TestCallToolFromEndpoint:
+    """Tests for generic STREAMABLE_HTTP tool invocation."""
+
+    def test_success_uses_session_and_returns_result(self):
+        from agentclaw.community.core.mcp.services.mcp_live_fetcher import (
+            call_tool_from_endpoint,
+        )
+
+        init_response = MagicMock()
+        init_response.status_code = 200
+        init_response.headers = {"Mcp-Session-Id": "session-1"}
+
+        notify_response = MagicMock()
+        call_response = MagicMock()
+        call_response.status_code = 200
+        call_response.headers = {"Content-Type": "application/json"}
+        call_response.json.return_value = {
+            "jsonrpc": "2.0",
+            "id": "agentclaw-tool-call",
+            "result": {"content": [{"type": "text", "text": '{"ok":true}'}]},
+        }
+
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            side_effect=[init_response, notify_response, call_response],
+        ) as mock_post:
+            result = call_tool_from_endpoint(
+                "https://example.com/mcp",
+                tool_name="queryWorkItemDetail",
+                arguments={"workItemId": "1"},
+                access_token="access-token",
+            )
+
+        assert result == {"content": [{"type": "text", "text": '{"ok":true}'}]}
+        assert mock_post.call_count == 3
+        init_call, notify_call, tool_call = mock_post.call_args_list
+        assert init_call.kwargs["json"]["method"] == "initialize"
+        assert notify_call.kwargs["json"]["method"] == "notifications/initialized"
+        assert notify_call.kwargs["headers"]["Mcp-Session-Id"] == "session-1"
+        assert tool_call.kwargs["headers"]["Authorization"] == "Bearer access-token"
+        assert tool_call.kwargs["headers"]["Mcp-Session-Id"] == "session-1"
+        assert tool_call.kwargs["json"] == {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "queryWorkItemDetail",
+                "arguments": {"workItemId": "1"},
+            },
+            "id": "agentclaw-tool-call",
+        }
+
+    def test_sse_tool_result_is_parsed(self):
+        from agentclaw.community.core.mcp.services.mcp_live_fetcher import (
+            call_tool_from_endpoint,
+        )
+
+        init_response = MagicMock()
+        init_response.status_code = 200
+        init_response.headers = {"Mcp-Session-Id": "session-1"}
+
+        call_response = MagicMock()
+        call_response.status_code = 200
+        call_response.headers = {"Content-Type": "text/event-stream"}
+        call_response.content = (
+            'event: message\ndata: {"jsonrpc":"2.0","id":"agentclaw-tool-call",'
+            '"result":{"content":[{"type":"text","text":"ok"}]}}\n\n'
+        ).encode()
+
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            side_effect=[init_response, MagicMock(), call_response],
+        ):
+            result = call_tool_from_endpoint(
+                "https://example.com/mcp",
+                tool_name="queryUserSpaceAndProject",
+                arguments={},
+            )
+
+        assert result == {"content": [{"type": "text", "text": "ok"}]}
+
+    def test_rpc_or_http_failure_returns_none(self):
+        from agentclaw.community.core.mcp.services.mcp_live_fetcher import (
+            call_tool_from_endpoint,
+        )
+
+        init_response = MagicMock()
+        init_response.status_code = 200
+        init_response.headers = {"Mcp-Session-Id": "session-1"}
+        rpc_error = MagicMock()
+        rpc_error.status_code = 200
+        rpc_error.headers = {"Content-Type": "application/json"}
+        rpc_error.json.return_value = {
+            "jsonrpc": "2.0",
+            "error": {"code": -1, "message": "failed"},
+        }
+
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            side_effect=[init_response, MagicMock(), rpc_error],
+        ):
+            assert (
+                call_tool_from_endpoint(
+                    "https://example.com/mcp",
+                    tool_name="queryUserSpaceAndProject",
+                    arguments={},
+                )
+                is None
+            )
+
+        init_error = MagicMock()
+        init_error.status_code = 503
+        with patch(
+            "agentclaw.community.core.mcp.services.mcp_live_fetcher.requests.post",
+            return_value=init_error,
+        ):
+            assert (
+                call_tool_from_endpoint(
+                    "https://example.com/mcp",
+                    tool_name="queryUserSpaceAndProject",
+                    arguments={},
+                )
+                is None
+            )

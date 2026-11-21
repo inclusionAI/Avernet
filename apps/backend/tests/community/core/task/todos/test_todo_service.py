@@ -25,6 +25,7 @@ from agentclaw.community.core.task.todos.models import (
     TodoStatus,
 )
 from agentclaw.community.core.task.todos.services.todo_service import TodoService
+from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationArtifact,
     TodoCollaborationContext,
@@ -320,6 +321,96 @@ def test_create_todo_persists_pending_without_creating_or_running_context():
             "created_by": "user_1",
         }
     ]
+
+
+def test_create_todo_normalizes_and_forwards_dima_source():
+    service, repository, _, _, _, _ = _service(rows=[_team_bot()])
+
+    service.create_todo(
+        space_id=7,
+        actor_id="user_1",
+        title="title",
+        description="details",
+        bot_id="bot_1",
+        source=TodoSourceInput(
+            source_type="dima",
+            container_id="  P1  ",
+            item_id="  work_1  ",
+            url="  https://dima.example/items/work_1  ",
+            updated_at="  2026-11-20T12:00:00Z  ",
+        ),
+    )
+
+    assert repository.calls[-1]["source"] == TodoSourceInput(
+        source_type="dima",
+        container_id="P1",
+        item_id="work_1",
+        url="https://dima.example/items/work_1",
+        updated_at="2026-11-20T12:00:00Z",
+    )
+
+
+@pytest.mark.parametrize(
+    "source,match",
+    [
+        (
+            TodoSourceInput(
+                source_type="github",  # type: ignore[arg-type]
+                container_id="P1",
+                item_id="work_1",
+            ),
+            "source type",
+        ),
+        (
+            TodoSourceInput(
+                source_type="dima",
+                container_id=" ",
+                item_id="work_1",
+            ),
+            "container_id",
+        ),
+        (
+            TodoSourceInput(
+                source_type="dima",
+                container_id="P1",
+                item_id=" ",
+            ),
+            "item_id",
+        ),
+        (
+            TodoSourceInput(
+                source_type="dima",
+                container_id="P1",
+                item_id="work_1",
+                url="not-a-url",
+            ),
+            "source url",
+        ),
+        (
+            TodoSourceInput(
+                source_type="dima",
+                container_id="P1",
+                item_id="work_1",
+                updated_at="yesterday",
+            ),
+            "updated_at",
+        ),
+    ],
+)
+def test_create_todo_rejects_invalid_source(source, match):
+    service, repository, _, _, _, _ = _service(rows=[_team_bot()])
+
+    with pytest.raises(ValidationError, match=match):
+        service.create_todo(
+            space_id=7,
+            actor_id="user_1",
+            title="title",
+            description="details",
+            bot_id="bot_1",
+            source=source,
+        )
+
+    assert repository.calls == []
 
 
 def test_create_todo_does_not_require_public_catalog_visibility():

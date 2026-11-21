@@ -34,6 +34,7 @@ from agentclaw.community.api.task.todo_artifact_service import (
     TodoArtifactServiceProtocol,
 )
 from agentclaw.community.api.task.todo_service import TodoServiceProtocol
+from agentclaw.community.api.task.todo_source_service import TodoSourceServiceProtocol
 from agentclaw.community.core.task.todos.artifact_models import TodoArtifactDownload
 from agentclaw.community.core.task.todos.models import (
     MAX_BOT_ID_LENGTH,
@@ -43,7 +44,9 @@ from agentclaw.community.core.task.todos.models import (
     TodoInteractionMention,
     TodoInteractionMentionActorType,
 )
+from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 from agentclaw.community.di import Injected
+from agentclaw.community.plugin_api.auth import AuthRequestContext
 
 from .schemas import (
     CreateTodoInteractionRequest,
@@ -53,6 +56,9 @@ from .schemas import (
     TodoEventResponse,
     TodoInteractionResponse,
     TodoResponse,
+    TodoSourceDraftResponse,
+    TodoSourceProjectResponse,
+    TodoSourceWorkItemResponse,
     TodoStatusSchema,
 )
 
@@ -71,6 +77,16 @@ def _load_todo_artifact_file(
         todo_id=todo_id,
         artifact_id=artifact_id,
         actor_id=actor_id,
+    )
+
+
+def _auth_request(request: Request, principal: Principal) -> AuthRequestContext:
+    return AuthRequestContext(
+        cookies=dict(request.cookies),
+        headers=dict(request.headers),
+        query_params=dict(request.query_params),
+        base_url=str(request.base_url),
+        verified_actor_user_id=caller_owner_id(principal),
     )
 
 
@@ -154,16 +170,127 @@ async def create_todo(
 ) -> Envelope[TodoResponse]:
     """Create one pending Todo for a Space-eligible Bot and await dispatch."""
     actor_id = call_user(user_id=user_id, principal=principal)
+    create_args: dict[str, object] = {
+        "space_id": body.space_id,
+        "actor_id": actor_id,
+        "title": body.title,
+        "description": body.description,
+        "bot_id": body.bot_id,
+    }
+    if body.source is not None:
+        create_args["source"] = TodoSourceInput(
+            source_type=body.source.type,
+            container_id=body.source.container_id,
+            item_id=body.source.item_id,
+            url=body.source.url,
+            updated_at=body.source.updated_at,
+        )
     result = await run_in_threadpool(  # allow-run-in-threadpool
         service.create_todo,
-        space_id=body.space_id,
-        actor_id=actor_id,
-        title=body.title,
-        description=body.description,
-        bot_id=body.bot_id,
+        **create_args,
     )
     response.status_code = 201
     return created(TodoResponse.from_record(result), request)
+
+
+@router.get(
+    "/sources/dima/projects",
+    response_model=Envelope[list[TodoSourceProjectResponse]],
+)
+@envelope_errors
+async def list_dima_projects(
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoSourceServiceProtocol = Injected(TodoSourceServiceProtocol),
+) -> Envelope[list[TodoSourceProjectResponse]]:
+    """List Dima projects visible through the authenticated Human identity."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    projects = await run_in_threadpool(
+        service.list_projects,
+        actor_id=actor_id,
+        auth_request=_auth_request(request, principal),
+    )
+    return envelope(
+        [TodoSourceProjectResponse.from_record(item) for item in projects], request
+    )
+
+
+@router.get(
+    "/sources/dima/projects/{project_id}/work-items",
+    response_model=Envelope[list[TodoSourceWorkItemResponse]],
+)
+@envelope_errors
+async def list_dima_work_items(
+    project_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=128,
+            description="Dima project identifier selected by the authenticated Human.",
+        ),
+    ],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    query: str | None = Query(
+        default=None,
+        max_length=MAX_TITLE_LENGTH,
+        description="Optional case-insensitive Dima work-item id or title filter.",
+    ),
+    service: TodoSourceServiceProtocol = Injected(TodoSourceServiceProtocol),
+) -> Envelope[list[TodoSourceWorkItemResponse]]:
+    """List normalized Dima work items in one selected project."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    items = await run_in_threadpool(
+        service.list_work_items,
+        actor_id=actor_id,
+        auth_request=_auth_request(request, principal),
+        project_id=project_id,
+        query=query,
+    )
+    return envelope(
+        [TodoSourceWorkItemResponse.from_record(item) for item in items], request
+    )
+
+
+@router.get(
+    "/sources/dima/projects/{project_id}/work-items/{work_item_id}",
+    response_model=Envelope[TodoSourceDraftResponse],
+)
+@envelope_errors
+async def get_dima_work_item_draft(
+    project_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=128,
+            description="Dima project identifier containing the selected work item.",
+        ),
+    ],
+    work_item_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=128,
+            description="Dima Req, Task, or Bug identifier to normalize as a Todo draft.",
+        ),
+    ],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoSourceServiceProtocol = Injected(TodoSourceServiceProtocol),
+) -> Envelope[TodoSourceDraftResponse]:
+    """Load one Dima work item as editable Todo fields."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    draft = await run_in_threadpool(
+        service.load_work_item_draft,
+        actor_id=actor_id,
+        auth_request=_auth_request(request, principal),
+        project_id=project_id,
+        work_item_id=work_item_id,
+    )
+    return envelope(TodoSourceDraftResponse.from_record(draft), request)
 
 
 @router.get("/{todo_id}", response_model=Envelope[TodoResponse])

@@ -11,6 +11,15 @@ from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactKind,
     TodoArtifactRecord,
 )
+from agentclaw.community.core.task.todos.source_models import (
+    MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
+    MAX_TODO_SOURCE_ITEM_ID_LENGTH,
+    MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
+    MAX_TODO_SOURCE_URL_LENGTH,
+    TodoSourceDraft,
+    TodoSourceProject,
+    TodoSourceWorkItem,
+)
 from agentclaw.community.core.task.todos.models import (
     MAX_ACCEPTANCE_ID_LENGTH,
     MAX_ACCEPTANCE_TARGETS,
@@ -24,6 +33,85 @@ from agentclaw.community.core.task.todos.models import (
     TodoEventRecord,
     TodoRecord,
 )
+
+
+class TodoSourceProjectResponse(BaseModel):
+    """One Dima project visible to the authenticated Human."""
+
+    id: str = Field(description="Stable Dima project identifier.")
+    name: str = Field(description="Human-readable Dima project name.")
+
+    @classmethod
+    def from_record(cls, record: TodoSourceProject) -> "TodoSourceProjectResponse":
+        return cls(id=record.id, name=record.name)
+
+
+class TodoSourceWorkItemResponse(BaseModel):
+    """One normalized Dima Req, Task, or Bug selectable for import."""
+
+    id: str = Field(description="Stable Dima work-item identifier.")
+    project_id: str = Field(description="Dima project containing the work item.")
+    category: Literal["req", "task", "bug"] = Field(
+        description="Normalized Dima work-item category."
+    )
+    title: str = Field(description="Current Dima work-item title.")
+    status: str | None = Field(
+        default=None,
+        description="Provider status label when Dima returned one.",
+    )
+    updated_at: str | None = Field(
+        default=None,
+        description="Provider update timestamp when Dima returned one.",
+    )
+
+    @classmethod
+    def from_record(cls, record: TodoSourceWorkItem) -> "TodoSourceWorkItemResponse":
+        return cls(
+            id=record.id,
+            project_id=record.project_id,
+            category=record.category,
+            title=record.title,
+            status=record.status,
+            updated_at=record.updated_at,
+        )
+
+
+class TodoSourceDraftResponse(BaseModel):
+    """Editable Todo fields normalized from one Dima work item."""
+
+    source_type: Literal["dima"] = Field(
+        description="Source adapter that produced this editable draft."
+    )
+    project_id: str = Field(description="Dima project containing the source item.")
+    work_item_id: str = Field(description="Dima work-item identifier.")
+    category: Literal["req", "task", "bug"] = Field(
+        description="Normalized Dima work-item category."
+    )
+    title: str = Field(description="Editable Todo title derived from Dima.")
+    description: str = Field(
+        description="Editable Todo description derived from Dima details."
+    )
+    source_url: str | None = Field(
+        default=None,
+        description="Dima work-item URL when the provider returned one.",
+    )
+    source_updated_at: str | None = Field(
+        default=None,
+        description="Dima update timestamp when the provider returned one.",
+    )
+
+    @classmethod
+    def from_record(cls, record: TodoSourceDraft) -> "TodoSourceDraftResponse":
+        return cls(
+            source_type=record.source_type,
+            project_id=record.project_id,
+            work_item_id=record.work_item_id,
+            category=record.category,
+            title=record.title,
+            description=record.description,
+            source_url=record.source_url,
+            source_updated_at=record.source_updated_at,
+        )
 
 
 class TodoStatusSchema(_DocumentedEnum):
@@ -58,6 +146,32 @@ class TodoArtifactKindSchema(_DocumentedEnum):
     }
 
 
+class CreateTodoSourceRequest(BaseModel):
+    """Stable external-source identity for an imported Todo."""
+
+    type: Literal["dima"] = Field(description="External source adapter.")
+    container_id: str = Field(
+        min_length=1,
+        max_length=MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
+        description="Dima project containing the selected work item.",
+    )
+    item_id: str = Field(
+        min_length=1,
+        max_length=MAX_TODO_SOURCE_ITEM_ID_LENGTH,
+        description="Stable Dima work-item identifier used for duplicate prevention.",
+    )
+    url: str | None = Field(
+        default=None,
+        max_length=MAX_TODO_SOURCE_URL_LENGTH,
+        description="Optional Dima work-item URL snapshot.",
+    )
+    updated_at: str | None = Field(
+        default=None,
+        max_length=MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
+        description="Optional Dima update timestamp snapshot.",
+    )
+
+
 class CreateTodoRequest(BaseModel):
     """Create one pending Todo in the selected product Space."""
 
@@ -78,6 +192,10 @@ class CreateTodoRequest(BaseModel):
         min_length=1,
         max_length=MAX_BOT_ID_LENGTH,
         description="Identifier of the Space-eligible Bot that will execute the Todo.",
+    )
+    source: CreateTodoSourceRequest | None = Field(
+        default=None,
+        description="Imported-source identity; omitted for manually created Todos.",
     )
 
 
@@ -236,6 +354,7 @@ class TodoEventResponse(BaseModel):
     created_at: str = Field(
         description="B event creation timestamp in ISO-8601 format."
     )
+
     @classmethod
     def from_record(cls, record: TodoEventRecord) -> "TodoEventResponse":
         return cls(

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Iterable
+from urllib.parse import urlsplit
 
 from injector import inject
 
@@ -50,6 +52,13 @@ from agentclaw.community.core.task.todos.models import (
     TodoStatus,
 )
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
+from agentclaw.community.core.task.todos.source_models import (
+    MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
+    MAX_TODO_SOURCE_ITEM_ID_LENGTH,
+    MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
+    MAX_TODO_SOURCE_URL_LENGTH,
+    TodoSourceInput,
+)
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationEvent,
     TodoCollaborationEventRequest,
@@ -140,6 +149,7 @@ class TodoService(TodoServiceProtocol):
         title: str,
         description: str,
         bot_id: str,
+        source: TodoSourceInput | None = None,
         env: str | None = None,
     ) -> TodoRecord:
         normalized_space_id = self._space_id(space_id)
@@ -151,6 +161,7 @@ class TodoService(TodoServiceProtocol):
             description, "description", MAX_DESCRIPTION_LENGTH
         )
         normalized_bot_id = self._required_text(bot_id, "bot_id", MAX_BOT_ID_LENGTH)
+        normalized_source = self._source(source)
         space, _member = self._space_access.require_space_member(
             space_id=normalized_space_id,
             user_id=normalized_actor_id,
@@ -163,14 +174,17 @@ class TodoService(TodoServiceProtocol):
             bot_id=normalized_bot_id,
         )
         require_todo_bot_owner_id(bot)
-        return self._repository.create_todo(
-            space_id=normalized_space_id,
-            title=normalized_title,
-            description=normalized_description,
-            bot_id=normalized_bot_id,
-            bot_name=todo_bot_name(bot, normalized_bot_id),
-            created_by=normalized_actor_id,
-        )
+        create_args: dict[str, Any] = {
+            "space_id": normalized_space_id,
+            "title": normalized_title,
+            "description": normalized_description,
+            "bot_id": normalized_bot_id,
+            "bot_name": todo_bot_name(bot, normalized_bot_id),
+            "created_by": normalized_actor_id,
+        }
+        if normalized_source is not None:
+            create_args["source"] = normalized_source
+        return self._repository.create_todo(**create_args)
 
     async def start_todo(
         self, *, todo_id: str, actor_id: str, env: str | None = None
@@ -743,3 +757,42 @@ class TodoService(TodoServiceProtocol):
             raise ValidationError("keyword must be a string")
         keyword = value.strip()
         return keyword or None
+
+    @classmethod
+    def _source(cls, value: TodoSourceInput | None) -> TodoSourceInput | None:
+        if value is None:
+            return None
+        if not isinstance(value, TodoSourceInput):
+            raise ValidationError("source must be a TodoSourceInput")
+        if value.source_type != "dima":
+            raise ValidationError("source type is invalid")
+        url = cls._optional_text(value.url, "source url", MAX_TODO_SOURCE_URL_LENGTH)
+        if url is not None:
+            parsed = urlsplit(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValidationError("source url is invalid")
+        updated_at = cls._optional_text(
+            value.updated_at,
+            "source updated_at",
+            MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
+        )
+        if updated_at is not None:
+            try:
+                datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValidationError("source updated_at is invalid") from exc
+        return TodoSourceInput(
+            source_type="dima",
+            container_id=cls._required_text(
+                value.container_id,
+                "source container_id",
+                MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
+            ),
+            item_id=cls._required_text(
+                value.item_id,
+                "source item_id",
+                MAX_TODO_SOURCE_ITEM_ID_LENGTH,
+            ),
+            url=url,
+            updated_at=updated_at,
+        )

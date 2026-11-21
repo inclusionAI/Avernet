@@ -41,6 +41,9 @@ from agentclaw.community.core.task.todos.execution_protocol import (
 )
 from agentclaw.community.core.task.todos.scheduler import TodoScheduler
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
+from agentclaw.community.core.task.todos.source_service_protocol import (
+    TodoSourceServiceProtocol,
+)
 from agentclaw.community.core.task.todos.services.todo_artifact_service import (
     TodoArtifactService,
 )
@@ -48,6 +51,9 @@ from agentclaw.community.core.task.todos.services.todo_execution_service import 
     TodoExecutionService,
 )
 from agentclaw.community.core.task.todos.services.todo_service import TodoService
+from agentclaw.community.core.task.todos.services.todo_source_service import (
+    TodoSourceService,
+)
 from agentclaw.community.di.modules.config_module import _as_bool, _as_int, _block
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.plugin_api.cache import CachePlugin
@@ -67,6 +73,11 @@ class TaskTodoBindings(Module):
             scope=singleton,
         )
         binder.bind(TodoServiceProtocol, to=TodoService, scope=singleton)
+        binder.bind(
+            TodoSourceServiceProtocol,
+            to=TodoSourceService,
+            scope=singleton,
+        )
         binder.bind(
             TodoExecutionServiceProtocol,
             to=TodoExecutionService,

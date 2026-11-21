@@ -12,6 +12,7 @@ if TYPE_CHECKING:
         TodoRecord,
         TodoStatus,
     )
+    from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 
 
 @runtime_checkable
@@ -26,6 +27,7 @@ class TodoRepositoryProtocol(Protocol):
         bot_id: str,
         bot_name: str,
         created_by: str,
+        source: TodoSourceInput | None = None,
     ) -> TodoRecord: ...
 
     @abstractmethod

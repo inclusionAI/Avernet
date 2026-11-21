@@ -156,6 +156,60 @@ class TodoAcceptanceModel(Base):
     )
 
 
+class TodoSourceBindingModel(Base):
+    """Stable imported-source identity for one Todo in one product Space."""
+
+    __tablename__ = "ac_todo_source_binding"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    todo_id = Column(String(64), nullable=False)
+    space_id = Column(AutoIncrementBigInteger, nullable=False)
+    source_type = Column(String(32), nullable=False)
+    source_container_id = Column(String(128), nullable=False)
+    source_item_id = Column(String(128), nullable=False)
+    source_url = Column(String(2048), nullable=True)
+    source_updated_at = Column(String(128), nullable=True)
+    imported_by = Column(String(256), nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "todo_id",
+            name="uk_todo_source_binding_todo",
+        ),
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "space_id",
+            "source_type",
+            "source_item_id",
+            name="uk_todo_source_binding_identity",
+        ),
+        Index(
+            "idx_todo_source_binding_lookup",
+            "avernet_tenant",
+            "env",
+            "source_type",
+            "source_item_id",
+        ),
+    )
+
+
 class TodoExecutionModel(Base):
     """One active or historical Bot execution credential for a Todo."""
 
@@ -235,5 +289,11 @@ class TodoArtifactModel(Base):
         )
 
 
-for _model in (TodoModel, TodoAcceptanceModel, TodoExecutionModel, TodoArtifactModel):
+for _model in (
+    TodoModel,
+    TodoAcceptanceModel,
+    TodoSourceBindingModel,
+    TodoExecutionModel,
+    TodoArtifactModel,
+):
     register_avernet_tenant_guard(_model)

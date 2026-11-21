@@ -1,10 +1,10 @@
-import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import type {
   CreateTodoInput,
   CreateTodoInteractionInput,
   TodoAcceptanceInput,
   TodoListQuery,
 } from '@/domain/todos/models';
+import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { userScopedParams } from '../bots/botController';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
@@ -62,6 +62,31 @@ export interface TodoPageDto {
   pageSize?: number;
 }
 
+export interface TodoSourceProjectDto extends BackendUnknownRecord {
+  id?: string | number;
+  name?: string;
+}
+
+export interface TodoSourceWorkItemDto extends BackendUnknownRecord {
+  id?: string | number;
+  project_id?: string | number;
+  category?: string;
+  title?: string;
+  status?: string | null;
+  updated_at?: string | null;
+}
+
+export interface TodoSourceDraftDto extends BackendUnknownRecord {
+  source_type?: string;
+  project_id?: string | number;
+  work_item_id?: string | number;
+  category?: string;
+  title?: string;
+  description?: string;
+  source_url?: string | null;
+  source_updated_at?: string | null;
+}
+
 export const TODO_ENDPOINTS = {
   list: TODO_API_BASE,
   detail: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}`,
@@ -72,6 +97,13 @@ export const TODO_ENDPOINTS = {
   artifacts: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/artifacts`,
   artifactContent: (todoId: string, artifactId: string) =>
     `${TODO_API_BASE}/${encodeURIComponent(todoId)}/artifacts/${encodeURIComponent(artifactId)}/content`,
+  dimaProjects: `${TODO_API_BASE}/sources/dima/projects`,
+  dimaWorkItems: (projectId: string) =>
+    `${TODO_API_BASE}/sources/dima/projects/${encodeURIComponent(projectId)}/work-items`,
+  dimaWorkItem: (projectId: string, workItemId: string) =>
+    `${TODO_API_BASE}/sources/dima/projects/${encodeURIComponent(projectId)}/work-items/${encodeURIComponent(
+      workItemId,
+    )}`,
 };
 
 export function listTodos(query: TodoListQuery) {
@@ -102,15 +134,25 @@ export function getTodo(todoId: string) {
 }
 
 export function createTodo(input: CreateTodoInput) {
+  const data: BackendUnknownRecord = {
+    space_id: input.spaceId,
+    title: input.title,
+    description: input.description,
+    bot_id: input.botId,
+  };
+  if (input.source) {
+    data.source = {
+      type: input.source.type,
+      container_id: input.source.containerId,
+      item_id: input.source.itemId,
+      url: input.source.url,
+      updated_at: input.source.updatedAt,
+    };
+  }
   return backendRequest<BackendApiEnvelope<TodoDto>>(TODO_ENDPOINTS.list, {
     method: 'POST',
     params: userScopedParams(),
-    data: {
-      space_id: input.spaceId,
-      title: input.title,
-      description: input.description,
-      bot_id: input.botId,
-    },
+    data,
     operation: 'create-todo',
   });
 }
@@ -195,5 +237,32 @@ export function downloadTodoArtifactContent(
     params: userScopedParams({ disposition }),
     responseType: 'blob',
     operation: 'download-todo-artifact-content',
+  });
+}
+
+export function listTodoSourceProjects() {
+  return backendRequest<BackendApiEnvelope<TodoSourceProjectDto[]>>(TODO_ENDPOINTS.dimaProjects, {
+    method: 'GET',
+    params: userScopedParams(),
+    operation: 'list-todo-source-projects',
+    retryOnTransient: true,
+  });
+}
+
+export function listTodoSourceWorkItems(projectId: string, query?: string) {
+  return backendRequest<BackendApiEnvelope<TodoSourceWorkItemDto[]>>(TODO_ENDPOINTS.dimaWorkItems(projectId), {
+    method: 'GET',
+    params: userScopedParams(query?.trim() ? { query: query.trim() } : {}),
+    operation: 'list-todo-source-work-items',
+    retryOnTransient: true,
+  });
+}
+
+export function getTodoSourceDraft(projectId: string, workItemId: string) {
+  return backendRequest<BackendApiEnvelope<TodoSourceDraftDto>>(TODO_ENDPOINTS.dimaWorkItem(projectId, workItemId), {
+    method: 'GET',
+    params: userScopedParams(),
+    operation: 'get-todo-source-draft',
+    retryOnTransient: true,
   });
 }

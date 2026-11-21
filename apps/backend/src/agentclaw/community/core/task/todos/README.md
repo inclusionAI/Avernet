@@ -71,6 +71,25 @@ While a Todo is `pending_acceptance`, posting a normal Human interaction atomica
 
 Resume retries are idempotent. Once B is `in_progress` or a later `task.started` exists, no additional resume is dispatched; the ContextCollab executor uses the triggering event ID as the BCS session-chat idempotency key. A delivery failure leaves the claimed Todo `in_progress` and fails closed rather than reopening the interactive state during uncertain delivery.
 
+## Imported source identity
+
+Imported Todos keep product-owned source metadata in
+`ac_todo_source_binding`; manually created Todos have no source binding. Dima
+imports use the stable work-item identity rather than editable title or
+description content. Within one `avernet_tenant`, runtime `env`, TeamClaw
+`space_id`, `source_type`, and `source_item_id`, only one Todo may exist. The
+Dima project ID is retained as `source_container_id` metadata but does not
+change that identity, so moving a work item between Dima projects cannot create
+a duplicate Todo in the same TeamClaw Space. The same source item may be
+imported independently into another TeamClaw Space.
+
+Todo and source binding are inserted in one database transaction. A friendly
+pre-check returns the existing Todo ID for ordinary retries, while the database
+unique constraint closes concurrent-import races; an import conflict returns
+`409` with `data.existing_todo_id`. This binding is an import snapshot only. It
+does not introduce automatic Dima synchronization, status write-back, or a
+periodic import job.
+
 ## Bot execution and artifact reporting contract
 
 Each dispatched or resumed Bot run receives only its dynamic execution context
@@ -143,7 +162,7 @@ event.
 ## Context Boundary
 
 ```yaml
-purpose: Own persisted Todo lifecycle, automatic Context dispatch, runtime refresh, interactions, and acceptance.
+purpose: Own persisted Todo lifecycle, imported-source identity, automatic Context dispatch, runtime refresh, interactions, and acceptance.
 provides:
   - TodoServiceProtocol
   - TodoService
@@ -154,6 +173,7 @@ provides:
   - TodoPage
   - TodoEventRecord
   - TodoCollaborationPort
+  - TodoSourceInput
   - InProcessTodoCollaborationAdapter
 consumes:
   - TodoRepositoryProtocol
@@ -175,8 +195,9 @@ internal_dependencies:
 
 ### Change impact
 
-Changes affect Todo create/read, automatic scheduling, the compensation Run
-endpoint, event and interaction projection, and acceptance. Repository state
+Changes affect Todo create/read, imported-source identity and duplicate
+prevention, automatic scheduling, the compensation Run endpoint, event and
+interaction projection, and acceptance. Repository state
 transitions are compare-and-set operations so duplicate schedulers or operator
 retries cannot move a Todo backwards. Context creation and Todo persistence are
 not one cross-store transaction; dispatch therefore resumes from an already

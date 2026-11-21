@@ -6,15 +6,19 @@ import pytest
 
 from agentclaw.community.core.repository.implementations.task.todos.models import (
     TodoAcceptanceModel,
+    TodoModel,
+    TodoSourceBindingModel,
 )
 from agentclaw.community.core.repository.implementations.task.todos.todo_repository import (
     TodoRepository,
 )
 from agentclaw.community.core.task.todos.errors import (
     TodoNotFoundError,
+    TodoSourceAlreadyImportedError,
     TodoStateConflictError,
 )
 from agentclaw.community.core.task.todos.models import AcceptanceVerdict, TodoStatus
+from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
@@ -44,6 +48,18 @@ def _transition(
     )
 
 
+def _source(**overrides) -> TodoSourceInput:
+    values = {
+        "source_type": "dima",
+        "container_id": "P1",
+        "item_id": "2026112000000000001",
+        "url": "https://dima.example/items/2026112000000000001",
+        "updated_at": "2026-11-20T12:00:00Z",
+    }
+    values.update(overrides)
+    return TodoSourceInput(**values)
+
+
 def test_create_and_get_todo_defaults_to_pending(db):
     repo = TodoRepository(db)
 
@@ -54,6 +70,71 @@ def test_create_and_get_todo_defaults_to_pending(db):
     assert loaded == created
     assert loaded.status is TodoStatus.PENDING
     assert loaded.collab_context_id is None
+
+    with db.orm_session() as session:
+        assert session.query(TodoSourceBindingModel).count() == 0
+
+
+def test_create_todo_persists_dima_source_binding(db):
+    repo = TodoRepository(db)
+
+    created = _create(repo, source=_source())
+
+    with db.orm_session() as session:
+        binding = session.query(TodoSourceBindingModel).one()
+        assert binding.todo_id == created.todo_id
+        assert binding.space_id == 7
+        assert binding.source_type == "dima"
+        assert binding.source_container_id == "P1"
+        assert binding.source_item_id == "2026112000000000001"
+        assert binding.source_url == "https://dima.example/items/2026112000000000001"
+        assert binding.source_updated_at == "2026-11-20T12:00:00Z"
+        assert binding.imported_by == "user_1"
+
+
+def test_duplicate_dima_source_in_same_space_returns_existing_todo(db):
+    repo = TodoRepository(db)
+    existing = _create(repo, source=_source())
+
+    with pytest.raises(TodoSourceAlreadyImportedError) as error:
+        _create(repo, title="duplicate", source=_source(container_id="P2"))
+
+    assert error.value.existing_todo_id == existing.todo_id
+
+
+def test_same_dima_source_in_another_space_is_allowed(db):
+    repo = TodoRepository(db)
+
+    first = _create(repo, source=_source())
+    second = _create(repo, space_id=8, source=_source(container_id="P2"))
+
+    assert first.todo_id != second.todo_id
+    with db.orm_session() as session:
+        assert session.query(TodoSourceBindingModel).count() == 2
+
+
+def test_source_binding_duplicate_race_rolls_back_new_todo(db, monkeypatch):
+    repo = TodoRepository(db)
+    existing = _create(repo, source=_source())
+    original_find = repo._find_source_todo_id
+    calls = 0
+
+    def miss_precheck_then_find(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        return original_find(**kwargs)
+
+    monkeypatch.setattr(repo, "_find_source_todo_id", miss_precheck_then_find)
+
+    with pytest.raises(TodoSourceAlreadyImportedError) as error:
+        _create(repo, title="racing duplicate", source=_source())
+
+    assert error.value.existing_todo_id == existing.todo_id
+    with db.orm_session() as session:
+        assert session.query(TodoModel).count() == 1
+        assert session.query(TodoSourceBindingModel).count() == 1
 
 
 def test_list_todos_filters_status_search_bot_and_paginates_in_database(db):
@@ -241,6 +322,28 @@ def test_repository_isolates_environments(db, monkeypatch):
     with pytest.raises(TodoNotFoundError):
         repo.get_todo(todo_id=created.todo_id)
     assert repo.list_todos_by_status(status=TodoStatus.PENDING, limit=10) == ()
+
+
+def test_source_identity_is_scoped_by_tenant(db):
+    repo = TodoRepository(db)
+
+    with avernet_tenant_scope("tenant-a"):
+        first = _create(repo, source=_source())
+    with avernet_tenant_scope("tenant-b"):
+        second = _create(repo, source=_source())
+
+    assert first.todo_id != second.todo_id
+
+
+def test_source_identity_is_scoped_by_environment(db, monkeypatch):
+    repo = TodoRepository(db)
+
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    first = _create(repo, source=_source())
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    second = _create(repo, source=_source())
+
+    assert first.todo_id != second.todo_id
 
 
 @pytest.mark.parametrize(

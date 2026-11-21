@@ -17,6 +17,9 @@ export {
   loadTodoEvents,
   loadTodoInteractions,
   loadTodos,
+  loadTodoSourceDraft,
+  loadTodoSourceProjects,
+  loadTodoSourceWorkItems,
   startTodoRun,
 } from '@/services/backendApi/todos/todoService';
 export type { TodoPage, TodoStatus } from '@/services/backendApi/todos/todoService';

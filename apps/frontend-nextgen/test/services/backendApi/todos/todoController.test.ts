@@ -3,9 +3,12 @@ import {
   createTodo,
   createTodoInteraction,
   getTodo,
+  getTodoSourceDraft,
   listTodoEvents,
   listTodoInteractions,
   listTodos,
+  listTodoSourceProjects,
+  listTodoSourceWorkItems,
   runTodo,
   submitTodoAcceptance,
 } from '@/services/backendApi/todos/todoController';
@@ -104,6 +107,82 @@ describe('todoController', () => {
       },
       operation: 'create-todo',
     });
+  });
+
+  it('创建 Dima 待办时序列化来源身份', async () => {
+    await createTodo({
+      spaceId: 10,
+      title: '标题',
+      description: '描述',
+      botId: 'bot-1',
+      source: {
+        type: 'dima',
+        containerId: 'P1',
+        itemId: 'work-1',
+        url: 'https://dima.example/items/work-1',
+        updatedAt: '2026-11-20T12:00:00Z',
+      },
+    });
+
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos', {
+      method: 'POST',
+      params: userParams,
+      data: {
+        space_id: 10,
+        title: '标题',
+        description: '描述',
+        bot_id: 'bot-1',
+        source: {
+          type: 'dima',
+          container_id: 'P1',
+          item_id: 'work-1',
+          url: 'https://dima.example/items/work-1',
+          updated_at: '2026-11-20T12:00:00Z',
+        },
+      },
+      operation: 'create-todo',
+    });
+  });
+
+  it('查询 Dima 来源时编码路径并下发当前用户', async () => {
+    await listTodoSourceProjects();
+    expect(request).toHaveBeenLastCalledWith('/openapi/v1/collaboration/tasks/todos/sources/dima/projects', {
+      method: 'GET',
+      params: userParams,
+      operation: 'list-todo-source-projects',
+      retryOnTransient: true,
+    });
+
+    await listTodoSourceWorkItems('P/1', '  支付  ');
+    expect(request).toHaveBeenLastCalledWith(
+      '/openapi/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items',
+      {
+        method: 'GET',
+        params: { query: '支付', user_id: 'human-1' },
+        operation: 'list-todo-source-work-items',
+        retryOnTransient: true,
+      },
+    );
+
+    await getTodoSourceDraft('P/1', 'work/1');
+    expect(request).toHaveBeenLastCalledWith(
+      '/openapi/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items/work%2F1',
+      {
+        method: 'GET',
+        params: userParams,
+        operation: 'get-todo-source-draft',
+        retryOnTransient: true,
+      },
+    );
+  });
+
+  it('Dima 工作项空搜索不下发 query', async () => {
+    await listTodoSourceWorkItems('P1', '   ');
+
+    expect(request).toHaveBeenCalledWith(
+      '/openapi/v1/collaboration/tasks/todos/sources/dima/projects/P1/work-items',
+      expect.objectContaining({ params: userParams }),
+    );
   });
 
   it('提交验收时下发当前用户', async () => {

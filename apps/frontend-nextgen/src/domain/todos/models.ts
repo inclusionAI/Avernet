@@ -3,6 +3,42 @@ export type TodoStatus = 'pending' | 'in_progress' | 'pending_acceptance' | 'com
 
 export type AcceptanceVerdict = 'approved' | 'rejected';
 
+export type TodoSourceType = 'manual' | 'dima';
+export type TodoSourceWorkItemCategory = 'req' | 'task' | 'bug';
+
+export interface TodoSourceProject {
+  id: string;
+  name: string;
+}
+
+export interface TodoSourceWorkItem {
+  id: string;
+  projectId: string;
+  category: TodoSourceWorkItemCategory;
+  title: string;
+  status?: string;
+  updatedAt?: string;
+}
+
+export interface TodoSourceDraft {
+  sourceType: 'dima';
+  projectId: string;
+  workItemId: string;
+  category: TodoSourceWorkItemCategory;
+  title: string;
+  description: string;
+  sourceUrl?: string;
+  sourceUpdatedAt?: string;
+}
+
+export interface TodoCreateSource {
+  type: 'dima';
+  containerId: string;
+  itemId: string;
+  url?: string;
+  updatedAt?: string;
+}
+
 export interface TodoEventArtifact {
   artifactId?: string;
   name: string;
@@ -97,6 +133,7 @@ export interface CreateTodoInput {
   title: string;
   description: string;
   botId: string;
+  source?: TodoCreateSource;
 }
 
 export interface CreateTodoInteractionInput {

@@ -40,6 +40,26 @@ CREATE TABLE IF NOT EXISTS `ac_todo_acceptance` (
     KEY `idx_todo_acceptance_history` (`avernet_tenant`, `env`, `todo_id`, `gmt_create`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='待办验收历史表';
 
+CREATE TABLE IF NOT EXISTS `ac_todo_source_binding` (
+    `id`                  bigint(20)    NOT NULL AUTO_INCREMENT COMMENT '内部主键',
+    `todo_id`             varchar(64)   NOT NULL                COMMENT '所属待办标识',
+    `space_id`            bigint(20)    NOT NULL                COMMENT '导入时所属产品空间',
+    `source_type`         varchar(32)   NOT NULL                COMMENT '来源类型，例如 dima',
+    `source_container_id` varchar(128)  NOT NULL                COMMENT '来源容器标识，例如 Dima 项目',
+    `source_item_id`      varchar(128)  NOT NULL                COMMENT '来源工作项稳定标识',
+    `source_url`          varchar(2048) DEFAULT NULL            COMMENT '来源工作项地址快照',
+    `source_updated_at`   varchar(128)  DEFAULT NULL            COMMENT '来源工作项更新时间快照',
+    `imported_by`         varchar(256)  NOT NULL                COMMENT '执行导入的用户标识',
+    `env`                 varchar(20)   NOT NULL                COMMENT '环境分区',
+    `avernet_tenant`      varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT '租户分区',
+    `gmt_create`          timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `gmt_modified`        timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_todo_source_binding_todo` (`avernet_tenant`, `env`, `todo_id`),
+    UNIQUE KEY `uk_todo_source_binding_identity` (`avernet_tenant`, `env`, `space_id`, `source_type`, `source_item_id`),
+    KEY `idx_todo_source_binding_lookup` (`avernet_tenant`, `env`, `source_type`, `source_item_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='待办外部来源绑定表';
+
 CREATE TABLE IF NOT EXISTS `ac_todo_execution` (
     `id` bigint(20) NOT NULL AUTO_INCREMENT,
     `execution_id` varchar(64) NOT NULL,
