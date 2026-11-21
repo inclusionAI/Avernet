@@ -106,10 +106,25 @@ class TodoParticipantBindingRequest(BaseModel):
 class CreateTodoFromTemplateRequest(BaseModel):
     """Create a Todo from one published template version."""
 
-    title: str = Field(min_length=1, max_length=MAX_TITLE_LENGTH)
-    description: str = Field(max_length=MAX_DESCRIPTION_LENGTH)
-    template_id: str = Field(min_length=1, max_length=64)
-    template_version_id: str = Field(min_length=1, max_length=64)
+    title: str = Field(
+        min_length=1,
+        max_length=MAX_TITLE_LENGTH,
+        description="Concrete Todo title shown in the workbench.",
+    )
+    description: str = Field(
+        max_length=MAX_DESCRIPTION_LENGTH,
+        description="Concrete objective executed through the selected template flow.",
+    )
+    template_id: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Stable Todo template identity selected for this Todo.",
+    )
+    template_version_id: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Exact published template version pinned to this Todo.",
+    )
     participant_bindings: dict[str, TodoParticipantBindingRequest] = Field(
         description="Values for every participant slot required by the template."
     )
@@ -118,15 +133,30 @@ class CreateTodoFromTemplateRequest(BaseModel):
 class CompleteTodoStageRequest(BaseModel):
     """Complete the current Human stage with an auditable result."""
 
-    summary: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
-    idempotency_key: str = Field(min_length=1, max_length=256)
-    result: dict[str, object] = Field(default_factory=dict)
+    summary: str = Field(
+        min_length=1,
+        max_length=MAX_MESSAGE_LENGTH,
+        description="Human-readable completion summary recorded for the stage.",
+    )
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=256,
+        description="Caller-stable key that makes stage completion retry-safe.",
+    )
+    result: dict[str, object] = Field(
+        default_factory=dict,
+        description="Optional structured completion result supplied by the Human.",
+    )
 
 
 class CancelTodoRequest(BaseModel):
     """Explicit Human cancellation request."""
 
-    reason: str | None = Field(default=None, max_length=MAX_MESSAGE_LENGTH)
+    reason: str | None = Field(
+        default=None,
+        max_length=MAX_MESSAGE_LENGTH,
+        description="Optional Human-readable reason for cancelling the Todo.",
+    )
 
 
 class TodoStageStatusSchema(_DocumentedEnum):
@@ -151,35 +181,64 @@ class TodoStagePendingActionSchema(_DocumentedEnum):
     PLANNED_HUMAN_STAGE = "planned_human_stage"
     BLOCKED = "blocked"
 
+    __descriptions__ = {
+        "planned_human_stage": "The template intentionally requires its bound Human to act.",
+        "blocked": "Execution cannot continue until the requested action is resolved.",
+    }
+
 
 class TodoStageResponse(BaseModel):
     """Expanded stage timeline item returned for a Todo."""
 
-    stage_instance_id: str
-    todo_id: str
-    template_version_id: str
-    stage_key: str
-    stage_order: int
-    stage_name: str
-    purpose: str
-    stage_kind: str
-    executor_binding_key: str | None
-    executor_subject_type: str
-    executor_subject_id: str
-    executor_subject_name: str
-    owner_binding_key: str | None
-    owner_user_id: str
-    owner_user_name: str
-    completion_gate: dict[str, object]
-    status: TodoStageStatusSchema
-    collab_context_id: str | None
-    pending_action_kind: TodoStagePendingActionSchema | None
-    state_reason: str | None
-    requested_action: str | None
-    started_at: str | None
-    completed_at: str | None
-    created_at: str
-    updated_at: str
+    stage_instance_id: str = Field(description="Stable expanded stage identifier.")
+    todo_id: str = Field(description="Todo that owns this expanded stage.")
+    template_version_id: str = Field(
+        description="Immutable template version from which the stage was expanded."
+    )
+    stage_key: str = Field(
+        description="Version-local stable key of the source stage definition."
+    )
+    stage_order: int = Field(description="One-based execution order within the Todo.")
+    stage_name: str = Field(description="Human-readable stage name snapshot.")
+    purpose: str = Field(description="Reusable product purpose of this stage.")
+    stage_kind: str = Field(description="Execution kind, either bot or human.")
+    executor_binding_key: str | None = Field(
+        description="Participant binding key used to resolve the executor, if any."
+    )
+    executor_subject_type: str = Field(
+        description="Resolved executor identity kind, either bot or human."
+    )
+    executor_subject_id: str = Field(description="Resolved executor identity.")
+    executor_subject_name: str = Field(description="Resolved executor display name.")
+    owner_binding_key: str | None = Field(
+        description="Participant binding key used to resolve the Human owner, if any."
+    )
+    owner_user_id: str = Field(description="Resolved Human owner identity.")
+    owner_user_name: str = Field(description="Resolved Human owner display name.")
+    completion_gate: dict[str, object] = Field(
+        description="Deterministic hard artifact gates required for completion."
+    )
+    status: TodoStageStatusSchema = Field(description="Current stage execution state.")
+    collab_context_id: str | None = Field(
+        description="Collaboration Context for this stage execution, if dispatched."
+    )
+    pending_action_kind: TodoStagePendingActionSchema | None = Field(
+        description="Reason this stage currently requires product action, if any."
+    )
+    state_reason: str | None = Field(
+        description="Human-readable explanation of the current waiting state, if any."
+    )
+    requested_action: str | None = Field(
+        description="Action requested from a Human before execution can continue, if any."
+    )
+    started_at: str | None = Field(
+        description="ISO-8601 timestamp when the stage first started, if started."
+    )
+    completed_at: str | None = Field(
+        description="ISO-8601 timestamp when the stage completed, if completed."
+    )
+    created_at: str = Field(description="ISO-8601 stage creation timestamp.")
+    updated_at: str = Field(description="ISO-8601 last-modified timestamp.")
 
     @classmethod
     def from_record(cls, record: TodoStageRecord) -> "TodoStageResponse":
