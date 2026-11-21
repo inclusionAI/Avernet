@@ -426,13 +426,13 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         PermissionLevel.MEMBER
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions"): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/sessions"): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"
     ),
     (
         "POST",
@@ -456,34 +456,34 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "/materialize-status",
     ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     ("PATCH", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite",
     ): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     ("PUT", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages",
     ): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"): ServiceChecked(
-        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.backend"
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(

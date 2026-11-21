@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
-from fastapi import Depends, Query
+from fastapi import Depends
 from injector import inject
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
@@ -19,28 +19,8 @@ from agentclaw.community.core.runtime_binding.errors import (
     RuntimeBindingResolutionError,
 )
 from agentclaw.community.core.session_resources.types import safe_creator_name
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingTarget
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
-from agentclaw.community.log import get_logger
-
-
-async def session_file_runtime_target(
-    caller_runtime_target: Annotated[
-        Literal["service", "caller_instance"] | None,
-        Query(description="Runtime used by the chat: service selects the requested stage, "
-                          "caller_instance selects the caller's instance. Omit for default routing."),
-    ] = None,
-) -> RuntimeBindingTarget:
-    if caller_runtime_target is not None:
-        get_logger().info("session_files.runtime_target requested=%s", caller_runtime_target)
-    if caller_runtime_target == "service":
-        return RuntimeBindingTarget.CALLER_SERVICE
-    if caller_runtime_target == "caller_instance":
-        return RuntimeBindingTarget.CALLER_INSTANCE
-    return RuntimeBindingTarget.AUTO
-
-
-SessionFileRuntimeTargetDep = Annotated[RuntimeBindingTarget, Depends(session_file_runtime_target)]
 
 
 async def upload_actor_name(
@@ -82,18 +62,18 @@ class OpenApiSessionFileAdapter:
         engine_type: str,
         files: list[tuple[str, int | None, str | None]],
         creator_name: str | None = None,
-        target: RuntimeBindingTarget = RuntimeBindingTarget.AUTO,
+        session_user_id: str | None = None,
     ) -> list[Any]:
         """Resolve one binding before creating legacy resource records."""
         try:
-            binding_id = self._runtime_bindings.resolve(
+            binding_id = self._runtime_bindings.resolve_session_file(
                 RuntimeBindingRequest(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     actor_user_id=actor_user_id,
                     stage=stage,
-                    target=target,
-                )
+                ),
+                session_user_id=session_user_id,
             ).binding_id
         except RuntimeBindingResolutionError as exc:
             raise ValueError("session_file_binding_unavailable") from exc
@@ -139,8 +119,11 @@ class OpenApiSessionFileAdapter:
 
     async def delete(
         self, *, target: RuntimeBindingRequest, session_key: str, resource_id: str,
+        session_user_id: str | None = None,
     ) -> Any:
-        return await self._engine_files.delete_file(target, session_key, resource_id)
+        return await self._engine_files.delete_file(
+            target, session_key, resource_id, session_user_id=session_user_id,
+        )
 
 
 __all__ = ["OpenApiSessionFileAdapter"]

@@ -84,7 +84,7 @@ def test_openapi_adapter_passes_actual_actor_to_directory_and_preserves_snapshot
     service, repo, _ = _service(staff_dept=staff)
     staff.get_profile_by_work_no.return_value = StaffProfileInfo("actor-2", "上传者")
     bindings = Mock()
-    bindings.resolve.return_value = SimpleNamespace(binding_id=42)
+    bindings.resolve_session_file.return_value = SimpleNamespace(binding_id=42)
     adapter = OpenApiSessionFileAdapter(
         session_resources=service, runtime_bindings=bindings, engine_files=Mock(),
     )
@@ -96,7 +96,7 @@ def test_openapi_adapter_passes_actual_actor_to_directory_and_preserves_snapshot
     record = intents[0].resource
     assert record.creator_name == "上传者"
     assert record.owner_id == "owner-1"
-    assert bindings.resolve.call_args.args[0].actor_user_id == "actor-2"
+    assert bindings.resolve_session_file.call_args.args[0].actor_user_id == "actor-2"
     staff.get_profile_by_work_no.assert_called_once_with(work_no="actor-2")
     # Later completion/status must keep the first name without consulting a changed directory.
     staff.get_profile_by_work_no.return_value = StaffProfileInfo("actor-2", "新花名")

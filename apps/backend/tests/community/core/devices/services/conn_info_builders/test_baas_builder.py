@@ -336,3 +336,74 @@ def test_build_default_device_uuid_none_omits_from_conn_info(
     assert "device_uuid" not in conn_info
     # get_ws_info 仍收到 device_uuid=None(默认值)
     assert fake_baas_service.get_ws_info.call_args.kwargs.get("device_uuid") is None
+
+
+@pytest.mark.parametrize("props", [{"bolt_id": "service-bot"}, {}])
+def test_caller_binding_canonicalizes_ws_and_http_affinity(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo, props, caplog,
+):
+    fake_binding.apply_reason = "caller_instance:service-bot"
+    fake_binding.applied_by = "friend-1"
+    fake_binding.device_props = props
+    fake_bot_repo.get_by_binding_id.return_value = None
+    fake_bot_repo.get_by_id_and_entity.return_value = {
+        "bot_id": "service-bot", "bot_type": "service", "call_type": "caller",
+    }
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+    with caplog.at_level("INFO"):
+        connection = builder.build(fake_binding, "owner-1", device_uuid="caller-device")
+    fake_baas_service.get_ws_info.assert_called_once_with(
+        bind_id=42, device_affinity="friend-1", device_uuid="caller-device",
+    )
+    assert connection["device_affinity"] == "friend-1"
+    assert connection["device_uuid"] == "caller-device"
+    assert "baas.caller_affinity.selected" in caplog.text
+    assert "binding_id=42" in caplog.text
+    assert "tok-xyz" not in caplog.text
+    assert "wss://baas.test" not in caplog.text
+
+
+@pytest.mark.parametrize("reason,applied_by,provider,props", [
+    (None, "friend-1", "baas", {}),
+    (42, "friend-1", "baas", {}),
+    ("caller_instance:service-bot", 42, "baas", {}),
+    ("service_online", "friend-1", "baas", {}),
+    ("caller_instance:", "friend-1", "baas", {}),
+    ("caller_instance: ", "friend-1", "baas", {}),
+    ("caller_instance:service-bot", "", "baas", {}),
+    ("caller_instance:service-bot", None, "baas", {}),
+    ("caller_instance:service-bot", "friend-1", "teclaw", {}),
+    ("caller_instance:other-bot", "friend-1", "baas", {"bolt_id": "service-bot"}),
+])
+def test_non_caller_or_mismatched_binding_preserves_requester_affinity(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo,
+    reason, applied_by, provider, props, caplog,
+):
+    fake_binding.apply_reason = reason
+    fake_binding.applied_by = applied_by
+    fake_binding.device_provider = provider
+    fake_binding.device_props = props
+    fake_bot_repo.get_by_binding_id.return_value = None
+    fake_bot_repo.get_by_id_and_entity.return_value = None
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+    with caplog.at_level("INFO"):
+        connection = builder.build(fake_binding, "operator")
+    assert fake_baas_service.get_ws_info.call_args.kwargs["device_affinity"] == "operator"
+    assert connection["device_affinity"] == "operator"
+    assert "baas.caller_affinity.selected" not in caplog.text
+
+
+def test_caller_override_failure_preserves_provider_error_without_logging_credentials(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo, caplog,
+):
+    fake_binding.apply_reason = "caller_instance:service-bot"
+    fake_binding.applied_by = "friend-1"
+    fake_binding.device_props = {"bolt_id": "service-bot"}
+    fake_bot_repo.get_by_binding_id.return_value = None
+    fake_bot_repo.get_by_id_and_entity.return_value = None
+    fake_baas_service.get_ws_info.side_effect = BaasNoActiveDevicesError(status_code=404)
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+    with caplog.at_level("INFO"), pytest.raises(DeviceOfflineError):
+        builder.build(fake_binding, "owner-1")
+    assert fake_baas_service.get_ws_info.call_args.kwargs["device_affinity"] == "friend-1"
+    assert "tok-xyz" not in caplog.text
