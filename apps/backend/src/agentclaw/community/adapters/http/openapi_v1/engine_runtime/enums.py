@@ -74,8 +74,8 @@ class SocketKind(_DocumentedEnum):
             "The bot's A2A agent endpoint — an HTTP base URL. The agent "
             "card is served at /.well-known/agent-card.json beneath it and "
             "the A2A JSON-RPC surface at /rpc; address both against the URL "
-            "as given. Unlike a chat socket it carries no credential and "
-            "never expires on its own. Absent when the deployment defines "
+            "as given. Optional HTTP headers expire at the connection's "
+            "expires_at deadline. Absent when the deployment defines "
             "no browser-direct address for it."
         ),
     }

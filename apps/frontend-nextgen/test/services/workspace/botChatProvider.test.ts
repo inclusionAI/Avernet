@@ -38,6 +38,7 @@ jest.mock('@tc-chat/adapters', () => ({
 
 import { createBotChatProvider, resolveFriendCodingBotChatSocketUrl } from '@/services/workspace/botChatProvider';
 import * as adapters from '@tc-chat/adapters';
+import * as a2aBootstrap from '@/adapters/a2a/bootstrap';
 
 const mockedGetConnection = (ctrl as any).getBotConnection as jest.Mock<any>;
 const mockedGetIamToken = getBotIamToken as jest.Mock<any>;
@@ -75,6 +76,41 @@ const bot = {
 };
 
 describe('botChatProvider', () => {
+  it('passes proxy authentication only to A2A fetch, leaving WS and IAM unchanged', async () => {
+    const bootstrap = jest.spyOn(a2aBootstrap, 'takeCachedA2AProvider').mockReturnValue(null);
+    mockedGetConnection.mockResolvedValue({ data: {
+      engine: 'openclaw', expires_at: new Date(Date.now() + 120_000).toISOString(),
+      sockets: [
+        { kind: 'chat', url: 'wss://gateway.example/ws?x-proxypass-token=ws-token' },
+        { kind: 'a2a', url: 'https://proxy.example/proxypass/ARCA_test:20003',
+          headers: { 'X-PROXYPASS-TOKEN': 'proxy-token' } },
+      ],
+    } });
+    const provider = createBotChatProvider({ bot, userId: 'u', sessionId: 'proxy-session' });
+    await provider.connect();
+    expect(bootstrap).toHaveBeenCalledWith(expect.objectContaining({
+      a2aBaseUrl: 'https://proxy.example/proxypass/ARCA_test:20003',
+      xIAMToken: 'iam-token', sessionKey: 'proxy-session',
+    }), { fetchImpl: expect.any(Function) });
+    const config = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0];
+    expect(config.url).toBe('wss://gateway.example/ws?x-proxypass-token=ws-token');
+    expect(config.headers).toBeUndefined();
+    expect(config.fetchImpl).toBeUndefined();
+    expect(JSON.stringify(config)).not.toContain('proxy-token');
+    await provider.disconnect();
+  });
+
+  it('does not install proxy fetch for older connection responses', async () => {
+    const bootstrap = jest.spyOn(a2aBootstrap, 'takeCachedA2AProvider').mockReturnValue(null);
+    mockedGetConnection.mockResolvedValue({ data: {
+      engine: 'openclaw', sockets: [{ kind: 'chat', url: 'wss://gateway.example/ws' }],
+    } });
+    const provider = createBotChatProvider({ bot, userId: 'u', sessionId: 'legacy-session' });
+    await provider.connect();
+    expect(bootstrap).toHaveBeenCalledWith(expect.any(Object), undefined);
+    await provider.disconnect();
+  });
+
   it.each(['draft', 'verify', 'online'] as const)('%s 连接地址与 IAM token 使用同一个 stage', async (stage) => {
     mockedGetConnection.mockImplementation(async (_id: string, params: { stage: string }) => ({
       data: { sockets: [{ kind: 'chat', url: `wss://gw/${params.stage}/ws` }] },

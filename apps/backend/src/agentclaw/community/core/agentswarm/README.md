@@ -383,6 +383,9 @@ status being pending, never off the presence of consent URLs).
 A creation apply whose report is `RUNNING` remains `PROVISIONING`, even
 when the container is already active. Only a succeeded creation apply can
 make an active bot `READY`; an unfinished apply is not `APPLY_FAILED`.
+A terminal pre-container report still means `PROVISIONING` while its creation
+job is live: the on-container phase may not have started yet. Record-first
+creation can use that report once its job has finished provisioning.
 
 **Run detail** — an agent with a passport application actually PENDING
 inside its window carries an additive `authorization` descriptor. Presence

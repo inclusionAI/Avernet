@@ -78,10 +78,12 @@ from agentclaw.community.core.apply_engine.apply_task import (
 )
 from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
+    BotCreateWithManifestHandler,
     CREATE_JOB_TASK_TYPE,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
+    CREATE_PRE_CONTAINER_TRIGGER,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
@@ -534,12 +536,14 @@ class _TaskQueuePump(threading.Thread):
 class TestBotKindEndToEnd:
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("defer_creation", [
-        pytest.param(False, id="same-slice"),
-        pytest.param(True, id="creation-after-slice"),
+    @pytest.mark.parametrize("defer_creation, observe_phase_gap", [
+        pytest.param(False, False, id="same-slice"),
+        pytest.param(True, False, id="creation-after-slice"),
+        pytest.param(True, True, id="creation-between-phases"),
     ])
     async def test_bot_agent_runs_a_real_swarm_round(
-            self, world, swarm_db, tmp_path, monkeypatch, defer_creation):
+            self, world, swarm_db, tmp_path, monkeypatch, defer_creation,
+            observe_phase_gap):
         from agentclaw.community.core.config.provider import load_config
         load_config().user_config["aidesktop_root"] = str(tmp_path)
 
@@ -573,6 +577,8 @@ class TestBotKindEndToEnd:
         # Keep the real RUNNING report visible until the swarm polls it.
         # This makes the CI creation/apply overlap deterministic without sleeps.
         polled_running = threading.Event()
+        polled_phase_gap = threading.Event()
+        phase_gap_states = []
         applies = world.get(ApplyRunServiceProtocol)
         compile_and_finish = applies._compile_apply_and_finish
         bot_status = platform.bot_status
@@ -589,6 +595,11 @@ class TestBotKindEndToEnd:
         def observe_status(bot_id, owner_id=""):
             status = bot_status(bot_id, owner_id=owner_id)
             report = applies.last_apply(entity_id=owner_id, bot_id=bot_id)
+            if (report is not None and report.trigger == CREATE_PRE_CONTAINER_TRIGGER
+                    and report.status is ApplyStatus.SUCCEEDED
+                    and created):
+                phase_gap_states.append(status)
+                polled_phase_gap.set()
             if (report is not None and report.trigger == CREATE_ON_CONTAINER_TRIGGER
                     and report.status is ApplyStatus.RUNNING):
                 polled_running.set()
@@ -596,6 +607,17 @@ class TestBotKindEndToEnd:
 
         monkeypatch.setattr(applies, "_compile_apply_and_finish", finish_after_poll)
         monkeypatch.setattr(platform, "bot_status", observe_status)
+        if observe_phase_gap:
+            creation_handler = world.get(BotCreateWithManifestHandler)
+            after_bot_exists = creation_handler._after_the_bot_exists
+
+            def after_phase_gap_poll(payload, bot):
+                if not polled_phase_gap.is_set():
+                    return Reschedule(0)
+                return after_bot_exists(payload, bot)
+
+            # Hold the real phase boundary until the swarm has polled it.
+            monkeypatch.setattr(creation_handler, "_after_the_bot_exists", after_phase_gap_poll)
         endpoints = _patch_engine_edges(monkeypatch, platform, ws)
 
         service, worker, handler, repos = _build_swarm(swarm_db, platform)
@@ -663,7 +685,15 @@ class TestBotKindEndToEnd:
             pump.stop_and_join()
 
         assert run is not None, "run row vanished"
-        assert polled_running.is_set(), "creation Apply was not observed in flight"
+        assert polled_running.is_set(), {
+            "error": "creation Apply was not observed in flight",
+            "run": run,
+            "agents": repos["agent"].list_by_run(dm.RunId(run_id), TENANT),
+            "results": repos["result"].list_by_run(dm.RunId(run_id), TENANT),
+        }
+        if observe_phase_gap:
+            assert phase_gap_states
+            assert set(phase_gap_states) == {dm.BotState.PROVISIONING.value}
         assert run.status is dm.RunStatus.COMPLETED, {
             "run": run,
             "creation_reports": [

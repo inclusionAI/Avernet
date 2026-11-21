@@ -32,3 +32,7 @@ class WsConnectionInfo:
     expires_at: datetime
     device_id: str = ""
     a2a_base_url: str = ""
+    a2a_auth: str = ""
+    """Empty for direct HTTP; ``proxypass`` reuses ``token`` / ``expires_at``
+    in the X-PROXYPASS-TOKEN header for both card and RPC requests.
+    """

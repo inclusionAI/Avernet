@@ -9,7 +9,7 @@ request to that bot's engine adapter and normalises the answer.
 purpose: "Engine-runtime relay — resolves the caller's bot, forwards one HTTP call to its engine adapter, and normalises the engine envelope."
 provides:
   - "EngineRuntimeRelay — bot resolution with operator adjudication + stage-aware device forward + envelope normalisation"
-  - "EngineConnectionService — composes a bot's usable WebSocket connections"
+  - "EngineConnectionService — composes WebSocket connections and provider-issued A2A faces"
   - "gate — who may operate a bot, and which bot types/stages the operator surfaces serve"
   - "stage — which runtime a stage names (draft workspace vs published bindings)"
   - "EngineResult / ConnectionResult / SocketInfo value objects"
@@ -141,3 +141,23 @@ appears only in desktop responses; cloud and friend responses retain their shape
 HTTP runtime discovery and legacy endpoints retain their existing behavior.
 Consumer contract tests are test_desktop_connection_contract.py and
 test_desktop_workflows.py; Mock BaaS results do not constitute device acceptance.
+
+### Credentialed A2A proxy faces
+
+The provider owns the browser-reachable base URL. BaaS `ws-info` may declare
+`a2a_auth=proxypass`: the A2A face uses its existing `token` and `expires_at`,
+with no second device selection or HTTP-info lookup. The device service first
+applies the authenticated caller's existing gray gate, then accepts this face
+only for non-desktop OpenClaw with a matching HTTPS proxy target and live token.
+Invalid/unsupported faces are withheld; the WS result remains unchanged.
+
+After the existing operator check, `/connection` adds `headers` only to the
+`kind=a2a` socket. The browser applies them exclusively to the card and `/rpc`
+under that base, preserving per-request IAM. It refreshes before credential
+expiry, rejects redirects and changed targets, and never automatically retries
+a send. No Backend card/RPC forwarding route is added. Existing direct A2A
+without headers and existing WS sockets retain their contracts.
+
+The HTTP proxy must allow `x-iam-token` on the A2A RPC preflight without
+changing its origin or token validation. A2A SSE responses carry
+`X-Accel-Buffering: no` so reverse proxies do not batch streaming output.

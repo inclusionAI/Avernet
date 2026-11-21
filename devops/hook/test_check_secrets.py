@@ -144,3 +144,44 @@ def test_rust_initializer_field_is_not_a_type_declaration() -> None:
 def test_rust_prior_struct_does_not_exempt_a_later_initializer() -> None:
     source = 'pub struct Empty {} fn f() { let config = Config { SLOT: ' + 'AbCdEf0123456789XYZ }; }'
     assert _findings(_diff(source.replace("SLOT", "token"), path="example.rs"))
+
+
+def test_python_getattr_credential_field_is_a_reference_but_default_is_not() -> None:
+    line = 'proxy_SLOT = getattr(info, "a2a_proxy_SLOT", "")'.replace("SLOT", "token")
+    assert _findings(_diff(line)) == []
+    secret = "AbCdEf" + "0123456789XYZ-secret-value"
+    for expression in [
+        'getattr(info, "a2a_proxy_SLOT", "VALUE")',
+        'getattr(info, "VALUE", "")',
+    ]:
+        line = 'proxy_SLOT = ' + expression.replace("VALUE", secret)
+        findings = _findings(_diff(line.replace("SLOT", "token")))
+        assert findings
+        assert all(secret not in finding.content for finding in findings)
+
+
+def test_python_header_mapping_preserves_runtime_and_literal_distinction() -> None:
+    line = 'headers={"X-PROXYPASS-SLOT": proxy_SLOT} if proxy_SLOT else {},'.replace("SLOT", "token")
+    assert _findings(_diff(line)) == []
+    secret = "AbCdEf" + "0123456789XYZ-secret-value"
+    for expression in ['"VALUE"', 'wrap("VALUE")']:
+        line = 'headers={"X-PROXYPASS-SLOT": ' + expression + '} if proxy_SLOT else {},'
+        findings = _findings(_diff(line.replace("SLOT", "token").replace("VALUE", secret)))
+        assert findings
+        assert all(secret not in finding.content for finding in findings)
+
+
+def test_python_call_can_end_in_unchanged_diff_context() -> None:
+    diff = "\n".join([
+        "+++ b/example.py", "@@ -1,3 +1,4 @@",
+        "-    result = resolve_proxy_face(info,",
+        "+    base, withheld, proxy_SLOT = resolve_proxy_face(",
+        "+        info, engine_type=engine_type,",
+        "         connection_type=connection_type,", "     )",
+    ]).replace("SLOT", "token")
+    assert _findings(diff) == []
+    # A literal on a retained argument line must not gain an exemption either.
+    secret = "AbCdEf" + "0123456789XYZ-secret-value"
+    assert _findings(diff.replace("connection_type=connection_type", 'connection_type="' + secret + '"'))
+    # Context never becomes a new finding by itself.
+    assert _findings(_diff('result = runtime_value') + '\n password="' + secret + '"') == []
