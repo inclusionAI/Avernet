@@ -52,9 +52,11 @@ def _config(bot_url):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bot_url", [BOT_URL, None])
-@pytest.mark.parametrize("catalogued", [True, False])
+@pytest.mark.parametrize(
+    "catalogued, config_operation", [(True, True), (False, True), (True, False)]
+)
 async def test_single_bot_projection_builds_payload_with_custom_url(
-    bot_url, catalogued
+    bot_url, catalogued, config_operation
 ):
     config, bot_repo = _config(bot_url)
     service = _make_sync_service(mcp_config_service=config)
@@ -65,6 +67,7 @@ async def test_single_bot_projection_builds_payload_with_custom_url(
     entry = {"serverCode": "weather"}
     if catalogued:
         entry.update(runMode="REMOTE", endpoints=[])
+        config.mcp_center.get_mcp_detail.return_value = entry
 
     result = await service.sync_mcp_details_for_bot(
         user_id="owner",
@@ -72,7 +75,11 @@ async def test_single_bot_projection_builds_payload_with_custom_url(
         bot_id="shared",
         mcp_entries=[entry],
         device_sync=plugin,
-        config_target=ResolvedBotContext(42, "shared", "entity", "owner", bot),
+        config_target=(
+            ResolvedBotContext(42, "shared", "entity", "owner", bot)
+            if config_operation
+            else None
+        ),
     )
 
     assert result["success"]

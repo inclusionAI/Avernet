@@ -82,7 +82,10 @@ async def deliver_mcp_detail(
         owner_id=resource_entity_id,
         server_code=server_code,
     )
-    if bot_override and not scoped_config_projection:
+    user_config = await asyncio.to_thread(config_service.get_user_unified_config, user_id, server_code)
+    url_override = effective_mcp_url_override(user_config, bot_override)
+    use_scoped_validation = scoped_config_projection or bool(url_override)
+    if bot_override and not use_scoped_validation:
         verdict = await asyncio.to_thread(
             config_service.validate_bot_override,
             user_id=user_id,
@@ -106,9 +109,7 @@ async def deliver_mcp_detail(
             # the endpoint shape the validation just rejected/replaced.
             mcp_data = current_detail
 
-    # 配置合并需读 DB；放入线程池，避免阻塞并发投递的 event loop。
-    user_config = await asyncio.to_thread(config_service.get_user_unified_config, user_id, server_code)
-    if scoped_config_projection:
+    if use_scoped_validation:
         verdict = config_service.validate_effective_scoped_config(
             server_code=server_code,
             detail=mcp_data,
@@ -132,7 +133,6 @@ async def deliver_mcp_detail(
         bot_override=bot_override,
         user_config_snapshot=user_config or {},
     )
-    url_override = effective_mcp_url_override(user_config, bot_override)
     strict_transport_protocol = bool(
         bot_override
         and _transport_protocol
