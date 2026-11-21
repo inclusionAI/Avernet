@@ -17,9 +17,9 @@
 
 ### REQ-2：Bot/Human 阶段与待处理原因
 
-- **AC-002**：模板阶段支持 `stage_kind=bot|human`；Human stage 激活或 Bot blocked 时 Todo 为 `pending_action`，并分别记录 `planned_human_stage | blocked`；Human->Bot 推进后为 `in_progress`。
+- **AC-002**：模板阶段支持 `stage_kind=bot|human`；Human stage 激活或 Runtime/领域服务判定 Bot execution blocked 时 Todo 为 `pending_action`，并分别记录 `planned_human_stage | blocked`；Human->Bot 推进后为 `in_progress`。
 - 场景：当模板下一阶段为 Human 时，系统通知绑定的 Human executor 并等待显式完成。
-- 场景：当 Bot 上报 blocked 时，系统保留 blocker reason/requested_action，不推进阶段。
+- 场景：当 Runtime/领域服务将 Bot execution 判定为 blocked 时，系统保留 blocker reason/requested_action，不推进阶段。
 
 ### REQ-3：版本化模板和参与角色绑定
 
@@ -31,9 +31,9 @@
 - **AC-004**：只有当前 Human stage 绑定的 executor 能通过阶段 complete 命令推进；请求必须具备幂等键，重复请求不得重复推进，错误 actor、旧 stage 或迟到请求必须拒绝。
 - 场景：当 Human executor 重试相同 complete 请求时，系统返回同一结果且只推进一次。
 
-### REQ-5：Bot outcome、失败、中断、恢复和取消
+### REQ-5：Execution 完成、失败、中断、恢复和取消
 
-- **AC-005**：Bot outcome 支持 `completed|blocked|failed`；`failed` 仅是 attempt 结果，自动恢复期间 Todo 保持 `in_progress`，恢复耗尽后才为 `interrupted`；当前阶段负责人或 Space Admin 可带原因 resume/cancel，completed/cancelled 默认不可恢复。
+- **AC-005**：Bot 通过现有产物接口和 `/complete` 提交一次 execution 的完成内容；Backend 根据 execution 结果和 Runtime 内部事件投影阶段与 Todo 状态。`failed` 仅是 attempt 结果，自动恢复期间 Todo 保持 `in_progress`，恢复耗尽后才为 `interrupted`；当前阶段负责人或 Space Admin 可带原因 resume/cancel，completed/cancelled 默认不可恢复。Bot 不直接调用阶段状态 outcome 接口。
 - 场景：当 blocked interaction 已提交但未执行 resume 时，Todo 仍保持 `pending_action(blocked)`。
 - 场景：当 authorized actor resume interrupted/blocked Todo 时，系统创建新 execution attempt 并回到 `in_progress`。
 
@@ -54,7 +54,7 @@
 
 ### REQ-9：兼容契约和文档一致性
 
-- **AC-009**：新增阶段化 contract 的同时保留现有 `/complete`、`/report`、`artifacts/object-file` 兼容适配，固定调用方清单；OpenAPI/Plugin contract、conformance tests、Todo README 和前序规格的替代说明使用同一状态和术语。
+- **AC-009**：保留现有 `/complete`、`/report`、`artifacts/object-file` 兼容适配，并在 `/complete` 增加可选完成内容；不新增独立 Bot 阶段 outcome 接口。OpenAPI/Plugin contract、conformance tests、Todo README 和前序规格的替代说明使用同一状态和术语。
 - 场景：旧 Bot 调用兼容接口时结果被绑定到当前 stage，不能绕过 actor、execution freshness 或门禁校验。
 
 ### REQ-10：正式 schema 变更但不迁移历史数据

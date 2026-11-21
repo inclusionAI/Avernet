@@ -15,13 +15,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.adapters.http.openapi_v1.task.todos.schemas import (
     TodoArtifactRecordResponse,
-    TodoResponse,
 )
 from agentclaw.community.api.task.todo_artifact_service import (
     TodoArtifactServiceProtocol,
 )
-from agentclaw.community.api.task.todo_stage_service import TodoStageServiceProtocol
-from agentclaw.community.core.task.todos.stage_outcome_models import TodoStageOutcomeKind
 from agentclaw.community.core.task.todos.artifact_models import TodoArtifactRecord
 from agentclaw.community.di import Injected
 
@@ -79,6 +76,16 @@ class CompleteTodoRequest(BaseModel):
         max_length=256,
         description="Deprecated and ignored; the Backend derives Context from the execution.",
     )
+    summary: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4000,
+        description="Optional completion summary recorded with the task.completed event.",
+    )
+    result: dict[str, object] = Field(
+        default_factory=dict,
+        description="Optional structured completion content owned by the executing Skill.",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -100,17 +107,6 @@ class CompleteTodoResponse(BaseModel):
     accepted: bool = True
     todo_id: str
     todo_execution_id: str
-
-
-class ReportTodoOutcomeRequest(BaseModel):
-    todo_execution_id: str = Field(min_length=1, max_length=64)
-    stage_instance_id: str = Field(min_length=1, max_length=64)
-    outcome: Literal["completed", "blocked", "failed"]
-    summary: str = Field(min_length=1, max_length=4000)
-    blocker_reason: str | None = Field(default=None, max_length=4000)
-    requested_action: str | None = Field(default=None, max_length=4000)
-    idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
-    result: dict[str, object] = Field(default_factory=dict)
 
 
 def _store_todo_artifact_file(
@@ -175,32 +171,6 @@ async def report_todo_artifact(
     return envelope(TodoArtifactRecordResponse.from_record(record), request)
 
 
-@router.post("/{todo_id}/outcome", response_model=Envelope[TodoResponse])
-@envelope_errors
-async def report_todo_outcome(
-    todo_id: str,
-    body: ReportTodoOutcomeRequest,
-    request: Request,
-    execution_token: ExecutionToken,
-    service: TodoStageServiceProtocol = Injected(TodoStageServiceProtocol),
-) -> Envelope[TodoResponse]:
-    """Report the outcome of the active Bot stage attempt."""
-    result = await run_in_threadpool(
-        service.report_bot_outcome,
-        todo_id=todo_id,
-        stage_instance_id=body.stage_instance_id,
-        todo_execution_id=body.todo_execution_id,
-        execution_token=execution_token,
-        outcome=TodoStageOutcomeKind(body.outcome),
-        summary=body.summary,
-        blocker_reason=body.blocker_reason,
-        requested_action=body.requested_action,
-        idempotency_key=body.idempotency_key or body.todo_execution_id,
-        result=body.result,
-    )
-    return envelope(TodoResponse.from_record(result), request)
-
-
 @router.post("/{todo_id}/complete", response_model=Envelope[CompleteTodoResponse])
 @envelope_errors
 async def complete_todo_execution(
@@ -216,6 +186,8 @@ async def complete_todo_execution(
         todo_id=todo_id,
         todo_execution_id=body.todo_execution_id,
         execution_token=execution_token,
+        summary=body.summary,
+        result=body.result,
     )
     return envelope(
         CompleteTodoResponse(

@@ -7,8 +7,8 @@
 
 - 采用 TDD：每个切片先新增失败测试，再实现最小闭环并重构。
 - 每个切片必须形成用户可观察或契约可验证的纵向能力，不按“先写所有表/所有接口”水平切分。
-- 保留现有 tenant/env/space、事务、行锁/CAS、调度 lease 和错误传播约束。
-- 不做历史 Todo 数据迁移，不删除兼容 endpoint。
+- 保留现有 tenant/env/space、事务、行锁/CAS、调度 lease 和错误传播约束；Bot 只通过产物上报和 `/complete` 提交执行事实。
+- 不做历史 Todo 数据迁移；不新增独立 Bot 阶段 outcome endpoint，保留现有 `/report`、对象文件上传和 `/complete` 兼容路径。
 
 ### Slice 1：模板定义校验与 capability 查询 ✅
 
@@ -77,12 +77,12 @@
 - Dependencies：Slice 2。
 - Human confirmation needed：no。
 
-### Slice 4：Bot outcome、Human complete 与硬门禁
+### Slice 4：Bot execution complete、Human complete 与硬门禁
 
-- Goal：当前执行 Bot 或当前 Human executor 能可信完成阶段，blocked/failed 语义正确，PR 门禁不能被绕过。
+- Goal：当前 execution 或当前 Human executor 能可信完成阶段，Runtime 内部 blocked/failed 语义正确，PR 门禁不能被绕过；Bot 不直接提交阶段 outcome。
 - Covers AC IDs：AC-002、AC-004、AC-005、AC-006、AC-007、AC-009。
-- Tests first：actor auth、execution freshness、idempotency、blocked payload、failed attempt、missing/satisfied PR gate、旧 stage/迟到 request、兼容 endpoint。
-- Implementation：outcome command、Human complete、semantic artifact persistence、gate validator、compat adapters。
+- Tests first：actor auth、execution freshness、完成内容幂等、Runtime blocked/failed attempt、missing/satisfied PR gate、旧 stage/迟到 request、现有兼容 endpoint。
+- Implementation：execution complete command、Human complete、semantic artifact persistence、gate validator、compat adapters；阶段推进由 Backend 内部调用领域转换。
 - Validation：core + contract + compatibility tests。
 - Dependencies：Slice 3。
 - Human confirmation needed：no。
@@ -121,7 +121,7 @@
 
 - Goal：新旧 Bot 调用和用户端流程在同一术语/状态契约下可验证发布。
 - Covers AC IDs：AC-008、AC-009、AC-010。
-- Tests first：plugin/service contract、compat routes、Singlebox Bot->Bot、Bot->Human->Bot、PR gate、blocked/resume、cancel/late outcome。
+- Tests first：plugin/service contract、compat routes、Singlebox Bot->Bot、Bot->Human->Bot、PR gate、Runtime blocked/resume、cancel/late completion。
 - Implementation：OpenAPI/Plugin docs、Todo README、前序规格 supersession、runbook、caller inventory。
 - Validation：Backend/Frontend affected gates、architecture tests、conformance tests、Singlebox coverage、`git diff --check`、file size checks。
 - Dependencies：Slices 1-7。

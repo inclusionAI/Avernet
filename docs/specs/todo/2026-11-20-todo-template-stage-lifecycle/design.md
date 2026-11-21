@@ -45,7 +45,7 @@
 
 ### 2.2 产品状态由领域转换产生，不允许任意修改
 
-Runtime 状态、Bot 上报结果和 Todo 状态不是同一个概念：
+Runtime 执行事实、完成内容和 Todo 状态不是同一个概念：
 
 ```text
 Runtime attempt/event
@@ -61,7 +61,8 @@ Todo 状态可持久化用于列表查询，但只能由领域命令和状态机
 ### 2.3 效果质量由执行 Bot 保证，模板不编码主观判断
 
 “需求是否清晰”“验收项是否合理”是执行效果，不适合作为通用产品协议里的硬规则。
-Bot 和其 Skill 应自行检查质量，并在无法继续时上报 `blocked`。
+Bot 和其 Skill 应自行检查质量；如果无法继续，可以结束当前 execution 或返回执行错误，
+由 Runtime/领域服务决定是否进入 blocked 等产品投影。
 
 模板可以配置机器能够可靠校验的硬门禁，例如“至少一个状态为 created 的 PR”，但不应配置：
 
@@ -213,7 +214,7 @@ V1 支持两种 `stage_kind`：
 
 | stage_kind | 执行者 | 阶段激活后的 Todo 状态 | 完成方式 |
 | --- | --- | --- | --- |
-| `bot` | Bot | `in_progress` | 当前 execution 通过 `/outcome` 上报 `completed`，并通过硬门禁 |
+| `bot` | Bot | `in_progress` | 当前 execution 通过 `/complete` 上报完成内容；后端内部推进阶段，并通过硬门禁 |
 | `human` | Human | `pending_action` | 被绑定的 Human 显式提交阶段完成动作 |
 
 Human 阶段表示产品流程本来就要求用户介入，不是异常阻塞。为避免两种“待处理”语义混淆，阶段实例需要记录：
@@ -334,36 +335,30 @@ stages[0] -> stages[1] -> stages[2] -> Todo completed
 
 ## 5. 阶段完成契约
 
-### 5.1 Bot 阶段结果信封
+### 5.1 Bot execution complete
 
-Bot/Runtime 对一个阶段尝试的业务结果统一上报：
+Bot/Runtime 通过现有产物接口和 `/complete` 形成一次执行的完成事实：
 
 ```yaml
-outcome: completed | blocked | failed
+# 先通过 /report 或 artifacts/object-file 上报产物
 summary: string
-artifacts: []
 result: {}
 ```
 
-`blocked` 还必须提供：
+- `/report` 和 `artifacts/object-file` 只负责持久化产物事实；
+- `/complete` 表示当前 `todo_execution_id` 已完成，并允许 Skill 定制
+  `summary` 和结构化 `result`；
+- Backend 根据 execution 绑定的 `stage_instance_id`、产物门禁和当前领域状态，
+  在内部推进阶段和 Todo；
+- 不提供 Bot-facing 的阶段 outcome 上报接口，Bot 不直接提交
+  `completed`、`blocked` 或 `failed` 这类阶段协议状态。
 
-```yaml
-blocker:
-  reason: string
-  requested_action: string
-```
-
-字段含义：
-
-- `completed`：Bot 认为本阶段工作已经完成；领域层仍需检查硬门禁；
-- `blocked`：存在明确 Human 或外部动作，不处理就无法继续；
-- `failed`：本次执行尝试失败，是否重试/恢复由 Runtime 决定。
-
-`result` 是 Skill 自定义详情，供展示和后续 Bot 使用；Todo Core 不应理解任意 Skill 字段并以此驱动通用状态机。
+`result` 是 Skill 自定义详情，供展示和后续 Bot 使用；Todo Core 不应理解任意
+Skill 字段并以此驱动通用状态机。
 
 ### 5.2 Human 阶段完成
 
-Human 阶段不伪装成 Bot outcome。被绑定的 Human 通过显式阶段完成命令提交：
+Human 阶段不复用 Bot execution 的 `/complete`。被绑定的 Human 通过显式阶段完成命令提交：
 
 ```yaml
 summary: string
@@ -373,28 +368,31 @@ result: {}
 
 服务端验证 actor 是当前 Human stage 的 executor，检查可选硬产物门禁，然后推进阶段。Human 阶段激活后即进入 `pending_action`，完成后根据下一个阶段类型继续投影 Todo 状态。
 
-### 5.3 协议状态与产品状态分离
+### 5.3 执行状态与产品状态分离
 
-- `completed/blocked/failed` 属于阶段执行结果契约；
 - `PENDING/RUNNING/FAILED/TIME_OUT/ABORTED` 等属于 Runtime attempt 状态；
-- `not_started/in_progress/interrupted/pending_action/completed/cancelled` 属于 Todo 产品状态。
+- `not_started/in_progress/interrupted/pending_action/completed/cancelled` 属于 Todo 产品状态；
+- `summary` 和 `result` 属于本次 `/complete` 的完成内容，不是阶段状态。
 
-`interrupted` 和 `cancelled` 应存在于 Todo Service API 的资源契约中，但不应被强加为 Bot 执行结果。Bot 不决定产品是否取消；一次尝试 `failed` 也不等于 Todo 已中断。
+`interrupted` 和 `cancelled` 存在于 Todo Service API 的资源契约中，但不作为
+Bot 执行结果要求 Bot 直接提交。Bot 不决定产品是否取消；一次 Runtime attempt
+`failed` 也不等于 Todo 已中断。
 
-### 5.4 幂等与可信上报
+### 5.4 幂等与可信完成
 
-- Bot outcome 请求必须带可去重的 `execution_id` 或事件 ID；Human 完成动作也必须带幂等键；
-- Bot outcome 只接受当前阶段已授权 Bot/Runtime 的上报；Human complete 只接受当前阶段绑定的 Human executor；
-- 重复上报或重复完成动作应幂等；
-- 已推进阶段后到达的旧 execution 结果不得回退状态；
-- 产物验证和阶段推进应在同一领域事务边界内完成，或使用可补偿的 outbox/event 方案。
+- `/complete` 必须带当前 execution 身份和执行凭证；Human 阶段完成动作必须带幂等键；
+- `/report`、对象文件上传和 `/complete` 只接受当前 execution/actor 的合法请求；
+- 重复产物上报和重复完成请求应按现有幂等语义处理；
+- 已推进阶段后到达的旧 execution 完成结果不得回退状态；
+- 产物验证和阶段推进应在同一领域事务边界内完成，或使用可补偿的 outbox/event 方案；
+- Runtime 的失败、超时、取消、恢复耗尽等事实由内部事件和领域服务处理，不通过 Bot 阶段 outcome API 暴露。
 
 ## 6. 完成门禁与产物
 
 ### 6.1 默认完成规则
 
 ```text
-Bot stage: 已认证的当前执行 Bot 上报 completed
+Bot stage: 当前 execution 调用 `/complete` 提交完成内容
 或
 Human stage: 已绑定的 Human 显式提交 complete
 +
@@ -403,7 +401,8 @@ Human stage: 已绑定的 Human 显式提交 complete
 当前阶段 completed
 ```
 
-如果阶段没有配置硬产物，可信 Bot `completed` 或 Human `complete` 即可完成阶段。不能把“任意 artifact 字段有内容”作为默认门禁。
+如果阶段没有配置硬产物，合法的 `/complete` 请求或 Human `complete` 即可完成阶段。
+不能把“任意 artifact 字段有内容”作为默认门禁。
 
 ### 6.2 产物语义
 
@@ -437,12 +436,12 @@ artifact_ref   = pr://inclusionAI/Avernet/123
 Human 介入分成两类，不能都解释为 Bot 阻塞：
 
 1. 模板中显式配置的 `human` 阶段，是正常产品流程；
-2. Bot 上报 `blocked`，是自动阶段执行中的异常等待。
+2. Runtime/领域服务判定 Bot execution `blocked`，是自动阶段执行中的异常等待。
 
 阶段负责人不是每次 Bot 执行的隐式验收人，而是当前阶段的责任承接者：
 
 - Human 阶段激活时通知该阶段 Human executor，Todo 进入 `pending_action`，并标记 `planned_human_stage`；
-- Bot 上报 `blocked` 时通知阶段负责人，Todo 进入 `pending_action`，并标记 `blocked`；
+- Runtime/领域服务判定当前 Bot execution blocked 时通知阶段负责人，Todo 进入 `pending_action`，并标记 `blocked`；
 - 计划内 Human stage 在 UI 展示阶段 `purpose`、执行人和完成入口；
 - blocked 场景在 UI 展示 `reason` 和 `requested_action`，Human 提交 interaction 后恢复 Bot 阶段。
 
@@ -474,7 +473,7 @@ Human 介入分成两类，不能都解释为 Bot 阻塞：
 | 创建成功，首阶段是 Bot 且尚未首次派发 | `not_started` |
 | 首个 Bot 阶段已经派发；当前 Bot 阶段正在执行、重试、恢复、切换 Bot 或等待下一 Bot 阶段调度 | `in_progress` |
 | 当前阶段是计划内 Human 阶段 | `pending_action`（`planned_human_stage`） |
-| Bot 阶段上报 `blocked`，需要 Human/外部动作 | `pending_action`（`blocked`） |
+| Runtime/领域服务判定 Bot execution blocked，需要 Human/外部动作 | `pending_action`（`blocked`） |
 | 当前阶段执行失败且 Runtime 恢复耗尽 | `interrupted` |
 | 当前阶段完成且下一阶段是 Bot | 保持 `in_progress`，不得回退到 `not_started` |
 | 当前阶段完成且下一阶段是 Human | `pending_action` |
@@ -485,7 +484,7 @@ Human 介入分成两类，不能都解释为 Bot 阻塞：
 
 ### 7.3 阶段推进
 
-1. Bot 阶段由当前 execution 上报 `completed`；Human 阶段由绑定的 Human 显式提交完成；
+1. Bot 阶段由当前 execution 调用 `/complete` 提交完成内容；Human 阶段由绑定的 Human 显式提交完成；
 2. Todo Core 校验当前 actor/execution、当前阶段和硬产物；
 3. 门禁不满足时不推进，并返回结构化缺失项；这是“完成声明未通过门禁”，不是自动变成 `blocked`；
 4. 门禁满足时将当前阶段标记 `completed`；
@@ -493,7 +492,7 @@ Human 介入分成两类，不能都解释为 Bot 阻塞：
 6. 存在下一 Human 阶段时创建/激活该阶段，Todo 进入 `pending_action`；
 7. 无下一阶段时 Todo 进入 `completed`。
 
-如果缺失硬产物导致 Bot 无法继续，Bot 可根据返回结果补交产物；只有确实需要 Human 动作时才上报 `blocked`。
+如果缺失硬产物导致当前 execution 无法完成，Bot/Skill 可补交产物后再次调用 `/complete`；只有 Runtime/领域服务判定确实需要 Human 动作时，才将阶段投影为 `blocked`。
 
 ### 7.4 取消与恢复
 
@@ -507,10 +506,10 @@ Human 介入分成两类，不能都解释为 Bot 阻塞：
 本设计的首选方向是：
 
 ```text
-Bot completed + 已配置硬门禁通过 = 阶段完成
+Bot execution 通过 `/complete` 提交完成内容 + 已配置硬门禁通过 = 阶段完成
 ```
 
-Human 只在模板显式配置的 Human 阶段，或 Bot `blocked` 形成的 `pending_action` 中介入，不再在每次 Bot 执行后强制进入 `pending_acceptance`。
+Human 只在模板显式配置的 Human 阶段，或 Runtime/领域服务将 Bot execution 投影为 `blocked` 形成的 `pending_action` 中介入，不再在每次 Bot 执行后强制进入 `pending_acceptance`。
 
 这会替代前序规格中的以下假设：
 
@@ -702,22 +701,17 @@ POST   /api/v1/collaboration/tasks/todos/{todo_id}/resume
 POST /api/v1/collaboration/tasks/todos/{todo_id}/stages/{stage_instance_id}/complete
 ```
 
-只允许当前 Human stage 的 executor 调用。请求包含幂等键、summary、可选 result/artifacts。它是计划内人工阶段的完成命令，不与 Bot `/outcome` 混用。
+只允许当前 Human stage 的 executor 调用。请求包含幂等键、summary、可选 result/artifacts。这是计划内人工阶段的完成命令。
 
-### 10.5 Bot outcome
+### 10.5 Bot execution complete
 
 ```text
-POST /api/v1/collaboration/tasks/todos/{todo_id}/outcome
+POST /api/v1/collaboration/tasks/todos/{todo_id}/complete
 ```
 
-请求应包含 `stage_instance_id`、`execution_id`、`outcome`、`summary`、产物和可选 blocker。
+Bot 先通过现有 `/report` 或对象文件上传接口提交产物，再调用 `/complete`。请求包含 `todo_execution_id`，可选 `summary` 和由 Skill 定义的结构化 `result`。
 
-兼容期内：
-
-- 保留现有 `/report` 和 `/upload`，但产物绑定到 stage instance；
-- 现有 Todo 级 `/complete` 暂时映射成 `outcome=completed`，不要与新的 Human stage complete 路径混淆；
-- 新客户端应统一使用 `/outcome`；
-- 兼容接口的退场时间和调用方清单必须在实施阶段记录。
+`/complete` 只表达“本次 execution 已完成并提交完成内容”，不暴露阶段状态、blocked/failed 等产品或协议语义。后端根据 execution 绑定的当前 stage instance，在完成事件持久化后内部执行阶段推进和硬产物门禁；不提供独立的 Bot 阶段 outcome 上报接口。
 
 ## 11. 前端信息架构
 

@@ -69,7 +69,7 @@ class TodoStageKind(_DocumentedTemplateEnum):
     HUMAN = "human"
 
     __descriptions__ = {
-        "bot": "The stage advances through a Bot completion or blocked outcome.",
+        "bot": "The stage advances when its bound Bot execution completes through the /complete contract; blocked is an internal lifecycle projection.",
         "human": "The stage waits for its bound Human executor to complete it.",
     }
 

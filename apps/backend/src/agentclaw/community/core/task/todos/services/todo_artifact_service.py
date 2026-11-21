@@ -117,12 +117,16 @@ class TodoArtifactService:
         todo_id: str,
         todo_execution_id: str,
         execution_token: str,
+        summary: str | None = None,
+        result: dict[str, object] | None = None,
     ) -> None:
         """Append the completion event and project templated stage completion.
 
         Legacy Todos keep their scheduler-owned acceptance projection. A
         templated execution additionally advances its current stage after the
-        durable collaboration event exists.
+        durable collaboration event exists. Completion content is supplied by
+        the executing Skill; stage lifecycle remains an internal projection and
+        does not have a separate Bot-facing outcome endpoint.
         """
         execution = self._authorize(
             todo_id=todo_id,
@@ -143,6 +147,10 @@ class TodoArtifactService:
         }
         if execution.run_id:
             payload["run_id"] = execution.run_id
+        if summary is not None:
+            payload["summary"] = summary
+        if result:
+            payload["result"] = dict(result)
 
         event_exists = False
         last_error: TodoCollaborationError | None = None
@@ -201,9 +209,10 @@ class TodoArtifactService:
                     todo_id=todo_id,
                     stage_instance_id=execution.stage_instance_id,
                     outcome=TodoStageOutcomeKind.COMPLETED,
-                    summary="Bot reported stage completion",
+                    summary=summary or "Bot reported stage completion",
                     execution_id=todo_execution_id,
                     idempotency_key=todo_execution_id,
+                    result=dict(result or {}),
                 )
             )
 

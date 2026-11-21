@@ -23,10 +23,10 @@
 1. 引入版本化待办模板、参与角色绑定和线性阶段实例。
 2. 支持 `bot | human` 两类阶段，计划内 Human 阶段进入待处理。
 3. 将 Todo 产品状态调整为六状态，并保证已启动 Todo 不回退到未开始。
-4. 将 Bot 的 `completed | blocked | failed` 结果与 Runtime attempt 状态、Todo 产品状态分离。
+4. 将 Bot execution 的完成事件与 Runtime attempt 状态、Todo 产品状态分离；Bot 不直接上报阶段状态。
 5. 支持可确定性检查的硬产物门禁，首批支持 `pull_request:created`。
 6. 取消每次 Bot 完成后的隐式人工验收；需要人工验收时使用显式 Human 阶段。
-7. 保留现有 Bot 上报接口的兼容适配，并更新前端、契约和领域文档。
+7. 保留现有产物 `/report`、对象文件上传和 `/complete` 兼容适配；`/complete` 支持定制完成内容，不新增 Bot 阶段状态上报接口。
 
 ## 用户/角色
 
@@ -40,7 +40,7 @@
 
 - Backend Todo Core、Repository、Scheduler、HTTP contracts 与数据库 DDL。
 - Todo Template、Template Version、Stage Instance、Participant Binding、Artifact Gate。
-- 六状态生命周期、Bot outcome、Human stage complete、cancel/resume。
+- 六状态生命周期、Bot execution complete、Human stage complete、cancel/resume。
 - Frontend Todo 列表、模板管理、创建流程和详情操作。
 - Todo 领域 README、协议文档、兼容测试与 Singlebox 用户故事。
 
@@ -52,7 +52,7 @@
 - 模板内保存仓库、分支、部署凭据、私有 endpoint。
 - 模型主观质量判断作为通用硬门禁。
 - 远程 SCM 实时查询；V1 的 `pull_request:created` 校验基于当前阶段可信上报并持久化的规范化 PR 产物事实。
-- 本次移除兼容 endpoint；只记录调用方并保留适配。
+- 本次不新增或保留独立的 Bot 阶段 outcome endpoint；现有产物上报和 `/complete` 继续兼容。
 
 ## Open Questions
 
@@ -63,7 +63,7 @@
 - `resume` 和 `cancel` 由当前阶段负责人或 Space Admin 执行，并要求审计原因。
 - blocked interaction 只记录处理信息，不隐式恢复；由显式 `resume` 命令继续。
 - 模板发布/归档 V1 使用现有 Space Admin 权限，不新增权限系统。
-- 兼容 `/complete`、`/report`、`artifacts/object-file` 在本次继续存在，新客户端使用阶段化契约。
+- `/report`、`artifacts/object-file` 继续负责产物上报，`/complete` 负责 execution 完成内容；阶段推进由 Backend 根据 execution 绑定内部投影。
 
 ## Decision Log
 

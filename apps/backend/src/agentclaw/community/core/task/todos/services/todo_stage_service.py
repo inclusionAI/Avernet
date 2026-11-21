@@ -11,9 +11,6 @@ from agentclaw.community.core.repository.protocols.task.todos import (
 )
 from agentclaw.community.core.spaces.models import SpaceRole
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
-from agentclaw.community.core.task.todos.artifact_service_protocol import (
-    TodoArtifactServiceProtocol,
-)
 from agentclaw.community.core.task.todos.errors import TodoStateConflictError
 from agentclaw.community.core.task.todos.models import TodoRecord
 from agentclaw.community.core.task.todos.stage_models import TodoStageStatus
@@ -33,67 +30,10 @@ class TodoStageService(TodoStageServiceProtocol):
     def __init__(
         self,
         repository: TodoRepositoryProtocol,
-        artifacts: TodoArtifactServiceProtocol,
         space_access: SpaceAccessServiceProtocol,
     ) -> None:
         self._repository = repository
-        self._artifacts = artifacts
         self._space_access = space_access
-
-    def report_bot_outcome(
-        self,
-        *,
-        todo_id: str,
-        stage_instance_id: str,
-        todo_execution_id: str,
-        execution_token: str,
-        outcome: TodoStageOutcomeKind | str,
-        summary: str,
-        blocker_reason: str | None = None,
-        requested_action: str | None = None,
-        idempotency_key: str | None = None,
-        result: dict[str, Any] | None = None,
-    ) -> TodoRecord:
-        execution = self._artifacts.authorize_execution(
-            todo_id=todo_id,
-            todo_execution_id=todo_execution_id,
-            execution_token=execution_token,
-        )
-        todo = self._repository.get_todo(todo_id=todo_id)
-        stage = self._find_stage(todo_id=todo_id, stage_instance_id=stage_instance_id)
-        if stage.stage_kind != "bot":
-            raise TodoStateConflictError("Only a Bot stage can accept a Bot outcome")
-        if execution.stage_instance_id != stage_instance_id:
-            raise TodoStateConflictError(
-                "Todo execution does not belong to the reported stage"
-            )
-        normalized = self._outcome(outcome)
-        if (
-            stage.status is TodoStageStatus.COMPLETED
-            and normalized is TodoStageOutcomeKind.COMPLETED
-            and idempotency_key
-            and stage.last_outcome_key == idempotency_key
-        ):
-            return todo
-        if todo.current_stage_instance_id != stage_instance_id:
-            raise TodoStateConflictError("Stage is not the current Todo stage")
-        if stage.status is not TodoStageStatus.IN_PROGRESS:
-            raise TodoStateConflictError("Only an active Bot stage can accept an outcome")
-        if normalized is TodoStageOutcomeKind.COMPLETED and not summary.strip():
-            raise TodoStateConflictError("completed stage outcome requires a summary")
-        return self._repository.apply_stage_outcome(
-            outcome=TodoStageOutcome(
-                todo_id=todo_id,
-                stage_instance_id=stage_instance_id,
-                outcome=normalized,
-                summary=summary,
-                execution_id=todo_execution_id,
-                idempotency_key=idempotency_key,
-                result=dict(result or {}),
-                blocker_reason=blocker_reason,
-                requested_action=requested_action,
-            )
-        )
 
     def complete_human_stage(
         self,
@@ -133,7 +73,7 @@ class TodoStageService(TodoStageServiceProtocol):
         if stage.status is not TodoStageStatus.IN_PROGRESS:
             raise TodoStateConflictError("Only an active Human stage can be completed")
         if not summary.strip():
-            raise TodoStateConflictError("completed stage outcome requires a summary")
+            raise TodoStateConflictError("completed Human stage requires a summary")
         return self._repository.apply_stage_outcome(
             outcome=TodoStageOutcome(
                 todo_id=todo_id,
@@ -195,10 +135,3 @@ class TodoStageService(TodoStageServiceProtocol):
             raise TodoStateConflictError(
                 "Todo operation requires its creator, current stage owner, or a Space admin"
             )
-
-    @staticmethod
-    def _outcome(value: TodoStageOutcomeKind | str) -> TodoStageOutcomeKind:
-        try:
-            return value if isinstance(value, TodoStageOutcomeKind) else TodoStageOutcomeKind(value)
-        except ValueError as exc:
-            raise TodoStateConflictError(f"Unsupported Todo stage outcome {value!r}") from exc
