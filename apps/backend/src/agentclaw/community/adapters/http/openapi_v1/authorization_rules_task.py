@@ -187,14 +187,80 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 
 #: Human self-service Todo workbench; Space and Bot scope are service-enforced.
 TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-template-capabilities",
+    ): NoCheck(
+        "read-only platform Todo template capabilities; no addressed bot"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/todo-templates"): NoCheck(
+        "Todo template creation is Space Admin-enforced in the service; no addressed bot"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todo-templates"): NoCheck(
+        "Todo template listing is Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}",
+    ): NoCheck(
+        "Todo template reads are Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): NoCheck(
+        "Todo template version reads are Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions",
+    ): NoCheck(
+        "Todo template draft creation is Space Admin-enforced in the service; no addressed bot"
+    ),
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): NoCheck(
+        "Todo template draft updates are Space Admin-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/validate",
+    ): NoCheck(
+        "Todo template validation is Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/publish",
+    ): NoCheck(
+        "Todo template publication is Space Admin-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/archive",
+    ): NoCheck(
+        "Todo template archival is Space Admin-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/activate",
+    ): NoCheck(
+        "Todo template activation is Space Admin-enforced in the service; no addressed bot"
+    ),
     ("GET", "/openapi/v1/collaboration/tasks/todos"): NoCheck(
         "Todo list is Space-scoped and service-enforced; no addressed bot"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/todos"): NoCheck(
         "Todo creation validates Space membership and Bot eligibility in the service"
     ),
+    ("POST", "/openapi/v1/collaboration/tasks/todos/from-template"): NoCheck(
+        "Templated Todo creation validates Space membership and template bindings in the service"
+    ),
     ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): NoCheck(
         "Todo detail derives the human actor and verifies the Todo Space in the service"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages"): NoCheck(
+        "stage timeline inherits the Todo Space membership check"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): NoCheck(
         "Todo start inherits Todo Space membership; B collaboration state is service-enforced"
@@ -217,5 +283,17 @@ TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance"): NoCheck(
         "human acceptance inherits Todo Space and pending-acceptance checks"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages/{stage_instance_id}/complete",
+    ): NoCheck(
+        "Human stage completion is authenticated and stage-owner/admin enforced by the Todo service"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/resume"): NoCheck(
+        "Todo resume is authenticated and creator/admin enforced by the Todo service"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/cancel"): NoCheck(
+        "Todo cancellation is authenticated and creator/admin enforced by the Todo service"
     ),
 }

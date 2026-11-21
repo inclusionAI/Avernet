@@ -284,6 +284,7 @@ provides:
   - TaskDiscoveryLockRepositoryProtocol
   - TaskArtifactRepositoryProtocol
   - TodoRepositoryProtocol
+  - TodoTemplateRepositoryProtocol
   - TodoArtifactRepositoryProtocol
   - TodoArtifactRepository
   # publishing
@@ -389,6 +390,7 @@ provides:
   - TaskDiscoveryLockRepository
   - TaskArtifactRepository
   - TodoRepository
+  - TodoTemplateRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
   - get_current_env               # environment scoping (utils.env_utils)
