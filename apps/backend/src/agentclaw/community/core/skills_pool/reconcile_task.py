@@ -126,7 +126,7 @@ class SkillsPoolReconcileTaskHandler:
             return Fail(f"invalid payload: {error}")
 
         try:
-            edit_lease = self._edits.acquire_for_edit(scope=scope)
+            edit_lease = self._edits.acquire_for_migration(scope=scope)
         except SkillsPoolEditPausedError:
             return Reschedule(SKILLS_POOL_LEASE_BUSY_DELAY_SECONDS)
         try:

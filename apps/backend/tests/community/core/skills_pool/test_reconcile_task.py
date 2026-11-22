@@ -590,7 +590,7 @@ def test_layout_reconcile_waits_for_an_inflight_local_package_edit() -> None:
     claims = FakeClaimService([MigrationClaimResult(MigrationClaimOutcome.CLAIMED, state)])
     runtime = FakeReconcileService([])
     edits = MagicMock()
-    edits.acquire_for_edit.side_effect = SkillsPoolEditBusyError()
+    edits.acquire_for_migration.side_effect = SkillsPoolEditBusyError()
     handler = SkillsPoolReconcileTaskHandler(
         claim_service=claims, layout_repository=FakeLayouts(state),
         reconcile_service=runtime, edit_guard=edits,

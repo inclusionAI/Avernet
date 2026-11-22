@@ -11,6 +11,8 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
+from unittest.mock import Mock
+
 import pytest
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
@@ -2622,6 +2624,8 @@ async def test_concurrent_same_name_uploads_serialize_then_converge_on_one_skill
         cache=_LockingCache(),
         layout_repository=_PoolLayouts(),
         participation_resolver=_Participation(),
+        binding_repository=Mock(),
+        skill_repository=repo,
     )
     package = _zip({"SKILL.md": _skill_md(description="concurrent")})
     first, second = await asyncio.gather(
