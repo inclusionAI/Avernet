@@ -7,8 +7,14 @@ import asyncio
 from agentclaw.community.core.apply_engine.capabilities import Category
 from agentclaw.community.core.apply_engine.outcomes import EntryOutcome, EntryResult
 from agentclaw.community.core.apply_engine.registry import (
+    CapabilityWriteError,
     CategoryWriteResult,
     ConfirmedPartialWriteError,
+)
+from agentclaw.community.core.ports.skill_package_upload_port import (
+    BatchSkillPackageUploadPort,
+    LocalSkillPackageReceipt,
+    PackagePublication,
 )
 from agentclaw.community.core.skill_center.errors import ApplyDesiredStateCommittedError
 from agentclaw.community.core.skill_center.skill_set_apply import ResolvedSkillSetWrite
@@ -74,6 +80,7 @@ async def write_capabilities(owner, ctx, plan):
     removals = set()
     prepared = {}
     uploaded = {}
+    package_receipts: tuple[LocalSkillPackageReceipt, ...] = ()
     scope = access_scope(ctx)
     all_skills = tuple(resolved.direct) + tuple(
         s for group in resolved.sets for s in group.skills
@@ -122,19 +129,40 @@ async def write_capabilities(owner, ctx, plan):
                 prepared[skill.key] = str(result["skill"]["id"])
             elif skill.package is None:
                 prepared[skill.key] = skill.skill_id
-        for skill in all_skills:
-            if skill.package is None or skill.key in prepared:
-                continue
-            upload = await owner._uploads.upload_local_skill(
-                **who, package=skill.package
+        local_packages = {
+            skill.key: (skill.name, skill.package)
+            for skill in all_skills
+            if skill.package is not None and skill.key not in prepared
+        }
+        if local_packages and ctx.defer_capability_projection:
+            if not isinstance(owner._uploads, BatchSkillPackageUploadPort):
+                raise TypeError("This capability delivery requires a device Local Skill batch port")
+            batch = await owner._uploads.upload_local_skill_batch(
+                **who, packages=tuple(local_packages.values()),
             )
-            # Upload alone can replace live contents; claim/UoW has not yet run.
-            confirmed = True
+            package_receipts = tuple(item.receipt for item in batch)
+            confirmed = any(
+                receipt.publication is PackagePublication.PUBLISHED
+                for receipt in package_receipts
+            )
+            if any(item.upload is None for item in batch):
+                raise CapabilityWriteError(
+                    "Local Skill package batch did not finish; later capability writes were skipped",
+                    local_skill_packages=package_receipts, confirmed_partial=confirmed,
+                )
+            uploads = [item.upload for item in batch]
+        else:
+            uploads = []
+            for _, package in local_packages.values():
+                uploads.append(await owner._uploads.upload_local_skill(**who, package=package))
+                confirmed = True
+        for key, upload in zip(local_packages, uploads, strict=True):
+            assert upload is not None
             operation = upload["operation"]
-            uploaded[skill.key] = EntryOutcome(
+            uploaded[key] = EntryOutcome(
                 "updated" if operation == "replaced" else operation
             )
-            prepared[skill.key] = str(upload["skill"]["id"])
+            prepared[key] = str(upload["skill"]["id"])
         if plan.set_write:
             result = await owner._sets.replace_apply_skill_sets(
                 scope=snapshot.scope,
@@ -298,8 +326,13 @@ async def write_capabilities(owner, ctx, plan):
                 if asset["name"] not in {skill.name for skill in resolved.final_skills}:
                     removals.add("skills/" + asset["name"])
     except Exception as exc:
-        if isinstance(exc, ConfirmedPartialWriteError):
+        if isinstance(exc, (ConfirmedPartialWriteError, CapabilityWriteError)):
             raise
+        if package_receipts:
+            raise CapabilityWriteError(
+                "Capability replacement stopped after publishing Local Skill packages",
+                local_skill_packages=package_receipts, confirmed_partial=confirmed,
+            ) from None
         if confirmed or isinstance(exc, ApplyDesiredStateCommittedError):
             raise ConfirmedPartialWriteError(
                 "Capability replacement stopped after a durable Bot write"
@@ -315,4 +348,4 @@ async def write_capabilities(owner, ctx, plan):
         results[k]
         for k in sorted(set(results) - {e.intent.identity for e in plan.entries})
     )
-    return CategoryWriteResult(ordered + extra, tuple(sorted(removals)))
+    return CategoryWriteResult(ordered + extra, tuple(sorted(removals)), package_receipts)

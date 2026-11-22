@@ -36,8 +36,10 @@ from agentclaw.community.core.apply_engine.outcomes import (
     SourceResolution,
     derive_status,
 )
+from agentclaw.community.core.ports.skill_package_upload_port import LocalSkillPackageReceipt
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CapabilityWriteError,
     ConfirmedPartialWriteError,
     Materialiser,
     ResolveFailure,
@@ -211,7 +213,10 @@ class ApplyOrchestrator:
                 cause=None,
                 reason=f"write failed: {exc}",
                 partially_written=True,
-                confirmed_partial=isinstance(exc, ConfirmedPartialWriteError),
+                confirmed_partial=isinstance(exc, ConfirmedPartialWriteError) or (
+                    isinstance(exc, CapabilityWriteError) and exc.confirmed_partial
+                ),
+                local_skill_packages=exc.local_skill_packages if isinstance(exc, CapabilityWriteError) else (),
             )
 
         return CategoryResult(
@@ -219,6 +224,7 @@ class ApplyOrchestrator:
             entries=written.entries,
             removals=written.removals,
             aborted=False,
+            local_skill_packages=written.local_skill_packages,
         )
 
     def _aborted(
@@ -230,6 +236,7 @@ class ApplyOrchestrator:
         reason: str | None,
         partially_written: bool = False,
         confirmed_partial: bool = False,
+        local_skill_packages: tuple[LocalSkillPackageReceipt, ...] = (),
     ) -> CategoryResult:
         """The category was not written. Report every entry, blame precisely.
 
@@ -265,6 +272,7 @@ class ApplyOrchestrator:
             aborted=True,
             partially_written=partially_written,
             confirmed_partial=confirmed_partial,
+            local_skill_packages=local_skill_packages,
         )
 
     def _projected(self, construct: ApplyConstruct, plan: CategoryPlan) -> CategoryResult:

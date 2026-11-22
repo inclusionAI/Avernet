@@ -29,6 +29,16 @@ CHAT_ENGINE=claude_code ENGINE_PROFILE=community python start.py --port 20003
 See the [file upload error contract](docs/file-upload-api.md) for the
 read-only filesystem response and compatibility guarantees.
 
+### Local Skill package publication
+
+An Engine advertising `skills.local_package.parallel_targets.v1` allows
+overlapping `POST /api/skills/local/apply` requests to distinct Skill names in
+the same Bot layout. Publication and rollback operate within each target.
+Callers still serialize writes to a single target and coordinate layout
+changes. The capability does not provide remote fencing for a timed-out
+request. An Engine exposing only `skills.local_package.apply.v1` supports
+whole-package publication without advertising that concurrency contract.
+
 ## Layout
 
 ```

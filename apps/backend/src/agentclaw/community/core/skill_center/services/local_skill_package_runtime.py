@@ -7,6 +7,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from agentclaw.community.core.devices.services.device_context import DeviceContext
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -14,6 +15,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
     LocalSkillEditLockUnavailableError,
     LocalSkillInvalidPackageError,
+    LocalSkillPackageOutcomeUnknownError,
     LocalSkillRuntimeUnavailableError,
     LocalSkillTooLargeError,
 )
@@ -24,6 +26,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 )
 
 _CAPABILITY = "skills.local_package.apply.v1"
+_PARALLEL_TARGETS = "skills.local_package.parallel_targets.v1"
 _STANDARD_PATH = "/api/skills/local/apply"
 _TECLAW_PATH = "/api/v1/file/skill-package"
 
@@ -34,6 +37,18 @@ class LocalSkillPackageRuntimeResult:
     action: str
     content_digest: str
     target_path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSkillPackageDestination:
+    context: DeviceContext
+    supports_package_apply: bool
+    supports_parallel_targets: bool
+
+    @property
+    def is_teclaw(self) -> bool:
+        return self.context.provider == "teclaw"
+
 
 
 class LocalSkillPackageRuntime:
@@ -56,17 +71,37 @@ class LocalSkillPackageRuntime:
         layout: str,
         package: bytes,
     ) -> LocalSkillPackageRuntimeResult | None:
+        destination = await self.destination(bot_id=bot_id, owner_id=owner_id)
+        if not destination.supports_package_apply:
+            return None
+        return await self.publish(
+            destination.context, bot_id=bot_id, skill_name=skill_name,
+            layout=layout, package=package,
+        )
+
+    async def resolve(self, *, bot_id: str, owner_id: str) -> DeviceContext:
         try:
-            context = await asyncio.to_thread(
+            return await asyncio.to_thread(
                 self._resolver.resolve_for_bot, bot_id, owner_id
             )
         except Exception as exc:
             raise LocalSkillRuntimeUnavailableError() from exc
 
-        is_teclaw = context.provider == "teclaw"
-        if not is_teclaw and not await self._supports_package_apply(context.conn_info):
-            return None
+    async def destination(self, *, bot_id: str, owner_id: str) -> LocalSkillPackageDestination:
+        context = await self.resolve(bot_id=bot_id, owner_id=owner_id)
+        if context.provider == "teclaw":
+            return LocalSkillPackageDestination(context, True, False)
+        capabilities = await self._capabilities(context.conn_info)
+        whole_package = _CAPABILITY in capabilities
+        return LocalSkillPackageDestination(
+            context, whole_package, whole_package and _PARALLEL_TARGETS in capabilities
+        )
 
+    async def publish(
+        self, context: DeviceContext, *, bot_id: str, skill_name: str,
+        layout: str, package: bytes,
+    ) -> LocalSkillPackageRuntimeResult:
+        is_teclaw = context.provider == "teclaw"
         path = _TECLAW_PATH if is_teclaw else _STANDARD_PATH
         data = (
             {"skills_name": skill_name}
@@ -84,11 +119,11 @@ class LocalSkillPackageRuntime:
             )
         except DeviceAdapterHTTPStatusError as exc:
             self._raise_known_failure(exc)
-            raise LocalSkillRuntimeUnavailableError() from exc
+            raise LocalSkillPackageOutcomeUnknownError() from exc
         except Exception as exc:
             # The request may already have committed. Never retry through the
             # legacy per-file protocol after this point.
-            raise LocalSkillRuntimeUnavailableError() from exc
+            raise LocalSkillPackageOutcomeUnknownError() from exc
         return self._normalise_result(
             raw,
             skill_name=skill_name,
@@ -96,7 +131,7 @@ class LocalSkillPackageRuntime:
             is_teclaw=is_teclaw,
         )
 
-    async def _supports_package_apply(self, conn_info: dict) -> bool:
+    async def _capabilities(self, conn_info: dict) -> frozenset[str]:
         try:
             raw = await self._transport.invoke(
                 conn_info,
@@ -114,7 +149,7 @@ class LocalSkillPackageRuntime:
                 health.get("status") == "ok" or health.get("ok") is True
             ):
                 raise LocalSkillRuntimeUnavailableError()
-            return False
+            return frozenset()
         except Exception as exc:
             raise LocalSkillRuntimeUnavailableError() from exc
         if not isinstance(raw, dict) or raw.get("success") is not True:
@@ -122,13 +157,15 @@ class LocalSkillPackageRuntime:
         data = raw.get("data")
         if not isinstance(data, dict) or not isinstance(data.get("supported"), list):
             raise LocalSkillRuntimeUnavailableError()
-        return _CAPABILITY in data["supported"]
+        return frozenset(item for item in data["supported"] if isinstance(item, str))
 
     @staticmethod
     def _raise_known_failure(exc: DeviceAdapterHTTPStatusError) -> None:
         try:
             payload = json.loads(exc.response_text)
         except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
             payload = {}
         error = payload.get("error") or payload.get("error_code")
         if error is None and isinstance(payload.get("detail"), dict):
@@ -153,10 +190,10 @@ class LocalSkillPackageRuntime:
         is_teclaw: bool,
     ) -> LocalSkillPackageRuntimeResult:
         if not isinstance(raw, dict) or raw.get("success") is not True:
-            raise LocalSkillRuntimeUnavailableError()
+            raise LocalSkillPackageOutcomeUnknownError()
         payload = raw if is_teclaw else raw.get("data")
         if not isinstance(payload, dict):
-            raise LocalSkillRuntimeUnavailableError()
+            raise LocalSkillPackageOutcomeUnknownError()
         digest = payload.get("sha256") if is_teclaw else payload.get("content_digest")
         if is_teclaw and isinstance(digest, str):
             digest = f"sha256:{digest.lower()}"
@@ -166,7 +203,7 @@ class LocalSkillPackageRuntime:
             or action not in {"created", "replaced", "unchanged"}
             or digest != expected_digest
         ):
-            raise LocalSkillRuntimeUnavailableError()
+            raise LocalSkillPackageOutcomeUnknownError()
         target_path = payload.get("target_path")
         return LocalSkillPackageRuntimeResult(
             skill_name=skill_name,
@@ -176,4 +213,6 @@ class LocalSkillPackageRuntime:
         )
 
 
-__all__ = ["LocalSkillPackageRuntime", "LocalSkillPackageRuntimeResult"]
+__all__ = [
+    "LocalSkillPackageDestination", "LocalSkillPackageRuntime", "LocalSkillPackageRuntimeResult",
+]

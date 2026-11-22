@@ -6,6 +6,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Optional, Protocol, runtime_checkable
 
 
+from agentclaw.community.core.ports.skill_package_upload_port import LocalSkillPackageWriteResult
+
+
 @runtime_checkable
 class LocalSkillUploadServiceProtocol(Protocol):
     """Create or safely replace one Bot-owned Local Skill from a complete package."""
@@ -30,6 +33,11 @@ class LocalSkillUploadServiceProtocol(Protocol):
         ``LocalSkillPackageRuntime`` (file-sync already wrote the package).
         """
         ...
+
+    async def upload_local_skill_batch(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        packages: Sequence[tuple[str, bytes]],
+    ) -> tuple[LocalSkillPackageWriteResult, ...]: ...
 
     async def upload_local_skill_files(
         self,

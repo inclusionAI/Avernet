@@ -65,6 +65,9 @@ class _Skills:
         self.delete_error = delete_error
         self.deleted = False
 
+    def has_pending_local_skill_dispatch(self, **_kwargs):
+        return False
+
     def get_by_id(self, skill_id):
         if skill_id != "9" or self.deleted:
             return None
