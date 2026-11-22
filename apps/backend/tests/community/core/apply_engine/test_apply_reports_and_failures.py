@@ -83,6 +83,47 @@ def test_the_report_payload_names_every_field_it_emits():
     }
 
 
+def test_finalized_apply_keeps_its_write_result_when_runtime_is_pending():
+    from agentclaw.community.adapters.http.openapi_v1.bots.config_manifest_support import (
+        apply_payload,
+    )
+    from agentclaw.community.core.apply_engine.outcomes import ApplyReport
+    from agentclaw.community.core.apply_engine.run.report_codec import report_from_payload
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        RuntimeProjectionResult,
+    )
+
+    finished = datetime.now()
+    record = SimpleNamespace(
+        apply_id="apply-1",
+        bot_id="bot-1",
+        trigger="explicit",
+        started_at=finished,
+        finished_at=finished,
+    )
+    report = ApplyReport(
+        **vars(record),
+        status=ApplyStatus.PARTIAL,
+        runtime_projection=RuntimeProjectionResult.pending(
+            code="MCP_RUNTIME_UNAVAILABLE", reason="MCP configuration is pending"
+        ),
+        runtime_projection_revision="bot-generation/5",
+    )
+
+    decoded = report_from_payload(
+        report.as_payload(), record=record, status=ApplyStatus.PARTIAL
+    )
+    body = apply_payload(decoded).model_dump()
+    assert decoded.runtime_projection_revision == "bot-generation/5"
+    assert body["result"] == "PARTIAL"
+    assert body["runtime_projection"]["status"] == "PENDING"
+    assert body["runtime_projection"]["issues"][0]["code"] == "MCP_RUNTIME_UNAVAILABLE"
+    assert "runtime_projection_revision" not in body
+
+    previous = report_from_payload({}, record=record, status=ApplyStatus.SUCCEEDED)
+    assert "runtime_projection" not in apply_payload(previous).model_dump()
+
+
 def test_a_stored_source_mode_outside_the_enum_reads_as_no_opinion_and_the_rest_decodes():
     """The one lenient field of the codec, pinned.
 

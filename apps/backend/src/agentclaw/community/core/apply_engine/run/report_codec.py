@@ -30,6 +30,9 @@ from agentclaw.community.core.apply_engine.capabilities import (
     Section,
     parse_category,
 )
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    RuntimeProjectionResult,
+)
 
 
 logger = get_logger()
@@ -83,6 +86,7 @@ def report_from_payload(
                 partially_written=bool(category.get("partially_written")),
             )
         )
+    projection = payload.get("runtime_projection")
     return ApplyReport(
         apply_id=record.apply_id,
         bot_id=record.bot_id,
@@ -105,6 +109,10 @@ def report_from_payload(
             for source in payload.get("sources") or []
         ),
         notes=tuple(str(note) for note in payload.get("notes") or ()),
+        runtime_projection=(
+            RuntimeProjectionResult.from_dict(projection) if projection is not None else None
+        ),
+        runtime_projection_revision=payload.get("runtime_projection_revision"),
     )
 
 
