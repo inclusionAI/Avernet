@@ -295,3 +295,28 @@ async def test_verified_friend_keeps_requested_runtime_for_target_authorization(
     assert await service.get_iam_token(**request) is caller.outcome
     assert caller.requests == [request]
     assert [ctx.friend_user_id for ctx in pipeline.contexts] == ["friend-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_target", ["service", "caller_instance", "invalid"])
+async def test_legacy_iam_route_ignores_removed_runtime_target(legacy_target):
+    from httpx import ASGITransport, AsyncClient
+    from tests.community.api.test_dingtalk_iam_token import _app
+
+    service, caller, pipeline = _service(_Auth())
+    app = _app(service)
+    parameters = app.openapi()["paths"]["/api/v1/token/iam"]["get"]["parameters"]
+    assert "caller_runtime_target" not in {parameter["name"] for parameter in parameters}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/v1/token/iam", params={
+            "bot_id": "bot-1", "entity_id": "resource-E", "stage": "draft",
+            "caller_runtime_target": legacy_target,
+        })
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "iam_token": caller.outcome.iam_token}
+    assert len(caller.requests) == 1
+    assert "caller_runtime_target" not in caller.requests[0]
+    context, = pipeline.contexts
+    assert context.stage == "draft"
+    assert context.friend_user_id is None
+    assert not hasattr(context, "caller_runtime_target")
