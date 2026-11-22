@@ -225,6 +225,33 @@ class CapabilityProjectionReconciler:
         device_delivery: bool = True,
     ) -> RuntimeProjectionResult:
         await lease.verify()
+        # Keep the lease until the worker has returned and recorded its
+        # receipt, even if the request handler has already been cancelled.
+        delivery = asyncio.gather(
+            self._dispatch_and_record(
+                state, lease, deliver=deliver, mcp_only=mcp_only, device_delivery=device_delivery,
+            ),
+            return_exceptions=True,
+        )
+        cancellation = None
+        while not delivery.done():
+            try:
+                await asyncio.shield(delivery)
+            except asyncio.CancelledError as exc:
+                if cancellation is None:
+                    cancellation = exc
+        if cancellation is not None:
+            raise cancellation
+        (receipt,) = delivery.result()
+        if isinstance(receipt, BaseException):
+            raise receipt
+        return receipt
+
+    async def _dispatch_and_record(
+        self, state: CapabilityProjectionState, lease: CapabilityDeliveryLease, *,
+        deliver: Callable[[], Awaitable[RuntimeProjectionResult]],
+        mcp_only: bool, device_delivery: bool,
+    ) -> RuntimeProjectionResult:
         if not await asyncio.to_thread(self._repository.begin, state, device_delivery=device_delivery):
             return RuntimeProjectionResult.pending(
                 code="CAPABILITY_PROJECTION_CHANGED",

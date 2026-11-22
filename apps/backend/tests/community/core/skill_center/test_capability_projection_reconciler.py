@@ -483,3 +483,97 @@ async def test_passport_checks_write_authority_after_slow_preparation(tmp_path, 
     assert state.retry_pending and state.scope.passport
     assert not state.write_blocked
     assert (state.revision == revision) is (superseded_by == "lease")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_device_delivery", [False, True])
+async def test_cancelled_passport_writer_keeps_lease_until_update_and_receipt_finish(
+    tmp_path, with_device_delivery,
+):
+    import threading
+
+    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
+        CapabilityProjectionReconciler,
+    )
+    from tests.community.core.skill_center._test_skill_set_management_service_support import (
+        _RuntimeFactory, _RuntimePassport,
+    )
+
+    updating = threading.Event()
+    resume = threading.Event()
+    completed = []
+
+    class Passport(_RuntimePassport):
+        def update_passport(self, **kwargs):
+            super().update_passport(**kwargs)
+            if len(self.calls) == 1:
+                raise RuntimeError("initial Passport update did not succeed")
+            if len(self.calls) == 2:
+                updating.set()
+                resume.wait(4)
+                completed.append("old update")
+            else:
+                completed.append("new update")
+
+    class Cache(MemoryCachePlugin):
+        def __init__(self):
+            super().__init__()
+            self.watch_competitor = False
+            self.competitor_attempts = 0
+            self.competitor_checked = threading.Event()
+
+        def acquire_lock_strict(self, lock_key, ttl=30):
+            token = super().acquire_lock_strict(lock_key, ttl=ttl)
+            if self.watch_competitor:
+                self.competitor_attempts += 1
+                if token is not None or self.competitor_attempts >= 2:
+                    self.competitor_checked.set()
+            return token
+
+    passport = Passport()
+    cache = Cache()
+    address, repository, incumbent = _teclaw_reconciler(
+        tmp_path, factory=_RuntimeFactory(), passport=passport, cache=cache,
+    )
+    await incumbent.finish_apply(**address, initialize=True)
+    assert repository.read(**address).scope == ProjectionScope(passport=True)
+    if with_device_delivery:
+        repository.require(**address, scope=ProjectionScope(mcp=True))
+    old_revision = repository.read(**address).revision
+    original_complete = repository.complete
+
+    def record_receipt(state, result, **kwargs):
+        recorded = original_complete(state, result, **kwargs)
+        if state.revision == old_revision:
+            completed.append("old receipt")
+        return recorded
+
+    repository.complete = record_receipt
+    contender = CapabilityProjectionReconciler(
+        repository=repository, projector=incumbent._projector, guard=CapabilityDeliveryGuard(cache),
+        bots=incumbent._bots, defer_enabled=True,
+    )
+    old = asyncio.create_task(incumbent.reconcile(**address))
+    try:
+        assert await asyncio.to_thread(updating.wait, 2)
+        old.cancel("request disconnected")
+        repository.require(**address, scope=ProjectionScope(mcp=True))
+        cache.watch_competitor = True
+        next_attempt = asyncio.create_task(contender.reconcile(**address))
+        assert await asyncio.to_thread(cache.competitor_checked.wait, 2)
+        pending_during_cancel = not old.done() and not next_attempt.done()
+        writes_during_cancel = list(completed)
+        old.cancel("request cancelled again")
+        await asyncio.sleep(0)
+    finally:
+        resume.set()
+
+    with pytest.raises(asyncio.CancelledError, match="request disconnected"):
+        await old
+    result = await next_attempt
+
+    assert pending_during_cancel
+    assert writes_during_cancel == []
+    assert completed == ["old update", "old receipt", "new update"]
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert not repository.read(**address).write_blocked
