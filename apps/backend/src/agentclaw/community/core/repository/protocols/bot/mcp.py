@@ -95,12 +95,12 @@ class ScopedMCPConfigRepositoryProtocol(Protocol):
         user_url: str | None = None,
         bot_urls: dict[str, str] | None = None,
         create_projection: bool | None = None,
-        projection_consumers: frozenset[str] = frozenset(),
-    ) -> dict[str, str]:
-        """Replace rules and return Bot IDs and entities whose projection is tracked.
+    ) -> dict[str, str | None]:
+        """Replace rules and return current consumers selected under the Bot lock.
 
-        Projection policy is unset for persistence-only callers, false to
-        track existing obligations, and true to enroll known consumers.
+        A consumer's value is its entity ID when the projection is tracked.
+        Persistence-only callers omit the policy. False retains existing
+        obligations, and true also enrolls current consumers.
         """
         ...
 

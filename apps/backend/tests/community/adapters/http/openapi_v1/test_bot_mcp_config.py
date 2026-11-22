@@ -260,6 +260,7 @@ def test_clear_is_saved_even_when_catalog_lookup_for_projection_fails(mcp):
 def test_tracked_effective_override_delivers_explicit_url_without_catalogue(mcp, tmp_path):
     from agentclaw.community.core.devices.services.mcp_device_payload import convert_to_device_format
     from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+    from agentclaw.community.core.models.mcp import BotMCPInstallation
     from agentclaw.community.core.repository.implementations.bot.bot import BotRepository as PersistentBots
     from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import BotMCPConfigRepository
     from agentclaw.community.core.repository.implementations.bot.scoped_mcp_config import ScopedMCPConfigRepository
@@ -280,6 +281,9 @@ def test_tracked_effective_override_delivers_explicit_url_without_catalogue(mcp,
         session.add(BotModel(
             id=42, bot_id="shared", entity_id="entity-1", owner_id="owner",
             creator_id="owner", entity_type="staff", env="dev", status="ACTIVE",
+        ))
+        session.add(BotMCPInstallation(
+            bot_id="shared", owner_id="entity-1", server_code="weather", env="dev",
         ))
     address = {"bot_id": "shared", "entity_id": "entity-1"}
     repository = CapabilityProjectionRepository(db)

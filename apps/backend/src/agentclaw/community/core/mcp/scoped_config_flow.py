@@ -302,12 +302,9 @@ async def write_scoped_config(
 
     projection_options = (
         {} if capability_projection is None
-        else {
-            "create_projection": capability_projection.defer_enabled,
-            "projection_consumers": frozenset(consumers),
-        }
+        else {"create_projection": capability_projection.defer_enabled}
     )
-    tracked = command_repo.replace(
+    applicable = command_repo.replace(
         user_id=user_id,
         server_code=server_code,
         headers=user_headers,
@@ -320,8 +317,17 @@ async def write_scoped_config(
         **projection_options,
     )
 
-    tracked_consumers = set(consumers).intersection(tracked or {})
-    consumers = [bot_id for bot_id in consumers if bot_id not in tracked_consumers]
+    tracked_consumers: dict[str, str] = {}
+    if capability_projection is not None:
+        preflight_consumers = set(consumers)
+        tracked_consumers = {
+            bot_id: entity_id
+            for bot_id, entity_id in applicable.items()
+            if bot_id in preflight_consumers and entity_id is not None
+        }
+        consumers = [
+            bot_id for bot_id in consumers if bot_id in applicable and bot_id not in tracked_consumers
+        ]
     sync_results: tuple[dict[str, Any], ...] = ()
     sync_summary = _projection_summary(sync_results)
     if consumers:
@@ -349,7 +355,7 @@ async def write_scoped_config(
             )
             sync_summary = _projection_summary(sync_results)
 
-    if tracked and capability_projection is not None:
+    if tracked_consumers and capability_projection is not None:
         scope = ProjectionScope(mcp=True, updated_mcp=frozenset({server_code}))
 
         async def unavailable() -> RuntimeProjectionResult:
@@ -359,7 +365,7 @@ async def write_scoped_config(
         for bot_id in sorted(tracked_consumers):
             try:
                 projection = await capability_projection.project_competing_change(
-                    bot_id=bot_id, owner_id=user_id, entity_id=tracked[bot_id],
+                    bot_id=bot_id, owner_id=user_id, entity_id=tracked_consumers[bot_id],
                     scope=scope, retired_mappings=(), legacy=unavailable,
                 )
                 synced = projection.status is RuntimeProjectionStatus.CONVERGED
@@ -495,17 +501,17 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
 
         projection_options = {}
         if self._capability_projection is not None:
-            create_projection = False
-            if self._capability_projection.defer_enabled:
+            create_projection = self._capability_projection.defer_enabled
+            if create_projection:
                 try:
-                    effective = await asyncio.to_thread(
+                    # Materialize legacy Installation sources before taking
+                    # the write lock. The repository re-reads current supply.
+                    await asyncio.to_thread(
                         self._capability_reader.effective_mcp_server_codes,
                         bot_id=bot.bot_id, owner_id=bot.current_owner_id, bot=bot.bot,
                     )
-                    create_projection = server_code in effective
                 except Exception:
-                    # Config persistence is independent of a live projection read.
-                    # Existing obligations are still updated in the write transaction.
+                    # Existing Installation facts still govern the write.
                     pass
             projection_options["create_projection"] = create_projection
         config, changed = await asyncio.to_thread(

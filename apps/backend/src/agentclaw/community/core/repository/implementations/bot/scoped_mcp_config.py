@@ -7,8 +7,15 @@ from typing import Any
 
 from injector import inject
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from agentclaw.community.core.models.mcp import UserMCPConfig
+from agentclaw.community.core.models.skill import Skill
+from agentclaw.community.core.repository.implementations.bot.template import find_template
+from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
+    skill_projection_mcp_dependency_codes,
+)
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import platform_default_mcp_codes
 from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import _begin_sqlite_write
 from agentclaw.community.core.repository.implementations.skill_center.capability_projection import record_capability_projection
 from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
@@ -21,6 +28,9 @@ from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.repository.implementations.bot import mcp_config_reads
 from agentclaw.community.core.repository.implementations.skill_center.tables import (
     bot_mcp_configs,
+    default_exclusions,
+    mcp_installations,
+    skill_installations,
 )
 from agentclaw.community.core.repository.protocols.bot.mcp import (
     ScopedMCPConfigRepositoryProtocol,
@@ -35,6 +45,35 @@ def _json_object(value: str | None) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("MCP config JSON must be an object")
     return parsed
+
+
+def _supplies_mcp(session: Session, bot: BotModel, server_code: str) -> bool:
+    """Read the active Installations and platform defaults under the Bot lock."""
+    bot_id, entity_id, env = str(bot.bot_id), str(bot.entity_id), str(bot.env)
+    scope = dict(bot_id=bot_id, owner_id=entity_id, env=env)
+    if server_code in mcp_installations.installed_codes(session, **scope, locked=True):
+        return True
+    template = find_template(session, bot_id, lock=True)
+    ext_info = {"template_config": template.to_dict().get("ext")} if template else None
+    if server_code in platform_default_mcp_codes(bot.to_dict(), ext_info=ext_info):
+        if not default_exclusions.lock_mcp_exclusions(
+            session, bot_id=bot_id, owner_id=entity_id, server_code=server_code,
+        ):
+            return True
+    skill_ids = skill_installations.installed_ids(session, **scope, locked=True)
+    if not skill_ids:
+        return False
+    skills = (
+        session.query(Skill)
+        .filter(
+            Skill.id.in_(sorted(skill_ids)), Skill.env == env,
+            Skill.avernet_tenant == bot.avernet_tenant, Skill.git_path != "",
+        )
+        .order_by(Skill.id)
+        .with_for_update()
+        .all()
+    )
+    return any(server_code in skill_projection_mcp_dependency_codes(session, skill) for skill in skills)
 
 
 class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
@@ -57,8 +96,7 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
         user_url: str | None = None,
         bot_urls: dict[str, str] | None = None,
         create_projection: bool | None = None,
-        projection_consumers: frozenset[str] = frozenset(),
-    ) -> dict[str, str]:
+    ) -> dict[str, str | None]:
         if not bot_headers.keys() <= owned_bot_ids:
             raise ValueError("Bot Header scope contains a Bot not owned by the user")
         if bot_urls is not None and not bot_urls.keys() <= owned_bot_ids:
@@ -148,20 +186,22 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                     env=env,
                 )
 
-            projected: dict[str, str] = {}
+            applicable: dict[str, str | None] = {}
             if create_projection is not None:
-                # Inherited settings can change every owned Bot's effective
-                # projection, including one installed after the caller's
-                # consumer preflight. Reconciliation re-reads current supply.
+                # The caller materialized legacy supply during preflight. Re-read
+                # Installation after locking the Bot, so a recently committed
+                # capability edit participates in this same transaction.
                 scope = ProjectionScope(mcp=True, updated_mcp=frozenset({server_code}))
-                for bot_id, entity_id in resources.items():
+                for bot in bots:
+                    if not _supplies_mcp(session, bot, server_code):
+                        continue
+                    bot_id, entity_id = str(bot.bot_id), str(bot.entity_id)
                     state = record_capability_projection(
                         session, bot_id=bot_id, entity_id=entity_id,
-                        scope=scope, create=create_projection and bot_id in projection_consumers,
+                        scope=scope, create=create_projection,
                     )
-                    if state is not None:
-                        projected[bot_id] = entity_id
-            return projected
+                    applicable[bot_id] = entity_id if state is not None else None
+            return applicable
 
     def patch_bot(
         self, *, bot_pk: int, bot_id: str, entity_id: str, current_owner_id: str,
@@ -216,7 +256,7 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                         session, bot_id=bot_id, owner_id=entity_id, env=env,
                         server_code=server_code, config=config or None,
                     )
-                    if create_projection is not None:
+                    if create_projection is not None and _supplies_mcp(session, bot, server_code):
                         record_capability_projection(
                             session, bot_id=bot_id, entity_id=entity_id,
                             scope=ProjectionScope(mcp=True, updated_mcp=frozenset({server_code})),
