@@ -198,8 +198,13 @@ def stage_of(nodes: list[dict]) -> str:
     return "vote" if "tally" in ids else "speak" if "collect" in ids else "other"
 
 
-def pick_victim(nodes: list[dict], players: set[str]) -> str | None:
-    """A player Bot whose Node is still pending, so its dispatch fails immediately."""
+def pick_victim(
+    nodes: list[dict],
+    players: set[str],
+    ports: dict[str, int],
+    requested_victim: str | None,
+) -> str | None:
+    """Choose a pending player whose gateway is healthy before injecting a kill."""
     if stage_of(nodes) == "vote":
         starter = next((n for n in nodes if n["node_id"] == "vote_start"), None)
         if not starter or starter["status"] != "running":
@@ -208,7 +213,13 @@ def pick_victim(nodes: list[dict], players: set[str]) -> str | None:
     else:
         excluded = {n["assignee"] for n in nodes if n["status"] in ("running", "completed")}
     candidates = sorted({n["assignee"] for n in nodes if n["status"] == "pending" and n["assignee"] in players} - excluded)
-    return random.choice(candidates) if candidates else None
+    if requested_victim:
+        candidates = [name for name in candidates if name == requested_victim]
+    healthy = [name for name in candidates if listening_pid(ports[name]) is not None]
+    if candidates and not healthy:
+        unavailable = ", ".join(f"{name}:{ports[name]}" for name in candidates)
+        log(f"pending player gateways unavailable; waiting before injection: {unavailable}")
+    return random.choice(healthy) if healthy else None
 
 
 def play_human(bcs: Bcs, run_id: str, answered: set[str]) -> None:
@@ -240,6 +251,7 @@ def main() -> None:
     parser.add_argument("--stages", default="speak,vote", help="comma-separated stages to inject into")
     parser.add_argument("--out", type=Path, default=Path("fault-injection.csv"))
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--victim", help="optional player Bot name; unavailable gateways are never killed")
     args = parser.parse_args()
     random.seed(args.seed)
 
@@ -281,7 +293,7 @@ def main() -> None:
         if current is None and active and active["run_id"] not in injected_runs and not reopened:
             nodes = runs.nodes(active["run_id"])
             stage = stage_of(nodes)
-            victim = pick_victim(nodes, set(players)) if stage in stages else None
+            victim = pick_victim(nodes, set(players), ports, args.victim) if stage in stages else None
             if victim:
                 gateway = Gateway.kill(victim, profiles[victim], ports[victim], log_dir)
                 injected_runs.add(active["run_id"])
