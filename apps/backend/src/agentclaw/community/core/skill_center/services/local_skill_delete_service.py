@@ -14,6 +14,11 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 from agentclaw.community.core.bot_management.addressing import BotAddressResolver, stable_resource_owner_id
 from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceContext,
+    RuntimeBindingTarget,
+    expect_runtime_binding,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
@@ -105,34 +110,38 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                 raise LocalSkillNotReadyError()
             self._skill_repo.require_unreferenced_for_delete(skill_id)
             locator = str(skill["git_path"])[len("local://") :]
-            is_teclaw = self._is_teclaw(
+            context = self._device_context(
                 bot_id=bot_id, owner_id=resolved_owner_id, name=str(skill["name"]),
             )
-            package = self._package_for_locator(
-                bot=bot,
-                owner_id=resolved_owner_id,
-                bot_id=bot_id,
-                is_teclaw=is_teclaw,
-                locator=locator,
-                skill_name=str(skill["name"]),
+            binding = RuntimeBindingTarget(
+                bot_id, str(bot["owner_id"]), resolved_owner_id, context.binding_id, context.device_id,
             )
-            try:
-                package_exists = await package.exists()
-                package_deleted = await package.delete() if package_exists else True
-            except Exception as exc:
-                raise LocalSkillStorageError() from exc
-            if not package_deleted:
-                raise LocalSkillStorageError()
-            try:
-                deleted = self._skill_repo.delete_bot_local_skill(
-                    skill_id=skill_id,
-                    owner_id=owner_id,
+            with expect_runtime_binding(binding):
+                package = self._package_for_locator(
+                    bot=bot,
+                    owner_id=resolved_owner_id,
                     bot_id=bot_id,
+                    is_teclaw=context.provider == "teclaw",
+                    locator=locator,
+                    skill_name=str(skill["name"]),
                 )
-                if not deleted:
-                    raise RuntimeError("Local Skill record disappeared during deletion")
-            except Exception as exc:
-                raise LocalSkillStorageError() from exc
+                try:
+                    package_exists = await package.exists()
+                    package_deleted = await package.delete() if package_exists else True
+                except Exception as exc:
+                    raise LocalSkillStorageError() from exc
+                if not package_deleted:
+                    raise LocalSkillStorageError()
+                try:
+                    deleted = self._skill_repo.delete_bot_local_skill(
+                        skill_id=skill_id,
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                    )
+                    if not deleted:
+                        raise RuntimeError("Local Skill record disappeared during deletion")
+                except Exception as exc:
+                    raise LocalSkillStorageError() from exc
             if self._security_observation_enabled:
                 try:
                     self._security_hook_provider().record_deletion(
@@ -173,7 +182,7 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
         except Exception as exc:
             raise LocalSkillStorageError() from exc
 
-    def _is_teclaw(self, *, bot_id: str, owner_id: str, name: str) -> bool:
+    def _device_context(self, *, bot_id: str, owner_id: str, name: str) -> DeviceContext:
         try:
             context = self._device_context_resolver_provider().resolve_for_bot(
                 bot_id, owner_id
@@ -184,7 +193,7 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
             bot_id=bot_id, entity_id=owner_id, name=name, device_id=context.device_id,
         ):
             raise LocalSkillPackageDispatchPendingError()
-        return context.provider == "teclaw"
+        return context
 
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:
         if not skill_id.isdecimal():

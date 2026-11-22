@@ -220,7 +220,7 @@ def _service(
         _Factory(files),
         guard,
         lambda: SimpleNamespace(
-            resolve_for_bot=lambda *_args: SimpleNamespace(provider=provider, device_id=None)
+            resolve_for_bot=lambda *_args: SimpleNamespace(provider=provider, binding_id=1, device_id=None)
         ),
         lambda: security_hook or SimpleNamespace(record_deletion=lambda **_kwargs: None),
         security_enabled,
@@ -531,3 +531,21 @@ async def test_lock_rereads_active_state_before_any_package_mutation():
         )
 
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
+
+
+@pytest.mark.asyncio
+async def test_manual_delete_rejects_a_different_binding_at_dispatch():
+    from agentclaw.community.core.devices.services.device_context import verify_runtime_binding
+
+    service, files, skills, _ = _service()
+
+    def select_rebound_storage(**kwargs):
+        verify_runtime_binding(
+            bot_id=kwargs["bot_id"], user_id=kwargs["owner_id"],
+            binding_id=2, device_id="next-device",
+        )
+        pytest.fail("Manual deletion reached a different Runtime")
+
+    service._skill_service_factory.local_skill_package_storage_for_locator = select_rebound_storage
+    with pytest.raises(LocalSkillStorageError):
+        await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")

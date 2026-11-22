@@ -9,34 +9,11 @@ from uuid import uuid4
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
-from agentclaw.community.core.devices.services.device_context import (
-    RuntimeBindingChangedError,
-    expected_runtime_binding,
-    verify_runtime_binding,
-)
 from agentclaw.community.core.models.local_skill_package_dispatch import LocalSkillPackageDispatch
 from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import require_locked_capability_bot
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
-
-
-def verify_local_skill_metadata_binding(
-    session: Session, *, bot_id: str, entity_id: str,
-) -> None:
-    expected = expected_runtime_binding(bot_id, entity_id)
-    if expected is None:
-        return
-    bot = require_locked_capability_bot(session, bot_id=bot_id, entity_id=entity_id)
-    binding = session.query(EntityDeviceBinding).filter_by(
-        id=bot.binding_id, env=bot.env,
-    ).with_for_update().one_or_none()
-    if binding is None:
-        raise RuntimeBindingChangedError("Bot Runtime binding changed before metadata commit")
-    verify_runtime_binding(
-        bot_id=bot_id, user_id=entity_id, binding_id=binding.id, device_id=binding.device_id,
-    )
 
 
 class LocalSkillPackageDispatches:

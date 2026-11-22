@@ -124,5 +124,6 @@ consumed_by:
   - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through these ports; the four implementations are apply/activation_delegates.py, apply/skill_package_upload.py and managed_files/ports.py"
   - "core/apply_engine (skills materialiser) — SharedSkillPort turns a desired Center or repository skill into the skill id it claims Direct"
   - "core/apply_engine (BOT_FILE_SYNC materialiser) — lifts the destination bot's coords into a BotFileSyncTarget and calls BotFileSyncPort.sync; the noop stand-in is apply/materialisers/bot_file_sync_noop.py"
-internal_dependencies: []
+internal_dependencies:
+  - agentclaw.community.core.devices.services.device_context
 ```

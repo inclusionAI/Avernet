@@ -223,7 +223,8 @@ async def test_deferred_replacement_keeps_asset_and_only_records_required_mappin
 
 @pytest.mark.asyncio
 async def test_independent_replacement_commits_tracked_mapping_before_unlocked_delivery():
-    db = _bound_database()
+    binding = _Binding()
+    db = _bound_database(binding)
     skills = SkillRepository(db)
     projections = CapabilityProjectionRepository(db)
     guard = _Guard()
@@ -243,8 +244,9 @@ async def test_independent_replacement_commits_tracked_mapping_before_unlocked_d
     transport = _Transport()
     service = _replacement_service(
         _Filesystem(), skills, runtime, guard=guard, security_observer=observer,
-        package_runtime=LocalSkillPackageRuntime(_Binding(), transport),
+        package_runtime=LocalSkillPackageRuntime(binding, transport),
     )
+    service._device_context_resolver_provider = lambda: binding
     first = await service.upload_local_skill(**WHO, package=_packages("first")[0][1])
     assert first["operation"] == "created"
     assert projections.read(bot_id="bot", entity_id="owner") is None
@@ -309,3 +311,37 @@ async def test_old_device_publication_cannot_commit_metadata_on_the_replacement(
     assert result[0].upload is None
     assert result[1].receipt.publication is PackagePublication.NOT_DISPATCHED
     assert skills.list_bot_local_by_name(bot_id="bot", name="first") == []
+
+
+@pytest.mark.asyncio
+async def test_completed_package_target_is_checked_again_in_relationship_transaction():
+    from agentclaw.community.core.devices.services.device_context import (
+        RuntimeBindingChangedError,
+        expect_runtime_binding,
+    )
+    from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
+        CapabilityDesiredStateRepository,
+    )
+
+    binding = _Binding("teclaw")
+    db = _bound_database(binding)
+    service = _service(
+        _Filesystem(), repo=SkillRepository(db), provider="teclaw",
+        package_runtime=LocalSkillPackageRuntime(binding, _Transport()),
+        security_observation_enabled=False,
+    )
+    (published,) = await service.upload_local_skill_batch(**WHO, packages=_packages("first"))
+    assert published.upload is not None
+    assert published.receipt.publication is PackagePublication.PUBLISHED
+    assert published.receipt.metadata is PackageMetadata.COMMITTED
+    binding.binding_id += 1
+    binding.device_id = "next-device"
+    binding.persist(db)
+
+    with expect_runtime_binding(published.target), pytest.raises(RuntimeBindingChangedError):
+        CapabilityDesiredStateRepository(db).commit_projection_mutation(
+            bot_id="bot", entity_id="owner",
+            mutation=lambda: pytest.fail("Capability relationship write reached a new Runtime binding"),
+            scope_from_result=lambda _: ProjectionScope(skills=True),
+            retired_mappings=(), create=True,
+        )

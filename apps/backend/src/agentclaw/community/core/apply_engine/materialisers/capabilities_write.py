@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import ExitStack
 
 from agentclaw.community.core.apply_engine.capabilities import Category
 from agentclaw.community.core.apply_engine.outcomes import EntryOutcome, EntryResult
@@ -11,6 +12,7 @@ from agentclaw.community.core.apply_engine.registry import (
     CategoryWriteResult,
     ConfirmedPartialWriteError,
 )
+from agentclaw.community.core.devices.services.device_context import expect_runtime_binding
 from agentclaw.community.core.ports.skill_package_upload_port import (
     BatchSkillPackageUploadPort,
     LocalSkillPackageReceipt,
@@ -87,6 +89,7 @@ async def write_capabilities(owner, ctx, plan):
     all_skills = tuple(resolved.direct) + tuple(
         s for group in resolved.sets for s in group.skills
     )
+    binding_scope = ExitStack()
     try:
         # Complete every shared publication before the first Bot Local write.
         for skill in all_skills:
@@ -153,6 +156,8 @@ async def write_capabilities(owner, ctx, plan):
                     local_skill_packages=package_receipts, confirmed_partial=confirmed,
                 )
             uploads = [item.upload for item in batch]
+            if batch and batch[0].target is not None:
+                binding_scope.enter_context(expect_runtime_binding(batch[0].target))
         else:
             uploads = []
             for _, package in local_packages.values():
@@ -350,6 +355,8 @@ async def write_capabilities(owner, ctx, plan):
         raise RuntimeError(
             "Capability write failed; shared preparation may remain, Bot writes are not confirmed"
         ) from exc
+    finally:
+        binding_scope.close()
     ordered = tuple(
         results[e.intent.identity] for e in plan.entries if e.intent.identity in results
     )
