@@ -10,7 +10,7 @@ import asyncio
 import hashlib
 from time import perf_counter
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
@@ -22,6 +22,11 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 from agentclaw.community.core.bot_management.addressing import BotAddressResolver, stable_resource_owner_id
 from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
+from agentclaw.community.core.devices.services.device_context import (
+    RuntimeBindingChangedError,
+    RuntimeBindingTarget,
+    expect_runtime_binding,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillRepository,
@@ -96,6 +101,7 @@ from agentclaw.community.core.skill_center.services.local_skill_batch import (
     PreparedLocalSkill,
     dispatch_local_skill_batch,
     package_result,
+    prepare_local_skill_packages,
 )
 
 if TYPE_CHECKING:
@@ -358,7 +364,7 @@ class LocalSkillUploadService(
             return ()
         async with self._edit(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id) as edit:
             started = perf_counter()
-            prepared, unattempted = await self._prepare_packages(packages)
+            prepared, unattempted = await prepare_local_skill_packages(packages, validate=self._validate_zip)
             logger.info(
                 "Local Skill batch prepared bot_id=%s package_count=%d prepare_ms=%.3f",
                 bot_id, len(packages), (perf_counter() - started) * 1000,
@@ -390,29 +396,15 @@ class LocalSkillUploadService(
             ) -> LocalSkillPackageWriteResult:
                 return await self._publish_batch_package(edit, destination, target, is_stopped)
 
-            return await dispatch_local_skill_batch(
+            results = await dispatch_local_skill_batch(
                 targets, unattempted, publish=publish,
                 window=self._local_skill_parallelism if destination.supports_parallel_targets else 1,
             )
-
-    async def _prepare_packages(
-        self, packages: Sequence[tuple[str, bytes]],
-    ) -> tuple[list[PreparedLocalSkill], tuple[LocalSkillPackageWriteResult, ...]]:
-        slots = asyncio.Semaphore(4)
-
-        async def prepare(name: str, raw: bytes):
-            try:
-                async with slots:
-                    package = await asyncio.to_thread(self._validate_zip, raw)
-                if package.name != name:
-                    raise LocalSkillInvalidPackageError("invalid_metadata")
-                skill = PreparedLocalSkill.from_package(package)
-            except (LocalSkillInvalidPackageError, LocalSkillTooLargeError):
-                return None, package_result(name, None, PackagePublication.FAILED)
-            return skill, package_result(name, skill.digest, PackagePublication.NOT_DISPATCHED)
-
-        checked = await asyncio.gather(*(prepare(name, raw) for name, raw in packages))
-        return [skill for skill, _ in checked if skill is not None], tuple(r for _, r in checked)
+            if all(item.upload is not None for item in results) and not await self._package_runtime.is_destination_current(
+                bot_id=edit.bot_id, owner_id=edit.owner_id, destination=destination,
+            ):
+                return tuple(replace(item, upload=None) for item in results)
+            return results
 
     async def _publish_batch_package(
         self, edit: _LocalSkillEdit, destination: LocalSkillPackageDestination,
@@ -426,12 +418,7 @@ class LocalSkillUploadService(
             context = await self._package_runtime.resolve(bot_id=edit.bot_id, owner_id=edit.owner_id)
             if is_stopped():
                 return package_result(name, skill.digest, PackagePublication.NOT_DISPATCHED)
-            if (
-                context.binding_id != destination.context.binding_id
-                or context.device_id != destination.context.device_id
-                or context.provider != destination.context.provider
-                or context.conn_info.get("device_uuid") != destination.context.conn_info.get("device_uuid")
-            ):
+            if not destination.matches(context):
                 raise LocalSkillRuntimeUnavailableError()
             self._edit_guard.refresh(edit.lease)
             dispatch = self._skill_repo.reserve_local_skill_dispatch(
@@ -467,9 +454,12 @@ class LocalSkillUploadService(
                 publication = PackagePublication.UNKNOWN
             started = perf_counter()
             metadata = PackageMetadata.UNKNOWN
-            result = await self._persist_package(
-                edit, target, runtime_result, is_teclaw=destination.is_teclaw, deferred=True
-            )
+            with expect_runtime_binding(RuntimeBindingTarget(
+                edit.bot_id, str(edit.bot["owner_id"]), edit.owner_id, context.binding_id, context.device_id,
+            )):
+                result = await self._persist_package(
+                    edit, target, runtime_result, is_teclaw=destination.is_teclaw, deferred=True,
+                )
             publication, metadata = PackagePublication.PUBLISHED, PackageMetadata.COMMITTED
             logger.info(
                 "Local Skill package committed bot_id=%s skill_name=%s %s=%.3f",
@@ -485,6 +475,8 @@ class LocalSkillUploadService(
             )
             if runtime_result is None:
                 self._skill_repo.finish_local_skill_dispatch(*dispatch)
+        except RuntimeBindingChangedError:
+            return package_result(name, skill.digest, publication, PackageMetadata.FAILED)
         except Exception:
             logger.exception(
                 "Local Skill batch package did not complete bot_id=%s skill_name=%s",
@@ -524,6 +516,8 @@ class LocalSkillUploadService(
                     "source_type": "upload",
                 }
             )
+        except RuntimeBindingChangedError:
+            raise
         except Exception as exc:
             logger.error(
                 "[LocalSkillUploadService] post-apply persistence failed "
@@ -569,6 +563,8 @@ class LocalSkillUploadService(
             )
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")
+        except RuntimeBindingChangedError:
+            raise
         except Exception as exc:
             logger.error(
                 "[LocalSkillUploadService] post-apply persistence failed "
@@ -662,7 +658,7 @@ class LocalSkillUploadService(
                 "skill": {**skill, "active": False},
                 "actor_id": actor_id,
             }
-        except (LocalSkillInvalidPackageError, LocalSkillDuplicateError):
+        except (LocalSkillInvalidPackageError, LocalSkillDuplicateError, RuntimeBindingChangedError):
             raise
         except Exception as exc:  # details remain internal; public mapper is fixed
             # Compensation must continue after a failed rollback step: a failed
@@ -788,6 +784,8 @@ class LocalSkillUploadService(
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
+        except RuntimeBindingChangedError:
+            raise
         except Exception as exc:
             if switched or canonical_published:
                 await self._restore_replacement(

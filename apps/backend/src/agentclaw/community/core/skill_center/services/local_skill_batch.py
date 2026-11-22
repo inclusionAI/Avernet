@@ -14,6 +14,10 @@ from agentclaw.community.core.ports.skill_package_upload_port import (
     PackageMetadata,
     PackagePublication,
 )
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillInvalidPackageError,
+    LocalSkillTooLargeError,
+)
 from agentclaw.community.core.skill_center.skill_package import ValidatedSkillPackage
 
 
@@ -39,6 +43,25 @@ def package_result(
 
 _Package = TypeVar("_Package")
 
+
+async def prepare_local_skill_packages(
+    packages: Sequence[tuple[str, bytes]], *, validate: Callable[[bytes], ValidatedSkillPackage],
+) -> tuple[list[PreparedLocalSkill], tuple[LocalSkillPackageWriteResult, ...]]:
+    slots = asyncio.Semaphore(4)
+
+    async def prepare(name: str, raw: bytes):
+        try:
+            async with slots:
+                package = await asyncio.to_thread(validate, raw)
+            if package.name != name:
+                raise LocalSkillInvalidPackageError("invalid_metadata")
+            skill = PreparedLocalSkill.from_package(package)
+        except (LocalSkillInvalidPackageError, LocalSkillTooLargeError):
+            return None, package_result(name, None, PackagePublication.FAILED)
+        return skill, package_result(name, skill.digest, PackagePublication.NOT_DISPATCHED)
+
+    checked = await asyncio.gather(*(prepare(name, raw) for name, raw in packages))
+    return [skill for skill, _ in checked if skill is not None], tuple(r for _, r in checked)
 
 async def dispatch_local_skill_batch(
     packages: Sequence[_Package],

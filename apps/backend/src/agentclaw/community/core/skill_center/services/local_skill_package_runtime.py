@@ -51,6 +51,15 @@ class LocalSkillPackageDestination:
 
 
 
+    def matches(self, context: DeviceContext) -> bool:
+        return (
+            context.binding_id == self.context.binding_id
+            and context.device_id == self.context.device_id
+            and context.provider == self.context.provider
+            and context.conn_info.get("device_uuid") == self.context.conn_info.get("device_uuid")
+        )
+
+
 class LocalSkillPackageRuntime:
     """Resolve a bot and translate package apply to its runtime transport."""
 
@@ -86,6 +95,15 @@ class LocalSkillPackageRuntime:
             )
         except Exception as exc:
             raise LocalSkillRuntimeUnavailableError() from exc
+
+    async def is_destination_current(
+        self, *, bot_id: str, owner_id: str, destination: LocalSkillPackageDestination,
+    ) -> bool:
+        try:
+            context = await self.resolve(bot_id=bot_id, owner_id=owner_id)
+        except LocalSkillRuntimeUnavailableError:
+            return False
+        return destination.matches(context)
 
     async def destination(self, *, bot_id: str, owner_id: str) -> LocalSkillPackageDestination:
         context = await self.resolve(bot_id=bot_id, owner_id=owner_id)

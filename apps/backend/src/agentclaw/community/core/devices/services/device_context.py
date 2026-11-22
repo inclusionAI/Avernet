@@ -100,13 +100,20 @@ def expect_runtime_binding(target: RuntimeBindingTarget) -> Iterator[None]:
         _EXPECTED_RUNTIME_BINDING.reset(token)
 
 
+def expected_runtime_binding(bot_id: str, user_id: str) -> RuntimeBindingTarget | None:
+    expected = _EXPECTED_RUNTIME_BINDING.get()
+    if expected is not None and bot_id == expected.bot_id and user_id in (
+        expected.owner_id, expected.entity_id
+    ):
+        return expected
+    return None
+
+
 def verify_runtime_binding(
     *, bot_id: str, user_id: str, binding_id: int, device_id: str | None,
 ) -> None:
-    expected = _EXPECTED_RUNTIME_BINDING.get()
-    if expected is None or bot_id != expected.bot_id or user_id not in (
-        expected.owner_id, expected.entity_id
-    ):
+    expected = expected_runtime_binding(bot_id, user_id)
+    if expected is None:
         return
     if binding_id != expected.binding_id or (
         expected.device_id is not None and device_id != expected.device_id

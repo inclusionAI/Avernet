@@ -62,6 +62,7 @@ from agentclaw.community.core.repository.implementations.skill_center.bot_skills
 )
 from agentclaw.community.core.repository.implementations.skill_center.local_skill_package_dispatch import (
     LocalSkillPackageDispatches,
+    verify_local_skill_metadata_binding,
 )
 from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import (
     require_locked_capability_bot,
@@ -673,6 +674,11 @@ class SkillRepository(
 
     def create(self, skill_data: dict) -> dict:
         with self._db.orm_session() as db:
+            if skill_data.get("source_type") == "upload":
+                verify_local_skill_metadata_binding(
+                    db, bot_id=skill_data.get("bolt_id") or "default",
+                    entity_id=_format_user_id(skill_data.get("user_id")),
+                )
             tags = skill_data.get("tags")
             risk_tags = skill_data.get("risk_tags")
             mcp_deps = skill_data.get("mcp_dependencies")
@@ -957,6 +963,7 @@ class SkillRepository(
             raise ValueError("Local Skill replacement cannot change git_path")
 
         with self._db.transactional_orm_session() as db:
+            verify_local_skill_metadata_binding(db, bot_id=bot_id, entity_id=owner_id)
             if defer_skills_projection or record_tracked_projection:
                 require_locked_capability_bot(db, bot_id=bot_id, entity_id=owner_id)
             skill = (
