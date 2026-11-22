@@ -308,31 +308,47 @@ class MCPSyncService(MCPSyncServiceProtocol):
             # 无 MCP 可投递:不必解析设备。allow-list 的声明是 caller 的事。
             return {"success": True}
 
-        resource_bot = await asyncio.to_thread(
-            resolve_detail_bot, self.bot_repository, bot_id=bot_id,
-            entity_id=entity_id, legacy_owner_id=user_id,
-        )
-        if config_target is not None and (
-            resource_bot.bot_pk != config_target.bot_pk
-            or resource_bot.current_owner_id != config_target.current_owner_id
-        ):
-            return {"success": False, "error": "Bot address changed before MCP projection"}
-        resource_owner_id = resource_bot.entity_id
-        effective_engine_type = engine_type
-        if device_sync is None:
-            try:
-                ctx = await asyncio.to_thread(
-                    resolve_detail_device, self._resolver_provider(), resource_bot, entity_id or user_id,
-                )
-            except (DeviceNotBoundError, UnknownProviderError):
-                error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
-                logger.error("[MCPSyncService] %s", error)
-                return {"success": False, "error": error}
-            device_sync = self._device_sync_dispatcher_provider().dispatch(ctx)
-            effective_engine_type = effective_engine_type or ctx.conn_info.get(
-                "engine_type"
+        def failed(error: str, *, delivery_uncertain: bool = False) -> dict[str, Any]:
+            result = {"success": False, "error": error}
+            if report_delivery_outcome:
+                result["delivery_uncertain"] = delivery_uncertain
+            return result
+
+        try:
+            resource_bot = await asyncio.to_thread(
+                resolve_detail_bot, self.bot_repository, bot_id=bot_id,
+                entity_id=entity_id, legacy_owner_id=user_id,
             )
-        plugin = device_sync
+            if config_target is not None and (
+                resource_bot.bot_pk != config_target.bot_pk
+                or resource_bot.current_owner_id != config_target.current_owner_id
+            ):
+                return failed("Bot address changed before MCP projection")
+            resource_owner_id = resource_bot.entity_id
+            effective_engine_type = engine_type
+            if device_sync is None:
+                try:
+                    ctx = await asyncio.to_thread(
+                        resolve_detail_device, self._resolver_provider(), resource_bot, entity_id or user_id,
+                    )
+                except (DeviceNotBoundError, UnknownProviderError):
+                    error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
+                    logger.error("[MCPSyncService] %s", error)
+                    return failed(error)
+                device_sync = self._device_sync_dispatcher_provider().dispatch(ctx)
+                effective_engine_type = effective_engine_type or ctx.conn_info.get(
+                    "engine_type"
+                )
+            plugin = device_sync
+
+        except Exception as exc:
+            if not report_delivery_outcome:
+                raise
+            logger.warning(
+                "[MCPSyncService] failed to prepare MCP detail batch: bot_id=%s, error=%s",
+                _bot, type(exc).__name__,
+            )
+            return failed("Bot or device could not be resolved before MCP projection")
 
         outcome = await deliver_mcp_detail_batch(
             mcps=mcp_entries,
@@ -354,10 +370,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
             codes = [server_code_of(m) or "unknown" for m in outcome.failures]
             error = f"向 bot={_bot} 推送 MCP 配置失败: {', '.join(codes)}"
             logger.error("[MCPSyncService] %s", error)
-            result = {"success": False, "error": error}
-            if report_delivery_outcome:
-                result["delivery_uncertain"] = outcome.delivery_uncertain
-            return result
+            return failed(error, delivery_uncertain=outcome.delivery_uncertain)
 
         logger.info(
             "[MCPSyncService] desired state 详情推送完成: bot=%s, count=%s",

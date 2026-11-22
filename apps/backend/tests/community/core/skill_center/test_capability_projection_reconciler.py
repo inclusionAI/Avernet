@@ -352,15 +352,12 @@ async def test_cutover_resolves_current_owner_and_keeps_preflight_failure_retrya
     assert not state.write_blocked
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("device_succeeds", [True, False])
-async def test_passport_failure_retries_its_obligation_in_the_same_revision(tmp_path, device_succeeds):
-    from agentclaw.community.core.skill_center.errors import ArtifactProjectionNotDispatchedError
+def _teclaw_reconciler(tmp_path, *, factory, passport, cache):
     from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
         CapabilityProjectionReconciler,
     )
     from tests.community.core.skill_center._test_skill_set_management_service_support import (
-        _RuntimeFactory, _RuntimePassport, _TeclawRuntimeBots, _teclaw_runtime,
+        _TeclawRuntimeBots, _teclaw_runtime,
     )
 
     address = {"bot_id": "bot-1", "entity_id": "entity-1"}
@@ -370,17 +367,34 @@ async def test_passport_failure_retries_its_obligation_in_the_same_revision(tmp_
             **address, owner_id="true-owner", creator_id="true-owner", entity_type="staff",
             active_engine="teclaw", env="dev", status="ACTIVE",
         ))
+
+    class Bots(_TeclawRuntimeBots):
+        def get_by_id_and_owner(self, bot_id, owner_id):
+            return {**super().get_by_id_and_owner(bot_id, owner_id), "status": "ACTIVE"}
+
     repository = CapabilityProjectionRepository(db)
+    projector = _teclaw_runtime(factory, passport=passport)
+    projector._bot_repo = Bots()
+    reconciler = CapabilityProjectionReconciler(
+        repository=repository, projector=projector, guard=CapabilityDeliveryGuard(cache),
+        bots=BotRepository(db), defer_enabled=True,
+    )
+    return address, repository, reconciler
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("device_succeeds", [True, False])
+async def test_passport_failure_retries_its_obligation_in_the_same_revision(tmp_path, device_succeeds):
+    from agentclaw.community.core.skill_center.errors import ArtifactProjectionNotDispatchedError
+    from tests.community.core.skill_center._test_skill_set_management_service_support import (
+        _RuntimeFactory, _RuntimePassport,
+    )
 
     class Passport(_RuntimePassport):
         def update_passport(self, **kwargs):
             super().update_passport(**kwargs)
             if len(self.calls) == 1:
                 raise RuntimeError("temporary Passport failure")
-
-    class Bots(_TeclawRuntimeBots):
-        def get_by_id_and_owner(self, bot_id, owner_id):
-            return {**super().get_by_id_and_owner(bot_id, owner_id), "status": "ACTIVE"}
 
     factory = _RuntimeFactory()
     original = factory.service.project_whole_artifact
@@ -394,11 +408,8 @@ async def test_passport_failure_retries_its_obligation_in_the_same_revision(tmp_
 
     factory.service.project_whole_artifact = deliver
     passport = Passport()
-    projector = _teclaw_runtime(factory, passport=passport)
-    projector._bot_repo = Bots()
-    reconciler = CapabilityProjectionReconciler(
-        repository=repository, projector=projector, guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
-        bots=BotRepository(db), defer_enabled=True,
+    address, repository, reconciler = _teclaw_reconciler(
+        tmp_path, factory=factory, passport=passport, cache=MemoryCachePlugin(),
     )
 
     revision, result = await reconciler.finish_apply(**address, initialize=True)
@@ -419,3 +430,56 @@ async def test_passport_failure_retries_its_obligation_in_the_same_revision(tmp_
     assert state.revision == revision
     assert state.scope == ProjectionScope()
     assert not state.retry_pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("superseded_by", ["revision", "lease"])
+async def test_passport_checks_write_authority_after_slow_preparation(tmp_path, superseded_by):
+    import threading
+
+    from tests.community.core.skill_center._test_skill_set_management_service_support import (
+        _RuntimeFactory, _RuntimePassport,
+    )
+
+    preparing = threading.Event()
+    resume = threading.Event()
+
+    class Passport(_RuntimePassport):
+        def query_agent_passport(self, bot_id, owner_id):
+            if self.calls:
+                preparing.set()
+                resume.wait(3)
+            return super().query_agent_passport(bot_id, owner_id)
+
+        def update_passport(self, **kwargs):
+            super().update_passport(**kwargs)
+            if len(self.calls) == 1:
+                raise RuntimeError("initial Passport update did not succeed")
+
+    passport = Passport()
+    cache = MemoryCachePlugin()
+    factory = _RuntimeFactory()
+    address, repository, reconciler = _teclaw_reconciler(
+        tmp_path, factory=factory, passport=passport, cache=cache,
+    )
+    revision, _ = await reconciler.finish_apply(**address, initialize=True)
+    assert repository.read(**address).scope == ProjectionScope(passport=True)
+
+    running = asyncio.create_task(reconciler.reconcile(**address))
+    try:
+        assert await asyncio.to_thread(preparing.wait, 2)
+        if superseded_by == "lease":
+            cache.renew_lock_strict = lambda *args, **kwargs: False
+        else:
+            repository.require(**address, scope=ProjectionScope(skills=True))
+    finally:
+        resume.set()
+    result = await running
+
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert len(passport.calls) == 1
+    assert len(factory.service.runtime_syncs) == 1
+    state = repository.read(**address)
+    assert state.retry_pending and state.scope.passport
+    assert not state.write_blocked
+    assert (state.revision == revision) is (superseded_by == "lease")

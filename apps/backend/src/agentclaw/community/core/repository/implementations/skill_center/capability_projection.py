@@ -384,6 +384,18 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
                 _mark_dispatch(row, state)
             return True
 
+    def is_dispatch_current(self, state: CapabilityProjectionState) -> bool:
+        with self._db.transactional_orm_session() as session:
+            current = self._locked_state(session, state)
+            if current is None:
+                return False
+            row, bot = current
+            return (
+                self._same_target(state, bot)
+                and row.version == state.version
+                and row.dispatch_version in (None, state.version)
+            )
+
     def complete(
         self, state: CapabilityProjectionState, result: RuntimeProjectionResult, *,
         write_blocked: bool = False, mcp_only: bool = False,
@@ -417,6 +429,7 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
             bot.binding_id == state.binding_id
             and bot.device_id == state.device_id
             and bot.active_engine == state.engine_type
+            and bot.owner_id == state.owner_id
         )
 
     @staticmethod

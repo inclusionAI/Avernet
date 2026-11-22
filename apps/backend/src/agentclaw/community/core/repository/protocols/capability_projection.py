@@ -47,6 +47,11 @@ class CapabilityProjectionRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def is_dispatch_current(self, state: CapabilityProjectionState) -> bool:
+        """Check the revision, target and any existing fence before an outbound write."""
+        ...
+
+    @abstractmethod
     def complete(
         self, state: CapabilityProjectionState, result: RuntimeProjectionResult, *,
         write_blocked: bool = False, mcp_only: bool = False,

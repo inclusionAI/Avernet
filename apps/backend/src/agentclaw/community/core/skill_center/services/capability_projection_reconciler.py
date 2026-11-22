@@ -40,6 +40,7 @@ from .capability_delivery_guard import (
     CapabilityDeliveryLease,
     CapabilityDeliveryUnavailable,
 )
+from .passport_write_checkpoint import passport_write_checkpoint
 
 
 logger = get_logger()
@@ -229,10 +230,17 @@ class CapabilityProjectionReconciler:
                 code="CAPABILITY_PROJECTION_CHANGED",
                 reason="Capability configuration or the Runtime binding changed before synchronization.",
             )
+
+        def verify_current_passport_write() -> None:
+            if not self._repository.is_dispatch_current(state):
+                raise CapabilityDeliveryUnavailable()
+            lease.verify_from_worker()
+
+        target = RuntimeBindingTarget(
+            state.bot_id, state.owner_id, state.entity_id, state.binding_id, state.device_id,
+        )
         try:
-            with expect_runtime_binding(RuntimeBindingTarget(
-                state.bot_id, state.owner_id, state.entity_id, state.binding_id, state.device_id,
-            )):
+            with expect_runtime_binding(target), passport_write_checkpoint(verify_current_passport_write):
                 result = await deliver()
         except Exception:
             logger.exception("Capability delivery did not return a receipt bot_id=%s", state.bot_id)
@@ -244,6 +252,8 @@ class CapabilityProjectionReconciler:
             write_blocked = device_delivery and result.delivery_uncertain
             if write_blocked:
                 result = RuntimeProjectionResult.combine(result, _unknown_delivery())
+        if not device_delivery:
+            await lease.verify()
         accepted = await asyncio.to_thread(
             self._repository.complete, state, result, write_blocked=write_blocked, mcp_only=mcp_only,
         )

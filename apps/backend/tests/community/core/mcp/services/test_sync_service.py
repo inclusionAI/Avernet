@@ -1686,6 +1686,31 @@ class TestSyncMcpDetailsForBot:
         assert legacy == {"success": False, "error": response["error"]}
 
     @pytest.mark.asyncio
+    async def test_bot_lookup_failure_is_retryable_before_the_batch_dispatches(self):
+        plugin = _make_plugin()
+        svc = _make_sync_service(plugin=plugin)
+        bot = {"id": 42, "bot_id": "bot1", "entity_id": "entity", "owner_id": "u1"}
+        svc.bot_repository.get_by_id_and_entity.side_effect = [
+            RuntimeError("lookup unavailable"), bot, RuntimeError("lookup unavailable"),
+        ]
+        args = dict(
+            user_id="u1", entity_id="entity", mcp_entries=self._entries(1),
+            bot_id="bot1", device_sync=plugin,
+        )
+
+        failed = await svc.sync_mcp_details_for_bot(**args, report_delivery_outcome=True)
+        assert failed["success"] is False
+        assert failed["delivery_uncertain"] is False
+        plugin.sync_single_mcp.assert_not_called()
+
+        success = await svc.sync_mcp_details_for_bot(**args, report_delivery_outcome=True)
+        assert success == {"success": True}
+        plugin.sync_single_mcp.assert_called_once()
+
+        with pytest.raises(RuntimeError, match="lookup unavailable"):
+            await svc.sync_mcp_details_for_bot(**args)
+
+    @pytest.mark.asyncio
     async def test_empty_batch_does_not_touch_the_device(self):
         resolver, dispatcher, plugin = _make_resolver_and_dispatcher()
         svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)

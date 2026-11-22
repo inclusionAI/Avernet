@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -57,6 +58,8 @@ from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import
     BotRuntimeProjectorProtocol,
 )
 
+
+from .passport_write_checkpoint import verify_passport_write
 
 logger = get_logger()
 
@@ -176,7 +179,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         if scope.passport and not scope.requires_device_delivery:
             if not isinstance(plan, ResolvedCapabilityPlan):
                 raise SkillSetRuntimeReconcileError()
-            return self._with_passport_receipt(plan, RuntimeProjectionResult.converged())
+            return await self._with_passport_receipt(plan, RuntimeProjectionResult.converged())
 
         self._registry.for_engine(plan.engine).validate_plan(
             skill_assets=plan.projection.skill_assets,
@@ -198,7 +201,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         )
         if scope.mcp or scope.passport:
             assert isinstance(plan, ResolvedCapabilityPlan)
-            return self._with_passport_receipt(plan, result)
+            return await self._with_passport_receipt(plan, result)
         logger.info(
             "[BotRuntimeProjector] Passport update skipped, scope declares "
             "no MCP change: bot_id=%s, engine=%s",
@@ -241,13 +244,14 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             scope=scope,
             service_factory=self._factory,
         )
-        return self._with_passport_receipt(plan, result)
+        return await self._with_passport_receipt(plan, result)
 
-    def _with_passport_receipt(
+    async def _with_passport_receipt(
         self, plan: ResolvedCapabilityPlan, result: RuntimeProjectionResult,
     ) -> RuntimeProjectionResult:
         try:
-            self._apply_passport_projection(plan=plan)
+            # Keep the worker's delivery lease heartbeat live during Passport I/O.
+            await asyncio.to_thread(self._apply_passport_projection, plan=plan)
         except Exception:
             logger.exception(
                 "[BotRuntimeProjector] Passport projection unavailable "
@@ -635,6 +639,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 additional_cli_items=plan.effective_cli_items,
             )
             stage = "update"
+            verify_passport_write()
             self._passport.update_passport(
                 bot_id=plan.bot_id,
                 user_id=stable_resource_owner_id(plan.bot),

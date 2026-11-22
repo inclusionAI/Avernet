@@ -30,12 +30,13 @@ class CapabilityDeliveryLease:
     lost: bool = False
 
     async def verify(self) -> None:
+        await asyncio.to_thread(self.verify_from_worker)
+
+    def verify_from_worker(self) -> None:
         if self.lost:
             raise CapabilityDeliveryUnavailable()
         try:
-            owned = await asyncio.to_thread(
-                self.cache.renew_lock_strict, self.key, self.token, ttl=_TTL_SECONDS
-            )
+            owned = self.cache.renew_lock_strict(self.key, self.token, ttl=_TTL_SECONDS)
         except CacheLockInfrastructureError as exc:
             self.lost = True
             raise CapabilityDeliveryUnavailable() from exc
