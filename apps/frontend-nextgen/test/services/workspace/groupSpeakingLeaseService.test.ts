@@ -14,7 +14,7 @@ import {
   GroupSpeakingLeaseService,
   type SpeakingLeaseSnapshot,
 } from '@/services/workspace/groupSpeakingLeaseService';
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 class FakeTransport {
   readonly frames: Array<Record<string, unknown>> = [];
@@ -67,10 +67,6 @@ beforeEach(() => {
   service = makeService(transport);
   snapshots = [];
   service.subscribe((snapshot) => snapshots.push(snapshot));
-});
-
-afterEach(() => {
-  service.resetConnection();
 });
 
 describe('domain pure helpers', () => {

@@ -54,7 +54,6 @@ pub(super) struct FaultyRuns {
     fail_dispatch_finish: AtomicBool,
     fail_finalize: AtomicBool,
     fail_retry: AtomicBool,
-    conflict_retry_after_commit: AtomicBool,
     fail_run_failure: AtomicBool,
     fail_failure_write: AtomicBool,
     fail_judge_claim: AtomicBool,
@@ -87,8 +86,7 @@ impl FaultyRuns {
             fail_publication_marker: AtomicBool::new(false), fail_publication_finish: AtomicBool::new(false),
             fail_dispatch_save: AtomicBool::new(false), fail_dispatch_claim: AtomicBool::new(false),
             fail_send_marker: AtomicBool::new(false), pause_after_send_marker: AtomicBool::new(false), fail_dispatch_finish: AtomicBool::new(false), fail_finalize: AtomicBool::new(false),
-            fail_retry: AtomicBool::new(false), conflict_retry_after_commit: AtomicBool::new(false),
-            fail_run_failure: AtomicBool::new(false), fail_failure_write: AtomicBool::new(false),
+            fail_retry: AtomicBool::new(false), fail_run_failure: AtomicBool::new(false), fail_failure_write: AtomicBool::new(false),
             fail_judge_claim: AtomicBool::new(false), fail_judge_finish: AtomicBool::new(false),
             fail_opening_save: AtomicBool::new(false), fail_opening_mark: AtomicBool::new(false),
             hide_opening: AtomicBool::new(false), pause_start: AtomicBool::new(false),
@@ -214,11 +212,6 @@ impl StateMachineRunRepoPort for FaultyRuns {
     async fn commit_eventful_transition(&self, transition: bcs_service_api::port::repo::StateMachineEventfulTransition) -> ServiceResult<bool> {
         if matches!(&transition, bcs_service_api::port::repo::StateMachineEventfulTransition::FinishJudge(_))
             && self.fail_judge_finish.swap(false, Ordering::SeqCst) { return Err(injected()); }
-        if matches!(&transition, bcs_service_api::port::repo::StateMachineEventfulTransition::ScheduleNodeRetry { .. })
-            && self.conflict_retry_after_commit.swap(false, Ordering::SeqCst) {
-            self.inner.commit_eventful_transition(transition).await?;
-            return Err(ServiceError::Conflict("injected retry transition race".into()));
-        }
         self.inner.commit_eventful_transition(transition).await
     }
 
@@ -277,10 +270,6 @@ impl StateMachineRunRepoPort for FaultyRuns {
     }
     async fn schedule_node_retry(&self, run: &str, node: &str, failed: i32, next: i32) -> ServiceResult<bool> {
         if self.fail_retry.swap(false, Ordering::SeqCst) { return Err(injected()); }
-        if self.conflict_retry_after_commit.swap(false, Ordering::SeqCst) {
-            self.inner.schedule_node_retry(run, node, failed, next).await?;
-            return Err(ServiceError::Conflict("injected retry transition race".into()));
-        }
         self.inner.schedule_node_retry(run, node, failed, next).await
     }
     async fn skip_node(&self, run: &str, node: &str, at: u64) -> ServiceResult<bool> {

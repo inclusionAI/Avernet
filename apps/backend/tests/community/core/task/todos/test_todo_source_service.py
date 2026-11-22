@@ -19,56 +19,21 @@ from agentclaw.community.plugin_api.auth import AuthRequestContext
 
 
 @dataclass
-class _Auth:
-    token: str | None = "access-token"
-    error: Exception | None = None
-    calls: list[str] = field(default_factory=list)
-
-    def exchange_iam_token(self, subject_token: str) -> str | None:
-        self.calls.append(subject_token)
-        if self.error:
-            raise self.error
-        return self.token
-
-
-@dataclass
-class _Market:
-    detail: object = field(
-        default_factory=lambda: {
-            "serverCode": "mcp.ant.arkai.dimamcpserver",
-            "endpoints": [],
-        }
-    )
-    error: Exception | None = None
-    calls: list[str] = field(default_factory=list)
-
-    def get_mcp_detail(self, server_code: str) -> object:
-        self.calls.append(server_code)
-        if self.error:
-            raise self.error
-        return self.detail
-
-
-@dataclass
-class _ToolCalls:
+class _SourceClient:
     responses: dict[str, object]
     error: Exception | None = None
     calls: list[dict[str, Any]] = field(default_factory=list)
 
-    def call_tool(self, **kwargs: Any) -> object | None:
+    def call(self, **kwargs: Any) -> object | None:
         self.calls.append(kwargs)
         if self.error:
             raise self.error
         return self.responses.get(kwargs["tool_name"])
 
 
-def _request(
-    *,
-    actor_id: str | None = "149844",
-    cookies: dict[str, str] | None = None,
-) -> AuthRequestContext:
+def _request(*, actor_id: str | None = "149844") -> AuthRequestContext:
     return AuthRequestContext(
-        cookies=cookies if cookies is not None else {"IAM_TOKEN": "iam-cookie"},
+        cookies={"IAM_TOKEN": "iam-cookie"},
         verified_actor_user_id=actor_id,
     )
 
@@ -76,14 +41,10 @@ def _request(
 def _service(
     responses: dict[str, object],
     *,
-    auth: _Auth | None = None,
-    market: _Market | None = None,
-    calls: _ToolCalls | None = None,
-) -> tuple[TodoSourceService, _Auth, _Market, _ToolCalls]:
-    auth = auth or _Auth()
-    market = market or _Market()
-    calls = calls or _ToolCalls(responses)
-    return TodoSourceService(auth, market, calls), auth, market, calls
+    client: _SourceClient | None = None,
+) -> tuple[TodoSourceService, _SourceClient]:
+    client = client or _SourceClient(responses)
+    return TodoSourceService(client), client
 
 
 def _mcp_text(value: object) -> dict[str, object]:
@@ -93,7 +54,7 @@ def _mcp_text(value: object) -> dict[str, object]:
 
 
 def test_lists_projects_and_preserves_numeric_project_ids() -> None:
-    service, auth, market, calls = _service(
+    service, client = _service(
         {
             "queryUserSpaceAndProject": _mcp_text(
                 {
@@ -124,15 +85,18 @@ def test_lists_projects_and_preserves_numeric_project_ids() -> None:
         ("W00000000001", "团队空间"),
         ("1259", "团队项目"),
     ]
-    assert auth.calls == ["iam-cookie"]
-    assert market.calls == ["mcp.ant.arkai.dimamcpserver"]
-    assert calls.calls[0]["tool_name"] == "queryUserSpaceAndProject"
-    assert calls.calls[0]["arguments"] == {}
-    assert calls.calls[0]["access_token"] == "access-token"
+    assert client.calls == [
+        {
+            "actor_id": "149844",
+            "auth_request": _request(),
+            "tool_name": "queryUserSpaceAndProject",
+            "arguments": {},
+        }
+    ]
 
 
 def test_valid_empty_project_payload_returns_empty_tuple() -> None:
-    service, *_ = _service(
+    service, _ = _service(
         {"queryUserSpaceAndProject": _mcp_text({"data": [], "total": 0})}
     )
 
@@ -140,7 +104,7 @@ def test_valid_empty_project_payload_returns_empty_tuple() -> None:
 
 
 def test_lists_and_filters_req_task_and_bug_work_items() -> None:
-    service, *_, calls = _service(
+    service, client = _service(
         {
             "queryUserWorkItemList": _mcp_text(
                 {
@@ -177,11 +141,11 @@ def test_lists_and_filters_req_task_and_bug_work_items() -> None:
     assert [(item.id, item.category, item.title) for item in items] == [
         ("2026112000000000001", "req", "支付需求")
     ]
-    assert calls.calls[0]["arguments"] == {"projectId": "P00000000001"}
+    assert client.calls[0]["arguments"] == {"projectId": "P00000000001"}
 
 
 def test_lists_workspace_work_items_with_dima_workspace_filter() -> None:
-    service, *_, calls = _service(
+    service, client = _service(
         {"queryUserWorkItemList": _mcp_text({"data": {"reqList": []}})}
     )
 
@@ -193,11 +157,11 @@ def test_lists_workspace_work_items_with_dima_workspace_filter() -> None:
         )
         == ()
     )
-    assert calls.calls[0]["arguments"] == {"workspaceId": "W26001113566"}
+    assert client.calls[0]["arguments"] == {"workspaceId": "W26001113566"}
 
 
 def test_loads_editable_draft_and_strips_basic_html() -> None:
-    service, _auth, _market, calls = _service(
+    service, client = _service(
         {
             "queryWorkItemDetail": _mcp_text(
                 {
@@ -230,60 +194,44 @@ def test_loads_editable_draft_and_strips_basic_html() -> None:
     )
     assert draft.source_url == "https://dima.example/work-item/3"
     assert draft.source_updated_at == "2026-11-20T12:00:00Z"
-    assert calls.calls[0]["arguments"] == {
-        "workItemId": "2026112000000000003"
-    }
+    assert client.calls[0]["arguments"] == {"workItemId": "2026112000000000003"}
 
 
 @pytest.mark.parametrize(
-    ("auth_request", "auth", "expected"),
+    "error",
     [
-        (_request(cookies={}), _Auth(), TodoSourceAuthError),
-        (_request(actor_id="other"), _Auth(), TodoSourceAuthError),
-        (_request(), _Auth(token=None), TodoSourceAuthError),
-        (_request(), _Auth(error=RuntimeError("exchange failed")), TodoSourceAuthError),
+        TodoSourceAuthError("IAM token is unavailable"),
+        TodoSourceResponseError("bad payload"),
+        TodoSourceUnavailableError("provider failed"),
     ],
 )
-def test_rejects_unusable_human_identity(
-    auth_request: AuthRequestContext,
-    auth: _Auth,
-    expected: type[Exception],
-) -> None:
-    service, *_ = _service({}, auth=auth)
+def test_preserves_source_client_errors(error: Exception) -> None:
+    service, _ = _service({}, client=_SourceClient({}, error=error))
 
-    with pytest.raises(expected):
-        service.list_projects(actor_id="149844", auth_request=auth_request)
+    with pytest.raises(type(error), match=str(error)):
+        service.list_projects(actor_id="149844", auth_request=_request())
 
 
-@pytest.mark.parametrize(
-    ("market", "calls"),
-    [
-        (_Market(detail=None), _ToolCalls({})),
-        (_Market(error=RuntimeError("metadata failed")), _ToolCalls({})),
-        (_Market(), _ToolCalls({}, error=RuntimeError("transport failed"))),
-        (_Market(), _ToolCalls({"queryUserSpaceAndProject": None})),
-    ],
-)
-def test_normalizes_provider_failures(
-    market: _Market,
-    calls: _ToolCalls,
-) -> None:
-    service, *_ = _service({}, market=market, calls=calls)
+def test_normalizes_unknown_client_failures() -> None:
+    service, _ = _service(
+        {},
+        client=_SourceClient({}, error=RuntimeError("transport failed")),
+    )
 
-    with pytest.raises(TodoSourceUnavailableError):
+    with pytest.raises(TodoSourceUnavailableError, match="Dima MCP call failed"):
         service.list_projects(actor_id="149844", auth_request=_request())
 
 
 @pytest.mark.parametrize("raw", ["not json", 42])
 def test_rejects_malformed_source_payload(raw: object) -> None:
-    service, *_ = _service({"queryUserSpaceAndProject": raw})
+    service, _ = _service({"queryUserSpaceAndProject": raw})
 
     with pytest.raises(TodoSourceResponseError):
         service.list_projects(actor_id="149844", auth_request=_request())
 
 
 def test_missing_work_item_is_not_found() -> None:
-    service, *_ = _service(
+    service, _ = _service(
         {"queryWorkItemDetail": _mcp_text({"data": {"id": "different"}})}
     )
 
@@ -297,7 +245,7 @@ def test_missing_work_item_is_not_found() -> None:
 
 
 def test_rejects_dima_business_error_response() -> None:
-    service, *_ = _service(
+    service, _ = _service(
         {
             "queryUserSpaceAndProject": _mcp_text(
                 {"success": False, "errorMsg": "permission denied", "data": None}

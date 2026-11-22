@@ -44,25 +44,6 @@ async fn saved_retry_recovers_same_loop_iteration_once_and_preserves_previous_re
 }
 
 #[tokio::test]
-async fn retry_transition_conflict_after_another_worker_commits_is_idempotent() {
-    let (h, runs) = harness(&[]).await;
-    let started = h.start(loop_yaml(2, false, false, 3), false).await;
-    let run = &started.view.run;
-    let node_id = iteration_id(&h.plan(&run.run_id).await, 1);
-    runs.conflict_retry_after_commit.store(true, Ordering::SeqCst);
-
-    fail_terminal(&h, 0, run).await.unwrap();
-
-    let scheduled = h.store.get_node_run(&run.run_id, &node_id).await.unwrap().unwrap();
-    assert_eq!((scheduled.status, scheduled.attempt), (StateMachineNodeStatus::RetryScheduled, 1));
-    recover(&h).await;
-    recover(&h).await;
-    assert_eq!(h.delivery.commands.lock().await.len(), 2);
-    let running = h.store.get_node_run(&run.run_id, &node_id).await.unwrap().unwrap();
-    assert_eq!((running.status, running.attempt), (StateMachineNodeStatus::Running, 1));
-}
-
-#[tokio::test]
 async fn exhausted_failure_recovers_run_and_session_without_retrying_bot() {
     let (mut h, runs) = harness(&[]).await;
     let started = h.start(loop_yaml(2, false, false, 1), false).await;

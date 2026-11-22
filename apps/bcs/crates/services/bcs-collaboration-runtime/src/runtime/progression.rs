@@ -246,7 +246,7 @@ fn collect_reachable_targets(
                     ("reason".to_string(), serde_json::json!(error.clone())),
                 ]),
             )?;
-            let scheduled_result = match event {
+            let scheduled = match event {
                 Some(event) => {
                     self.runs
                         .commit_eventful_transition(
@@ -258,31 +258,13 @@ fn collect_reachable_targets(
                                 event,
                             },
                         )
-                        .await
+                        .await?
                 }
                 None => {
                     self.runs
                         .schedule_node_retry(&run.run_id, node_id, attempt, next_attempt)
-                        .await
-                }
-            };
-            let scheduled = match scheduled_result {
-                Ok(scheduled) => scheduled,
-                Err(ServiceError::Conflict(message)) => {
-                    if self
-                        .runs
-                        .get_node_attempt_failure(&run.run_id, node_id, attempt)
                         .await?
-                        .is_none()
-                    {
-                        // The retry transition is a fenced CAS. A concurrent
-                        // worker may commit it after this worker reads the
-                        // failure but before this write reaches the store.
-                        return self.run_view(&run.run_id).await;
-                    }
-                    return Err(ServiceError::Conflict(message).into());
                 }
-                Err(error) => return Err(error.into()),
             };
             if scheduled {
                 self.observe_loop_node(compiled, run, node_id, next_attempt, "retry_scheduled", None);

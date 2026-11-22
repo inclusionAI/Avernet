@@ -9,15 +9,6 @@ from typing import Any, Iterable
 
 from injector import inject
 
-from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
-    MCPAuthServiceProtocol,
-)
-from agentclaw.community.core.mcp.mcp_market_service_protocol import (
-    MCPMarketServiceProtocol,
-)
-from agentclaw.community.core.mcp.mcp_tool_call_service_protocol import (
-    MCPToolCallServiceProtocol,
-)
 from agentclaw.community.core.task.todos.errors import (
     TodoSourceAuthError,
     TodoSourceResponseError,
@@ -34,12 +25,14 @@ from agentclaw.community.core.task.todos.source_models import (
     TodoSourceWorkItem,
     TodoSourceWorkItemKind,
 )
+from agentclaw.community.core.task.todos.source_client_protocol import (
+    TodoSourceClientProtocol,
+)
 from agentclaw.community.core.task.todos.source_service_protocol import (
     TodoSourceServiceProtocol,
 )
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 
-_DIMA_SERVER_CODE = "mcp.ant.arkai.dimamcpserver"
 _TAG_RE = re.compile(r"<[^>]+>")
 _BREAK_RE = re.compile(r"<(?:br\s*/?|/p|/div|/li)>|<(?:p|div|li)(?:\s[^>]*)?>", re.I)
 _SPACE_RE = re.compile(r"[ \t]+")
@@ -49,15 +42,8 @@ class TodoSourceService(TodoSourceServiceProtocol):
     """Use the authenticated Human's Dima MCP identity for read-only imports."""
 
     @inject
-    def __init__(
-        self,
-        auth: MCPAuthServiceProtocol,
-        market: MCPMarketServiceProtocol,
-        tool_calls: MCPToolCallServiceProtocol,
-    ) -> None:
-        self._auth = auth
-        self._market = market
-        self._tool_calls = tool_calls
+    def __init__(self, client: TodoSourceClientProtocol) -> None:
+        self._client = client
 
     def list_projects(
         self,
@@ -138,34 +124,19 @@ class TodoSourceService(TodoSourceServiceProtocol):
         tool_name: str,
         parameter: dict[str, object],
     ) -> object:
-        if auth_request.verified_actor_user_id not in (None, actor_id):
-            raise TodoSourceAuthError("verified actor mismatch")
-        iam_token = auth_request.cookies.get("IAM_TOKEN") or auth_request.cookies.get(
-            "iam_token"
-        )
-        if not iam_token:
-            raise TodoSourceAuthError("IAM token is unavailable")
         try:
-            access_token = self._auth.exchange_iam_token(iam_token)
-        except Exception as exc:  # noqa: BLE001 -- provider failures are normalized
-            raise TodoSourceAuthError("IAM token exchange failed") from exc
-        if not access_token:
-            raise TodoSourceAuthError("IAM token exchange failed")
-        try:
-            detail = self._market.get_mcp_detail(_DIMA_SERVER_CODE)
-        except Exception as exc:  # noqa: BLE001 -- upstream is a deployment concern
-            raise TodoSourceUnavailableError(
-                "Dima MCP metadata is unavailable"
-            ) from exc
-        if not isinstance(detail, dict):
-            raise TodoSourceUnavailableError("Dima MCP metadata is unavailable")
-        try:
-            raw = self._tool_calls.call_tool(
-                server_detail=detail,
+            raw = self._client.call(
+                actor_id=actor_id,
+                auth_request=auth_request,
                 tool_name=tool_name,
                 arguments=parameter,
-                access_token=access_token,
             )
+        except (
+            TodoSourceAuthError,
+            TodoSourceResponseError,
+            TodoSourceUnavailableError,
+        ):
+            raise
         except Exception as exc:  # noqa: BLE001 -- transport errors are normalized
             raise TodoSourceUnavailableError("Dima MCP call failed") from exc
         if raw is None:

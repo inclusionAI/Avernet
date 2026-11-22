@@ -173,6 +173,8 @@ provides:
   - TodoPage
   - TodoEventRecord
   - TodoCollaborationPort
+  - TodoSourceServiceProtocol
+  - TodoSourceService
   - TodoSourceInput
   - InProcessTodoCollaborationAdapter
 consumes:
@@ -182,6 +184,10 @@ consumes:
   - CachePlugin
   - TodoCollaborationPort
   - TodoArtifactServiceProtocol
+  - TodoSourceClientProtocol
+  - MCPAuthPlugin
+  - MCPCenterPlugin
+  - HttpClient
 internal_dependencies:
   - agentclaw.community.core.errors
   - agentclaw.community.core.repository.protocols
