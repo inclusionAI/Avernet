@@ -62,10 +62,10 @@ from agentclaw.community.core.repository.implementations.skill_center.bot_skills
 )
 from agentclaw.community.core.repository.implementations.skill_center.local_skill_package_dispatch import (
     LocalSkillPackageDispatches,
-    verify_local_skill_metadata_binding,
 )
 from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import (
     require_locked_capability_bot,
+    verify_runtime_binding_for_write,
 )
 from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
     record_capability_projection,
@@ -675,9 +675,9 @@ class SkillRepository(
     def create(self, skill_data: dict) -> dict:
         with self._db.orm_session() as db:
             if skill_data.get("source_type") == "upload":
-                verify_local_skill_metadata_binding(
+                verify_runtime_binding_for_write(
                     db, bot_id=skill_data.get("bolt_id") or "default",
-                    entity_id=_format_user_id(skill_data.get("user_id")),
+                    entity_id=_format_user_id(skill_data.get("user_id")) or "",
                 )
             tags = skill_data.get("tags")
             risk_tags = skill_data.get("risk_tags")
@@ -963,7 +963,7 @@ class SkillRepository(
             raise ValueError("Local Skill replacement cannot change git_path")
 
         with self._db.transactional_orm_session() as db:
-            verify_local_skill_metadata_binding(db, bot_id=bot_id, entity_id=owner_id)
+            verify_runtime_binding_for_write(db, bot_id=bot_id, entity_id=owner_id)
             if defer_skills_projection or record_tracked_projection:
                 require_locked_capability_bot(db, bot_id=bot_id, entity_id=owner_id)
             skill = (
@@ -1005,6 +1005,7 @@ class SkillRepository(
         from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.transactional_orm_session() as db:
+            verify_runtime_binding_for_write(db, bot_id=bot_id, entity_id=owner_id)
             skill = (
                 db.query(self.Skill)
                 .filter(

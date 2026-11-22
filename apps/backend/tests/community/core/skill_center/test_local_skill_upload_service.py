@@ -21,6 +21,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
+    LocalSkillRuntimeUnavailableError,
     LocalSkillStorageError,
 )
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
@@ -681,7 +682,7 @@ class _DeviceResolver:
         self.provider = provider
 
     def resolve_for_bot(self, _bot_id, _owner_id):
-        return SimpleNamespace(provider=self.provider, device_id=None)
+        return SimpleNamespace(provider=self.provider, binding_id=1, device_id=None)
 
 
 class _LegacyPackageRuntime:
@@ -2718,3 +2719,22 @@ async def test_upload_preserves_size_limit_reason(monkeypatch, as_directory):
     with pytest.raises(LocalSkillTooLargeError) as caught:
         await call
     assert caught.value.reason == expected
+
+
+@pytest.mark.asyncio
+async def test_manual_upload_rejects_a_different_binding_at_dispatch():
+    from agentclaw.community.core.devices.services.device_context import verify_runtime_binding
+
+    class ReboundRuntime(_LegacyPackageRuntime):
+        async def apply(self, **kwargs):
+            verify_runtime_binding(
+                bot_id=kwargs["bot_id"], user_id=kwargs["owner_id"],
+                binding_id=2, device_id="next-device",
+            )
+            pytest.fail("Manual upload reached a different Runtime")
+
+    service = _service(_Filesystem(), package_runtime=ReboundRuntime())
+    with pytest.raises(LocalSkillRuntimeUnavailableError):
+        await service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner", package=_zip({"SKILL.md": _skill_md()}),
+        )

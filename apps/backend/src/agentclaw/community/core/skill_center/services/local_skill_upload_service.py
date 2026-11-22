@@ -23,6 +23,7 @@ from agentclaw.community.core.bot_management.addressing import BotAddressResolve
 from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.devices.services.device_context import (
+    DeviceContext,
     RuntimeBindingChangedError,
     RuntimeBindingTarget,
     expect_runtime_binding,
@@ -243,17 +244,28 @@ class LocalSkillUploadService(
     ) -> dict[str, Any]:
         async with self._edit(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id) as edit:
             skill = PreparedLocalSkill.from_package(self._validate_zip(package))
-            is_teclaw = self._is_teclaw(
-                bot_id=bot_id, owner_id=edit.owner_id, assert_quiescent_name=skill.package.name,
+            context = self._device_context(bot_id=bot_id, owner_id=edit.owner_id)
+            if self._skill_repo.has_pending_local_skill_dispatch(
+                bot_id=bot_id, entity_id=edit.owner_id, name=skill.package.name,
+                device_id=context.device_id,
+            ):
+                raise LocalSkillPackageDispatchPendingError()
+            is_teclaw = context.provider == "teclaw"
+            binding = RuntimeBindingTarget(
+                bot_id, str(edit.bot["owner_id"]), edit.owner_id, context.binding_id, context.device_id,
             )
-            target = self._target(edit, skill, is_teclaw=is_teclaw)
-            runtime_result = await self._package_runtime.apply(
-                bot_id=bot_id, owner_id=edit.owner_id, skill_name=skill.package.name,
-                layout=target.location.layout, package=skill.package.canonical_zip,
-            )
-            result = await self._persist_package(
-                edit, target, runtime_result, is_teclaw=is_teclaw, deferred=False
-            )
+            try:
+                with expect_runtime_binding(binding):
+                    target = self._target(edit, skill, is_teclaw=is_teclaw)
+                    runtime_result = await self._package_runtime.apply(
+                        bot_id=bot_id, owner_id=edit.owner_id, skill_name=skill.package.name,
+                        layout=target.location.layout, package=skill.package.canonical_zip,
+                    )
+                    result = await self._persist_package(
+                        edit, target, runtime_result, is_teclaw=is_teclaw, deferred=False
+                    )
+            except RuntimeBindingChangedError as exc:
+                raise LocalSkillRuntimeUnavailableError() from exc
             await self._observe_package(edit, skill, result)
         # Capability delivery and Apply use a common send boundary. Enter it
         # after releasing the package lease to keep their lock order acyclic.
@@ -454,9 +466,10 @@ class LocalSkillUploadService(
                 publication = PackagePublication.UNKNOWN
             started = perf_counter()
             metadata = PackageMetadata.UNKNOWN
-            with expect_runtime_binding(RuntimeBindingTarget(
+            binding = RuntimeBindingTarget(
                 edit.bot_id, str(edit.bot["owner_id"]), edit.owner_id, context.binding_id, context.device_id,
-            )):
+            )
+            with expect_runtime_binding(binding):
                 result = await self._persist_package(
                     edit, target, runtime_result, is_teclaw=destination.is_teclaw, deferred=True,
                 )
@@ -486,7 +499,7 @@ class LocalSkillUploadService(
                 publication = PackagePublication.FAILED
             return package_result(name, skill.digest, publication, metadata)
         return LocalSkillPackageWriteResult(
-            LocalSkillPackageReceipt(name, skill.digest, publication, metadata), result
+            LocalSkillPackageReceipt(name, skill.digest, publication, metadata), result, binding,
         )
 
     def _commit_runtime_create(
@@ -867,21 +880,14 @@ class LocalSkillUploadService(
         if not cleaned:
             raise LocalSkillStorageError()
 
-    def _is_teclaw(
-        self, *, bot_id: str, owner_id: str, assert_quiescent_name: str | None = None,
-    ) -> bool:
+    def _is_teclaw(self, *, bot_id: str, owner_id: str) -> bool:
+        return self._device_context(bot_id=bot_id, owner_id=owner_id).provider == "teclaw"
+
+    def _device_context(self, *, bot_id: str, owner_id: str) -> DeviceContext:
         try:
-            context = self._device_context_resolver_provider().resolve_for_bot(
-                bot_id, owner_id
-            )
+            return self._device_context_resolver_provider().resolve_for_bot(bot_id, owner_id)
         except Exception as exc:
             raise LocalSkillStorageError() from exc
-        if assert_quiescent_name is not None and self._skill_repo.has_pending_local_skill_dispatch(
-            bot_id=bot_id, entity_id=owner_id, name=assert_quiescent_name,
-            device_id=context.device_id,
-        ):
-            raise LocalSkillPackageDispatchPendingError()
-        return context.provider == "teclaw"
 
     def _same_name_matches(
         self, *, bot_id: str, owner_id: str, name: str

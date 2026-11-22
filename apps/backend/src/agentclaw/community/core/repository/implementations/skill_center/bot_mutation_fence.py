@@ -4,6 +4,12 @@ from contextlib import contextmanager
 
 from sqlalchemy.orm import Query, Session
 
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+from agentclaw.community.core.devices.services.device_context import (
+    RuntimeBindingChangedError,
+    expected_runtime_binding,
+)
+
 from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneLockUnavailableError,
 )
@@ -53,6 +59,22 @@ def require_locked_capability_bot(
     if bot is None:
         raise SkillSetControlPlaneLockUnavailableError("Bot capability fence unavailable")
     return bot
+
+
+def verify_runtime_binding_for_write(
+    session: Session, *, bot_id: str, entity_id: str, locked_bot: BotModel | None = None,
+) -> None:
+    expected = expected_runtime_binding(bot_id, entity_id)
+    if expected is None:
+        return
+    bot = locked_bot or require_locked_capability_bot(session, bot_id=bot_id, entity_id=entity_id)
+    if bot.binding_id != expected.binding_id or bot.owner_id != expected.owner_id:
+        raise RuntimeBindingChangedError("Bot Runtime binding changed before capability commit")
+    binding = session.query(EntityDeviceBinding).filter_by(
+        id=bot.binding_id, env=bot.env,
+    ).with_for_update().one_or_none()
+    if binding is None or binding.device_id != expected.device_id:
+        raise RuntimeBindingChangedError("Bot Runtime device changed before capability commit")
 
 
 def lock_bot_capabilities(

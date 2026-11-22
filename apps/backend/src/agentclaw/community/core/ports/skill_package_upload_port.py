@@ -39,6 +39,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
+from agentclaw.community.core.devices.services.device_context import RuntimeBindingTarget
+
 
 class PackagePublication(StrEnum):
     PUBLISHED = "PUBLISHED"
@@ -88,6 +90,8 @@ class LocalSkillPackageReceipt:
 class LocalSkillPackageWriteResult:
     receipt: LocalSkillPackageReceipt
     upload: dict[str, Any] | None = None
+    # The actual Runtime that acknowledged this publication and metadata write.
+    target: RuntimeBindingTarget | None = None
 
 
 @runtime_checkable

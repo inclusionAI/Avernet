@@ -14,6 +14,7 @@ from agentclaw.community.core.repository.implementations.skill_center.bot_mutati
     SkillBatchTransactions,
     find_capability_bot,
     lock_bot_capabilities,
+    verify_runtime_binding_for_write,
 )
 from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
     record_capability_projection,
@@ -129,6 +130,9 @@ class CapabilityDesiredStateRepository(
                 if create:
                     raise SkillSetControlPlaneLockUnavailableError("Bot capability fence unavailable")
                 return mutation()
+            verify_runtime_binding_for_write(
+                session, bot_id=bot_id, entity_id=entity_id, locked_bot=bot,
+            )
             token = self._batch_session.set(session)
             try:
                 result = mutation()
