@@ -36,6 +36,9 @@ class CapabilityProjectionReconcileProtocol(Protocol):
 
 
 class CapabilityProjectionCompetitionProtocol(Protocol):
+    @property
+    def defer_enabled(self) -> bool: ...
+
     async def project_competing_change(
         self,
         *,

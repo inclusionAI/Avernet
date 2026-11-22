@@ -336,6 +336,7 @@ _No dependents in the boundary-significant set._
 - `agentclaw.community.core.desktop_bot`
 - `agentclaw.community.core.expert_market`
 - `agentclaw.community.core.harness`
+- `agentclaw.community.core.mcp`
 - `agentclaw.community.core.repository`
 - `agentclaw.community.core.service_bot`
 - `agentclaw.community.plugins.local`

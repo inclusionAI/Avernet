@@ -145,13 +145,23 @@ class CapabilityProjectionReconciler:
             return await legacy()
         if retired_mappings and not scope.skills:
             scope = replace(scope, skills=True)
+        if not (scope.skills or scope.mcp):
+            return RuntimeProjectionResult.skipped(reason="NO_CAPABILITY_PROJECTION")
+        if known is None:
+            # Enabled deployments must durably fence the first send even
+            # while another process owns the first Apply's delivery lease.
+            await asyncio.to_thread(
+                self._repository.require,
+                bot_id=bot_id, entity_id=entity_id, scope=scope,
+                retired_mappings=retired_mappings,
+            )
         try:
             async with self._guard.hold(bot_id=bot_id, entity_id=entity_id) as lease:
                 state = await asyncio.to_thread(
                     self._repository.prepare, bot_id=bot_id, entity_id=entity_id,
                 )
                 if state is None:
-                    return await legacy()
+                    return RuntimeProjectionResult.skipped(reason="CAPABILITY_PROJECTION_SUPERSEDED")
                 if not _covers(state.scope, scope) or not set(retired_mappings).issubset(
                     state.retired_mappings
                 ):

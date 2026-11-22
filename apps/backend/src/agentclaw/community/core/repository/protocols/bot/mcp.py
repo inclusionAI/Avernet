@@ -94,15 +94,21 @@ class ScopedMCPConfigRepositoryProtocol(Protocol):
         transport_protocol: str | None,
         user_url: str | None = None,
         bot_urls: dict[str, str] | None = None,
-    ) -> None:
-        """When bot_urls is None preserve all URLs; otherwise replace them."""
+        create_projection: bool | None = None,
+        projection_consumers: frozenset[str] = frozenset(),
+    ) -> dict[str, str]:
+        """Replace rules and return Bot IDs and entities whose projection is tracked.
+
+        Projection policy is unset for persistence-only callers, false to
+        track existing obligations, and true to enroll known consumers.
+        """
         ...
 
 
     @abstractmethod
     def patch_bot(
         self, *, bot_pk: int, bot_id: str, entity_id: str, current_owner_id: str,
-        server_code: str, patch: BotMCPConfigPatch,
+        server_code: str, patch: BotMCPConfigPatch, create_projection: bool | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Merge one Bot override under the Bot mutation lock."""
         ...

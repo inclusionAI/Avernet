@@ -227,7 +227,11 @@ class CapabilityRuntimeBoundary(Protocol):
         released: frozenset[str],
         declared: set[str],
     ) -> bool:
-        """Apply one MCP projection: deliver, withdraw, and declare the set."""
+        """Apply one MCP projection: deliver, withdraw, and declare the set.
+
+        Raise McpProjectionNotDispatchedError if preparation fails before any
+        outbound operation. False means a dispatch did not confirm delivery.
+        """
         ...
 
     async def project_whole_artifact(

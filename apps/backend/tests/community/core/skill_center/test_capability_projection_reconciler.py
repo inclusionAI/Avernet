@@ -179,3 +179,49 @@ async def test_committed_edit_during_delivery_never_inherits_the_older_receipt(t
     assert reconciler.observe(**address, revision=edited.revision).status is RuntimeProjectionStatus.PENDING
     assert (await reconciler.reconcile(**address)).status is RuntimeProjectionStatus.CONVERGED
     assert projector.scopes[-1].released_mcp == frozenset({"mcp.removed"})
+
+
+@pytest.mark.asyncio
+async def test_enabled_first_apply_cannot_drop_a_competing_send_before_baseline(tmp_path):
+    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
+        CapabilityProjectionReconciler,
+    )
+
+    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
+    address = {"bot_id": "bot", "entity_id": "owner"}
+    repository = CapabilityProjectionRepository(db)
+    cache = MemoryCachePlugin()
+    projector = _Projector([RuntimeProjectionResult.converged()])
+    holder = CapabilityProjectionReconciler(
+        repository=repository, projector=projector, guard=CapabilityDeliveryGuard(cache),
+        bots=BotRepository(db), defer_enabled=True,
+    )
+    contender = CapabilityProjectionReconciler(
+        repository=repository, projector=projector, guard=CapabilityDeliveryGuard(cache),
+        bots=BotRepository(db), defer_enabled=True,
+    )
+    scope = ProjectionScope(mcp=True, updated_mcp=frozenset({"mcp.changed"}))
+
+    async def legacy():
+        pytest.fail("Enabled competing delivery bypassed the capability fence")
+
+    submitted = asyncio.Event()
+    async def compete():
+        submitted.set()
+        return await contender.project_competing_change(
+            **address, owner_id="owner", scope=scope, retired_mappings=(), legacy=legacy,
+        )
+
+    async with holder.deferred_apply(**address, owner_id="owner"):
+        assert repository.read(**address) is None
+        pending = asyncio.create_task(compete())
+        await submitted.wait()
+        for _ in range(30):
+            state = await asyncio.to_thread(repository.read, **address)
+            if state is not None:
+                break
+            await asyncio.sleep(0.01)
+        assert state is not None
+        assert state.scope.updated_mcp == frozenset({"mcp.changed"})
+        assert not projector.scopes
+    assert (await pending).status is RuntimeProjectionStatus.CONVERGED

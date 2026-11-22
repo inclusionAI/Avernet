@@ -9,6 +9,9 @@ from injector import inject
 from sqlalchemy.exc import SQLAlchemyError
 
 from agentclaw.community.core.models.mcp import UserMCPConfig
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import _begin_sqlite_write
+from agentclaw.community.core.repository.implementations.skill_center.capability_projection import record_capability_projection
+from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
 from agentclaw.community.core.bot_management.owner_handoff.contracts import HandoffError
 from agentclaw.community.core.bot_management.owner_handoff.guard import assert_bot_mutable
 from agentclaw.community.core.mcp.scoped_config_contract import BotMCPConfigPatch
@@ -53,7 +56,9 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
         transport_protocol: str | None,
         user_url: str | None = None,
         bot_urls: dict[str, str] | None = None,
-    ) -> None:
+        create_projection: bool | None = None,
+        projection_consumers: frozenset[str] = frozenset(),
+    ) -> dict[str, str]:
         if not bot_headers.keys() <= owned_bot_ids:
             raise ValueError("Bot Header scope contains a Bot not owned by the user")
         if bot_urls is not None and not bot_urls.keys() <= owned_bot_ids:
@@ -63,6 +68,8 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
         env = get_current_env()
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
+            if create_projection is not None:
+                _begin_sqlite_write(session)
             user_row = (
                 session.query(UserMCPConfig)
                 .filter(
@@ -106,7 +113,7 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                 BotModel.avernet_tenant == tenant, BotModel.env == env,
                 BotModel.is_delete == 0, BotModel.owner_id == user_id,
                 BotModel.bot_id.in_(owned_bot_ids),
-            ).with_for_update().all()
+            ).order_by(BotModel.id).with_for_update().all()
             resources = {}
             for bot in bots:
                 if bot.bot_id in resources:
@@ -141,15 +148,31 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                     env=env,
                 )
 
+            projected: dict[str, str] = {}
+            if create_projection is not None:
+                # Inherited settings can change every owned Bot's effective
+                # projection, including one installed after the caller's
+                # consumer preflight. Reconciliation re-reads current supply.
+                scope = ProjectionScope(mcp=True, updated_mcp=frozenset({server_code}))
+                for bot_id, entity_id in resources.items():
+                    state = record_capability_projection(
+                        session, bot_id=bot_id, entity_id=entity_id,
+                        scope=scope, create=create_projection and bot_id in projection_consumers,
+                    )
+                    if state is not None:
+                        projected[bot_id] = entity_id
+            return projected
 
     def patch_bot(
         self, *, bot_pk: int, bot_id: str, entity_id: str, current_owner_id: str,
-        server_code: str, patch: BotMCPConfigPatch,
+        server_code: str, patch: BotMCPConfigPatch, create_projection: bool | None = None,
     ) -> tuple[dict[str, Any], bool]:
         env = get_current_env()
         tenant = get_current_avernet_tenant()
         try:
             with self._db.transactional_orm_session() as session:
+                if create_projection is not None:
+                    _begin_sqlite_write(session)
                 bot = session.query(BotModel).filter(
                     BotModel.id == bot_pk,
                     BotModel.avernet_tenant == tenant,
@@ -193,6 +216,12 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                         session, bot_id=bot_id, owner_id=entity_id, env=env,
                         server_code=server_code, config=config or None,
                     )
+                    if create_projection is not None:
+                        record_capability_projection(
+                            session, bot_id=bot_id, entity_id=entity_id,
+                            scope=ProjectionScope(mcp=True, updated_mcp=frozenset({server_code})),
+                            create=create_projection,
+                        )
                 return config, changed
         except SQLAlchemyError as exc:
             # SQLAlchemy can include the bound override JSON in its traceback.

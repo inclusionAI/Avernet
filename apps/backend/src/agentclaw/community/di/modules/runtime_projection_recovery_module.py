@@ -10,11 +10,18 @@ from agentclaw.community.api.bot_runtime_projector import (
 from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
     DesktopSkillRecoveryServiceProtocol,
 )
+from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
+    CapabilityDesiredStateRepository,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.capability_projection import (
     CapabilityProjectionRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionCompetitionProtocol,
     CapabilityProjectionReconcileProtocol,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
@@ -35,6 +42,7 @@ from agentclaw.community.core.skill_center.services.recovering_bot_runtime_proje
 from agentclaw.community.di.manifest_apply_config import ManifestApplyConfig
 from agentclaw.community.di.modules.config_module import read_user_config
 from agentclaw.community.plugin_api.cache import CachePlugin
+from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
 class RuntimeProjectionRecoveryModule(Module):
@@ -47,6 +55,23 @@ class RuntimeProjectionRecoveryModule(Module):
         if not isinstance(config, dict):
             raise ValueError("manifest_apply must be a mapping")
         return ManifestApplyConfig(**config)
+
+    @singleton
+    @provider
+    @inject
+    def capability_desired_state_repository(
+        self, db: DatabasePlugin, config: ManifestApplyConfig,
+    ) -> CapabilityDesiredStateRepository:
+        return CapabilityDesiredStateRepository(
+            db, track_competing_changes=config.defer_capability_projection,
+        )
+
+    @provider
+    @inject
+    def capability_desired_state_repository_protocol(
+        self, repository: CapabilityDesiredStateRepository,
+    ) -> CapabilityDesiredStateRepositoryProtocol:
+        return repository
 
     @singleton
     @provider
@@ -73,6 +98,14 @@ class RuntimeProjectionRecoveryModule(Module):
     def capability_projection_reconcile_protocol(
         self, reconciler: CapabilityProjectionReconciler,
     ) -> CapabilityProjectionReconcileProtocol:
+        return reconciler
+
+    @singleton
+    @provider
+    @inject
+    def capability_projection_competition_protocol(
+        self, reconciler: CapabilityProjectionReconciler,
+    ) -> CapabilityProjectionCompetitionProtocol:
         return reconciler
 
     @singleton

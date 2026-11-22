@@ -349,3 +349,37 @@ def test_patch_refuses_the_same_bot_identity_under_another_tenant() -> None:
             )
     with db.orm_session() as session:
         assert session.query(BotMCPConfig).count() == 0
+
+
+def test_effective_projection_work_commits_with_scoped_bot_and_inherited_overrides() -> None:
+    from agentclaw.community.core.models.capability_projection import BotCapabilityProjection
+    from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
+        CapabilityProjectionRepository,
+    )
+    from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
+
+    db = _Database()
+    BotCapabilityProjection.__table__.create(db.engine)
+    projections = CapabilityProjectionRepository(db)
+    base = projections.require(bot_id="bot-x", entity_id="owner", scope=ProjectionScope(skills=True))
+    repo = ScopedMCPConfigRepository(db)
+    with db.orm_session() as session:
+        bot_pk = session.query(BotModel).filter_by(bot_id="bot-x").one().id
+    address = dict(bot_pk=bot_pk, bot_id="bot-x", entity_id="owner",
+                   current_owner_id="owner", server_code="weather")
+
+    saved, changed = repo.patch_bot(**address, patch={"headers": {"X-Region": "sample"}},
+                                    create_projection=False)
+    assert changed and saved == {"headers": {"X-Region": "sample"}}
+    override = projections.read(bot_id="bot-x", entity_id="owner")
+    assert override.version == base.version + 1
+    assert override.scope.updated_mcp == {"weather"}
+
+    tracked = repo.replace(
+        user_id="owner", server_code="weather", headers={"X-Region": "new"},
+        bot_headers={}, owned_bot_ids={"bot-x", "bot-y"},
+        endpoint_env="PROD", transport_protocol=None, create_projection=False,
+    )
+    assert tracked == {"bot-x": "owner"}
+    assert projections.read(bot_id="bot-x", entity_id="owner").version == override.version + 1
+    assert projections.read(bot_id="bot-y", entity_id="owner") is None

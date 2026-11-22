@@ -65,6 +65,8 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.config
   - agentclaw.community.core.devices
+  - agentclaw.community.core.skill_center.capability_projection_reconcile
+  - agentclaw.community.core.skill_center.runtime_projection_contract
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
   - agentclaw.community.log

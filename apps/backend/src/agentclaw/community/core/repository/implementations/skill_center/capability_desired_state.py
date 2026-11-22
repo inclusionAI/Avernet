@@ -106,8 +106,11 @@ class CapabilityDesiredStateRepository(
     """SkillSet Membership and Installation UoW; lifecycle edits preserve overrides."""
 
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(
+        self, db: DatabasePlugin, *, track_competing_changes: bool = False,
+    ) -> None:
         self._db = db
+        self._track_competing_changes = track_competing_changes
         self._batch_session = ContextVar("skill_batch_session", default=None)
 
     def commit_projection_mutation(
@@ -117,6 +120,7 @@ class CapabilityDesiredStateRepository(
         retired_mappings: Sequence[PoolSkillMapping], create: bool,
     ) -> DesiredStateMutation:
         """Run the command and append its projection work on the same connection."""
+        create = create or self._track_competing_changes
         with self._db.transactional_orm_session() as session:
             bot = find_capability_bot(
                 session, bot_id=bot_id, entity_id=entity_id, lock=True,
