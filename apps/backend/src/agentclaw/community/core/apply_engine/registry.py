@@ -103,15 +103,22 @@ class ConfirmedPartialWriteError(RuntimeError):
 
 
 class CapabilityWriteError(RuntimeError):
-    """A capability write stopped after observing package publication facts."""
+    """A capability write stopped after observing independently committed facts."""
 
     def __init__(
-        self, message: str, *, local_skill_packages: tuple[LocalSkillPackageReceipt, ...],
+        self,
+        message: str,
+        *,
         confirmed_partial: bool,
+        local_skill_packages: tuple[LocalSkillPackageReceipt, ...] = (),
+        entries: tuple[EntryResult, ...] = (),
+        removals: tuple[str, ...] = (),
     ) -> None:
         super().__init__(message)
         self.local_skill_packages = local_skill_packages
         self.confirmed_partial = confirmed_partial
+        self.entries = entries
+        self.removals = removals
 
 
 @dataclass(frozen=True)

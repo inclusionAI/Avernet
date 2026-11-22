@@ -25,7 +25,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     RuntimeProjectionResult,
 )
-from agentclaw.community.core.skills_pool.mapping_intent import retired_logical_skill_mappings
+from agentclaw.community.core.skills_pool.mapping_intent import retirement_request
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.log import get_logger
 
@@ -200,10 +200,7 @@ class CapabilityProjectionReconciler:
             )
         if not is_bot_ready(plan.bot):
             return _projection_pending("BOT_RUNTIME_NOT_READY", "The Bot Runtime is not ready.")
-        retired = retired_logical_skill_mappings(
-            list(state.retired_mappings),
-            list(plan.projection.skill_mappings),
-        )
+        retired = retirement_request(state.retired_mappings, plan.projection.skill_mappings)
         await lease.verify()
         if not await asyncio.to_thread(self._repository.begin, state):
             return _projection_pending(

@@ -199,14 +199,9 @@ class ApplyOrchestrator:
         try:
             written = await materialiser.write(ctx, plan)
         except Exception as exc:  # noqa: BLE001
-            # A write that raised may have partially landed. Report it as a
-            # failure of every entry rather than claiming any of them: the
-            # record must never say something was materialised when it may not
-            # have been. ``partially_written`` is the other half of that
-            # honesty: aborting from ``resolve`` or ``plan`` leaves the area
-            # untouched; aborting from here does not, and a caller told only
-            # "aborted" would stop when it should re-apply to converge.
+            # Only the materialiser can confirm which earlier writes landed.
             logger.exception("[manifest_apply] write raised, construct=%s, bot_id=%s", construct.value, ctx.bot_id)
+            partial = exc if isinstance(exc, CapabilityWriteError) else None
             return self._aborted(
                 construct,
                 identities,
@@ -214,9 +209,11 @@ class ApplyOrchestrator:
                 reason=f"write failed: {exc}",
                 partially_written=True,
                 confirmed_partial=isinstance(exc, ConfirmedPartialWriteError) or (
-                    isinstance(exc, CapabilityWriteError) and exc.confirmed_partial
+                    partial is not None and partial.confirmed_partial
                 ),
-                local_skill_packages=exc.local_skill_packages if isinstance(exc, CapabilityWriteError) else (),
+                local_skill_packages=partial.local_skill_packages if partial else (),
+                completed_entries=partial.entries if partial else (),
+                completed_removals=partial.removals if partial else (),
             )
 
         return CategoryResult(
@@ -237,8 +234,10 @@ class ApplyOrchestrator:
         partially_written: bool = False,
         confirmed_partial: bool = False,
         local_skill_packages: tuple[LocalSkillPackageReceipt, ...] = (),
+        completed_entries: tuple[EntryResult, ...] = (),
+        completed_removals: tuple[str, ...] = (),
     ) -> CategoryResult:
-        """The category was not written. Report every entry, blame precisely.
+        """Report confirmed writes and which entries did not materialize.
 
         Exactly one of ``cause`` and ``reason`` is meaningful. ``reason`` is a
         whole-category cause, so every entry carries it verbatim; ``cause``
@@ -250,12 +249,18 @@ class ApplyOrchestrator:
         ``identities`` (it never became an entry); its row comes from the
         failure itself, so every declared line still reports.
 
-        ``removals`` is empty by construction here: an aborted category is not
-        written, so nothing was removed from it.
+        A write-stage failure can still report receipts returned by an earlier
+        successful operation.
         """
         results: list[EntryResult] = []
         if reason is not None:
-            results.extend(EntryResult(construct, identity, EntryOutcome.FAILED, reason) for identity in identities)
+            completed = {entry.identity: entry for entry in completed_entries}
+            for identity in identities:
+                if identity in completed_removals:
+                    continue
+                result = completed.pop(identity, None)
+                results.append(result or EntryResult(construct, identity, EntryOutcome.FAILED, reason))
+            results.extend(completed.values())
         else:
             failures = cause.failures if cause is not None else ()
             named = {failure.identity for failure in failures}
@@ -268,7 +273,7 @@ class ApplyOrchestrator:
         return CategoryResult(
             construct=construct,
             entries=tuple(results),
-            removals=(),
+            removals=completed_removals,
             aborted=True,
             partially_written=partially_written,
             confirmed_partial=confirmed_partial,

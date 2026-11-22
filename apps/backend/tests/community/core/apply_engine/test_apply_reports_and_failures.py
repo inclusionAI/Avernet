@@ -426,6 +426,10 @@ async def test_a_later_mcp_failure_after_a_committed_claim_reports_partial():
     assert report.status is ApplyStatus.PARTIAL
     assert activations.installed == {"first"}
     assert _category(report, Category.CAPABILITIES).partially_written is True
+    assert {entry.identity: entry.outcome for entry in report.entries} == {
+        "mcp/first": EntryOutcome.CREATED,
+        "mcp/second": EntryOutcome.FAILED,
+    }
 
 
 @pytest.mark.asyncio

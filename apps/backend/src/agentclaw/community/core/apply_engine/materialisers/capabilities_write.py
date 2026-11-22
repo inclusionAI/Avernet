@@ -78,6 +78,8 @@ async def write_capabilities(owner, ctx, plan):
         for e in plan.entries
     }
     removals = set()
+    pending_asset_cleanup = set()
+    completed = set()
     prepared = {}
     uploaded = {}
     package_receipts: tuple[LocalSkillPackageReceipt, ...] = ()
@@ -202,6 +204,7 @@ async def write_capabilities(owner, ctx, plan):
                             {"runtime_projection": result.runtime_projection}
                         ),
                     )
+                    completed.add(identity)
             if result.default_removed:
                 removals.add("skill_sets/default")
             if resolved.default_enabled and "skill_sets/default" in results:
@@ -215,6 +218,7 @@ async def write_capabilities(owner, ctx, plan):
                         {"runtime_projection": result.runtime_projection}
                     ),
                 )
+                completed.add("skill_sets/default")
         for skill in resolved.direct:
             identity = "skills/" + skill.name
             entry = next(e for e in plan.entries if e.intent.identity == identity)
@@ -232,6 +236,7 @@ async def write_capabilities(owner, ctx, plan):
             results[identity] = EntryResult(
                 Category.CAPABILITIES, identity, outcome, note=note
             )
+            completed.add(identity)
         # Names, not stale IDs, define Direct removal scope too.
         actual = await asyncio.to_thread(owner._snapshot, ctx)
         catalog = assets(actual)
@@ -245,6 +250,8 @@ async def write_capabilities(owner, ctx, plan):
             if _confirmed_mutation(result):
                 confirmed = True
                 removals.add("skills/" + asset["name"])
+                if sid in plan.cleanup_ids:
+                    pending_asset_cleanup.add("skills/" + asset["name"])
         # Re-observe actual effective supply after all Skill commands. No predicted context handoff.
         actual = await asyncio.to_thread(owner._snapshot, ctx)
         set_ids, supplied_mcps = effective_sets(actual)
@@ -275,6 +282,7 @@ async def write_capabilities(owner, ctx, plan):
                     _claim_outcome(result),
                     note=_projection_note(result),
                 )
+                completed.add("mcp/" + code)
             candidates = (
                 (set(direct_codes) | overrides | set(plan.remove_mcps))
                 - supplied_mcps
@@ -300,6 +308,7 @@ async def write_capabilities(owner, ctx, plan):
                         EntryOutcome.UPDATED,
                         note="explicit MCP supply and Bot override are removed; the server remains available as a final Skill dependency",
                     )
+                    completed.add(identity)
                 else:
                     removals.add(identity)
                     results.pop(identity, None)
@@ -322,20 +331,20 @@ async def write_capabilities(owner, ctx, plan):
                 await owner._uploads.delete_local_skill(
                     **who, skill_id=str(sid), name=asset["name"]
                 )
+                pending_asset_cleanup.discard("skills/" + asset["name"])
                 confirmed = True
                 if asset["name"] not in {skill.name for skill in resolved.final_skills}:
                     removals.add("skills/" + asset["name"])
     except Exception as exc:
         if isinstance(exc, (ConfirmedPartialWriteError, CapabilityWriteError)):
             raise
-        if package_receipts:
+        if package_receipts or confirmed or isinstance(exc, ApplyDesiredStateCommittedError):
             raise CapabilityWriteError(
-                "Capability replacement stopped after publishing Local Skill packages",
-                local_skill_packages=package_receipts, confirmed_partial=confirmed,
-            ) from None
-        if confirmed or isinstance(exc, ApplyDesiredStateCommittedError):
-            raise ConfirmedPartialWriteError(
-                "Capability replacement stopped after a durable Bot write"
+                "Capability replacement stopped after starting Bot writes",
+                local_skill_packages=package_receipts,
+                confirmed_partial=confirmed or isinstance(exc, ApplyDesiredStateCommittedError),
+                entries=tuple(results[key] for key in sorted(completed)),
+                removals=tuple(sorted(removals - pending_asset_cleanup)),
             ) from None
         # No Bot write is confirmed: an earlier shared publication may still remain.
         raise RuntimeError(

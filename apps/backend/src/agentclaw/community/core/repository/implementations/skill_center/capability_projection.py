@@ -79,20 +79,7 @@ def _read_mappings(row: BotCapabilityProjection) -> tuple[PoolSkillMapping, ...]
 
 
 def _read_result(row: BotCapabilityProjection) -> RuntimeProjectionResult:
-    data = json.loads(row.result_json)
-    issues = []
-    for issue in data["issues"]:
-        issue["status"] = RuntimeProjectionStatus(issue["status"])
-        issues.append(RuntimeProjectionIssue(**issue))
-    return RuntimeProjectionResult(
-        status=RuntimeProjectionStatus(data["status"]),
-        components={
-            name: RuntimeProjectionStatus(status)
-            for name, status in data["components"].items()
-        },
-        issues=tuple(issues),
-        reason=data.get("reason"),
-    )
+    return RuntimeProjectionResult.from_dict(json.loads(row.result_json))
 
 
 def _queue_result() -> RuntimeProjectionResult:

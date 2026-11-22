@@ -254,6 +254,7 @@ async def test_teclaw_failed_delivery_returns_pending_and_keeps_other_domains():
 
     assert result.status == "PENDING"
     assert result.issues[0].code == "ARTIFACT_APPLY_FAILED"
+    assert result.delivery_uncertain is True
     assert passport.calls
 
 
@@ -543,6 +544,32 @@ async def test_per_domain_engine_keeps_the_scope_split():
     assert claimed <= set(declared)
     assert released == frozenset()
     assert pool.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_baseline_retires_only_mcps_without_remaining_supply():
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(
+            mcp=True, claim_all_mcp=True,
+            released_mcp=frozenset({"mcp.template-preset", "mcp.removed"}),
+        ),
+    )
+    claimed, released, declared = factory.service.mcp_projections[0]
+    assert "mcp.template-preset" in claimed
+    assert claimed == declared
+    assert released == frozenset({"mcp.removed"})
 
 
 @pytest.mark.asyncio
