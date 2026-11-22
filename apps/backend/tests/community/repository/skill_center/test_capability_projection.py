@@ -11,9 +11,11 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
+    RuntimeProjectionIssue,
     RuntimeProjectionResult,
     RuntimeProjectionStatus,
 )
+from agentclaw.community.core.skills_pool.mapping_intent import retirement_request
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.plugin_api.models import BotModel
 
@@ -168,3 +170,47 @@ def test_rebinding_the_same_device_keeps_the_prior_dispatch_fence():
     current = repository.prepare(**locator)
     assert current is not None and current.needs_recovery
     assert current.result.status is RuntimeProjectionStatus.PENDING
+
+
+
+@pytest.mark.parametrize(
+    ("code", "write_blocked", "should_retry"),
+    [
+        ("RETIRED_TARGET_IDENTITY_MISMATCH", False, True),
+        ("RETIRED_TARGET_IDENTITY_MISMATCH", True, False),
+        ("UNMANAGED_ACTIVE_ENTRY_RETAINED", False, False),
+    ],
+)
+def test_only_confirmed_managed_mismatch_triggers_the_next_retirement_candidate(
+    code, write_blocked, should_retry,
+):
+    repository = CapabilityProjectionRepository(_Database())
+    locator = {"bot_id": "bot", "entity_id": "owner"}
+    first = PoolSkillMapping(corpus="repo", relative_path="old/first", link_name="old")
+    second = PoolSkillMapping(corpus="local", relative_path="old/second", link_name="old")
+    still_supplied = PoolSkillMapping(corpus="local", relative_path="active", link_name="active")
+    current = PoolSkillMapping(corpus="repo", relative_path="new/active", link_name="active")
+    work = repository.require(
+        **locator, scope=ProjectionScope(skills=True),
+        retired_mappings=(first, second, still_supplied),
+    )
+    assert retirement_request(work.retired_mappings, (current,)) == [first]
+    assert repository.complete(work, RuntimeProjectionResult(
+        status=RuntimeProjectionStatus.DEGRADED,
+        components={"skills": RuntimeProjectionStatus.DEGRADED},
+        issues=(RuntimeProjectionIssue(
+            resource_type="SKILL", name="old", requested_action="RETIRE",
+            code=code, reason="a known runtime result",
+            status=RuntimeProjectionStatus.DEGRADED, retryable=False,
+        ),),
+    ), write_blocked=write_blocked)
+    pending = repository.prepare(**locator)
+    assert pending is not None
+    if should_retry:
+        assert pending.needs_recovery
+        assert pending.result.status is RuntimeProjectionStatus.PENDING
+        assert retirement_request(pending.retired_mappings, (current,)) == [second]
+    else:
+        assert not pending.needs_recovery
+        assert pending.result.status is RuntimeProjectionStatus.DEGRADED
+        assert retirement_request(pending.retired_mappings, (current,)) == [first]

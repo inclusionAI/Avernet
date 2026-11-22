@@ -431,7 +431,10 @@ For a Runtime without a confirmed ordering guarantee, a dispatch with an
 unknown outcome remains fenced until the device target changes or completion
 is established. Recovery scans for pending records and enqueues work by
 stable Bot identity, then re-reads the current binding and desired state.
-It never replays a Manifest package batch.
+Retirement requests carry one recorded identity per target that has no
+current supply. A confirmed managed identity mismatch can advance to the
+next recorded candidate through recovery. It never replays a Manifest
+package batch.
 
 Deploy the additive `ac_bot_capability_projection` table before starting
 Backend workers with an operator-managed database. In this directory, apply

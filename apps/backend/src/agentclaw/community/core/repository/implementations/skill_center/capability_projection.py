@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import cast
@@ -204,6 +205,55 @@ def _clear_dispatch(row: BotCapabilityProjection) -> None:
     row.dispatch_device_id = None
 
 
+def _retry_retirement_mismatches(
+    row: BotCapabilityProjection, result: RuntimeProjectionResult,
+) -> RuntimeProjectionResult:
+    if result.status is not RuntimeProjectionStatus.DEGRADED or any(
+        issue.code == "SKILL_MAPPING_RESULT_INVALID" for issue in result.issues
+    ):
+        return result
+    candidates = _read_mappings(row)
+    alternatives = Counter(mapping.link_name for mapping in candidates)
+    retry_issues = {
+        issue for issue in result.issues
+        if issue.name is not None
+        and alternatives[issue.name] > 1
+        and issue.requested_action == "RETIRE"
+        and issue.code == "RETIRED_TARGET_IDENTITY_MISMATCH"
+    }
+    if not retry_issues:
+        return result
+
+    rejected = {issue.name for issue in retry_issues}
+    remaining = []
+    for candidate in candidates:
+        if candidate.link_name in rejected:
+            rejected.remove(candidate.link_name)
+        else:
+            remaining.append(candidate.to_dict())
+    row.retired_json = json.dumps(remaining)
+
+    issues = tuple(
+        replace(
+            issue,
+            status=RuntimeProjectionStatus.PENDING,
+            retryable=True,
+            reason="The Runtime rejected one recorded retirement identity. "
+                   "Another recorded identity remains to be checked.",
+        )
+        if issue in retry_issues else issue
+        for issue in result.issues
+    )
+    if any(issue.status is RuntimeProjectionStatus.DEGRADED for issue in issues):
+        return replace(result, issues=issues)
+    return replace(
+        result,
+        status=RuntimeProjectionStatus.PENDING,
+        components={**result.components, "skills": RuntimeProjectionStatus.PENDING},
+        issues=issues,
+    )
+
+
 def _write_result(
     row: BotCapabilityProjection, result: RuntimeProjectionResult,
 ) -> None:
@@ -308,6 +358,8 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
                 _mark_dispatch(row, state)
             if row.version != state.version:
                 return False
+            if not write_blocked:
+                result = _retry_retirement_mismatches(row, result)
             _write_result(row, result)
             return True
 
