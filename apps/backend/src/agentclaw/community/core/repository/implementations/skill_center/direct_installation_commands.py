@@ -54,7 +54,7 @@ class DirectInstallationCommands:
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         """Write the direct Installation fact for one Skill (R1 under txn)."""
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             skill = (
                 self._scope(session.query(Skill), Skill)
@@ -126,7 +126,7 @@ class DirectInstallationCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             # The Skill row may be gone; membership rows can still name its id,

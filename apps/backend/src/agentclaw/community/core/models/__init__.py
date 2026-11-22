@@ -40,3 +40,7 @@ from agentclaw.community.core.models.space_skill import (  # noqa: F401
     Space,
     SpaceMember,
 )
+
+from agentclaw.community.core.models.capability_projection import (  # noqa: F401
+    BotCapabilityProjection,
+)
