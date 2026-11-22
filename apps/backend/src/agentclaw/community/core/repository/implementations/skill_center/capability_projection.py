@@ -37,6 +37,17 @@ from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
 
 
+def _covers(current: ProjectionScope, requested: ProjectionScope) -> bool:
+    return (
+        (current.skills or not requested.skills)
+        and (current.mcp or not requested.mcp)
+        and (current.claim_all_mcp or not requested.claim_all_mcp)
+        and (current.claim_all_mcp or requested.claimed_mcp <= current.claimed_mcp)
+        and (current.claim_all_mcp or requested.updated_mcp <= current.updated_mcp)
+        and requested.released_mcp <= current.released_mcp
+    )
+
+
 def _merge_scope(current: ProjectionScope, added: ProjectionScope) -> ProjectionScope:
     return ProjectionScope(
         skills=current.skills or added.skills,
@@ -160,6 +171,7 @@ def _advance(
 def record_capability_projection(
     session: Session, *, bot_id: str, entity_id: str, scope: ProjectionScope,
     retired_mappings: Sequence[PoolSkillMapping] = (), create: bool,
+    skip_if_covered: bool = False,
 ) -> CapabilityProjectionState | None:
     """Append work inside the caller's transaction, after locking its Bot row."""
     if not (scope.skills or scope.mcp):
@@ -176,6 +188,10 @@ def record_capability_projection(
         )
         _write_scope(row, ProjectionScope())
         session.add(row)
+    elif skip_if_covered and row.retry_pending and _same_binding(row, bot) and _covers(
+        _read_scope(row), scope,
+    ) and set(retired_mappings).issubset(_read_mappings(row)):
+        return _snapshot(row, bot)
     _advance(row, bot, scope, retired_mappings)
     return _snapshot(row, bot)
 
@@ -258,8 +274,16 @@ def _retry_retirement_mismatches(
 
 
 def _write_result(
-    row: BotCapabilityProjection, result: RuntimeProjectionResult,
+    row: BotCapabilityProjection, result: RuntimeProjectionResult, *, mcp_only: bool,
 ) -> None:
+    scope = _read_scope(row)
+    if mcp_only:
+        components = {name: status for name, status in result.components.items() if name != "skills"}
+        result = replace(result, components=components)
+        if result.status is RuntimeProjectionStatus.CONVERGED:
+            scope = ProjectionScope(skills=scope.skills)
+        if scope.skills:
+            result = RuntimeProjectionResult.combine(_queue_result(), result)
     previous = _read_result(row)
     result = replace(result, components={**previous.components, **result.components})
     row.result_json = json.dumps(result.to_dict(), ensure_ascii=False)
@@ -267,7 +291,9 @@ def _write_result(
         result.status is RuntimeProjectionStatus.PENDING
         or any(issue.retryable for issue in result.issues)
     )
-    scope = _read_scope(row)
+    if mcp_only:
+        _write_scope(row, scope)
+        return
     if result.status is RuntimeProjectionStatus.CONVERGED:
         scope = ProjectionScope()
     else:
@@ -303,12 +329,12 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
 
     def require(
         self, *, bot_id: str, entity_id: str, scope: ProjectionScope,
-        retired_mappings: Sequence[PoolSkillMapping] = (),
+        retired_mappings: Sequence[PoolSkillMapping] = (), skip_if_covered: bool = False,
     ) -> CapabilityProjectionState:
         with self._db.transactional_orm_session() as session:
             state = record_capability_projection(
                 session, bot_id=bot_id, entity_id=entity_id, scope=scope,
-                retired_mappings=retired_mappings, create=True,
+                retired_mappings=retired_mappings, create=True, skip_if_covered=skip_if_covered,
             )
             if state is None:
                 raise ValueError("At least one capability projection domain is required")
@@ -343,7 +369,7 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
 
     def complete(
         self, state: CapabilityProjectionState, result: RuntimeProjectionResult, *,
-        write_blocked: bool = False,
+        write_blocked: bool = False, mcp_only: bool = False,
     ) -> bool:
         with self._db.transactional_orm_session() as session:
             current = self._locked_state(session, state)
@@ -363,9 +389,9 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
                 return False
             if write_blocked:
                 _mark_dispatch(row, state)
-            if not write_blocked:
+            if not write_blocked and not mcp_only:
                 result = _retry_retirement_mismatches(row, result)
-            _write_result(row, result)
+            _write_result(row, result, mcp_only=mcp_only)
             return True
 
     @staticmethod

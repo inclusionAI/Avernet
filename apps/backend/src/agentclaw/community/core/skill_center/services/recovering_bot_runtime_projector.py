@@ -133,8 +133,19 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
     async def project_mcp_and_cli(
         self, *, bot_id: str, owner_id: str, scope: ProjectionScope
     ) -> RuntimeProjectionResult:
-        return await self._delegate.project_mcp_and_cli(
-            bot_id=bot_id, owner_id=owner_id, scope=scope
+        if not scope.mcp or scope.skills:
+            raise ValueError("project_mcp_and_cli requires an MCP-only scope")
+
+        async def deliver(current_scope: ProjectionScope = scope) -> RuntimeProjectionResult:
+            return await self._delegate.project_mcp_and_cli(
+                bot_id=bot_id, owner_id=owner_id, scope=current_scope,
+            )
+
+        if self._capability_projection is None:
+            return await deliver()
+        return await self._capability_projection.project_competing_change(
+            bot_id=bot_id, owner_id=owner_id, entity_id=None, scope=scope,
+            retired_mappings=(), legacy=deliver, deliver_mcp_and_cli=deliver,
         )
 
     def _ensure_if_unresolved(

@@ -31,9 +31,9 @@ class CapabilityProjectionRepositoryProtocol(Protocol):
     @abstractmethod
     def require(
         self, *, bot_id: str, entity_id: str, scope: ProjectionScope,
-        retired_mappings: Sequence[PoolSkillMapping] = (),
+        retired_mappings: Sequence[PoolSkillMapping] = (), skip_if_covered: bool = False,
     ) -> CapabilityProjectionState:
-        """Advance the projection revision and merge a new obligation."""
+        """Record an obligation, optionally reusing pending work that already contains it."""
         ...
 
     @abstractmethod
@@ -49,7 +49,7 @@ class CapabilityProjectionRepositoryProtocol(Protocol):
     @abstractmethod
     def complete(
         self, state: CapabilityProjectionState, result: RuntimeProjectionResult, *,
-        write_blocked: bool = False,
+        write_blocked: bool = False, mcp_only: bool = False,
     ) -> bool:
         """Confirm only the sent revision. Keep ambiguous same-target writes fenced."""
         ...

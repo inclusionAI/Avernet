@@ -50,17 +50,6 @@ def _unknown_delivery() -> RuntimeProjectionResult:
     )
 
 
-def _covers(current: ProjectionScope, requested: ProjectionScope) -> bool:
-    return (
-        (current.skills or not requested.skills)
-        and (current.mcp or not requested.mcp)
-        and (current.claim_all_mcp or not requested.claim_all_mcp)
-        and (current.claim_all_mcp or requested.claimed_mcp <= current.claimed_mcp)
-        and (current.claim_all_mcp or requested.updated_mcp <= current.updated_mcp)
-        and requested.released_mcp <= current.released_mcp
-    )
-
-
 class CapabilityProjectionReconciler:
     def __init__(
         self,
@@ -129,11 +118,16 @@ class CapabilityProjectionReconciler:
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping],
         legacy: Callable[[], Awaitable[RuntimeProjectionResult]],
+        deliver_mcp_and_cli: Callable[[ProjectionScope], Awaitable[RuntimeProjectionResult]] | None = None,
     ) -> RuntimeProjectionResult:
         """Use the same send boundary for standalone mutations and lifecycle."""
         if entity_id is None:
             bot = await asyncio.to_thread(self._bots.get_by_id_and_owner, bot_id, owner_id)
             if bot is None:
+                bot = await asyncio.to_thread(self._bots.get_by_id_and_entity, bot_id, owner_id)
+            if bot is None:
+                if self.defer_enabled:
+                    return RuntimeProjectionResult.skipped(reason="CAPABILITY_PROJECTION_SUPERSEDED")
                 return await legacy()
             entity_id = str(bot.get("entity_id") or owner_id)
         if capability_projection_intent(bot_id=bot_id, entity_id=entity_id) is not None:
@@ -147,14 +141,12 @@ class CapabilityProjectionReconciler:
             scope = replace(scope, skills=True)
         if not (scope.skills or scope.mcp):
             return RuntimeProjectionResult.skipped(reason="NO_CAPABILITY_PROJECTION")
-        if known is None:
-            # Enabled deployments must durably fence the first send even
-            # while another process owns the first Apply's delivery lease.
-            await asyncio.to_thread(
-                self._repository.require,
-                bot_id=bot_id, entity_id=entity_id, scope=scope,
-                retired_mappings=retired_mappings,
-            )
+        await asyncio.to_thread(
+            self._repository.require,
+            bot_id=bot_id, entity_id=entity_id, scope=scope,
+            retired_mappings=retired_mappings,
+            skip_if_covered=not scope.claim_all_mcp,
+        )
         try:
             async with self._guard.hold(bot_id=bot_id, entity_id=entity_id) as lease:
                 state = await asyncio.to_thread(
@@ -162,15 +154,13 @@ class CapabilityProjectionReconciler:
                 )
                 if state is None:
                     return RuntimeProjectionResult.skipped(reason="CAPABILITY_PROJECTION_SUPERSEDED")
-                if not _covers(state.scope, scope) or not set(retired_mappings).issubset(
-                    state.retired_mappings
-                ):
-                    state = await asyncio.to_thread(
-                        self._repository.require,
-                        bot_id=bot_id,
-                        entity_id=entity_id,
-                        scope=scope,
-                        retired_mappings=retired_mappings,
+                if deliver_mcp_and_cli is not None:
+                    if state.write_blocked or not state.scope.mcp:
+                        return self._observed(state)
+                    return await self._dispatch(
+                        state, lease,
+                        deliver=partial(deliver_mcp_and_cli, replace(state.scope, skills=False)),
+                        mcp_only=True,
                     )
                 return await self._deliver(state, lease)
         except CapabilityDeliveryUnavailable:
@@ -213,6 +203,17 @@ class CapabilityProjectionReconciler:
                 code="BOT_RUNTIME_NOT_READY", reason="The Bot Runtime is not ready."
             )
         retired = retirement_request(state.retired_mappings, plan.projection.skill_mappings)
+        return await self._dispatch(
+            state, lease,
+            deliver=partial(
+                self._projector.apply_plan, plan=plan, retired_mappings=retired, scope=state.scope,
+            ),
+        )
+
+    async def _dispatch(
+        self, state: CapabilityProjectionState, lease: CapabilityDeliveryLease, *,
+        deliver: Callable[[], Awaitable[RuntimeProjectionResult]], mcp_only: bool = False,
+    ) -> RuntimeProjectionResult:
         await lease.verify()
         if not await asyncio.to_thread(self._repository.begin, state):
             return RuntimeProjectionResult.pending(
@@ -223,9 +224,7 @@ class CapabilityProjectionReconciler:
             with expect_runtime_binding(RuntimeBindingTarget(
                 state.bot_id, state.owner_id, state.entity_id, state.binding_id, state.device_id,
             )):
-                result = await self._projector.apply_plan(
-                    plan=plan, retired_mappings=retired, scope=state.scope,
-                )
+                result = await deliver()
         except Exception:
             logger.exception("Capability delivery did not return a receipt bot_id=%s", state.bot_id)
             result = _unknown_delivery()
@@ -235,13 +234,15 @@ class CapabilityProjectionReconciler:
             if write_blocked:
                 result = RuntimeProjectionResult.combine(result, _unknown_delivery())
         accepted = await asyncio.to_thread(
-            self._repository.complete, state, result, write_blocked=write_blocked,
+            self._repository.complete, state, result, write_blocked=write_blocked, mcp_only=mcp_only,
         )
         if not accepted:
             return RuntimeProjectionResult.pending(
                 code="CAPABILITY_PROJECTION_CHANGED",
                 reason="Capability configuration or the Runtime binding changed during synchronization.",
             )
+        if mcp_only:
+            return result
         return await asyncio.to_thread(
             self.observe, bot_id=state.bot_id, entity_id=state.entity_id, revision=state.revision,
         )

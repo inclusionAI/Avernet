@@ -48,4 +48,5 @@ class CapabilityProjectionCompetitionProtocol(Protocol):
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping],
         legacy: Callable[[], Awaitable[RuntimeProjectionResult]],
+        deliver_mcp_and_cli: Callable[[ProjectionScope], Awaitable[RuntimeProjectionResult]] | None = None,
     ) -> RuntimeProjectionResult: ...
