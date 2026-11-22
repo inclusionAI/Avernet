@@ -19,6 +19,9 @@ from typing import Any, Optional
 from agentclaw.community.core.apply_engine.capabilities import (
     Capabilities,
 )
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityWriteScope,
+)
 
 
 @dataclass
@@ -119,6 +122,11 @@ class ApplyContext:
     #: per fetch and rides the materialiser's call instead.
     apply_id: Optional[str] = None
     capability_state: CapabilityApplyState = field(default_factory=CapabilityApplyState)
+    capability_write_scope: CapabilityWriteScope | None = None
+
+    @property
+    def defer_capability_projection(self) -> bool:
+        return self.capability_write_scope is not None
 
 
 __all__ = ["ApplyContext", "CapabilityApplyState"]

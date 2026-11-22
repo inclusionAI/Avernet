@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import asyncio
 from typing import Sequence
 
@@ -225,4 +227,6 @@ class CapabilitiesMaterialiser(Materialiser[DesiredCapabilities]):
     async def write(self, ctx: ApplyContext, plan: CategoryPlan) -> CategoryWriteResult:
         if not isinstance(plan, CapabilityPlan):
             raise ValueError("capability writer requires its own complete plan")
-        return await write_capabilities(self, ctx, plan)
+        scope = ctx.capability_write_scope
+        with scope() if scope is not None else nullcontext():
+            return await write_capabilities(self, ctx, plan)
