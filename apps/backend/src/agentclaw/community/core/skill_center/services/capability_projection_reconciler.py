@@ -39,14 +39,10 @@ from .capability_delivery_guard import (
 logger = get_logger()
 
 
-def _projection_pending(code: str, reason: str) -> RuntimeProjectionResult:
-    return RuntimeProjectionResult.pending(code=code, reason=reason)
-
-
 def _unknown_delivery() -> RuntimeProjectionResult:
-    return _projection_pending(
-        "CAPABILITY_DELIVERY_OUTCOME_UNKNOWN",
-        "The last request may still be running. Synchronization will wait for a new Runtime binding.",
+    return RuntimeProjectionResult.pending(
+        code="CAPABILITY_DELIVERY_OUTCOME_UNKNOWN",
+        reason="The last request may still be running. Synchronization will wait for a new Runtime binding.",
     )
 
 
@@ -194,18 +190,20 @@ class CapabilityProjectionReconciler:
             )
         except Exception:
             logger.exception("Could not resolve committed capability projection bot_id=%s", state.bot_id)
-            return _projection_pending(
-                "CAPABILITY_PROJECTION_PLAN_UNAVAILABLE",
-                "Committed capability configuration could not be read for synchronization.",
+            return RuntimeProjectionResult.pending(
+                code="CAPABILITY_PROJECTION_PLAN_UNAVAILABLE",
+                reason="Committed capability configuration could not be read for synchronization.",
             )
         if not is_bot_ready(plan.bot):
-            return _projection_pending("BOT_RUNTIME_NOT_READY", "The Bot Runtime is not ready.")
+            return RuntimeProjectionResult.pending(
+                code="BOT_RUNTIME_NOT_READY", reason="The Bot Runtime is not ready."
+            )
         retired = retirement_request(state.retired_mappings, plan.projection.skill_mappings)
         await lease.verify()
         if not await asyncio.to_thread(self._repository.begin, state):
-            return _projection_pending(
-                "CAPABILITY_PROJECTION_CHANGED",
-                "Capability configuration or the Runtime binding changed before synchronization.",
+            return RuntimeProjectionResult.pending(
+                code="CAPABILITY_PROJECTION_CHANGED",
+                reason="Capability configuration or the Runtime binding changed before synchronization.",
             )
         try:
             result = await self._projector.apply_plan(
@@ -223,9 +221,9 @@ class CapabilityProjectionReconciler:
             self._repository.complete, state, result, write_blocked=write_blocked,
         )
         if not accepted:
-            return _projection_pending(
-                "CAPABILITY_PROJECTION_CHANGED",
-                "Capability configuration or the Runtime binding changed during synchronization.",
+            return RuntimeProjectionResult.pending(
+                code="CAPABILITY_PROJECTION_CHANGED",
+                reason="Capability configuration or the Runtime binding changed during synchronization.",
             )
         return await asyncio.to_thread(
             self.observe, bot_id=state.bot_id, entity_id=state.entity_id, revision=state.revision,
@@ -233,9 +231,9 @@ class CapabilityProjectionReconciler:
 
     @staticmethod
     def _delivery_busy() -> RuntimeProjectionResult:
-        return _projection_pending(
-            "CAPABILITY_DELIVERY_BUSY",
-            "Capability configuration is awaiting the shared Runtime delivery lease.",
+        return RuntimeProjectionResult.pending(
+            code="CAPABILITY_DELIVERY_BUSY",
+            reason="Capability configuration is awaiting the shared Runtime delivery lease.",
         )
 
     @staticmethod
