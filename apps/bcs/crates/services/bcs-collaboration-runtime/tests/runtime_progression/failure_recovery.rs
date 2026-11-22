@@ -169,3 +169,54 @@ async fn disconnected_assignee_fails_all_parallel_nodes_in_one_run() {
     assert_eq!(h.runtime.handle_bot_disconnect("driver-bot").await.unwrap(), 0);
     assert_eq!(h.store.get_run(&run.run_id).await.unwrap().unwrap().status, StateMachineRunStatus::Failed);
 }
+
+fn pending_worker_yaml() -> String {
+    r#"
+api_version: bcs.collaboration/v1
+id: pending-worker
+version: 1
+name: Pending Worker
+participants:
+  driver:
+    bot_id: driver-bot
+    required: true
+  worker:
+    bot_id: worker-bot
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      start:
+        kind: bot_task
+        display_name: Start
+        assignee:
+          type: bot_binding
+          binding: driver
+        instruction: Start.
+        transitions:
+          complete:
+            targets: [worker]
+      worker:
+        kind: bot_task
+        display_name: Worker
+        assignee:
+          type: bot_binding
+          binding: worker
+        instruction: Worker.
+        final_output: true
+"#
+    .to_string()
+}
+
+#[tokio::test]
+async fn disconnected_bot_with_pending_node_fails_run_without_waiting_for_dispatch() {
+    let h = Harness::new_with_group(session_collaboration_group(GroupStrategy::StateMachine), &[]).await;
+    let started = h.start(pending_worker_yaml(), false).await;
+    let run = started.view.run;
+
+    assert_eq!(h.runtime.handle_bot_disconnect("worker-bot").await.unwrap(), 1);
+    assert_eq!(h.store.get_run(&run.run_id).await.unwrap().unwrap().status, StateMachineRunStatus::Failed);
+}

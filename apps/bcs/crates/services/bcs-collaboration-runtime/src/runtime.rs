@@ -4198,34 +4198,52 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         bot_id: &str,
     ) -> Result<usize, CollaborationRuntimeError> {
         const DISCONNECT_NODE_LIMIT: usize = 128;
-        let nodes = self.runs.list_running_node_runs_for_bot(bot_id, DISCONNECT_NODE_LIMIT).await?;
-        let mut failed = 0;
+        let nodes = self.runs.list_active_node_runs_for_bot(bot_id, DISCONNECT_NODE_LIMIT).await?;
+        if nodes.len() == DISCONNECT_NODE_LIMIT {
+            warn!(bot_id = %bot_id, limit = DISCONNECT_NODE_LIMIT, "state_machine: Bot disconnect scan reached its bound");
+        }
+        let mut nodes_by_run = BTreeMap::<String, Vec<StateMachineNodeRun>>::new();
         for node in nodes {
-            let Some(run) = self.runs.get_run(&node.run_id).await? else { continue; };
-            if !matches!(run.status, StateMachineRunStatus::Running | StateMachineRunStatus::Failed)
-                || node.status != StateMachineNodeStatus::Running
-                || node.assignee_bot_id.as_deref() != Some(bot_id)
-            {
+            if node.assignee_bot_id.as_deref() != Some(bot_id) {
                 continue;
             }
-            let error = format!(
-                "state-machine node '{}' failed because assigned Bot '{}' disconnected",
-                node.node_id, bot_id
-            );
-            let marked = self.runs.fail_node_attempt_with_action(FailStateMachineNodeAttempt {
-                run_id: run.run_id.clone(),
-                node_id: node.node_id.clone(),
-                attempt: node.attempt,
-                error: error.clone(),
-                completed_at_ms: bcs_protocol::now_ms(),
-                action: StateMachineFailureAction::FailRun,
-            }).await?;
-            if marked {
-                failed += 1;
-                self.fail_run(&run, RunFailure::node(&node.node_id, node.attempt, error)).await?;
+            nodes_by_run.entry(node.run_id.clone()).or_default().push(node);
+        }
+        let mut runs = BTreeMap::<String, (StateMachineRun, Vec<StateMachineNodeRun>)>::new();
+        for (run_id, nodes) in nodes_by_run {
+            let Some(run) = self.runs.get_run(&run_id).await? else { continue; };
+            if run.status == StateMachineRunStatus::Running {
+                runs.insert(run_id, (run, nodes));
             }
         }
-        Ok(failed)
+
+        let mut affected_nodes = 0;
+        for (_, (run, nodes)) in runs {
+            let first_node = nodes
+                .iter()
+                .find(|node| node.status == StateMachineNodeStatus::Running)
+                .or_else(|| nodes.first())
+                .expect("disconnect candidates are non-empty");
+            let error = format!(
+                "state-machine run failed because assigned Bot '{}' disconnected",
+                bot_id
+            );
+            for node in &nodes {
+                if node.status == StateMachineNodeStatus::Running {
+                    let _ = self.runs.fail_node_attempt_with_action(FailStateMachineNodeAttempt {
+                        run_id: run.run_id.clone(),
+                        node_id: node.node_id.clone(),
+                        attempt: node.attempt,
+                        error: format!("state-machine node '{}' failed because assigned Bot '{}' disconnected", node.node_id, bot_id),
+                        completed_at_ms: bcs_protocol::now_ms(),
+                        action: StateMachineFailureAction::FailRun,
+                    }).await?;
+                }
+            }
+            self.fail_run(&run, RunFailure::node(&first_node.node_id, first_node.attempt, error)).await?;
+            affected_nodes += nodes.len();
+        }
+        Ok(affected_nodes)
     }
 
     async fn lookup_delivery_correlation(

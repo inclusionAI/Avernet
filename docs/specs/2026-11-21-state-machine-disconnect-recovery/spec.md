@@ -9,12 +9,12 @@
 
 ## Problem
 
-When a Bot disconnected after a StateMachine dispatch had been accepted, BCS kept the node running until the normal 420-second timeout. The manager did not receive a durable failure result, so the game remained stuck until a human sent `卡住了`.
+When a Bot disconnected, BCS could keep an assigned StateMachine node in `pending` until a later dispatch or the normal 420-second timeout. The manager did not receive a durable failure result, so the game remained stuck until a human sent `卡住了`.
 
 ## Contract
 
-1. A WebSocket Bot disconnect fails every currently running node assigned to that Bot, bounded to 128 node records per disconnect callback.
-2. The first successful failure CAS transitions the Run to `failed`; concurrent or late events are ignored by the existing attempt/run fences.
+1. A WebSocket Bot disconnect processes at most the first 128 currently non-terminal (`pending`, `ready`, `running`, or `retry_scheduled`) node records assigned to that Bot, ordered by `(run_id, node_id)`. Pending dispatches are included so the Run fails without waiting for a later delivery attempt. Candidates beyond the bound are not processed by that callback and have no immediate-failure guarantee; reaching the bound emits a warning rather than turning the WebSocket cleanup path into an unbounded database drain. For the six-player Undercover profile, the bound is not reached.
+2. Any selected non-terminal assigned node is treated as disconnect-sensitive, including a pending node that is waiting on upstream work or may later be skipped by branch selection; the fail-fast policy is intentional. The first successful failure CAS transitions the Run to `failed`; concurrent or late events are ignored by the existing attempt/run fences.
 3. The first terminal transition persists one structured, sanitized manager result and the public `state_machine.run.failed` event in the same local store transaction. The manager message uses the stable `run-result:{run_id}` identity while successful legacy results retain `state-machine-result:{run_id}`.
 4. The result contains only bounded metadata: workflow, terminal status, failed node/attempt, reason category, and completed node IDs. Raw error text, node artifacts, and player words remain internal diagnostics.
 5. User cancellation records `state_machine.run.aborted`, publishes a structured `user_aborted` result, and never enters automatic retry notification handling. Session and Group cleanup use `session_closed` and `group_closed` reason categories respectively.
@@ -48,7 +48,7 @@ No database migration is required. Existing chat-result checkpoints remain immut
 - Deterministic contract tests cover sanitized terminal-result rendering and the `run-result` message identity.
 - Immediate disconnect regression test in `runtime_progression/failure_recovery.rs`.
 - Real Singlebox fault injection: 10/10 independent Bot kills reopened the same speech phase within 60 seconds; stuck=0, late=0; all 10 original terminal-result checkpoints finished `delivered`. Detailed CSV and summary are in `fault-injection-10-runs.csv` and `fault-injection-10-runs.md`.
-- Runtime progression suite: 270 passing tests, including the disconnect terminal-result idempotence regression and cross-platform migration assertions.
+- Runtime progression suite: 271 passing tests, including the pending-node disconnect regression, disconnect terminal-result idempotence regression, and cross-platform migration assertions.
 - Terminal-result storage contracts pass for Memory and SQLite; the real MySQL contract passes in Text and Prepared protocols for fixed-loop v1 and v2.
 - `cargo test -p bcs-cli --test e2e custom_collaboration_test`: 11 passed.
 - Event contract tests: 13 passed.

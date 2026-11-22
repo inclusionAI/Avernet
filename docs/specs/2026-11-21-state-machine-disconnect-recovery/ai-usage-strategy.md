@@ -25,7 +25,7 @@
 - 使用 Event Catalog Python contract test 验证公开事件 schema、fixture 和 metadata-only 限制。
 - 使用真实 MySQL Text/Prepared 路径验证终态 checkpoint contract。
 - 使用 Singlebox 故障注入重复验证 Bot 被杀后的自动恢复，目标为 10/10 恢复、0 次卡死。
-- 最终 Runtime progression suite 达到 270 passed、0 failed；已知迁移换行断言通过跨平台规范化修复。
+- 最终 Runtime progression suite 达到 271 passed、0 failed；新增 pending 节点断连回归测试，已知迁移换行断言通过跨平台规范化修复。
 
 ## 人工复核清单
 

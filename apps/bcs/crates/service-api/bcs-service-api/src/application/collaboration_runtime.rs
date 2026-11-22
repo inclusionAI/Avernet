@@ -804,8 +804,9 @@ pub trait CollaborationRuntimeService: Send + Sync {
         cmd: HandleBotTerminalEventCommand,
     ) -> Result<HandleBotTerminalEventOutcome, CollaborationRuntimeError>;
 
-    /// Fail active Bot nodes assigned to a Bot whose streaming connection closed.
+    /// Fail non-terminal Bot nodes assigned to a Bot whose streaming connection closed.
     /// The operation is bounded and idempotent; it must not scan terminal history.
+    /// The returned count is the number of candidate node records processed.
     async fn handle_bot_disconnect(
         &self,
         bot_id: &str,

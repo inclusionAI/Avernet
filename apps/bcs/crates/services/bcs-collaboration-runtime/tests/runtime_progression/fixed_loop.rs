@@ -69,8 +69,12 @@ struct Harness {
 
 impl Harness {
     async fn new(outcomes: &[&str]) -> Self {
+        Self::new_with_group(test_group(), outcomes).await
+    }
+
+    async fn new_with_group(group_definition: Group, outcomes: &[&str]) -> Self {
         let group = Arc::new(GroupStore::new());
-        group.upsert(test_group()).await.unwrap();
+        group.upsert(group_definition).await.unwrap();
         let session_repo = Arc::new(MemorySessionRepo::new());
         let sessions = Arc::new(SessionManagementServiceImpl::new(session_repo.clone(), Arc::new(MemoryGroupRepo::new())));
         let public_events = Arc::new(bcs_event_store::MemoryEventStore::new());
@@ -992,6 +996,5 @@ async fn concurrent_loop_rerun_creates_one_child_and_dispatches_its_first_node_o
     assert_eq!(h.delivery.commands.lock().await.len(), 2);
     assert_eq!(serde_json::to_value(h.plan(&run.run_id).await).unwrap(), serde_json::to_value(h.plan(&first.view.run.run_id).await).unwrap());
 }
-
 #[path = "history_loop.rs"]
 mod history_loop;

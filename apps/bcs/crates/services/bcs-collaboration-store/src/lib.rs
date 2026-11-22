@@ -679,7 +679,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         Ok(nodes)
     }
 
-    async fn list_running_node_runs_for_bot(
+    async fn list_active_node_runs_for_bot(
         &self,
         bot_id: &str,
         limit: usize,
@@ -691,7 +691,13 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         let mut nodes = inner
             .nodes
             .values()
-            .filter(|node| node.status == StateMachineNodeStatus::Running
+            .filter(|node| matches!(
+                    node.status,
+                    StateMachineNodeStatus::Pending
+                        | StateMachineNodeStatus::Ready
+                        | StateMachineNodeStatus::Running
+                        | StateMachineNodeStatus::RetryScheduled,
+                )
                 && node.artifact_text.is_none()
                 && node.assignee_bot_id.as_deref() == Some(bot_id)
                 && inner.runs.get(&node.run_id).is_some_and(|run| run.status == StateMachineRunStatus::Running))
@@ -2987,7 +2993,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             .collect()
     }
 
-    async fn list_running_node_runs_for_bot(
+    async fn list_active_node_runs_for_bot(
         &self,
         bot_id: &str,
         limit: usize,
@@ -2997,7 +3003,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         }
         let sql = format!(
             "SELECT {SM_NODE_SELECT_COLS} FROM bcs_state_machine_node_runs n \
-             WHERE n.env = ? AND n.assignee_bot_id = ? AND n.status = 'running' \
+             WHERE n.env = ? AND n.assignee_bot_id = ? AND n.status IN ('pending', 'ready', 'running', 'retry_scheduled') \
                AND n.artifact_text IS NULL AND n.record_status = 'active' \
                AND EXISTS (SELECT 1 FROM bcs_state_machine_runs r \
                  WHERE r.env = n.env AND r.run_id = n.run_id \

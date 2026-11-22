@@ -761,9 +761,9 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         run_id: &str,
     ) -> ServiceResult<Option<StateMachineDeliveryCorrelation>>;
 
-    /// Return a bounded snapshot of active Bot nodes assigned to one Bot.
+    /// Return a bounded snapshot of non-terminal Bot nodes assigned to one Bot.
     /// This is used by disconnect handling and must not scan terminal history.
-    async fn list_running_node_runs_for_bot(
+    async fn list_active_node_runs_for_bot(
         &self,
         bot_id: &str,
         limit: usize,
