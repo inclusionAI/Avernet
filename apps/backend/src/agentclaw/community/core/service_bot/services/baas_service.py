@@ -3389,16 +3389,18 @@ class BaasService:  # pragma: no cover
         """Return all active targets of the current logical Bot record.
 
         Unlike legacy token-target lookup, an omitted UUID enumerates every
-        current replica. Explicit UUID selection must resolve exactly once.
+        current replica. An empty UUID is treated as omitted; nonempty UUID
+        selection must resolve exactly once.
         """
         started = time.monotonic()
+        if device_uuid == "":
+            logger.info("runtime_device_uuid_normalized binding_id=%s reason=empty", binding.id)
+            device_uuid = None
         fields = {"binding_id": binding.id, "provider": binding.device_provider, "device_uuid": device_uuid}
         logger.info("runtime_device_inventory_started fields=%s", fields)
         try:
             if str(binding.status).upper() != "ACTIVE":
                 raise BaasOutboundTargetError("binding_unavailable")
-            if device_uuid == "":
-                raise BaasOutboundTargetError("target_not_found")
             provider = binding.device_provider
             if provider in ("baas", "teclaw"):
                 bot_uuid = binding.device_id
@@ -3425,8 +3427,7 @@ class BaasService:  # pragma: no cover
                 target = device.get("provider_device_id")
                 if not self._is_valid_paas_device_id(target):
                     raise BaasOutboundTargetError("invalid_target")
-                if provider == "arca" and (not target.startswith("ARCA-SANDBOX-")
-                        or not all("0" <= char <= "9" for char in target.rpartition("@")[2])):
+                if provider == "arca" and not target.startswith("ARCA-SANDBOX-"):
                     raise BaasOutboundTargetError("invalid_target")
                 targets.append({"device_uuid": device.get("device_uuid"), "provider_device_id": target})
         except Exception as exc:

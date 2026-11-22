@@ -193,12 +193,13 @@ def test_friend_post_forwards_verbatim_jit_selectors_without_changing_caller(jit
 
 
 @pytest.mark.parametrize("selector", [{"device_uuid": ""}])
-def test_post_invalid_selector_only_skips_jit(jit_iam, selector):
+def test_post_empty_uuid_is_omitted_without_changing_caller(jit_iam, selector):
     response = request(jit_iam.http, **selector)
     assert response.status_code == 200
     assert response.json()["data"]["iam_token"] == "test-token"
     jit_iam.caller.get_iam_token.assert_awaited_once()
-    jit_iam.pipeline.run.assert_not_awaited()
+    jit_iam.pipeline.run.assert_awaited_once()
+    assert jit_iam.pipeline.run.await_args.args[0].device_uuid is None
 
 
 @pytest.mark.parametrize("scoped", [True, False])

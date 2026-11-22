@@ -154,10 +154,7 @@ class TokenExchangeOrchestrator:
     ) -> TokenExchangeContext | None:
         if not bot_id or not entity_id:
             return None
-        device_uuid = auth_request.query_params.get("device_uuid")
-        if device_uuid == "":
-            logger.warning("token_plugin_context_skipped bot_id=%s reason=invalid_device_uuid", bot_id)
-            return None
+        device_uuid = auth_request.query_params.get("device_uuid") or None
         bot = await asyncio.to_thread(
             self._bot_repository.get_by_id_and_entity, bot_id, entity_id,
         )

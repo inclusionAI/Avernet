@@ -30,6 +30,10 @@ internal_dependencies:
   - agentclaw.community.core.service_bot
 ```
 
+When `entity_id` is supplied, the binding resolver locates the exact Bot by
+that entity; the owner argument is not an additional equality constraint.
+Without an entity it retains the existing Bot/owner lookup.
+
 `RuntimeBindingTarget.CALLER_SERVICE` explicitly resolves a service Bot's draft,
 verify, or online runtime even when the Bot also has a caller instance.
 `RuntimeBindingTarget.CALLER_INSTANCE` resolves the authenticated user's active
@@ -50,8 +54,10 @@ instance. Shared engines retain their stage binding. This service does not
 authenticate the friend selector or authorize credential writes.
 
 `resolve_binding` performs no physical-device query. `resolve_targets` returns
-all ACTIVE devices from the current ACTIVE BaaS Bot record; an explicit UUID
-must match exactly once. `resolve` combines both operations. Results retain the
+all ACTIVE devices from the current ACTIVE BaaS Bot record; a nonempty UUID
+must match exactly once. An empty UUID is equivalent to omission, including
+in IAM/JIT context construction. Provider target IDs preserve safe opaque
+template suffixes; the locator does not require numeric template IDs. `resolve` combines both operations. Results retain the
 provider so callers can distinguish Teclaw from ARCA. Consumers requiring one
 target must reject ambiguity; enumeration does not authorize broadcasting
 credentials. IAM/JIT selects friend versus service runtimes with `f_user_id`

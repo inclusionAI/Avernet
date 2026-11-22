@@ -222,7 +222,7 @@ async def test_real_identity_module_injects_auth_plugin_into_orchestrator():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", [
-    {}, {"caller_runtime_target": "service"}, {"caller_runtime_target": "caller_instance"},
+    {}, {"device_uuid": ""}, {"caller_runtime_target": "service"}, {"caller_runtime_target": "caller_instance"},
     {"device_uuid": "DEVICE-02"}, {"device_uuid": " 副本/a:b "}, {"device_uuid": "DEVICE-02", "caller_runtime_target": "service"},
 ])
 async def test_jit_reads_selectors_after_unchanged_caller_refresh(selection):
@@ -234,24 +234,25 @@ async def test_jit_reads_selectors_after_unchanged_caller_refresh(selection):
     context, = pipeline.contexts
     assert context.friend_user_id is None
     assert not hasattr(context, "caller_runtime_target")
-    assert context.device_uuid == selection.get("device_uuid")
+    assert context.device_uuid == (selection.get("device_uuid") or None)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", [
     {"device_uuid": ""},
 ])
-async def test_invalid_jit_selectors_preserve_caller_without_fallback(selection):
+async def test_empty_jit_uuid_is_omitted_without_changing_caller(selection):
     service, caller, pipeline = _service(_Auth())
     request = _request(auth_request=AuthRequestContext(query_params=selection))
     assert await service.get_iam_token(**request) is caller.outcome
     assert caller.requests == [request]
-    assert pipeline.contexts == []
+    assert len(pipeline.contexts) == 1
+    assert pipeline.contexts[0].device_uuid is None
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", [{"device_uuid": ""}])
-async def test_http_invalid_selection_preserves_caller_response(selection):
+async def test_http_empty_uuid_preserves_caller_response_and_omits_jit_selector(selection):
     from httpx import ASGITransport, AsyncClient
     from tests.community.api.test_dingtalk_iam_token import _app
 
@@ -267,11 +268,12 @@ async def test_http_invalid_selection_preserves_caller_response(selection):
     }
     assert len(caller.requests) == 1
     assert {"caller_runtime_target", "device_uuid"}.isdisjoint(caller.requests[0])
-    assert pipeline.contexts == []
+    assert len(pipeline.contexts) == 1
+    assert pipeline.contexts[0].device_uuid is None
 
 
 @pytest.mark.asyncio
-async def test_jit_selector_failure_preserves_original_caller_exception():
+async def test_empty_jit_uuid_preserves_original_caller_exception():
     caller_error = RuntimeError("caller refresh failed")
     service, caller, pipeline = _service(_Auth(), caller_error=caller_error)
     request = _request(auth_request=AuthRequestContext(query_params={"device_uuid": ""}))
@@ -279,7 +281,8 @@ async def test_jit_selector_failure_preserves_original_caller_exception():
         await service.get_iam_token(**request)
     assert exc.value is caller_error
     assert caller.requests == [request]
-    assert pipeline.contexts == []
+    assert len(pipeline.contexts) == 1
+    assert pipeline.contexts[0].device_uuid is None
 
 
 @pytest.mark.asyncio

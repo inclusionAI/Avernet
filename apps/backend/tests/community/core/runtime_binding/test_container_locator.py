@@ -6,7 +6,9 @@ import pytest
 
 from agentclaw.community.core.runtime_binding.container_locator import RuntimeContainerLocator
 from agentclaw.community.core.runtime_binding.errors import CallerInstanceNotReadyError, RuntimeBindingNotFoundError, RuntimeBotNotFoundError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingSource, RuntimeContainerRequest
+from agentclaw.community.core.runtime_binding.models import (
+    RuntimeBindingRequest, RuntimeBindingSource, RuntimeBindingTarget, RuntimeContainerRequest,
+)
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.core.service_bot.services.baas_service import BaasService, BaasOutboundTargetError
 
@@ -136,7 +138,7 @@ def test_missing_or_not_ready_caller_never_creates_or_falls_back(instance):
     baas._active_token_replica_devices.assert_not_called()
 
 
-@pytest.mark.parametrize("uuid", ["foreign", "", "old"])
+@pytest.mark.parametrize("uuid", ["foreign", "old"])
 def test_exact_device_rejects_missing_or_inactive_without_fallback(uuid):
     locator, _, _, _, _ = world()
     with pytest.raises(BaasOutboundTargetError, match="target_not_found"):
@@ -150,12 +152,13 @@ def test_duplicate_device_uuid_is_ambiguous():
         locator.resolve(request(stage="online", device_uuid="a"))
 
 
-def test_native_arca_exact_uuid_and_template_are_preserved():
+@pytest.mark.parametrize("template", ["12", "template-v2"])
+def test_native_arca_exact_uuid_and_template_are_preserved(template):
     locator, _, bindings, _, _ = world(kind="personal")
     bindings[1].device_provider = "arca"
-    bindings[1].device_props = {"sandbox_id": "ARCA-SANDBOX-native@12", "device_uuid": "native"}
+    bindings[1].device_props = {"sandbox_id": f"ARCA-SANDBOX-native@{template}", "device_uuid": "native"}
     result = locator.resolve(request(device_uuid="native"))
-    assert result.targets[0].provider_device_id == "ARCA-SANDBOX-native@12"
+    assert result.targets[0].provider_device_id == f"ARCA-SANDBOX-native@{template}"
     assert result.targets[0].provider == "arca"
 
 
@@ -194,19 +197,22 @@ def test_exact_entity_survives_same_owner_duplicate_bot_names():
     assert locator.resolve_binding(request(stage="draft")).binding.id == 1
 
 
-def test_owner_change_during_binding_resolution_is_rejected():
-    locator, bots, _, _, baas = world()
-    before = bots.get_by_id_and_entity.return_value
-    bots.get_by_id_and_entity.side_effect = [before, {**before, "owner_id": "changed-owner"}]
-    with pytest.raises(RuntimeBotNotFoundError):
-        locator.resolve(request(stage="draft"))
-    baas._active_token_replica_devices.assert_not_called()
+def test_exact_entity_lookup_does_not_require_a_matching_owner_hint():
+    locator, bots, _, _, _ = world()
+    resolved = locator._runtime_bindings.resolve(RuntimeBindingRequest(
+        bot_id="default", entity_id="historical-entity", owner_id="historical-owner",
+        actor_user_id="actor", stage="draft", target=RuntimeBindingTarget.CALLER_SERVICE,
+    ))
+    assert resolved.binding_id == 1
+    bots.get_by_id_and_entity.assert_called_once_with("default", "historical-entity")
+    bots.get_by_id_and_owner.assert_not_called()
 
 
 @pytest.mark.parametrize(("provider", "props", "device_id", "status", "reason"), [
     ("unknown", {}, "logical", "ACTIVE", "unsupported_provider"),
     ("baas", {}, "../foreign", "ACTIVE", "invalid_target"),
-    ("arca", {"sandbox_id": "ARCA-SANDBOX-native@bad"}, "native", "ACTIVE", "invalid_target"),
+    ("arca", {"sandbox_id": "ARCA-SANDBOX-native@../bad"}, "native", "ACTIVE", "invalid_target"),
+    ("arca", {"sandbox_id": "ARCA-SANDBOX-native@bad\n"}, "native", "ACTIVE", "invalid_target"),
     ("arca", {"sandbox_id": "OTHER@0"}, "native", "ACTIVE", "invalid_target"),
     ("arca", {}, "native", "ACTIVE", "invalid_target"),
     ("arca", {"sandbox_id": "ARCA-SANDBOX-native@0", "device_uuid": "native"}, "native", "RELEASED", "binding_unavailable"),
@@ -248,3 +254,19 @@ def test_inventory_query_failure_is_propagated_without_secret_response(caplog):
     assert "token_replica_inventory_failed" in caplog.text
     assert "runtime_device_inventory_failed" in caplog.text
     assert "credential-sentinel" not in caplog.text
+
+
+@pytest.mark.parametrize("provider", ["baas", "teclaw", "arca"])
+def test_empty_uuid_enumerates_the_same_targets_as_omitted(provider, caplog):
+    caplog.set_level("INFO")
+    locator, _, bindings, _, _ = world(kind="personal")
+    binding = bindings[1]
+    binding.device_provider = provider
+    if provider == "arca":
+        binding.device_props = {"sandbox_id": "ARCA-SANDBOX-native@template-v2", "device_uuid": "native"}
+    omitted = locator.resolve(request())
+    empty = locator.resolve(request(device_uuid=""))
+    assert empty.targets == omitted.targets
+    assert len(empty.targets) == (1 if provider == "arca" else 2)
+    assert "runtime_device_uuid_normalized" in caplog.text
+    assert "reason=empty" in caplog.text
