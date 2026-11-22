@@ -403,6 +403,7 @@ def test_request_error_maps_to_a_failure_dict():
 
     assert result["success"] is False
     assert result["message"].startswith("请求失败")
+    assert result.get("dispatched") is not False
 
 
 def test_compose_failure_is_contained_in_the_result_dict():
@@ -413,6 +414,7 @@ def test_compose_failure_is_contained_in_the_result_dict():
 
     assert result["success"] is False
     assert "投递失败" in result["message"]
+    assert result["dispatched"] is False
     m["http_client"].post.assert_not_called()
 
 

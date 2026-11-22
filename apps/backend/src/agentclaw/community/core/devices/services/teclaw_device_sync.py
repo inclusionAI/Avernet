@@ -234,6 +234,7 @@ class TeclawDeviceSyncService(DeviceSync):
         that called it, so the two cannot describe different bots. When it is
         ``None`` the collector reads the set itself, exactly as before.
         """
+        dispatch_status = {"dispatched": False}
         try:
             artifact = self._composer_provider().compose(
                 ComposeRequest(
@@ -267,6 +268,7 @@ class TeclawDeviceSyncService(DeviceSync):
                     stage=PublishStage.DRAFT,
                 ),
             )
+            dispatch_status.clear()
             self._deliver(artifact)
             self._record_draft_artifact(artifact)
         except HttpClientStatusError as e:
@@ -274,19 +276,19 @@ class TeclawDeviceSyncService(DeviceSync):
                 "[TeclawDeviceSyncService.%s] HTTP error for bot=%s: %s",
                 caller, self._bot_id, e.response.status_code,
             )
-            return {"success": False, "message": f"HTTP 错误: {e.response.status_code}"}
+            return {"success": False, "message": f"HTTP 错误: {e.response.status_code}", **dispatch_status}
         except HttpClientRequestError as e:
             logger.error(
                 "[TeclawDeviceSyncService.%s] request failed for bot=%s: %s",
                 caller, self._bot_id, type(e).__name__,
             )
-            return {"success": False, "message": f"请求失败: {e}"}
+            return {"success": False, "message": f"请求失败: {e}", **dispatch_status}
         except Exception as e:  # compose / transport errors must not crash callers
             logger.error(
                 "[TeclawDeviceSyncService.%s] error for bot=%s: %s",
                 caller, self._bot_id, type(e).__name__,
             )
-            return {"success": False, "message": f"投递失败: {e}"}
+            return {"success": False, "message": f"投递失败: {e}", **dispatch_status}
 
         logger.info(
             "[TeclawDeviceSyncService.%s] delivered artifact for bot=%s",

@@ -244,7 +244,8 @@ class CapabilityRuntimeBoundary(Protocol):
 
         No filesystem mapping is built before this call. Exact Center identity
         reaches the artifact composer as data, so a whole-artifact engine never
-        guesses a path or trips over the legacy symlink adapter.
+        guesses a path or trips over the legacy symlink adapter. A confirmed
+        pre-delivery failure raises ArtifactProjectionNotDispatchedError.
         """
         ...
 

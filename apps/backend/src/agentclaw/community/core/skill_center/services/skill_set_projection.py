@@ -13,6 +13,7 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.mcp.url_resolution import effective_mcp_url_override
 from agentclaw.community.core.skill_center.errors import (
+    ArtifactProjectionNotDispatchedError,
     McpProjectionNotDispatchedError,
     SkillSetRuntimeReconcileError,
 )
@@ -141,7 +142,12 @@ class SkillSetRuntimeProjection:
                 effective_mcps=effective_mcps,
             )
             if not result.get("success"):
-                raise SkillSetRuntimeReconcileError(
+                error = (
+                    ArtifactProjectionNotDispatchedError
+                    if result.get("dispatched") is False
+                    else SkillSetRuntimeReconcileError
+                )
+                raise error(
                     str(result.get("message") or "Skill set runtime sync failed")
                 )
             return True

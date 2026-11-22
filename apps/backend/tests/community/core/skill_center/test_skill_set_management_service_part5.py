@@ -238,10 +238,15 @@ async def test_teclaw_empty_scope_delivers_nothing():
 
 
 @pytest.mark.asyncio
-async def test_teclaw_failed_delivery_returns_pending_and_keeps_other_domains():
+@pytest.mark.parametrize("pre_dispatch", [False, True])
+async def test_teclaw_failed_delivery_returns_pending_and_keeps_other_domains(pre_dispatch):
+    from agentclaw.community.core.skill_center.errors import ArtifactProjectionNotDispatchedError
+
     passport = _RuntimePassport()
     factory = _RuntimeFactory()
     async def _refuse(**_):
+        if pre_dispatch:
+            raise ArtifactProjectionNotDispatchedError()
         return False
 
     factory.service.project_whole_artifact = _refuse
@@ -253,8 +258,10 @@ async def test_teclaw_failed_delivery_returns_pending_and_keeps_other_domains():
     )
 
     assert result.status == "PENDING"
-    assert result.issues[0].code == "ARTIFACT_APPLY_FAILED"
-    assert result.delivery_uncertain is True
+    assert result.issues[0].code == (
+        "ARTIFACT_PROJECTION_NOT_DISPATCHED" if pre_dispatch else "ARTIFACT_APPLY_FAILED"
+    )
+    assert result.delivery_uncertain is not pre_dispatch
     assert passport.calls
 
 

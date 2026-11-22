@@ -9,7 +9,10 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     DeviceOfflineError,
 )
-from agentclaw.community.core.skill_center.errors import SkillSetRuntimeReconcileError
+from agentclaw.community.core.skill_center.errors import (
+    ArtifactProjectionNotDispatchedError,
+    SkillSetRuntimeReconcileError,
+)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
     ProjectionScope,
@@ -155,6 +158,11 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
             return RuntimeProjectionResult.pending(
                 code="ARTIFACT_RUNTIME_UNAVAILABLE",
                 reason="Bot 运行环境当前不可连接，能力状态已保存但尚未同步",
+            )
+        except ArtifactProjectionNotDispatchedError:
+            return RuntimeProjectionResult.pending(
+                code="ARTIFACT_PROJECTION_NOT_DISPATCHED",
+                reason="Bot 运行配置准备失败，等待重试",
             )
         except SkillSetRuntimeReconcileError:
             delivered = False
