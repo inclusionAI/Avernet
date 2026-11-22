@@ -268,8 +268,10 @@ class TeclawDeviceSyncService(DeviceSync):
                     stage=PublishStage.DRAFT,
                 ),
             )
+            url, body, headers = self._prepare_delivery(artifact)
+            post = self._http_client.post
             dispatch_status.clear()
-            self._deliver(artifact)
+            post(url, json=body, headers=headers, timeout=30).raise_for_status()
             self._record_draft_artifact(artifact)
         except HttpClientStatusError as e:
             logger.error(
@@ -298,7 +300,7 @@ class TeclawDeviceSyncService(DeviceSync):
 
     def _record_draft_artifact(self, artifact: BotConfigArtifact) -> None:
         """Best-effort: record the just-delivered artifact onto the bot's DRAFT
-        publish row. Called only after a successful ``_deliver``, so the stored
+        publish row. Called only after a successful POST, so the stored
         artifact equals what reached the container.
 
         Self-contained try/except: a recording failure must never flip the
@@ -317,8 +319,10 @@ class TeclawDeviceSyncService(DeviceSync):
                 self._bot_id, e,
             )
 
-    def _deliver(self, artifact: BotConfigArtifact) -> None:
-        """POST the composed full artifact to the running teclaw container.
+    def _prepare_delivery(
+        self, artifact: BotConfigArtifact,
+    ) -> tuple[str, dict[str, Any], dict[str, str]]:
+        """Prepare the endpoint and request for the running TeClaw container.
 
         Resolves the container URL + proxypass token per-request via
         :meth:`BaasService.get_http_info`, derives the teclaw bot id from the
@@ -375,7 +379,4 @@ class TeclawDeviceSyncService(DeviceSync):
             "[TeclawDeviceSyncService] POST %s for bot=%s teclaw_bot_id=%s",
             info.http_url, self._bot_id, teclaw_bot_id,
         )
-        response = self._http_client.post(
-            info.http_url, json=body, headers=headers, timeout=30
-        )
-        response.raise_for_status()
+        return info.http_url, body, headers

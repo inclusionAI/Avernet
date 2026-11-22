@@ -423,3 +423,15 @@ def test_mcp_methods_return_false_on_failure():
     m["http_client"].post.side_effect = httpx.ConnectError("no route")
 
     assert service.sync_remove_mcp("s1") is False
+
+
+def test_failed_http_info_lookup_is_confirmed_before_post():
+    service, m = _make_service()
+    m["baas"].get_http_info.side_effect = RuntimeError("binding route temporarily unavailable")
+
+    result = service.sync_symlinks([])
+
+    assert result["success"] is False
+    assert result["dispatched"] is False
+    m["http_client"].post.assert_not_called()
+    m["recorder"].record_draft_artifact.assert_not_called()
