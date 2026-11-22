@@ -142,3 +142,29 @@ def test_retry_retains_only_the_unconfirmed_domain_and_keeps_its_retirement_evid
         "skills": RuntimeProjectionStatus.CONVERGED,
         "mcp": RuntimeProjectionStatus.CONVERGED,
     }
+
+
+def test_rebinding_the_same_device_keeps_the_prior_dispatch_fence():
+    db = _Database()
+    repository = CapabilityProjectionRepository(db)
+    locator = {"bot_id": "bot", "entity_id": "owner"}
+    with db.transactional_orm_session() as session:
+        bot = session.query(BotModel).filter_by(**locator).one()
+        bot.binding_id = 17
+        bot.device_id = "same-device"
+    first = repository.require(**locator, scope=ProjectionScope(skills=True))
+    assert repository.begin(first)
+
+    for binding_id, device_id in ((None, None), (42, "same-device")):
+        with db.transactional_orm_session() as session:
+            bot = session.query(BotModel).filter_by(**locator).one()
+            bot.binding_id = binding_id
+            bot.device_id = device_id
+        current = repository.prepare(**locator)
+        assert current is not None and current.write_blocked
+
+    assert repository.due(env="dev", limit=10) == ()
+    assert not repository.complete(first, RuntimeProjectionResult.converged())
+    current = repository.prepare(**locator)
+    assert current is not None and current.needs_recovery
+    assert current.result.status is RuntimeProjectionStatus.PENDING

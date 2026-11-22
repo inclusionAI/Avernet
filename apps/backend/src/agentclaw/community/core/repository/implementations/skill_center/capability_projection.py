@@ -17,10 +17,12 @@ from agentclaw.community.core.repository.implementations.skill_center.bot_mutati
     find_capability_bot,
     require_locked_capability_bot,
 )
-from agentclaw.community.core.repository.protocols.capability_projection import (
-    CapabilityProjectionRepositoryProtocol,
+from agentclaw.community.core.repository.capability_projection_types import (
     CapabilityProjectionState,
     CapabilityProjectionTarget,
+)
+from agentclaw.community.core.repository.protocols.capability_projection import (
+    CapabilityProjectionRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,

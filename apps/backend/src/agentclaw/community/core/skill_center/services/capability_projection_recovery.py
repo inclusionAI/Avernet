@@ -7,9 +7,11 @@ import logging
 from contextlib import suppress
 from dataclasses import asdict
 
+from agentclaw.community.core.repository.capability_projection_types import (
+    CapabilityProjectionTarget,
+)
 from agentclaw.community.core.repository.protocols.capability_projection import (
     CapabilityProjectionRepositoryProtocol,
-    CapabilityProjectionTarget,
 )
 from agentclaw.community.core.skill_center.capability_projection_reconcile import (
     CapabilityProjectionReconcileProtocol,
