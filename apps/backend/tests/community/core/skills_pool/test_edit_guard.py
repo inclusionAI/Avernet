@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import Mock
 import logging
 
 import pytest
@@ -93,9 +95,20 @@ class _RollbackAfterAcquireCache(_Cache):
         return token
 
 
+def _guard(**kwargs) -> SkillsPoolEditGuard:
+    bindings = kwargs.pop("binding_repository", None) or Mock()
+    skills = kwargs.pop("skill_repository", None)
+    if skills is None:
+        skills = Mock()
+        skills.has_pending_local_skill_dispatch.return_value = False
+    return SkillsPoolEditGuard(
+        **kwargs, binding_repository=bindings, skill_repository=skills,
+    )
+
+
 def test_rollback_lease_excludes_new_local_edits() -> None:
     layouts = _Layouts()
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=layouts,
         participation_resolver=_Participation(),
@@ -113,10 +126,10 @@ def test_non_pool_edit_excludes_mutations_from_another_worker() -> None:
     cache = _Cache()
     layouts = _Layouts()
     participation = _Participation(participates=False, label="legacy_layout_state")
-    first_worker = SkillsPoolEditGuard(
+    first_worker = _guard(
         cache=cache, layout_repository=layouts, participation_resolver=participation
     )
-    second_worker = SkillsPoolEditGuard(
+    second_worker = _guard(
         cache=cache, layout_repository=layouts, participation_resolver=participation
     )
 
@@ -129,8 +142,36 @@ def test_non_pool_edit_excludes_mutations_from_another_worker() -> None:
         assert first_worker.release(lease)
 
 
+def test_layout_edit_waits_for_unconfirmed_upload_only_on_current_binding() -> None:
+    package_dispatches = Mock()
+    package_dispatches.has_pending_local_skill_dispatch.side_effect = (
+        lambda *, binding_id=None, **_scope: binding_id in (None, 5)
+    )
+    bindings = Mock()
+    bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(id=5)
+    guard = _guard(
+        cache=_Cache(), layout_repository=_Layouts(), participation_resolver=_Participation(),
+        binding_repository=bindings, skill_repository=package_dispatches,
+    )
+
+    with pytest.raises(SkillsPoolEditBusyError):
+        guard.acquire_for_migration(scope=SCOPE)
+    assert guard.acquire_for_rollback(scope=SCOPE) is None
+
+    bindings.get_active_by_bot_and_owner.return_value = None
+    with pytest.raises(SkillsPoolEditBusyError):
+        guard.acquire_for_migration(scope=SCOPE)
+    assert guard.acquire_for_rollback(scope=SCOPE) is None
+
+    bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(id=6)
+    assert guard.release(guard.acquire_for_migration(scope=SCOPE))
+    rollback = guard.acquire_for_rollback(scope=SCOPE)
+    assert rollback is not None
+    assert guard.release(rollback)
+
+
 def test_lock_identity_includes_entity_for_reused_bot_ids() -> None:
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),
@@ -147,7 +188,7 @@ def test_lock_identity_includes_entity_for_reused_bot_ids() -> None:
 
 @pytest.mark.asyncio
 async def test_waiting_edit_acquires_lock_after_ordinary_edit_releases() -> None:
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),
@@ -172,7 +213,7 @@ def test_rollback_phase_rejects_edit_even_after_lock_becomes_available() -> None
         target_layout=SkillLayout.LEGACY,
         phase=SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING,
     )
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=layouts,
         participation_resolver=_Participation(),
@@ -185,7 +226,7 @@ def test_rollback_phase_rejects_edit_even_after_lock_becomes_available() -> None
 def test_lock_contention_rechecks_for_a_rollback_before_reporting_busy() -> None:
     layouts = _Layouts()
     cache = _Cache()
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=cache,
         layout_repository=layouts,
         participation_resolver=_Participation(),
@@ -204,7 +245,7 @@ def test_lock_contention_rechecks_for_a_rollback_before_reporting_busy() -> None
 def test_rollback_starting_after_lock_acquisition_releases_edit_lease() -> None:
     layouts = _Layouts()
     cache = _RollbackAfterAcquireCache(layouts)
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=cache,
         layout_repository=layouts,
         participation_resolver=_Participation(),
@@ -226,7 +267,7 @@ async def test_legacy_bot_still_serializes_ordinary_edits() -> None:
         phase=SkillLayoutPhase.LEGACY_ACTIVE,
         persisted=False,
     )
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=layouts,
         participation_resolver=_Participation(
@@ -248,7 +289,7 @@ async def test_legacy_bot_still_serializes_ordinary_edits() -> None:
 
 
 def test_cache_outage_is_not_reported_as_lock_contention() -> None:
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_UnavailableCache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),
@@ -260,7 +301,7 @@ def test_cache_outage_is_not_reported_as_lock_contention() -> None:
 
 def test_lock_lifecycle_logs_key_ttl_token_fingerprint_and_duration(caplog) -> None:
     caplog.set_level(logging.INFO)
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),
@@ -284,7 +325,7 @@ def test_lock_lifecycle_logs_key_ttl_token_fingerprint_and_duration(caplog) -> N
 
 @pytest.mark.asyncio
 async def test_wait_does_not_retry_a_cache_outage_as_ordinary_contention() -> None:
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_UnavailableCache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),

@@ -439,7 +439,7 @@ class SkillRepository(Protocol):
 
     @abstractmethod
     def has_pending_local_skill_dispatch(
-        self, *, bot_id: str, entity_id: str, name: str, binding_id: int | None = None,
+        self, *, bot_id: str, entity_id: str, name: str | None = None, binding_id: int | None = None,
     ) -> bool: ...
 
     @abstractmethod

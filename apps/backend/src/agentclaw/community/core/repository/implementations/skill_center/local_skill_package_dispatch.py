@@ -19,13 +19,15 @@ class LocalSkillPackageDispatches:
     _db: DatabasePlugin
 
     def has_pending_local_skill_dispatch(
-        self, *, bot_id: str, entity_id: str, name: str, binding_id: int | None = None,
+        self, *, bot_id: str, entity_id: str, name: str | None = None, binding_id: int | None = None,
     ) -> bool:
         with self._db.orm_session() as session:
             query = session.query(LocalSkillPackageDispatch.target_key).filter_by(
                 avernet_tenant=get_current_avernet_tenant(), env=get_current_env(),
-                entity_id=entity_id, bot_id=bot_id, name=name.casefold(),
+                entity_id=entity_id, bot_id=bot_id,
             )
+            if name is not None:
+                query = query.filter_by(name=name.casefold())
             if binding_id is not None:
                 query = query.filter_by(binding_id=binding_id)
             return query.first() is not None
