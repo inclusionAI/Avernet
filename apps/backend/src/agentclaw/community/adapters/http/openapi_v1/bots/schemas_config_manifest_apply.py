@@ -21,6 +21,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
+    RuntimeProjectionResult,
+)
+
 
 class ConfigManifestApplyAccepted(BaseModel):
     """The 202 body: a handle, and the state the apply starts in.
@@ -222,4 +226,10 @@ class ConfigManifestApply(BaseModel):
         "delivery strategy's closing step writes one: on teclaw, a whole-artifact "
         "redeliver that failed after every category was written is recorded here "
         "rather than failing the apply. Empty on ARCA.",
+    )
+    runtime_projection: RuntimeProjectionResult | None = Field(
+        default=None,
+        exclude_if=lambda result: result is None,
+        description="Capability Runtime synchronization, independent of the Apply write result. "
+        "Omitted for historical reports, previews, and Apply paths without a capability observation.",
     )

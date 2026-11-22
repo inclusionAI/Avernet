@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from enum import StrEnum
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RegisteredSkillAsset,
@@ -46,6 +46,12 @@ class RuntimeProjectionIssue:
     logical_location: str | None = None
     suggested_action: str | None = None
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "RuntimeProjectionIssue":
+        values = {item.name: data[item.name] for item in fields(cls) if item.name in data}
+        values["status"] = RuntimeProjectionStatus(data["status"])
+        return cls(**values)
+
     def to_dict(self) -> dict[str, object]:
         values: dict[str, object] = {
             "resource_type": self.resource_type,
@@ -78,6 +84,21 @@ class RuntimeProjectionResult:
     components: dict[str, RuntimeProjectionStatus] = field(default_factory=dict)
     issues: tuple[RuntimeProjectionIssue, ...] = ()
     reason: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "RuntimeProjectionResult":
+        return cls(
+            status=RuntimeProjectionStatus(data["status"]),
+            components={
+                name: RuntimeProjectionStatus(status)
+                for name, status in data.get("components", {}).items()
+            },
+            issues=tuple(
+                RuntimeProjectionIssue.from_dict(issue)
+                for issue in data.get("issues", ())
+            ),
+            reason=data.get("reason"),
+        )
 
     @classmethod
     def converged(cls, *, components: dict[str, RuntimeProjectionStatus] | None = None) -> "RuntimeProjectionResult":

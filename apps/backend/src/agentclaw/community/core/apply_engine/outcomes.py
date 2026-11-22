@@ -17,6 +17,9 @@ from typing import Any
 
 from agentclaw.community.core.apply_engine.compiler import LEGACY_STATE, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    RuntimeProjectionResult,
+)
 
 #: What a construct is, for the purposes of applying it: one of the six
 #: categories under ``manifest``, or the top-level ``script`` section.
@@ -502,6 +505,9 @@ class ApplyReport:
     #: compiler's refusal of the whole reference in the worker
     #: (``CompileRefused``: a FAILED report with no categories and the reason).
     notes: tuple[str, ...] = field(default=())
+    runtime_projection: RuntimeProjectionResult | None = None
+    #: Stored report correlation. The HTTP report exposes only the observation.
+    runtime_projection_revision: str | None = None
 
     @property
     def entries(self) -> tuple[EntryResult, ...]:
@@ -541,7 +547,7 @@ class ApplyReport:
         structurally unable to emit a credential value: a secret cannot ride
         along inside a dict nobody inspected, because no dict is copied through.
         """
-        return {
+        payload = {
             "apply_id": self.apply_id,
             "bot_id": self.bot_id,
             "trigger": self.trigger,
@@ -556,6 +562,11 @@ class ApplyReport:
             "entries": [entry.as_dict() for entry in self.entries],
             "notes": list(self.notes),
         }
+        if self.runtime_projection is not None:
+            payload["runtime_projection"] = self.runtime_projection.to_dict()
+        if self.runtime_projection_revision is not None:
+            payload["runtime_projection_revision"] = self.runtime_projection_revision
+        return payload
 
 
 #: The entity-key fields an entry may name itself by, in the order they are
