@@ -80,6 +80,7 @@ provides:
   - "DesktopSkillRecoveryServiceProtocol"
   - "DesktopSkillRecoveryService"
   - "DesktopSkillRecoveryTaskHandler"
+  - "CapabilityProjectionRecovery"
   - "SkillParser"
   - "SkillMetadata"
   - "SkillManifestError"
@@ -172,6 +173,8 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.capability_desired_state
+  - agentclaw.community.core.repository.protocols.capability_projection
+  - agentclaw.community.core.repository.capability_projection_types
   - agentclaw.community.core.repository.capability_desired_state_types
   - agentclaw.community.core.repository.protocols.identity    # per-Bot MCP execution identity, read for the Passport scope
   - agentclaw.community.core.access

@@ -222,6 +222,8 @@ provides:
   - SourceCredentialRepository
   - CapabilityDesiredStateRepositoryProtocol
   - CapabilityDesiredStateRepository
+  - CapabilityProjectionRepositoryProtocol
+  - CapabilityProjectionRepository
   - MCPDefaultExclusionReaderProtocol
   - SkillEditorRequestRepositoryProtocol
   # task / forum
