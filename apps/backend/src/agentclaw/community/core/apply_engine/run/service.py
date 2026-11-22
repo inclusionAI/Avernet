@@ -864,6 +864,8 @@ class ApplyRunService(ApplyRunServiceProtocol):
                 note = f"delivery could not be closed: {exc.__class__.__name__}"
             if note:
                 report = dataclasses.replace(report, notes=report.notes + (note,))
+            if projection is not None:
+                report = dataclasses.replace(report, finished_at=datetime.now())
             return report
 
     def _context(
