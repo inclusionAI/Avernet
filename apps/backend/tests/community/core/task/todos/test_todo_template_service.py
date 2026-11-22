@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
+from agentclaw.community.core.spaces.models import SpaceRole
 from agentclaw.community.core.task.todos.errors import TodoTemplateStateConflictError
 from agentclaw.community.core.task.todos.services.todo_template_service import (
     TodoTemplateService,
@@ -108,17 +110,16 @@ def _version(status: TodoTemplateVersionStatus = TodoTemplateVersionStatus.DRAFT
 
 
 class _Access:
-    def __init__(self) -> None:
-        self.admin_calls: list[dict[str, Any]] = []
+    def __init__(self, *, role: SpaceRole = SpaceRole.ADMIN) -> None:
+        self.role = role
         self.member_calls: list[dict[str, Any]] = []
-
-    def require_space_admin(self, **kwargs):
-        self.admin_calls.append(kwargs)
-        return SimpleNamespace(id=kwargs["space_id"]), SimpleNamespace()
 
     def require_space_member(self, **kwargs):
         self.member_calls.append(kwargs)
-        return SimpleNamespace(id=kwargs["space_id"]), SimpleNamespace()
+        return (
+            SimpleNamespace(id=kwargs["space_id"], created_by="creator_1"),
+            SimpleNamespace(role=self.role),
+        )
 
 
 class _Repository:
@@ -188,13 +189,17 @@ class _Repository:
         return self.template
 
 
-def _service(status: TodoTemplateStatus = TodoTemplateStatus.ACTIVE):
+def _service(
+    status: TodoTemplateStatus = TodoTemplateStatus.ACTIVE,
+    *,
+    role: SpaceRole = SpaceRole.ADMIN,
+):
     repository = _Repository(status=status)
-    access = _Access()
+    access = _Access(role=role)
     return TodoTemplateService(repository, access), repository, access
 
 
-def test_create_validates_definition_and_requires_space_admin() -> None:
+def test_create_validates_definition_and_requires_space_admin_role() -> None:
     service, repository, access = _service()
 
     detail = service.create_template(
@@ -205,7 +210,9 @@ def test_create_validates_definition_and_requires_space_admin() -> None:
     )
 
     assert detail.template.name == "Standard delivery"
-    assert access.admin_calls == [{"space_id": 7, "user_id": "admin_1", "env": "pre"}]
+    assert access.member_calls == [
+        {"space_id": 7, "user_id": "admin_1", "env": "pre"}
+    ]
     assert repository.calls == [
         {
             "operation": "create_template",
@@ -267,7 +274,7 @@ def test_mutations_require_admin_of_the_addressed_template_space() -> None:
     service.archive_template(template_id="todo_tpl_1", actor_id="admin_1")
     service.activate_template(template_id="todo_tpl_1", actor_id="admin_1")
 
-    assert access.admin_calls == [
+    assert access.member_calls == [
         {"space_id": 7, "user_id": "admin_1", "env": None},
         {"space_id": 7, "user_id": "admin_1", "env": None},
         {"space_id": 7, "user_id": "admin_1", "env": None},
@@ -283,6 +290,23 @@ def test_mutations_require_admin_of_the_addressed_template_space() -> None:
         "get_template",
         "set_template_status",
     ]
+
+
+def test_template_mutations_reject_non_admin_space_members() -> None:
+    service, repository, access = _service(role=SpaceRole.MEMBER)
+
+    with pytest.raises(SpaceAccessDeniedError, match="administrator role required"):
+        service.create_template(
+            space_id=7,
+            actor_id="member_1",
+            definition=_definition(),
+            env="pre",
+        )
+
+    assert access.member_calls == [
+        {"space_id": 7, "user_id": "member_1", "env": "pre"}
+    ]
+    assert repository.calls == []
 
 
 def test_archived_template_cannot_create_or_publish_versions() -> None:

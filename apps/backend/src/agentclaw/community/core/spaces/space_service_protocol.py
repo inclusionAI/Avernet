@@ -59,10 +59,6 @@ class SpaceAccessServiceProtocol(Protocol):
         self, *, space_id: int, user_id: str, env: str | None = None
     ) -> tuple[SpaceRecord, SpaceMemberRecord]: ...
 
-    def require_space_admin(
-        self, *, space_id: int, user_id: str, env: str | None = None
-    ) -> tuple[SpaceRecord, SpaceMemberRecord]: ...
-
 
 @runtime_checkable
 class SpaceMemberServiceProtocol(Protocol):

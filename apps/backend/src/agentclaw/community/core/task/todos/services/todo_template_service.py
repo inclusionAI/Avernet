@@ -7,6 +7,8 @@ from injector import inject
 from agentclaw.community.core.repository.protocols.task.todo_templates import (
     TodoTemplateRepositoryProtocol,
 )
+from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
+from agentclaw.community.core.spaces.models import SpaceRole
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.todos.errors import TodoTemplateStateConflictError
 from agentclaw.community.core.task.todos.template_management_models import (
@@ -46,9 +48,9 @@ class TodoTemplateService(TodoTemplateManagementServiceProtocol):
         env: str | None = None,
     ) -> TodoTemplateDetail:
         normalized = self._validator.validate(definition)
-        self._space_access.require_space_admin(
+        self._require_space_admin(
             space_id=space_id,
-            user_id=actor_id,
+            actor_id=actor_id,
             env=env,
         )
         return self._repository.create_template(
@@ -217,12 +219,29 @@ class TodoTemplateService(TodoTemplateManagementServiceProtocol):
 
     def _require_admin(self, *, template_id: str, actor_id: str, env: str | None):
         template = self._repository.get_template(template_id=template_id)
-        self._space_access.require_space_admin(
+        self._require_space_admin(
             space_id=template.space_id,
-            user_id=actor_id,
+            actor_id=actor_id,
             env=env,
         )
         return template
+
+    def _require_space_admin(
+        self, *, space_id: int, actor_id: str, env: str | None
+    ) -> None:
+        space, member = self._space_access.require_space_member(
+            space_id=space_id,
+            user_id=actor_id,
+            env=env,
+        )
+        if space.created_by == actor_id:
+            return
+        if member.role not in (
+            SpaceRole.ADMIN,
+            SpaceRole.OWNER,
+            SpaceRole.ADMINISTRATOR,
+        ):
+            raise SpaceAccessDeniedError("space administrator role required")
 
     @staticmethod
     def _require_active(status: TodoTemplateStatus) -> None:

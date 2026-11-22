@@ -65,18 +65,16 @@ class SpaceAccessService(SpaceAccessServiceProtocol):
             raise SpaceAccessDeniedError("space membership required")
         return space, member
 
-    def require_space_admin(
-        self, *, space_id: int, user_id: str, env: str | None = None
-    ):
-        resolved_env = env or get_current_env()
-        space = self.require_space(space_id=space_id, env=resolved_env)
-        member = self._repository.get_member(
-            space_id=space_id, user_id=user_id, env=resolved_env
-        )
+    def require_space_admin(self, *, space_id: int, user_id: str):
+        space = self.require_space(space_id=space_id)
         if space.created_by == user_id:
-            if member is None:
-                raise SpaceAccessDeniedError("space membership required")
+            member = self._repository.get_member(
+                space_id=space_id, user_id=user_id, env=get_current_env()
+            )
             return space, member
+        member = self._repository.get_member(
+            space_id=space_id, user_id=user_id, env=get_current_env()
+        )
         if member is None or member.role not in (
             SpaceRole.ADMIN, SpaceRole.OWNER, SpaceRole.ADMINISTRATOR
         ):
