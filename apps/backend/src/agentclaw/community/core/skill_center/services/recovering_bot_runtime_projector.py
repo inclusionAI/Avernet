@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import partial
 
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionCompetitionProtocol,
+)
 from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
     DesktopSkillRecoveryServiceProtocol,
 )
@@ -35,9 +39,11 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
         *,
         delegate: BotRuntimeProjectorProtocol,
         recovery: DesktopSkillRecoveryServiceProtocol,
+        capability_projection: CapabilityProjectionCompetitionProtocol | None = None,
     ) -> None:
         self._delegate = delegate
         self._recovery = recovery
+        self._capability_projection = capability_projection
 
     async def snapshot_skill_mappings(
         self, *, bot_id: str, owner_id: str
@@ -54,13 +60,18 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         scope: ProjectionScope,
     ) -> RuntimeProjectionResult:
+        deliver = partial(
+            self._delegate.project, bot_id=bot_id, owner_id=owner_id,
+            retired_mappings=retired_mappings, scope=scope,
+        )
         try:
-            result = await self._delegate.project(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                retired_mappings=retired_mappings,
-                scope=scope,
-            )
+            if self._capability_projection is None:
+                result = await deliver()
+            else:
+                result = await self._capability_projection.project_competing_change(
+                    bot_id=bot_id, owner_id=owner_id, entity_id=None, scope=scope,
+                    retired_mappings=retired_mappings, legacy=deliver,
+                )
         except Exception:
             self._ensure_after_projection_exception(
                 scope=scope, bot_id=bot_id, owner_id=owner_id
@@ -93,12 +104,19 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         scope: ProjectionScope,
     ) -> RuntimeProjectionResult:
+        deliver = partial(
+            self._delegate.apply_plan, plan=plan,
+            retired_mappings=retired_mappings, scope=scope,
+        )
         try:
-            result = await self._delegate.apply_plan(
-                plan=plan,
-                retired_mappings=retired_mappings,
-                scope=scope,
-            )
+            if self._capability_projection is None:
+                result = await deliver()
+            else:
+                result = await self._capability_projection.project_competing_change(
+                    bot_id=plan.bot_id, owner_id=plan.owner_id,
+                    entity_id=plan.bot.get("entity_id"), scope=scope,
+                    retired_mappings=retired_mappings, legacy=deliver,
+                )
         except Exception:
             self._ensure_after_projection_exception(
                 scope=scope, bot_id=plan.bot_id, owner_id=plan.owner_id

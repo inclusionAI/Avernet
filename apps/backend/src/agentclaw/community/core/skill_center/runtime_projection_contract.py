@@ -84,6 +84,7 @@ class RuntimeProjectionResult:
     components: dict[str, RuntimeProjectionStatus] = field(default_factory=dict)
     issues: tuple[RuntimeProjectionIssue, ...] = ()
     reason: str | None = None
+    delivery_uncertain: bool = False
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "RuntimeProjectionResult":
@@ -118,6 +119,7 @@ class RuntimeProjectionResult:
         code: str,
         reason: str,
         suggested_action: str | None = None,
+        delivery_uncertain: bool = False,
     ) -> "RuntimeProjectionResult":
         return cls(
             status=RuntimeProjectionStatus.PENDING,
@@ -131,6 +133,7 @@ class RuntimeProjectionResult:
                     suggested_action=suggested_action,
                 ),
             ),
+            delivery_uncertain=delivery_uncertain,
         )
 
     @classmethod
@@ -152,7 +155,12 @@ class RuntimeProjectionResult:
             status = RuntimeProjectionStatus.CONVERGED
         else:
             status = RuntimeProjectionStatus.SKIPPED
-        return cls(status=status, components=components, issues=tuple(issues))
+        return cls(
+            status=status,
+            components=components,
+            issues=tuple(issues),
+            delivery_uncertain=any(result.delivery_uncertain for result in results),
+        )
 
     def to_dict(self) -> dict[str, object]:
         pending_count = sum(
@@ -409,11 +417,9 @@ class ProjectionScope:
     released_mcp: frozenset[str] = frozenset()
     #: Treat *every* projected MCP code as claimed, ignoring ``claimed_mcp``.
     #:
-    #: Exactly one listener sets this: ``SkillSymlinkListener``, via either a
-    #: first ``DeviceActivatedEvent`` or a post-restart
-    #: ``RuntimeProjectionRequestedEvent``. It is the one place where "just
-    #: re-declare the allow-list" is not enough, because a newly active or
-    #: restarted container must converge from its current runtime contents.
+    #: Set by the device lifecycle and when establishing a durable projection
+    #: baseline. Re-declaring the allow-list is insufficient when the current
+    #: Runtime may not have the configuration behind it.
     #: Every mutation-triggered path names its own delta instead.
     #:
     #: It is load-bearing, not a convenience: ``report_device_alive``
@@ -432,8 +438,8 @@ class ProjectionScope:
     #: that on their own. An MCP-only reconcile — ``ProjectionScope(mcp=True,
     #: claim_all_mcp=True)`` — is a real and used shape.
     #:
-    #: It never deletes: ``released_mcp`` is not consulted when this is set,
-    #: so a reconcile can only ever add configuration to a device.
+    #: Explicit releases are applied only for codes absent from the final set.
+    #: A lifecycle baseline supplies no explicit releases by default.
     claim_all_mcp: bool = False
 
     @classmethod

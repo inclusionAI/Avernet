@@ -4,6 +4,11 @@ import asyncio
 import time
 from typing import Any, Optional
 
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+    DeviceNotBoundError,
+    DeviceOfflineError,
+)
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.skill_center.errors import (
     SkillSetRuntimeReconcileError,
@@ -135,6 +140,8 @@ class SkillSetRuntimeProjection:
                     str(result.get("message") or "Skill set runtime sync failed")
                 )
             return True
+        except (DeviceNotBoundError, DeviceOfflineError, DeviceConnectionUnavailableError):
+            raise
         except SkillSetRuntimeReconcileError:
             raise
         except Exception as exc:
@@ -187,6 +194,8 @@ class SkillSetRuntimeProjection:
                 self._device_owner_id or self.user_id or self.entity_id or "",
             )
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
+        except (DeviceNotBoundError, DeviceOfflineError, DeviceConnectionUnavailableError):
+            raise
         except Exception:
             logger.warning(
                 "[project_mcps] device resolution failed bot_id=%s",
