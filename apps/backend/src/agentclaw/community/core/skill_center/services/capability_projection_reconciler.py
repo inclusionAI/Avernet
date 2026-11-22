@@ -8,6 +8,10 @@ from dataclasses import replace
 from functools import partial
 
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
+from agentclaw.community.core.devices.services.device_context import (
+    RuntimeBindingTarget,
+    expect_runtime_binding,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.capability_projection_types import CapabilityProjectionState
 from agentclaw.community.core.repository.protocols.capability_projection import (
@@ -206,9 +210,12 @@ class CapabilityProjectionReconciler:
                 reason="Capability configuration or the Runtime binding changed before synchronization.",
             )
         try:
-            result = await self._projector.apply_plan(
-                plan=plan, retired_mappings=retired, scope=state.scope,
-            )
+            with expect_runtime_binding(RuntimeBindingTarget(
+                state.bot_id, state.owner_id, state.entity_id, state.binding_id, state.device_id,
+            )):
+                result = await self._projector.apply_plan(
+                    plan=plan, retired_mappings=retired, scope=state.scope,
+                )
         except Exception:
             logger.exception("Capability delivery did not return a receipt bot_id=%s", state.bot_id)
             result = _unknown_delivery()

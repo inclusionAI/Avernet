@@ -8,6 +8,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceConnectionUnavailableError,
     DeviceNotBoundError,
     DeviceOfflineError,
+    RuntimeBindingChangedError,
 )
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.skill_center.errors import (
@@ -80,6 +81,8 @@ class SkillSetRuntimeProjection:
                 )
                 return False
 
+        except RuntimeBindingChangedError:
+            raise
         except Exception as e:
             logger.warning(
                 f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}",

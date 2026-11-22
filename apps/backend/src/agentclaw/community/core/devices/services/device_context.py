@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -66,3 +69,45 @@ class DeviceOfflineError(ConnInfoBuildError):
 
 class DeviceConnectionUnavailableError(ConnInfoBuildError):
     """A transient provider connection failure with unknown device state."""
+
+
+class RuntimeBindingChangedError(DeviceConnectionUnavailableError):
+    """A caller's expected Runtime binding changed before a device request."""
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeBindingTarget:
+    bot_id: str
+    owner_id: str
+    entity_id: str
+    binding_id: int | None
+    device_id: str | None
+
+
+_EXPECTED_RUNTIME_BINDING: ContextVar[RuntimeBindingTarget | None] = ContextVar(
+    "expected_runtime_binding", default=None
+)
+
+
+@contextmanager
+def expect_runtime_binding(target: RuntimeBindingTarget) -> Iterator[None]:
+    """Keep one operation on the device whose receipt it can acknowledge."""
+    token = _EXPECTED_RUNTIME_BINDING.set(target)
+    try:
+        yield
+    finally:
+        _EXPECTED_RUNTIME_BINDING.reset(token)
+
+
+def verify_runtime_binding(
+    *, bot_id: str, user_id: str, binding_id: int, device_id: str | None,
+) -> None:
+    expected = _EXPECTED_RUNTIME_BINDING.get()
+    if expected is None or bot_id != expected.bot_id or user_id not in (
+        expected.owner_id, expected.entity_id
+    ):
+        return
+    if binding_id != expected.binding_id or (
+        expected.device_id is not None and device_id != expected.device_id
+    ):
+        raise RuntimeBindingChangedError("Bot Runtime binding changed before delivery")
