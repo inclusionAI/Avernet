@@ -153,7 +153,8 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                 )
 
             if friend_user_id is not None:
-                # The delivery boundary verified friendship and session ownership.
+                # The authenticated subject selects its existing Caller instance;
+                # the session validator below retains the usual target checks.
                 # Refresh only this caller's chat instance, never the owner's
                 # service (even when the caller also happens to own the Bot).
                 target = await asyncio.to_thread(

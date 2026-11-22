@@ -84744,6 +84744,100 @@
             }
           },
           {
+            "description": "Bot entity, current-owner or historical-owner locator for an explicit friend IAM request; defaults to the acting user.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bot entity, current-owner or historical-owner locator for an explicit friend IAM request; defaults to the acting user.",
+              "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Friend-chat user; an empty value selects the Bot's service runtime.",
+            "in": "query",
+            "name": "f_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Friend-chat user; an empty value selects the Bot's service runtime.",
+              "title": "F User Id"
+            }
+          },
+          {
+            "description": "Required with f_user_id: an owned friend session identifier.",
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required with f_user_id: an owned friend session identifier.",
+              "title": "Session Id"
+            }
+          },
+          {
+            "description": "Current chat session key used by TeClaw Caller credential refresh.",
+            "in": "query",
+            "name": "session_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Current chat session key used by TeClaw Caller credential refresh.",
+              "title": "Session Key"
+            }
+          },
+          {
+            "description": "Compatibility alias for session_key.",
+            "in": "query",
+            "name": "sessionKey",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Compatibility alias for session_key.",
+              "title": "Sessionkey"
+            }
+          },
+          {
             "description": "Bot runtime stage whose Caller identity may be prepared.",
             "in": "query",
             "name": "stage",
@@ -84770,24 +84864,6 @@
               ],
               "description": "Entity identifier used to resolve the Bot unambiguously.",
               "title": "Entity Id"
-            }
-          },
-          {
-            "description": "JIT runtime selection: service uses the stage binding; caller_instance uses the authenticated caller's instance.",
-            "in": "query",
-            "name": "caller_runtime_target",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "JIT runtime selection: service uses the stage binding; caller_instance uses the authenticated caller's instance.",
-              "title": "Caller Runtime Target"
             }
           },
           {
