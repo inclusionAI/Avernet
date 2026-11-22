@@ -335,3 +335,7 @@ class McpEndpointUnavailableError(DomainError):
             "MCP_NO_COMPATIBLE_SECURE_ENDPOINT: 当前 MCP 没有可安全下发到该 Bot "
             "的端点，请检查 MCP Center 的网络和端点配置"
         )
+
+
+class McpProjectionNotDispatchedError(RuntimeError):
+    """Runtime MCP projection failed before any device operation started."""

@@ -12,6 +12,7 @@ from agentclaw.community.core.devices.services.device_context import (
 )
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.skill_center.errors import (
+    McpProjectionNotDispatchedError,
     SkillSetRuntimeReconcileError,
 )
 
@@ -199,20 +200,20 @@ class SkillSetRuntimeProjection:
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
         except (DeviceNotBoundError, DeviceOfflineError, DeviceConnectionUnavailableError):
             raise
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "[project_mcps] device resolution failed bot_id=%s",
                 self.bot_id,
                 exc_info=True,
             )
-            return False
+            raise McpProjectionNotDispatchedError() from exc
         finally:
             logger.info(
                 "[project_mcps] timing stage=resolve_device bot_id=%s duration_ms=%.3f",
                 self.bot_id,
                 (time.perf_counter() - started) * 1000,
             )
-        if claimed and not await self.sync_mcp_delivery(
+        if claimed and not await self._sync_mcp_delivery(
             claimed=claimed, released=frozenset(), device_sync=device_sync
         ):
             return False
@@ -220,13 +221,24 @@ class SkillSetRuntimeProjection:
             server_codes=declared, device_sync=device_sync
         ):
             return False
-        if released and not await self.sync_mcp_delivery(
+        if released and not await self._sync_mcp_delivery(
             claimed=frozenset(), released=released, device_sync=device_sync
         ):
             return False
         return True
 
     async def sync_mcp_delivery(
+        self, *, claimed: frozenset[str], released: frozenset[str], device_sync: DeviceSync | None = None,
+    ) -> bool:
+        """Keep the legacy delivery result for standalone callers."""
+        try:
+            return await self._sync_mcp_delivery(
+                claimed=claimed, released=released, device_sync=device_sync,
+            )
+        except McpProjectionNotDispatchedError:
+            return False
+
+    async def _sync_mcp_delivery(
         self,
         *,
         claimed: frozenset[str],
@@ -250,21 +262,21 @@ class SkillSetRuntimeProjection:
         """
         if not claimed and not released:
             return True
-        try:
-            entries: list[dict[str, Any]] = []
-            for server_code in sorted(claimed):
+        entries: list[dict[str, Any]] = []
+        for server_code in sorted(claimed):
+            try:
                 detail = self.mcp_center.get_mcp_detail(server_code)
-                if not detail:
-                    # Only ever a code we are actually installing — an
-                    # unrelated catalogue gap cannot reach here and block the
-                    # whole projection.
-                    logger.error(
-                        "[sync_mcp_delivery] no catalogue detail for %s, bot_id=%s",
-                        server_code,
-                        self.bot_id,
-                    )
-                    return False
-                entries.append(detail)
+            except Exception as exc:
+                raise McpProjectionNotDispatchedError() from exc
+            if not detail:
+                logger.warning(
+                    "[sync_mcp_delivery] no catalogue detail for %s, bot_id=%s",
+                    server_code,
+                    self.bot_id,
+                )
+                raise McpProjectionNotDispatchedError()
+            entries.append(detail)
+        try:
             if entries:
                 logger.info(
                     "[sync_mcp_delivery] pushing MCP configuration: bot_id=%s, "

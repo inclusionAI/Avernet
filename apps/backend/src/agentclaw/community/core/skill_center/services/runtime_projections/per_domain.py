@@ -9,6 +9,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     DeviceOfflineError,
 )
+from agentclaw.community.core.skill_center.errors import McpProjectionNotDispatchedError
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
     ProjectionScope,
@@ -180,7 +181,10 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                     results.append(
                         await self._apply_mcp_projection(plan=plan, scope=scope)
                     )
-                except (DeviceNotBoundError, DeviceOfflineError, DeviceConnectionUnavailableError):
+                except (
+                    DeviceNotBoundError, DeviceOfflineError, DeviceConnectionUnavailableError,
+                    McpProjectionNotDispatchedError,
+                ):
                     results.append(
                         RuntimeProjectionResult.pending(
                             code="MCP_RUNTIME_UNAVAILABLE",
