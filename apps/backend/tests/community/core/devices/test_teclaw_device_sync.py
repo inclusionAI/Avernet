@@ -435,3 +435,24 @@ def test_failed_http_info_lookup_is_confirmed_before_post():
     assert result["dispatched"] is False
     m["http_client"].post.assert_not_called()
     m["recorder"].record_draft_artifact.assert_not_called()
+
+
+def test_overridden_delivery_is_called_and_keeps_opaque_failures_uncertain():
+    service, m = _make_service()
+    delivered = []
+
+    def custom_delivery(artifact):
+        delivered.append(artifact)
+        raise RuntimeError("custom transport did not return a receipt")
+
+    service._deliver = custom_delivery
+    result = service.sync_symlinks([])
+
+    assert len(delivered) == 1
+    assert delivered[0].engine_ext["stage"] == "draft"
+    assert result == {
+        "success": False,
+        "message": "投递失败: custom transport did not return a receipt",
+    }
+    m["http_client"].post.assert_not_called()
+    m["recorder"].record_draft_artifact.assert_not_called()

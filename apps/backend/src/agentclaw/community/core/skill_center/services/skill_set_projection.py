@@ -153,7 +153,7 @@ class SkillSetRuntimeProjection:
             return True
         except (DeviceNotBoundError, DeviceOfflineError, DeviceConnectionUnavailableError):
             raise
-        except SkillSetRuntimeReconcileError:
+        except (ArtifactProjectionNotDispatchedError, SkillSetRuntimeReconcileError):
             raise
         except Exception as exc:
             logger.warning(

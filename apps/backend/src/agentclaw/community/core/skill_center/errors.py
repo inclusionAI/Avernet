@@ -341,5 +341,5 @@ class McpProjectionNotDispatchedError(RuntimeError):
     """Runtime MCP projection failed before any device operation started."""
 
 
-class ArtifactProjectionNotDispatchedError(SkillSetRuntimeReconcileError):
+class ArtifactProjectionNotDispatchedError(RuntimeError):
     """Whole-artifact projection failed before the outbound delivery started."""

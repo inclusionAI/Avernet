@@ -15,7 +15,7 @@ the transport-neutral exception aliases re-exported from
 
 The ``bind_id`` that call needs is **not** re-derived here: it arrives as
 ``binding_id``, threaded in from the ``DeviceContext`` the factory was handed.
-See :meth:`_deliver` for why that is the same value the old
+See :meth:`_prepare_delivery` for why that is the same value the old
 :meth:`BaasService.get_bind_id` round trip returned.
 
 Identity fields (read this before wiring a new call site)
@@ -85,6 +85,14 @@ def build_bot_apply_body(bot_id: str, artifact: BotConfigArtifact) -> dict:
         "operation": "UPDATE",
         "bot_config": artifact.to_dict(),
     }
+
+
+class _DeliveryNotDispatchedError(RuntimeError):
+    """The default delivery implementation could not prepare its POST."""
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(cause)
+        self.cause = cause
 
 
 class TeclawDeviceSyncService(DeviceSync):
@@ -234,7 +242,7 @@ class TeclawDeviceSyncService(DeviceSync):
         that called it, so the two cannot describe different bots. When it is
         ``None`` the collector reads the set itself, exactly as before.
         """
-        dispatch_status = {"dispatched": False}
+        delivery_attempted = False
         try:
             artifact = self._composer_provider().compose(
                 ComposeRequest(
@@ -268,29 +276,27 @@ class TeclawDeviceSyncService(DeviceSync):
                     stage=PublishStage.DRAFT,
                 ),
             )
-            url, body, headers = self._prepare_delivery(artifact)
-            post = self._http_client.post
-            dispatch_status.clear()
-            post(url, json=body, headers=headers, timeout=30).raise_for_status()
+            delivery_attempted = True
+            self._deliver(artifact)
             self._record_draft_artifact(artifact)
-        except HttpClientStatusError as e:
-            logger.error(
-                "[TeclawDeviceSyncService.%s] HTTP error for bot=%s: %s",
-                caller, self._bot_id, e.response.status_code,
-            )
-            return {"success": False, "message": f"HTTP 错误: {e.response.status_code}", **dispatch_status}
-        except HttpClientRequestError as e:
-            logger.error(
-                "[TeclawDeviceSyncService.%s] request failed for bot=%s: %s",
-                caller, self._bot_id, type(e).__name__,
-            )
-            return {"success": False, "message": f"请求失败: {e}", **dispatch_status}
-        except Exception as e:  # compose / transport errors must not crash callers
+        except Exception as exc:  # compose / transport errors must not crash callers
+            if isinstance(exc, _DeliveryNotDispatchedError):
+                delivery_attempted = False
+                exc = exc.cause
+            if isinstance(exc, HttpClientStatusError):
+                message = f"HTTP 错误: {exc.response.status_code}"
+            elif isinstance(exc, HttpClientRequestError):
+                message = f"请求失败: {exc}"
+            else:
+                message = f"投递失败: {exc}"
             logger.error(
                 "[TeclawDeviceSyncService.%s] error for bot=%s: %s",
-                caller, self._bot_id, type(e).__name__,
+                caller, self._bot_id, type(exc).__name__,
             )
-            return {"success": False, "message": f"投递失败: {e}", **dispatch_status}
+            result = {"success": False, "message": message}
+            if not delivery_attempted:
+                result["dispatched"] = False
+            return result
 
         logger.info(
             "[TeclawDeviceSyncService.%s] delivered artifact for bot=%s",
@@ -300,7 +306,7 @@ class TeclawDeviceSyncService(DeviceSync):
 
     def _record_draft_artifact(self, artifact: BotConfigArtifact) -> None:
         """Best-effort: record the just-delivered artifact onto the bot's DRAFT
-        publish row. Called only after a successful POST, so the stored
+        publish row. Called only after a successful delivery, so the stored
         artifact equals what reached the container.
 
         Self-contained try/except: a recording failure must never flip the
@@ -319,6 +325,15 @@ class TeclawDeviceSyncService(DeviceSync):
                 self._bot_id, e,
             )
 
+    def _deliver(self, artifact: BotConfigArtifact) -> None:
+        """Send the full artifact through the device's POST boundary."""
+        try:
+            url, body, headers = self._prepare_delivery(artifact)
+            post = self._http_client.post
+        except Exception as exc:
+            raise _DeliveryNotDispatchedError(exc) from exc
+        post(url, json=body, headers=headers, timeout=30).raise_for_status()
+
     def _prepare_delivery(
         self, artifact: BotConfigArtifact,
     ) -> tuple[str, dict[str, Any], dict[str, str]]:
@@ -326,7 +341,7 @@ class TeclawDeviceSyncService(DeviceSync):
 
         Resolves the container URL + proxypass token per-request via
         :meth:`BaasService.get_http_info`, derives the teclaw bot id from the
-        resolved ``target``, and POSTs the ``/api/v1/bot/apply`` contract with
+        resolved ``target``, and prepares the ``/api/v1/bot/apply`` request with
         the proxy token in the ``x-proxypass-token`` header (the auth the
         agentclawproxy ``/proxypass`` gateway expects — same gateway/header
         ARCA uses). The full ``info.http_url`` is posted through the injected
