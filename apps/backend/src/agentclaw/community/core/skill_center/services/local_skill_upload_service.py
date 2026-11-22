@@ -249,7 +249,12 @@ class LocalSkillUploadService(
                 edit, target, runtime_result, is_teclaw=is_teclaw, deferred=False
             )
             await self._observe_package(edit, skill, result)
-            return result
+        # Capability delivery and Apply use a common send boundary. Enter it
+        # after releasing the package lease to keep their lock order acyclic.
+        if target.existing is not None:
+            projection = await self._sync_runtime(edit.owner_id, bot_id)
+            result["runtime_projection"] = projection.to_dict()
+        return result
 
     @asynccontextmanager
     async def _edit(
@@ -313,7 +318,7 @@ class LocalSkillUploadService(
         who = dict(bot_id=edit.bot_id, owner_id=edit.owner_id, actor_id=edit.actor_id)
         if runtime_result is not None:
             if target.existing is not None:
-                return await self._commit_runtime_replace(
+                return self._commit_runtime_replace(
                     **who, skill=target.existing, description=validated.description,
                     runtime_result=runtime_result, deferred=deferred, is_teclaw=is_teclaw,
                 )
@@ -474,8 +479,8 @@ class LocalSkillUploadService(
             started = perf_counter()
             await self._observe_package(edit, skill, result)
             logger.info(
-                "Local Skill package observation handed off bot_id=%s skill_name=%s observation_ms=%.3f",
-                edit.bot_id, name, (perf_counter() - started) * 1000,
+                "Local Skill package observation stage bot_id=%s skill_name=%s enabled=%s observation_ms=%.3f",
+                edit.bot_id, name, self._security_observation_enabled, (perf_counter() - started) * 1000,
             )
             if runtime_result is None:
                 self._skill_repo.finish_local_skill_dispatch(*dispatch)
@@ -535,7 +540,7 @@ class LocalSkillUploadService(
             "actor_id": actor_id,
         }
 
-    async def _commit_runtime_replace(
+    def _commit_runtime_replace(
         self,
         *,
         skill: dict[str, Any],
@@ -559,12 +564,10 @@ class LocalSkillUploadService(
                 new_locator=old_locator,
                 description=description,
                 defer_skills_projection=deferred and not is_teclaw,
+                record_tracked_projection=not deferred,
             )
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")
-            runtime_projection = (
-                RuntimeProjectionResult.skipped(reason="DEFERRED_CAPABILITY_PROJECTION") if deferred else await self._sync_runtime(owner_id, bot_id)
-            )
         except Exception as exc:
             logger.error(
                 "[LocalSkillUploadService] post-apply persistence failed "
@@ -585,7 +588,6 @@ class LocalSkillUploadService(
                 "user_id": owner_id,
             },
             "actor_id": actor_id,
-            "runtime_projection": runtime_projection.to_dict(),
         }
 
     async def upload_local_skill_files(
@@ -750,7 +752,6 @@ class LocalSkillUploadService(
             "user_id": skill.get("user_id"),
         }
         switched = False
-        runtime_sync_attempted = False
         canonical_published = False
         try:
             await staged.write(files)
@@ -781,27 +782,21 @@ class LocalSkillUploadService(
                 new_locator=old_locator,
                 description=description,
                 defer_skills_projection=deferred and not is_teclaw,
+                record_tracked_projection=not deferred,
             )
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
-            runtime_sync_attempted = not deferred
-            runtime_projection = (
-                RuntimeProjectionResult.skipped(reason="DEFERRED_CAPABILITY_PROJECTION") if deferred else await self._sync_runtime(owner_id, bot_id)
-            )
         except Exception as exc:
             if switched or canonical_published:
                 await self._restore_replacement(
                     skill=skill,
                     old_metadata=old_metadata,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
                     staged=staged,
                     canonical=canonical,
                     backup=backup,
                     canonical_published=canonical_published,
                     switched=switched,
-                    runtime_sync_attempted=runtime_sync_attempted,
                 )
             else:
                 if backup is not None:
@@ -819,14 +814,11 @@ class LocalSkillUploadService(
                 await self._restore_replacement(
                     skill=skill,
                     old_metadata=old_metadata,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
                     staged=staged,
                     canonical=canonical,
                     backup=backup,
                     canonical_published=canonical_published,
                     switched=switched,
-                    runtime_sync_attempted=runtime_sync_attempted,
                 )
             except Exception as rollback_exc:
                 raise LocalSkillStorageError() from rollback_exc
@@ -840,7 +832,6 @@ class LocalSkillUploadService(
                 "user_id": owner_id,
             },
             "actor_id": actor_id,
-            "runtime_projection": runtime_projection.to_dict(),
         }
 
     async def _restore_replacement(
@@ -848,14 +839,11 @@ class LocalSkillUploadService(
         *,
         skill: dict[str, Any],
         old_metadata: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
         staged,
         canonical,
         backup,
         canonical_published: bool,
         switched: bool,
-        runtime_sync_attempted: bool,
     ) -> None:
         if canonical_published:
             try:
@@ -868,8 +856,6 @@ class LocalSkillUploadService(
             restored = self._skill_repo.update(skill["id"], old_metadata)
             if restored is None:
                 raise LocalSkillStorageError()
-            if runtime_sync_attempted:
-                await self._sync_runtime(owner_id, bot_id)
         if backup is not None:
             await self._discard(backup)
         await self._discard(staged)

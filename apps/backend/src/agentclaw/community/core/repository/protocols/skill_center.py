@@ -432,6 +432,7 @@ class SkillRepository(Protocol):
         new_locator: str,
         description: str,
         defer_skills_projection: bool = False,
+        record_tracked_projection: bool = False,
     ) -> dict | None:
         """Atomically switch package authority at a canonical locator."""
         ...

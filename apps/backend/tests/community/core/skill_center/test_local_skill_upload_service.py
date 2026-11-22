@@ -2101,14 +2101,11 @@ async def test_restore_replacement_requires_backup_after_canonical_publish():
         await service._restore_replacement(
             skill=skill,
             old_metadata={},
-            owner_id="owner",
-            bot_id="bot",
             staged=_Storage(filesystem, "/private/staged"),
             canonical=_Storage(filesystem, "/private/canonical"),
             backup=None,
             canonical_published=True,
             switched=False,
-            runtime_sync_attempted=False,
         )
 
 

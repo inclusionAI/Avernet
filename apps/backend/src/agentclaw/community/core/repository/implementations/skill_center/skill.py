@@ -949,6 +949,7 @@ class SkillRepository(
         new_locator: str,
         description: str,
         defer_skills_projection: bool = False,
+        record_tracked_projection: bool = False,
     ) -> dict | None:
         """Update one Local Skill while preserving its canonical locator."""
 
@@ -956,7 +957,7 @@ class SkillRepository(
             raise ValueError("Local Skill replacement cannot change git_path")
 
         with self._db.transactional_orm_session() as db:
-            if defer_skills_projection:
+            if defer_skills_projection or record_tracked_projection:
                 require_locked_capability_bot(db, bot_id=bot_id, entity_id=owner_id)
             skill = (
                 db.query(self.Skill)
@@ -975,10 +976,10 @@ class SkillRepository(
             skill.description = description
             skill.user_id = _normalize_user_id(owner_id)
             skill.gmt_modified = func.now()
-            if defer_skills_projection:
+            if defer_skills_projection or record_tracked_projection:
                 intent = capability_projection_intent(bot_id=bot_id, entity_id=owner_id)
                 record_capability_projection(
-                    db, bot_id=bot_id, entity_id=owner_id, create=True,
+                    db, bot_id=bot_id, entity_id=owner_id, create=defer_skills_projection,
                     scope=ProjectionScope(skills=True),
                     retired_mappings=intent.retired_mappings if intent is not None else (),
                 )
