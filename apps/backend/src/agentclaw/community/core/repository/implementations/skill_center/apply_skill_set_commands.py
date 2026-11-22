@@ -216,7 +216,7 @@ class ApplySkillSetCommands:
             raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_RESERVED")
         if len(names) != len(set(names)) or set(names) & set(remove_names):
             raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_CONFLICT")
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             lock_bot_capabilities(session, bot_id=scope.bot_id, entity_id=scope.owner_id, env=scope.env)
             rows = self._bot_sets(
                 session,

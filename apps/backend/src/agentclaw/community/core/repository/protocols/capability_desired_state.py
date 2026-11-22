@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, ContextManager, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, Callable, ContextManager, Mapping, Protocol, Sequence
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
+    from agentclaw.community.core.skills_pool.models import PoolSkillMapping
     from agentclaw.community.core.skill_center.skill_set_apply import (
         BotCapabilityScope, DefaultExclusionChange, ResolvedSkillSetWrite, SkillSetApplySnapshot,
     )
@@ -27,6 +29,16 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     capability compensation preserve Bot MCP overrides. Explicit Direct MCP
     uninstall, configuration replacement and Bot deletion own their cleanup.
     """
+
+    @abstractmethod
+    def commit_projection_mutation(
+        self, *, bot_id: str, entity_id: str,
+        mutation: Callable[[], DesiredStateMutation],
+        scope_from_result: Callable[[DesiredStateMutation], ProjectionScope],
+        retired_mappings: Sequence[PoolSkillMapping], create: bool,
+    ) -> DesiredStateMutation:
+        """Commit a capability command with its Runtime obligation."""
+        ...
 
     @abstractmethod
     def read_apply_snapshot(self, *, scope: BotCapabilityScope, platform_default_codes: frozenset[str]) -> SkillSetApplySnapshot:

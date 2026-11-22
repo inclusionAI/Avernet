@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
@@ -17,6 +18,7 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
 )
+from agentclaw.community.core.skill_center.capability_projection_intent import capability_projection_intent
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
     ProjectionScope,
@@ -136,6 +138,7 @@ class MutationProjectionFlow:
             Callable[[DesiredStateMutation], ProjectionScope] | None
         ) = None,
         skip_projection_when_unchanged: bool = False,
+        on_committed: Callable[[DesiredStateMutation], None] | None = None,
     ) -> dict:
         """Run the command; return ``{**item, "changed": ..., **details}``.
 
@@ -167,8 +170,43 @@ class MutationProjectionFlow:
         """
         if (scope is None) == (scope_from_result is None):
             raise ValueError("exactly one of scope / scope_from_result is required")
+        entity_id = stable_resource_owner_id(bot) if bot.get("entity_id") else None
+        deferred = (
+            capability_projection_intent(bot_id=bot_id, entity_id=entity_id)
+            if entity_id is not None
+            else None
+        )
+
+        def effective_scope(result: DesiredStateMutation) -> ProjectionScope:
+            selected = scope_from_result(result) if scope_from_result is not None else scope
+            assert selected is not None
+            return selected
+
+        def commit(mappings: Sequence[PoolSkillMapping] = ()) -> DesiredStateMutation:
+            if entity_id is not None and (deferred is not None or runtime_required):
+                result = self._repository.commit_projection_mutation(
+                    bot_id=bot_id, entity_id=entity_id, mutation=mutation,
+                    scope_from_result=effective_scope, retired_mappings=mappings,
+                    create=deferred is not None,
+                )
+            else:
+                result = mutation()
+            if on_committed is not None:
+                on_committed(result)
+            return result
+
+        if deferred is not None:
+            result = commit(deferred.retired_mappings)
+            return {
+                **result.item,
+                "changed": result.changed,
+                **result.details,
+                "runtime_projection": RuntimeProjectionResult.skipped(
+                    reason="APPLY_PROJECTION_DEFERRED"
+                ).to_dict(),
+            }
         if not runtime_required:
-            result = mutation()
+            result = commit()
             return {
                 **result.item,
                 "changed": result.changed,
@@ -178,11 +216,8 @@ class MutationProjectionFlow:
                 ).to_dict(),
             }
         if not is_bot_ready(bot):
-            result = mutation()
-            effective_scope = (
-                scope_from_result(result) if scope_from_result is not None else scope
-            )
-            assert effective_scope is not None
+            result = commit()
+            selected_scope = effective_scope(result)
             runtime_result = RuntimeProjectionResult.pending(
                 code="BOT_RUNTIME_NOT_READY",
                 reason="Bot 运行环境尚未就绪，能力状态已保存但尚未同步",
@@ -190,7 +225,7 @@ class MutationProjectionFlow:
             self._ensure_skill_recovery(
                 bot=bot,
                 bot_id=bot_id,
-                scope=effective_scope,
+                scope=selected_scope,
                 result=runtime_result,
             )
             return {
@@ -219,7 +254,7 @@ class MutationProjectionFlow:
                 mapping_count=len(previous_mappings),
             )
         mutation_started_at = time.perf_counter()
-        result = mutation()
+        result = commit(previous_mappings)
         self._log_timing(
             stage="desired_state_mutation",
             bot_id=bot_id,
@@ -229,17 +264,14 @@ class MutationProjectionFlow:
             mcp_delta_count=len(result.mcp_codes),
         )
         if skip_projection_when_unchanged and not result.changed:
-            effective_scope = (
-                scope_from_result(result) if scope_from_result is not None else scope
-            )
-            assert effective_scope is not None
+            selected_scope = effective_scope(result)
             runtime_result = RuntimeProjectionResult.skipped(
                 reason="DESIRED_STATE_UNCHANGED"
             )
             self._ensure_skill_recovery(
                 bot=bot,
                 bot_id=bot_id,
-                scope=effective_scope,
+                scope=selected_scope,
                 result=runtime_result,
             )
             return {
@@ -248,23 +280,20 @@ class MutationProjectionFlow:
                 **result.details,
                 "runtime_projection": runtime_result.to_dict(),
             }
-        effective_scope = (
-            scope_from_result(result) if scope_from_result is not None else scope
-        )
-        assert effective_scope is not None  # guaranteed by the check above
+        selected_scope = effective_scope(result)
         projection_started_at = time.perf_counter()
         runtime_result = await self._project_best_effort(
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=engine_type,
             previous_mappings=previous_mappings,
-            scope=effective_scope,
+            scope=selected_scope,
             previous_snapshot_failed=previous_snapshot_failed,
         )
         self._ensure_skill_recovery(
             bot=bot,
             bot_id=bot_id,
-            scope=effective_scope,
+            scope=selected_scope,
             result=runtime_result,
         )
         self._log_timing(
@@ -272,7 +301,7 @@ class MutationProjectionFlow:
             bot_id=bot_id,
             engine_type=engine_type,
             started_at=projection_started_at,
-            scope=effective_scope,
+            scope=selected_scope,
         )
         return {
             **result.item,

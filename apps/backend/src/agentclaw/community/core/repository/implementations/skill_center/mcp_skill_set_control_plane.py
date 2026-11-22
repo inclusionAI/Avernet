@@ -73,7 +73,7 @@ class McpSkillSetControlPlaneCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             excluded_default_ids = default_exclusions.lock_mcp_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 server_code=server_code,
@@ -163,7 +163,7 @@ class McpSkillSetControlPlaneCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, default_engine_types=default_engine_types, locked=True)
             self._ordinary(row)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
@@ -204,7 +204,7 @@ class McpSkillSetControlPlaneCommands:
         because a stray code must not leave a dangling row that would
         pre-exclude the server if the platform ever adds it.
         """
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             default_exclusions.lock_mcp_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 server_code=server_code,
@@ -254,7 +254,7 @@ class McpSkillSetControlPlaneCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             excluded_default_ids = default_exclusions.lock_mcp_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 server_code=server_code,
@@ -323,7 +323,7 @@ class McpSkillSetControlPlaneCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             require_direct_mcp_control_allowed(
                 server_code=server_code,
                 platform_default_codes=self._effective_direct_policy(
@@ -367,7 +367,7 @@ class McpSkillSetControlPlaneCommands:
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         """Atomically install one direct MCP and replace its Bot override."""
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             manifest_direct = self._manifest_direct_mcp_in_session(
                 session,
                 bot_id=bot_id,
@@ -439,7 +439,7 @@ class McpSkillSetControlPlaneCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             manifest_direct = self._manifest_direct_mcp_in_session(
                 session,
                 bot_id=bot_id,
