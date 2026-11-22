@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from functools import partial
+from typing import Protocol
 
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.devices.services.device_context import (
@@ -27,6 +28,7 @@ from agentclaw.community.core.skill_center.capability_projection_reconcile impor
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
     ProjectionScope,
+    ResolvedSkillPlan,
     RuntimeProjectionResult,
 )
 from agentclaw.community.core.skills_pool.mapping_intent import retirement_request
@@ -50,12 +52,18 @@ def _unknown_delivery() -> RuntimeProjectionResult:
     )
 
 
+class _RuntimeProjector(BotRuntimeProjectorProtocol, Protocol):
+    async def apply_mcp_and_cli_plan(
+        self, *, plan: ResolvedSkillPlan, scope: ProjectionScope,
+    ) -> RuntimeProjectionResult: ...
+
+
 class CapabilityProjectionReconciler:
     def __init__(
         self,
         *,
         repository: CapabilityProjectionRepositoryProtocol,
-        projector: BotRuntimeProjectorProtocol,
+        projector: _RuntimeProjector,
         guard: CapabilityDeliveryGuard,
         bots: BotRepository,
         defer_enabled: bool,
@@ -118,7 +126,7 @@ class CapabilityProjectionReconciler:
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping],
         legacy: Callable[[], Awaitable[RuntimeProjectionResult]],
-        deliver_mcp_and_cli: Callable[[ProjectionScope], Awaitable[RuntimeProjectionResult]] | None = None,
+        mcp_and_cli_only: bool = False,
     ) -> RuntimeProjectionResult:
         """Use the same send boundary for standalone mutations and lifecycle."""
         if entity_id is None:
@@ -154,15 +162,7 @@ class CapabilityProjectionReconciler:
                 )
                 if state is None:
                     return RuntimeProjectionResult.skipped(reason="CAPABILITY_PROJECTION_SUPERSEDED")
-                if deliver_mcp_and_cli is not None:
-                    if state.write_blocked or not state.scope.mcp:
-                        return self._observed(state)
-                    return await self._dispatch(
-                        state, lease,
-                        deliver=partial(deliver_mcp_and_cli, replace(state.scope, skills=False)),
-                        mcp_only=True,
-                    )
-                return await self._deliver(state, lease)
+                return await self._deliver(state, lease, mcp_only=mcp_and_cli_only)
         except CapabilityDeliveryUnavailable:
             return self._delivery_busy()
 
@@ -181,16 +181,18 @@ class CapabilityProjectionReconciler:
             return None, self._delivery_busy()
 
     async def _deliver(
-        self, state: CapabilityProjectionState, lease: CapabilityDeliveryLease,
+        self, state: CapabilityProjectionState, lease: CapabilityDeliveryLease, *,
+        mcp_only: bool = False,
     ) -> RuntimeProjectionResult:
-        if state.write_blocked or not (state.scope.skills or state.scope.mcp):
+        scope = replace(state.scope, skills=False) if mcp_only else state.scope
+        if state.write_blocked or not (scope.skills or scope.mcp):
             return self._observed(state)
         try:
             plan = await asyncio.to_thread(
                 self._projector.resolve_plan,
                 bot_id=state.bot_id,
                 owner_id=state.owner_id,
-                scope=state.scope,
+                scope=scope,
             )
         except Exception:
             logger.exception("Could not resolve committed capability projection bot_id=%s", state.bot_id)
@@ -201,6 +203,11 @@ class CapabilityProjectionReconciler:
         if not is_bot_ready(plan.bot):
             return RuntimeProjectionResult.pending(
                 code="BOT_RUNTIME_NOT_READY", reason="The Bot Runtime is not ready."
+            )
+        if mcp_only:
+            return await self._dispatch(
+                state, lease, mcp_only=True,
+                deliver=partial(self._projector.apply_mcp_and_cli_plan, plan=plan, scope=scope),
             )
         retired = retirement_request(state.retired_mappings, plan.projection.skill_mappings)
         return await self._dispatch(

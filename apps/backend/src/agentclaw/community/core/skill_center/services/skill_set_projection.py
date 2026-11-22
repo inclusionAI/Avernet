@@ -11,6 +11,7 @@ from agentclaw.community.core.devices.services.device_context import (
     RuntimeBindingChangedError,
 )
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
+from agentclaw.community.core.mcp.url_resolution import effective_mcp_url_override
 from agentclaw.community.core.skill_center.errors import (
     McpProjectionNotDispatchedError,
     SkillSetRuntimeReconcileError,
@@ -263,9 +264,20 @@ class SkillSetRuntimeProjection:
         if not claimed and not released:
             return True
         entries: list[dict[str, Any]] = []
+        user_id = self.user_id or self.entity_id or ""
         for server_code in sorted(claimed):
             try:
-                detail = self.mcp_center.get_mcp_detail(server_code)
+                detail = await asyncio.to_thread(self.mcp_center.get_mcp_detail, server_code)
+                if not detail:
+                    bot_config = await asyncio.to_thread(
+                        self.mcp_config_service.get_bot_override,
+                        bot_id=self.bot_id, owner_id=self.entity_id or user_id, server_code=server_code,
+                    )
+                    user_config = await asyncio.to_thread(
+                        self.mcp_config_service.get_user_unified_config, user_id, server_code,
+                    )
+                    if effective_mcp_url_override(user_config, bot_config):
+                        detail = {"serverCode": server_code}
             except Exception as exc:
                 raise McpProjectionNotDispatchedError() from exc
             if not detail:
@@ -286,7 +298,7 @@ class SkillSetRuntimeProjection:
                     sorted(claimed),
                 )
                 delivery = await self._mcp_sync_service.sync_mcp_details_for_bot(
-                    user_id=self.user_id or self.entity_id or "",
+                    user_id=user_id,
                     mcp_entries=entries,
                     bot_id=self.bot_id,
                     entity_id=self.entity_id,

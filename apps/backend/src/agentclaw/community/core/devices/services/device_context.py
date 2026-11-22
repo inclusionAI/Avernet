@@ -11,6 +11,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from agentclaw.community.core.ports.runtime_binding import RuntimeBindingTarget
+
 ProviderType = Literal["arca", "baas", "teclaw", "local"]
 
 
@@ -74,15 +76,6 @@ class DeviceConnectionUnavailableError(ConnInfoBuildError):
 
 class RuntimeBindingChangedError(DeviceConnectionUnavailableError):
     """A caller's expected Runtime binding changed before a device request."""
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeBindingTarget:
-    bot_id: str
-    owner_id: str
-    entity_id: str
-    binding_id: int | None
-    device_id: str | None
 
 
 _EXPECTED_RUNTIME_BINDING: ContextVar[RuntimeBindingTarget | None] = ContextVar(

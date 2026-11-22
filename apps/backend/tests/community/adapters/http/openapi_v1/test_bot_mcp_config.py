@@ -131,6 +131,7 @@ def mcp(monkeypatch):
         client=user_scoped_client(
             app, "delegate", headers={dependencies.PRINCIPAL_HEADER: token}
         ),
+        service=service,
         commands=commands,
         effective=effective,
         market=market,
@@ -254,3 +255,88 @@ def test_clear_is_saved_even_when_catalog_lookup_for_projection_fails(mcp):
     assert response.json()["data"]["desired_state"]["status"] == "COMMITTED"
     assert response.json()["data"]["runtime_projection"]["status"] == "DEGRADED"
     mcp.sync.sync_mcp_details_for_bot.assert_not_called()
+
+
+def test_tracked_effective_override_delivers_explicit_url_without_catalogue(mcp, tmp_path):
+    from agentclaw.community.core.devices.services.mcp_device_payload import convert_to_device_format
+    from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+    from agentclaw.community.core.repository.implementations.bot.bot import BotRepository as PersistentBots
+    from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import BotMCPConfigRepository
+    from agentclaw.community.core.repository.implementations.bot.scoped_mcp_config import ScopedMCPConfigRepository
+    from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
+    from agentclaw.community.core.repository.implementations.skill_center.capability_projection import CapabilityProjectionRepository
+    from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope, RuntimeProjectionResult
+    from agentclaw.community.core.skill_center.services.capability_delivery_guard import CapabilityDeliveryGuard
+    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import CapabilityProjectionReconciler
+    from agentclaw.community.core.skill_center.services.skill_set_projection import SkillSetRuntimeProjection
+    from agentclaw.community.di.config import McpRuntimeCredentialsConfig
+    from agentclaw.community.plugin_api.models import BotModel
+    from agentclaw.community.plugins.local.cache import MemoryCachePlugin
+    from tests.community.core.mcp.services.test_sync_service import _make_plugin, _make_sync_service
+    from tests.community.repository.skill_center.capability_desired_state_support import _Database
+
+    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
+    with db.transactional_orm_session() as session:
+        session.add(BotModel(
+            id=42, bot_id="shared", entity_id="entity-1", owner_id="owner",
+            creator_id="owner", entity_type="staff", env="dev", status="ACTIVE",
+        ))
+    address = {"bot_id": "shared", "entity_id": "entity-1"}
+    repository = CapabilityProjectionRepository(db)
+    repository.require(**address, scope=ProjectionScope.everything())
+    bots = PersistentBots(db)
+    bot = bots.get_by_id_and_entity("shared", "entity-1")
+    mcp.effective.effective_mcp_server_codes.return_value = {"weather"}
+    config = MCPConfigService(
+        user_mcp_config_repo=UserMCPConfigRepository(db),
+        bot_mcp_config_repo=BotMCPConfigRepository(db),
+        mcp_center=mcp.market, bot_repo=bots, capability_reader=mcp.effective,
+        mcp_runtime_credentials=McpRuntimeCredentialsConfig(), secret_resolver=Mock(),
+    )
+    device = _make_plugin()
+    device.sync_all_mcp_servers.return_value = True
+    sync = _make_sync_service(mcp_config_service=config)
+    sync.bot_repository.get_by_id_and_entity.side_effect = None
+    sync.bot_repository.get_by_id_and_entity.return_value = bot
+
+    service = SkillSetRuntimeProjection()
+    service.user_id = "owner"
+    service.entity_id = "entity-1"
+    service.bot_id = "shared"
+    service.engine_type = "openclaw"
+    service.mcp_center = mcp.market
+    service.mcp_config_service = config
+    service._device_owner_id = "owner"
+    service._mcp_sync_service = sync
+    service._resolver = Mock()
+    service._device_sync_dispatcher = Mock()
+    service._device_sync_dispatcher.dispatch.return_value = device
+
+    class Projector:
+        def resolve_plan(self, **kwargs):
+            return SimpleNamespace(bot=bot, projection=SimpleNamespace(skill_mappings=[]))
+
+        async def apply_plan(self, *, plan, retired_mappings, scope):
+            assert scope.claim_all_mcp or "weather" in scope.updated_mcp
+            if await service.project_mcps(
+                claimed=frozenset({"weather"}), released=frozenset(), declared={"weather"},
+            ):
+                return RuntimeProjectionResult.converged()
+            return RuntimeProjectionResult.pending(code="NO_DEVICE_RECEIPT", reason="No device receipt")
+
+    mcp.service._config_service = config
+    mcp.service._command_repo = ScopedMCPConfigRepository(db)
+    mcp.service._capability_projection = CapabilityProjectionReconciler(
+        repository=repository, projector=Projector(), guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+        bots=bots, defer_enabled=False,
+    )
+    url = "https://example.invalid/custom"
+    response = mcp.client.put(PATH, json={"url": url})
+    assert response.status_code == 200, response.json()
+    assert response.json()["data"]["runtime_projection"]["status"] == "CONVERGED"
+    assert config.get_bot_override(bot_id="shared", owner_id="entity-1", server_code="weather") == {"url": url}
+    mcp.sync.sync_mcp_details_for_bot.assert_not_awaited()
+    device.sync_single_mcp.assert_called_once()
+    args, kwargs = device.sync_single_mcp.call_args
+    assert convert_to_device_format(*args, **kwargs).to_dict()["url"] == url
+    assert repository.read(**address).result.status.value == "CONVERGED"

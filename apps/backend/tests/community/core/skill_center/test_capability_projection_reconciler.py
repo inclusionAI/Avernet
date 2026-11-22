@@ -281,7 +281,7 @@ async def test_cutover_mcp_receipt_preserves_pending_skills_and_shared_fence(tmp
     repository.require(**address, scope=ProjectionScope.everything())
 
     class CutoverProjector(_Projector):
-        async def project_mcp_and_cli(self, *, scope, **kwargs):
+        async def apply_mcp_and_cli_plan(self, *, scope, **kwargs):
             self.scopes.append(scope)
             assert repository.read(**address).write_blocked
             return RuntimeProjectionResult.converged(
@@ -303,5 +303,50 @@ async def test_cutover_mcp_receipt_preserves_pending_skills_and_shared_fence(tmp
     assert delegate.scopes == [ProjectionScope(mcp=True, claim_all_mcp=True)]
     state = repository.read(**address)
     assert state.scope == ProjectionScope(skills=True)
+    assert state.retry_pending
+    assert not state.write_blocked
+
+
+@pytest.mark.asyncio
+async def test_cutover_resolves_current_owner_and_keeps_preflight_failure_retryable(tmp_path):
+    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
+        CapabilityProjectionReconciler,
+    )
+    from agentclaw.community.core.skill_center.services.recovering_bot_runtime_projector import (
+        RecoveringBotRuntimeProjector,
+    )
+
+    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
+    address = {"bot_id": "bot", "entity_id": "owner"}
+    with db.transactional_orm_session() as session:
+        row = session.query(BotModel).filter_by(**address).one()
+        row.owner_id = "current-owner"
+    repository = CapabilityProjectionRepository(db)
+    repository.require(**address, scope=ProjectionScope.everything())
+    prepared = []
+
+    class CutoverProjector(_Projector):
+        def resolve_plan(self, *, bot_id, owner_id, scope):
+            prepared.append((bot_id, owner_id, scope))
+            assert not repository.read(**address).write_blocked
+            raise RuntimeError("configuration read temporarily unavailable")
+
+        async def project_mcp_and_cli(self, *, bot_id, owner_id, scope):
+            self.resolve_plan(bot_id=bot_id, owner_id=owner_id, scope=scope)
+
+    delegate = CutoverProjector([])
+    reconciler = CapabilityProjectionReconciler(
+        repository=repository, projector=delegate, guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+        bots=BotRepository(db), defer_enabled=True,
+    )
+    projector = RecoveringBotRuntimeProjector(
+        delegate=delegate, recovery=None, capability_projection=reconciler,
+    )
+    scope = ProjectionScope(mcp=True, claim_all_mcp=True)
+    result = await projector.project_mcp_and_cli(bot_id="bot", owner_id="owner", scope=scope)
+    assert any(issue.code == "CAPABILITY_PROJECTION_PLAN_UNAVAILABLE" for issue in result.issues)
+    assert prepared == [("bot", "current-owner", scope)]
+    state = repository.read(**address)
+    assert state.scope == ProjectionScope.everything()
     assert state.retry_pending
     assert not state.write_blocked

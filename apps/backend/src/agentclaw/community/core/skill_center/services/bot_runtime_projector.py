@@ -241,7 +241,14 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             owner_id=owner_id,
             scope=scope,
         )
-        assert isinstance(plan, ResolvedCapabilityPlan)
+        return await self.apply_mcp_and_cli_plan(plan=plan, scope=scope)
+
+    async def apply_mcp_and_cli_plan(
+        self, *, plan: ResolvedSkillPlan, scope: ProjectionScope,
+    ) -> RuntimeProjectionResult:
+        """Deliver the preflighted MCP scope while cutover owns the Skill mappings."""
+        if not isinstance(plan, ResolvedCapabilityPlan) or not scope.mcp or scope.skills:
+            raise ValueError("An MCP/CLI projection requires a resolved MCP-only plan")
         result = await self._registry.for_engine(plan.engine).apply(
             plan=plan,
             scope=scope,
