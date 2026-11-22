@@ -1,0 +1,37 @@
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/document_mapping.py
+  s_e7fe9f07a64c50::t_416d42b46895fc 4-5,29-34
+apps/bcsfuse/tests/composition/test_tc_card_storage.py
+  s_e7fe9f07a64c50::t_70428912d6a005 8,11,35-52,54-57
+  s_e7fe9f07a64c50::t_0e23abc28d000d 22
+  s_e7fe9f07a64c50::t_c4f05ea10ec197 16,109-122
+  s_e7fe9f07a64c50::t_d033fc0d52b3b5 53
+  s_e7fe9f07a64c50::t_d4c072d5ffd136 58-59,123
+apps/bcsfuse/docs/deployment/tc-production-release.md
+  s_e7fe9f07a64c50::t_03ed80211e67ed 70,85-89
+  s_e7fe9f07a64c50::t_6e4a76eb58258c 65-69,71-84
+apps/bcsfuse/internal/bcsfuse_internal/providers/drm_config_provider.py
+  s_e7fe9f07a64c50::t_cd7dbbb86821f4 11
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/tc.py
+  s_e7fe9f07a64c50::t_e58727f2d041d0 65,79
+  s_e7fe9f07a64c50::t_416d42b46895fc 75-77
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/index_builds.py
+  s_e7fe9f07a64c50::t_f63c83f17f5e6f 4,42,57,61-62
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/updates.py
+  s_e7fe9f07a64c50::t_dbdf48c8616469 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ce7ecede45dc347e672709411903de096dc1acd8",
+  "prompts": {},
+  "sessions": {
+    "s_e7fe9f07a64c50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf7a-1d65-7ce2-80b0-e54cb93b8362",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

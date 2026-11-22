@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-permissions.test.ts
+  h_5f06d4d8b4bdd5 20-24,26-29,41-50,54-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ebff34aa75dd198ea2f729c3a0e941f845bf23f0",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

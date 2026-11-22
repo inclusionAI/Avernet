@@ -1,0 +1,47 @@
+apps/agentclawscs/docker/utils/rotate-bcs-logs.sh
+  s_689737e42e2070::t_a6e4c83fdabe00 2-4,6,9-37,42-65,71-72
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start.sh
+  s_689737e42e2070::t_0458202baa408e 9,23
+  s_689737e42e2070::t_92ef0b3fceda9a 19,24-26
+apps/agentclawscs/docker/bcs/scripts/admin/bin/start-logrotate.sh
+  s_689737e42e2070::t_4de25ec2c5ce84 4
+  s_689737e42e2070::t_92ef0b3fceda9a 7,17,43
+apps/agentclawscs/docker/bcs/scripts/admin/bin/start.sh
+  s_689737e42e2070::t_92ef0b3fceda9a 19,24-26
+  s_689737e42e2070::t_0458202baa408e 9,23
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start-logrotate.sh
+  s_689737e42e2070::t_4de25ec2c5ce84 4
+  s_689737e42e2070::t_92ef0b3fceda9a 7,17,43
+apps/agentclawscs/docker/utils/test-rotate-bcs-logs.sh
+  s_689737e42e2070::t_c8271993af8b77 167,183,203,218,221
+  s_689737e42e2070::t_6fdb65863fb45c 15
+  s_689737e42e2070::t_17ce2cbc71c9be 3-4
+  s_689737e42e2070::t_ae36d8339721db 9-14,16-17,20,51,85-140,142-150,240-270
+  s_689737e42e2070::t_b2b9d1fe01777f 160-166,168-182,184-202,204-217,219-220,222-232
+apps/agentclawscs/docker/bcn/logrotate.conf
+  s_689737e42e2070::t_92ef0b3fceda9a 13-14
+apps/bcs-internal/docs/diagnostics/README.md
+  s_689737e42e2070::t_2443d8184558e5 10
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/CONTEXT.md
+  s_689737e42e2070::t_2443d8184558e5 61-66
+apps/bcs-internal/docs/sofa-tracer.md
+  s_689737e42e2070::t_2443d8184558e5 30-55,178-197,227-229
+apps/agentclawscs/docker/bcs/logrotate.conf
+  s_689737e42e2070::t_92ef0b3fceda9a 13-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "99203622bd877142f202bf563aca5102d6ffa35f",
+  "prompts": {},
+  "sessions": {
+    "s_689737e42e2070": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce05-02e8-71a3-ac6b-b1dbef4592a3",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

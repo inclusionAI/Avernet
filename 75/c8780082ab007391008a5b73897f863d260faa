@@ -1,0 +1,47 @@
+apps/bcs-internal/Cargo.lock
+  s_bff5f362001415::t_de972fbb76ba3b 850,2344
+apps/bcs-internal/bcn-configs/agentbase-sofarpc.toml
+  s_bff5f362001415::t_970fc803f0ba84 6-10
+apps/bcs-internal/configs/agentbase-sofarpc.toml
+  s_bff5f362001415::t_313c2b40540cc6 6-10
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  s_bff5f362001415::t_b7737a6435734f 20-23,220,226-242,261,342-343,365,1002-1003,1027-1028
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/config.rs
+  s_bff5f362001415::t_a7f3592a559c71 8-9,35-41,55-56,194-199,270-271
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/identity.rs
+  s_bff5f362001415::t_29cf768eab610d 48,52-63
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/config_fail_closed.rs
+  s_bff5f362001415::t_bd6a74bcf94cc0 14-15,134-143,307-311
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/identity_pins.rs
+  s_bff5f362001415::t_cd5879a7c379ea 46-49
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/consumer.rs
+  s_bff5f362001415::t_2d959c1a411c78 31-37,207-208,351-352
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/registry.rs
+  s_bff5f362001415::t_2e29603e36c108 201-205
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/triple_pojo/channel.rs
+  s_bff5f362001415::t_6d5ee118b7eded 98-102,133-136,143-167,1134-1161
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/outbound_wire.rs
+  s_bff5f362001415::t_703e083c566230 71
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/sofa_rpc_rs_poc.rs
+  s_bff5f362001415::t_e72d3d04d8d70c 266-267
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  s_bff5f362001415::t_a54661a3177019 93-94
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/roundtrip.rs
+  s_bff5f362001415::t_8ae5ab33d770c8 178-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75c8780082ab007391008a5b73897f863d260faa",
+  "prompts": {},
+  "sessions": {
+    "s_bff5f362001415": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf88-6d03-7101-8fb4-9e6c106916be",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_b8bd53b858e9e7::t_51286555ef961c 196-198,269-271,279,285,290,305-310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "44f64500d4ee670ecb1dfa1e8d5f82f9c6d79360",
+  "prompts": {},
+  "sessions": {
+    "s_b8bd53b858e9e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e47d-1b63-7362-aaf7-7096b19afd9f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

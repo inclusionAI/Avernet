@@ -1,0 +1,59 @@
+apps/bcs-internal/bcn-configs/sofa-rpc-dev.toml
+  s_14578f9514f223::t_7bb2e99210d8b3 22
+apps/bcs-internal/bcn-configs/sofa-rpc-pre.toml
+  s_14578f9514f223::t_849d587718ef4f 22
+apps/bcs-internal/bcn-configs/sofa-rpc.toml
+  s_14578f9514f223::t_6873ecc26b30e6 36-40,55
+apps/bcs-internal/configs/sofa-rpc-dev.toml
+  s_14578f9514f223::t_eb0ecf1e8ef892 18
+apps/bcs-internal/configs/sofa-rpc-local.toml
+  s_14578f9514f223::t_f8bd718a9dc8b9 18
+apps/bcs-internal/configs/sofa-rpc-pre.toml
+  s_14578f9514f223::t_697182e3a9cfa6 18
+apps/bcs-internal/configs/sofa-rpc.toml
+  s_14578f9514f223::t_7eaa997303f1db 35-39,51
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/consumer.rs
+  s_14578f9514f223::t_e848584efa898c 53-54,321-327
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/registry.rs
+  s_14578f9514f223::t_61cf80d3912e74 200-202
+apps/bcs-internal/crates/plugins/bcs-sofa-services/build.rs
+  s_14578f9514f223::t_ef870707e448dc 27,43-46
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/test/v1/jinnie_stream_proxy.proto
+  s_14578f9514f223::t_30b2fae7baad25 1-22
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/jinnie/AgentMarketDemoTripleStreamController.proto
+  s_14578f9514f223::t_99f7094e50e0c8 1-24
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  s_14578f9514f223::t_334ec4723bd469 133,272-275
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host.rs
+  s_14578f9514f223::t_95096dc21d2dd2 15,21-24
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa.rs
+  s_14578f9514f223::t_127176c667fa53 125-135,412,514-516
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/lib.rs
+  s_14578f9514f223::t_3f7c03bbade19f 11-14
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  s_14578f9514f223::t_16f7480a73e8a9 371,377-380,382,407
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/jinnie_stream/mod.rs
+  s_14578f9514f223::t_62e5b9999eb2f3 1-195
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/mod.rs
+  s_14578f9514f223::t_de2d314c35dfa9 9
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  s_14578f9514f223::t_fdb1953c56f3e0 603
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/sofa_provider_host.rs
+  s_14578f9514f223::t_d0f582ab82ebf4 122,278,546,752
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "486262a7a3d71bcd6bfdde03327e7b0d4b1ce721",
+  "prompts": {},
+  "sessions": {
+    "s_14578f9514f223": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e490-9a86-7883-a2dd-b902d9fae6cb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

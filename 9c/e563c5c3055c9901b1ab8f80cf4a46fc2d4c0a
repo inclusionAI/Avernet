@@ -1,0 +1,89 @@
+apps/baas/docs/adr/0018-session-runtime-observation.md
+  s_ad6596e5f395ca::t_97d774d68c5873 1-50
+apps/baas/docs/adr/README.md
+  s_ad6596e5f395ca::t_fb3020dfc0cb32 39,43
+apps/baas/docs/flows/README.md
+  s_ad6596e5f395ca::t_bf8c2a07e99591 9
+apps/baas/src/secbaas/community/adapters/web/routers/open_api/model.py
+  s_ad6596e5f395ca::t_8c7cc1c6221d45 9,317-322
+apps/baas/src/secbaas/community/adapters/web/routers/open_api/session_router.py
+  s_ad6596e5f395ca::t_c7033b8694fe7a 6-7,26,205-249
+apps/baas/src/secbaas/community/api/bot_runtime/__init__.py
+  s_ad6596e5f395ca::t_5ba9a15bfdf4d9 49,75
+apps/baas/src/secbaas/community/api/bot_runtime/_protocols.py
+  s_ad6596e5f395ca::t_7ea76876e5375f 30,358-368
+apps/baas/src/secbaas/community/api/bot_runtime/_session_runtime_status.py
+  s_ad6596e5f395ca::t_c6a7480da716aa 1-32
+apps/baas/src/secbaas/community/core/service/bot_run/_async_session_client.py
+  s_ad6596e5f395ca::t_8a93feeeb67c83 15,82-92
+apps/baas/src/secbaas/community/core/service/bot_run/_baas_service.py
+  s_ad6596e5f395ca::t_7aeae3bb8d33fc 40,685-710
+apps/baas/src/secbaas/community/core/service/bot_run/_caller_service.py
+  s_ad6596e5f395ca::t_d7f637a30a6142 13,130-143
+apps/baas/src/secbaas/community/core/service/bot_run/_claw_service.py
+  s_ad6596e5f395ca::t_e5c375026dfdec 30,440-464
+apps/baas/src/secbaas/community/core/service/bot_run/_internal_protocols.py
+  s_ad6596e5f395ca::t_37f066f54760f4 22,162-171
+apps/baas/src/secbaas/community/core/service/bot_run/_runner.py
+  s_ad6596e5f395ca::t_c09c2fe1bd984f 37,636-650
+apps/baas/tests/unit/adapters/web/open_api/test_session_router.py
+  s_ad6596e5f395ca::t_de4997979a4278 1362-1489
+apps/baas/tests/unit/core/service/bot_run/test_async_session_client.py
+  s_ad6596e5f395ca::t_234726ab975f92 1078-1111
+apps/baas/tests/unit/core/service/bot_run/test_baas_service.py
+  s_ad6596e5f395ca::t_78ccf549dbc543 3659-3706
+apps/baas/tests/unit/core/service/bot_run/test_caller_service.py
+  s_ad6596e5f395ca::t_3e3656d63a8b0a 214-240
+apps/baas/tests/unit/core/service/bot_run/test_claw_service.py
+  s_ad6596e5f395ca::t_7e426e01977954 932-967
+apps/baas/tests/unit/core/service/bot_run/test_runner.py
+  s_ad6596e5f395ca::t_662823de2f8d5c 3482-3523
+apps/backend/src/agentclaw/community/core/task/README.md
+  s_ad6596e5f395ca::t_8bfcb12e9c894a 14-20
+apps/backend/src/agentclaw/community/core/task/task_harness/relay_runtime_monitor.py
+  s_ad6596e5f395ca::t_2fdf289830e5c8 68,87,112-114,125-137
+apps/backend/src/agentclaw/community/core/task/task_harness/runtime_probe.py
+  s_ad6596e5f395ca::t_3990c03786ea65 29,37-39,44,320-324,339-341,343,345-348,350-359,361-365,367-388
+apps/backend/src/agentclaw/community/core/task/task_runner/client/open_api_bot_adapter.py
+  s_ad6596e5f395ca::t_ebb6c90fc2390f 24,350-371
+apps/backend/src/agentclaw/community/core/task/task_runner/client/ports.py
+  s_ad6596e5f395ca::t_2de89023c54077 6-8,28-52,75-81
+apps/backend/tests/community/core/task/task_harness/test_harness.py
+  s_ad6596e5f395ca::t_b3f2975653840b 899-952
+apps/backend/tests/community/core/task/task_harness/test_relay_session_recovery.py
+  s_ad6596e5f395ca::t_8d0df76f47a9d7 12-14,194-196,200,214-215
+apps/backend/tests/community/core/task/task_harness/test_runtime_probe.py
+  s_ad6596e5f395ca::t_c12942a7fccb53 9-11,21-26,105,122,143,145,151-152,154,173,235-236,344-383
+apps/backend/tests/community/core/task/task_runner/integration/test_open_api_bot_adapter.py
+  s_ad6596e5f395ca::t_ace0afde0f0df8 539-569
+docs/flows/README.md
+  s_ad6596e5f395ca::t_60bfb465f76a6e 13-14
+docs/flows/session-runtime-observation.md
+  s_ad6596e5f395ca::t_15187e5575fb1b 1-72
+engine/adapter/docs/openclaw-session-resume.md
+  s_ad6596e5f395ca::t_0083bf956f9bdc 46-63
+engine/adapter/src/engine/community/api/app.py
+  s_ad6596e5f395ca::t_1ebd6625bb9b3f 301-302
+engine/adapter/src/engine/community/api/session/runtime_status.py
+  s_ad6596e5f395ca::t_1284c14b519626 1-62
+engine/adapter/src/engine/community/api/tests/transport/test_runtime_status_http.py
+  s_ad6596e5f395ca::t_eede883f619568 1-191
+engine/adapter/src/engine/community/api/transport/ws_server.py
+  s_ad6596e5f395ca::t_4b9429cfb67f40 1027-1041
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9ce563c5c3055c9901b1ab8f80cf4a46fc2d4c0a",
+  "prompts": {},
+  "sessions": {
+    "s_ad6596e5f395ca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e724-7273-7761-8b9a-88eacb18b252",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

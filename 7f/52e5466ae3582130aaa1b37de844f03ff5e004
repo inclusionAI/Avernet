@@ -1,0 +1,54 @@
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityPickerModal.openCore.test.tsx
+  s_bb98e2f10840b6::t_9181ba99d67303 22
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilitySetManager.pickerDetail.test.tsx
+  s_bb98e2f10840b6::t_9181ba99d67303 14-15
+apps/frontend-nextgen/src/internal/market/mappers.ts
+  s_bb98e2f10840b6::t_9181ba99d67303 208-209
+apps/frontend-nextgen/src/internal/market/constants.ts
+  s_bb98e2f10840b6::t_9181ba99d67303 22-28,33,42-45
+  s_bb98e2f10840b6::t_c442dc6a3c829e 21,46
+apps/frontend-nextgen/test/internal/market/hooks/useMarketMcps.test.tsx
+  s_bb98e2f10840b6::t_9181ba99d67303 236,239,241,249-254
+apps/frontend-nextgen/test/internal/market/components/McpMarketPanel.test.tsx
+  s_bb98e2f10840b6::t_9181ba99d67303 77,84-93,120-122,183-185,187-190
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityPickerModal.test.tsx
+  s_bb98e2f10840b6::t_9181ba99d67303 11-12,93-95,110,140-142,159-160,164
+apps/frontend-nextgen/src/internal/market/components/McpDetailPage.tsx
+  s_bb98e2f10840b6::t_9181ba99d67303 20,205-214
+  s_bb98e2f10840b6::t_19ed7973176b5d 215-218
+apps/frontend-nextgen/src/internal/market/service.ts
+  s_bb98e2f10840b6::t_9181ba99d67303 224-227
+apps/gateway/src/gateway/enterprise/plugins/authn/user_xoneid/_identity_client.py
+  s_bb98e2f10840b6::t_9181ba99d67303 32,90,134-164
+  s_bb98e2f10840b6::t_35253b8ecd7919 165-166
+apps/frontend-nextgen/src/internal/market/components/McpMarketPanel.tsx
+  s_bb98e2f10840b6::t_9181ba99d67303 9,108-133,135
+apps/frontend-nextgen/scripts/public-tests.list
+  s_bb98e2f10840b6::t_9181ba99d67303 209-221
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityPickerModal.search.test.tsx
+  s_bb98e2f10840b6::t_9181ba99d67303 7-11
+apps/gateway/tests/unit/plugins/authn/user_xoneid/test_resolver.py
+  s_bb98e2f10840b6::t_9181ba99d67303 115-149
+apps/frontend-nextgen/src/extensions/internal.ts
+  s_bb98e2f10840b6::t_9181ba99d67303 550-552
+apps/frontend-nextgen/src/internal/market/hooks/useMarketMcps.ts
+  s_bb98e2f10840b6::t_9181ba99d67303 5,70-77,123,130,135,148,167,184,218,228
+apps/frontend-nextgen/test/internal/market/components/McpDetailPage.test.tsx
+  s_bb98e2f10840b6::t_9181ba99d67303 243-262
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7f52e5466ae3582130aaa1b37de844f03ff5e004",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/lib.rs
+  s_b8bd53b858e9e7::t_f6859eb6943fe4 69,77
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/sink.rs
+  s_b8bd53b858e9e7::t_08cfafad42f936 62
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/rpc_wire.rs
+  s_b8bd53b858e9e7::t_5e2a586308ee00 129,210-212
+apps/bcs-internal/scripts/check-tracing-api-compat.py
+  s_b8bd53b858e9e7::t_2b6726da138ac7 2,4-5,10,12-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "283a772582cb0c9a16c448ab36a52c08a2df4403",
+  "prompts": {},
+  "sessions": {
+    "s_b8bd53b858e9e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e47d-1b63-7362-aaf7-7096b19afd9f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

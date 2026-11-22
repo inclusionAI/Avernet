@@ -1,0 +1,19 @@
+apps/gateway/tests/unit/core/forwarding/test_combined_schema_catalogs.py
+  s_7c97e57846d67d::t_87ac8b88f12453 420,440-443
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "97a36fdd88ad43ab62b4ee9dde3e3471ea2745f0",
+  "prompts": {},
+  "sessions": {
+    "s_7c97e57846d67d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ee18-34ed-7dc1-9e5d-7bce40c3556e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

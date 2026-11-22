@@ -1,0 +1,27 @@
+autocoding/skills/teamclaw-clarify/SKILL.md
+  s_eed8a9353e71aa::t_e3f3d5ec492b31 30
+autocoding/skills/teamclaw-clarify/references/no-fix.md
+  s_eed8a9353e71aa::t_e3f3d5ec492b31 3,5,7,9,11,13-19,21,23,25
+autocoding/skills/teamclaw-clarify/references/cdo-investigation.md
+  s_eed8a9353e71aa::t_e3f3d5ec492b31 19,21,23-26
+autocoding/skills/teamclaw-plan/references/no-fix.md
+  s_eed8a9353e71aa::t_e3f3d5ec492b31 3,5,7,9,11,13-19,21,23,25
+autocoding/skills/teamclaw-workflow/SKILL.md
+  s_eed8a9353e71aa::t_e3f3d5ec492b31 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c50942076349c7a80489ae2d1a699a66bb4196e1",
+  "prompts": {},
+  "sessions": {
+    "s_eed8a9353e71aa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dfb8-cce4-7051-990a-3605c8c9a895",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

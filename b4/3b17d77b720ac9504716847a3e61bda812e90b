@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/src/App.tsx
+  h_b601d8706f5d44 31,188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b43b17d77b720ac9504716847a3e61bda812e90b",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,67 @@
+apps/bcs/specs/README.md
+  s_19e1c67879702a::t_303aff03d5c059 15
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
+  s_19e1c67879702a::t_303aff03d5c059 1-3,5-15,17-19,21-27,29-49,52,54-57,61-76,97-100,102,106,108,110,123-127,129-131,135-139,141-157,162-210,222-223,225-226,229-230,241,243-247,251-260,282-303,306-307,309-312,315-316,319-320,322-330
+  s_19e1c67879702a::t_2a8dccf7f690b5 224,227-228
+  s_9dac9fbdf9fc56::t_6d4394d1d26443 77-90,92-96,140,158-160
+  s_9dac9fbdf9fc56::t_198421dfa260e0 91,104-105,120,233,236,238,279,305,313
+  s_9dac9fbdf9fc56::t_8a4b2d85bd6874 211-221,231-232,234-235,237,240-242,248-250,261-278,281
+  s_9dac9fbdf9fc56::t_b5de6b27671781 101,103,335-336
+  s_9dac9fbdf9fc56::t_c20e1180f5db84 304,308,314,317-318,321,331-334,337-345
+  s_9dac9fbdf9fc56::t_2fa98a72e695f4 4,16,28,51,53,107-109,111,113-119,121-122,128,132-134
+  s_9dac9fbdf9fc56::t_e6087d03524c14 161
+  s_9dac9fbdf9fc56::t_e5178bfc0fcfde 280
+  s_9dac9fbdf9fc56::t_45f5ebc799a90b 50,58-60
+  s_9dac9fbdf9fc56::t_d67867ac7c923f 20
+apps/bcs/crates/test-support/bcs-test-support/src/store_model/coordination.rs
+  s_9dac9fbdf9fc56::t_80655a0cbcbde9 11-12
+apps/bcs/crates/plugin-api/bcs-store-api/src/common.rs
+  s_9dac9fbdf9fc56::t_80655a0cbcbde9 21
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
+  s_9dac9fbdf9fc56::t_583bbc19b13739 1-79
+  s_9dac9fbdf9fc56::t_d67867ac7c923f 80-86
+apps/bcs/crates/plugin-api/bcs-store-api/README.md
+  s_9dac9fbdf9fc56::t_45f5ebc799a90b 34,40-41,241-242,260,299-302,312-333
+  s_9dac9fbdf9fc56::t_5b0d59aef8ca3a 243
+  s_9dac9fbdf9fc56::t_38af7b5db38c4e 334
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/document.rs
+  s_9dac9fbdf9fc56::t_5b0d59aef8ca3a 14-18,205,228-264
+  s_9dac9fbdf9fc56::t_462467f994032b 3,32,59,63-86,88-89,93-127,152,180-187,189-202,224-227
+  s_9dac9fbdf9fc56::t_80655a0cbcbde9 10-13,87,90-92,188
+apps/bcs/crates/test-support/bcs-test-support/tests/document_subset.rs
+  s_9dac9fbdf9fc56::t_77778463c65bef 1-110,143-172
+  s_9dac9fbdf9fc56::t_80655a0cbcbde9 111-113,116-134
+  s_9dac9fbdf9fc56::t_5b0d59aef8ca3a 135-142
+  s_9dac9fbdf9fc56::t_6d6851adf265ce 114-115
+apps/bcs/crates/plugin-api/bcs-store-api/src/document.rs
+  s_9dac9fbdf9fc56::t_6760ca3a619a4a 1,16-20,23-24,26-35,37,42,52-61,64-66,68-140,142
+  s_9dac9fbdf9fc56::t_77778463c65bef 4,21-22,25,36,62-63,67,141
+apps/bcs/crates/plugin-api/bcs-store-api/CONTEXT.md
+  s_9dac9fbdf9fc56::t_45f5ebc799a90b 7-8,37-39
+apps/bcs/crates/plugin-api/bcs-store-api/tests/types.rs
+  s_9dac9fbdf9fc56::t_45f5ebc799a90b 2,17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d3856f83cc0dfb88e07a554d376a5ef0f5392bca",
+  "prompts": {},
+  "sessions": {
+    "s_19e1c67879702a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea5f-2aaa-7150-98c8-e055d66f36a3",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    },
+    "s_9dac9fbdf9fc56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ef8f-99fd-7003-aabd-a16850889d4d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
