@@ -185,6 +185,41 @@ impl WorkerRuntime {
         make_peers: impl FnOnce(&Instance) -> Result<Arc<dyn DistWorkerPeerPort>, RuntimeError>,
         initialize: Arc<CheckpointInitializer>,
     ) -> Result<Arc<Self>, RuntimeError> {
+        Self::start_with_instance(
+            Self::fresh_instance(node),
+            control_address,
+            config,
+            membership,
+            owners,
+            sessions,
+            inbox,
+            scheduling,
+            make_peers,
+            initialize,
+        )
+        .await
+    }
+
+    /// Start a new runtime for a host-generated incarnation. Retry an uncertain
+    /// registration with the same instance and control address. The host must
+    /// use a fresh incarnation after confirmed lease loss and ensure there are
+    /// no two running runtimes for the same instance.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "explicit injected coordination boundaries"
+    )]
+    pub async fn start_with_instance(
+        instance: Instance,
+        control_address: String,
+        config: WorkerConfig,
+        membership: Arc<dyn MembershipPort>,
+        owners: Arc<dyn ShardLeasePort>,
+        sessions: Arc<dyn SessionStorePort>,
+        inbox: Arc<dyn InboxConsumerPort>,
+        scheduling: Arc<dyn InboxSchedulingPort>,
+        make_peers: impl FnOnce(&Instance) -> Result<Arc<dyn DistWorkerPeerPort>, RuntimeError>,
+        initialize: Arc<CheckpointInitializer>,
+    ) -> Result<Arc<Self>, RuntimeError> {
         config.validate()?;
         if sessions
             .local_session_capacity()
@@ -192,7 +227,6 @@ impl WorkerRuntime {
         {
             return Err(err("session_store_capacity_mismatch"));
         }
-        let instance = Self::fresh_instance(node);
         let peers = make_peers(&instance)?;
         let started = Instant::now();
         let lease = timeout(
@@ -320,6 +354,7 @@ impl WorkerRuntime {
                         if self.state()?.stopped {return Ok(())}
                         if let Err(error)=self.tick().await {
                             tracing::warn!(node=%self.instance.node, incarnation=%self.instance.incarnation, code=%error.code, "Worker coordination scan deferred");
+                            if error.code == "membership_lost" { return Err(error); }
                         }
                     }
                 }
