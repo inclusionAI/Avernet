@@ -10,9 +10,19 @@ import pytest
 
 from agentclaw.community.core.ports.skill_package_upload_port import PackageMetadata, PackagePublication
 from agentclaw.community.core.skill_center.services.local_skill_package_runtime import LocalSkillPackageRuntime
+from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
+    CapabilityProjectionRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository
+from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
+from agentclaw.community.plugin_api.models import BotModel
+from tests.community.core.apply_engine.test_capability_full_replace_contract import _Database
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterHTTPStatusError
 
-from .test_local_skill_upload_service import _Filesystem, _Repo, _service, _zip
+from .test_local_skill_upload_service import (
+    _CapturedSecurityObserver, _Filesystem, _Guard, _Repo, _ReplacementRuntime,
+    _replacement_service, _service, _zip,
+)
 
 
 WHO = dict(bot_id="bot", owner_id="owner", actor_id="owner")
@@ -71,8 +81,9 @@ class _Transport:
             await self.finish_second.wait()
         raw = files["file"][1]
         digest = hashlib.sha256(raw).hexdigest()
+        action = "replaced" if name in self.confirmed else "created"
         self.confirmed.append(name)
-        payload = {"skill_name": name, "action": "created"}
+        payload = {"skill_name": name, "action": action}
         if teclaw:
             return {"success": True, "sha256": digest, **payload}
         return {"success": True, "data": {"content_digest": "sha256:" + digest, **payload}}
@@ -105,18 +116,19 @@ async def test_batch_stops_dispatching_after_first_failure_and_drains_inflight_p
     assert [row["name"] for row in repo.created] == ["second"]
 
 
-@pytest.mark.asyncio
-async def test_unknown_package_stays_fenced_across_workers_until_binding_changes():
-    from tests.community.core.apply_engine.test_capability_full_replace_contract import _Database
-    from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository
-    from agentclaw.community.plugin_api.models import BotModel
-
+def _bound_database() -> _Database:
     db = _Database()
     with db.transactional_orm_session() as session:
         session.add(BotModel(
             bot_id=WHO["bot_id"], entity_id=WHO["owner_id"], owner_id=WHO["owner_id"],
             entity_type="staff", creator_id=WHO["owner_id"], env="dev",
         ))
+    return db
+
+
+@pytest.mark.asyncio
+async def test_unknown_package_stays_fenced_across_workers_until_binding_changes():
+    db = _bound_database()
     binding = _Binding("teclaw")
     transport = _Transport(unknown_first=True)
 
@@ -142,3 +154,94 @@ async def test_unknown_package_stays_fenced_across_workers_until_binding_changes
     assert published[0].receipt.publication is PackagePublication.PUBLISHED
     assert published[0].receipt.metadata is PackageMetadata.COMMITTED
     assert transport.entered == ["first", "first"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("provider", "requires_mapping"), [("teclaw", False), ("arca", True)])
+async def test_deferred_replacement_keeps_asset_and_only_records_required_mapping(provider, requires_mapping):
+    db = _bound_database()
+    skills = SkillRepository(db)
+    transport = _Transport()
+    runtime = _ReplacementRuntime([])
+    service = _replacement_service(
+        _Filesystem(), skills, runtime,
+        provider=provider, package_runtime=LocalSkillPackageRuntime(_Binding(provider), transport),
+        security_observation_enabled=False,
+    )
+    first = await service.upload_local_skill_batch(**WHO, packages=_packages("first"))
+    skill_id = first[0].upload["skill"]["id"]
+    replacement = _zip({
+        "SKILL.md": b"---\nname: first\ndescription: replacement\n---\n",
+        "data.txt": b"updated bytes",
+    })
+    result = await service.upload_local_skill_batch(**WHO, packages=(("first", replacement),))
+
+    assert result[0].receipt.metadata is PackageMetadata.COMMITTED
+    assert result[0].receipt.content_digest != first[0].receipt.content_digest
+    assert result[0].upload["skill"]["id"] == skill_id
+    assert result[0].upload["skill"]["description"] == "replacement"
+    assert transport.confirmed == ["first", "first"]
+    assert runtime.calls == 0
+    state = CapabilityProjectionRepository(db).read(bot_id="bot", entity_id="owner")
+    if requires_mapping:
+        assert state is not None and state.scope.skills
+        assert state.retry_pending
+    else:
+        assert state is None
+
+
+@pytest.mark.asyncio
+async def test_independent_replacement_commits_tracked_mapping_before_unlocked_delivery():
+    db = _bound_database()
+    skills = SkillRepository(db)
+    projections = CapabilityProjectionRepository(db)
+    guard = _Guard()
+    observer = _CapturedSecurityObserver(guard)
+
+    class ObservedDelivery(_ReplacementRuntime):
+        async def project(self, *, scope=None, **kwargs):
+            assert not guard._lock.locked()
+            assert len(observer.calls) == 2
+            pending = projections.read(bot_id="bot", entity_id="owner")
+            assert scope == ProjectionScope(skills=True)
+            assert pending is not None and pending.scope.skills
+            assert pending.version == previous.version + 1
+            return await super().project(scope=scope, **kwargs)
+
+    runtime = ObservedDelivery([True])
+    transport = _Transport()
+    service = _replacement_service(
+        _Filesystem(), skills, runtime, guard=guard, security_observer=observer,
+        package_runtime=LocalSkillPackageRuntime(_Binding(), transport),
+    )
+    first = await service.upload_local_skill(**WHO, package=_packages("first")[0][1])
+    assert first["operation"] == "created"
+    assert projections.read(bot_id="bot", entity_id="owner") is None
+    previous = projections.require(bot_id="bot", entity_id="owner", scope=ProjectionScope(skills=True))
+
+    updated = await service.upload_local_skill(**WHO, package=_packages("first")[0][1])
+
+    assert updated["skill"]["id"] == first["skill"]["id"]
+    assert updated["runtime_projection"]["status"] == "CONVERGED"
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_acknowledged_publication_is_preserved_when_metadata_fails():
+    class MetadataUnavailable(_Repo):
+        def create(self, _row):
+            raise RuntimeError("metadata database unavailable")
+
+    transport = _Transport()
+    service = _service(
+        _Filesystem(), repo=MetadataUnavailable(),
+        package_runtime=LocalSkillPackageRuntime(_Binding("teclaw"), transport),
+        security_observation_enabled=False,
+    )
+
+    result = await service.upload_local_skill_batch(**WHO, packages=_packages("first", "second"))
+
+    assert result[0].receipt.publication is PackagePublication.PUBLISHED
+    assert result[0].receipt.metadata is PackageMetadata.UNKNOWN
+    assert result[1].receipt.publication is PackagePublication.NOT_DISPATCHED
+    assert transport.confirmed == ["first"]

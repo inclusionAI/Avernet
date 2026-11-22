@@ -138,4 +138,3 @@ def _log_late_security_handoff(task: asyncio.Task[None]) -> None:
         return
     except Exception:
         logger.exception("Local Skill late security handoff failed")
-

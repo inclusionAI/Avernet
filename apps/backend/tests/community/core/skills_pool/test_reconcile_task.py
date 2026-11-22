@@ -444,6 +444,7 @@ def _handler(
             claim_service=claims,
             layout_repository=layouts,
             reconcile_service=reconcile,
+            edit_guard=MagicMock(),
             quarantine_repository=FakeQuarantines(QuarantineStatus.RETAINED),
             lease_seconds=300,
         ),
@@ -582,6 +583,24 @@ def test_unclaimed_task_claims_then_reconciles_same_generation() -> None:
     assert reconcile.calls == [{"scope": SCOPE, "lease_owner": "skills-pool:wakeup-1"}]
 
 
+def test_layout_reconcile_waits_for_an_inflight_local_package_edit() -> None:
+    from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditBusyError
+
+    state = _claimed_state()
+    claims = FakeClaimService([MigrationClaimResult(MigrationClaimOutcome.CLAIMED, state)])
+    runtime = FakeReconcileService([])
+    edits = MagicMock()
+    edits.acquire_for_edit.side_effect = SkillsPoolEditBusyError()
+    handler = SkillsPoolReconcileTaskHandler(
+        claim_service=claims, layout_repository=FakeLayouts(state),
+        reconcile_service=runtime, edit_guard=edits,
+        quarantine_repository=FakeQuarantines(QuarantineStatus.RETAINED),
+    )
+
+    assert handler.handle(_payload()) == Reschedule(5.0)
+    assert runtime.calls == []
+
+
 def test_pool_activation_schedules_generation_scoped_seven_day_cleanup() -> None:
     state = _claimed_state()
     claims = FakeClaimService(
@@ -596,6 +615,7 @@ def test_pool_activation_schedules_generation_scoped_seven_day_cleanup() -> None
         claim_service=claims,
         layout_repository=layouts,
         reconcile_service=reconcile,
+        edit_guard=MagicMock(),
         quarantine_repository=FakeQuarantines(QuarantineStatus.RETAINED),
         task_queue_service=queue,
     )
@@ -692,6 +712,7 @@ def test_pool_active_wakeup_verifies_runtime_after_quarantine_is_cleaned() -> No
         claim_service=claims,
         layout_repository=layouts,
         reconcile_service=reconcile,
+        edit_guard=MagicMock(),
         quarantine_repository=FakeQuarantines(QuarantineStatus.CLEANED),
     )
 
@@ -718,6 +739,7 @@ def test_pool_active_wakeup_after_cleanup_completes_when_evidence_is_immutable()
         claim_service=claims,
         layout_repository=layouts,
         reconcile_service=reconcile,
+        edit_guard=MagicMock(),
         quarantine_repository=FakeQuarantines(QuarantineStatus.CLEANED),
     )
 
@@ -740,6 +762,7 @@ def test_pool_active_wakeup_does_not_enqueue_duplicate_cleanup_task() -> None:
         claim_service=claims,
         layout_repository=layouts,
         reconcile_service=reconcile,
+        edit_guard=MagicMock(),
         quarantine_repository=FakeQuarantines(QuarantineStatus.RETAINED),
         task_queue_service=queue,
     )
