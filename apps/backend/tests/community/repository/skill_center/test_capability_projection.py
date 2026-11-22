@@ -116,6 +116,39 @@ def test_a_new_binding_reconciles_without_accepting_an_old_binding_receipt():
     assert repository.due(env="dev", limit=10) == ()
 
 
+def test_returning_to_a_previous_device_keeps_its_unknown_dispatch_fence():
+    db = _Database()
+    repository = CapabilityProjectionRepository(db)
+    locator = {"bot_id": "bot", "entity_id": "owner"}
+
+    def bind(binding_id, device_id):
+        with db.transactional_orm_session() as session:
+            bot = session.query(BotModel).filter_by(**locator).one()
+            bot.binding_id = binding_id
+            bot.device_id = device_id
+
+    bind(17, "device-a")
+    original = repository.require(**locator, scope=ProjectionScope(skills=True))
+    assert repository.begin(original)
+
+    bind(42, "device-b")
+    replacement = repository.prepare(**locator)
+    assert replacement is not None and not replacement.write_blocked
+    assert repository.begin(replacement)
+    assert repository.complete(replacement, RuntimeProjectionResult.converged())
+
+    bind(43, "device-a")
+    returned = repository.prepare(**locator)
+    assert returned is not None and returned.write_blocked
+    assert not repository.begin(returned)
+    assert repository.due(env="dev", limit=10) == ()
+
+    assert not repository.complete(original, RuntimeProjectionResult.converged())
+    current = repository.prepare(**locator)
+    assert current is not None and current.needs_recovery
+    assert current.result.status is RuntimeProjectionStatus.PENDING
+
+
 def test_retry_retains_only_the_unconfirmed_domain_and_keeps_its_retirement_evidence():
     repository = CapabilityProjectionRepository(_Database())
     locator = {"bot_id": "bot", "entity_id": "owner"}

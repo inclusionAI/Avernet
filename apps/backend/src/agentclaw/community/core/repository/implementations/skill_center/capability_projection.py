@@ -138,15 +138,13 @@ def _advance(
     retired_mappings: Sequence[PoolSkillMapping],
 ) -> None:
     if not _same_binding(row, bot):
-        # Rebinding the same device or temporarily detaching a device does
-        # not make an older request unable to write there.
-        if bot.device_id and row.dispatch_device_id and row.dispatch_device_id != bot.device_id:
-            _clear_dispatch(row)
+        dispatches = _read_dispatches(row)
         if bot.device_id and row.device_id and row.device_id != bot.device_id:
             row.retired_json = "[]"
         row.binding_id = bot.binding_id
         row.device_id = bot.device_id
         row.engine_type = bot.active_engine
+        _write_dispatches(row, dispatches)
         scope = _merge_scope(ProjectionScope.everything(), scope)
     if row.version == 0:
         scope = _merge_scope(ProjectionScope.everything(), scope)
@@ -182,14 +180,32 @@ def record_capability_projection(
     return _snapshot(row, bot)
 
 
+def _read_dispatches(row: BotCapabilityProjection) -> dict[str, int]:
+    if row.dispatch_history_json is not None:
+        return json.loads(row.dispatch_history_json)
+    if row.dispatch_version is not None:
+        return {row.dispatch_device_id or "": int(row.dispatch_version)}
+    return {}
+
+
+def _write_dispatches(row: BotCapabilityProjection, dispatches: dict[str, int]) -> None:
+    row.dispatch_history_json = json.dumps(dispatches)
+    # The empty key records an attempt whose actual device was unknown.
+    # It may conflict with any device. Without a current device identity
+    # none of the outstanding attempts can be proven unrelated either.
+    target = row.device_id or ""
+    if "" in dispatches:
+        target = ""
+    elif not target and dispatches:
+        target = next(iter(dispatches))
+    row.dispatch_version = dispatches.get(target)
+    row.dispatch_device_id = (target or None) if row.dispatch_version is not None else None
+
+
 def _mark_dispatch(row: BotCapabilityProjection, state: CapabilityProjectionState) -> None:
-    row.dispatch_version = state.version
-    row.dispatch_device_id = state.device_id
-
-
-def _clear_dispatch(row: BotCapabilityProjection) -> None:
-    row.dispatch_version = None
-    row.dispatch_device_id = None
+    dispatches = _read_dispatches(row)
+    dispatches[state.device_id or ""] = state.version
+    _write_dispatches(row, dispatches)
 
 
 def _retry_retirement_mismatches(
@@ -334,17 +350,19 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
             if current is None:
                 return False
             row, bot = current
-            dispatch_matches = row.dispatch_version == state.version
-            if dispatch_matches and not write_blocked:
-                _clear_dispatch(row)
+            dispatches = _read_dispatches(row)
+            target = state.device_id or ""
+            if not write_blocked and dispatches.get(target) == state.version:
+                del dispatches[target]
+                _write_dispatches(row, dispatches)
             if not self._same_target(state, bot):
                 return False
             if row.dispatch_version not in (None, state.version):
                 return False
-            if write_blocked:
-                _mark_dispatch(row, state)
             if row.version != state.version:
                 return False
+            if write_blocked:
+                _mark_dispatch(row, state)
             if not write_blocked:
                 result = _retry_retirement_mismatches(row, result)
             _write_result(row, result)

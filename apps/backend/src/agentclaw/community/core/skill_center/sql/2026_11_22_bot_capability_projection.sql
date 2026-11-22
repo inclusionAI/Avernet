@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS ac_bot_capability_projection (
     version BIGINT NOT NULL,
     dispatch_version BIGINT NULL,
     dispatch_device_id VARCHAR(128) NULL,
+  dispatch_history_json TEXT NULL,
     retry_pending BOOLEAN NOT NULL,
     scope_json TEXT NOT NULL,
     retired_json MEDIUMTEXT NOT NULL,
