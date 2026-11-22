@@ -220,7 +220,7 @@ def _service(
         _Factory(files),
         guard,
         lambda: SimpleNamespace(
-            resolve_for_bot=lambda *_args: SimpleNamespace(provider=provider)
+            resolve_for_bot=lambda *_args: SimpleNamespace(provider=provider, device_id=None)
         ),
         lambda: security_hook or SimpleNamespace(record_deletion=lambda **_kwargs: None),
         security_enabled,

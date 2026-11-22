@@ -39,10 +39,12 @@ class _Binding:
     def __init__(self, provider: str = "arca") -> None:
         self.provider = provider
         self.binding_id = 4
+        self.device_id = "device-a"
 
     def resolve_for_bot(self, _bot_id: str, _owner_id: str):
         return SimpleNamespace(
-            provider=self.provider, binding_id=self.binding_id, conn_info={"binding_id": self.binding_id}
+            provider=self.provider, binding_id=self.binding_id, device_id=self.device_id,
+            conn_info={"binding_id": self.binding_id},
         )
 
 
@@ -127,7 +129,7 @@ def _bound_database() -> _Database:
 
 
 @pytest.mark.asyncio
-async def test_unknown_package_stays_fenced_across_workers_until_binding_changes():
+async def test_unknown_package_stays_fenced_across_workers_and_rebinding_the_same_device():
     db = _bound_database()
     binding = _Binding("teclaw")
     transport = _Transport(unknown_first=True)
@@ -150,9 +152,21 @@ async def test_unknown_package_stays_fenced_across_workers_until_binding_changes
     assert transport.entered == ["first"]
 
     binding.binding_id += 1
+    rebound = await worker().upload_local_skill_batch(**WHO, packages=_packages("first"))
+    assert rebound[0].receipt.publication is PackagePublication.UNKNOWN
+    assert transport.entered == ["first"]
+
+    binding.binding_id += 1
+    binding.device_id = "device-b"
     published = await worker().upload_local_skill_batch(**WHO, packages=_packages("first"))
     assert published[0].receipt.publication is PackagePublication.PUBLISHED
     assert published[0].receipt.metadata is PackageMetadata.COMMITTED
+    assert transport.entered == ["first", "first"]
+
+    binding.binding_id += 1
+    binding.device_id = "device-a"
+    returned = await worker().upload_local_skill_batch(**WHO, packages=_packages("first"))
+    assert returned[0].receipt.publication is PackagePublication.UNKNOWN
     assert transport.entered == ["first", "first"]
 
 

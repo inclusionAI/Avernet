@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS ac_local_skill_package_dispatch (
   entity_id VARCHAR(128) NOT NULL,
   bot_id VARCHAR(100) NOT NULL,
   binding_id BIGINT NOT NULL,
+  device_id VARCHAR(128) NULL,
   name VARCHAR(255) NOT NULL,
   content_digest VARCHAR(71) NOT NULL,
   gmt_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

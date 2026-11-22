@@ -19,6 +19,7 @@ class LocalSkillPackageDispatch(Base):
     entity_id = Column(String(128), nullable=False)
     bot_id = Column(String(100), nullable=False)
     binding_id = Column(BigInteger, nullable=False)
+    device_id = Column(String(128), nullable=True)
     name = Column(String(255), nullable=False)
     content_digest = Column(String(71), nullable=False)
     gmt_created = Column(DateTime, nullable=False, server_default=func.now())

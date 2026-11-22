@@ -181,9 +181,7 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
         except Exception as exc:
             raise LocalSkillStorageError() from exc
         if self._skill_repo.has_pending_local_skill_dispatch(
-            bot_id=bot_id, entity_id=owner_id, name=name,
-        ) and self._skill_repo.has_pending_local_skill_dispatch(
-            bot_id=bot_id, entity_id=owner_id, name=name, binding_id=context.binding_id,
+            bot_id=bot_id, entity_id=owner_id, name=name, device_id=context.device_id,
         ):
             raise LocalSkillPackageDispatchPendingError()
         return context.provider == "teclaw"

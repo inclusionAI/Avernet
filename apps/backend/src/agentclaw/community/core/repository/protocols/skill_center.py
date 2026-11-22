@@ -439,12 +439,13 @@ class SkillRepository(Protocol):
 
     @abstractmethod
     def has_pending_local_skill_dispatch(
-        self, *, bot_id: str, entity_id: str, name: str | None = None, binding_id: int | None = None,
+        self, *, bot_id: str, entity_id: str, name: str | None = None, device_id: str | None = None,
     ) -> bool: ...
 
     @abstractmethod
     def reserve_local_skill_dispatch(
-        self, *, bot_id: str, entity_id: str, binding_id: int, name: str, digest: str,
+        self, *, bot_id: str, entity_id: str, binding_id: int, device_id: str | None,
+        name: str, digest: str,
     ) -> tuple[str, str] | None: ...
 
     @abstractmethod

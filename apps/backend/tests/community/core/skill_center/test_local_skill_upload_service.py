@@ -681,7 +681,7 @@ class _DeviceResolver:
         self.provider = provider
 
     def resolve_for_bot(self, _bot_id, _owner_id):
-        return SimpleNamespace(provider=self.provider)
+        return SimpleNamespace(provider=self.provider, device_id=None)
 
 
 class _LegacyPackageRuntime:

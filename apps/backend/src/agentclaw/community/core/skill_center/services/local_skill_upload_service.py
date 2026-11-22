@@ -428,6 +428,7 @@ class LocalSkillUploadService(
                 return package_result(name, skill.digest, PackagePublication.NOT_DISPATCHED)
             if (
                 context.binding_id != destination.context.binding_id
+                or context.device_id != destination.context.device_id
                 or context.provider != destination.context.provider
                 or context.conn_info.get("device_uuid") != destination.context.conn_info.get("device_uuid")
             ):
@@ -435,7 +436,7 @@ class LocalSkillUploadService(
             self._edit_guard.refresh(edit.lease)
             dispatch = self._skill_repo.reserve_local_skill_dispatch(
                 bot_id=edit.bot_id, entity_id=edit.owner_id, binding_id=context.binding_id,
-                name=name, digest=skill.digest,
+                device_id=context.device_id, name=name, digest=skill.digest,
             )
             if dispatch is None:
                 # A stopped local await or a worker crash cannot establish that
@@ -879,8 +880,7 @@ class LocalSkillUploadService(
             raise LocalSkillStorageError() from exc
         if assert_quiescent_name is not None and self._skill_repo.has_pending_local_skill_dispatch(
             bot_id=bot_id, entity_id=owner_id, name=assert_quiescent_name,
-        ) and self._skill_repo.has_pending_local_skill_dispatch(
-            bot_id=bot_id, entity_id=owner_id, name=assert_quiescent_name, binding_id=context.binding_id,
+            device_id=context.device_id,
         ):
             raise LocalSkillPackageDispatchPendingError()
         return context.provider == "teclaw"

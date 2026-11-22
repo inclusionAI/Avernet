@@ -142,13 +142,13 @@ def test_non_pool_edit_excludes_mutations_from_another_worker() -> None:
         assert first_worker.release(lease)
 
 
-def test_layout_edit_waits_for_unconfirmed_upload_only_on_current_binding() -> None:
+def test_layout_edit_waits_for_unconfirmed_upload_on_current_device() -> None:
     package_dispatches = Mock()
     package_dispatches.has_pending_local_skill_dispatch.side_effect = (
-        lambda *, binding_id=None, **_scope: binding_id in (None, 5)
+        lambda *, device_id=None, **_scope: device_id in (None, "device-a")
     )
     bindings = Mock()
-    bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(id=5)
+    bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(id=5, device_id="device-a")
     guard = _guard(
         cache=_Cache(), layout_repository=_Layouts(), participation_resolver=_Participation(),
         binding_repository=bindings, skill_repository=package_dispatches,
@@ -163,7 +163,7 @@ def test_layout_edit_waits_for_unconfirmed_upload_only_on_current_binding() -> N
         guard.acquire_for_migration(scope=SCOPE)
     assert guard.acquire_for_rollback(scope=SCOPE) is None
 
-    bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(id=6)
+    bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(id=6, device_id="device-b")
     assert guard.release(guard.acquire_for_migration(scope=SCOPE))
     rollback = guard.acquire_for_rollback(scope=SCOPE)
     assert rollback is not None

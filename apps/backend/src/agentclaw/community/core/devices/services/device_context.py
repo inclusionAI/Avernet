@@ -42,6 +42,7 @@ class DeviceContext:
     bot_id: str
     user_id: str
     bot_type: str = ""  # Task 1 默认 "" — Task 2 后 resolver 内部 bot_repo 注入真值
+    device_id: str | None = None
 
 
 class BotNotFoundError(RuntimeError):

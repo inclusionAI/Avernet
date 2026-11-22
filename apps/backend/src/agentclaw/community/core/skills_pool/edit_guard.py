@@ -253,7 +253,7 @@ class SkillsPoolEditGuard:
             # establish that the old dispatch has lost write authority.
             binding = self._bindings.get_active_by_bot_and_owner(scope.bot_id, scope.entity_id)
             return binding is None or self._skills.has_pending_local_skill_dispatch(
-                **who, binding_id=binding.id,
+                **who, device_id=binding.device_id,
             )
         except Exception:
             logger.exception(
