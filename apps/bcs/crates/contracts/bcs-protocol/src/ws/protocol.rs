@@ -558,6 +558,9 @@ impl GroupContext {
         if let Some(recipient) = self.format_recipient_identity() {
             lines.push(format!("- 你是: {}", recipient));
         }
+        if let Some(recipient) = &self.recipient {
+            lines.push(format!("- 你的Bot ID: {}", recipient));
+        }
         if let Some(role) = &self.recipient_role {
             lines.push(format!("- 你的角色: {}", role));
         }
@@ -2083,6 +2086,28 @@ mod tests {
         assert!(header.contains("- 你的角色: consultant"));
         assert!(header.contains("- 当前投递: chat.inject"));
         assert!(header.contains("静默观察"));
+    }
+
+    /// Test the human-readable header exposes the canonical recipient Bot ID even
+    /// when the display name and Bot ID are identical.
+    #[test]
+    fn test_group_context_format_header_includes_canonical_recipient_bot_id() {
+        let json = r#"{
+            "session_id": "grp-007",
+            "participants": ["谁是卧底主持人", "玩家稳健老陈"],
+            "originator": "谁是卧底主持人",
+            "from": "human_001",
+            "recipient": "谁是卧底主持人",
+            "recipient_name": "谁是卧底主持人",
+            "recipient_role": "manager",
+            "delivery_type": "send",
+            "message": "开始"
+        }"#;
+
+        let ctx: GroupContext = serde_json::from_str(json).unwrap();
+        let header = ctx.format_header();
+
+        assert!(header.contains("- 你的Bot ID: 谁是卧底主持人"));
     }
 
     /// Test RequestSource::SenderRoutes serialization

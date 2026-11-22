@@ -48,6 +48,18 @@ def log(message: str) -> None:
     print(time.strftime("%H:%M:%S"), message, flush=True)
 
 
+def recovery_outcome(
+    status: str, run_result: str | None, latency_s: float, sla: float
+) -> str | None:
+    if status in ("failed", "aborted"):
+        return "failed"
+    if status != "completed":
+        return None
+    if run_result != "delivered":
+        return "failed"
+    return "recovered" if latency_s <= sla else "late"
+
+
 class Bcs:
     def __init__(self, base: str) -> None:
         self.base = base.rstrip("/")
@@ -314,14 +326,24 @@ def main() -> None:
                 later = [r for r in session_runs if r["created_at_ms"] > current.failed_at_ms]
                 waited = time.time() - current.failed_at_ms / 1000
                 if later:
-                    current.reopened_run = later[0]["run_id"]
-                    current.reopened_at_ms = later[0]["created_at_ms"]
+                    reopened = later[0]
+                    if current.reopened_run is None:
+                        current.reopened_run = reopened["run_id"]
+                        current.reopened_at_ms = reopened["created_at_ms"]
                     latency = (current.reopened_at_ms - current.failed_at_ms) / 1000
-                    current.outcome = "recovered" if latency <= args.sla else "late"
+                    reopened_result = (
+                        runs.run_result(reopened["run_id"])
+                        if reopened["status"] == "completed"
+                        else None
+                    )
+                    current.outcome = recovery_outcome(
+                        reopened["status"], reopened_result, latency, args.sla
+                    ) or "pending"
                 elif waited > args.stuck_after:
                     current.outcome = "stuck"
                 if current.outcome != "pending":
-                    current.run_result = runs.run_result(current.run_id)
+                    result_run = current.reopened_run or current.run_id
+                    current.run_result = runs.run_result(result_run)
                     log(f"#{current.number} {current.outcome}: new run {current.reopened_run} "
                         f"RunResult={current.run_result}")
                     current = None
@@ -344,6 +366,7 @@ def main() -> None:
     summary = {
         "injections": len(results), "games": games, "recovered_within_sla": sum(r.outcome == "recovered" for r in results),
         "stuck": sum(r.outcome == "stuck" for r in results), "late": sum(r.outcome == "late" for r in results),
+        "failed_reopened": sum(r.outcome == "failed" for r in results),
         "median_latency_s": round(statistics.median(latencies), 1) if latencies else None,
         "max_latency_s": round(max(latencies), 1) if latencies else None,
         "start_nudges": nudges_total, "elapsed_min": round((time.time() - started) / 60, 1), "csv": str(args.out),
