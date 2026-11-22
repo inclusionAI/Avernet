@@ -58,6 +58,19 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 
 `reveal` 为新版投票副屏直接发布公开结算文件，成功后才确认揭晓。遇到 `RESULT_PUBLISH_FAILED`，报告失败；修复后重试原命令，脚本会核对已有文件。已成功揭晓只需补发文件时执行 `uc publish-result --session "$session_id"`，不再念终局稿。
 
+## StateMachine 失败回灌
+
+收到包含 `[State Machine Run Failed]` 的系统结果时，它是一次已经持久化的节点失败，不是普通玩家发言，也不是让主持人继续等待。 结果中的 `run_id`、`reason`、`failed_node` 和 `attempt` 只用于诊断；恢复阶段必须以当前 `uc status` 为准，不能解析原始错误或玩家内容。先执行一次 `uc status --session "$session_id"`，按返回阶段恢复当前局：
+
+- `SPEAK_RUNNING` / `PK_SPEAK_RUNNING`：执行 `uc open-round --session "$session_id" --retry`。
+- `VOTE_RUNNING` / `PK_VOTE_RUNNING`：执行 `uc open-vote --session "$session_id" --retry`。
+- `AWAIT_VOTE_START` / `AWAIT_PK_VOTE_START`：执行不带 `--retry` 的 `uc open-vote --session "$session_id"`。
+- `AWAIT_PK_SPEAK_START`：执行不带 `--retry` 的 `uc open-round --session "$session_id"`。
+- `IN_COLLECT_NODE` / `IN_TALLY_NODE`：不要重试或推进，先报告当前节点仍在收集结果。
+- `FINISHED`：不重复揭晓或重开，等待人类新建会话。
+
+重试前必须以 `status` 的阶段为准，不能根据失败消息里的旧节点名猜测阶段；脚本会持久化本阶段的渲染次数并拒绝第三次 retry，最多重试两次，仍失败就报告需要新建会话。收到 `[State Machine Run Aborted]` 时只记录终止原因，禁止自动重试。
+
 ## 普通消息与回灌
 
 非节点唤醒时先 `uc status --session "$session_id"`，按下面处理。

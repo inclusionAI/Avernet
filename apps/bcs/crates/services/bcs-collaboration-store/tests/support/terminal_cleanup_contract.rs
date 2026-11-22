@@ -94,7 +94,7 @@ pub(super) async fn terminal_cleanup_contract(store: &dyn StateMachineRunRepoPor
         store.create_run(run.clone(), Vec::new()).await.unwrap();
         let r = run.run_id.as_str();
         let payload = StateMachineChatResultPayload { command: StateMachineResultPublishCommand { run_id: r.into(),
-            group_id: run.group_id.clone(), session_id: run.session_id.clone(), sender_bot_id: "bot".into(), content: "saved Chat output".into(), created_at_ms: 100 }, deadline_ms: 1000 };
+            group_id: run.group_id.clone(), session_id: run.session_id.clone(), sender_bot_id: "bot".into(), content: "saved Chat output".into(), terminal_result: None, created_at_ms: 100 }, deadline_ms: 1000 };
         store.save_chat_result(payload.clone()).await.unwrap();
         let claim = store.claim_chat_result(r, "owner".into(), 101, 900).await.unwrap().unwrap();
         if case != "pending" { store.begin_chat_result_send(&claim, 102).await.unwrap(); }

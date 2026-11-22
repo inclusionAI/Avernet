@@ -622,6 +622,7 @@ async fn local_opening_and_delivered_publication_repair_never_acknowledges_netwo
         group_id: run.group_id.clone(),
         session_id: run.session_id.clone(),
         sender_bot_id: "driver-bot".into(),
+        terminal_result: None,
         content: "published fact".into(),
         created_at_ms: 100,
     };

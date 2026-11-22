@@ -279,6 +279,46 @@ def test_metadata_only_fixtures_never_expose_content_or_derived_identifiers() ->
         assert not exposed, f"{path.name} exposes metadata-only keys: {sorted(exposed)}"
 
 
+def test_terminal_run_fixtures_are_bounded_metadata_only_events() -> None:
+    fixture_names = (
+        "state_machine.run.failed.metadata_only.json",
+        "state_machine.run.aborted.metadata_only.json",
+    )
+    fixtures = {
+        name: _load_json(FIXTURE_ROOT / name)
+        for name in fixture_names
+    }
+    assert set(fixtures) == set(fixture_names)
+
+    expected_fields = {
+        "state_machine.run.failed": {
+            "failed_at",
+            "reason",
+            "failed_node",
+            "attempt",
+            "max_attempts",
+            "completed_nodes",
+            "duration_ms",
+        },
+        "state_machine.run.aborted": {
+            "aborted_at",
+            "reason",
+            "completed_nodes",
+            "duration_ms",
+        },
+    }
+    for fixture in fixtures.values():
+        event_type = fixture["event_type"]
+        assert set(fixture["data"]) == expected_fields[event_type]
+        assert all(isinstance(node_id, str) for node_id in fixture["data"]["completed_nodes"])
+        exposed = {
+            key
+            for key, _ in _walk(fixture["data"])
+            if key in METADATA_FORBIDDEN_KEYS | {"error", "raw_error", "artifact", "output", "player_words"}
+        }
+        assert not exposed, f"{event_type} exposes non-metadata fields: {sorted(exposed)}"
+
+
 def test_full_fixtures_exclude_internal_reasoning_credentials_and_urls() -> None:
     fixture_paths = sorted(FIXTURE_ROOT.glob("*.full.json"))
     assert fixture_paths

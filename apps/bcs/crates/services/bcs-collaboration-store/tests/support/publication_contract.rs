@@ -11,7 +11,7 @@ pub(super) async fn publication_contract(store: &dyn StateMachineRunRepoPort) {
         node.status = if case == "unfinished" { StateMachineNodeStatus::Running } else { StateMachineNodeStatus::Completed };
         store.create_run(run.clone(), vec![node]).await.unwrap();
         let payload = Payload { command: StateMachineResultPublishCommand { run_id: r.into(), group_id: run.group_id.clone(),
-            session_id: run.session_id.clone(), sender_bot_id: "original-bot".into(), content: "原结果\n原目标".into(), created_at_ms: 100 }, deadline_ms: 1000 };
+            session_id: run.session_id.clone(), sender_bot_id: "original-bot".into(), content: "原结果\n原目标".into(), terminal_result: None, created_at_ms: 100 }, deadline_ms: 1000 };
         if case == "unfinished" { assert!(!store.save_chat_result(payload).await.unwrap()); continue; }
         for change in [0, 1, 2] {
             let mut wrong = payload.clone();

@@ -50,9 +50,9 @@ use bcs_service_api::{
     StartSessionStateMachineRunCommand, StartStateMachineRunCommand, StartStateMachineRunOutcome,
     StateMachineDefinitionRepoPort, StateMachineGraphDefinitionView, StateMachineGraphEdgeView,
     StateMachineGraphNodeView, StateMachineJudgeOutputView, StateMachineNodeRunView,
-    StateMachineNodeSubStatus, StateMachineResultPublishCommand, StateMachineResultPublisherPort,
+    StateMachineNodeSubStatus, StateMachineChatResultPayload, StateMachineResultPublishCommand, StateMachineResultPublisherPort,
     StateMachineRunAccessCommand, StateMachineRunGraphView, StateMachineRunRepoPort,
-    StateMachineRunView, StateMachineTerminalEvent, StateMachineTerminalStatus,
+    StateMachineRunView, StateMachineTerminalEvent, StateMachineTerminalStatus, StateMachineTerminalReason,
     UpgradeGroupCollaborationDefinitionCommand, ValidateCollaborationDefinitionYamlCommand,
     message_log_json,
 };
@@ -114,6 +114,9 @@ mod terminal_im;
 
 #[path = "runtime_publication.rs"]
 mod publication;
+#[path = "runtime_run_result.rs"]
+mod run_result;
+use run_result::{classify_abort_reason, failure_event_reason, RunFailure};
 
 #[path = "runtime_opening.rs"]
 mod opening_recovery;
@@ -930,7 +933,7 @@ impl CollaborationRuntime {
             run_id: run.run_id.clone(), node_id: node_id.to_string(), attempt,
             error: error.clone(), completed_at_ms: now, action: StateMachineFailureAction::FailRun,
         }).await? {
-            self.fail_run(run, error).await?;
+            self.fail_run(run, RunFailure::node(node_id, attempt, error)).await?;
         }
         Ok(())
     }
@@ -1147,7 +1150,7 @@ impl CollaborationRuntime {
             return Ok(RerunStateMachineOutcome { view, created });
         }
         if let Err(error) = self.save_opening_payload(&run, opening_message).await {
-            self.fail_run(&run, error.to_string()).await?;
+            self.fail_run(&run, RunFailure::startup(error.to_string())).await?;
             return Err(error);
         }
         self.ensure_materialized_run_started(&mut run).await?;
@@ -1164,7 +1167,7 @@ impl CollaborationRuntime {
             .persist_saved_opening(&run)
             .await
         {
-            self.fail_run(&run, error.to_string()).await?;
+            self.fail_run(&run, RunFailure::startup(error.to_string())).await?;
             return Err(error);
         }
         self.publish_state_machine_panel_event(group, &run, opening_message)
@@ -1806,7 +1809,7 @@ impl CollaborationRuntime {
             .is_some_and(|session| session.session_kind == SessionKind::Chat);
         if let Some(session) = session.as_ref().filter(|_| is_chat_session) {
             let output_at = nodes.iter().filter_map(|node| node.completed_at).max().unwrap_or(run.created_at);
-            if !self.ensure_chat_result(run, session, output.as_deref(), output_at).await? {
+            if !self.ensure_chat_result(run, session, output.as_deref(), None, output_at).await? {
                 return self.run_view(&run.run_id).await;
             }
         }
@@ -1915,45 +1918,110 @@ impl CollaborationRuntime {
     async fn fail_run(
         &self,
         run: &StateMachineRun,
-        error: String,
+        failure: RunFailure,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         let now = bcs_protocol::now_ms();
-        let failed = self.runs
-            .update_run_status(
-                &run.run_id,
-                StateMachineRunStatus::Failed,
-                None,
-                Some(error.clone()),
-                now,
-                Some(now),
-            )
-            .await?;
+        let workflow_name = self
+            .definitions
+            .get_run_snapshot(&run.run_id)
+            .await?
+            .map(|snapshot| snapshot.definition.name)
+            .unwrap_or_else(|| run.definition_id.clone());
+        let is_chat_session = self.is_chat_session(&run.session_id).await?;
+        let terminal_result = if is_chat_session {
+            self.build_failed_result(run, workflow_name, &failure, now).await?
+        } else {
+            None
+        };
+        let terminal_result_payload = terminal_result.clone().map(|result| StateMachineChatResultPayload {
+            command: StateMachineResultPublishCommand {
+                run_id: run.run_id.clone(),
+                group_id: run.group_id.clone(),
+                session_id: run.session_id.clone(),
+                sender_bot_id: result.target_bot_id.clone(),
+                content: result.render_manager_message(),
+                terminal_result: Some(result),
+                created_at_ms: now,
+            },
+            deadline_ms: now.saturating_add(publication::CHAT_RESULT_TIMEOUT_MS),
+        });
+        let failed_node = failure.node.as_ref().map(|(node_id, _)| node_id.clone());
+        let max_attempts = if let Some((node_id, _)) = failure.node.as_ref() {
+            self.runs.get_node_run(&run.run_id, node_id).await?.map(|node| node.max_attempts.max(1))
+        } else {
+            None
+        };
+        let event_reason = failure_event_reason(failure.reason, terminal_result.as_ref());
+        let event = self.prepare_public_event(
+            "state_machine.run.failed",
+            run,
+            "state_machine.run",
+            &run.run_id,
+            "failed",
+            None,
+            None,
+            now,
+            BTreeMap::from([
+                ("failed_at".to_string(), serde_json::json!(event_timestamp(now)?)),
+                ("duration_ms".to_string(), serde_json::json!(now.saturating_sub(run.created_at))),
+                ("reason".to_string(), serde_json::json!(event_reason.as_str())),
+                ("failed_node".to_string(), serde_json::json!(failed_node)),
+                ("attempt".to_string(), serde_json::json!(terminal_result.as_ref().and_then(|result| result.attempt))),
+                ("max_attempts".to_string(), serde_json::json!(max_attempts)),
+                ("completed_nodes".to_string(), serde_json::json!(terminal_result.as_ref().map(|result| result.completed_node_ids.clone()).unwrap_or_default())),
+            ]),
+        )?;
+        let failed = match event {
+            Some(event) => self.runs.commit_eventful_transition(StateMachineEventfulTransition::FailRun {
+                run_id: run.run_id.clone(),
+                error: failure.error.clone(),
+                completed_at_ms: now,
+                event,
+                terminal_result: terminal_result_payload.clone(),
+            }).await?,
+            None => {
+                let changed = self.runs.update_run_status(
+                    &run.run_id,
+                    StateMachineRunStatus::Failed,
+                    None,
+                    Some(failure.error.clone()),
+                    now,
+                    Some(now),
+                ).await?;
+                if changed && self.runs.get_chat_result(&run.run_id).await?.is_none() {
+                    if let Some(payload) = terminal_result_payload.clone() {
+                        self.runs.save_chat_result(payload).await?;
+                    }
+                }
+                changed
+            },
+        };
         self.runs.supersede_inactive_node_dispatches(&run.run_id).await?;
         if !failed { return self.run_view(&run.run_id).await; }
-        let is_chat_session = self.is_chat_session(&run.session_id).await?;
-        if !is_chat_session && self.session_channel_outbound.is_some() {
+        let current_run = self.runs.get_run(&run.run_id).await?.ok_or_else(||
+            CollaborationRuntimeError::RunNotFound(run.run_id.clone()))?;
+        if is_chat_session {
+            if self.runs.get_chat_result(&run.run_id).await?.is_none() {
+                if let Some(session) = self.sessions.get(&run.session_id).await
+                    .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))? {
+                    if !self.ensure_chat_result(&current_run, &session, None, terminal_result.as_ref(), now).await? {
+                        return self.run_view(&run.run_id).await;
+                    }
+                }
+            }
+        } else if self.session_channel_outbound.is_some() {
             let snapshot = self.definitions.get_run_snapshot(&run.run_id).await?.ok_or_else(||
                 CollaborationRuntimeError::InvalidRequest("terminal IM requires original Run snapshot".into()))?;
-            self.prepare_terminal_im(run, snapshot.definition.name, StateMachineTerminalStatus::Failed, None).await?;
+            self.prepare_terminal_im(&run, snapshot.definition.name, StateMachineTerminalStatus::Failed, None).await?;
         }
         let (session_complete_result, _session_transitioned) =
-            if is_chat_session {
-                ("chat_preserved", false)
-            } else {
-                match self
-                    .complete_service_session_for_run(run, None, Some(error.clone()))
-                    .await
-                {
+            if is_chat_session { ("chat_preserved", false) } else {
+                match self.complete_service_session_for_run(&run, None, Some(failure.error.clone())).await {
                     Ok(Some(_)) => ("completed", true),
                     Ok(None) => ("not_running", false),
                     Err(error) => {
-                        warn!(
-                            run_id = %run.run_id,
-                            group_id = %run.group_id,
-                            session_id = %run.session_id,
-                            error = %error,
-                            "state_machine: failed to complete session for failed run"
-                        );
+                        warn!(run_id = %run.run_id, session_id = %run.session_id, error = %error,
+                            "state_machine: failed to complete session for failed run");
                         return Err(CollaborationRuntimeError::Internal(ServiceError::InternalError(
                             format!("failed to complete Session for failed Run: {error}"),
                         )));
@@ -1961,17 +2029,10 @@ impl CollaborationRuntime {
                 }
             };
         if !is_chat_session && self.session_channel_outbound.is_some() { self.resume_terminal_im(&run.run_id).await?; }
-        warn!(
-            run_id = %run.run_id,
-            group_id = %run.group_id,
-            session_id = %run.session_id,
-            definition_id = %run.definition_id,
-            definition_version = run.definition_version,
-            error = %error,
-            session_complete_result = %session_complete_result,
-            "state_machine: run failed"
-        );
-        log_state_machine_run_failed(run, &error, session_complete_result);
+        warn!(run_id = %run.run_id, group_id = %run.group_id, session_id = %run.session_id,
+            definition_id = %run.definition_id, definition_version = run.definition_version,
+            error = %failure.error, session_complete_result = %session_complete_result, "state_machine: run failed");
+        log_state_machine_run_failed(&run, &failure.error, session_complete_result);
         self.run_view(&run.run_id).await
     }
 
@@ -2001,6 +2062,18 @@ impl CollaborationRuntime {
         run: &StateMachineRun,
         node_id: &str,
         attempt: i32,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        self.resume_failed_node_with_reason(compiled, group, run, node_id, attempt, None).await
+    }
+
+    async fn resume_failed_node_with_reason(
+        &self,
+        compiled: &CompiledStateMachine,
+        group: &Group,
+        run: &StateMachineRun,
+        node_id: &str,
+        attempt: i32,
+        failure_reason: Option<StateMachineTerminalReason>,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         let Some(failure) = self.runs.get_node_attempt_failure(&run.run_id, node_id, attempt).await? else {
             if self.runs.get_node_run(&run.run_id, node_id).await?.is_none() {
@@ -2099,7 +2172,12 @@ impl CollaborationRuntime {
             }
             return self.run_view(&run.run_id).await;
         }
-        self.fail_run(run, error).await
+        let failure = match failure_reason {
+            Some(StateMachineTerminalReason::HumanTimeout) => RunFailure::human_timeout(node_id, attempt, error),
+            Some(reason) => RunFailure::with_reason(reason, node_id, attempt, error),
+            None => RunFailure::node(node_id, attempt, error),
+        };
+        self.fail_run(run, failure).await
     }
 
     async fn evaluate_node_outcome(
@@ -2627,12 +2705,13 @@ impl CollaborationRuntime {
             return Ok(false);
         }
         log_state_machine_timeout(&run, node, timeout_ms, deadline_ms, timeout_grace_ms);
-        self.resume_failed_node(
+        self.resume_failed_node_with_reason(
             &compiled,
             &group,
             &run,
             &node.node_id,
             node.attempt,
+            Some(StateMachineTerminalReason::HumanTimeout),
         )
         .await?;
         Ok(true)
@@ -3085,7 +3164,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             match render_state_machine_opening_message(&group, &run, session_title.as_deref()) {
                 Ok(message) => message,
                 Err(error) => {
-                    self.fail_run(&run, error.to_string()).await?;
+                    self.fail_run(&run, RunFailure::startup(error.to_string())).await?;
                     return Err(error);
                 }
             };
@@ -3209,7 +3288,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             .persist_saved_opening(&run)
             .await
         {
-            self.fail_run(&run, error.to_string()).await?;
+            self.fail_run(&run, RunFailure::startup(error.to_string())).await?;
             return Err(error);
         }
         self.publish_state_machine_panel_event(&group, &run, &opening_message)
@@ -4035,66 +4114,120 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         &self,
         cmd: CancelStateMachineRunCommand,
     ) -> Result<StateMachineRunView, CollaborationRuntimeError> {
-        let run = self
-            .runs
-            .get_run(&cmd.run_id)
-            .await?
+        let run = self.runs.get_run(&cmd.run_id).await?
             .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id.clone()))?;
         let now = bcs_protocol::now_ms();
         let reason = cmd.reason.clone();
-        let aborted = self.runs
-            .update_run_status(
-                &cmd.run_id,
-                StateMachineRunStatus::Aborted,
-                None,
-                cmd.reason,
-                now,
-                Some(now),
-            )
-            .await?;
+        let workflow_name = self.definitions.get_run_snapshot(&run.run_id).await?
+            .map(|snapshot| snapshot.definition.name)
+            .unwrap_or_else(|| run.definition_id.clone());
+        let is_chat_session = self.is_chat_session(&run.session_id).await?;
+        let terminal_reason = classify_abort_reason(reason.as_deref());
+        let terminal_result = if is_chat_session {
+            self.build_aborted_result(&run, workflow_name, terminal_reason, now).await?
+        } else {
+            None
+        };
+        let terminal_result_payload = terminal_result.clone().map(|result| StateMachineChatResultPayload {
+            command: StateMachineResultPublishCommand {
+                run_id: run.run_id.clone(), group_id: run.group_id.clone(), session_id: run.session_id.clone(),
+                sender_bot_id: result.target_bot_id.clone(), content: result.render_manager_message(),
+                terminal_result: Some(result), created_at_ms: now,
+            },
+            deadline_ms: now.saturating_add(publication::CHAT_RESULT_TIMEOUT_MS),
+        });
+        let event = self.prepare_public_event(
+            "state_machine.run.aborted", &run, "state_machine.run", &run.run_id,
+            "aborted", None, None, now,
+            BTreeMap::from([
+                ("reason".to_string(), serde_json::json!(terminal_reason.as_str())),
+                ("aborted_at".to_string(), serde_json::json!(event_timestamp(now)?)),
+                ("completed_nodes".to_string(), serde_json::json!(terminal_result.as_ref().map(|result| result.completed_node_ids.clone()).unwrap_or_default())),
+            ]),
+        )?;
+        let aborted = match event {
+            Some(event) => self.runs.commit_eventful_transition(StateMachineEventfulTransition::AbortRun {
+                run_id: cmd.run_id.clone(), reason: reason.clone(), completed_at_ms: now, event,
+                terminal_result: terminal_result_payload.clone(),
+            }).await?,
+            None => {
+                let changed = self.runs.update_run_status(
+                    &cmd.run_id, StateMachineRunStatus::Aborted, None, reason.clone(), now, Some(now),
+                ).await?;
+                if changed && self.runs.get_chat_result(&cmd.run_id).await?.is_none() {
+                    if let Some(payload) = terminal_result_payload.clone() {
+                        self.runs.save_chat_result(payload).await?;
+                    }
+                }
+                changed
+            },
+        };
         self.runs.supersede_inactive_node_dispatches(&run.run_id).await?;
         if !aborted {
             return self.run_view(&cmd.run_id).await?
                 .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id));
         }
-        let is_chat_session = self.is_chat_session(&run.session_id).await?;
+        if is_chat_session {
+            if let Some(session) = self.sessions.get(&run.session_id).await
+                .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))? {
+                let _ = self.ensure_chat_result(&run, &session, None, terminal_result.as_ref(), now).await?;
+            }
+        }
         let (completed_session, session_missing) = if is_chat_session {
             (None, false)
         } else {
-            match self
-                .complete_service_session_for_run(&run, None, Some("aborted".to_string()))
-                .await
-            {
+            match self.complete_service_session_for_run(&run, None, Some("aborted".to_string())).await {
                 Ok(completed_session) => (completed_session, false),
                 Err(SessionUseCaseError::NotFound(_)) => (None, true),
-                Err(error) => {
-                    return Err(CollaborationRuntimeError::InvalidRequest(error.to_string()));
-                }
+                Err(error) => return Err(CollaborationRuntimeError::InvalidRequest(error.to_string())),
             }
         };
-        let session_complete_result = if is_chat_session {
-            "chat_preserved"
-        } else if session_missing {
-            "missing"
-        } else if completed_session.is_some() {
-            "completed"
-        } else {
-            "not_running"
-        };
-        info!(
-            run_id = %cmd.run_id,
-            group_id = %run.group_id,
-            session_id = %run.session_id,
-            definition_id = %run.definition_id,
-            definition_version = run.definition_version,
-            reason = ?reason,
-            session_complete_result = %session_complete_result,
-            "state_machine: run aborted"
-        );
-        self.run_view(&cmd.run_id)
-            .await?
+        let session_complete_result = if is_chat_session { "chat_preserved" }
+        else if session_missing { "missing" }
+        else if completed_session.is_some() { "completed" }
+        else { "not_running" };
+        info!(run_id = %cmd.run_id, group_id = %run.group_id, session_id = %run.session_id,
+            definition_id = %run.definition_id, definition_version = run.definition_version,
+            reason = ?reason, session_complete_result = %session_complete_result,
+            "state_machine: run aborted");
+        self.run_view(&cmd.run_id).await?
             .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id))
     }
+    async fn handle_bot_disconnect(
+        &self,
+        bot_id: &str,
+    ) -> Result<usize, CollaborationRuntimeError> {
+        const DISCONNECT_NODE_LIMIT: usize = 128;
+        let nodes = self.runs.list_running_node_runs_for_bot(bot_id, DISCONNECT_NODE_LIMIT).await?;
+        let mut failed = 0;
+        for node in nodes {
+            let Some(run) = self.runs.get_run(&node.run_id).await? else { continue; };
+            if !matches!(run.status, StateMachineRunStatus::Running | StateMachineRunStatus::Failed)
+                || node.status != StateMachineNodeStatus::Running
+                || node.assignee_bot_id.as_deref() != Some(bot_id)
+            {
+                continue;
+            }
+            let error = format!(
+                "state-machine node '{}' failed because assigned Bot '{}' disconnected",
+                node.node_id, bot_id
+            );
+            let marked = self.runs.fail_node_attempt_with_action(FailStateMachineNodeAttempt {
+                run_id: run.run_id.clone(),
+                node_id: node.node_id.clone(),
+                attempt: node.attempt,
+                error: error.clone(),
+                completed_at_ms: bcs_protocol::now_ms(),
+                action: StateMachineFailureAction::FailRun,
+            }).await?;
+            if marked {
+                failed += 1;
+                self.fail_run(&run, RunFailure::node(&node.node_id, node.attempt, error)).await?;
+            }
+        }
+        Ok(failed)
+    }
+
     async fn lookup_delivery_correlation(
         &self,
         run_id: &str,
@@ -4596,6 +4729,62 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             next_run_id: if ids.len() == limit { ids.last().cloned() } else { None }, ..Default::default() };
         for run_id in ids {
             let result = async {
+                if let Some(run) = self.runs.get_run(&run_id).await? {
+                    if matches!(run.status, StateMachineRunStatus::Failed | StateMachineRunStatus::Aborted)
+                        && self.is_chat_session(&run.session_id).await?
+                    {
+                        if let Some(session) = self.sessions.get(&run.session_id).await
+                            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))? {
+                            let saved = self.runs.get_chat_result(&run.run_id).await?;
+                            if let Some(saved) = saved.as_ref().filter(|saved| saved.payload.command.terminal_result.is_some()) {
+                                let _ = self.ensure_chat_result(
+                                    &run,
+                                    &session,
+                                    None,
+                                    saved.payload.command.terminal_result.as_ref(),
+                                    bcs_protocol::now_ms(),
+                                ).await?;
+                            } else if run.status == StateMachineRunStatus::Failed {
+                                if let Some(error) = run.error.clone() {
+                                    let workflow_name = self.definitions.get_run_snapshot(&run.run_id).await?
+                                        .map(|snapshot| snapshot.definition.name)
+                                        .unwrap_or_else(|| run.definition_id.clone());
+                                    let failure = RunFailure::startup(error);
+                                    let terminal_result = self.build_failed_result(
+                                        &run,
+                                        workflow_name,
+                                        &failure,
+                                        bcs_protocol::now_ms(),
+                                    ).await?;
+                                    let _ = self.ensure_chat_result(
+                                        &run,
+                                        &session,
+                                        None,
+                                        terminal_result.as_ref(),
+                                        bcs_protocol::now_ms(),
+                                    ).await?;
+                                }
+                            } else if saved.is_none() {
+                                let workflow_name = self.definitions.get_run_snapshot(&run.run_id).await?
+                                    .map(|snapshot| snapshot.definition.name)
+                                    .unwrap_or_else(|| run.definition_id.clone());
+                                let terminal_result = self.build_aborted_result(
+                                    &run,
+                                    workflow_name,
+                                    classify_abort_reason(run.error.as_deref()),
+                                    bcs_protocol::now_ms(),
+                                ).await?;
+                                let _ = self.ensure_chat_result(
+                                    &run,
+                                    &session,
+                                    None,
+                                    terminal_result.as_ref(),
+                                    bcs_protocol::now_ms(),
+                                ).await?;
+                            }
+                        }
+                    }
+                }
                 self.runs.cleanup_terminal_run_checkpoints(&run_id, 32).await?;
                 if history_repairs.contains(&run_id) {
                     if let Some(run) = self.runs.get_run(&run_id).await? {

@@ -82,6 +82,8 @@
     { "$ref": "#/$defs/StateMachineRunCreatedEvent" },
     { "$ref": "#/$defs/StateMachineRunStartedEvent" },
     { "$ref": "#/$defs/StateMachineRunCompletedEvent" },
+    { "$ref": "#/$defs/StateMachineRunFailedEvent" },
+    { "$ref": "#/$defs/StateMachineRunAbortedEvent" },
     { "$ref": "#/$defs/StateMachineNodeStartedEvent" },
     { "$ref": "#/$defs/StateMachineNodeCompletedEvent" },
     { "$ref": "#/$defs/StateMachineNodeRetryScheduledEvent" },
@@ -322,6 +324,22 @@
         "data": { "$ref": "#/$defs/StateMachineRunCompletedData" }
       }
     },
+    "StateMachineRunFailedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "state_machine.run.failed" },
+        "data": { "$ref": "#/$defs/StateMachineRunFailedData" }
+      }
+    },
+    "StateMachineRunAbortedEvent": {
+      "type": "object",
+      "required": ["event_type", "data"],
+      "properties": {
+        "event_type": { "const": "state_machine.run.aborted" },
+        "data": { "$ref": "#/$defs/StateMachineRunAbortedData" }
+      }
+    },
     "StateMachineNodeStartedEvent": {
       "type": "object",
       "required": ["event_type", "data"],
@@ -491,6 +509,31 @@
       "properties": {
         "completed_at": { "$ref": "#/$defs/Timestamp" },
         "output": { "$ref": "#/$defs/ContentProjection" },
+        "duration_ms": { "$ref": "#/$defs/NonNegativeInteger" }
+      }
+    },
+    "StateMachineRunFailedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failed_at", "reason", "failed_node", "attempt", "max_attempts", "completed_nodes", "duration_ms"],
+      "properties": {
+        "failed_at": { "$ref": "#/$defs/Timestamp" },
+        "reason": { "enum": ["node_failed", "human_timeout", "startup_failed", "publication_failed"] },
+        "failed_node": { "oneOf": [{ "$ref": "#/$defs/OpaqueId" }, { "type": "null" }] },
+        "attempt": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "max_attempts": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "completed_nodes": { "type": "array", "items": { "$ref": "#/$defs/OpaqueId" } },
+        "duration_ms": { "$ref": "#/$defs/NonNegativeInteger" }
+      }
+    },
+    "StateMachineRunAbortedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aborted_at", "reason", "completed_nodes", "duration_ms"],
+      "properties": {
+        "aborted_at": { "$ref": "#/$defs/Timestamp" },
+        "reason": { "enum": ["user_aborted", "session_closed", "group_closed"] },
+        "completed_nodes": { "type": "array", "items": { "$ref": "#/$defs/OpaqueId" } },
         "duration_ms": { "$ref": "#/$defs/NonNegativeInteger" }
       }
     },

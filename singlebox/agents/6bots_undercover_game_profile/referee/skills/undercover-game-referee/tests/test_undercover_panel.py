@@ -86,6 +86,16 @@ class UndercoverPanelParamsTest(unittest.TestCase):
             self.assertEqual(command[command.index("--panel-tab-closable") + 1], "false")
             self.assertEqual(command[command.index("--panel-component") + 1], "bcsPanel.UndercoverGamePanel")
 
+    def test_retry_budget_is_limited_to_two_retries(self) -> None:
+        self.state["phase"] = "AWAIT_VOTE_START"
+        undercover.save_state(self.state)
+        undercover.prepare_vote_run(self.state["session_id"], retry=False)
+        undercover.prepare_vote_run(self.state["session_id"], retry=True)
+        undercover.prepare_vote_run(self.state["session_id"], retry=True)
+        with self.assertRaises(SystemExit):
+            undercover.prepare_vote_run(self.state["session_id"], retry=True)
+        self.assertEqual(undercover.load_state(self.state["session_id"])["rounds"][0]["renders"]["vote"], 3)
+
     def test_submission_command_matches_rendered_metadata(self) -> None:
         self.state["phase"] = "AWAIT_START"; self.state["round"] = 0; self.state["rounds"] = []
         undercover.save_state(self.state)

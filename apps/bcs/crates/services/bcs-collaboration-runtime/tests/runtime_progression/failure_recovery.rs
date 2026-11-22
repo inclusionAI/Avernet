@@ -133,3 +133,39 @@ async fn saved_judge_and_empty_output_failures_resume_without_rejudging() {
         assert_eq!(h.store.get_node_run(&run.run_id, &node_id).await.unwrap().unwrap().attempt, 1);
     }
 }
+
+#[tokio::test]
+async fn disconnected_assignee_fails_running_state_machine_immediately() {
+    let h = Harness::new(&[]).await;
+    let started = h.start(loop_yaml(1, false, false, 1), false).await;
+    let run = started.view.run;
+
+    assert!(h.runtime.handle_bot_disconnect("driver-bot").await.unwrap() >= 1);
+
+    let failed_run = h.store.get_run(&run.run_id).await.unwrap().unwrap();
+    assert_eq!(failed_run.status, StateMachineRunStatus::Failed);
+    assert!(failed_run
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("disconnected")));
+    let nodes = h.store.list_node_runs(&run.run_id).await.unwrap();
+    assert!(!nodes.is_empty());
+    assert!(nodes.iter().any(|node| node.status == StateMachineNodeStatus::Failed));
+}
+
+#[tokio::test]
+async fn disconnected_assignee_fails_all_parallel_nodes_in_one_run() {
+    let h = Harness::new(&[]).await;
+    let started = h.start(join_yaml(), false).await;
+    let run = started.view.run;
+    h.finish(0, &run, "start").await;
+
+    let failed = h.runtime.handle_bot_disconnect("driver-bot").await.unwrap();
+    let nodes = h.store.list_node_runs(&run.run_id).await.unwrap();
+    assert!(failed >= 2, "failed={failed} nodes={nodes:?}");
+    assert!(nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Running).next().is_none());
+    assert!(nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Failed).count() >= 2);
+
+    assert_eq!(h.runtime.handle_bot_disconnect("driver-bot").await.unwrap(), 0);
+    assert_eq!(h.store.get_run(&run.run_id).await.unwrap().unwrap().status, StateMachineRunStatus::Failed);
+}

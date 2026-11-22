@@ -202,8 +202,10 @@ mod tests {
             panic!("embedded Event Catalog must be valid");
         };
 
-        assert_eq!(catalog.events.len(), 16);
+        assert_eq!(catalog.events.len(), 18);
         assert!(catalog.event("group.created").is_some());
+        assert!(catalog.event("state_machine.run.failed").is_some());
+        assert!(catalog.event("state_machine.run.aborted").is_some());
         assert!(catalog.event("message.created").is_some());
         assert!(catalog.event("judge.started").is_none());
     }

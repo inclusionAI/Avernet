@@ -274,6 +274,10 @@ pub async fn handle_connection(
         {
             warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, error = %err, "Failed to record bot streaming disconnect");
         }
+        if let Err(err) = state.collaboration_runtime.handle_bot_disconnect(bot_id).await {
+            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, error = %err,
+                "Failed to fail active state-machine nodes after Bot disconnect");
+        }
 
         // Bot is now offline but token persists for reconnection
 

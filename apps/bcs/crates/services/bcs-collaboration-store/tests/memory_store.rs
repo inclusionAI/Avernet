@@ -17,6 +17,9 @@ use bcs_service_api::{
 };
 use serde_json::json;
 
+#[path = "support/terminal_result_contract.rs"]
+mod terminal_result_contract;
+
 #[tokio::test]
 async fn definition_upsert_is_idempotent_for_same_content() {
     let store = MemoryCollaborationStore::new();
@@ -608,4 +611,13 @@ runtime:
 "#
     ))
     .expect("valid definition")
+}
+
+
+#[tokio::test]
+async fn terminal_result_contract_memory() {
+    let event_store = std::sync::Arc::new(MemoryEventStore::new());
+    let store = MemoryCollaborationStore::new().with_event_store(event_store);
+    terminal_result_contract::terminal_result_contract(&store).await;
+    terminal_result_contract::terminal_result_persistence_contract(&store).await;
 }

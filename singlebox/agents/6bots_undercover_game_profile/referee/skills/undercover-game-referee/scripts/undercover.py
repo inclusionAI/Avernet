@@ -70,6 +70,7 @@ NEXT_ACTION = {
 }
 
 SPEECH_MAX_CHARS = 25
+MAX_STAGE_ATTEMPTS = 3
 # 投票只交票号：「我投4号」5 字、「我弃权」3 字。理由是泄露渠道——一条理由本质上
 # 是「拿我的词去比对他的话」的结果，念出来就等于广播自己那个词的一个属性。
 VOTE_MAX_CHARS = 10
@@ -1433,6 +1434,18 @@ def run_file_kind(kind: str, rnd: int, attempt: int) -> str:
     return f"{kind}-r{rnd}" if attempt <= 1 else f"{kind}-r{rnd}-retry{attempt - 1}"
 
 
+def require_retry_budget(state: dict[str, Any], kind: str, retry: bool) -> None:
+    if not retry:
+        return
+    attempts = current_stage(state).get("renders", {}).get(kind, 0)
+    if attempts >= MAX_STAGE_ATTEMPTS:
+        die(
+            "RETRY_LIMIT",
+            f"本阶段最多允许两次重试，{kind} 已达到上限；请新建会话。",
+            attempts=attempts,
+        )
+
+
 def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
     with locked(session_id):
         state = load_state(session_id)
@@ -1447,6 +1460,7 @@ def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
                     "本轮发言已经收齐落盘了，不能重开发言运行。"
                     "如果卡住的是投票，用 render-vote-run --retry。",
                 )
+            require_retry_budget(state, "speak", retry)
         elif pk:
             require_phase(state, "AWAIT_PK_SPEAK_START")
         else:
@@ -1582,6 +1596,7 @@ def prepare_vote_run(session_id: str, retry: bool) -> dict[str, Any]:
             # 投票运行失败不会唤醒裁判，phase 却已经推到 VOTE_RUNNING 了。
             # 没有这条路，卡住诊断走到重开那一步就会被阶段卫兵拦死。
             require_phase(state, "VOTE_RUNNING", "PK_VOTE_RUNNING")
+            require_retry_budget(state, "vote", retry)
         else:
             require_phase(state, "AWAIT_VOTE_START", "AWAIT_PK_VOTE_START")
         state["phase"] = "PK_VOTE_RUNNING" if is_pk(state) else "VOTE_RUNNING"

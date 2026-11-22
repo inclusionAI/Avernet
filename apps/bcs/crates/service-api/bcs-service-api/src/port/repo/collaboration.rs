@@ -164,6 +164,22 @@ pub enum StateMachineEventfulTransition {
         completed_at_ms: u64,
         event: AppendEventRecord,
     },
+    /// Atomically mark a running Run as failed and append its public terminal event.
+    FailRun {
+        run_id: String,
+        error: String,
+        completed_at_ms: u64,
+        event: AppendEventRecord,
+        terminal_result: Option<StateMachineChatResultPayload>,
+    },
+    /// Atomically mark a pending/running Run as aborted and append its public terminal event.
+    AbortRun {
+        run_id: String,
+        reason: Option<String>,
+        completed_at_ms: u64,
+        event: AppendEventRecord,
+        terminal_result: Option<StateMachineChatResultPayload>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -744,6 +760,17 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         &self,
         run_id: &str,
     ) -> ServiceResult<Option<StateMachineDeliveryCorrelation>>;
+
+    /// Return a bounded snapshot of active Bot nodes assigned to one Bot.
+    /// This is used by disconnect handling and must not scan terminal history.
+    async fn list_running_node_runs_for_bot(
+        &self,
+        bot_id: &str,
+        limit: usize,
+    ) -> ServiceResult<Vec<StateMachineNodeRun>> {
+        let _ = (bot_id, limit);
+        Ok(Vec::new())
+    }
 
     async fn list_expired_running_node_runs(
         &self,

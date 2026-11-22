@@ -76,6 +76,7 @@ async fn exercise(db: Arc<MysqlDbPlugin>, snapshot: StateMachineRunSnapshot) -> 
     dispatch_contract::dispatch_contract(&store).await;
     opening_contract::opening_contract(&store).await;
     publication_contract::publication_contract(&store).await;
+    terminal_result_contract::terminal_result_persistence_contract(&store).await;
     recovery_gap_contract::recovery_gap_contract(&store, &store).await;
     terminal_cleanup_contract::terminal_cleanup_contract(&store).await;
     // A failed startup-fact insert must roll back the conditional Run failure.

@@ -70,7 +70,7 @@ fn publication_command() -> StateMachineResultPublishCommand {
     StateMachineResultPublishCommand {
         run_id: "one-shot-result".into(), group_id: "group-1".into(),
         session_id: "group-1:result".into(), sender_bot_id: "bot-observer".into(),
-        content: "状态机最终结果".into(), created_at_ms: 100,
+        content: "状态机最终结果".into(), terminal_result: None, created_at_ms: 100,
     }
 }
 
@@ -96,6 +96,22 @@ async fn legacy_chat_result_preserves_original_history_and_delivers_to_driver() 
     assert_eq!(saved.created_at, 100);
     assert_eq!(saved.visibility_domain, Some(MessageVisibilityDomain::StateMachine));
     assert_eq!(saved.audience, Some(MessageAudience::Public));
+}
+
+#[tokio::test]
+async fn terminal_run_result_uses_run_result_message_identity() {
+    let (publisher, messages, _, _, _) = publication_fixture(false).await;
+    let mut command = publication_command();
+    command.content = "[State Machine Run Failed]".into();
+    command.terminal_result = Some(bcs_service_api::StateMachineRunResultPayload::failed(
+        command.run_id.clone(), command.group_id.clone(), command.session_id.clone(),
+        "workflow".into(), command.sender_bot_id.clone(), Some("speak_2".into()), Some(0),
+        bcs_service_api::StateMachineTerminalReason::NodeFailed, vec!["speak_1".into()], 100,
+    ));
+    publisher.publish_state_machine_result(command).await.unwrap();
+    let saved = messages.get_message_by_id("group-1:result", "run-result:one-shot-result")
+        .await.unwrap().unwrap();
+    assert_eq!(saved.content, serde_json::json!("[State Machine Run Failed]"));
 }
 
 #[tokio::test]

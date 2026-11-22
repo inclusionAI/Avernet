@@ -130,5 +130,5 @@ pub use session_channel_outbound::{
     StateMachineTerminalEvent, StateMachineTerminalStatus,
 };
 pub use state_machine_metrics::*;
-pub use state_machine_result::{StateMachineResultPublishCommand, StateMachineResultPublisherPort};
+pub use state_machine_result::{StateMachineResultPublishCommand, StateMachineResultPublisherPort, StateMachineRunResultPayload, StateMachineRunTerminalStatus, StateMachineTerminalReason};
 pub mod agent_identity;
