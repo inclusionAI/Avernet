@@ -4467,7 +4467,7 @@
             "title": "Finished At"
           },
           "notes": {
-            "description": "Apply-level notes that belong to no entry. Today only the delivery strategy's closing step writes one: on teclaw, a whole-artifact redeliver that failed after every category was written is recorded here rather than failing the apply. Empty on ARCA.",
+            "description": "Apply-level notes, including delivery feedback from TeClaw's platform-managed artifact closure.",
             "items": {
               "type": "string"
             },
@@ -4478,6 +4478,17 @@
             "description": "`RUNNING` while the work is in flight, then `SUCCEEDED` / `PARTIAL` / `FAILED`, derived from the entries below.",
             "title": "Result",
             "type": "string"
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Capability Runtime synchronization, independent of the Apply write result. Omitted for historical reports, previews, and Apply paths without a capability observation."
           },
           "sources": {
             "description": "Provenance for the manifest's git sources: what each declaration actually resolved to, including the exact `resolved_sha`, since a moving `ref` like `main` means something different next week. One row per declaration; empty when the document names no git source. A credential appears by name only, never by value.",
@@ -4556,6 +4567,14 @@
             "description": "The category or section.",
             "title": "Category",
             "type": "string"
+          },
+          "local_skill_packages": {
+            "description": "Per-package Runtime publication and Backend metadata when this Apply used a Local Skill publication batch.",
+            "items": {
+              "$ref": "#/components/schemas/ConfigManifestLocalSkillPackage"
+            },
+            "title": "Local Skill Packages",
+            "type": "array"
           },
           "partially_written": {
             "default": false,
@@ -33281,6 +33300,57 @@
           "request_id"
         ],
         "title": "Envelope[Union[ConfigManifest, ConfigManifestApply]]",
+        "type": "object"
+      },
+      "ConfigManifestLocalSkillPackage": {
+        "description": "A package publication observation, independent of installation.",
+        "properties": {
+          "content_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical package content digest, when validation computed it.",
+            "title": "Content Digest"
+          },
+          "metadata": {
+            "description": "COMMITTED for committed Backend metadata, FAILED for a confirmed failure, UNKNOWN for an unconfirmed outcome, or NOT_ATTEMPTED.",
+            "enum": [
+              "COMMITTED",
+              "FAILED",
+              "UNKNOWN",
+              "NOT_ATTEMPTED"
+            ],
+            "title": "Metadata",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the Local Skill package target.",
+            "title": "Name",
+            "type": "string"
+          },
+          "publication": {
+            "description": "PUBLISHED for a confirmed Runtime write, FAILED for a confirmed failure, UNKNOWN for an unconfirmed outcome, or NOT_DISPATCHED.",
+            "enum": [
+              "PUBLISHED",
+              "FAILED",
+              "UNKNOWN",
+              "NOT_DISPATCHED"
+            ],
+            "title": "Publication",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "publication",
+          "metadata"
+        ],
+        "title": "ConfigManifestLocalSkillPackage",
         "type": "object"
       }
     }

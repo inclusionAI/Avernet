@@ -9,9 +9,9 @@ from functools import partial
 
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.capability_projection_types import CapabilityProjectionState
 from agentclaw.community.core.repository.protocols.capability_projection import (
     CapabilityProjectionRepositoryProtocol,
-    CapabilityProjectionState,
 )
 from agentclaw.community.core.skill_center.capability_projection_intent import (
     capability_projection_intent,

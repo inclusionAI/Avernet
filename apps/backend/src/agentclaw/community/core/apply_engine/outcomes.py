@@ -17,6 +17,7 @@ from typing import Any
 
 from agentclaw.community.core.apply_engine.compiler import LEGACY_STATE, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
+from agentclaw.community.core.ports.skill_package_upload_port import LocalSkillPackageReceipt
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     RuntimeProjectionResult,
 )
@@ -323,6 +324,7 @@ class CategoryResult:
     #: ``partially_written`` flag, this means an earlier durable step is known
     #: to have committed (for example deactivation before Local package delete).
     confirmed_partial: bool = False
+    local_skill_packages: tuple[LocalSkillPackageReceipt, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         """The wire shape for one category's summary. Note that the entries are
@@ -336,12 +338,17 @@ class CategoryResult:
                 "removed": [],
             }
         """
-        return {
+        payload = {
             "category": self.construct.value,
             "aborted": self.aborted,
             "partially_written": self.partially_written,
             "removed": list(self.removals),
         }
+        if self.local_skill_packages:
+            payload["local_skill_packages"] = [
+                receipt.as_dict() for receipt in self.local_skill_packages
+            ]
+        return payload
 
 
 class SourceMode(StrEnum):

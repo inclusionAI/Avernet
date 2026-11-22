@@ -124,6 +124,65 @@ def test_finalized_apply_keeps_its_write_result_when_runtime_is_pending():
     assert "runtime_projection" not in apply_payload(previous).model_dump()
 
 
+def test_partial_package_receipts_survive_apply_report_storage():
+    from agentclaw.community.adapters.http.openapi_v1.bots.config_manifest_support import apply_payload
+    from agentclaw.community.core.apply_engine.outcomes import ApplyReport, CategoryResult
+    from agentclaw.community.core.apply_engine.run.report_codec import report_from_payload
+    from agentclaw.community.core.ports.skill_package_upload_port import (
+        LocalSkillPackageReceipt,
+        PackageMetadata,
+        PackagePublication,
+    )
+
+    finished = datetime.now()
+    record = SimpleNamespace(
+        apply_id="apply-1",
+        bot_id="bot-1",
+        trigger="explicit",
+        started_at=finished,
+        finished_at=finished,
+    )
+    report = ApplyReport(
+        **vars(record),
+        status=ApplyStatus.PARTIAL,
+        categories=(CategoryResult(
+            Category.CAPABILITIES,
+            aborted=True,
+            partially_written=True,
+            local_skill_packages=(
+                LocalSkillPackageReceipt(
+                    "published", "sha256:" + "4" * 64,
+                    PackagePublication.PUBLISHED, PackageMetadata.FAILED,
+                ),
+                LocalSkillPackageReceipt(
+                    "unattempted", None, PackagePublication.NOT_DISPATCHED,
+                    PackageMetadata.NOT_ATTEMPTED,
+                ),
+            ),
+        ),),
+    )
+
+    decoded = report_from_payload(
+        report.as_payload(), record=record, status=ApplyStatus.PARTIAL,
+    )
+    body = apply_payload(decoded).model_dump()
+    assert body["result"] == "PARTIAL"
+    assert body["categories"][0]["local_skill_packages"] == [
+        {
+            "name": "published",
+            "content_digest": "sha256:" + "4" * 64,
+            "publication": "PUBLISHED",
+            "metadata": "FAILED",
+        },
+        {
+            "name": "unattempted",
+            "content_digest": None,
+            "publication": "NOT_DISPATCHED",
+            "metadata": "NOT_ATTEMPTED",
+        },
+    ]
+
+
 def test_a_stored_source_mode_outside_the_enum_reads_as_no_opinion_and_the_rest_decodes():
     """The one lenient field of the codec, pinned.
 

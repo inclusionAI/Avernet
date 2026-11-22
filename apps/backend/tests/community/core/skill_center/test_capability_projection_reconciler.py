@@ -1,4 +1,5 @@
 """Runtime receipts through the shared capability reconciliation service."""
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +17,7 @@ from agentclaw.community.core.skill_center.services.capability_delivery_guard im
     CapabilityDeliveryGuard,
 )
 from agentclaw.community.plugins.local.cache import MemoryCachePlugin
+from agentclaw.community.plugin_api.models import BotModel
 from tests.community.repository.skill_center.capability_desired_state_support import _Database
 
 
@@ -86,3 +88,94 @@ async def test_recovery_projects_only_the_failed_domain_then_keeps_converged_bas
     assert next_revision == revision
     assert result.status is RuntimeProjectionStatus.CONVERGED
     assert len(projector.scopes) == 2
+
+
+@pytest.mark.asyncio
+async def test_unknown_artifact_receipt_waits_for_a_different_device(tmp_path):
+    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
+        CapabilityProjectionReconciler,
+    )
+
+    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
+    address = {"bot_id": "bot", "entity_id": "owner"}
+    repository = CapabilityProjectionRepository(db)
+    projector = _Projector([
+        RuntimeProjectionResult.pending(
+            code="ARTIFACT_APPLY_FAILED",
+            reason="The Runtime did not confirm artifact delivery",
+            delivery_uncertain=True,
+        ),
+        RuntimeProjectionResult.converged(),
+    ])
+    reconciler = CapabilityProjectionReconciler(
+        repository=repository,
+        projector=projector,
+        guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+        bots=BotRepository(db),
+        defer_enabled=True,
+    )
+
+    def bind(binding_id, device_id):
+        with db.transactional_orm_session() as session:
+            row = session.query(BotModel).filter_by(**address).one()
+            row.active_engine = "teclaw"
+            row.binding_id = binding_id
+            row.device_id = device_id
+
+    bind(1, "device-1")
+    revision, result = await reconciler.finish_apply(**address, initialize=True)
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert len(projector.scopes) == 1
+    assert any(issue.code == "CAPABILITY_DELIVERY_OUTCOME_UNKNOWN" for issue in result.issues)
+
+    bind(2, "device-1")
+    result = await reconciler.reconcile(**address)
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert len(projector.scopes) == 1
+
+    bind(3, "device-2")
+    result = await reconciler.reconcile(**address)
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert len(projector.scopes) == 2
+    assert reconciler.observe(**address, revision=revision).reason == "CAPABILITY_PROJECTION_SUPERSEDED"
+
+
+@pytest.mark.asyncio
+async def test_committed_edit_during_delivery_never_inherits_the_older_receipt(tmp_path):
+    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
+        CapabilityProjectionReconciler,
+    )
+
+    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
+    address = {"bot_id": "bot", "entity_id": "owner"}
+    repository = CapabilityProjectionRepository(db)
+    sending = asyncio.Event()
+    release = asyncio.Event()
+
+    class Projector(_Projector):
+        async def apply_plan(self, *, plan, retired_mappings, scope):
+            sending.set()
+            await release.wait()
+            return await super().apply_plan(plan=plan, retired_mappings=retired_mappings, scope=scope)
+
+    projector = Projector([RuntimeProjectionResult.converged()] * 2)
+    reconciler = CapabilityProjectionReconciler(
+        repository=repository,
+        projector=projector,
+        guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+        bots=BotRepository(db),
+        defer_enabled=True,
+    )
+    first = asyncio.create_task(reconciler.finish_apply(**address, initialize=True))
+    await sending.wait()
+    edited = repository.require(
+        **address,
+        scope=ProjectionScope(mcp=True, released_mcp=frozenset({"mcp.removed"})),
+    )
+    release.set()
+    old_revision, result = await first
+    assert old_revision != edited.revision
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert reconciler.observe(**address, revision=edited.revision).status is RuntimeProjectionStatus.PENDING
+    assert (await reconciler.reconcile(**address)).status is RuntimeProjectionStatus.CONVERGED
+    assert projector.scopes[-1].released_mcp == frozenset({"mcp.removed"})

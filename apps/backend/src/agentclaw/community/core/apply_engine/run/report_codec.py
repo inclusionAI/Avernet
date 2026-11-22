@@ -33,6 +33,7 @@ from agentclaw.community.core.apply_engine.capabilities import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     RuntimeProjectionResult,
 )
+from agentclaw.community.core.ports.skill_package_upload_port import LocalSkillPackageReceipt
 
 
 logger = get_logger()
@@ -84,6 +85,10 @@ def report_from_payload(
                 # one is the only signal that an aborted category may already
                 # have changed the bot.
                 partially_written=bool(category.get("partially_written")),
+                local_skill_packages=tuple(
+                    LocalSkillPackageReceipt.from_dict(receipt)
+                    for receipt in category.get("local_skill_packages", ())
+                ),
             )
         )
     projection = payload.get("runtime_projection")
