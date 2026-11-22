@@ -85,6 +85,8 @@ class RuntimeProjectionResult:
     issues: tuple[RuntimeProjectionIssue, ...] = ()
     reason: str | None = None
     delivery_uncertain: bool = False
+    # Internal receipt consumed by the durable projector, outside public serialization.
+    passport_updated: bool | None = field(default=None, compare=False, repr=False)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "RuntimeProjectionResult":
@@ -143,7 +145,10 @@ class RuntimeProjectionResult:
         components: dict[str, RuntimeProjectionStatus] = {}
         issues: list[RuntimeProjectionIssue] = []
         statuses: list[RuntimeProjectionStatus] = []
+        passport_updated = None
         for result in results:
+            if result.passport_updated is not None:
+                passport_updated = result.passport_updated
             components.update(result.components)
             issues.extend(result.issues)
             statuses.append(result.status)
@@ -160,6 +165,7 @@ class RuntimeProjectionResult:
             components=components,
             issues=tuple(issues),
             delivery_uncertain=any(result.delivery_uncertain for result in results),
+            passport_updated=passport_updated,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -446,6 +452,12 @@ class ProjectionScope:
     #: Explicit releases are applied only for codes absent from the final set.
     #: A lifecycle baseline supplies no explicit releases by default.
     claim_all_mcp: bool = False
+    #: A separate platform authorization update remains due after a device receipt.
+    passport: bool = False
+
+    @property
+    def requires_device_delivery(self) -> bool:
+        return self.skills or self.mcp
 
     @classmethod
     def everything(cls) -> "ProjectionScope":

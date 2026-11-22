@@ -350,3 +350,72 @@ async def test_cutover_resolves_current_owner_and_keeps_preflight_failure_retrya
     assert state.scope == ProjectionScope.everything()
     assert state.retry_pending
     assert not state.write_blocked
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("device_succeeds", [True, False])
+async def test_passport_failure_retries_its_obligation_in_the_same_revision(tmp_path, device_succeeds):
+    from agentclaw.community.core.skill_center.errors import ArtifactProjectionNotDispatchedError
+    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
+        CapabilityProjectionReconciler,
+    )
+    from tests.community.core.skill_center._test_skill_set_management_service_support import (
+        _RuntimeFactory, _RuntimePassport, _TeclawRuntimeBots, _teclaw_runtime,
+    )
+
+    address = {"bot_id": "bot-1", "entity_id": "entity-1"}
+    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
+    with db.transactional_orm_session() as session:
+        session.add(BotModel(
+            **address, owner_id="true-owner", creator_id="true-owner", entity_type="staff",
+            active_engine="teclaw", env="dev", status="ACTIVE",
+        ))
+    repository = CapabilityProjectionRepository(db)
+
+    class Passport(_RuntimePassport):
+        def update_passport(self, **kwargs):
+            super().update_passport(**kwargs)
+            if len(self.calls) == 1:
+                raise RuntimeError("temporary Passport failure")
+
+    class Bots(_TeclawRuntimeBots):
+        def get_by_id_and_owner(self, bot_id, owner_id):
+            return {**super().get_by_id_and_owner(bot_id, owner_id), "status": "ACTIVE"}
+
+    factory = _RuntimeFactory()
+    original = factory.service.project_whole_artifact
+    device_attempts = []
+
+    async def deliver(**kwargs):
+        device_attempts.append(kwargs)
+        if not device_succeeds and len(device_attempts) == 1:
+            raise ArtifactProjectionNotDispatchedError()
+        return await original(**kwargs)
+
+    factory.service.project_whole_artifact = deliver
+    passport = Passport()
+    projector = _teclaw_runtime(factory, passport=passport)
+    projector._bot_repo = Bots()
+    reconciler = CapabilityProjectionReconciler(
+        repository=repository, projector=projector, guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+        bots=BotRepository(db), defer_enabled=True,
+    )
+
+    revision, result = await reconciler.finish_apply(**address, initialize=True)
+    assert result.status is RuntimeProjectionStatus.PENDING
+    codes = {issue.code for issue in result.issues}
+    assert "PASSPORT_RUNTIME_UNAVAILABLE" in codes
+    assert ("ARTIFACT_PROJECTION_NOT_DISPATCHED" in codes) is not device_succeeds
+    state = repository.read(**address)
+    assert state.scope.passport
+    assert state.scope.mcp is not device_succeeds
+    assert state.retry_pending
+    assert not state.write_blocked
+
+    assert (await reconciler.reconcile(**address)).status is RuntimeProjectionStatus.CONVERGED
+    assert len(device_attempts) == (1 if device_succeeds else 2)
+    assert len(passport.calls) == 2
+    state = repository.read(**address)
+    assert state.revision == revision
+    assert state.scope == ProjectionScope()
+    assert not state.retry_pending

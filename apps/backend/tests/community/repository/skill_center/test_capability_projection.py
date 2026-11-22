@@ -247,3 +247,54 @@ def test_only_confirmed_managed_mismatch_triggers_the_next_retirement_candidate(
         assert not pending.needs_recovery
         assert pending.result.status is RuntimeProjectionStatus.DEGRADED
         assert retirement_request(pending.retired_mappings, (current,)) == [first]
+
+
+@pytest.mark.parametrize("superseded_by", ["desired-write", "runtime-binding"])
+def test_passport_obligation_survives_a_superseded_authorization_receipt(superseded_by):
+    import json
+    from dataclasses import replace
+
+    from agentclaw.community.core.models.capability_projection import BotCapabilityProjection
+
+    db = _Database()
+    repository = CapabilityProjectionRepository(db)
+    address = {"bot_id": "bot", "entity_id": "owner"}
+    current = repository.require(**address, scope=ProjectionScope.everything())
+
+    # An existing row stored this failure only as an issue and cleared both domains.
+    previous_result = RuntimeProjectionResult.pending(
+        code="PASSPORT_RUNTIME_UNAVAILABLE", reason="temporary authorization failure",
+    )
+    with db.transactional_orm_session() as session:
+        row = session.get(BotCapabilityProjection, current.bot_pk)
+        old_scope = json.loads(row.scope_json)
+        old_scope.update(
+            skills=False, mcp=False, claim_all_mcp=False,
+        )
+        old_scope.pop("passport")
+        row.scope_json = json.dumps(old_scope)
+        row.result_json = json.dumps(previous_result.to_dict())
+
+    pending = repository.prepare(**address)
+    assert pending.revision == current.revision
+    assert pending.scope == ProjectionScope(passport=True)
+    assert repository.begin(pending, device_delivery=False)
+    assert not repository.read(**address).write_blocked
+
+    if superseded_by == "desired-write":
+        current = repository.require(**address, scope=ProjectionScope(skills=True))
+    else:
+        with db.transactional_orm_session() as session:
+            bot = session.query(BotModel).filter_by(**address).one()
+            bot.binding_id = 5
+            bot.device_id = "next-device"
+        current = repository.prepare(**address)
+
+    receipt = replace(RuntimeProjectionResult.converged(), passport_updated=True)
+    assert not repository.complete(pending, receipt)
+    assert not repository.begin(pending, device_delivery=False)
+    state = repository.read(**address)
+    assert state.revision == current.revision
+    assert state.revision != pending.revision
+    assert state.scope.passport and state.scope.skills
+    assert state.retry_pending

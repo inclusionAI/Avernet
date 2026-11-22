@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 
 from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeServiceProtocol
 
@@ -172,11 +173,16 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         scope: ProjectionScope,
     ) -> RuntimeProjectionResult:
         """Apply one already-resolved plan without reading desired state again."""
+        if scope.passport and not scope.requires_device_delivery:
+            if not isinstance(plan, ResolvedCapabilityPlan):
+                raise SkillSetRuntimeReconcileError()
+            return self._with_passport_receipt(plan, RuntimeProjectionResult.converged())
+
         self._registry.for_engine(plan.engine).validate_plan(
             skill_assets=plan.projection.skill_assets,
             retired_mappings=retired_mappings,
         )
-        if scope.mcp and not isinstance(plan, ResolvedCapabilityPlan):
+        if (scope.mcp or scope.passport) and not isinstance(plan, ResolvedCapabilityPlan):
             # Contract guard before any engine write: an MCP scope must never
             # cross the seam with a Skill-only plan.
             raise SkillSetRuntimeReconcileError()
@@ -190,34 +196,15 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             retired_mappings=retired_mappings,
             service_factory=self._factory,
         )
-        # The Passport is not a runtime and not engine-shaped: it is the
-        # platform's authorization record, the same for every engine. Its
-        # trigger is unchanged.
-        if scope.mcp:
+        if scope.mcp or scope.passport:
             assert isinstance(plan, ResolvedCapabilityPlan)
-            try:
-                self._apply_passport_projection(plan=plan)
-            except Exception:
-                logger.exception(
-                    "[BotRuntimeProjector] Passport projection unavailable "
-                    "bot_id=%s engine=%s",
-                    plan.bot_id,
-                    plan.engine,
-                )
-                return RuntimeProjectionResult.combine(
-                    result,
-                    RuntimeProjectionResult.pending(
-                        code="PASSPORT_RUNTIME_UNAVAILABLE",
-                        reason="MCP 授权配置尚未完成同步",
-                    ),
-                )
-        else:
-            logger.info(
-                "[BotRuntimeProjector] Passport update skipped, scope declares "
-                "no MCP change: bot_id=%s, engine=%s",
-                plan.bot_id,
-                plan.engine,
-            )
+            return self._with_passport_receipt(plan, result)
+        logger.info(
+            "[BotRuntimeProjector] Passport update skipped, scope declares "
+            "no MCP change: bot_id=%s, engine=%s",
+            plan.bot_id,
+            plan.engine,
+        )
         return result
 
     async def project_mcp_and_cli(
@@ -254,6 +241,11 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             scope=scope,
             service_factory=self._factory,
         )
+        return self._with_passport_receipt(plan, result)
+
+    def _with_passport_receipt(
+        self, plan: ResolvedCapabilityPlan, result: RuntimeProjectionResult,
+    ) -> RuntimeProjectionResult:
         try:
             self._apply_passport_projection(plan=plan)
         except Exception:
@@ -263,14 +255,11 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 plan.bot_id,
                 plan.engine,
             )
-            return RuntimeProjectionResult.combine(
-                result,
-                RuntimeProjectionResult.pending(
-                    code="PASSPORT_RUNTIME_UNAVAILABLE",
-                    reason="MCP 授权配置尚未完成同步",
-                ),
+            pending = RuntimeProjectionResult.pending(
+                code="PASSPORT_RUNTIME_UNAVAILABLE", reason="MCP 授权配置尚未完成同步",
             )
-        return result
+            return replace(RuntimeProjectionResult.combine(result, pending), passport_updated=False)
+        return replace(result, passport_updated=True)
 
     def _resolve_plan(
         self,
@@ -287,7 +276,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         try:
             snapshot = (
                 self._reader.active_capabilities(bot_id=bot_id, owner_id=owner_id, bot=bot)
-                if scope.mcp else None
+                if scope.mcp or scope.passport else None
             )
             skill_plan = self._build_skill_plan(
                 bot=bot,
@@ -313,7 +302,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             outcome="success",
             skill_count=len(skill_plan.projection.skill_assets),
         )
-        if not scope.mcp:
+        if not (scope.mcp or scope.passport):
             logger.info(
                 "[BotRuntimeProjector] Non-Skill plan skipped for Skill-only "
                 "scope: bot_id=%s, engine=%s",

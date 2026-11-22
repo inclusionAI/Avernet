@@ -41,6 +41,7 @@ def _covers(current: ProjectionScope, requested: ProjectionScope) -> bool:
     return (
         (current.skills or not requested.skills)
         and (current.mcp or not requested.mcp)
+        and (current.mcp or current.passport or not requested.passport)
         and (current.claim_all_mcp or not requested.claim_all_mcp)
         and (current.claim_all_mcp or requested.claimed_mcp <= current.claimed_mcp)
         and (current.claim_all_mcp or requested.updated_mcp <= current.updated_mcp)
@@ -56,6 +57,7 @@ def _merge_scope(current: ProjectionScope, added: ProjectionScope) -> Projection
         updated_mcp=current.updated_mcp | added.updated_mcp,
         released_mcp=current.released_mcp | added.released_mcp,
         claim_all_mcp=current.claim_all_mcp or added.claim_all_mcp,
+        passport=current.passport or added.passport,
     )
 
 
@@ -67,11 +69,16 @@ def _write_scope(row: BotCapabilityProjection, scope: ProjectionScope) -> None:
         "updated_mcp": sorted(scope.updated_mcp),
         "released_mcp": sorted(scope.released_mcp),
         "claim_all_mcp": scope.claim_all_mcp,
+        "passport": scope.passport,
     })
 
 
 def _read_scope(row: BotCapabilityProjection) -> ProjectionScope:
     fields = json.loads(row.scope_json)
+    passport = fields.get("passport")
+    if passport is None:
+        # Older rows persisted the failed authorization in the result only.
+        passport = any(issue.code == "PASSPORT_RUNTIME_UNAVAILABLE" for issue in _read_result(row).issues)
     return ProjectionScope(
         skills=fields["skills"],
         mcp=fields["mcp"],
@@ -79,6 +86,7 @@ def _read_scope(row: BotCapabilityProjection) -> ProjectionScope:
         updated_mcp=frozenset(fields["updated_mcp"]),
         released_mcp=frozenset(fields["released_mcp"]),
         claim_all_mcp=fields["claim_all_mcp"],
+        passport=passport,
     )
 
 
@@ -159,10 +167,11 @@ def _advance(
         scope = _merge_scope(ProjectionScope.everything(), scope)
     if row.version == 0:
         scope = _merge_scope(ProjectionScope.everything(), scope)
+    combined_scope = _merge_scope(_read_scope(row), scope)
     row.version += 1
     row.retry_pending = True
     row.result_json = json.dumps(_queue_result().to_dict(), ensure_ascii=False)
-    _write_scope(row, _merge_scope(_read_scope(row), scope))
+    _write_scope(row, combined_scope)
     if scope.skills and retired_mappings:
         candidates = dict.fromkeys((*_read_mappings(row), *retired_mappings))
         row.retired_json = json.dumps([mapping.to_dict() for mapping in candidates])
@@ -174,7 +183,7 @@ def record_capability_projection(
     skip_if_covered: bool = False,
 ) -> CapabilityProjectionState | None:
     """Append work inside the caller's transaction, after locking its Bot row."""
-    if not (scope.skills or scope.mcp):
+    if not (scope.requires_device_delivery or scope.passport):
         return None
     bot = require_locked_capability_bot(session, bot_id=bot_id, entity_id=entity_id)
     row = _get_for_bot(session, bot)
@@ -277,30 +286,27 @@ def _write_result(
     row: BotCapabilityProjection, result: RuntimeProjectionResult, *, mcp_only: bool,
 ) -> None:
     scope = _read_scope(row)
+    completed = result.status is RuntimeProjectionStatus.CONVERGED
+    if result.passport_updated is not None:
+        scope = replace(scope, passport=not result.passport_updated)
     if mcp_only:
         components = {name: status for name, status in result.components.items() if name != "skills"}
         result = replace(result, components=components)
-        if result.status is RuntimeProjectionStatus.CONVERGED:
-            scope = ProjectionScope(skills=scope.skills)
-        if scope.skills:
-            result = RuntimeProjectionResult.combine(_queue_result(), result)
+    elif completed or result.components.get("skills") is RuntimeProjectionStatus.CONVERGED:
+        scope = replace(scope, skills=False)
+
+    if completed or result.components.get("mcp") is RuntimeProjectionStatus.CONVERGED:
+        scope = ProjectionScope(skills=scope.skills, passport=scope.passport)
+    if (mcp_only and scope.skills) or (completed and scope.passport):
+        result = RuntimeProjectionResult.combine(_queue_result(), result)
     previous = _read_result(row)
     result = replace(result, components={**previous.components, **result.components})
     row.result_json = json.dumps(result.to_dict(), ensure_ascii=False)
     row.retry_pending = (
-        result.status is RuntimeProjectionStatus.PENDING
+        scope.passport
+        or result.status is RuntimeProjectionStatus.PENDING
         or any(issue.retryable for issue in result.issues)
     )
-    if mcp_only:
-        _write_scope(row, scope)
-        return
-    if result.status is RuntimeProjectionStatus.CONVERGED:
-        scope = ProjectionScope()
-    else:
-        if result.components.get("skills") is RuntimeProjectionStatus.CONVERGED:
-            scope = replace(scope, skills=False)
-        if result.components.get("mcp") is RuntimeProjectionStatus.CONVERGED:
-            scope = ProjectionScope(skills=scope.skills)
     if not scope.skills:
         row.retired_json = "[]"
     _write_scope(row, scope)
@@ -352,7 +358,7 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
                 _advance(row, bot, ProjectionScope.everything(), ())
             return _snapshot(row, bot)
 
-    def begin(self, state: CapabilityProjectionState) -> bool:
+    def begin(self, state: CapabilityProjectionState, *, device_delivery: bool = True) -> bool:
         with self._db.transactional_orm_session() as session:
             current = self._locked_state(session, state)
             if current is None:
@@ -364,7 +370,8 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
                 or row.dispatch_version is not None
             ):
                 return False
-            _mark_dispatch(row, state)
+            if device_delivery:
+                _mark_dispatch(row, state)
             return True
 
     def complete(

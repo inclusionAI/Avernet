@@ -147,7 +147,7 @@ class CapabilityProjectionReconciler:
             return await legacy()
         if retired_mappings and not scope.skills:
             scope = replace(scope, skills=True)
-        if not (scope.skills or scope.mcp):
+        if not (scope.requires_device_delivery or scope.passport):
             return RuntimeProjectionResult.skipped(reason="NO_CAPABILITY_PROJECTION")
         await asyncio.to_thread(
             self._repository.require,
@@ -185,7 +185,7 @@ class CapabilityProjectionReconciler:
         mcp_only: bool = False,
     ) -> RuntimeProjectionResult:
         scope = replace(state.scope, skills=False) if mcp_only else state.scope
-        if state.write_blocked or not (scope.skills or scope.mcp):
+        if state.write_blocked or not (scope.requires_device_delivery or scope.passport):
             return self._observed(state)
         try:
             plan = await asyncio.to_thread(
@@ -200,29 +200,31 @@ class CapabilityProjectionReconciler:
                 code="CAPABILITY_PROJECTION_PLAN_UNAVAILABLE",
                 reason="Committed capability configuration could not be read for synchronization.",
             )
-        if not is_bot_ready(plan.bot):
+        if scope.requires_device_delivery and not is_bot_ready(plan.bot):
             return RuntimeProjectionResult.pending(
                 code="BOT_RUNTIME_NOT_READY", reason="The Bot Runtime is not ready."
             )
-        if mcp_only:
+        if mcp_only and scope.mcp:
             return await self._dispatch(
                 state, lease, mcp_only=True,
                 deliver=partial(self._projector.apply_mcp_and_cli_plan, plan=plan, scope=scope),
             )
-        retired = retirement_request(state.retired_mappings, plan.projection.skill_mappings)
+        retired = (
+            retirement_request(state.retired_mappings, plan.projection.skill_mappings)
+            if scope.skills else ()
+        )
         return await self._dispatch(
-            state, lease,
-            deliver=partial(
-                self._projector.apply_plan, plan=plan, retired_mappings=retired, scope=state.scope,
-            ),
+            state, lease, device_delivery=scope.requires_device_delivery, mcp_only=mcp_only,
+            deliver=partial(self._projector.apply_plan, plan=plan, retired_mappings=retired, scope=scope),
         )
 
     async def _dispatch(
         self, state: CapabilityProjectionState, lease: CapabilityDeliveryLease, *,
         deliver: Callable[[], Awaitable[RuntimeProjectionResult]], mcp_only: bool = False,
+        device_delivery: bool = True,
     ) -> RuntimeProjectionResult:
         await lease.verify()
-        if not await asyncio.to_thread(self._repository.begin, state):
+        if not await asyncio.to_thread(self._repository.begin, state, device_delivery=device_delivery):
             return RuntimeProjectionResult.pending(
                 code="CAPABILITY_PROJECTION_CHANGED",
                 reason="Capability configuration or the Runtime binding changed before synchronization.",
@@ -234,10 +236,12 @@ class CapabilityProjectionReconciler:
                 result = await deliver()
         except Exception:
             logger.exception("Capability delivery did not return a receipt bot_id=%s", state.bot_id)
-            result = _unknown_delivery()
-            write_blocked = True
+            write_blocked = device_delivery
+            result = _unknown_delivery() if device_delivery else RuntimeProjectionResult.pending(
+                code="PASSPORT_RUNTIME_UNAVAILABLE", reason="MCP 授权配置尚未完成同步",
+            )
         else:
-            write_blocked = result.delivery_uncertain
+            write_blocked = device_delivery and result.delivery_uncertain
             if write_blocked:
                 result = RuntimeProjectionResult.combine(result, _unknown_delivery())
         accepted = await asyncio.to_thread(

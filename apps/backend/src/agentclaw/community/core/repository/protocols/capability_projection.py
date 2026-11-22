@@ -42,8 +42,8 @@ class CapabilityProjectionRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def begin(self, state: CapabilityProjectionState) -> bool:
-        """Fence a dispatch for exactly this revision and binding."""
+    def begin(self, state: CapabilityProjectionState, *, device_delivery: bool = True) -> bool:
+        """Verify the revision and binding, and fence any device delivery."""
         ...
 
     @abstractmethod
