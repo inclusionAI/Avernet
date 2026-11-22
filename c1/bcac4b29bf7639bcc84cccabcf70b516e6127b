@@ -1,0 +1,33 @@
+apps/backend/src/agentclaw/community/core/mcp/scoped_config_flow.py
+  s_3d36bb45bb2a35::t_1e7eacaac41392 305,307,320-330,358,368,504-505,507-509,514
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/scoped_mcp_config.py
+  s_3d36bb45bb2a35::t_e2f75171918b9d 10,13-18,31-33,50-78,99,189,191-193,195-198,201,203-204,259
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/template.py
+  s_3d36bb45bb2a35::t_3484c24ff33ae5 16,26-34,79
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/mcp.py
+  s_3d36bb45bb2a35::t_8e427a58a91623 98-99,101-103
+apps/backend/src/agentclaw/community/core/skill_center/policies/platform_default_mcp.py
+  s_3d36bb45bb2a35::t_8a6afcfaab4e4c 21-32,48-49
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_mcp_config.py
+  s_3d36bb45bb2a35::t_b25bbb81fa3560 263,285-287
+apps/backend/tests/community/core/mcp/test_scoped_config_flow.py
+  s_3d36bb45bb2a35::t_b6639f33ed0a5e 75,77,156-170,183,185,201-206
+apps/backend/tests/community/repository/bot/test_scoped_mcp_config.py
+  s_3d36bb45bb2a35::t_5fc7ded944c5ff 355-356,363-367,391-478
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c1bcac4b29bf7639bcc84cccabcf70b516e6127b",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
