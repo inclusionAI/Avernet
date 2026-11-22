@@ -338,7 +338,7 @@ class McpEndpointUnavailableError(DomainError):
 
 
 class McpProjectionNotDispatchedError(RuntimeError):
-    """Runtime MCP projection failed before any device operation started."""
+    """Every incomplete MCP device operation failed before being dispatched."""
 
 
 class ArtifactProjectionNotDispatchedError(RuntimeError):

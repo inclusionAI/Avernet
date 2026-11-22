@@ -853,6 +853,28 @@ class TestSyncMcpDesiredState:
         svc._device_sync_dispatcher.dispatch.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_runtime_retries_credential_preparation_without_declaring_an_incomplete_set(self):
+        from agentclaw.community.core.skill_center.errors import McpProjectionNotDispatchedError
+        from tests.community.core.mcp.services.test_sync_service import _make_sync_service
+
+        svc, plugin = self._make_svc()
+        sync = _make_sync_service()
+        attempts = iter([RuntimeError("credential service is unavailable"), (None, {}, "PROD", None)])
+        sync.mcp_config_service.build_mcp_sync_payload.side_effect = attempts
+        svc._mcp_sync_service = sync
+        plugin.sync_single_mcp.return_value = True
+        scope = dict(claimed=frozenset({"mcp.new"}), released=frozenset(), declared={"mcp.new"})
+
+        with pytest.raises(McpProjectionNotDispatchedError):
+            await svc.project_mcps(**scope)
+        plugin.sync_single_mcp.assert_not_called()
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+        assert await svc.project_mcps(**scope)
+        plugin.sync_single_mcp.assert_called_once()
+        plugin.sync_all_mcp_servers.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_missing_catalogue_configuration_proves_no_projection_was_dispatched(self):
         from agentclaw.community.core.skill_center.errors import McpProjectionNotDispatchedError
 

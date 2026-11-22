@@ -235,8 +235,8 @@ class CapabilityRuntimeBoundary(Protocol):
     ) -> bool:
         """Apply one MCP projection: deliver, withdraw, and declare the set.
 
-        Raise McpProjectionNotDispatchedError if preparation fails before any
-        outbound operation. False means a dispatch did not confirm delivery.
+        Raise McpProjectionNotDispatchedError when every incomplete operation
+        failed before dispatch. False means a dispatch did not confirm delivery.
         """
         ...
 

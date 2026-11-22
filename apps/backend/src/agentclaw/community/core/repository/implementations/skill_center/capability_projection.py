@@ -78,7 +78,17 @@ def _read_scope(row: BotCapabilityProjection) -> ProjectionScope:
     passport = fields.get("passport")
     if passport is None:
         # Older rows persisted the failed authorization in the result only.
-        passport = any(issue.code == "PASSPORT_RUNTIME_UNAVAILABLE" for issue in _read_result(row).issues)
+        result = _read_result(row)
+        issue_codes = {issue.code for issue in result.issues}
+        passport = "PASSPORT_RUNTIME_UNAVAILABLE" in issue_codes
+        if (
+            passport
+            and result.components.get("mcp") is RuntimeProjectionStatus.CONVERGED
+            and issue_codes <= {"PASSPORT_RUNTIME_UNAVAILABLE", "CAPABILITY_PROJECTION_PENDING"}
+        ):
+            # Legacy MCP-only receipts kept the MCP scope after a Passport
+            # failure even when the device confirmed it.
+            return ProjectionScope(skills=fields["skills"], passport=True)
     return ProjectionScope(
         skills=fields["skills"],
         mcp=fields["mcp"],

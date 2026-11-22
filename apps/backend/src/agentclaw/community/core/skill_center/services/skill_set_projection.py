@@ -309,9 +309,14 @@ class SkillSetRuntimeProjection:
                     bot_id=self.bot_id,
                     entity_id=self.entity_id,
                     engine_type=self.engine_type,
-                    **({"device_sync": device_sync} if device_sync is not None else {}),
+                    **(
+                        {"device_sync": device_sync, "report_delivery_outcome": True}
+                        if device_sync is not None else {}
+                    ),
                 )
                 if not delivery.get("success"):
+                    if delivery.get("delivery_uncertain") is False:
+                        raise McpProjectionNotDispatchedError()
                     logger.error(
                         "[sync_mcp_delivery] MCP configuration push failed: "
                         "bot_id=%s, error=%s",
@@ -345,6 +350,8 @@ class SkillSetRuntimeProjection:
                     )
                     return False
             return True
+        except McpProjectionNotDispatchedError:
+            raise
         except Exception:
             logger.warning(
                 "[sync_mcp_delivery] MCP delivery failed for bot_id=%s",

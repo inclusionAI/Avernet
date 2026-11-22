@@ -1652,6 +1652,40 @@ class TestSyncMcpDetailsForBot:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("sibling_outcome", [True, False, RuntimeError("no receipt")])
+    async def test_preflight_failure_is_retryable_only_when_siblings_acknowledge(self, sibling_outcome):
+        def prepare(*, mcp_data, **kwargs):
+            if mcp_data["server_code"] == "mcp.s0":
+                raise RuntimeError("runtime credentials are temporarily unavailable")
+            return None, {}, "PROD", None
+
+        def push(mcp_data, **kwargs):
+            if isinstance(sibling_outcome, RuntimeError):
+                raise sibling_outcome
+            return sibling_outcome
+
+        plugin = _make_plugin(sync_single_mcp=MagicMock(side_effect=push))
+        svc = _make_sync_service(plugin=plugin)
+        svc.mcp_config_service.build_mcp_sync_payload.side_effect = prepare
+
+        response = await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=self._entries(2), bot_id="bot1",
+            device_sync=plugin, report_delivery_outcome=True,
+        )
+
+        assert response["success"] is False
+        assert response["delivery_uncertain"] is (sibling_outcome is not True)
+        assert "mcp.s0" in response["error"]
+        assert ("mcp.s1" in response["error"]) is (sibling_outcome is not True)
+        assert plugin.sync_single_mcp.call_count == 1
+        assert plugin.sync_single_mcp.call_args.args[0]["server_code"] == "mcp.s1"
+
+        legacy = await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=self._entries(2), bot_id="bot1", device_sync=plugin,
+        )
+        assert legacy == {"success": False, "error": response["error"]}
+
+    @pytest.mark.asyncio
     async def test_empty_batch_does_not_touch_the_device(self):
         resolver, dispatcher, plugin = _make_resolver_and_dispatcher()
         svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)

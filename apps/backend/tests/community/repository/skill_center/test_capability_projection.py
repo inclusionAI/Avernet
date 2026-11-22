@@ -298,3 +298,39 @@ def test_passport_obligation_survives_a_superseded_authorization_receipt(superse
     assert state.revision != pending.revision
     assert state.scope.passport and state.scope.skills
     assert state.retry_pending
+
+
+def test_reads_legacy_cutover_receipt_as_passport_only_when_mcp_is_confirmed():
+    import json
+    from dataclasses import replace
+
+    from agentclaw.community.core.models.capability_projection import BotCapabilityProjection
+
+    db = _Database()
+    repository = CapabilityProjectionRepository(db)
+    address = {"bot_id": "bot", "entity_id": "owner"}
+    retired = PoolSkillMapping(corpus="local", link_name="obsolete", relative_path="obsolete")
+    current = repository.require(
+        **address,
+        scope=ProjectionScope(mcp=True, released_mcp=frozenset({"mcp.removed"})),
+        retired_mappings=(retired,),
+    )
+    confirmed = RuntimeProjectionResult.converged(components={"mcp": RuntimeProjectionStatus.CONVERGED})
+    failure = RuntimeProjectionResult.pending(code="PASSPORT_RUNTIME_UNAVAILABLE", reason="authorization failed")
+    with db.transactional_orm_session() as session:
+        row = session.get(BotCapabilityProjection, current.bot_pk)
+        scope = json.loads(row.scope_json)
+        scope.pop("passport")
+        row.scope_json = json.dumps(scope)
+        row.result_json = json.dumps(RuntimeProjectionResult.combine(confirmed, failure).to_dict())
+
+    pending = repository.prepare(**address)
+    assert pending.scope == ProjectionScope(skills=True, passport=True)
+    assert pending.retired_mappings == (retired,)
+    assert pending.revision == current.revision
+
+    both_fail = RuntimeProjectionResult.pending(code="MCP_RUNTIME_UNAVAILABLE", reason="MCP device offline")
+    with db.transactional_orm_session() as session:
+        row = session.get(BotCapabilityProjection, current.bot_pk)
+        row.result_json = json.dumps(RuntimeProjectionResult.combine(confirmed, failure, both_fail).to_dict())
+    assert repository.read(**address).scope == replace(current.scope, passport=True)

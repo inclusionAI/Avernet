@@ -35,6 +35,10 @@ def resolve_detail_device(resolver: DeviceContextResolver, resource: ResolvedBot
     return resolver.resolve_for_binding(int(binding_id), operator_id, bot_id=resource.bot_id)
 
 
+class McpDetailNotDispatchedError(RuntimeError):
+    """The detail could not be prepared before entering the device plugin."""
+
+
 async def deliver_mcp_detail(
     *,
     config_service: MCPConfigServiceProtocol,
@@ -49,6 +53,7 @@ async def deliver_mcp_detail(
     transport_protocol: Optional[str] = None,
     engine_type: Optional[str] = None,
     scoped_config_projection: bool = False,
+    report_delivery_outcome: bool = False,
 ) -> bool:
     """向单个 bot 的设备推送 MCP 配置。
 
@@ -69,87 +74,100 @@ async def deliver_mcp_detail(
     Returns:
         同步是否成功。
     """
-    # MCP Center 返回的字段是 camelCase 的 serverCode，
-    # 而内部流转时可能已转成 snake_case 的 server_code，需要兼容两种写法。
-    server_code = mcp_data.get("serverCode") or mcp_data.get("server_code", "")
-    if not server_code:
-        logger.warning("[MCPSyncService] MCP 数据缺少 server_code")
+    async def prepare(detail: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        # MCP Center 返回的字段是 camelCase 的 serverCode，
+        # 而内部流转时可能已转成 snake_case 的 server_code，需要兼容两种写法。
+        server_code = detail.get("serverCode") or detail.get("server_code", "")
+        if not server_code:
+            logger.warning("[MCPSyncService] MCP 数据缺少 server_code")
+            return None
+
+        bot_override = await asyncio.to_thread(
+            config_service.get_bot_override,
+            bot_id=bot_id,
+            owner_id=resource_entity_id,
+            server_code=server_code,
+        )
+        user_config = await asyncio.to_thread(config_service.get_user_unified_config, user_id, server_code)
+        url_override = effective_mcp_url_override(user_config, bot_override)
+        use_scoped_validation = scoped_config_projection or bool(url_override)
+        if bot_override and not use_scoped_validation:
+            verdict = await asyncio.to_thread(
+                config_service.validate_bot_override,
+                user_id=user_id,
+                server_code=server_code,
+                config=bot_override,
+                engine_type=engine_type,
+            )
+            if not verdict.get("valid"):
+                logger.warning(
+                    "[MCPSyncService] Bot MCP override 当前不可投影: "
+                    "bot_id=%s, server_code=%s, error=%s",
+                    bot_id,
+                    server_code,
+                    verdict.get("error"),
+                )
+                return None
+            current_detail = verdict.get("mcp_data")
+            if isinstance(current_detail, dict):
+                # Validate and compose from one Center snapshot. Otherwise a
+                # second, older detail carried by the caller could reintroduce
+                # the endpoint shape the validation just rejected/replaced.
+                detail = current_detail
+
+        if use_scoped_validation:
+            verdict = config_service.validate_effective_scoped_config(
+                server_code=server_code,
+                detail=detail,
+                bot_config=bot_override or {},
+                user_config=user_config or {},
+                engine_type=engine_type,
+                allow_custom_url=True,
+            )
+            if not verdict["valid"]:
+                return None
+        _api_key, merged_headers, _endpoint_env, _transport_protocol = await asyncio.to_thread(
+            config_service.build_mcp_sync_payload,
+            user_id=user_id,
+            bot_id=bot_id,
+            mcp_data=detail,
+            api_key=api_key,
+            custom_headers=custom_headers,
+            endpoint_env=endpoint_env,
+            transport_protocol=transport_protocol,
+            engine_type=engine_type,
+            bot_override=bot_override,
+            user_config_snapshot=user_config or {},
+        )
+        strict_transport_protocol = bool(
+            bot_override
+            and _transport_protocol
+            and (
+                "endpoint_env" in bot_override
+                or "transport_protocol" in bot_override
+            )
+        )
+
+        return detail, {
+            "api_key": _api_key,
+            "custom_headers": merged_headers,
+            "endpoint_env": _endpoint_env,
+            "transport_protocol": _transport_protocol,
+            "url_override": url_override,
+            "strict_transport_protocol": strict_transport_protocol,
+        }
+
+    try:
+        prepared = await prepare(mcp_data)
+    except Exception as exc:
+        if report_delivery_outcome:
+            raise McpDetailNotDispatchedError() from exc
+        raise
+    if prepared is None:
+        if report_delivery_outcome:
+            raise McpDetailNotDispatchedError()
         return False
 
-    bot_override = await asyncio.to_thread(
-        config_service.get_bot_override,
-        bot_id=bot_id,
-        owner_id=resource_entity_id,
-        server_code=server_code,
-    )
-    user_config = await asyncio.to_thread(config_service.get_user_unified_config, user_id, server_code)
-    url_override = effective_mcp_url_override(user_config, bot_override)
-    use_scoped_validation = scoped_config_projection or bool(url_override)
-    if bot_override and not use_scoped_validation:
-        verdict = await asyncio.to_thread(
-            config_service.validate_bot_override,
-            user_id=user_id,
-            server_code=server_code,
-            config=bot_override,
-            engine_type=engine_type,
-        )
-        if not verdict.get("valid"):
-            logger.warning(
-                "[MCPSyncService] Bot MCP override 当前不可投影: "
-                "bot_id=%s, server_code=%s, error=%s",
-                bot_id,
-                server_code,
-                verdict.get("error"),
-            )
-            return False
-        current_detail = verdict.get("mcp_data")
-        if isinstance(current_detail, dict):
-            # Validate and compose from one Center snapshot. Otherwise a
-            # second, older detail carried by the caller could reintroduce
-            # the endpoint shape the validation just rejected/replaced.
-            mcp_data = current_detail
-
-    if use_scoped_validation:
-        verdict = config_service.validate_effective_scoped_config(
-            server_code=server_code,
-            detail=mcp_data,
-            bot_config=bot_override or {},
-            user_config=user_config or {},
-            engine_type=engine_type,
-            allow_custom_url=True,
-        )
-        if not verdict["valid"]:
-            return False
-    _api_key, merged_headers, _endpoint_env, _transport_protocol = await asyncio.to_thread(
-        config_service.build_mcp_sync_payload,
-        user_id=user_id,
-        bot_id=bot_id,
-        mcp_data=mcp_data,
-        api_key=api_key,
-        custom_headers=custom_headers,
-        endpoint_env=endpoint_env,
-        transport_protocol=transport_protocol,
-        engine_type=engine_type,
-        bot_override=bot_override,
-        user_config_snapshot=user_config or {},
-    )
-    strict_transport_protocol = bool(
-        bot_override
-        and _transport_protocol
-        and (
-            "endpoint_env" in bot_override
-            or "transport_protocol" in bot_override
-        )
-    )
-
-    # 同步 HTTP 投递在线程池执行，避免阻塞事件循环；插件内部处理重试。
-    return await asyncio.to_thread(
-        plugin.sync_single_mcp,
-        mcp_data,
-        api_key=_api_key,
-        custom_headers=merged_headers,
-        endpoint_env=_endpoint_env,
-        transport_protocol=_transport_protocol,
-        url_override=url_override,
-        strict_transport_protocol=strict_transport_protocol,
-    )
+    # Device entry is deliberately outside the preparation failure handler.
+    detail, arguments = prepared
+    return await asyncio.to_thread(plugin.sync_single_mcp, detail, **arguments)
