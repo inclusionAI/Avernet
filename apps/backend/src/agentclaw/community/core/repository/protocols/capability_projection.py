@@ -35,6 +35,11 @@ class CapabilityProjectionState(CapabilityProjectionTarget):
     result: RuntimeProjectionResult
     write_blocked: bool
     is_current_binding: bool
+    retry_pending: bool
+
+    @property
+    def needs_recovery(self) -> bool:
+        return not self.is_current_binding or (self.retry_pending and not self.write_blocked)
 
     @property
     def revision(self) -> str:
@@ -42,6 +47,11 @@ class CapabilityProjectionState(CapabilityProjectionTarget):
 
 
 class CapabilityProjectionRepositoryProtocol(Protocol):
+    @abstractmethod
+    def validate_schema(self) -> None:
+        """Verify the additive migration before a worker serves capability writes."""
+        ...
+
     @abstractmethod
     def read(self, *, bot_id: str, entity_id: str) -> CapabilityProjectionState | None:
         """Report the current target's status without creating an obligation."""

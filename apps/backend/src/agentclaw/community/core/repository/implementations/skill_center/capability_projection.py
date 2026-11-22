@@ -9,6 +9,7 @@ from typing import cast
 
 from injector import inject
 from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from agentclaw.community.core.models.capability_projection import BotCapabilityProjection
@@ -124,6 +125,7 @@ def _snapshot(row: BotCapabilityProjection, bot: BotModel) -> CapabilityProjecti
         result=_read_result(row) if current else _queue_result(),
         write_blocked=row.dispatch_version is not None,
         is_current_binding=current,
+        retry_pending=bool(row.retry_pending),
     )
 
 
@@ -146,15 +148,16 @@ def _advance(
     retired_mappings: Sequence[PoolSkillMapping],
 ) -> None:
     if not _same_binding(row, bot):
-        # An engine change alone does not prove that the previous device
-        # lost write access. Retain its unknown dispatch if the target stayed.
-        if row.binding_id != bot.binding_id or row.device_id != bot.device_id:
-            row.dispatch_version = None
+        # Rebinding the same device or temporarily detaching a device does
+        # not make an older request unable to write there.
+        if bot.device_id and row.dispatch_device_id and row.dispatch_device_id != bot.device_id:
+            _clear_dispatch(row)
+        if bot.device_id and row.device_id and row.device_id != bot.device_id:
+            row.retired_json = "[]"
         row.binding_id = bot.binding_id
         row.device_id = bot.device_id
         row.engine_type = bot.active_engine
         scope = _merge_scope(ProjectionScope.everything(), scope)
-        row.retired_json = "[]"
     if row.version == 0:
         scope = _merge_scope(ProjectionScope.everything(), scope)
     row.version += 1
@@ -189,6 +192,16 @@ def record_capability_projection(
     return _snapshot(row, bot)
 
 
+def _mark_dispatch(row: BotCapabilityProjection, state: CapabilityProjectionState) -> None:
+    row.dispatch_version = state.version
+    row.dispatch_device_id = state.device_id
+
+
+def _clear_dispatch(row: BotCapabilityProjection) -> None:
+    row.dispatch_version = None
+    row.dispatch_device_id = None
+
+
 def _write_result(
     row: BotCapabilityProjection, result: RuntimeProjectionResult,
 ) -> None:
@@ -216,6 +229,16 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
+
+    def validate_schema(self) -> None:
+        try:
+            with self._db.orm_session() as session:
+                session.execute(select(BotCapabilityProjection.__table__).limit(0))
+        except SQLAlchemyError as error:
+            raise RuntimeError(
+                "Capability projection schema unavailable. Apply the "
+                "ac_bot_capability_projection migration before Backend startup."
+            ) from error
 
     def read(self, *, bot_id: str, entity_id: str) -> CapabilityProjectionState | None:
         with self._db.orm_session() as session:
@@ -250,10 +273,17 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
 
     def begin(self, state: CapabilityProjectionState) -> bool:
         with self._db.transactional_orm_session() as session:
-            row = self._matching_target(session, state)
-            if row is None or row.version != state.version or row.dispatch_version is not None:
+            current = self._locked_state(session, state)
+            if current is None:
                 return False
-            row.dispatch_version = state.version
+            row, bot = current
+            if (
+                not self._same_target(state, bot)
+                or row.version != state.version
+                or row.dispatch_version is not None
+            ):
+                return False
+            _mark_dispatch(row, state)
             return True
 
     def complete(
@@ -261,22 +291,36 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
         write_blocked: bool = False,
     ) -> bool:
         with self._db.transactional_orm_session() as session:
-            row = self._matching_target(session, state)
-            if row is None:
+            current = self._locked_state(session, state)
+            if current is None:
                 return False
-            if row.dispatch_version == state.version and not write_blocked:
-                row.dispatch_version = None
-            if row.version != state.version:
+            row, bot = current
+            dispatch_matches = row.dispatch_version == state.version
+            if dispatch_matches and not write_blocked:
+                _clear_dispatch(row)
+            if not self._same_target(state, bot):
+                return False
+            if row.dispatch_version not in (None, state.version):
                 return False
             if write_blocked:
-                row.dispatch_version = state.version
+                _mark_dispatch(row, state)
+            if row.version != state.version:
+                return False
             _write_result(row, result)
             return True
 
     @staticmethod
-    def _matching_target(
+    def _same_target(state: CapabilityProjectionState, bot: BotModel) -> bool:
+        return (
+            bot.binding_id == state.binding_id
+            and bot.device_id == state.device_id
+            and bot.active_engine == state.engine_type
+        )
+
+    @staticmethod
+    def _locked_state(
         session: Session, state: CapabilityProjectionState,
-    ) -> BotCapabilityProjection | None:
+    ) -> tuple[BotCapabilityProjection, BotModel] | None:
         bot = find_capability_bot(
             session, bot_id=state.bot_id, entity_id=state.entity_id, lock=True,
         )
@@ -284,12 +328,10 @@ class CapabilityProjectionRepository(CapabilityProjectionRepositoryProtocol):
             bot.id != state.bot_pk
             or bot.avernet_tenant != state.tenant
             or bot.env != state.env
-            or bot.binding_id != state.binding_id
-            or bot.device_id != state.device_id
-            or bot.active_engine != state.engine_type
         ):
             return None
-        return _get_for_bot(session, bot)
+        row = _get_for_bot(session, bot)
+        return (row, bot) if row is not None else None
 
     def due(
         self, *, env: str, limit: int, after_bot_pk: int = 0,

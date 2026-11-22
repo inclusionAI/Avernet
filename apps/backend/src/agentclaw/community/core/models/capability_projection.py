@@ -24,6 +24,7 @@ class BotCapabilityProjection(Base):
     # For runtimes without a remote ordering guarantee, persist an attempt
     # before dispatch. A newer desired-state version must not erase it.
     dispatch_version = Column(BigInteger, nullable=True)
+    dispatch_device_id = Column(String(128), nullable=True)
     retry_pending = Column(Boolean, nullable=False)
     scope_json = Column(Text, nullable=False)
     retired_json = Column(Text().with_variant(mysql.MEDIUMTEXT(), "mysql"), nullable=False)

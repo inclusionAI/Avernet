@@ -420,3 +420,25 @@ CommunityDatabase 的 operator-managed SQLite（`create_schema=false`）在启�
 ## 数字员工共享凭证保护
 
 已绑定数字员工的服务 Bot 在完整能力投影更新 AgentPass 前，通过数字员工服务申请非公开 MCP 权限，并保留历史 MCP 授权与草稿期望范围的并集。删除仅影响草稿 Runtime 配置；审批通过的发布流程在最终上线时收敛凭证范围。未绑定 Bot 的投影语义保持不变。
+
+## Existing-Bot Manifest capability delivery
+
+The deferred Manifest path writes the Bot's capability projection version,
+affected domains, and mapping retirement candidates in the same transaction as
+the corresponding desired-state change. Dispatch occurs after commit.
+Acknowledgements identify the exact Bot, binding, and desired-state version.
+For a Runtime without a confirmed ordering guarantee, a dispatch with an
+unknown outcome remains fenced until the device target changes or completion
+is established. Recovery scans for pending records and enqueues work by
+stable Bot identity, then re-reads the current binding and desired state.
+It never replays a Manifest package batch.
+
+Deploy the additive `ac_bot_capability_projection` table before starting
+Backend workers with an operator-managed database. In this directory, apply
+the `sql/2026_11_22_bot_capability_projection.sql` migration for MySQL or
+MariaDB, `sql/2026_11_22_bot_capability_projection_postgresql.sql` for
+PostgreSQL, or `sql/2026_11_22_bot_capability_projection_sqlite.sql` for SQLite.
+The managed schema bootstrap creates the same table. Existing Bots establish
+a projection baseline on their first eligible Apply. Keep the table and
+recovery workers available when disabling deferral so queued obligations can
+still reach the Runtime.
