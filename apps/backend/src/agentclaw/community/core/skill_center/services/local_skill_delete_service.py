@@ -22,6 +22,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillLayoutRollbackError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
+    LocalSkillPackageDispatchPendingError,
     LocalSkillStorageError,
 )
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
@@ -104,7 +105,9 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                 raise LocalSkillNotReadyError()
             self._skill_repo.require_unreferenced_for_delete(skill_id)
             locator = str(skill["git_path"])[len("local://") :]
-            is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=resolved_owner_id)
+            is_teclaw = self._is_teclaw(
+                bot_id=bot_id, owner_id=resolved_owner_id, name=str(skill["name"]),
+            )
             package = self._package_for_locator(
                 bot=bot,
                 owner_id=resolved_owner_id,
@@ -170,13 +173,19 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
         except Exception as exc:
             raise LocalSkillStorageError() from exc
 
-    def _is_teclaw(self, *, bot_id: str, owner_id: str) -> bool:
+    def _is_teclaw(self, *, bot_id: str, owner_id: str, name: str) -> bool:
         try:
             context = self._device_context_resolver_provider().resolve_for_bot(
                 bot_id, owner_id
             )
         except Exception as exc:
             raise LocalSkillStorageError() from exc
+        if self._skill_repo.has_pending_local_skill_dispatch(
+            bot_id=bot_id, entity_id=owner_id, name=name,
+        ) and self._skill_repo.has_pending_local_skill_dispatch(
+            bot_id=bot_id, entity_id=owner_id, name=name, binding_id=context.binding_id,
+        ):
+            raise LocalSkillPackageDispatchPendingError()
         return context.provider == "teclaw"
 
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:

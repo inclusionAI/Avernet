@@ -80,6 +80,15 @@ class _Repo:
     def __init__(self) -> None:
         self.created: list[dict] = []
 
+    def has_pending_local_skill_dispatch(self, **_kwargs):
+        return False
+
+    def reserve_local_skill_dispatch(self, **kwargs):
+        return ("key", kwargs["name"])
+
+    def finish_local_skill_dispatch(self, _key, _attempt):
+        pass
+
     def get_bot_local_by_name(self, **kwargs):
         return None
 
@@ -423,6 +432,9 @@ class _Guard:
         await self._lock.acquire()
         return object()
 
+    def refresh(self, _lease):
+        assert self._lock.locked()
+
     def release(self, _lease):
         self._lock.release()
         return True
@@ -734,6 +746,7 @@ def _service(
     package_runtime=None,
     security_observer=None,
     security_observation_enabled=True,
+    local_skill_parallelism=1,
 ):
     return LocalSkillUploadService(
         repo or _Repo(),
@@ -747,6 +760,7 @@ def _service(
         package_runtime or _LegacyPackageRuntime(),
         lambda: security_observer or _CapturedSecurityObserver(),
         security_observation_enabled,
+        local_skill_parallelism=local_skill_parallelism,
     )
 
 

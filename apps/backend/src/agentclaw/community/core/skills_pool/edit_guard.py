@@ -113,14 +113,6 @@ class SkillsPoolEditGuard:
                 "Another skill update is already in progress; please retry shortly"
             )
 
-        # Legacy Bots have no Pool rollback to serialize against, but still
-        # need this ordinary mutex so concurrent same-name uploads cannot both
-        # observe an absent Skill and create competing records/packages.
-        if not participation.participates_in_pool_layout:
-            return SkillsPoolEditLease(
-                key="", token=None, ordinary_lock_entry=ordinary_lock_entry
-            )
-
         try:
             lease = self._acquire_for_edit(scope=scope)
         except CacheLockInfrastructureError as exc:
@@ -264,6 +256,18 @@ class SkillsPoolEditGuard:
         return SkillsPoolEditLease(
             key=key, token=token, ttl_seconds=self._LOCK_TTL_SECONDS
         )
+
+    def refresh(self, lease: SkillsPoolEditLease) -> None:
+        """Renew a held lease before publishing or committing another package."""
+        assert lease.token is not None and lease.ttl_seconds is not None
+        try:
+            held = self._cache.renew_lock_strict(
+                lease.key, lease.token, ttl=lease.ttl_seconds
+            )
+        except CacheLockInfrastructureError as exc:
+            raise SkillsPoolEditLockUnavailableError("Local Skill edit lease cannot be renewed") from exc
+        if not held:
+            raise SkillsPoolEditBusyError("Local Skill edit lease was lost")
 
     def release(self, lease: SkillsPoolEditLease) -> bool:
         if lease.token is None:
