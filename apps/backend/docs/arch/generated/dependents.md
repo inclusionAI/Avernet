@@ -192,7 +192,6 @@ _No dependents in the boundary-significant set._
 - `agentclaw.community.core.expert_chat`
 - `agentclaw.community.core.grt_chat`
 - `agentclaw.community.core.mcp`
-- `agentclaw.community.core.ports`
 - `agentclaw.community.core.repository`
 - `agentclaw.community.core.resources`
 - `agentclaw.community.core.service_bot`
@@ -261,6 +260,7 @@ _No dependents in the boundary-significant set._
 
 - `agentclaw.community.core.apply_engine`
 - `agentclaw.community.core.bot_genome`
+- `agentclaw.community.core.devices`
 - `agentclaw.community.core.repository`
 - `agentclaw.community.core.resources`
 - `agentclaw.community.core.skill_center`

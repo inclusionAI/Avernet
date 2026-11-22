@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
-from agentclaw.community.core.devices.services.device_context import RuntimeBindingTarget
+from .runtime_binding import RuntimeBindingTarget
 
 
 class PackagePublication(StrEnum):
