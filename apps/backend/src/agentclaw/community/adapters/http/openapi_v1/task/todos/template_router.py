@@ -81,7 +81,7 @@ async def create_todo_template(
     ),
 ) -> Envelope[TodoTemplateDetailResponse]:
     """Create a template identity and its first draft as a Space Admin."""
-    detail = await run_in_threadpool(
+    detail = await run_in_threadpool(  # allow-run-in-threadpool: TodoTemplateManagementServiceProtocol method is synchronous.
         service.create_template,
         space_id=body.space_id,
         actor_id=user_id,
@@ -114,7 +114,7 @@ async def list_todo_templates(
     ),
 ) -> Envelope[Page[TodoTemplateRecordResponse]]:
     """List Todo templates visible to a Space member."""
-    result = await run_in_threadpool(
+    result = await run_in_threadpool(  # allow-run-in-threadpool: TodoTemplateManagementServiceProtocol method is synchronous.
         service.list_templates,
         space_id=space_id,
         actor_id=user_id,
@@ -144,7 +144,7 @@ async def get_todo_template(
     ),
 ) -> Envelope[TodoTemplateDetailResponse]:
     """Read template metadata and ordered versions as a Space member."""
-    result = await run_in_threadpool(
+    result = await run_in_threadpool(  # allow-run-in-threadpool: TodoTemplateManagementServiceProtocol method is synchronous.
         service.get_template,
         template_id=template_id,
         actor_id=user_id,

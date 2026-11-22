@@ -196,7 +196,7 @@ async def create_todo_from_template(
         )
         for key, value in body.participant_bindings.items()
     }
-    result = await run_in_threadpool(
+    result = await run_in_threadpool(  # allow-run-in-threadpool: TodoTemplateCreationServiceProtocol method is synchronous.
         service.create_todo_from_template,
         space_id=space_id,
         actor_id=actor_id,
@@ -305,7 +305,9 @@ async def resume_todo(
 ) -> Envelope[TodoResponse]:
     """Resume an interrupted or blocked Todo."""
     actor_id = call_user(user_id=user_id, principal=principal)
-    result = await run_in_threadpool(service.resume, todo_id=todo_id, actor_id=actor_id)
+    result = await run_in_threadpool(  # allow-run-in-threadpool: TodoStageServiceProtocol method is synchronous.
+        service.resume, todo_id=todo_id, actor_id=actor_id
+    )
     return envelope(TodoResponse.from_record(result), request)
 
 
@@ -321,7 +323,7 @@ async def cancel_todo(
 ) -> Envelope[TodoResponse]:
     """Cancel a Todo explicitly as its creator or a Space admin."""
     actor_id = call_user(user_id=user_id, principal=principal)
-    result = await run_in_threadpool(
+    result = await run_in_threadpool(  # allow-run-in-threadpool: TodoStageServiceProtocol method is synchronous.
         service.cancel, todo_id=todo_id, actor_id=actor_id, reason=body.reason
     )
     return envelope(TodoResponse.from_record(result), request)
