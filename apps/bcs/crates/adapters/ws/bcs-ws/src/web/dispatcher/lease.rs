@@ -12,6 +12,14 @@ use super::*;
 struct LeaseParams {
     #[serde(alias = "groupId")]
     group_id: String,
+    /// Session scope for a user-level (UserBound) connection: the frame
+    /// declares WHICH session the command targets, mirroring `chat.send`'s
+    /// frame-borne session resolution (dispatcher::resolve_bcs_session_id).
+    /// This is a scope DECLARATION, never a grant — session facts are
+    /// re-verified on every command by authorize_chat_send, and a session
+    /// outside this Group reads as absent.
+    #[serde(default, alias = "sessionId")]
+    session_id: Option<String>,
     /// Only `lease.release` needs the lease coordinates being given back;
     /// acquire/preempt/current take nothing beyond the authenticated actor.
     #[serde(default, alias = "leaseId")]
@@ -74,13 +82,15 @@ pub(super) async fn handle_lease_command(
     let group = params.group_id.clone();
     let session_id = match auth {
         WorkbenchConnectionAuth::SessionBound { group_id, session_id, .. } => {
-            if group_id != &group {
+            if group_id != &group
+                || params.session_id.as_deref().is_some_and(|frame| frame != session_id.as_str())
+            {
                 return send_error(tx, &req.id, "token_scope_mismatch",
                     "Request scope does not match the connection token").await;
             }
             Some(session_id.clone())
         }
-        WorkbenchConnectionAuth::UserBound { .. } => None,
+        WorkbenchConnectionAuth::UserBound { .. } => params.session_id.clone(),
     };
     // Recheck persisted membership on every command, not just connect:
     // an authenticated principal (including a mock principal) is not a member.

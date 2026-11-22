@@ -185,6 +185,9 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     const humanUserId = authenticatedHumanId || options.identityId;
     this.speakingLeaseService = new GroupSpeakingLeaseService({
       groupId: options.groupId,
+      // 会话作用域声明：与 chat.send 的 session_id 同构，UserBound 连接下
+      // 服务端据此对会话参与者做发言权实查（session-only 成员的授权通道）。
+      sessionId: options.sessionId,
       // 服务端 holderActorId 形如 human_{userId}；认证 Human 优先，不能沿用 Bot 查看身份。
       humanActorId: `human_${humanUserId}`,
       send: (frame) => this.sendQuestionFrame(frame),

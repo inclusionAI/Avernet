@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 from urllib.parse import urlsplit
 
 from injector import inject
+
+from agentclaw.community.core.bot_management.addressing import ResolvedBotContext
 
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
 from agentclaw.community.core.mcp.mcp_market_service_protocol import MCPMarketServiceProtocol
@@ -32,6 +35,8 @@ from agentclaw.community.core.mcp.errors import (
     McpServerNotFoundError,
 )
 from agentclaw.community.core.mcp.scoped_config_contract import (
+    BotMCPConfigPatch,
+    BotMCPConfigUpdate,
     HeaderGroup,
     MCPScopedConfigServiceProtocol,
     ScopedMCPConfig,
@@ -399,3 +404,75 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
             sync_service=self._sync_service,
             capability_reader=self._capability_reader,
         )
+
+
+    def read_bot(
+        self, *, bot: ResolvedBotContext, server_code: str
+    ) -> dict[str, Any]:
+        return self._bot_config_repo.get_by_bot_and_server_code(
+            bot_id=bot.bot_id, owner_id=bot.entity_id, server_code=server_code,
+        ) or {}
+
+    async def patch_bot(
+        self, *, bot: ResolvedBotContext, server_code: str, patch: BotMCPConfigPatch
+    ) -> BotMCPConfigUpdate:
+        headers = {}
+        names = set()
+        for key, value in patch.get("headers", {}).items():
+            name = key.strip()
+            if name.lower() in names:
+                raise McpConfigValueError("Duplicate MCP Header name")
+            names.add(name.lower())
+            headers[name] = value
+        if headers:
+            validation = self._config_service.validate_scoped_headers(
+                server_code=server_code,
+                entries=tuple(headers.items()),
+            )
+            if not validation["valid"]:
+                raise McpConfigValueError("Invalid or platform-managed MCP Header")
+            patch = {**patch, "headers": headers}
+        url = patch.get("url")
+        if url is not None:
+            _compile_url_rules((URLRule(url=url, bots=()),), set())
+
+        setting_override = url is not None or any(value is not None for value in headers.values())
+        detail = None
+        if setting_override:
+            # Validate known LOCAL servers before setting a remote override.
+            # Missing catalog entries can still accept an explicit URL.
+            try:
+                detail = await asyncio.to_thread(self._market_service.get_mcp_detail, server_code)
+            except Exception:
+                raise McpMarketUnavailableError("MCP Center unavailable") from None
+            if detail and (detail.get("runMode") or detail.get("run_mode")) == "LOCAL":
+                raise McpConfigValueError("LOCAL MCP does not accept remote configuration")
+
+        config, changed = await asyncio.to_thread(
+            self._command_repo.patch_bot,
+            bot_pk=bot.bot_pk, bot_id=bot.bot_id, entity_id=bot.entity_id,
+            current_owner_id=bot.current_owner_id, server_code=server_code, patch=patch,
+        )
+        try:
+            effective = await asyncio.to_thread(
+                self._capability_reader.effective_mcp_server_codes,
+                bot_id=bot.bot_id, owner_id=bot.current_owner_id, bot=bot.bot,
+            )
+            if server_code not in effective:
+                return BotMCPConfigUpdate(config, changed, "SKIPPED", "MCP_NOT_EFFECTIVE")
+            if not setting_override:
+                detail = await asyncio.to_thread(self._market_service.get_mcp_detail, server_code)
+            delivery = await self._sync_service.sync_mcp_details_for_bot(
+                user_id=bot.current_owner_id,
+                entity_id=bot.entity_id,
+                bot_id=bot.bot_id,
+                mcp_entries=[detail or {"serverCode": server_code}],
+                engine_type=bot.bot.get("active_engine") or bot.bot.get("engine"),
+                config_target=bot,
+            )
+            if delivery.get("success"):
+                return BotMCPConfigUpdate(config, changed, "CONVERGED")
+        except Exception:
+            # The write is durable and delivery errors can contain connection data.
+            pass
+        return BotMCPConfigUpdate(config, changed, "DEGRADED", "MCP_PROJECTION_FAILED")

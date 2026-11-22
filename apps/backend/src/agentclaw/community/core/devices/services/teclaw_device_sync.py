@@ -271,20 +271,20 @@ class TeclawDeviceSyncService(DeviceSync):
             self._record_draft_artifact(artifact)
         except HttpClientStatusError as e:
             logger.error(
-                "[TeclawDeviceSyncService.%s] HTTP error for bot=%s: %s - %s",
-                caller, self._bot_id, e.response.status_code, e.response.text,
+                "[TeclawDeviceSyncService.%s] HTTP error for bot=%s: %s",
+                caller, self._bot_id, e.response.status_code,
             )
             return {"success": False, "message": f"HTTP 错误: {e.response.status_code}"}
         except HttpClientRequestError as e:
             logger.error(
                 "[TeclawDeviceSyncService.%s] request failed for bot=%s: %s",
-                caller, self._bot_id, e,
+                caller, self._bot_id, type(e).__name__,
             )
             return {"success": False, "message": f"请求失败: {e}"}
         except Exception as e:  # compose / transport errors must not crash callers
-            logger.exception(
+            logger.error(
                 "[TeclawDeviceSyncService.%s] error for bot=%s: %s",
-                caller, self._bot_id, e,
+                caller, self._bot_id, type(e).__name__,
             )
             return {"success": False, "message": f"投递失败: {e}"}
 

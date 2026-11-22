@@ -671,8 +671,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # workflow adds seven Bot-path-addressed user-scoped operations under
 # /bots/{bot_id}/eval: path 226 -> 233.
 # Admin Caller expiry correction adds one Bot-addressed operation: 233 -> 234.
-_BOT_ID_PLACEMENT = {"path": 235, "query": 2, "none": 161}
 # Read-only Caller status adds one Bot-path operation: 234 -> 235.
+# Bot MCP config read and update add two Bot-path operations: 235 -> 237.
+# The three Dima Todo source reads have no Bot dimension: none 158 -> 161.
+_BOT_ID_PLACEMENT = {"path": 237, "query": 2, "none": 161}
 
 
 def _schema() -> dict:
@@ -898,7 +900,8 @@ def test_the_pinned_number_of_operations_take_it():
     # Read-only Caller status adds one user-taking operation: 317 -> 318.
     # The three Dima Todo source reads are Human-scoped and each names the
     # authenticated user explicitly: 318 -> 321.
-    assert len(taking) == 321
+    # Bot MCP config read and update both name the acting user: 321 -> 323.
+    assert len(taking) == 323
 
 
 def test_the_exempt_operations_take_none():

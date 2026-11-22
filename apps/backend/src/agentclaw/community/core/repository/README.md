@@ -398,6 +398,7 @@ internal_dependencies:
   - agentclaw.community.core.base  # Declarative ORM base for Todo persistence models
   - agentclaw.community.utils.avernet_tenant_guard  # Tenant column guard for Todo ORM models
   - agentclaw.community.core.mcp.errors  # scoped ownership can change after preflight
+  - agentclaw.community.core.mcp.scoped_config_contract  # sparse Bot Header and URL updates
   - agentclaw.community.core.mcp.config_comparison  # pure HTTP Header/value equivalence for idempotent Apply claims
   - agentclaw.community.core.ports.mcp_config  # preserve / clear / replace on an atomic Direct MCP claim
   - agentclaw.community.kernel.bot_ownership_sync

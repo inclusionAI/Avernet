@@ -30,6 +30,12 @@ const LEASE_POLL_INTERVAL_MS = 10_000;
 export interface GroupSpeakingLeaseServiceConfig {
   /** 当前群（lease.* params 的 groupId）。 */
   groupId: string;
+  /**
+   * 当前会话（lease.* params 的 sessionId）：帧上的会话作用域声明，与
+   * chat.send 的 session_id 同构。用户级连接下，服务端按它对会话参与
+   * 者做发言权实查；不配置则帧不带该字段（群作用域语义，行为同旧版）。
+   */
+  sessionId?: string;
   /** 本地认证 Human 的业务 actor id（human_{userId}），与服务端 holderActorId 同构。 */
   humanActorId: string;
   /** 出站 lease.* 帧发送（包装层注入的 transport.send）；断线下在发送处拒绝。 */
@@ -145,8 +151,8 @@ export class GroupSpeakingLeaseService {
     this.setRequesting(true);
     try {
       const result = preempt
-        ? await this.command('lease.preempt', { groupId: this.config.groupId })
-        : await this.command('lease.acquire', { groupId: this.config.groupId });
+        ? await this.command('lease.preempt', this.leaseParams())
+        : await this.command('lease.acquire', this.leaseParams());
       return this.applyLeaseResult(result);
     } catch (error) {
       // 指令失败（发送/超时/服务端拒绝）落 error 态，等待 UI 重试；具体提示由 hook 层负责。
@@ -163,11 +169,10 @@ export class GroupSpeakingLeaseService {
     if (!this.config.isConnected() || !lease) return;
     this.setRequesting(true);
     try {
-      await this.command('lease.release', {
-        groupId: this.config.groupId,
-        leaseId: lease.leaseId,
-        leaseEpoch: lease.epoch,
-      });
+      await this.command(
+        'lease.release',
+        this.leaseParams({ leaseId: lease.leaseId, leaseEpoch: lease.epoch }),
+      );
     } finally {
       this.setRequesting(false);
     }
@@ -178,14 +183,21 @@ export class GroupSpeakingLeaseService {
   async refresh(): Promise<void> {
     if (!this.config.isConnected()) return;
     try {
-      const result = await this.command('lease.current', {
-        groupId: this.config.groupId,
-      });
+      const result = await this.command('lease.current', this.leaseParams());
       this.applyLeaseResult(result);
     } catch (error) {
       this.clearLease('error');
       console.error('[GroupSpeakingLeaseService] refresh failed:', error);
     }
+  }
+
+  /** lease.* 帧公共参数：会话作用域声明（sessionId 可选回落到群语义）。 */
+  private leaseParams(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      groupId: this.config.groupId,
+      ...(this.config.sessionId ? { sessionId: this.config.sessionId } : {}),
+      ...extra,
+    };
   }
 
   private async command(

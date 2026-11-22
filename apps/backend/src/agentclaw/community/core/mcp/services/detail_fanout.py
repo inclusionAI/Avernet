@@ -54,7 +54,7 @@ async def fan_out_mcp_details(
             except Exception as e:
                 logger.error(
                     "[MCPSyncService] 同步 %s 异常, bot_id=%s, error=%s",
-                    server_code, bot_id, e,
+                    server_code, bot_id, type(e).__name__,
                 )
                 return False
 
@@ -70,7 +70,7 @@ async def fan_out_mcp_details(
         if isinstance(result, Exception):
             logger.error(
                 "[MCPSyncService] 任务异常 %s, bot_id=%s, error=%s",
-                server_code_of(mcp), bot_id, result,
+                server_code_of(mcp), bot_id, type(result).__name__,
             )
             failures.append(mcp)
         elif result:

@@ -101,7 +101,8 @@ class TestPendingAuthorization:
         # The horizon is the payload's own spelling: submitted_at plus
         # the frozen window, not a re-derived clock.
         assert descriptor.deadline == (
-            submitted_at + timedelta(seconds=600)
+            submitted_at
+            + timedelta(seconds=600)
         ).isoformat()
         assert descriptor.application_id == "sim-passport-aa11"
 

@@ -383,7 +383,28 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                 owner_id=req.entity_id,
                 server_code=server_code,
             )
-            if bot_override:
+            user_config = self._mcp_config_service.get_user_unified_config(
+                req.user_id, server_code
+            )
+            url_override = effective_mcp_url_override(user_config, bot_override)
+            if url_override and (
+                detail_failure is None or isinstance(detail_failure, McpDetailUnavailableError)
+            ):
+                verdict = self._mcp_config_service.validate_effective_scoped_config(
+                    server_code=server_code,
+                    detail=md,
+                    bot_config=bot_override or {},
+                    user_config=user_config or {},
+                    engine_type=req.engine_type,
+                    allow_custom_url=True,
+                )
+                if not verdict.get("valid"):
+                    raise McporterComposeError(
+                        f"MCP {server_code}: persisted remote override is no longer valid"
+                    )
+                if isinstance(detail_failure, McpDetailUnavailableError):
+                    detail_failure = None
+            elif bot_override:
                 verdict = self._mcp_config_service.validate_bot_override(
                     user_id=req.user_id,
                     server_code=server_code,
@@ -413,9 +434,6 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     "local-MCP registry has no entry for it). MCP Center is "
                     "unreachable or holds no record for this code."
                 ) from detail_failure
-            user_config = self._mcp_config_service.get_user_unified_config(
-                req.user_id, server_code
-            )
             api_key, headers, endpoint_env, transport = (
                 self._mcp_config_service.build_mcp_sync_payload(
                     user_id=req.user_id,
@@ -433,7 +451,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     headers=headers,
                     endpoint_env=endpoint_env,
                     transport_protocol=transport,
-                    url_override=effective_mcp_url_override(user_config, bot_override),
+                    url_override=url_override,
                     strict_transport_protocol=bool(
                         bot_override
                         and transport
