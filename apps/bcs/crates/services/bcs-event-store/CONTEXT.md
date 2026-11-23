@@ -55,3 +55,18 @@ when it affects zero rows. Empty claims execute one SQL statement; nonempty
 claims retain their full atomic transaction, fencing and recovery semantics.
 `src/db.rs` implements the repository contract, with private SQL operations,
 validation and row mapping split under `src/db/`. No schema changes are required.
+
+## Memory repository layout
+
+`src/memory.rs` owns the in-memory store state, the scope/producer/stream lock
+registry, the runtime constructors and commit helpers, and the shared input
+validators. Its private siblings mirror the `src/db/` layout:
+`src/memory/repo.rs` holds the single `EventRepoPort` implementation,
+`src/memory/fanout.rs` owns state-level append, causation and target creation,
+`src/memory/delivery.rs` owns delivery due/eligibility/lane ordering plus the
+claim, completion and replay bodies, and `src/memory/retention.rs` owns purge
+eligibility and the retention sweep. The port methods whose bodies live in
+`memory/delivery.rs` or `memory/retention.rs` remain thin delegating shells, so
+port signatures, lock acquisition order and `.await` points are unchanged.
+Cross-sibling helpers are `pub(super)`; the public surface stays
+`MemoryEventStore` and its existing public methods.
