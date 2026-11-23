@@ -1,0 +1,23 @@
+apps/bcs/crates/services/bcs-group-store/src/memory.rs
+  s_774269863f0994::t_80fc05b2734648 159,166-249
+apps/bcs/crates/services/bcs-group/CONTEXT.md
+  s_774269863f0994::t_8c6f11083173c7 75-81
+apps/bcs/scripts/e2e-test/group_card_story.py
+  s_774269863f0994::t_1d72ee3b0f94d1 89-128,191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "269c600482185022d0c40b404b3e9cbb9d08931b",
+  "prompts": {},
+  "sessions": {
+    "s_774269863f0994": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207e4-ceb0-7293-9d0f-801f6862cd56",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
