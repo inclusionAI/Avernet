@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/cron/services/test_cron_relay_uses_resolver.py
+  s_3d36bb45bb2a35::t_9037829775d3e4 107-109,2633-2636
+apps/backend/tests/community/endpoints/test_openapi_skill_delete.py
+  s_3d36bb45bb2a35::t_e9eef770d12970 17,33,45,141,153-154,201-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32247008b0a611883caac44a895cd88aa3ac2509",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

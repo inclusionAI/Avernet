@@ -1,0 +1,22 @@
+engine/adapter/src/engine/community/plugins/openclaw/service_layout_probe.py
+  s_b08b2045502443::t_79221318f785b3 5,45-51
+engine/adapter/src/engine/community/plugins/openclaw/tests/test_service_layout_probe.py
+  s_b08b2045502443::t_de3c28d3127447 14,23,27-34,66-93
+  s_b08b2045502443::t_f7c2adc074ad65 2,94-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "862b524139d4082818ee5037eb764bfc8fa3875f",
+  "prompts": {},
+  "sessions": {
+    "s_b08b2045502443": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f3d6-4bdb-7ad3-83e1-269a178f33ac",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

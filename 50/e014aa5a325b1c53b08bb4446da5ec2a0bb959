@@ -1,0 +1,30 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_projection.py
+  s_3d36bb45bb2a35::t_9b06a5ef4898c3 40-50,174,191-194,277,279-286,294-296,332,337,372,392,394
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_reconcile.py
+  s_3d36bb45bb2a35::t_9b06a5ef4898c3 51
+apps/backend/src/agentclaw/community/core/repository/protocols/capability_projection.py
+  s_3d36bb45bb2a35::t_9b06a5ef4898c3 34,36,52
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_9b06a5ef4898c3 121,127-130,144-149,157-163,206-216,227,237,244-245
+apps/backend/src/agentclaw/community/core/skill_center/services/recovering_bot_runtime_projector.py
+  s_3d36bb45bb2a35::t_9b06a5ef4898c3 138,142-147
+  s_3d36bb45bb2a35::t_63ba052b1e5e76 136-137,139-141,148
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_952b57f6daafd7 228-307
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "50e014aa5a325b1c53b08bb4446da5ec2a0bb959",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
