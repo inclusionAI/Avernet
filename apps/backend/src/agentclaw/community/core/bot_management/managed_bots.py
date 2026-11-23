@@ -97,14 +97,9 @@ class ManagedBotService(ManagedBotServiceProtocol):
 
     def statuses(self, *, template_key: str, targets: list[tuple[str, str]]) -> list[dict[str, Any]]:
         items = []
-        for bot_id, owner_id in dict.fromkeys(targets):
-            try:
-                self.snapshot(bot_id=bot_id, owner_id=owner_id, template_key=template_key)
-            except BotAddressNotFoundError:
-                continue
-            bot = self.lifecycle.get_bot(bot_id, owner_id)
+        for bot in self.repository.statuses(template_key=template_key, targets=targets):
             item = {
-                'bot_id': bot_id, 'owner_id': owner_id, 'status': bot.get('status') or '',
+                'bot_id': bot['bot_id'], 'owner_id': bot['owner_id'], 'status': bot.get('status') or '',
                 'is_ready': is_bot_ready(bot),
             }
             ext = resolve_status_ext(bot, response_ext={}, public=True)

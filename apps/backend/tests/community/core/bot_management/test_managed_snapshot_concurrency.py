@@ -5,16 +5,29 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from sqlalchemy.orm import Session
 
-from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
-from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
-from agentclaw.community.core.bot_management.services.template_service import TemplateService
+from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
+    AicodingProvisioningStrategy,
+)
+from agentclaw.community.core.bot_management.engines.provisioning import (
+    BotProvisioningContext,
+)
+from agentclaw.community.core.bot_management.services.template_service import (
+    TemplateService,
+)
 from agentclaw.community.core.bot_management.snapshot_guard import (
-    ManagedSnapshotConflictError, ManagedSnapshotPersistenceError, template_snapshot_hash, validate_snapshot_write,
+    ManagedSnapshotConflictError,
+    ManagedSnapshotPersistenceError,
+    template_snapshot_hash,
+    validate_snapshot_write,
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.repository.implementations.bot.template import TemplateRepository
-from agentclaw.community.plugin_api.bot_template_write_extension import TemplateWriteInvalidInput
-from tests.community.core.bot_management.test_template_bot_repository import Database, seed
+from agentclaw.community.core.repository.implementations.bot.template import (
+    TemplateRepository,
+)
+from agentclaw.community.plugin_api.bot_template_write_extension import (
+    TemplateWriteInvalidInput,
+)
+from tests.community.core.bot_management.managed_bot_support import Database, seed
 
 
 class ProductionShapeDatabase(Database):
@@ -144,4 +157,40 @@ def test_resync_does_not_clear_a_marker_written_during_its_projection(monkeypatc
         context, {'entity_id': 'owner', 'entity_type': 'staff'}, None,
         runtime_reconciler=reconciler, template_service=service,
     ) is True
+    assert repository.get_by_bot_id('bot')['ext'] == latest
+
+
+@pytest.mark.parametrize('replace_before_scheduling', [False, True])
+def test_delayed_resync_worker_cannot_adopt_a_newer_operations_snapshot(monkeypatch, replace_before_scheduling):
+    db = ProductionShapeDatabase()
+    seed(db)
+    repository = TemplateRepository(db)
+    old = {'template_key': 'coding', 'template_version_id': 7, '_aicoding_restart': {
+        'resync_authorization': True, 'template_version_id': 7,
+    }}
+    latest = {**old, 'template_version_id': 9, '_aicoding_restart': {
+        'resync_authorization': True, 'template_version_id': 9,
+    }}
+    repository.update_by_bot_id('bot', {'ext': latest if replace_before_scheduling else old})
+    service = TemplateService(repository, TokenVault(master_key=''))
+    workers = []
+
+    class DelayedThread:
+        def __init__(self, target, **_kwargs):
+            workers.append(target)
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr('agentclaw.community.core.bot_management.engines.aicoding.strategy.threading.Thread', DelayedThread)
+    reconciler = Mock(project_mcp_and_cli=AsyncMock())
+    context = BotProvisioningContext(bot_id='bot', owner_id='owner', bot_type='personal',
+                                    active_engine='aicoding', template_type='architect', template_config=old)
+    assert AicodingProvisioningStrategy('aicoding').refresh_restart_authorization(
+        context, {'entity_id': 'owner', 'entity_type': 'staff'}, None,
+        runtime_reconciler=reconciler, template_service=service,
+    ) is True
+    if not replace_before_scheduling:
+        repository.update_by_bot_id('bot', {'ext': latest})
+    workers[0]()
     assert repository.get_by_bot_id('bot')['ext'] == latest
