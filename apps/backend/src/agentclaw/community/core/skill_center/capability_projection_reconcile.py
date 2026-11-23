@@ -88,4 +88,5 @@ class CapabilityProjectionCompetitionProtocol(Protocol):
         retired_mappings: Sequence[PoolSkillMapping],
         legacy: Callable[[], Awaitable[RuntimeProjectionResult]],
         mcp_and_cli_only: bool = False,
+        desktop_recovery: bool = False,
     ) -> RuntimeProjectionResult: ...

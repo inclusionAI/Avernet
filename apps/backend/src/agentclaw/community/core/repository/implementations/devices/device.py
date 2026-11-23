@@ -495,6 +495,7 @@ class DeviceRepository(
         # Read-merge-write so other device_props keys (callback_token,
         # sandbox_id, adapter_port, ...) survive. Binding gone → silent no-op.
         with self._db.orm_session() as db:
+            begin_guarded_transaction(db, purpose="Device property merge")
             row = (
                 db.query(EntityDeviceBinding.device_props)
                 .filter(EntityDeviceBinding.id == binding_id)

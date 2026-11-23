@@ -202,6 +202,7 @@ class CapabilityProjectionReconciler:
         retired_mappings: Sequence[PoolSkillMapping],
         legacy: Callable[[], Awaitable[RuntimeProjectionResult]],
         mcp_and_cli_only: bool = False,
+        desktop_recovery: bool = False,
     ) -> RuntimeProjectionResult:
         """Run standalone configuration and lifecycle delivery on the same lease."""
         if entity_id is None:
@@ -229,14 +230,15 @@ class CapabilityProjectionReconciler:
                 if binding is None:
                     return _ApplyDelivery._not_ready()
                 return await self._deliver_standalone(
-                    lease, binding, scope, retired_mappings, mcp_and_cli_only=mcp_and_cli_only,
+                    lease, binding, scope, retired_mappings,
+                    mcp_and_cli_only=mcp_and_cli_only, desktop_recovery=desktop_recovery,
                 )
         except CapabilityDeliveryUnavailable:
             return self.delivery_busy()
 
     async def _deliver_standalone(
         self, lease: CapabilityDeliveryLease, binding: RuntimeBindingTarget, scope: ProjectionScope,
-        retired_mappings: Sequence[PoolSkillMapping], *, mcp_and_cli_only: bool,
+        retired_mappings: Sequence[PoolSkillMapping], *, mcp_and_cli_only: bool, desktop_recovery: bool,
     ) -> RuntimeProjectionResult:
         evidence = self.retirement_evidence(binding)
         previous = await asyncio.to_thread(evidence.load) if scope.skills else ()
@@ -247,7 +249,11 @@ class CapabilityProjectionReconciler:
             plan = await asyncio.to_thread(
                 self._projector.resolve_plan, bot_id=binding.bot_id, owner_id=binding.owner_id, scope=scope,
             )
-            if not is_bot_ready(plan.bot):
+            recovering_pending_desktop = (
+                desktop_recovery and plan.bot.get("bot_type") == "desktop"
+                and str(plan.bot.get("status") or "").upper() == "PENDING"
+            )
+            if not is_bot_ready(plan.bot) and not recovering_pending_desktop:
                 return _ApplyDelivery._not_ready()
             if mcp_and_cli_only:
                 operation = partial(self._projector.apply_mcp_and_cli_plan, plan=plan, scope=scope)

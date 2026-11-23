@@ -42,7 +42,7 @@ class EntityDeviceBinding(Base):
     env = Column(String(16), nullable=False, default="dev")
 
     # Device properties — stored as JSON string
-    # Contains provider-specific data like sandbox_id, client_id, callback_token, etc.
+    # Contains provider data and private evidence for unresolved Local Skill retirements.
     device_props = Column(Text, nullable=False, default="{}")
 
     # Binding status — one of DeviceBindingStatus enum values:

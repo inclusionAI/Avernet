@@ -263,3 +263,27 @@ async def test_standalone_retirement_survives_failed_delivery(tmp_path, retry_wi
     after = bindings.get_by_id(4).device_props
     assert after["adapter_port"] == 20003
     assert all(after[key] is None for key in after if key != "adapter_port")
+
+
+@pytest.mark.asyncio
+async def test_existing_desktop_recovery_delivers_a_pending_bots_skills():
+    class PendingDesktop(_Projector):
+        def resolve_plan(self, **kwargs):
+            plan = super().resolve_plan(**kwargs)
+            plan.bot = {"status": "PENDING", "bot_type": "desktop"}
+            return plan
+
+    async def unused_legacy():
+        pytest.fail("The current Bot is using combined capability delivery")
+
+    projector = PendingDesktop(RuntimeProjectionResult.converged())
+    reconciler = _reconciler(projector, _Device())
+    args = dict(**ADDRESS, owner_id="owner", scope=ProjectionScope(skills=True),
+                retired_mappings=(), legacy=unused_legacy)
+    normal = await reconciler.project_competing_change(**args)
+    assert normal.issues[0].code == "BOT_RUNTIME_NOT_READY"
+    assert projector.calls == []
+
+    recovering = await reconciler.project_competing_change(**args, desktop_recovery=True)
+    assert recovering.status is RuntimeProjectionStatus.CONVERGED
+    assert len(projector.calls) == 1

@@ -333,7 +333,7 @@ class DesktopSkillRecoveryTaskHandler:
         else:
             projection = await self._delivery.project_competing_change(
                 bot_id=bot_id, owner_id=owner_id, entity_id=latest_bot.get("entity_id"),
-                scope=scope, retired_mappings=retired_mappings, legacy=deliver,
+                scope=scope, retired_mappings=retired_mappings, legacy=deliver, desktop_recovery=True,
             )
         projection = self._preserve_permanent_prepare_issues(
             projection,
