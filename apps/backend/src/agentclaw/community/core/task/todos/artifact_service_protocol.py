@@ -9,14 +9,19 @@ from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactKind,
     TodoArtifactRecord,
     TodoExecutionCredential,
+    TodoExecutionRecord,
 )
 
 
 @runtime_checkable
 class TodoArtifactServiceProtocol(Protocol):
     def issue_execution(
-        self, *, todo_id: str, executor_id: str
+        self, *, todo_id: str, executor_id: str, stage_instance_id: str | None = None
     ) -> TodoExecutionCredential: ...
+
+    def authorize_execution(
+        self, *, todo_id: str, todo_execution_id: str, execution_token: str
+    ) -> "TodoExecutionRecord": ...
 
     def bind_run_id(self, *, execution_id: str, run_id: str) -> None: ...
 
@@ -28,6 +33,8 @@ class TodoArtifactServiceProtocol(Protocol):
         todo_id: str,
         todo_execution_id: str,
         execution_token: str,
+        summary: str | None = None,
+        result: dict[str, object] | None = None,
     ) -> None: ...
 
     def report_artifact(

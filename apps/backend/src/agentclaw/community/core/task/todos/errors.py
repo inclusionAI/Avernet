@@ -52,3 +52,15 @@ class TodoArtifactStorageNotConfiguredError(InternalError):
 
 class TodoArtifactStorageError(InternalError):
     """The configured object store failed an operation."""
+
+
+class TodoTemplateValidationError(ValidationError):
+    """A Todo template definition violates the supported product contract."""
+
+
+class TodoTemplateNotFoundError(NotFound):
+    """The requested Todo template or version is outside the current scope."""
+
+
+class TodoTemplateStateConflictError(Conflict):
+    """The requested Todo template mutation is illegal in its current state."""

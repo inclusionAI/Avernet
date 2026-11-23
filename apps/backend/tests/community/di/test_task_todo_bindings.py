@@ -4,9 +4,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from injector import Injector, Module
 
+from agentclaw.community.core.repository.implementations.task.todos import (
+    TodoTemplateRepository,
+)
+from agentclaw.community.core.repository.protocols.task.todo_templates import (
+    TodoTemplateRepositoryProtocol,
+)
+from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
+)
+from agentclaw.community.core.task.todos.template_management_protocol import (
+    TodoTemplateManagementServiceProtocol,
 )
 from agentclaw.community.core.task.todos.collaboration.in_process import (
     InProcessTodoCollaborationAdapter,
@@ -17,6 +28,17 @@ from agentclaw.community.di.modules.task.todo_bindings import (
     TaskTodoBindings,
 )
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
+from agentclaw.community.plugin_api.database import DatabasePlugin
+
+
+class _InstanceModule(Module):
+    def __init__(self, instances: dict[type, object]):
+        self._instances = instances
+
+    def configure(self, binder):
+        for interface, instance in self._instances.items():
+            binder.bind(interface, to=instance)
+
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -112,3 +134,24 @@ def test_task_todo_bindings_wire_in_process_collaboration_adapter():
 
     assert isinstance(adapter, InProcessTodoCollaborationAdapter)
     assert adapter._service is context_collab
+
+
+def test_task_todo_bindings_resolve_template_repository_and_service():
+    repository_module = _InstanceModule({DatabasePlugin: object()})
+    repository_injector = Injector([TaskTodoBindings(), repository_module])
+    repository = repository_injector.get(TodoTemplateRepositoryProtocol)
+
+    assert isinstance(repository, TodoTemplateRepository)
+    assert repository._codec is not None
+
+    repository_module = _InstanceModule(
+        {
+            TodoTemplateRepositoryProtocol: repository,
+            SpaceAccessServiceProtocol: object(),
+        }
+    )
+    service_injector = Injector([TaskTodoBindings(), repository_module])
+    service = service_injector.get(TodoTemplateManagementServiceProtocol)
+
+    assert service._repository is repository
+    assert service._space_access is not None
