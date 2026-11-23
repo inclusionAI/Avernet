@@ -15,6 +15,7 @@ consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"
   - "Some core domain repository protocols (injected for sandbox-resolution etc.)"
 internal_dependencies:
+  - agentclaw.community.plugins.community.service_bot_release_audit
   - agentclaw.community.plugin_api.bcs_collaboration_metadata   # recording fake for the one-shot collaboration repair
   - agentclaw.community.plugin_api.bcs_ownership
   - agentclaw.community.plugins.community.knowledge_catalog

@@ -325,6 +325,7 @@ def test_inventory_matches_full_records_without_reading_offloaded_artifacts(
     BotPublishModel.__table__.create(engine)
     db = MagicMock()
     db.orm_session.side_effect = sessionmaker(bind=engine).begin
+    db.transactional_orm_session.side_effect = sessionmaker(bind=engine).begin
     objects = {}
 
     def put_object(key, body):
