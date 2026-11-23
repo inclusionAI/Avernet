@@ -72,6 +72,13 @@ The crate owns group session business rules and lifecycle decisions. It does not
 
 ## Tests
 
+- `python3 apps/bcs/scripts/e2e-test/group_card_story.py --binary apps/bcs/target/debug/bcs`
+  launches an isolated real HTTP server. ManagerWorker and StateMachine PATCH
+  responses are checked against read-only SQLite metadata/Card rows for label
+  replacement, omission, no-op version/timestamp preservation, clear, restore,
+  per-key deletion, and rejection without partial mutation. It preserves the
+  caller's LLVM profile path and also runs in the Singlebox story inventory.
+
 - `cargo test --package bcs-group --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-group --all-targets --manifest-path src/bcs/Cargo.toml`
 

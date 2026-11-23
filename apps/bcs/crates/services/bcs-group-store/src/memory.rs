@@ -51,99 +51,6 @@ impl MemoryGroupRepo {
     }
 }
 
-impl MemoryGroupRepo {
-    async fn commit_mutation_snapshot(
-        &self,
-        command: CommitGroupEventfulMutation,
-    ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
-        let mut groups = self.groups.write().await;
-        let current = groups
-            .get(&command.group_id)
-            .cloned()
-            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
-        if current.version != command.expected_version {
-            return Err(ServiceError::Conflict(format!(
-                "Group '{}' expected version {}, found {}",
-                command.group_id, command.expected_version, current.version
-            )));
-        }
-        if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
-            super::validate_catalog_labels(&current,patch.catalog_labels.as_ref())?;
-        }
-        let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
-        if deleting && command.event.is_some() {
-            return Err(ServiceError::InvalidOperation {
-                message: "Group deletion is not part of the public Event Catalog".to_string(),
-                request_id: None,
-            });
-        }
-        let mut candidate = current;
-        apply_memory_group_mutation(&mut candidate, &command.mutation, command.mutated_at_ms)?;
-
-        let mut cards = self.card_templates.write().await;
-        if let Some(event) = command.event.as_ref() {
-            let event_store =
-                self.event_store
-                    .as_ref()
-                    .ok_or_else(|| ServiceError::InvalidOperation {
-                        message:
-                            "Eventful Memory Group mutation requires the shared Memory Event Store"
-                                .to_string(),
-                        request_id: None,
-                    })?;
-            event_store
-                .commit_group_mutation(&command.group_id, event, || {
-                    if deleting {
-                        groups.remove(&command.group_id);
-                    } else {
-                        groups.insert(command.group_id.clone(), candidate.clone());
-                    }
-                    Ok(())
-                })
-                .await
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-        } else if deleting {
-            if let Some(event_store) = self.event_store.as_ref() {
-                let env =
-                    self.event_env
-                        .as_deref()
-                        .ok_or_else(|| ServiceError::InvalidOperation {
-                            message: "Memory Group deletion requires an Event environment"
-                                .to_string(),
-                            request_id: None,
-                        })?;
-                event_store
-                    .commit_group_deletion(&command.group_id, env, command.mutated_at_ms, || {
-                        groups.remove(&command.group_id);
-                        Ok(())
-                    })
-                    .await
-                    .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-            } else {
-                // Eventing is an optional capability in isolated tests and
-                // embedded callers. Without an Event Store there can be no
-                // subscriptions or pending deliveries to reconcile.
-                groups.remove(&command.group_id);
-            }
-        } else {
-            groups.insert(command.group_id.clone(), candidate.clone());
-        }
-        if deleting {
-            cards.remove(&command.group_id);
-            self.catalog_labels.write().await.remove(&command.group_id);
-        } else if matches!(&command.mutation, GroupEventfulMutation::PatchMutableFields(patch) if patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some()) {
-            super::card_template::update_memory_template(&mut cards, &candidate);
-        }
-        if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
-            if let Some(labels)=&patch.catalog_labels { self.catalog_labels.write().await.insert(command.group_id.clone(),labels.clone()); }
-        }
-        let catalog_labels = self.catalog_labels.read().await
-            .get(&command.group_id).cloned().unwrap_or_default();
-        Ok(bcs_service_api::types::GroupMutationSnapshot { group: candidate, catalog_labels })
-    }
-
-}
-
 fn normalize_service_mode_for_metrics(mode: Option<&str>) -> Option<String> {
     match mode.map(str::trim).filter(|s| !s.is_empty()) {
         None => None,
@@ -249,14 +156,97 @@ impl GroupRepoPort for MemoryGroupRepo {
         &self,
         command: CommitGroupEventfulMutation,
     ) -> ServiceResult<DomainGroup> {
-        Ok(self.commit_mutation_snapshot(command).await?.group)
+        Ok(self.commit_eventful_mutation_with_snapshot(command).await?.group)
     }
 
     async fn commit_eventful_mutation_with_snapshot(
         &self,
         command: CommitGroupEventfulMutation,
     ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
-        self.commit_mutation_snapshot(command).await
+        let mut groups = self.groups.write().await;
+        let current = groups
+            .get(&command.group_id)
+            .cloned()
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        if current.version != command.expected_version {
+            return Err(ServiceError::Conflict(format!(
+                "Group '{}' expected version {}, found {}",
+                command.group_id, command.expected_version, current.version
+            )));
+        }
+        if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
+            super::validate_catalog_labels(&current,patch.catalog_labels.as_ref())?;
+        }
+        let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
+        if deleting && command.event.is_some() {
+            return Err(ServiceError::InvalidOperation {
+                message: "Group deletion is not part of the public Event Catalog".to_string(),
+                request_id: None,
+            });
+        }
+        let mut candidate = current;
+        apply_memory_group_mutation(&mut candidate, &command.mutation, command.mutated_at_ms)?;
+
+        let mut cards = self.card_templates.write().await;
+        if let Some(event) = command.event.as_ref() {
+            let event_store =
+                self.event_store
+                    .as_ref()
+                    .ok_or_else(|| ServiceError::InvalidOperation {
+                        message:
+                            "Eventful Memory Group mutation requires the shared Memory Event Store"
+                                .to_string(),
+                        request_id: None,
+                    })?;
+            event_store
+                .commit_group_mutation(&command.group_id, event, || {
+                    if deleting {
+                        groups.remove(&command.group_id);
+                    } else {
+                        groups.insert(command.group_id.clone(), candidate.clone());
+                    }
+                    Ok(())
+                })
+                .await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        } else if deleting {
+            if let Some(event_store) = self.event_store.as_ref() {
+                let env =
+                    self.event_env
+                        .as_deref()
+                        .ok_or_else(|| ServiceError::InvalidOperation {
+                            message: "Memory Group deletion requires an Event environment"
+                                .to_string(),
+                            request_id: None,
+                        })?;
+                event_store
+                    .commit_group_deletion(&command.group_id, env, command.mutated_at_ms, || {
+                        groups.remove(&command.group_id);
+                        Ok(())
+                    })
+                    .await
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            } else {
+                // Eventing is an optional capability in isolated tests and
+                // embedded callers. Without an Event Store there can be no
+                // subscriptions or pending deliveries to reconcile.
+                groups.remove(&command.group_id);
+            }
+        } else {
+            groups.insert(command.group_id.clone(), candidate.clone());
+        }
+        if deleting {
+            cards.remove(&command.group_id);
+            self.catalog_labels.write().await.remove(&command.group_id);
+        } else if matches!(&command.mutation, GroupEventfulMutation::PatchMutableFields(patch) if patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some()) {
+            super::card_template::update_memory_template(&mut cards, &candidate);
+        }
+        if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
+            if let Some(labels)=&patch.catalog_labels { self.catalog_labels.write().await.insert(command.group_id.clone(),labels.clone()); }
+        }
+        let catalog_labels = self.catalog_labels.read().await
+            .get(&command.group_id).cloned().unwrap_or_default();
+        Ok(bcs_service_api::types::GroupMutationSnapshot { group: candidate, catalog_labels })
     }
 
     async fn upsert(&self, group: DomainGroup) -> ServiceResult<()> {
