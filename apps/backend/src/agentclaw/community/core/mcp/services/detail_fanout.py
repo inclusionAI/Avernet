@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
+from agentclaw.community.core.mcp.services.detail_delivery import McpDetailNotDispatchedError
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -21,6 +23,13 @@ def server_code_of(mcp: dict[str, Any]) -> str:
     return mcp.get("server_code") or mcp.get("serverCode") or ""
 
 
+@dataclass(frozen=True, slots=True)
+class McpDetailBatchOutcome:
+    successes: list[dict[str, Any]]
+    failures: list[dict[str, Any]]
+    delivery_uncertain: bool
+
+
 async def fan_out_mcp_details(
     *,
     mcps: list[dict[str, Any]],
@@ -28,7 +37,20 @@ async def fan_out_mcp_details(
     concurrency: int,
     bot_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """并发把 ``mcps`` 交给 ``push_one`` 投递,返回 ``(successes, failures)``。
+    outcome = await deliver_mcp_detail_batch(
+        mcps=mcps, push_one=push_one, concurrency=concurrency, bot_id=bot_id,
+    )
+    return outcome.successes, outcome.failures
+
+
+async def deliver_mcp_detail_batch(
+    *,
+    mcps: list[dict[str, Any]],
+    push_one: Callable[[dict[str, Any]], Awaitable[bool]],
+    concurrency: int,
+    bot_id: str,
+) -> McpDetailBatchOutcome:
+    """并发投递详情并等待全部回执，区分准备失败与投递结果未知。
 
     并发上限有两条理由,缺一不可:每条投递最终是一次设备侧阻塞 HTTP,放开会把
     单台引擎压垮;而投递经 ``asyncio.to_thread`` 落到 event loop 的默认线程池
@@ -48,9 +70,11 @@ async def fan_out_mcp_details(
                     "[MCPSyncService] 跳过无 server_code 的 MCP, bot_id=%s, mcp=%s",
                     bot_id, mcp,
                 )
-                return False
+                raise McpDetailNotDispatchedError()
             try:
                 return await push_one(mcp)
+            except McpDetailNotDispatchedError:
+                raise
             except Exception as e:
                 logger.error(
                     "[MCPSyncService] 同步 %s 异常, bot_id=%s, error=%s",
@@ -64,6 +88,7 @@ async def fan_out_mcp_details(
 
     successes: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
+    delivery_uncertain = False
     for mcp, result in zip(mcps, results, strict=True):
         if isinstance(result, asyncio.CancelledError):
             raise result
@@ -73,8 +98,13 @@ async def fan_out_mcp_details(
                 server_code_of(mcp), bot_id, type(result).__name__,
             )
             failures.append(mcp)
+            if not isinstance(result, McpDetailNotDispatchedError):
+                delivery_uncertain = True
         elif result:
             successes.append(mcp)
+            if result is not True:
+                delivery_uncertain = True
         else:
             failures.append(mcp)
-    return successes, failures
+            delivery_uncertain = True
+    return McpDetailBatchOutcome(successes, failures, delivery_uncertain)

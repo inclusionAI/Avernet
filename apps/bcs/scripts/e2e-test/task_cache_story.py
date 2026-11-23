@@ -34,6 +34,8 @@ def main():
         config['session_files']['backend'] = {'data_dir': str(root / 'files')}
         config['collaboration']['templates']['base_dir'] = str(root / 'templates')
         config_path = root / 'bcs-config-local.json'
+        (root / "catalog-labels.toml").write_bytes((Path(__file__).resolve().parents[2] / "configs/catalog-labels.toml").read_bytes())
+        (root / "catalog-labels.toml").write_bytes((Path(__file__).resolve().parents[2] / "configs/catalog-labels.toml").read_bytes())
         config_path.write_text(json.dumps(config))
         env = dict(os.environ, SERVER_ENV='local', BCS_SECRET_BCN_GROUP_SESSION_WS_JWT=uuid.uuid4().hex, BCS_TASK_CACHE_DB=str(root / 'bcs.db'),
                    BCS_TASK_CACHE_FIXTURE=f'http://127.0.0.1:{fixture_port}',

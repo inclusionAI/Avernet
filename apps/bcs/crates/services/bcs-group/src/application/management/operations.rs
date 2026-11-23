@@ -4,12 +4,15 @@ use super::*;
 
 #[async_trait]
 impl GroupManagementService for GroupManagement {
+    fn normalize_catalog_labels(&self,input:bcs_service_api::types::catalog_labels::CatalogLabelsInput)->ServiceResult<bcs_service_api::types::catalog_labels::CatalogLabels> {
+        self.catalog_label_policy.normalize(input)
+    }
 
     async fn create_group(
         &self,
         cmd: GroupCreateCommand,
     ) -> Result<GroupDetailResult, GroupUseCaseError> {
-        self.create_group_impl(cmd).await
+        self.with_detail_catalog_labels(self.create_group_impl(cmd).await?).await
     }
 
     async fn create_dm(&self, cmd: DmCreateCommand) -> Result<DmCreateResult, GroupUseCaseError> {
@@ -51,7 +54,7 @@ impl GroupManagementService for GroupManagement {
                 },
             ))
             .await?;
-        Ok(group_to_detail(updated))
+        self.with_detail_catalog_labels(group_to_detail(updated)).await
     }
 
     async fn add_member(
@@ -352,7 +355,7 @@ impl GroupManagementService for GroupManagement {
                 },
             ))
             .await?;
-        Ok(group_to_detail(group))
+        self.with_detail_catalog_labels(group_to_detail(group)).await
     }
 
     async fn update_label(
@@ -377,7 +380,7 @@ impl GroupManagementService for GroupManagement {
                 }),
             ))
             .await?;
-        Ok(group_to_detail(updated))
+        self.with_detail_catalog_labels(group_to_detail(updated)).await
     }
 
     async fn update_visibility(
@@ -442,7 +445,7 @@ impl GroupManagementService for GroupManagement {
                 }),
             ))
             .await?;
-        Ok(group_to_detail(updated))
+        self.with_detail_catalog_labels(group_to_detail(updated)).await
     }
 
     async fn update_routing_policy(

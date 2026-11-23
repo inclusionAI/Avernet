@@ -17,6 +17,12 @@ core/repository/
 └── implementations/  the ORM bodies — each declaring its Protocol(s) as a base
 ```
 
+Recycle activation claims take an explicit validator from the dormant domain.
+The repository invokes that policy against the locked Bot row in the same
+transaction as the `RECYCLED` → `REACTIVATING` claim; it does not select engine
+policy or decide personal/Teclaw eligibility. Rollback applies the same domain
+validation under its existing transaction.
+
 Repositories are not plugins. Each has exactly one implementation, and database selection remains the `DatabasePlugin` injected into the constructor.
 `BotRepository.list_catalog_bots_by_owner_bot_pairs` is a bounded (100-pair)
 read without COUNT, equivalent to the existing exact-pair first page including
@@ -165,6 +171,8 @@ imports in the finite set of legacy writers. There is no new CI exemption.
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - RecycleRepository
+  - BotRecycleRepositoryProtocol
   - OwnershipSyncReadRepository
   - SqlOwnershipSyncReadRepository
   - CollaborationRepairReadRepository
@@ -222,6 +230,8 @@ provides:
   - SourceCredentialRepository
   - CapabilityDesiredStateRepositoryProtocol
   - CapabilityDesiredStateRepository
+  - CapabilityProjectionRepositoryProtocol
+  - CapabilityProjectionRepository
   - MCPDefaultExclusionReaderProtocol
   - SkillEditorRequestRepositoryProtocol
   # task / forum
@@ -399,6 +409,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.base  # Declarative ORM base for Todo persistence models
   - agentclaw.community.utils.avernet_tenant_guard  # Tenant column guard for Todo ORM models
+  - agentclaw.community.core.bot_dormant
   - agentclaw.community.core.mcp.errors  # scoped ownership can change after preflight
   - agentclaw.community.core.mcp.scoped_config_contract  # sparse Bot Header and URL updates
   - agentclaw.community.core.mcp.config_comparison  # pure HTTP Header/value equivalence for idempotent Apply claims

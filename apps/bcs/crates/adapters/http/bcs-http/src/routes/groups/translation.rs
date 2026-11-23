@@ -105,6 +105,19 @@ pub(crate) fn group_use_case_error_to_http(error: GroupUseCaseError) -> HttpAdap
                 mode, actor_kind
             ))
         }
+        GroupUseCaseError::Service(ServiceError::A2aManagement(error))
+            if error.code == bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::InvalidRequest
+                && (error.field == "catalog_labels" || error.field.starts_with("catalog_labels.")) =>
+        {
+            HttpAdapterError::BadRequestStructured {
+                message: format!("invalid catalog_labels: {}", error.reason),
+                params: serde_json::json!({
+                    "code": "invalid_request",
+                    "field": error.field,
+                    "reason": error.reason,
+                }),
+            }
+        }
         GroupUseCaseError::Service(ServiceError::ExistNonPublicBots { bots }) => {
             let bot_list: Vec<Value> = bots
                 .iter()

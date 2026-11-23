@@ -85,7 +85,7 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
                 owner_user_id: owner.into(), mutation: AuthorityMutation {
             mutation_id: uuid::Uuid::new_v4().to_string(), actor: AuthorityActor::Provider {provider_id:provider_id.into()},
         }};
-        let snapshot = A2aBotRecord { bot_uuid: bot_uuid.clone(), provider_id: provider_id.into(),
+        let snapshot = A2aBotRecord { catalog_labels: card.catalog_labels, bot_uuid: bot_uuid.clone(), provider_id: provider_id.into(),
             provider_bot_ref: reference.clone(), agent_card_url: card.agent_card_url, agent_card: card.agent_card,
             revision:1 };
         // No network calls or locks span this transaction. The existing composite

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from injector import inject
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -20,6 +21,15 @@ from agentclaw.community.core.bot_management.repository.models import TemplateMo
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository as TemplateRepositoryProtocol
 
 logger = get_logger()
+
+
+def find_template(session: Session, bot_id: str, *, lock: bool = False) -> TemplateModel | None:
+    if bot_id == "default":
+        return None
+    query = session.query(TemplateModel).filter(TemplateModel.bot_id == bot_id)
+    if lock:
+        query = query.with_for_update()
+    return query.first()
 
 
 class TemplateRepository(
@@ -65,11 +75,8 @@ class TemplateRepository(
         """
         if bot_id == "default":
             return None
-
         with self._db.orm_session() as db:
-            template = db.query(TemplateModel).filter(
-                TemplateModel.bot_id == bot_id
-            ).first()
+            template = find_template(db, bot_id)
             return template.to_dict() if template else None
 
     def update_by_bot_id(self, bot_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:

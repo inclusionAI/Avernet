@@ -62,6 +62,9 @@ from agentclaw.community.core.repository.implementations.skill_center.mcp_defaul
 )
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.mcp.scoped_config_flow import MCPScopedConfigService
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionCompetitionProtocol,
+)
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.services.effective_mcp_state_reader import (
     EffectiveMCPStateReader,
@@ -97,7 +100,6 @@ class McpModule(Module):
         binder.bind(MCPMarketService, to=MCPMarketService, scope=singleton)
         binder.bind(MCPAuthService, to=MCPAuthService, scope=singleton)
         binder.bind(MCPConfigService, to=MCPConfigService, scope=singleton)
-        binder.bind(MCPScopedConfigService, to=MCPScopedConfigService, scope=singleton)
         binder.bind(
             EffectiveMCPStateReaderProtocol,
             to=EffectiveMCPStateReader,
@@ -202,6 +204,16 @@ class McpModule(Module):
     @inject
     def _mcp_config_service_protocol(self, svc: MCPConfigService) -> MCPConfigServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def _mcp_scoped_config_service(
+        self, injector: Injector, capability_projection: CapabilityProjectionCompetitionProtocol,
+    ) -> MCPScopedConfigService:
+        return injector.create_object(
+            MCPScopedConfigService, additional_kwargs={"capability_projection": capability_projection},
+        )
 
     @singleton
     @provider

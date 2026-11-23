@@ -251,6 +251,7 @@ pub async fn registration_chain() -> RegistrationChain {
     for sql in bcs_db_api::split_sql_statements(&[
         include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql"),
         include_str!("../../../../../migrations/sqlite/040_bot_avatar.sql"),
+        "ALTER TABLE bcs_bots ADD COLUMN catalog_labels TEXT NULL;",
     ].concat()) {
         inner.execute(DbStatement::new(sql)).await.expect("A2A registration schema");
     }

@@ -107,7 +107,11 @@ impl GroupCoreService for GroupCore {
         self.repo.read_card_snapshot(id).await
     }
 
-    async fn upsert(&self, group: Group) -> ServiceResult<()> {
+    async fn upsert(&self,group:Group)->ServiceResult<()> {
+        self.upsert_with_catalog_labels(group,None).await
+    }
+    async fn upsert_with_catalog_labels(&self, group:Group, labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+
         let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
         if let Some(registry) = &self.collaboration_registry {
             let actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
@@ -116,7 +120,21 @@ impl GroupCoreService for GroupCore {
             }
         }
         let id = group.id.clone();
-        self.repo.upsert(group).await?;
+        self.repo.upsert_with_catalog_labels(group,labels).await?;
+        self.catalog_changed(&id);
+        Ok(())
+    }
+
+    async fn create_with_catalog_labels(&self,group:Group,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        let _policy_read = match &self.policy_gate {Some(gate)=>Some(gate.read().await),None=>None};
+        if let Some(registry)=&self.collaboration_registry {
+            let actors=group.participants.iter().map(|p|p.bot_uuid.clone()).collect::<Vec<_>>();
+            if registry.collaboration_owner(&actors).await?.is_some() && group.visibility!="private" {
+                return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+            }
+        }
+        let id=group.id.clone();
+        self.repo.create_with_catalog_labels(group,labels).await?;
         self.catalog_changed(&id);
         Ok(())
     }
@@ -611,6 +629,7 @@ fn prepare_group_mutation(
     let prepared = match mutation {
         GroupMutationKind::PatchMutableFields(patch) => {
             let mut changed_fields = Vec::new();
+            if patch.catalog_labels.is_some() { changed_fields.push("catalog_labels"); }
             if let Some(label) = &patch.label
                 && group.label.as_ref() != Some(label)
             {

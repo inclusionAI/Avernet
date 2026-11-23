@@ -107,6 +107,7 @@ fn api_auth_section(body: &str) -> bcs_config_api::api_auth::ApiAuthConfig {
 /// `BcsConfig::from_file`, i.e. the real value-domain-guarded parse path.
 fn parse_full(content: &str) -> Result<BcsConfig, String> {
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("catalog-labels.toml"),include_str!("../../../../configs/catalog-labels.toml")).unwrap();
     let path = dir.path().join("bcs-config.toml");
     std::fs::write(&path, content).unwrap();
     BcsConfig::from_file(&path).map_err(|e| e.to_string())
@@ -571,6 +572,7 @@ fn trusted_origins_require_a_cookie_source() {
 
 fn write_overlay_result(base: &str, overlay: &str) -> Result<BcsConfig, String> {
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("catalog-labels.toml"),include_str!("../../../../configs/catalog-labels.toml")).unwrap();
     std::fs::write(dir.path().join("bcs-config.toml"), base).unwrap();
     // The env overlay file must exist under whichever suffix the ambient
     // SERVER_ENV resolves to; write one copy per suffix.
@@ -825,6 +827,7 @@ fn unknown_extension_value_domain_failure_is_not_retried_as_toml() {
     // its own error when the file extension is unknown: the TOML fallback is
     // reserved for JSON *syntax* parse failures only.
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("catalog-labels.toml"),include_str!("../../../../configs/catalog-labels.toml")).unwrap();
     let path = dir.path().join("bcs-config.conf");
     std::fs::write(
         &path,

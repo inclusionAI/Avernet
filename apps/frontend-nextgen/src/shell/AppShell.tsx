@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppSidebar } from './AppSidebar';
 import { OpenSourceExperienceNotice } from './OpenSourceExperienceNotice';
 import { SidebarNavList } from './SidebarNavList';
+import { SidebarUserFooter } from './SidebarUserFooter';
 import { getMergedNavigationItems, getNavigationItem } from './navigation';
 import { getRouteMeta } from './routeMeta';
 import { Points } from '@/tracking/points';
@@ -144,12 +145,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </main>
           </div>
         </div>
-        {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由页头内联入口或兜底条带的汉堡钮触发本抽屉。 */}
+        {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由页头内联入口或兜底条带的汉堡钮触发本抽屉。
+            底部用户区（返回旧版/头像/新版助手/更多）经 SidebarUserFooter 与内流侧栏展开态共用，
+            新版助手为流内 fixed 浮层（z 同 Drawer 层会被 Dialog portal 压住），点击后先收起抽屉。 */}
         {!hideNavigation && (
           <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
             <DrawerContent side="left" size="sm" showClose={false} bodyClassName="p-0 flex flex-col">
               <DrawerTitle className="sr-only">主导航</DrawerTitle>
               <SidebarNavList activePath={location.pathname} items={mergedItems} onNavigate={handleMobileNavigate} />
+              <SidebarUserFooter currentUser={currentUser} onGuideEntryIntent={() => setMobileNavOpen(false)} />
             </DrawerContent>
           </Drawer>
         )}

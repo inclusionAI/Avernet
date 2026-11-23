@@ -511,6 +511,7 @@ class SkillSetManagementService(
         scope_from_result: Callable[[DesiredStateMutation], ProjectionScope]
         | None = None,
         skip_projection_when_unchanged: bool = False,
+        on_committed: Callable[[DesiredStateMutation], None] | None = None,
     ) -> dict:
         """Apply one desired-state mutation and synchronously reconcile runtime.
 
@@ -533,6 +534,7 @@ class SkillSetManagementService(
             scope=scope,
             scope_from_result=scope_from_result,
             skip_projection_when_unchanged=skip_projection_when_unchanged,
+            on_committed=on_committed,
         )
         self._audit(
             bot_id=bot_id,

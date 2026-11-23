@@ -76,6 +76,33 @@ describe('filterPublicBotsByMetadata', () => {
     expect(kept[1]).toBe(unmatched);
   });
 
+  it('回填 bot_type 到 botType，仅识别 service/personal，未知类型与无记录候选不回填', async () => {
+    const serviceBot = compoundBot(0);
+    const personalBot = compoundBot(1);
+    const unknownTypeBot = compoundBot(2);
+    const bareBot = compoundBot(3, { id: 'bare-bot' });
+    fetchMetadata.mockResolvedValue([
+      // 有可用 online 发布的 service Bot 才会出现在广场列表（否则被普通列表清洗拆除）。
+      metadataRecord({ bot_id: 'assistant', owner_id: 'owner-0' }, { bot_type: 'service', online_available: true }),
+      metadataRecord({ bot_id: 'assistant', owner_id: 'owner-1' }, { bot_type: 'personal' }),
+      metadataRecord({ bot_id: 'assistant', owner_id: 'owner-2' }, { bot_type: 'other' }),
+    ]);
+
+    const kept = await filterPublicBotsByMetadata({
+      bots: [serviceBot, personalBot, unknownTypeBot, bareBot],
+      userId: '7',
+      backendEnabled: true,
+      fetchMetadata,
+      signal,
+    });
+
+    expect(kept[0].botType).toBe('service');
+    expect(kept[1].botType).toBe('personal');
+    expect(kept[2].botType).toBeUndefined();
+    // 裸 UUID 候选无 metadata 记录：保留原对象引用，botType 保持 undefined。
+    expect(kept[3]).toBe(bareBot);
+  });
+
   it('owner_name 空白时保持「未公开」并保留原对象引用', async () => {
     const bot = compoundBot(0);
     fetchMetadata.mockResolvedValue([
@@ -247,10 +274,16 @@ describe('filterPublicBotsByMetadata', () => {
     expect(signalArg).toBe(signal);
 
     // BCS 原顺序保留；service false / service null 拆除；unknown、非 service、service true、
-    // 裸 UUID 原生 Bot 全部保留；保留对象即输入引用（bcsStatus/推荐分数/短画像不被改写）。
-    expect(kept).toEqual([keptServiceTrue, keptPersonalNull, keptUnknownRecord, keptNativeBareUuid]);
-    expect(kept).toContain(keptServiceTrue);
-    expect(kept).toContain(keptNativeBareUuid);
+    // 裸 UUID 原生 Bot 全部保留；有 metadata 记录的候选回填 botType（克隆对象），
+    // 无记录候选保留输入引用（bcsStatus/推荐分数/短画像不被改写）。
+    expect(kept).toEqual([
+      { ...keptServiceTrue, botType: 'service', isOwnedByLoggedInUser: false },
+      { ...keptPersonalNull, botType: 'personal', isOwnedByLoggedInUser: false },
+      keptUnknownRecord,
+      keptNativeBareUuid,
+    ]);
+    expect(kept[2]).toBe(keptUnknownRecord);
+    expect(kept[3]).toBe(keptNativeBareUuid);
     expect(onEnhancementUnavailable).not.toHaveBeenCalled();
   });
 

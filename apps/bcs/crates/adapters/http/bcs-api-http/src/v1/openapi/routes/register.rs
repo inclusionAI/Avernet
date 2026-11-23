@@ -41,6 +41,8 @@ pub struct RegisterQuery {
 #[derive(Default,Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RegisterBody {
+    #[serde(default,deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    catalog_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     agent_card:Option<serde_json::Value>,
     agent_card_url:Option<String>,
     #[serde(alias="bot-name")]
@@ -93,7 +95,7 @@ async fn register_bot(
         Some(name) if !name.trim().is_empty()=>name.trim().to_owned(),
         _=>return Err(invalid_request(&request_id,"missing required parameter: bot-name")),
     };
-    let command = RegisterBot {token,bot_name,mode:query.mode,
+    let command = RegisterBot {catalog_labels:body.catalog_labels,token,bot_name,mode:query.mode,
         provider_bot_ref:query.provider_bot_ref,webhook_url:query.webhook_url};
     let result = if let Some(source) = source {
         state.register_service.register_a2a_card(command,source).await

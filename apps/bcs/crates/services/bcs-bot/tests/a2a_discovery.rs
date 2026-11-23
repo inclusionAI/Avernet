@@ -26,7 +26,7 @@ async fn fixture() -> Fixture {
         friend_ext JSON, friend_check_in_strategy TEXT DEFAULT 'APPROVAL',
         gmt_create TEXT DEFAULT CURRENT_TIMESTAMP,gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY(bot_uuid,env))")).await.unwrap();
-    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")].concat()).into_iter() {
+    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql"),"ALTER TABLE bcs_bots ADD COLUMN catalog_labels TEXT NULL;"].concat()).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     let env=bcs_config::resolve_env_str();
@@ -35,7 +35,7 @@ async fn fixture() -> Fixture {
         "visibility":"public","owners":["untrusted"],"future":{"opaque":42},
         "skills":[{"id":"refund_lookup","name":"Refund lookup","description":"settlementneedle 100%_exact",
             "tags":["invoice-tag"],"futureSkill":{"opaque":"not-a-search-field"}}]});
-    let mut record=A2aBotRecord {bot_uuid:"card-1".into(),provider_id:"provider".into(),provider_bot_ref:"card-1".into(),
+    let mut record=A2aBotRecord { catalog_labels:Default::default(),bot_uuid:"card-1".into(),provider_id:"provider".into(),provider_bot_ref:"card-1".into(),
         agent_card_url:Some("https://example.org/card".into()),agent_card:raw,revision:1,};
     for (id,visibility) in [("card-1","public"),("card-2","public"),("card-private","private"),("legacy","public")] {
         let provider=if id=="card-1" {"provider".to_owned()} else {format!("provider-{id}")};

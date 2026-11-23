@@ -83,7 +83,9 @@ class TestSkillSetServiceUsesResolver:
         sync_plugin.sync_symlinks.assert_called_once_with([])
 
     @pytest.mark.asyncio
-    async def test_whole_artifact_projection_preserves_delivery_failure_detail(self):
+    @pytest.mark.parametrize("pre_dispatch", [False, True])
+    async def test_whole_artifact_projection_preserves_delivery_failure_detail(self, pre_dispatch):
+        from agentclaw.community.core.skill_center.errors import ArtifactProjectionNotDispatchedError
         from agentclaw.community.core.skill_center.services.skill_set_service import (
             SkillSetService,
         )
@@ -94,6 +96,7 @@ class TestSkillSetServiceUsesResolver:
         sync_plugin.sync_symlinks.return_value = {
             "success": False,
             "message": "MCP mcp.test.noendpoint has no endpoint",
+            **({"dispatched": False} if pre_dispatch else {}),
         }
         dispatcher = MagicMock()
         dispatcher.dispatch.return_value = sync_plugin
@@ -118,7 +121,7 @@ class TestSkillSetServiceUsesResolver:
             )
 
         with pytest.raises(
-            SkillSetRuntimeReconcileError,
+            ArtifactProjectionNotDispatchedError if pre_dispatch else SkillSetRuntimeReconcileError,
             match="mcp.test.noendpoint has no endpoint",
         ):
             await svc.project_whole_artifact(

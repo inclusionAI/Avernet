@@ -234,7 +234,7 @@ class ApplyClaimCommands:
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         """Claim Direct supply and preserve/clear/replace its override; refuse current Set supply."""
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             _skills, supplied = self._set_supply(
                 session,
@@ -297,7 +297,7 @@ class ApplyClaimCommands:
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         """Remove one Direct MCP server and its override; refuse one a Set supplies."""
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             _skills, supplied = self._set_supply(
                 session,
@@ -353,7 +353,7 @@ class ApplyClaimCommands:
         caller's check (``DirectActivationService._resolve_skill``), made
         before this runs. A runtime name a Set supplies is refused.
         """
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             supplied, _mcps = self._set_supply(
                 session,
@@ -436,7 +436,7 @@ class ApplyClaimCommands:
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         """Remove one Direct Skill; refuse one whose runtime name a Set supplies."""
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             supplied, _mcps = self._set_supply(
                 session,

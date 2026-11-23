@@ -116,6 +116,7 @@ pass "BCS built"
 
 BCS_WS_URL="ws://127.0.0.1:${BCS_PORT}/ws/bot"
 
+cp "$PROJECT_ROOT/configs/catalog-labels.toml" "$CONFIG_DIR/catalog-labels.toml"
 cat > "$CONFIG_DIR/bcs-config.toml" <<EOF
 bind = "127.0.0.1"
 port = ${BCS_PORT}

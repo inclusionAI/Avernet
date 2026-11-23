@@ -65,7 +65,20 @@ pub async fn register_provider_bot(
     State(state): State<HttpAppState>,
     Path(provider_id): Path<String>,
     headers: HeaderMap,
-    Json(req): Json<RegisterProviderBotRequest>,
+    body: Result<Json<RegisterProviderBotRequest>, JsonRejection>,
+) -> Response {
+    let Json(req)=match body {
+        Ok(body)=>body,
+        Err(error)=>return crate::routes::catalog_label_errors::rejection_response(error),
+    };
+    register_provider_bot_request(state,provider_id,headers,req).await.into_response()
+}
+
+async fn register_provider_bot_request(
+    state: HttpAppState,
+    provider_id: String,
+    headers: HeaderMap,
+    req: RegisterProviderBotRequest,
 ) -> Result<Json<RegisterProviderBotResponse>, ProviderRouteError> {
     let provider_admin_token = bearer_token(&headers)?;
     let allowed_switch_provider = state.allowed_switch_provider_ids.contains(&provider_id);
@@ -109,8 +122,11 @@ pub async fn register_provider_bot(
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .ok().and_then(|time| i64::try_from(time.as_millis()).ok())
             .ok_or_else(|| ProviderRouteError {status:StatusCode::INTERNAL_SERVER_ERROR,message:"registration clock unavailable".into()})?;
-        service.register_provider_bot(command, source, now).await
+        service.register_provider_bot_with_labels(command, source, now,req.catalog_labels.unwrap_or_default()).await
     } else {
+        if req.catalog_labels.as_ref().is_some_and(|labels|!labels.0.is_empty()) {
+            return Err(ProviderRouteError::bad_request("catalog_labels requires an AgentCard"));
+        }
         state.services.provider_management.register_provider_bot(command).await
     }.map_err(provider_error)?;
 

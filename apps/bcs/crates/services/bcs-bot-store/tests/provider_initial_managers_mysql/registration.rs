@@ -13,7 +13,7 @@ fn capabilities(id: &str) -> BotCapabilities {
     BotCapabilities {name: Some(id.into()), ..Default::default()}
 }
 fn card(id: &str) -> A2aBotRecord {
-    A2aBotRecord { bot_uuid: id.into(), provider_id: "provider-a".into(), provider_bot_ref: id.into(),
+    A2aBotRecord { catalog_labels:Default::default(), bot_uuid: id.into(), provider_id: "provider-a".into(), provider_bot_ref: id.into(),
         agent_card: serde_json::json!({"name":id}), agent_card_url: None, revision: 1 }
 }
 async fn scalar(db: &dyn DbPlugin, sql: &str) -> i64 {

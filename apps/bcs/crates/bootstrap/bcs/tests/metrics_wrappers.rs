@@ -605,7 +605,7 @@ impl FrontendDeliveryPort for FrontendDeliveryFake {
 }
 
 fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult {
-    GroupDetailResult {
+    GroupDetailResult { catalog_labels:Default::default(),
         group_id: "group-wrapper".to_string(),
         label: None,
         status,
@@ -645,7 +645,7 @@ fn participant_view(bot_uuid: &str) -> GroupParticipantView {
 }
 
 fn group_create_cmd() -> GroupCreateCommand {
-    GroupCreateCommand {
+    GroupCreateCommand { catalog_labels:Default::default(),
         human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-wrapper".to_string()),

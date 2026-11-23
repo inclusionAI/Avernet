@@ -14,6 +14,7 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.core.devices.services.device_context import DeviceContext
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
@@ -29,6 +30,7 @@ from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
+from tests.community.factories.devices import make_active_local_device
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -40,6 +42,7 @@ from tests.community.framework import (
 _OWNER = "delete-owner"
 _BOT_ID = "delete-bot"
 _TENANT = "delete-tenant"
+_DEVICE_ID = "delete-device"
 _KEY = "delete-framework-signing-key-at-least-32-bytes"
 
 
@@ -135,6 +138,7 @@ def _seed_delete(world, *, active: bool) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     storage_factory = _StorageFactory()
     with avernet_tenant_scope(_TENANT):
+        binding_id = make_active_local_device(world, owner_id=_OWNER, device_id=_DEVICE_ID)
         world.get(BotRepository).insert(
             {
                 "bot_id": _BOT_ID,
@@ -146,6 +150,8 @@ def _seed_delete(world, *, active: bool) -> None:
                 "creator_id": _OWNER,
                 "status": "ACTIVE",
                 "active_engine": "openclaw",
+                "binding_id": binding_id,
+                "device_id": _DEVICE_ID,
             }
         )
         default_set = world.get(SkillSetRepository).create(
@@ -192,7 +198,10 @@ def _seed_delete(world, *, active: bool) -> None:
             storage_factory,
             _Guard(),
             lambda: SimpleNamespace(
-                resolve_for_bot=lambda *_args: SimpleNamespace(provider="local")
+                resolve_for_bot=lambda bot_id, user_id: DeviceContext(
+                    provider="local", conn_info={}, binding_id=binding_id, bot_id=bot_id,
+                    user_id=user_id, device_id=_DEVICE_ID,
+                ),
             ),
             lambda: SimpleNamespace(record_deletion=lambda **_kwargs: None),
             False,

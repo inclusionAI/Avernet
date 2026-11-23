@@ -61,6 +61,7 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.SKILLS_CLEAN_SYMLINKS,
     Capability.SKILLS_CENTER_ENSURE,
     Capability.SKILLS_LOCAL_PACKAGE_APPLY,
+    Capability.SKILLS_LOCAL_PACKAGE_PARALLEL_TARGETS,
     # Approval
     Capability.APPROVAL_GET,
     Capability.APPROVAL_SET,

@@ -222,6 +222,7 @@ class SkillRuntimeDelivery:
             return RuntimeProjectionResult.pending(
                 code="SKILL_RUNTIME_UNAVAILABLE",
                 reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                delivery_uncertain=True,
             )
         return RuntimeProjectionResult.converged(
             components={"skills": RuntimeProjectionStatus.CONVERGED}
@@ -360,6 +361,20 @@ class SkillRuntimeDelivery:
             status=status,
             components={"skills": status},
             issues=tuple(issues),
+            delivery_uncertain=SkillRuntimeDelivery._mapping_delivery_uncertain(applied),
+        )
+
+    @staticmethod
+    def _mapping_delivery_uncertain(applied: MappingApplyResult) -> bool:
+        reason = applied.evidence.get("reason")
+        error_type = applied.evidence.get("error_type")
+        return (
+            reason in {
+                "runtime_mapping_apply_outcome_unknown", "invalid_runtime_response",
+                "invalid_runtime_status",
+            }
+            or error_type == "HTTP_408"
+            or isinstance(error_type, str) and error_type.startswith("HTTP_5")
         )
 
     @staticmethod

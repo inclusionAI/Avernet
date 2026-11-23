@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from .restart_arca import ArcaRestartTransport
+from ..restart_contract import BaasRecycleRuntime as BaasRecycleRuntime
 
 
 class BaasRestartRuntime(Protocol):

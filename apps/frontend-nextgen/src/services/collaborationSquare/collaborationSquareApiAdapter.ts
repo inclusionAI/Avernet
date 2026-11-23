@@ -353,6 +353,13 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
         realBotId,
         {
           user_id: context.userId,
+          // 自有 service Bot 显式 online：后端 POST 缺省 stage=draft 会把会话建进 draft
+          // 运行时，而 /workspace/chat 读取按 online 口径（resolveChatRuntimeStage）→ 必现
+          // 404。好友 Bot（BCN expert 路径自行规范化 stage）与 Personal Bot（聊天页读取
+          // 剥掉 stage 走默认 draft）保持缺省值，不传。
+          ...(options?.isOwnedByLoggedInUser && options?.botType === 'service'
+            ? { stage: 'online' as const }
+            : {}),
           ...(ownerId ? { owner_id: ownerId } : {}),
           // f_user_id 仅好友 Bot 会话需要；目标 Bot 归登录用户所有（自有 Bot）时不得携带。
           ...(options?.isOwnedByLoggedInUser ? {} : { f_user_id: context.userId }),

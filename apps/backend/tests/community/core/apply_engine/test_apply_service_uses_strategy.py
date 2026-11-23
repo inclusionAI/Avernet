@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from tests.community.core.apply_engine._capability_facts import materialiser_ports
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 import pytest
 from sqlalchemy import create_engine
@@ -42,6 +42,10 @@ from agentclaw.community.core.apply_engine.run.service import (
 from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
     BotConfigManifestApplyLockRepository,
     BotConfigManifestApplyRepository,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    RuntimeProjectionResult,
+    RuntimeProjectionStatus,
 )
 
 from ._empty_cli_tools import EmptyCliTools
@@ -134,7 +138,7 @@ class _InlineQueue:
         return (None, True)
 
 
-def _world(*, bot, mode, platform_activation=None, redeliver=None):
+def _world(*, bot, mode, platform_activation=None, redeliver=None, capability_projection=None):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -191,6 +195,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
         completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(bot),
+        capability_projection=capability_projection,
         delivery_strategies=DeliveryStrategyFactory(
             family_of=family_from_engine_test(teclaw_engine_test),
             strategies={
@@ -220,6 +225,68 @@ def _apply(service, bot, phase):
         phase=phase,
     )
     return service.last_apply(entity_id=_ENTITY, bot_id=bot["bot_id"])
+
+
+class _CapabilityProjection:
+    defer_enabled = True
+
+    def __init__(self):
+        self.calls = []
+        self.result = RuntimeProjectionResult.pending(
+            code="RUNTIME_UNAVAILABLE", reason="Capability synchronization is pending"
+        )
+
+    @asynccontextmanager
+    async def deferred_apply(self, *, bot_id, entity_id, owner_id):
+        @contextmanager
+        def write_scope():
+            self.calls.append(("write", bot_id))
+            yield
+
+        yield write_scope
+
+    async def finish_apply(self, *, bot_id, entity_id, initialize):
+        self.calls.append(("finish", bot_id, initialize))
+        return "bot/1", self.result
+
+    def observe(self, *, bot_id, entity_id, revision):
+        assert revision == "bot/1"
+        return self.result
+
+
+@pytest.mark.parametrize(
+    ("bot", "mode"),
+    [
+        ({**_ARCA_BOT, "active_engine": "openclaw"}, TeclawDeliveryMode.PLATFORM),
+        (_TECLAW_BOT, TeclawDeliveryMode.DEVICE),
+    ],
+)
+def test_existing_device_manifest_reports_write_and_recovery_results(bot, mode):
+    projection = _CapabilityProjection()
+    service, activation, _ = _world(bot=bot, mode=mode, capability_projection=projection)
+    accepted = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=bot["bot_id"],
+        bot=bot,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        state=MANIFEST_STATE,
+        trigger=triggers.EXPLICIT,
+    )
+
+    report = service.get_apply(
+        entity_id=_ENTITY, bot_id=bot["bot_id"], apply_id=accepted.apply_id
+    )
+    assert activation.installed == {"github"}
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert report.runtime_projection.status is RuntimeProjectionStatus.PENDING
+    assert projection.calls == [("write", bot["bot_id"]), ("finish", bot["bot_id"], True)]
+
+    projection.result = RuntimeProjectionResult.converged()
+    report = service.last_apply(entity_id=_ENTITY, bot_id=bot["bot_id"])
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert report.runtime_projection.status is RuntimeProjectionStatus.CONVERGED
+    assert len(projection.calls) == 2
 
 
 def test_the_service_selects_the_strategy_by_engine_alone() -> None:

@@ -258,6 +258,9 @@ RegisterPath:
             type: object
             additionalProperties: false
             properties:
+              catalog_labels:
+                $ref: ../domain-models.yaml#/CatalogLabelsInput
+                description: AgentCard registration metadata; omitted initializes empty. Requires a scoped gateway Card registration.
               agent_card:
                 type: object
                 description: Complete inline AgentCard, mutually exclusive with agent_card_url. Uses the same declaration and egress validation without a Card GET. Scoped v2 gateway only.

@@ -977,3 +977,24 @@ Bounded replay and composition semantics are specified in
 protected-delivery application seams.
 
 Public Agent registration accepts BCN visibility (protected by default, or public). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility.
+
+## Configured catalog labels
+
+The [BCS label contract](../../../docs/catalog-labels.md) owns dictionary,
+omission, atomic persistence, refresh fencing and complete-publication semantics.
+Service API 7.0.0 adds typed metadata and explicit preserve/replace commands;
+external Rust consumers rebuild together. Labels are not raw Card or authorization
+state. Bootstrap loads the independent policy file once; no environment overlay
+or request can extend it. See the change validation record for actual test and
+release evidence; local code is not a published or deployed revision.
+
+
+## Atomic normal-Group creation
+
+`GroupCoreService` and `GroupRepoPort` expose `create_with_catalog_labels` for
+create-only admission. Existing identities conflict atomically; a default
+implementation fails explicitly rather than doing an unsafe exists/upsert pair.
+Memory and SQL implement the contract, and legacy normal-Group creation uses it
+instead of upsert. Custom downstream Core/repo implementations must implement
+or delegate this method before using legacy creation. Trusted internal upserts
+and DM pair reuse retain their separate behavior. See the [label contract](../../../docs/catalog-labels.md).

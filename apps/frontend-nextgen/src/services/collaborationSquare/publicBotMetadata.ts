@@ -92,6 +92,9 @@ export async function filterPublicBotsByMetadata<T extends PublicBot>(
   const unavailableReferences = new Set<string>();
   const ownerNameByReference = new Map<string, string>();
   const ownershipByReference = new Map<string, boolean>();
+  // bot_type 回填：自有 service Bot 建聊需以 stage=online 与聊天页读取口径对齐
+  //（openBotConversation），Personal Bot 保持后端默认 draft；只认识 service/personal。
+  const botTypeByReference = new Map<string, 'service' | 'personal'>();
   try {
     const pairs = [...pairByKey.values()];
     for (let start = 0; start < pairs.length; start += BOT_METADATA_QUERY_CHUNK_SIZE) {
@@ -106,6 +109,8 @@ export async function filterPublicBotsByMetadata<T extends PublicBot>(
         const ownerName = record.owner_name?.trim();
         if (ownerName) ownerNameByReference.set(reference, ownerName);
         if (ownerId) ownershipByReference.set(reference, Boolean(userId.trim() && ownerId === userId.trim()));
+        const botType = record.bot_type?.trim();
+        if (botType === 'service' || botType === 'personal') botTypeByReference.set(reference, botType);
         if (isServiceUnavailableRecord(record)) unavailableReferences.add(reference);
       }
     }
@@ -128,19 +133,22 @@ export async function filterPublicBotsByMetadata<T extends PublicBot>(
     })
     .map((bot) => {
       const pair = toBotMetadataPair(bot.id);
+      const referenceKey = pair ? botOwnerKey(pair.bot_id, pair.owner_id) : bot.id.trim();
       const ownerName =
         (pair ? ownerNameByReference.get(botOwnerKey(pair.bot_id, pair.owner_id)) : undefined) ??
         ownerNameByReference.get(bot.id.trim());
       const ownership =
         (pair ? ownershipByReference.get(botOwnerKey(pair.bot_id, pair.owner_id)) : undefined) ??
         ownershipByReference.get(bot.id.trim());
+      const botType = botTypeByReference.get(referenceKey) ?? botTypeByReference.get(bot.id.trim());
       // 未匹配 Owner 时保留 candidates 判断；显式 false 必须覆盖先前的 true。
       const ownershipChanged = ownership !== undefined && ownership !== (bot.isOwnedByLoggedInUser === true);
-      if (!ownerName && !ownershipChanged) return bot;
+      if (!ownerName && !ownershipChanged && !botType) return bot;
       return {
         ...bot,
         ...(ownerName ? { ownerName } : {}),
         ...(ownership !== undefined ? { isOwnedByLoggedInUser: ownership } : {}),
+        ...(botType && botType !== bot.botType ? { botType } : {}),
       };
     });
 }

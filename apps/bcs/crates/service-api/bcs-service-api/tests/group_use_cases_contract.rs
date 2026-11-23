@@ -12,7 +12,7 @@ use bcs_test_support::{NoopGroupManagementService, NoopGroupMessageHistoryServic
 
 #[test]
 fn group_create_command_carries_caller_and_members() {
-    let cmd = GroupCreateCommand {
+    let cmd = GroupCreateCommand { catalog_labels:Default::default(),
         human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-explicit".to_string()),
@@ -86,7 +86,7 @@ fn dm_create_command_and_result_carry_create_or_reuse_semantics() {
     assert_eq!(cmd.topic.as_deref(), Some("debug incident"));
 
     let result = DmCreateResult {
-        group: GroupDetailResult {
+        group: GroupDetailResult { catalog_labels:Default::default(),
             group_id: "dm-explicit".to_string(),
             label: cmd.label.clone(),
             status: GroupStatus::Active,
@@ -166,7 +166,7 @@ fn group_result_dtos_are_route_friendly_views() {
         tags: Vec::new(),
         message_view_scope: MessageViewScope::Full,
     };
-    let detail = GroupDetailResult {
+    let detail = GroupDetailResult { catalog_labels:Default::default(),
         group_id: "group-1".to_string(),
         label: Some("Group: debug incident".to_string()),
         status: GroupStatus::Active,
@@ -254,7 +254,7 @@ async fn noop_group_management_service_fails_closed() {
     let service = NoopGroupManagementService;
 
     let created = service
-        .create_group(GroupCreateCommand {
+        .create_group(GroupCreateCommand { catalog_labels:Default::default(),
             human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             group_id: None,

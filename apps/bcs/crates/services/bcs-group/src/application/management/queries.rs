@@ -47,7 +47,7 @@ impl GroupQueryService for GroupManagement {
             .await
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
         backfill_bot_names(self.registry.as_ref(), &mut group).await;
-        Ok(group_to_detail(group))
+        self.with_detail_catalog_labels(group_to_detail(group)).await
     }
 
     async fn list_bot_groups(
