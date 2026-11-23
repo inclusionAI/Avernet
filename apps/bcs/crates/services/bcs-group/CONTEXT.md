@@ -2,6 +2,14 @@
 
 ## Provides
 
+- `mutate_with_snapshot` returns a Group PATCH's version-fenced metadata and
+  labels together. SQL captures at most one indexed Card row inside the existing
+  transaction (a current locking read on MySQL); Memory captures under its Group
+  write guard. Legacy `mutate` keeps its result and SQL read cost unchanged.
+  No-op PATCH does not write/increment the version: its strict Card snapshot
+  must still match the metadata version, or the operation returns Conflict.
+  Neither path constructs a successful response using a post-commit label read.
+
 - Optional post-commit catalog change notifications for Group creation, provisioning, metadata, visibility and deletion.
 
 - `GroupCoreService::read_card_snapshot` delegates the strict, environment-scoped

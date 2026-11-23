@@ -264,7 +264,7 @@ mod tests {
         let template = json!({"name": "Stored name", "description": "Stored goal", "skills": [{"id":"group.execute"}],
             "supportedInterfaces": [{"url":"local://groups/group", "protocolBinding":"LOCAL"}],
             "capabilities":{"extensions":[{"params":{"groupKind":"manager_worker"}}]}, "opaque":{"keep":[1,2]}});
-        let mut group = GroupCardSnapshot { catalog_labels:Default::default(),
+        let mut group = GroupCardSnapshot { version: 0, catalog_labels:Default::default(),
             group_id: "group".into(), group_kind: GroupKind::Normal, group_strategy: GroupStrategy::ManagerWorker,
             visibility: "private".into(), record_status: "active".into(), card_template: Some(template.clone()),
         };

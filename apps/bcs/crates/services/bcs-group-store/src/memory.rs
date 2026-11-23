@@ -51,110 +51,11 @@ impl MemoryGroupRepo {
     }
 }
 
-fn normalize_service_mode_for_metrics(mode: Option<&str>) -> Option<String> {
-    match mode.map(str::trim).filter(|s| !s.is_empty()) {
-        None => None,
-        Some("master_slave") => Some("master_slave".to_string()),
-        Some(_) => Some("other".to_string()),
-    }
-}
-
-#[async_trait]
-impl GroupMetricsSnapshotPort for MemoryGroupRepo {
-    async fn group_counts(&self) -> ServiceResult<Vec<GroupMetricCount>> {
-        let groups = self.groups.read().await;
-        let mut counts: Vec<GroupMetricCount> = Vec::new();
-        for group in groups.values() {
-            let service_mode = normalize_service_mode_for_metrics(group.service_mode.as_deref());
-            if let Some(existing) = counts.iter_mut().find(|count| {
-                count.status == group.status
-                    && count.kind == group.group_kind
-                    && count.group_strategy == group.group_strategy
-                    && count.service_mode == service_mode
-            }) {
-                existing.count = existing.count.saturating_add(1);
-            } else {
-                counts.push(GroupMetricCount {
-                    status: group.status,
-                    kind: group.group_kind,
-                    group_strategy: group.group_strategy,
-                    service_mode,
-                    count: 1,
-                });
-            }
-        }
-        Ok(counts)
-    }
-}
-
-#[async_trait]
-impl GroupRepoPort for MemoryGroupRepo {
-    async fn read_card_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupCardSnapshot>> {
-        let groups = self.groups.read().await;
-        let Some(group) = groups.get(id) else { return Ok(None); };
-        let cards = self.card_templates.read().await;
-        let card_template = cards.get(id).cloned().map(|card|
-            super::card_template::project_stored_template(card, id, group.label.as_deref(), group.context.as_deref())
-        ).transpose()?;
-        Ok(Some(bcs_service_api::types::GroupCardSnapshot {
-            catalog_labels:self.catalog_labels.read().await.get(id).cloned().unwrap_or_default(),
-            group_id: group.id.clone(), group_kind: group.group_kind,
-            group_strategy: group.group_strategy, visibility: group.visibility.clone(),
-            record_status: group.record_status.clone(), card_template,
-        }))
-    }
-
-    async fn has_public_group_with_members(&self, actor_ids: &[String]) -> ServiceResult<bool> {
-        let ids = actor_ids.iter().collect::<std::collections::HashSet<_>>();
-        Ok(self.groups.read().await.values().any(|g| g.visibility == "public" && g.record_status != "deleted"
-            && g.participants.iter().any(|p| ids.contains(&p.bot_uuid))))
-    }
-
-    async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
-        let event_store =
-            self.event_store
-                .as_ref()
-                .ok_or_else(|| ServiceError::InvalidOperation {
-                    message: "Memory Group provisioning requires the shared Memory Event Store"
-                        .to_string(),
-                    request_id: None,
-                })?;
-        let mut groups = self.groups.write().await;
-        let group = groups
-            .get_mut(&command.group_id)
-            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
-        if group.record_status != "provisioning" {
-            return Err(ServiceError::InvalidOperation {
-                message: format!(
-                    "Group '{}' is not awaiting provisioning finalization",
-                    command.group_id
-                ),
-                request_id: None,
-            });
-        }
-        let updated_at = command.finalized_at_ms;
-        event_store
-            .finalize_group_provisioning(
-                &command.group_id,
-                &command.subscription_ids,
-                &command.events,
-                command.finalized_at_ms,
-                &command.env,
-                || {
-                    group.record_status = "active".to_string();
-                    group.updated_at = updated_at;
-                    Ok(())
-                },
-            )
-            .await
-            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-        Ok(())
-    }
-
-    async fn commit_eventful_mutation(
+impl MemoryGroupRepo {
+    async fn commit_mutation_snapshot(
         &self,
         command: CommitGroupEventfulMutation,
-    ) -> ServiceResult<DomainGroup> {
+    ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
         let mut groups = self.groups.write().await;
         let current = groups
             .get(&command.group_id)
@@ -234,9 +135,128 @@ impl GroupRepoPort for MemoryGroupRepo {
             super::card_template::update_memory_template(&mut cards, &candidate);
         }
         if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
-            if let Some(labels)=&patch.catalog_labels { self.catalog_labels.write().await.insert(command.group_id,labels.clone()); }
+            if let Some(labels)=&patch.catalog_labels { self.catalog_labels.write().await.insert(command.group_id.clone(),labels.clone()); }
         }
-        Ok(candidate)
+        let catalog_labels = self.catalog_labels.read().await
+            .get(&command.group_id).cloned().unwrap_or_default();
+        Ok(bcs_service_api::types::GroupMutationSnapshot { group: candidate, catalog_labels })
+    }
+
+}
+
+fn normalize_service_mode_for_metrics(mode: Option<&str>) -> Option<String> {
+    match mode.map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some("master_slave") => Some("master_slave".to_string()),
+        Some(_) => Some("other".to_string()),
+    }
+}
+
+#[async_trait]
+impl GroupMetricsSnapshotPort for MemoryGroupRepo {
+    async fn group_counts(&self) -> ServiceResult<Vec<GroupMetricCount>> {
+        let groups = self.groups.read().await;
+        let mut counts: Vec<GroupMetricCount> = Vec::new();
+        for group in groups.values() {
+            let service_mode = normalize_service_mode_for_metrics(group.service_mode.as_deref());
+            if let Some(existing) = counts.iter_mut().find(|count| {
+                count.status == group.status
+                    && count.kind == group.group_kind
+                    && count.group_strategy == group.group_strategy
+                    && count.service_mode == service_mode
+            }) {
+                existing.count = existing.count.saturating_add(1);
+            } else {
+                counts.push(GroupMetricCount {
+                    status: group.status,
+                    kind: group.group_kind,
+                    group_strategy: group.group_strategy,
+                    service_mode,
+                    count: 1,
+                });
+            }
+        }
+        Ok(counts)
+    }
+}
+
+#[async_trait]
+impl GroupRepoPort for MemoryGroupRepo {
+    async fn read_card_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupCardSnapshot>> {
+        let groups = self.groups.read().await;
+        let Some(group) = groups.get(id) else { return Ok(None); };
+        let cards = self.card_templates.read().await;
+        let card_template = cards.get(id).cloned().map(|card|
+            super::card_template::project_stored_template(card, id, group.label.as_deref(), group.context.as_deref())
+        ).transpose()?;
+        Ok(Some(bcs_service_api::types::GroupCardSnapshot {
+            version: group.version,
+            catalog_labels:self.catalog_labels.read().await.get(id).cloned().unwrap_or_default(),
+            group_id: group.id.clone(), group_kind: group.group_kind,
+            group_strategy: group.group_strategy, visibility: group.visibility.clone(),
+            record_status: group.record_status.clone(), card_template,
+        }))
+    }
+
+    async fn has_public_group_with_members(&self, actor_ids: &[String]) -> ServiceResult<bool> {
+        let ids = actor_ids.iter().collect::<std::collections::HashSet<_>>();
+        Ok(self.groups.read().await.values().any(|g| g.visibility == "public" && g.record_status != "deleted"
+            && g.participants.iter().any(|p| ids.contains(&p.bot_uuid))))
+    }
+
+    async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
+        let event_store =
+            self.event_store
+                .as_ref()
+                .ok_or_else(|| ServiceError::InvalidOperation {
+                    message: "Memory Group provisioning requires the shared Memory Event Store"
+                        .to_string(),
+                    request_id: None,
+                })?;
+        let mut groups = self.groups.write().await;
+        let group = groups
+            .get_mut(&command.group_id)
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        if group.record_status != "provisioning" {
+            return Err(ServiceError::InvalidOperation {
+                message: format!(
+                    "Group '{}' is not awaiting provisioning finalization",
+                    command.group_id
+                ),
+                request_id: None,
+            });
+        }
+        let updated_at = command.finalized_at_ms;
+        event_store
+            .finalize_group_provisioning(
+                &command.group_id,
+                &command.subscription_ids,
+                &command.events,
+                command.finalized_at_ms,
+                &command.env,
+                || {
+                    group.record_status = "active".to_string();
+                    group.updated_at = updated_at;
+                    Ok(())
+                },
+            )
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn commit_eventful_mutation(
+        &self,
+        command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<DomainGroup> {
+        Ok(self.commit_mutation_snapshot(command).await?.group)
+    }
+
+    async fn commit_eventful_mutation_with_snapshot(
+        &self,
+        command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
+        self.commit_mutation_snapshot(command).await
     }
 
     async fn upsert(&self, group: DomainGroup) -> ServiceResult<()> {

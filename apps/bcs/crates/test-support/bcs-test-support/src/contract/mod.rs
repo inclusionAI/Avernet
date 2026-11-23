@@ -32,3 +32,4 @@ pub mod group_card;
 pub mod a2a_bot;
 pub mod a2a_catalog_stack;
 pub mod distributed;
+pub mod group_mutation_snapshot;

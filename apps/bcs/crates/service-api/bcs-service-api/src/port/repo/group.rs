@@ -97,6 +97,15 @@ pub trait GroupRepoPort: Send + Sync {
             request_id: None,
         })
     }
+    /// Capture labels within the mutation transaction/lock, including preserved
+    /// labels when the PATCH omits them. Never implement as commit then read.
+    async fn commit_eventful_mutation_with_snapshot(
+        &self,
+        _command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<crate::types::GroupMutationSnapshot> {
+        Err(ServiceError::InternalError("Group mutation snapshots are not configured".into()))
+    }
+
     /// Apply one already-authorized Group mutation with optimistic versioning.
     /// The returned Group is the committed post-mutation state; for Delete it
     /// is the terminal snapshot that was removed from normal reads.

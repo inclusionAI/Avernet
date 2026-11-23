@@ -28,6 +28,13 @@ impl GroupRepoPort for MySqlGroupStore {
         self.finalize_provisioning_sql(command).await
     }
 
+    async fn commit_eventful_mutation_with_snapshot(
+        &self,
+        command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
+        self.commit_eventful_mutation_snapshot_sql(command, true).await
+    }
+
     async fn commit_eventful_mutation(
         &self,
         command: CommitGroupEventfulMutation,

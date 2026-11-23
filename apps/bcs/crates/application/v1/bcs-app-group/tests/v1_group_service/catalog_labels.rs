@@ -1,6 +1,6 @@
 use super::*;
 use bcs_service_api::types::catalog_labels::{CatalogLabelPolicy,CatalogLabelRule};
-fn configure(mut fixture:Fixture)->Fixture {
+pub(super) fn configure(mut fixture:Fixture)->Fixture {
     fixture.service=fixture.service.with_catalog_label_policy(Arc::new(CatalogLabelPolicy::new([("stage".into(),CatalogLabelRule {
         allowed_values:vec!["trial".into(),"running".into()],allow_multiple:false,
     })].into()).unwrap()));fixture
@@ -8,7 +8,7 @@ fn configure(mut fixture:Fixture)->Fixture {
 fn detail_labels(detail:GroupDetail)->bcs_service_api::types::catalog_labels::CatalogLabels {
     match detail {GroupDetail::Collaboration(detail)=>detail.catalog_labels,GroupDetail::DirectMessage(detail)=>detail.catalog_labels}
 }
-fn input(value:serde_json::Value)->Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput> {Some(serde_json::from_value(value).unwrap())}
+pub(super) fn input(value:serde_json::Value)->Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput> {Some(serde_json::from_value(value).unwrap())}
 #[tokio::test]
 async fn create_patch_omission_replacement_and_public_transition(){
     let fixture=configure(Fixture::new().await);fixture.add_public_bot("driver").await;

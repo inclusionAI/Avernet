@@ -63,6 +63,14 @@ impl MySqlGroupStore {
         &self,
         command: CommitGroupEventfulMutation,
     ) -> ServiceResult<Group> {
+        Ok(self.commit_eventful_mutation_snapshot_sql(command, false).await?.group)
+    }
+
+    pub(crate) async fn commit_eventful_mutation_snapshot_sql(
+        &self,
+        command: CommitGroupEventfulMutation,
+        capture_labels: bool,
+    ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
         if let Some(event) = command.event.as_ref()
             && (event.env != self.env
                 || event.event.scope.group_id.as_deref() != Some(command.group_id.as_str()))
@@ -502,26 +510,54 @@ impl MySqlGroupStore {
             ));
             steps.push(self.card_template_delete_step(group_id));
         }
-        if let Err(error) = self.db.plugin().transaction(steps).await {
-            if provider_scope_guard::public_scope_denied(&error, guard_step) {
-                return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
-            }
-            if (cas_step == 0 && transaction_lock_row_is_missing(&error))
-                || provider_scope_guard::public_scope_denied(&error, Some(cas_step)) {
-                self.cache.write().await.remove(&command.group_id);
-                return Err(ServiceError::Conflict(format!(
-                    "Group '{}' version or routing policy changed concurrently",
-                    command.group_id
+        // The Group CAS lock is held until COMMIT. One indexed optional Card
+        // row captures explicit, empty and omitted labels at that same version.
+        let labels_step = if capture_labels && !deleting {
+            let index = steps.len();
+            let sql = match self.flavor {
+                DbSqlFlavor::Mysql => "SELECT catalog_labels FROM bcs_group_agent_cards WHERE env = ? AND group_id = ? FOR UPDATE",
+                DbSqlFlavor::Sqlite => "SELECT catalog_labels FROM bcs_group_agent_cards WHERE env = ? AND group_id = ?",
+            };
+            steps.push(DbTransactionStep::Query(DbStatement::with_params(
+                sql,
+                vec![Value::from(self.env.as_str()), Value::from(command.group_id.as_str())],
+            )));
+            Some(index)
+        } else { None };
+        let results = match self.db.plugin().transaction(steps).await {
+            Ok(results) => results,
+            Err(error) => {
+                if provider_scope_guard::public_scope_denied(&error, guard_step) {
+                    return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+                }
+                if (cas_step == 0 && transaction_lock_row_is_missing(&error))
+                    || provider_scope_guard::public_scope_denied(&error, Some(cas_step)) {
+                    self.cache.write().await.remove(&command.group_id);
+                    return Err(ServiceError::Conflict(format!(
+                        "Group '{}' version or routing policy changed concurrently",
+                        command.group_id
+                    )));
+                }
+                return Err(ServiceError::InternalError(format!(
+                    "Eventful Group mutation failed: {error}"
                 )));
             }
-            return Err(ServiceError::InternalError(format!(
-                "Eventful Group mutation failed: {error}"
-            )));
-        }
+        };
+        let catalog_labels = match labels_step {
+            Some(index) => match results.get(index) {
+                Some(DbTransactionStepResult::Rows(rows)) => {
+                    let raw = rows.first().map(|row| db_get_column_opt::<String>(row, "catalog_labels"))
+                        .transpose().map_err(|e| ServiceError::InternalError(e.to_string()))?.flatten();
+                    bcs_service_api::types::catalog_labels::CatalogLabels::from_storage(raw.as_deref())?
+                }
+                _ => return Err(ServiceError::InternalError("Group label transaction result missing".into())),
+            },
+            None => Default::default(),
+        };
         self.cache.write().await.remove(&command.group_id);
         // The version-fenced candidate is the state just committed. A second
         // read can fail after COMMIT and prevent Core from notifying the catalog.
         // Keep the cache invalidated; later reads load current authoritative data.
-        Ok(terminal)
+        Ok(bcs_service_api::types::GroupMutationSnapshot { group: terminal, catalog_labels })
     }
 }
