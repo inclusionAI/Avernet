@@ -25,7 +25,7 @@ fn coverage_memory_workbench_composes_group_and_session_lifecycle_without_extern
         for bot in ["driver", "worker"] {
             state.services.registry.register(bot.into(), BotCapabilities { name: Some(bot.into()), visibility: "public".into(), ..Default::default() }).await.unwrap();
         }
-        let group = state.services.group_management.create_group(GroupCreateCommand {
+        let group = state.services.group_management.create_group(GroupCreateCommand { catalog_labels:Default::default(),
             group_id: Some("workbench-regression".into()), caller_actor_id: Some("driver".into()), driver_bot_id: "driver".into(),
             label: Some("Regression".into()), topic: None, context: None, opening_message: None, create_initial_session: false,
             human_mention_notify_mode: HumanMentionNotifyMode::None, routing_policy: None, participants: Vec::new(),

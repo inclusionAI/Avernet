@@ -193,7 +193,7 @@ impl BcsClient {
         create_initial_session: bool,
     ) -> Result<CreateGroupResponse> {
         let url = format!("{}/groups", self.base_url);
-        let payload = CreateGroupRequest {
+        let payload = CreateGroupRequest { catalog_labels:Default::default(),
             retired_service_spec: (),
             human_mention_notify_mode: Default::default(),
             create_initial_session,

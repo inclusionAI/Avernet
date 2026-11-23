@@ -101,7 +101,7 @@ async fn rig_with_authority(
         .with_bot_authority(authority.clone()),
     );
     let created = management
-        .create_group(GroupCreateCommand {
+        .create_group(GroupCreateCommand { catalog_labels:Default::default(),
             create_initial_session: true,
             human_mention_notify_mode: Default::default(),
             group_id: Some(GROUP.into()),

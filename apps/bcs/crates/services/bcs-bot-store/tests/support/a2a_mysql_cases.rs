@@ -11,7 +11,7 @@ use bcs_test_support::contract::a2a_bot::{a2a_bot_repo_port_contract_tests,a2a_r
 use serde_json::json;
 
 fn card()->A2aBotRecord {
-    A2aBotRecord {bot_uuid:"a2a-bot".into(),provider_id:"provider".into(),provider_bot_ref:"remote".into(),
+    A2aBotRecord { catalog_labels:serde_json::from_value(json!({"stage":["trial"],"region":["a","b"]})).unwrap(),bot_uuid:"a2a-bot".into(),provider_id:"provider".into(),provider_bot_ref:"remote".into(),
         agent_card_url:Some("https://example.org/card".into()),agent_card:json!({"name":"Agent","description":"服务能力","supportedInterfaces":[{"url":"https://example.org/a2a/bots/remote","protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}],
             "skills":[{"id":"refund_lookup","name":"查询","description":"完整说明 100%_exact foo~bar","tags":["invoice-tag"],"unknown":{"keep":true}}]}),revision:1,}
 }

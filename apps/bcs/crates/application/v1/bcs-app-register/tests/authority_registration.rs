@@ -39,7 +39,7 @@ use bcs_test_support::contract::bot_registration_chain::{
 /// command — the audit table's UNIQUE (env, mutation_id,
 /// sequence) behaves exactly like the real surface.
 fn v1_command(token: String) -> RegisterBot {
-    RegisterBot {
+    RegisterBot { catalog_labels:Default::default(),
         mode: None,
         provider_bot_ref: None,
         webhook_url: None,
@@ -49,7 +49,7 @@ fn v1_command(token: String) -> RegisterBot {
 }
 
 fn v2_command(token: String) -> RegisterBot {
-    RegisterBot {
+    RegisterBot { catalog_labels:Default::default(),
         mode: Some(ProviderRegistrationMode::Plugin),
         provider_bot_ref: Some("ref-1".to_string()),
         webhook_url: None,
@@ -218,7 +218,7 @@ async fn enable_gateway(chain: &RegistrationChain) {
 }
 
 fn v2_gateway_command(token: String) -> RegisterBot {
-    RegisterBot {
+    RegisterBot { catalog_labels:Default::default(),
         mode: Some(ProviderRegistrationMode::Gateway),
         provider_bot_ref: Some("ref-gw".to_string()),
         webhook_url: Some("https://provider.example.test/callback".to_string()),

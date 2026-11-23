@@ -53,6 +53,7 @@ def peer_tls(root):
 @contextmanager
 def bcs_server(binary, story, root, config, env):
     path = root / "bcs-config-pre.json"
+    (root / "catalog-labels.toml").write_bytes((Path(__file__).resolve().parents[2] / "configs/catalog-labels.toml").read_bytes())
     path.write_text(json.dumps(config))
     log_path = root / "server.log"
     with log_path.open("w") as log:

@@ -27,6 +27,7 @@ use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 pub struct MemoryGroupRepo {
     groups: RwLock<HashMap<String, DomainGroup>>,
     // Writes and snapshot reads both lock groups before templates.
+    catalog_labels: RwLock<HashMap<String,bcs_service_api::types::catalog_labels::CatalogLabels>>,
     card_templates: RwLock<HashMap<String, serde_json::Value>>,
     message_counts: RwLock<HashMap<String, usize>>,
     event_store: Option<Arc<MemoryEventStore>>,
@@ -96,6 +97,7 @@ impl GroupRepoPort for MemoryGroupRepo {
             super::card_template::project_stored_template(card, id, group.label.as_deref(), group.context.as_deref())
         ).transpose()?;
         Ok(Some(bcs_service_api::types::GroupCardSnapshot {
+            catalog_labels:self.catalog_labels.read().await.get(id).cloned().unwrap_or_default(),
             group_id: group.id.clone(), group_kind: group.group_kind,
             group_strategy: group.group_strategy, visibility: group.visibility.clone(),
             record_status: group.record_status.clone(), card_template,
@@ -164,6 +166,9 @@ impl GroupRepoPort for MemoryGroupRepo {
                 command.group_id, command.expected_version, current.version
             )));
         }
+        if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
+            super::validate_catalog_labels(&current,patch.catalog_labels.as_ref())?;
+        }
         let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
         if deleting && command.event.is_some() {
             return Err(ServiceError::InvalidOperation {
@@ -224,18 +229,38 @@ impl GroupRepoPort for MemoryGroupRepo {
         }
         if deleting {
             cards.remove(&command.group_id);
-        } else if matches!(&command.mutation, GroupEventfulMutation::PatchMutableFields(patch) if patch.label.is_some() || patch.context.is_some()) {
+            self.catalog_labels.write().await.remove(&command.group_id);
+        } else if matches!(&command.mutation, GroupEventfulMutation::PatchMutableFields(patch) if patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some()) {
             super::card_template::update_memory_template(&mut cards, &candidate);
+        }
+        if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
+            if let Some(labels)=&patch.catalog_labels { self.catalog_labels.write().await.insert(command.group_id,labels.clone()); }
         }
         Ok(candidate)
     }
 
     async fn upsert(&self, group: DomainGroup) -> ServiceResult<()> {
+        self.upsert_with_catalog_labels(group,None).await
+    }
+    async fn upsert_with_catalog_labels(&self,group:DomainGroup,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        super::validate_catalog_labels(&group,labels.as_ref())?;
         let mut groups = self.groups.write().await;
         let mut cards = self.card_templates.write().await;
         super::card_template::update_memory_template(&mut cards, &group);
+        if let Some(labels)=labels { self.catalog_labels.write().await.insert(group.id.clone(),labels); }
         debug!(group_id = %group.id, "Group upserted");
         groups.insert(group.id.clone(), group);
+        Ok(())
+    }
+
+    async fn create_with_catalog_labels(&self,group:DomainGroup,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        super::validate_catalog_labels(&group,labels.as_ref())?;
+        let mut groups=self.groups.write().await;
+        if groups.contains_key(&group.id) {return Err(ServiceError::Conflict("Group identity already exists".into()));}
+        let mut cards=self.card_templates.write().await;
+        super::card_template::update_memory_template(&mut cards,&group);
+        if let Some(labels)=labels {self.catalog_labels.write().await.insert(group.id.clone(),labels);}
+        groups.insert(group.id.clone(),group);
         Ok(())
     }
 
@@ -249,7 +274,9 @@ impl GroupRepoPort for MemoryGroupRepo {
             .get_mut(id)
             .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
         let mut cards = self.card_templates.write().await;
-        let updates_card = patch.label.is_some() || patch.context.is_some();
+        super::validate_catalog_labels(group,patch.catalog_labels.as_ref())?;
+        let updates_card = patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some();
+        if let Some(labels)=patch.catalog_labels { self.catalog_labels.write().await.insert(id.into(),labels); }
         if let Some(label) = patch.label {
             group.label = Some(label);
         }
@@ -466,6 +493,7 @@ impl GroupRepoPort for MemoryGroupRepo {
         let mut groups = self.groups.write().await;
         let mut cards = self.card_templates.write().await;
         cards.remove(id);
+        self.catalog_labels.write().await.remove(id);
         Ok(groups.remove(id))
     }
 

@@ -71,6 +71,7 @@ def main():
                 server_args = ["--trace-output", str(log_dir / "network-traces.json")]
                 config["logging"].setdefault("modules", {})["bcs_a2a_http"] = "debug"
             path = root / "config.json"
+            (root / "catalog-labels.toml").write_bytes((Path(__file__).resolve().parents[2] / "configs/catalog-labels.toml").read_bytes())
             path.write_text(json.dumps(config))
             env = dict(os.environ, SERVER_ENV="local", CUSTOM_E2E_SIGNING_KEY=uuid.uuid4().hex,
                        CUSTOM_E2E_BCN_GROUP_SESSION_WS_JWT=uuid.uuid4().hex)

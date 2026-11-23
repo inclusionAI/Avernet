@@ -31,7 +31,7 @@ struct Service {
     calls: AtomicUsize,
 }
 fn card() -> ManagedA2aCard {
-    ManagedA2aCard {
+    ManagedA2aCard { catalog_labels:Default::default(),
         provider_bot_ref: "remote".into(),
         provider_name: "orders".into(),
         agent_name: "Agent".into(),
@@ -99,7 +99,7 @@ impl A2aService for Service {
         assert_eq!(command.provider_name, "orders");
         assert_eq!(command.provider_bot_ref, "remote");
         Ok(NamedA2aRegistration {
-            card: bcs_service_api::application::a2a_bot::NamedA2aCard {
+            card: bcs_service_api::application::a2a_bot::NamedA2aCard { catalog_labels:Default::default(),
                 bot_id: "bot/opaque".into(),
                 provider_bot_ref: "remote".into(),
                 provider_name: "orders".into(),
