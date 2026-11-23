@@ -9,15 +9,15 @@ from datetime import datetime
 from typing import Any
 
 
-_SKILL_RETIREMENT_PREFIX = "_local_skill_retirements:"
+_CAPABILITY_RELEASE_PREFIX = "_local_skill_retirements:"
 
 
-def skill_retirement_property(*, bot_id: str, entity_id: str, tenant: str) -> str:
-    return f"{_SKILL_RETIREMENT_PREFIX}{len(tenant)}:{tenant}:{len(entity_id)}:{entity_id}:{bot_id}"
+def capability_release_property(*, bot_id: str, entity_id: str, tenant: str) -> str:
+    return f"{_CAPABILITY_RELEASE_PREFIX}{len(tenant)}:{tenant}:{len(entity_id)}:{entity_id}:{bot_id}"
 
 
 def public_device_props(props: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in props.items() if not key.startswith(_SKILL_RETIREMENT_PREFIX)}
+    return {key: value for key, value in props.items() if not key.startswith(_CAPABILITY_RELEASE_PREFIX)}
 
 
 @dataclass

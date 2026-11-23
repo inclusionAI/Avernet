@@ -82,6 +82,14 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
         )
         return result
 
+    async def remember_mcp_releases(
+        self, *, bot_id: str, entity_id: str, codes: frozenset[str],
+    ) -> None:
+        if self._capability_projection is not None:
+            await self._capability_projection.remember_mcp_releases(
+                bot_id=bot_id, entity_id=entity_id, codes=codes,
+            )
+
     def resolve_plan(
         self,
         *,

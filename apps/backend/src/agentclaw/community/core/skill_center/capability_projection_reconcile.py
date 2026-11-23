@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
@@ -19,7 +19,7 @@ PROJECTION_RETRY_FIELD = "capability_projection_retry"
 
 @dataclass(frozen=True, slots=True)
 class CapabilityProjectionRetry:
-    """Private Apply report evidence scoped to its physical device."""
+    """Private release evidence scoped to its physical device."""
 
     device_id: str
     retired_mappings: tuple[PoolSkillMapping, ...] = ()
@@ -41,7 +41,7 @@ class CapabilityProjectionRetry:
             raise ValueError("invalid capability retry evidence")
         device_id = evidence.get("device_id")
         mappings = evidence.get("retired_mappings")
-        releases = evidence.get("released_mcp")
+        releases = evidence.get("released_mcp", [])
         if (
             not isinstance(device_id, str) or not device_id or not isinstance(mappings, list)
             or not isinstance(releases, list) or any(not isinstance(code, str) for code in releases)
@@ -74,7 +74,14 @@ class CapabilityProjectionReconcileProtocol(Protocol):
     ) -> AbstractAsyncContextManager[DeferredCapabilityProjection]: ...
 
 
-class CapabilityProjectionCompetitionProtocol(Protocol):
+@runtime_checkable
+class CapabilityReleaseRecorder(Protocol):
+    async def remember_mcp_releases(
+        self, *, bot_id: str, entity_id: str, codes: frozenset[str],
+    ) -> None: ...
+
+
+class CapabilityProjectionCompetitionProtocol(CapabilityReleaseRecorder, Protocol):
     @property
     def defer_enabled(self) -> bool: ...
 

@@ -287,3 +287,62 @@ async def test_existing_desktop_recovery_delivers_a_pending_bots_skills():
     recovering = await reconciler.project_competing_change(**args, desktop_recovery=True)
     assert recovering.status is RuntimeProjectionStatus.CONVERGED
     assert len(projector.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_with_apply", [False, True])
+async def test_standalone_mcp_releases_survive_failed_delivery(retry_with_apply):
+    device = _Device()
+    projector = _Projector(
+        RuntimeProjectionResult.pending(code="MCP_UNAVAILABLE", reason="Device unavailable"),
+        RuntimeProjectionResult.converged(components={"skills": RuntimeProjectionStatus.CONVERGED}),
+        RuntimeProjectionResult.converged(components={"mcp": RuntimeProjectionStatus.CONVERGED}),
+    )
+    reconciler = _reconciler(projector, device)
+    releases = frozenset({"old-mcp"})
+
+    async def unused_legacy():
+        pytest.fail("The current Bot is using combined capability delivery")
+
+    async def standalone(scope):
+        return await reconciler.project_competing_change(
+            **ADDRESS, owner_id="owner", scope=scope, retired_mappings=(), legacy=unused_legacy,
+        )
+
+    result = await standalone(ProjectionScope(mcp=True, released_mcp=releases))
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert projector.calls[-1][0].released_mcp == releases
+
+    # A successful Skill-only request cannot acknowledge the MCP retirement.
+    await standalone(ProjectionScope(skills=True))
+    assert not projector.calls[-1][0].mcp
+    assert projector.calls[-1][0].released_mcp == frozenset()
+
+    if retry_with_apply:
+        async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+            result, _ = await apply.finish(initialize=True)
+    else:
+        result = await standalone(ProjectionScope())
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert projector.calls[-1][0].released_mcp == releases
+    assert projector.calls[-1][0].updated_mcp == releases
+    assert all(value is None for value in device.props.values())
+
+
+@pytest.mark.asyncio
+async def test_repeat_uninstall_uses_the_release_saved_before_dispatch():
+    device = _Device()
+    projector = _Projector(RuntimeProjectionResult.converged())
+    reconciler = _reconciler(projector, device)
+
+    async def unused_legacy():
+        pytest.fail("The current Bot is using combined capability delivery")
+
+    await reconciler.remember_mcp_releases(**ADDRESS, codes=frozenset({"saved-mcp"}))
+    assert projector.calls == []
+
+    await reconciler.project_competing_change(
+        **ADDRESS, owner_id="owner", scope=ProjectionScope(), retired_mappings=(), legacy=unused_legacy,
+    )
+    assert projector.calls[-1][0].released_mcp == {"saved-mcp"}
+    assert all(value is None for value in device.props.values())

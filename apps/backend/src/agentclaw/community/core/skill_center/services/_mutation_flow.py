@@ -18,6 +18,7 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
 )
+from agentclaw.community.core.skill_center.capability_projection_reconcile import CapabilityReleaseRecorder
 from agentclaw.community.core.skill_center.capability_projection_intent import capability_projection_intent
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
@@ -219,6 +220,7 @@ class MutationProjectionFlow:
         if not is_bot_ready(bot):
             result = commit()
             selected_scope = effective_scope(result)
+            await self._remember_mcp_releases(bot_id, entity_id, selected_scope)
             runtime_result = RuntimeProjectionResult.pending(
                 code="BOT_RUNTIME_NOT_READY",
                 reason="Bot 运行环境尚未就绪，能力状态已保存但尚未同步",
@@ -285,6 +287,7 @@ class MutationProjectionFlow:
         projection_started_at = time.perf_counter()
         runtime_result = await self._project_best_effort(
             bot_id=bot_id,
+            entity_id=entity_id,
             owner_id=owner_id,
             engine_type=engine_type,
             previous_mappings=previous_mappings,
@@ -324,10 +327,19 @@ class MutationProjectionFlow:
             return
         self._recovery.ensure(owner_id=str(bot["owner_id"]), bot_id=bot_id)
 
+    async def _remember_mcp_releases(
+        self, bot_id: str, entity_id: str | None, scope: ProjectionScope,
+    ) -> None:
+        if entity_id is not None and scope.released_mcp and isinstance(self._runtime, CapabilityReleaseRecorder):
+            await self._runtime.remember_mcp_releases(
+                bot_id=bot_id, entity_id=entity_id, codes=scope.released_mcp,
+            )
+
     async def _project_best_effort(
         self,
         *,
         bot_id: str,
+        entity_id: str | None,
         owner_id: str,
         engine_type: str | None,
         previous_mappings: Sequence[PoolSkillMapping],
@@ -335,6 +347,7 @@ class MutationProjectionFlow:
         previous_snapshot_failed: bool,
     ) -> RuntimeProjectionResult:
         if previous_snapshot_failed:
+            await self._remember_mcp_releases(bot_id, entity_id, scope)
             return RuntimeProjectionResult.pending(
                 code="RUNTIME_SNAPSHOT_UNAVAILABLE",
                 reason="Bot 运行环境当前不可连接，能力状态已保存但尚未同步",
@@ -349,6 +362,7 @@ class MutationProjectionFlow:
             )
             current_mappings = plan.projection.skill_mappings
         except Exception:
+            await self._remember_mcp_releases(bot_id, entity_id, scope)
             return RuntimeProjectionResult.pending(
                 code="RUNTIME_SNAPSHOT_UNAVAILABLE",
                 reason="Bot 运行环境当前不可连接，能力状态已保存但尚未同步",
