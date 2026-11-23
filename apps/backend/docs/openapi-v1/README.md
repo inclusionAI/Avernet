@@ -1,5 +1,8 @@
 # `/openapi/v1` Public API + Tenant Isolation — Team Handoff
 
+Trusted application draft restart, snapshot and batch status contracts are in
+[Managed Bot operations](managed-bot-operations.md).
+
 Bot public-risk operations use the full `bot_id:entity_id` path identity. They
 reuse the declaration-driven explicit ADMIN check and the existing addressed-Bot
 application grant. An app-only caller names its delegating `user_id`; its live
@@ -1225,6 +1228,7 @@ literals the routes actually publish:
 all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  copy  collaborations  connection  engine  identity
 loadtest  local  logs  market  metadata  mcp  models  resources  routines  service-envs  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
+template-queries  template-config-for-others  restart-for-others  status-for-others
 ```
 
 Eight of those twenty-seven — `approvals`, `connection`, `engine`, `identity`,
@@ -1237,6 +1241,7 @@ list is the nineteen that remain:
 ```text
 all  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  loadtest  local  logs  market  metadata  mcp  skills
 source-credentials  spaces  with-manifest  work-order-notifications  work-orders
+template-queries  template-config-for-others  restart-for-others  status-for-others
 ```
 
 They are still reserved today, and the list above is the accurate one: a bot
