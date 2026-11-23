@@ -496,7 +496,7 @@ class ServicePublicationFacade:
                 decision.reason or "local bots cannot be serviced"
             )
         result = self._publish_service.upgrade_bot_to_service(
-            bot_id=bot_id, owner_id=bot["owner_id"]
+            bot_id=bot_id, owner_id=bot["owner_id"], audit_operator_id=actor_id
         )
         record = result.get("publish_record")
         if record is None:
@@ -779,7 +779,7 @@ class ServicePublicationFacade:
             actor_id=actor_id,
             owner_id=owner_id,
         )
-        result = await self._publish_service.offline_publish(record.id)
+        result = await self._publish_service.offline_publish(record.id, operator_id=actor_id)
         return self._operation(record, action="cancel_staging", result=result)
 
     async def offline(
@@ -796,7 +796,7 @@ class ServicePublicationFacade:
         )
         result: Any = None
         if not approval.should_approval:
-            result = await self._publish_service.offline_publish(record.id)
+            result = await self._publish_service.offline_publish(record.id, operator_id=actor_id)
         return self._operation(
             record, action="offline", result=result, approval=approval
         )
