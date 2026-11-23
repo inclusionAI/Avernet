@@ -31,6 +31,7 @@ from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer 
 from agentclaw.community.core.bot_management.engines.aicoding.artifact_config import parse_fastdisk_publish_config
 from agentclaw.community.di.modules.config_module import read_user_config
 
+from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.digital_employee.contracts import DigitalEmployeePublicationProtocol
 
 from typing import Annotated, Callable
@@ -704,6 +705,7 @@ class ServiceBotModule(Module):
         publish_operation_repo: PublishOperationRepository,
         runtime_projector: ApiBotRuntimeProjectorProtocol,
         runtime_layout_probe: RuntimeLayoutProbeServiceProtocol,
+        engine_runtime_relay: EngineRuntimeRelayProtocol,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 
@@ -741,6 +743,7 @@ class ServiceBotModule(Module):
             publish_operation_repo=publish_operation_repo,
             runtime_projector=runtime_projector,
             runtime_layout_probe=runtime_layout_probe,
+            engine_runtime_relay=engine_runtime_relay,
         )
 
     @singleton

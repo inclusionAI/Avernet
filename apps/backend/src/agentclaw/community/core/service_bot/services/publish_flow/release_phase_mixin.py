@@ -83,6 +83,45 @@ class ReleasePhaseMixin:
             if not bot:
                 raise PublishFlowServiceError(f"Bot does not exist: {bot_id}")
 
+            # Session precheck: block the online upgrade while any session on
+            # the online runtime still has an in-flight run — the container
+            # replacement would terminate that work mid-flight. Retained
+            # conversations whose runs already concluded do not count. Personal
+            # bots and relay errors/timeouts skip the check (fail-open).
+            if self._session_prechecker is not None:
+                active_count = await self._session_prechecker.active_session_count(bot)
+                if active_count > 0:
+                    error_msg = (
+                        f"Cannot publish while {active_count} "
+                        f"session{'s' if active_count != 1 else ''} still "
+                        f"{'have' if active_count != 1 else 'has'} active runs. "
+                        f"Please wait for the run{'s' if active_count != 1 else ''} "
+                        f"to finish or stop "
+                        f"{'them' if active_count != 1 else 'it'} before publishing."
+                    )
+                    logger.warning(
+                        "[PublishFlowService] Session precheck blocked "
+                        "publish_id=%s bot_id=%s active_sessions=%s",
+                        publish_id, bot_id, active_count,
+                    )
+                    ext = self._get_latest_ext(publish_id)
+                    expected_ext = copy.deepcopy(ext)
+                    self._clear_retry_flag(ext)
+                    ext["error_message"] = error_msg
+                    ext["source_status"] = PublishStatus.ONLINE_PUB.value
+                    self._update_publish_status(
+                        publish_id=publish_id,
+                        target_status=PublishStatus.FAILED,
+                        source_status=PublishStatus.ONLINE_PUB,
+                        ext=ext,
+                        expected_ext=expected_ext,
+                    )
+                    return PublishFlowResult(
+                        publish_id=publish_id,
+                        status=PublishStatus.FAILED,
+                        message=error_msg,
+                    )
+
             # ===== Core logic: provider-aware reuse-vs-recreate decision =====
             # One shared decision (see UpgradeResolutionMixin._decide_online_deploy):
             # reuse the existing bot in place when it is live/rebuildable, else
