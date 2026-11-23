@@ -17,6 +17,7 @@ import { useRoutineActivation } from '@/hooks/useRoutineActivation';
 import { useResourceListState } from '@/hooks/useResourceListState';
 import { useSkillSetActivation } from '@/hooks/useSkillSetActivation';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
+import { safeReportError } from '@/utils/errorToast';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -91,7 +92,10 @@ export function useBotEditor(
         toast.success(message);
         await load(options);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '操作失败');
+        // 协议层已默认提示(alreadyHandled)的错误经 safeReportError 跳过,避免双重 toast;
+        // 纯前端错误仍在此提示一次。失败仍须 throw:调用方(如 RenderScreenPanel.save)
+        // 靠 rejection 跳过 close() 保留表单内容,吞错会清空用户输入。
+        safeReportError(error);
         throw error;
       }
     },
