@@ -14,7 +14,7 @@ import {
   GroupSpeakingLeaseService,
   type SpeakingLeaseSnapshot,
 } from '@/services/workspace/groupSpeakingLeaseService';
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 class FakeTransport {
   readonly frames: Array<Record<string, unknown>> = [];
@@ -67,6 +67,12 @@ beforeEach(() => {
   service = makeService(transport);
   snapshots = [];
   service.subscribe((snapshot) => snapshots.push(snapshot));
+});
+
+// 每例结束收敛连接周期：停轮询/到期定时器并立结在途请求，
+// 避免遗留的 setInterval 轮询 handle 使 jest 进程无法退出（CI 挂死）。
+afterEach(() => {
+  service.resetConnection();
 });
 
 describe('domain pure helpers', () => {
