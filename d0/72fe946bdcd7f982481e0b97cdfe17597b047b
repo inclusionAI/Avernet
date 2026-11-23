@@ -1,0 +1,98 @@
+apps/bcs/crates/services/bcs-dist-store/src/archive/mod.rs
+  s_9dac9fbdf9fc56::t_59dbea99b4e73a 1-2,8-15,20-27,36-37,44-49,53-61,66-69,75,77,81,90-94,101-106,112,121-122,131-135,160-167,181,185-189,194,198-200,204,213-214,218-220,230-234,249-250,255-261,265-266,271-273
+  s_9dac9fbdf9fc56::t_83f82b86d94027 136-137
+  s_9dac9fbdf9fc56::t_ec0d17cdf6c062 144-159
+  s_9dac9fbdf9fc56::t_046df031af3199 3-7,28-32,35,38-43,50-52,62-65,70-74,78-80,82-89,95-100,107-111,113-119,123-130,138-143,168-180,182-184,190-193,195-197,201-203,205-212,215-217,221-229,235-248,251-254,262-264,267-270
+  s_9dac9fbdf9fc56::t_e28ec7134e92fc 16-19,33-34,76,120
+apps/bcs/crates/services/bcs-dist-store/src/lib.rs
+  s_9dac9fbdf9fc56::t_1ba95e6943e023 14-15
+  s_9dac9fbdf9fc56::t_2f80bfaa629a89 2,4
+apps/bcs/migrations/mysql/049_dist_immutable_objects.sql
+  s_9dac9fbdf9fc56::t_ad17a13c5dd6e6 1-11
+apps/bcs/migrations/sqlite/047_dist_immutable_objects.sql
+  s_9dac9fbdf9fc56::t_ad17a13c5dd6e6 1-13
+apps/bcs/crates/services/bcs-db-migrations/src/lib.rs
+  s_9dac9fbdf9fc56::t_1ba95e6943e023 595,603,605-607,716
+  s_9dac9fbdf9fc56::t_a5a046b31f774d 758,763-765
+  s_b033c54cc00da7::t_ea6521ee12da36 166,602,604,760,762
+  s_b033c54cc00da7::t_a33c0a623a3cb8 714-715
+apps/bcs/crates/services/bcs-dist-store/src/archive/README.md
+  s_9dac9fbdf9fc56::t_360ec1bd027fb9 1-9,11-39,44-74
+  s_9dac9fbdf9fc56::t_9903d8a84cddab 40-43
+  s_b033c54cc00da7::t_ea6521ee12da36 10
+apps/bcs/crates/services/bcs-dist-store/tests/archive.rs
+  s_9dac9fbdf9fc56::t_8bca19f909fa8b 1-4,6-13,21,33-34,48-53,58-61,72-75,85-88,96-97,102-109,117-121,126-133,147-156,161,169-171,181-192,197-213,228-229,272
+  s_9dac9fbdf9fc56::t_ebfb0f09df59a9 230-236,243-244,252-256,258,266,271
+  s_9dac9fbdf9fc56::t_046df031af3199 14-20,22,27-32,35-47,54-57,62-71,76-84,89-95,98-101,110-116,122-125,134-146,157-160,162-168,172-175,177-180,193-196,216-217,219-227
+  s_9dac9fbdf9fc56::t_83f82b86d94027 283-284,286-288,291-294
+  s_9dac9fbdf9fc56::t_7dc01a3a78ab7a 273-282,285,289-290,295-296
+  s_9dac9fbdf9fc56::t_324264b94b6801 23-26,237-242,245-251,259-265,267-270
+  s_9dac9fbdf9fc56::t_ebdeaeb5336f84 5,176,214-215,218,257
+apps/bcs/crates/services/bcs-dist-store/src/layout.rs
+  s_9dac9fbdf9fc56::t_655310f92be91d 147-151
+apps/bcs/crates/services/bcs-dist-store/src/archive/sql.rs
+  s_9dac9fbdf9fc56::t_59dbea99b4e73a 1-10,16-19,31-35,39,48-55,62-70
+  s_9dac9fbdf9fc56::t_046df031af3199 11-15,20-30,36-38,40-47,56-61
+apps/bcs/crates/services/bcs-dist-store/src/evidence.rs
+  s_9dac9fbdf9fc56::t_046df031af3199 26-27,31-36,39-41,52-55,57-60,78-79,108-112
+  s_9dac9fbdf9fc56::t_ad17a13c5dd6e6 1-22,24-25,28-30,37-38,42-51,56,61-69,71-77,113
+  s_9dac9fbdf9fc56::t_f7329abc924a79 23,70,80-82,88,92,95,99,107
+  s_9dac9fbdf9fc56::t_324264b94b6801 83-87,89-91,93-94,96-98,100-106
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/friend_cutover_tests.rs
+  s_9dac9fbdf9fc56::t_f15a6dfba5af7a 8
+apps/bcs/crates/services/bcs-db-migrations/CONTEXT.md
+  s_9dac9fbdf9fc56::t_14700bb5633fa7 9,16,57,64-68
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
+  s_9dac9fbdf9fc56::t_3e9159cf5cb44d 9,48,99,128,130
+  s_b033c54cc00da7::t_ea6521ee12da36 70
+apps/bcs/README.md
+  s_9dac9fbdf9fc56::t_14700bb5633fa7 20
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/dist_archive_tests.rs
+  s_9dac9fbdf9fc56::t_a5a046b31f774d 8-11,24-28,30-46,55-59
+  s_9dac9fbdf9fc56::t_924aac3e7cb87a 1-7,12-23,29,47-51,53-54,60-62
+  s_b033c54cc00da7::t_ea6521ee12da36 52
+apps/bcs/crates/services/bcs-dist-store/tests/archive_support/mod.rs
+  s_9dac9fbdf9fc56::t_324264b94b6801 193-195,223-225
+  s_9dac9fbdf9fc56::t_c8602cfbca97d7 6-9,11-13,22-28,32-38,46-47,49,54,67-68,87,95-100,105-108,138-140,155-163,166-167,204-208,219-221,227-228,232-234,244-245
+  s_9dac9fbdf9fc56::t_046df031af3199 1-5,14-17,19-21,29-31,40-45,55-66,69-86,88-94,101-104,109-137,141-154,168-175,178-192,209-210,217,229-231,235-243
+  s_9dac9fbdf9fc56::t_c0436a47e111a1 18,165,177,196,201-203,211-216,218
+  s_9dac9fbdf9fc56::t_0e64d779d2fc9d 50-51,53,164,176,222,226
+  s_9dac9fbdf9fc56::t_83f82b86d94027 197-200
+  s_9dac9fbdf9fc56::t_06fc937229e786 10,39,48,52
+apps/bcs/crates/services/bcs-dist-store/Cargo.toml
+  s_9dac9fbdf9fc56::t_d006955a0c20b8 13,24-26
+  s_9dac9fbdf9fc56::t_a8799f766bdc53 27
+apps/bcs/Cargo.lock
+  s_9dac9fbdf9fc56::t_9ce023b7b1b3f8 1566-1568,1577
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
+  s_9dac9fbdf9fc56::t_47294aa6fa5bdb 288
+  s_b033c54cc00da7::t_ea6521ee12da36 277,750
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
+  s_9dac9fbdf9fc56::t_0893df0c720e85 93-102
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/auth_session_version_migration_tests.rs
+  s_b033c54cc00da7::t_ea6521ee12da36 92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d072fe946bdcd7f982481e0b97cdfe17597b047b",
+  "prompts": {},
+  "sessions": {
+    "s_9dac9fbdf9fc56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ef8f-99fd-7003-aabd-a16850889d4d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    },
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
