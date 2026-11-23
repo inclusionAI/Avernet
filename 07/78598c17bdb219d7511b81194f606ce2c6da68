@@ -1,0 +1,59 @@
+apps/bcs/crates/application/v1/bcs-app-group/CONTEXT.md
+  s_c3514a76a0dbf3::t_6b563500490d9b 5-11
+apps/bcs/crates/application/v1/bcs-app-group/src/authorization.rs
+  s_843f7a9b1aad9a::t_1ef2790d54f936 523,536-537,545,551
+apps/bcs/crates/application/v1/bcs-app-group/src/projections.rs
+  s_843f7a9b1aad9a::t_43d744ea085be8 11-24,31
+apps/bcs/crates/application/v1/bcs-app-group/src/service.rs
+  s_843f7a9b1aad9a::t_e3906aa39b4f24 447,450
+apps/bcs/crates/application/v1/bcs-app-group/src/update.rs
+  s_843f7a9b1aad9a::t_6c24736372c61c 113
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/catalog_snapshot.rs
+  s_c3514a76a0dbf3::t_9c187b62f15d87 119-259
+apps/bcs/crates/service-api/bcs-service-api/src/core/group.rs
+  s_843f7a9b1aad9a::t_e54664740362f4 171-177
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/group.rs
+  s_843f7a9b1aad9a::t_1aaddd74610d94 72-78
+apps/bcs/crates/service-api/bcs-service-api/src/types/mod.rs
+  s_843f7a9b1aad9a::t_4ce271a6a3ab13 42
+apps/bcs/crates/services/bcs-group-store/src/memory.rs
+  s_843f7a9b1aad9a::t_67d8644b425c5b 92-100
+apps/bcs/crates/services/bcs-group-store/src/store_repo.rs
+  s_843f7a9b1aad9a::t_58e87f624f25d5 17-31
+apps/bcs/crates/services/bcs-group-store/tests/detail_snapshot.rs
+  s_843f7a9b1aad9a::t_8a2f96578aae5a 1-101
+apps/bcs/crates/services/bcs-group/CONTEXT.md
+  s_c3514a76a0dbf3::t_cac521646800df 5-10
+apps/bcs/crates/services/bcs-group/src/application/management/projections.rs
+  s_843f7a9b1aad9a::t_ebf3eb3fe07766 98-115
+apps/bcs/crates/services/bcs-group/src/core/group_core.rs
+  s_843f7a9b1aad9a::t_f566ea7b485ca1 196-199
+apps/bcs/crates/test-support/bcs-test-support/src/contract/group_mutation_snapshot.rs
+  s_843f7a9b1aad9a::t_6c9577b417acd0 9,30-33
+apps/bcs/docs/catalog-labels.md
+  s_843f7a9b1aad9a::t_8216e5c6631fba 87-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0778598c17bdb219d7511b81194f606ce2c6da68",
+  "prompts": {},
+  "sessions": {
+    "s_843f7a9b1aad9a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a208e1-7927-7551-a5ad-2696ea61926c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    },
+    "s_c3514a76a0dbf3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20734-6dfe-7521-98b8-ff59645a4011",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
