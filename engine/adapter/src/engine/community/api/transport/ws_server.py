@@ -83,6 +83,7 @@ from engine.community.shared import (
 
 from engine.community.core.session.models import SessionResetRequest  # noqa: E402
 from engine.community.api.transport.auth_gate import verify_chat_send  # noqa: E402
+from engine.community.api.transport.chat_error_fields import complete_chat_error
 from engine.community.api.transport.openclaw_resume import (
     OpenClawResumeRegistry,
     OpenClawResumeRun,
@@ -1081,6 +1082,13 @@ class EngineWebSocketServer:
         materialized_paths: tuple[str, ...] = (),
         resume_run: OpenClawResumeRun | None = None,
     ) -> None:
+        # Complete only the wire payload, after startup ACK sanitization. Other
+        # engines and non-error events retain their existing protocol behavior.
+        if (
+            payload.get("state") == "error"
+            and EngineManager.get_instance().engine in ("openclaw", "hermes")
+        ):
+            payload = complete_chat_error(payload)
         if resume_run is None:
             await self._send_event(
                 websocket, event_name, payload, materialized_paths=materialized_paths

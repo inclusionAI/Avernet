@@ -29,6 +29,16 @@ CHAT_ENGINE=claude_code ENGINE_PROFILE=community python start.py --port 20003
 See the [file upload error contract](docs/file-upload-api.md) for the
 read-only filesystem response and compatibility guarantees.
 
+### Chat error compatibility
+
+OpenClaw-compatible OpenClaw/Hermes WebSocket chat errors expose nonempty
+`payload.errorCode` and `payload.errorMessage` strings. Existing codes,
+messages, event names and extension fields are preserved; missing runtime
+codes use `UNAVAILABLE`. OpenClaw failed ACKs keep `error.code` and
+`error.message` and do not emit an additional error event. There is no shared
+error-code enum that clients must recognize. Normal, aborted and final events,
+other engines, and existing retry/termination timing are unchanged.
+
 ### Local Skill package publication
 
 An Engine advertising `skills.local_package.parallel_targets.v1` allows
