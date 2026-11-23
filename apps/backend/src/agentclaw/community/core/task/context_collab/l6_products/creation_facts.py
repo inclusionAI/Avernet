@@ -40,6 +40,7 @@ _CREATION_FACT_KEYS = frozenset(
         "workflow_kind",
         "product_profile_ref",
         "product_instance",
+        "executor_owner_id",
     }
 )
 
@@ -53,10 +54,11 @@ def creation_payload(
     product_kind: str | None,
     workflow_kind: str | None,
     product_profile_ref: VersionedProfileRef | None = None,
+    executor_owner_id: str | None = None,
 ) -> dict:
     """Build the creation-event payload from the owning L4/L6 fields."""
     parse_method_kinds(method_kind)
-    return {
+    facts = {
         "objective": objective,
         "resource_refs": [ref.to_dict() for ref in resource_refs],
         "method_kind": method_kind,
@@ -72,6 +74,12 @@ def creation_payload(
             else None
         ),
     }
+
+    if executor_owner_id is not None:
+        if not isinstance(executor_owner_id, str) or not executor_owner_id.strip():
+            raise ContextCollabValidationError("executor_owner_id must be non-empty")
+        facts["executor_owner_id"] = executor_owner_id
+    return facts
 
 
 def decode_creation_facts(data: dict[str, Any]) -> dict:
@@ -169,6 +177,11 @@ def decode_creation_facts(data: dict[str, Any]) -> dict:
             else None
         ),
     }
+    if "executor_owner_id" in data:
+        owner_id = data["executor_owner_id"]
+        if not isinstance(owner_id, str) or not owner_id.strip():
+            raise ContextCollabValidationError("executor_owner_id must be non-empty")
+        normalized["executor_owner_id"] = owner_id
     if "product_instance" in data:
         normalized["product_instance"] = data["product_instance"]
     return normalized

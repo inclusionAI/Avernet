@@ -30,6 +30,7 @@ def stage_role_candidates(
         p
         for p in facts.participants
         if p.agent_ref is not None
+        and (stage.workflow_node is None or p.agent_ref in stage.workflow_node.agents)
         and all(
             bindings[ref].participant_id == p.participant_id for ref in requirements
         )

@@ -35,6 +35,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
     SwarmMethodPolicy,
+    SwarmWorkflowPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (
     ParticipantScope,
@@ -133,12 +134,18 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
         policy = declaration.policy
         if policy is None:
             continue
-        if not isinstance(policy, (OpenMethodPolicy, SwarmMethodPolicy)):
+        if not isinstance(
+            policy, (OpenMethodPolicy, SwarmMethodPolicy, SwarmWorkflowPolicy)
+        ):
             raise ContextCollabValidationError("unsupported Method policy type")
         if policy.method != declaration.profile.method_kind:
             raise ContextCollabValidationError(
                 "Method policy must match its declared Method Profile"
             )
+        if isinstance(policy, SwarmWorkflowPolicy):
+            for node in policy.workflow.nodes:
+                for agent in node.agents:
+                    definition.participant_scope.require(agent)
         if isinstance(policy, OpenMethodPolicy):
             policy.publication.admission.validate_roles(definition.scenario_roles)
             if not contract.actions:

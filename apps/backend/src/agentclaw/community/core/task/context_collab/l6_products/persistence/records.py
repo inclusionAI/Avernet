@@ -43,8 +43,8 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
     PrimitiveReadState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
@@ -155,9 +155,13 @@ class EventAppendedRecord(_RecordView):
 
 
 class ProductRecordDecoder:
-    """Decode product facts from the exact L4 SQL snapshot, with no extra lookup."""
+    """Decode the exact L4 SQL snapshot, resolving its pinned Profile separately.
 
-    def __init__(self, catalog: ProductCatalog) -> None:
+    Profile lookup may perform I/O; it never reloads Collet/Task or renegotiates
+    their revision. Published definitions are immutable; missing versions fail.
+    """
+
+    def __init__(self, catalog: ProductProfileReader) -> None:
         self._catalog = catalog
 
     def validate(self, creation_facts_json: str) -> None:

@@ -50,6 +50,8 @@ class CollaborationCreateCommand:
     objective: str
     resource_refs: list[ResourceRef]
     product_profile_ref: VersionedProfileRef | None = None
+    # Historical/new Todo runtime addressing; not a Work principal or resource grant.
+    executor_owner_id: str | None = None
 
 
 @runtime_checkable

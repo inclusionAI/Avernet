@@ -27,6 +27,7 @@ class SwarmRuntimeConfiguration:
     actor: ActorContext
     # Trusted runtime identity for root startup, distinct from plan coordination.
     start_actor: ActorContext
+    max_events: int = 100
 
 
 class SwarmRuntimeResolver(Protocol):

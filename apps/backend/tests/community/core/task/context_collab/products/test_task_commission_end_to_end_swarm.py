@@ -5,6 +5,10 @@
 L5 协调器不是持久化调度器，不声称支持重试/重规划或持久化产品 Decision。
 """
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 import json
 
 import pytest
@@ -140,7 +144,6 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
     assert record.task == root_task
     assert record.task.status == "created"
 
-
     # 5. 第五步：只传 collet_id 构造真实 L5 Driver；由 wake 统一启动根 Task 并进入 Swarm 规划。
     driver = injector.get(AssistedBuilder[SwarmDriver]).build(collet_id=collet_id)
     driver.wake()
@@ -158,15 +161,17 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
     assert driver.is_completed()
     assert driver.plan().state is PlanState.COMPLETED
     assert len(planner.calls) == len(ROLES) + 1
-    assert [participant.agent_ref for _, participant, _ in executor.calls] == list(AGENTS)
+    assert [participant.agent_ref for _, participant, _ in executor.calls] == list(
+        AGENTS
+    )
 
     # 8. 第八步：逐阶段验证不同产物、子 Task、实际执行者及上报事件，确认分配释放与运行时合同。
     stages = driver.stages()
     record = _record(injector, collet_id)
-    tasks = {t.task_id: t for t in record.tasks}   # 一个根Task + 每个state一个子任务
+    tasks = {t.task_id: t for t in record.tasks}  # 一个根Task + 每个state一个子任务
     assert len(stages) == len(ROLES)
     assert [stage.name for stage in stages] == list(ROLES)
-    assert len(tasks) == len(ROLES) + 1            # 任务数量校验
+    assert len(tasks) == len(ROLES) + 1  # 任务数量校验
     root_starts = [
         event
         for event in record.events
@@ -177,10 +182,12 @@ def test_task_commission_end_to_end_swarm(deploy_swarm, tmp_path):
 
     for stage, artifact, agent in zip(stages, ARTIFACTS, AGENTS):
         assert stage.state is StageState.SUCCEEDED
-        assert stage.output_artifact_refs == (f"artifact://{artifact}",)  # 验证每个stage的产物
+        assert stage.output_artifact_refs == (
+            f"artifact://{artifact}",
+        )  # 验证每个stage的产物
         assert (tmp_path / artifact).read_text()
         task = tasks[stage.task_ref]
-        assert task.status == "done"                                      # 验证每个task的状态
+        assert task.status == "done"  # 验证每个task的状态
         assert task.parent_task_ref == record.task.task_id
         assert task.executor_refs == (agent,)
         reports = [
@@ -297,7 +304,7 @@ def deploy_swarm(db):
 
         def local(binder: Binder):
             binder.bind(DatabasePlugin, to=db)
-            binder.bind(ProductCatalog, to=ProductCatalog((profile,)))
+            binder.bind(ProductProfileReader, to=ProductCatalog((profile,)))
             binder.bind(LocalCodingPlanService, to=InstanceProvider(planner))
             binder.bind(
                 SwarmPlanningCapabilities,

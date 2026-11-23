@@ -27,8 +27,8 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.service_
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     product_definition,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_method_kind,
@@ -46,7 +46,7 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.reposi
 
 class ProductCollaborationPolicy(CollaborationPolicy[ContextStatusRecord]):
     def __init__(
-        self, catalog: ProductCatalog, authorizer: ContextCollabAuthorizerProtocol
+        self, catalog: ProductProfileReader, authorizer: ContextCollabAuthorizerProtocol
     ) -> None:
         self._catalog = catalog
         self._authorizer = authorizer

@@ -1,5 +1,9 @@
 """Composition roots bind L4 storage, not a renamed product repository."""
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
@@ -26,9 +30,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.repository import (
     ContextCollabRepository as L4Repository,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
-)
 from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
     ContextStatusRecord,
 )
@@ -51,7 +52,7 @@ def test_actual_l4_service_creation_neither_resolves_nor_calls_product_repositor
 
     def overrides(binder):
         binder.bind(DatabasePlugin, to=db)
-        binder.bind(ProductCatalog, to=InstanceProvider(NoCatalogAccess()))
+        binder.bind(ProductProfileReader, to=InstanceProvider(NoCatalogAccess()))
         binder.bind(
             ContextCollabAuthorizerProtocol, to=StructuralColletCreationAuthorizer()
         )

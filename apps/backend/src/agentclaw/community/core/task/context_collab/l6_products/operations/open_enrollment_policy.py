@@ -15,8 +15,8 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.service_
 from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
     ContextStatusRecord,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
     ProductCollaborationPolicy,
@@ -32,7 +32,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 class OpenEnrollmentCollaborationPolicy(ProductCollaborationPolicy):
     def __init__(
         self,
-        catalog: ProductCatalog,
+        catalog: ProductProfileReader,
         authorizer: ContextCollabAuthorizerProtocol,
         store: MethodStoreProtocol,
     ) -> None:

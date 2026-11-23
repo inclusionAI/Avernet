@@ -1,5 +1,8 @@
 from typing import Annotated
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import ProductProfileReader
+from agentclaw.community.di.modules.context_collab_products import build_product_catalog
+
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator,
     NoopCallbackAuthenticator,
@@ -113,13 +116,10 @@ from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
 from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
     SemanticKeywordBotDiscover,
 )
+from agentclaw.community.di.modules.task.todo_bindings import TaskTodoBindings
 from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
-)
-from agentclaw.community.di.modules.task_module import (
-    TaskModule,
-    _resolve_harness_enabled,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.notify_sender import (
@@ -239,7 +239,7 @@ class _ContextExecutorInjector:
 
 
 def test_context_collab_executor_requires_openapi_bot_port():
-    executor = TaskModule().context_collab_executor(
+    executor = TaskTodoBindings().context_collab_executor(
         _ContextExecutorInjector(),
         TaskDispatchConfig(backend_url="http://backend.example"),
     )
@@ -249,7 +249,7 @@ def test_context_collab_executor_requires_openapi_bot_port():
 
 def test_context_collab_executor_allows_missing_legacy_bcs_ports():
     openapi_bot = object()
-    executor = TaskModule().context_collab_executor(
+    executor = TaskTodoBindings().context_collab_executor(
         _ContextExecutorInjector(openapi_bot),
         TaskDispatchConfig(backend_url="http://backend.example"),
     )
@@ -417,9 +417,16 @@ def test_task_module_wires_bbs_digest_report_service_singleton():
     assert service is injector.get(ForumDigestReportServiceProtocol)
 
 
+
+
 class _StubContextCollabRepoModule(Module):
     """L5 method 服务接线测试用的受控 collet 仓储 stub(免 ORM,可解析性
     是断言对象,行为不是)。"""
+
+    @singleton
+    @provider
+    def product_catalog(self) -> ProductProfileReader:
+        return build_product_catalog()
 
     @singleton
     @provider

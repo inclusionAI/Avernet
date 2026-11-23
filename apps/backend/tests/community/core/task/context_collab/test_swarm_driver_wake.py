@@ -54,7 +54,7 @@ def _driver(status="created"):
 
     work.start.side_effect = start
     driver = SwarmDriver(
-        "collet_test", store, Mock(), reader, resolver, Mock(), Mock(), work
+        "collet_test", store, Mock(), reader, resolver, Mock(), Mock(), work, Mock()
     )
     return driver, work, record, starter
 

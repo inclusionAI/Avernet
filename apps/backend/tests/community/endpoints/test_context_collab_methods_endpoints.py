@@ -20,6 +20,11 @@ core/task/context_collab 的服务单测覆盖。
 - 错误语义:unknown binding → 404 而非 500。
 """
 
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+    UnmanagedSwarmPolicies,
+    UnavailableSwarmArtifactValidator,
+)
+
 from contextlib import contextmanager
 
 # Side-effect import: registers the 2 context collab models on Base.metadata.
@@ -155,6 +160,8 @@ def client_world():
             store=store,
             authorizer=authorizer,
             collab_repo=repo,
+            workflow_policies=UnmanagedSwarmPolicies(),
+            artifact_validator=UnavailableSwarmArtifactValidator(),
         ),
         OpenMethodOpsServiceProtocol: OpenMethodService(
             store=store,
@@ -353,7 +360,8 @@ class TestMethodBindingsDelivery:
         # Do not keep a binding-scoped publish route that silently ignores its ID.
         legacy = client.post(
             f"{PREFIX}/context_collab/{collab_id}/method-bindings"
-            f"/{binding_id}/open/opportunities", json={},
+            f"/{binding_id}/open/opportunities",
+            json={},
         )
         assert legacy.status_code == 404
         application = client.post(
@@ -367,7 +375,9 @@ class TestMethodBindingsDelivery:
         assert application.json()["data"]["state"] == "SUBMITTED"
 
     @pytest.mark.parametrize("value", ["unknown", "group_member", None])
-    def test_open_publication_rejects_invalid_participation_type(self, client_world, value):
+    def test_open_publication_rejects_invalid_participation_type(
+        self, client_world, value
+    ):
         created = client_world.post(
             f"{PREFIX}/context_collab", json=create_body("Open + Group")
         )
@@ -399,7 +409,8 @@ class TestMethodBindingsDelivery:
             bound = client.post(
                 f"{PREFIX}/context_collab/{collab_id}/method-bindings",
                 json={
-                    "method_kind": "Open", "method_binding_id": "second_open",
+                    "method_kind": "Open",
+                    "method_binding_id": "second_open",
                     "parent_scope_ref": "task_scope_root",
                 },
             )
@@ -410,8 +421,8 @@ class TestMethodBindingsDelivery:
             )
             assert activated.status_code == 200, activated.text
         elif case == "stranger":
-            client.app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
-                id="SSO", staffId="stranger", operatorName="stranger"
+            client.app.dependency_overrides[get_current_user] = lambda: (
+                AuthenticatedUser(id="SSO", staffId="stranger", operatorName="stranger")
             )
         result = client.post(
             f"{PREFIX}/context_collab/{collab_id}/open/opportunities",

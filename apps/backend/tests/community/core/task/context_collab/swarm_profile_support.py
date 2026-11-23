@@ -1,5 +1,10 @@
 """Shared fixtures for Swarm Method contract and lifecycle tests."""
 
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+    UnmanagedSwarmPolicies,
+    UnavailableSwarmArtifactValidator,
+)
+
 from datetime import datetime, timedelta, timezone
 
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
@@ -183,6 +188,8 @@ def make_swarm_service():
         store=store,
         authorizer=StructuralMethodOpsAuthorizer(),
         collab_repo=repo,
+        workflow_policies=UnmanagedSwarmPolicies(),
+        artifact_validator=UnavailableSwarmArtifactValidator(),
     )
     return store, repo, lifecycle, service
 

@@ -57,6 +57,10 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
     StoreAxes,
 )
 from injector import inject
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+    SwarmWorkflowPolicyReader,
+    SwarmArtifactEvidenceValidator,
+)
 
 
 def _now() -> str:
@@ -74,10 +78,14 @@ class SwarmMethodServiceBase:
         store: MethodStoreProtocol,
         authorizer: MethodOpsAuthorizerProtocol,
         collab_repo: CollaborationReader,
+        workflow_policies: SwarmWorkflowPolicyReader,
+        artifact_validator: SwarmArtifactEvidenceValidator,
     ) -> None:
         self._store = store
         self._authorizer = authorizer
         self._collab_repo = collab_repo
+        self._workflow_policies = workflow_policies
+        self._artifact_validator = artifact_validator
 
     def _load_binding(
         self, axes: StoreAxes, collab_context_id: str, method_binding_id: str

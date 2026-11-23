@@ -1,5 +1,9 @@
 """The complete L4 Service API resolves directly, preserving storage/G1 policy."""
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 from inspect import signature
 from types import SimpleNamespace
 from typing import get_type_hints
@@ -79,7 +83,7 @@ def creation_runtime():
             to=InstanceProvider(writer),
         )
         binder.bind(ContextCollabAuthorizerProtocol, to=authorizer)
-        binder.bind(ProductCatalog, to=ProductCatalog(()))
+        binder.bind(ProductProfileReader, to=ProductCatalog(()))
         for contract in (
             ContextCollabRepositoryProtocol,
             ApplicationCollabServiceProtocol,

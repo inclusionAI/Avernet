@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 import logging
 import runpy
 from collections.abc import Callable
@@ -71,9 +75,6 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     role_binding_refs,
-)
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
@@ -535,7 +536,7 @@ class SimulatedWorkingBot:
             _TEST_DIRECTORY, "模拟 Bot 以自身身份调用 L5 Open.query_opportunities"
         )
         return self._open_method.query_opportunities(
-            actor_context=self.actor_context,          # 传入自身身份，仅仅用作鉴权、审计
+            actor_context=self.actor_context,  # 传入自身身份，仅仅用作鉴权、审计
         )
 
     def submit_application_by_skill(
@@ -717,7 +718,7 @@ def _participation_snapshot(service, injector, created):
     record = injector.get(ContextCollabRepositoryProtocol).get_current_status(
         context_id
     )
-    profile = injector.get(ProductCatalog).get(
+    profile = injector.get(ProductProfileReader).get(
         record.product_instance.profile_ref.profile_id,
         record.product_instance.profile_ref.version,
     )

@@ -9,6 +9,9 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+    SwarmArtifactEvidenceValidator,
+)
 
 from injector import inject
 
@@ -26,7 +29,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
     current_participation,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import validate_enrolled_participation
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import (
+    validate_enrolled_participation,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     SwarmAllocateCommand,
     SwarmExecutionProfileCommand,
@@ -66,9 +71,7 @@ from agentclaw.community.core.task.context_collab.swarm_planning import (
 class _Computed:
     decision: PlanningDecision
     # Fence decisions against Stage/Task progress between computation and commit.
-    snapshot: tuple[
-        int, SwarmPlan | None, tuple[tuple[str, StageState, tuple[str, ...]], ...]
-    ]
+    snapshot: tuple[int, SwarmPlan | None, tuple[Stage, ...]]
 
 
 class SwarmDriver:
@@ -83,15 +86,18 @@ class SwarmDriver:
         executor: StageExecutionService,
         reports: SwarmStageReportService,
         work: ContextServiceProtocol,
+        artifact_validator: SwarmArtifactEvidenceValidator,
     ) -> None:
         self.collet_id = collet_id
         self.store, self.swarm, self.reader = store, swarm, reader
         self.executor, self.reports = executor, reports
         self.work = work
+        self.artifact_validator = artifact_validator
         self.axes = current_axes()
         config = resolver.resolve(collet_id)
         self.planner, self.actor = config.planner, config.actor
         self.start_actor = config.start_actor
+        self.max_events = config.max_events
         bindings = [
             b
             for b in store.list_bindings(self.axes, collet_id)
@@ -187,14 +193,12 @@ class SwarmDriver:
 
     def _snapshot(
         self,
-    ) -> tuple[
-        int, SwarmPlan | None, tuple[tuple[str, StageState, tuple[str, ...]], ...]
-    ]:
+    ) -> tuple[int, SwarmPlan | None, tuple[Stage, ...]]:
         record = self._record()
         return (
             record.collet.version,
             self.plan(),
-            tuple((s.stage_id, s.state, s.output_artifact_refs) for s in self.stages()),
+            tuple(self.stages()),
         )
 
     def step(self) -> bool:
@@ -232,7 +236,7 @@ class SwarmDriver:
         return True
 
     def drain(self) -> None:
-        for _ in range(100):
+        for _ in range(self.max_events):
             if not self.step():
                 return
         raise RuntimeError("Swarm driver exceeded event budget")
@@ -352,10 +356,21 @@ class SwarmDriver:
                 declared.object_id,
                 (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
                 qualification_evidence_refs=list(stage.requirement_refs),
-                allocation_id=f"alloc_{uuid4().hex}",
+                allocation_id=(
+                    f"alloc_{stage.stage_id}_1"
+                    if stage.workflow_node is not None
+                    else f"alloc_{uuid4().hex}"
+                ),
             ),
             self.actor,
         )
+        stage = self.store.get_stage(
+            self.axes, stage.stage_id, self.binding_id, self.collet_id
+        )
+        if stage is None:
+            raise ContextCollabValidationError("allocated Stage disappeared")
+        if stage.workflow_node is not None:
+            self.artifact_validator.validate_inputs(stage, participant)
         self.reports.start_task(
             self.collet_id, self.binding_id, stage, participant, self.actor
         )

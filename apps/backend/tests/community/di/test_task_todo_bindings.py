@@ -13,7 +13,7 @@ from agentclaw.community.core.repository.protocols.task.todo_templates import (
     TodoTemplateRepositoryProtocol,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from agentclaw.community.core.task.todos.template_management_protocol import (
@@ -130,10 +130,14 @@ def test_config_type_stays_in_dedicated_todo_config_module():
 def test_task_todo_bindings_wire_in_process_collaboration_adapter():
     context_collab = object.__new__(ContextCollabService)
 
-    adapter = TaskTodoBindings().todo_collaboration_port(context_collab)
+    repository, executor = object(), object()
+    adapter = TaskTodoBindings().todo_collaboration_port(context_collab, repository, executor)
 
     assert isinstance(adapter, InProcessTodoCollaborationAdapter)
     assert adapter._service is context_collab
+    assert adapter._runtime._service is context_collab
+    assert adapter._runtime._repository is repository
+    assert adapter._runtime._executor is executor
 
 
 def test_task_todo_bindings_resolve_template_repository_and_service():

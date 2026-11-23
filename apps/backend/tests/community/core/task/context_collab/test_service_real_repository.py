@@ -22,6 +22,10 @@
   ``tests/community/repository/task/test_task_persistence_module.py``)。
 """
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 import json
 from datetime import datetime, timezone
 
@@ -29,9 +33,6 @@ import pytest
 from injector import Injector
 from sqlalchemy import func, insert as sql_insert, select, update as sql_update
 
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
-)
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     TaskCommissionServiceProtocol,
     TaskMethodOpsPort,
@@ -73,7 +74,9 @@ from agentclaw.community.core.task.context_collab.service_api import (
     CollaborationCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import Collet
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
+)
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
@@ -562,8 +565,8 @@ class TestDiWiring:
         assert isinstance(service, ContextCollabServiceProtocol)
         assert injector.get(ContextCollabServiceProtocol) is service
         assert isinstance(service._authorizer, StructuralContextCollabAuthorizer)
-        catalog = injector.get(ProductCatalog)
-        assert injector.get(ProductCatalog) is catalog
+        catalog = injector.get(ProductProfileReader)
+        assert injector.get(ProductProfileReader) is catalog
         for consumer in (
             repository,
             service,
@@ -578,7 +581,7 @@ class TestDiWiring:
         other = Injector(
             [TestingDatabaseModule(), TaskPersistenceModule(), TaskModule()]
         )
-        assert other.get(ProductCatalog) is not catalog
+        assert other.get(ProductProfileReader) is not catalog
 
     def test_test_profile_injector_serves_context_collab_service(self):
         """完整测试 profile 组合根也能装配出 ContextCollabService 单例。"""
@@ -645,8 +648,7 @@ class TestNullablePartialRows:
         with engine.connect() as conn:
             stored = conn.scalar(
                 select(ContextCollabColletModel.current_snapshot).where(
-                    ContextCollabColletModel.collab_context_id
-                    == created.collet_id
+                    ContextCollabColletModel.collab_context_id == created.collet_id
                 )
             )
         assert stored is None  # 保持 NULL,不虚构快照

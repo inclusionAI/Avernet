@@ -68,8 +68,7 @@ class StoreAxes:
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value.strip():
                 raise ContextCollabValidationError(
-                    f"StoreAxes.{field_name} must be a non-empty string, "
-                    f"got: {value!r}"
+                    f"StoreAxes.{field_name} must be a non-empty string, got: {value!r}"
                 )
 
 
@@ -279,6 +278,36 @@ class MethodStoreProtocol(Protocol):
         stage: Stage,
         collab_context_id: str,
     ) -> Stage: ...
+
+    def commit_workflow_allocation(
+        self,
+        axes: StoreAxes,
+        method_binding_id: str,
+        collab_context_id: str,
+        expected_plan: SwarmPlan,
+        expected_stages: tuple[Stage, ...],
+        stage: Stage,
+        allocation: StageAllocation,
+    ) -> StageAllocation:
+        """CAS frozen inputs + allocation; exact request replay returns its first record.
+
+        Replay is checked before mutable snapshot/lease eligibility. Different
+        request content under one allocation ID conflicts without any writes.
+        """
+        ...
+
+    def commit_workflow_completion(
+        self,
+        axes: StoreAxes,
+        method_binding_id: str,
+        collab_context_id: str,
+        expected_stage: Stage,
+        expected_allocations: tuple[StageAllocation, ...],
+        stage: Stage,
+        allocations: tuple[StageAllocation, ...],
+    ) -> None:
+        """Commit accepted manifest/SUCCEEDED and allocation releases atomically."""
+        ...
 
     def get_stage(
         self,

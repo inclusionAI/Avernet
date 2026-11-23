@@ -70,8 +70,8 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.task_storage import (
     load_tasks,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_method_kind,
@@ -174,7 +174,9 @@ def _collet_from_row(row: ContextCollabColletModel) -> tuple[Collet, dict]:
 
 class ContextCollabRepository:
     @inject
-    def __init__(self, db: DatabasePlugin, product_catalog: ProductCatalog) -> None:
+    def __init__(
+        self, db: DatabasePlugin, product_catalog: ProductProfileReader
+    ) -> None:
         self._db = db
         self._product_catalog = product_catalog
         self._primitives = L4ContextCollabRepository(

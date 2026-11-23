@@ -125,7 +125,7 @@ class TestExplicitWorkTransition:
             (_snapshot("created"), "not_registered", None, "lifecycle machine"),
             (_snapshot("created"), "team_todo_execution", 999, "unavailable"),
             (_snapshot("in_progress"), "team_todo_execution", None, "not allowed"),
-            (_snapshot("done"), "team_todo_execution", None, "not allowed"),
+            (_snapshot("cancelled"), "team_todo_execution", None, "not allowed"),
         ],
     )
     def test_requires_task_machine_and_matching_transition(
@@ -152,3 +152,11 @@ class TestExplicitWorkTransition:
                 actor=PrincipalRef("human", "stranger"),
                 require_transition=True,
             )
+
+
+def test_todo_round_done_can_resume_through_explicit_work_transition():
+    assert resolve_workflow_status(
+        workflow_kind="team_todo_execution", task=_snapshot("done"),
+        event_kind="task.started", payload={}, actor=PRINCIPAL,
+        require_transition=True,
+    ) == "in_progress"

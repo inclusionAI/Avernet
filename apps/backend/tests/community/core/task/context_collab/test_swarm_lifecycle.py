@@ -358,6 +358,7 @@ class TestSwarmAllocateAndOutcome:
             (_past_iso(), "not in the future"),
             ("not-a-timestamp", "ISO timestamp"),
         ],
+        ids=("expired", "unparseable"),
     )
     def test_allocate_rejects_bad_lease(self, lease, error):
         _, _, service, binding, plan_id = running_plan_harness()

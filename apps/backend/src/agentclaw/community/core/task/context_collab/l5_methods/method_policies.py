@@ -1,5 +1,9 @@
 """L5-owned Method policy values for composition by callers, including L6."""
 
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow import (
+    SwarmWorkflowDefinition,
+)
+
 from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 
@@ -42,4 +46,16 @@ class SwarmMethodPolicy:
             )
 
 
-MethodPolicy: TypeAlias = OpenMethodPolicy | SwarmMethodPolicy
+@dataclass(frozen=True)
+class SwarmWorkflowPolicy:
+    """Deterministic graph, random eligible executor per committed allocation."""
+
+    workflow: SwarmWorkflowDefinition
+    method: Literal["Swarm"] = field(default="Swarm", init=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.workflow, SwarmWorkflowDefinition):
+            raise ContextCollabValidationError("Swarm workflow requires a typed DAG")
+
+
+MethodPolicy: TypeAlias = OpenMethodPolicy | SwarmMethodPolicy | SwarmWorkflowPolicy

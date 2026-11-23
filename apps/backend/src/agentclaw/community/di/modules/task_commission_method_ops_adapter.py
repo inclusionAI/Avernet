@@ -30,8 +30,8 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
@@ -60,7 +60,9 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
 
     @inject
     def __init__(
-        self, open_ops: OpenMethodOpsServiceProtocol, product_catalog: ProductCatalog
+        self,
+        open_ops: OpenMethodOpsServiceProtocol,
+        product_catalog: ProductProfileReader,
     ) -> None:
         self._product_catalog = product_catalog
         self._open_ops = open_ops

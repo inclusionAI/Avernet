@@ -39,8 +39,8 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     role_binding_refs,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
@@ -155,7 +155,7 @@ def ensure_top_level_binding(
     actor: ActorContext,
     *,
     now: str,
-    catalog: ProductCatalog,
+    catalog: ProductProfileReader,
     method_binding_id: str | None = None,
 ) -> MethodBinding:
     """Read-path recovery of the L5 top-level binding from persisted facts."""
@@ -244,7 +244,7 @@ class ProductMethodBindingRecovery:
         self,
         store: MethodStoreProtocol,
         repository: ContextCollabRepositoryProtocol,
-        catalog: ProductCatalog,
+        catalog: ProductProfileReader,
     ) -> None:
         self._store = store
         self._repository = repository

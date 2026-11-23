@@ -6,6 +6,10 @@
 申请者在运行时才出现，录取后绑定角色，Swarm 在当前有效的录取集合中选择执行者。
 """
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 from dataclasses import dataclass
 
 import pytest
@@ -157,6 +161,7 @@ CANDIDATE_COUNT = len(AGENTS) + len(OTHER_AGENTS)
   - [ ] open方法中的参与类型，协议中的枚举不在一个维度：participation_type: COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | SINGLE_CONTRIBUTION
 """
 
+
 def test_task_commission_end_to_end_open_swarm(deploy_open_swarm, tmp_path):
     # 1、基于L6层协议发布一个代办任务 （协作方法基于L5层OPEN + SWARM方法的组合）
     (
@@ -224,7 +229,7 @@ def publish_todo_task(deploy_open_swarm, tmp_path):
                 description="AI coding",
                 objective=OBJECTIVE,
                 acceptance_criteria="",
-                resources=()
+                resources=(),
             ),
             profile_ref=profile.ref,
         ),
@@ -257,12 +262,16 @@ def swarm_run(injector, collet_id):
     swarm_driver.drain()
 
     # 校验swarm任务结束状态
-    assert swarm_driver.is_completed() and swarm_driver.plan().state is PlanState.COMPLETED
+    assert (
+        swarm_driver.is_completed() and swarm_driver.plan().state is PlanState.COMPLETED
+    )
 
     return swarm_driver.stages()
 
 
-def judge_artifacts(injector, storage_service, storage_envs, stages, collet_id, swarm_binding_id):
+def judge_artifacts(
+    injector, storage_service, storage_envs, stages, collet_id, swarm_binding_id
+):
     # 11. 第十一步：逐 Stage / 子 Task 校验产物、上报人与验收证据；实际执行者必须都来自 OPEN 录取集合。
     record = _record(injector, collet_id)
     tasks = {task.task_id: task for task in record.tasks}
@@ -292,8 +301,12 @@ def judge_artifacts(injector, storage_service, storage_envs, stages, collet_id, 
             == accepted.payload["artifacts"]
             == list(refs)
         )
-    allocations = storage_service.list_allocations(storage_envs, swarm_binding_id, collet_id)
-    profiles = storage_service.list_execution_profiles(storage_envs, swarm_binding_id, collet_id)
+    allocations = storage_service.list_allocations(
+        storage_envs, swarm_binding_id, collet_id
+    )
+    profiles = storage_service.list_execution_profiles(
+        storage_envs, swarm_binding_id, collet_id
+    )
     assert len(allocations) == len(profiles) == len(ROLES)
     profiles_by_id = {p.execution_profile_id: p for p in profiles}
     allocations_by_stage = {a.stage_ref: a for a in allocations}
@@ -344,13 +357,19 @@ def _create_product_profile():
                 ),
             ),
             participant_scope=ParticipantScope(ParticipantScopeKind.OPEN),
-
         )
     )
 
 
-def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_service, storage_envs,
-                                profile, collet_id, open_binding_id):
+def recruit_multi_coding_agents(
+    injector,
+    l5_open_method_operate,
+    storage_service,
+    storage_envs,
+    profile,
+    collet_id,
+    open_binding_id,
+):
     role_refs = {role: scenario_role_ref(profile.ref, role) for role in ROLES}
     admission = profile.composition.require_policy("Open").publication.admission
 
@@ -381,7 +400,9 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
             l5_open_method_operate, published.object_id, role_refs[bot.role]
         )
 
-    applications = storage_service.list_applications(storage_envs, open_binding_id, collet_id)
+    applications = storage_service.list_applications(
+        storage_envs, open_binding_id, collet_id
+    )
     applicants = {bot.agent.agent_id: bot for bot in bots}
     reviewer = LocalCapabilityAdmissionService()
     for application in applications:
@@ -419,7 +440,9 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
         a.application_id for a in applications
     }
     assert all(policy is admission for policy, _ in reviewer.calls)
-    applications = storage_service.list_applications(storage_envs, open_binding_id, collet_id)
+    applications = storage_service.list_applications(
+        storage_envs, open_binding_id, collet_id
+    )
     for application in applications:
         assert application.transitioned_by == OWNER.actor.principal_id
         assert application.transition_reason == (
@@ -434,12 +457,14 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
     }
     assert set(admitted_by_agent) == {agent.agent_id for agent in AGENTS}
     assert {
-               a.applicant_agent_ref
-               for a in applications
-               if a.state is ApplicationState.REJECTED
-           } == {agent.agent_id for agent in OTHER_AGENTS}
+        a.applicant_agent_ref
+        for a in applications
+        if a.state is ApplicationState.REJECTED
+    } == {agent.agent_id for agent in OTHER_AGENTS}
     decisions = storage_service.list_decisions(storage_envs, open_binding_id, collet_id)
-    scoped = storage_service.list_participant_bindings(storage_envs, open_binding_id, collet_id)
+    scoped = storage_service.list_participant_bindings(
+        storage_envs, open_binding_id, collet_id
+    )
     assert len(decisions) == len(scoped) == len(AGENTS)
     scoped_by_id = {p.participant_binding_id: p for p in scoped}
     for decision in decisions:
@@ -466,7 +491,8 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
     # 录取后才绑定具体 Agent：身份取实际申请者，角色取被审核录取的申请。
     # 根执行者由本案例的协调策略选择已录取的 PR 提交者，不取 AGENTS 的位置。
     [root_application] = [
-        application for application in admitted_by_agent.values()
+        application
+        for application in admitted_by_agent.values()
         if role_refs["pr_submission"] in application.requested_role_refs
     ]
     before = _record(injector, collet_id)
@@ -491,7 +517,6 @@ def recruit_multi_coding_agents(injector, l5_open_method_operate, storage_servic
     assert set(ROLES) <= {binding.role for binding in bound.role_bindings}
 
 
-
 @pytest.fixture
 def deploy_open_swarm(db):
     def deploy(profile, workspace):
@@ -500,7 +525,7 @@ def deploy_open_swarm(db):
 
         def local(binder: Binder):
             binder.bind(DatabasePlugin, to=db)
-            binder.bind(ProductCatalog, to=ProductCatalog((profile,)))
+            binder.bind(ProductProfileReader, to=ProductCatalog((profile,)))
             binder.bind(LocalCodingPlanService, to=InstanceProvider(planner))
             binder.bind(
                 SwarmPlanningCapabilities,

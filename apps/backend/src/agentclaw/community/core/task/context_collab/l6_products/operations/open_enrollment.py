@@ -51,8 +51,8 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.open_enrollment import (
     AdmittedAgent,
@@ -185,7 +185,9 @@ def enrollment_payload(
 
 
 def require_current_enrollment(
-    record: ContextStatusRecord, catalog: ProductCatalog, store: MethodStoreProtocol
+    record: ContextStatusRecord,
+    catalog: ProductProfileReader,
+    store: MethodStoreProtocol,
 ) -> None:
     """A retained binding event is evidence, not authority after admission revocation."""
     events = [e for e in record.events if e.event_kind == ADMITTED_BINDING_EVENT]
@@ -219,7 +221,7 @@ class ProductOpenEnrollmentService(ProductOpenEnrollmentServiceProtocol):
         self,
         repository: ContextCollabRepositoryProtocol,
         store: MethodStoreProtocol,
-        catalog: ProductCatalog,
+        catalog: ProductProfileReader,
         authorizer: MethodOpsAuthorizerProtocol,
     ) -> None:
         self.repository, self.store, self.catalog, self.authorizer = (

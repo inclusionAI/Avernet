@@ -34,8 +34,8 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     prepare_product_profile,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     composition_method_kind,
@@ -72,7 +72,7 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
         self,
         repository: ContextCollabRepositoryProtocol,
         method_store: MethodStoreProtocol,
-        product_catalog: ProductCatalog,
+        product_catalog: ProductProfileReader,
         authorizer: ContextCollabAuthorizerProtocol,
         context_service: ContextServiceProtocol,
     ) -> None:

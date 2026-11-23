@@ -1,4 +1,4 @@
-"""Composition-root installation of code-owned, versioned product definitions."""
+"""Public versioned authoring snapshots and explicit authorized SQL import."""
 
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -19,5 +19,14 @@ INSTALLED_PRODUCT_PROFILES = (
 
 
 def build_product_catalog() -> ProductCatalog:
-    """Build an isolated immutable catalog; TaskModule binds one per injector."""
+    """Build an isolated snapshot; production Profile reads use published SQL rows."""
     return ProductCatalog(INSTALLED_PRODUCT_PROFILES)
+
+
+def import_installed_product_profiles(publication, actor):
+    """Explicit deployment/test import. Never called by request-path DI providers.
+
+    Caller must establish the target trusted tenant/env and independent publish
+    authorization. Imports and historical-reference verification are one transaction.
+    """
+    return publication.import_profiles(INSTALLED_PRODUCT_PROFILES, actor)

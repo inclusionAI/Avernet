@@ -5,7 +5,10 @@ advancing the authoritative Stage and its L4 child Task through G4 machines.
 A report from another worker or a repeated report is rejected without advancement.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.artifact_manifest import (
+    ArtifactPortBinding,
+)
 from typing import Protocol
 
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
@@ -20,6 +23,7 @@ class StageExecutionReport:
     stage_ref: str
     allocation_ref: str
     artifact_refs: tuple[str, ...]
+    output_bindings: tuple[ArtifactPortBinding, ...] = field(default=(), kw_only=True)
 
 
 class StageReportProtocol(Protocol):

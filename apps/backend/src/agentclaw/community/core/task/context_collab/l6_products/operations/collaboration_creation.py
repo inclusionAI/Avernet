@@ -37,8 +37,8 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
     _now,
     current_axes,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
@@ -86,11 +86,13 @@ class ContextCollabService(
         method_store: MethodStoreProtocol,
         authorizer: ContextCollabAuthorizerProtocol = StructuralContextCollabAuthorizer(),
         *,
-        product_catalog: ProductCatalog,
+        product_catalog: ProductProfileReader,
     ) -> None:
         super().__init__(
             repository,
-            OpenEnrollmentCollaborationPolicy(product_catalog, authorizer, method_store),
+            OpenEnrollmentCollaborationPolicy(
+                product_catalog, authorizer, method_store
+            ),
             authorizer,
         )
         self._product_catalog = product_catalog
@@ -125,6 +127,7 @@ class ContextCollabService(
             product_kind=command.product_kind,
             workflow_kind=command.workflow_kind,
             product_profile_ref=command.product_profile_ref,
+            executor_owner_id=command.executor_owner_id,
         )
         record = self._repository.create_collet(
             CreateColletRecordRequest(

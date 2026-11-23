@@ -1,5 +1,10 @@
 """Functional layer ports: no ContextSpec/ProductCatalog needed inside L4/L5."""
 
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+    UnmanagedSwarmPolicies,
+    UnavailableSwarmArtifactValidator,
+)
+
 from dataclasses import dataclass, replace
 from importlib import import_module
 
@@ -173,7 +178,13 @@ def test_method_operations_use_lower_reader_and_resolved_facts(kind):
         assert opportunity.opportunity_id == result.object_id
         assert opportunity.scope_ref == COLLET_ID
     else:
-        service = SwarmMethodService(store, authorizer, reader)
+        service = SwarmMethodService(
+            store,
+            authorizer,
+            reader,
+            UnmanagedSwarmPolicies(),
+            UnavailableSwarmArtifactValidator(),
+        )
         result = service.declare_execution_profile(
             COLLET_ID,
             binding_id,

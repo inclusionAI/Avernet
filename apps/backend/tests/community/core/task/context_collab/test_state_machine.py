@@ -43,7 +43,7 @@ A_EXECUTOR_BOT = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 # ---------------------------------------------------------------- 内置 machine 词汇
 
 def test_builtin_machine_pinned():
-    """六状态 / 六迁移逐字钉死(全局约束重命名后词汇,guard_refs 保留)。"""
+    """六状态 / 八迁移逐字钉死(全局约束重命名后词汇,guard_refs 保留)。"""
     assert MACHINE_REGISTRY == {
         "team_todo_execution": TEAM_TODO_EXECUTION_MACHINE,
         "bbs_help_request_goal": BBS_HELP_REQUEST_GOAL_MACHINE,
@@ -62,7 +62,7 @@ def test_builtin_machine_pinned():
         ("in_progress", "active", ("Single",)),
         ("reviewing", "review", ("Single",)),
         ("blocked", "blocked", ("Single",)),
-        ("done", "terminal_success", ("Single",)),
+        ("done", "review", ("Single",)),
         ("cancelled", "terminal_cancelled", ("Single",)),
     ]
     assert [
@@ -79,6 +79,10 @@ def test_builtin_machine_pinned():
          ("actor_can_start_task",), "in_progress"),
         ("update_progress", ("in_progress",), "task.progress.updated",
          ("event_matches_task",), "in_progress"),
+        ("complete_task", ("in_progress",), "task.completed",
+         ("event_matches_task",), "done"),
+        ("resume_task", ("done",), "task.started",
+         ("actor_can_start_task",), "in_progress"),
         ("submit_for_review", ("in_progress",), "task.submitted",
          ("required_artifacts_present",), "reviewing"),
         ("accept_task", ("reviewing",), "task.accepted",
@@ -188,7 +192,7 @@ def test_terminal_outgoing_edge_rejected():
     """terminal_* 状态不能有出边(spec §4.4 第 3 条)。"""
     reopen = TransitionRule(
         rule_id="reopen",
-        from_states=("done",),
+        from_states=("cancelled",),
         event_name="task.accepted",
         guard_refs=("actor_is_responsible_principal",),
         to_state="reviewing",

@@ -29,6 +29,12 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import uuid4
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.workflow_guards import (
+    freeze_inputs,
+    require_stage,
+    normalize_outputs,
+    require_done_evidence,
+)
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
@@ -43,7 +49,9 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.metho
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
     resolve_transition,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import validate_enrolled_participation
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import (
+    validate_enrolled_participation,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
     current_participation,
 )
@@ -64,6 +72,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.ma
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
     AllocationState,
+    ALLOCATION_REQUEST_FIELDS,
     ExecutionMode,
     PlanState,
     Stage,
@@ -77,21 +86,6 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 
 _STAGE_MACHINE = METHOD_MACHINE_REGISTRY["swarm_stage"]
 _ALLOCATION_MACHINE = METHOD_MACHINE_REGISTRY["swarm_allocation"]
-
-# 幂等重放(§8.3)的"请求形态"白名单:排除服务端生成的时间/审计/
-# 状态机事实(``transitioned_*``)与 ``attempt``(既有分配数 + 1 的派生
-# 计数,首次落库后随 store 状态漂移——沿 bind 重放排除 version 先例);
-# ``lease_ref`` 由服务端按分配 id 派生,同 id 重放恒等,保留在比对面。
-_ALLOCATION_REQUEST_FIELDS = (
-    "stage_ref",
-    "target_kind",
-    "target_ref",
-    "execution_profile_ref",
-    "lease_ref",
-    "lease_expires_at",
-    "qualification_evidence_refs",
-    "authorization_evidence_refs",
-)
 
 
 def _resolve_stage_state(from_state: str, event: str) -> str:
@@ -194,7 +188,54 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
         plan = self._require_plan(
             axes, collab_context_id, method_binding_id, stage.swarm_plan_ref
         )
+        workflow = self._workflow_policies.workflow_for(
+            collab_context_id, method_binding_id
+        )
+        if workflow is not None and command.allocation_id is not None:
+            require_stage(workflow, collab_context_id, plan, stage)
+            existing = self._store.get_allocation(
+                axes, command.allocation_id, method_binding_id, collab_context_id
+            )
+            if existing is not None:
+                # Replaying an accepted request is not a new lease or allocation.
+                # Keep the current G1 gate, but do not require READY, free capacity
+                # or a still-future lease merely to return the original record.
+                request = {
+                    "stage_ref": command.stage_ref,
+                    "target_kind": command.target_kind,
+                    "target_ref": command.target_ref,
+                    "execution_profile_ref": command.execution_profile_ref,
+                    "lease_ref": f"lease_{command.allocation_id}",
+                    "lease_expires_at": command.lease_expires_at,
+                    "qualification_evidence_refs": command.qualification_evidence_refs,
+                    "authorization_evidence_refs": [],
+                }
+                if _shape_of(
+                    existing.to_dict(), ALLOCATION_REQUEST_FIELDS
+                ) != _shape_of(request, ALLOCATION_REQUEST_FIELDS):
+                    raise ContextCollabValidationError(
+                        "idempotent workflow allocation differs from the stored shape"
+                    )
+                return ProfileOpAcceptedResult(
+                    accepted=True,
+                    collab_context_id=collab_context_id,
+                    method_binding_id=method_binding_id,
+                    object_kind="swarm_allocation",
+                    object_id=existing.allocation_id,
+                    state=existing.state.value,
+                )
         self._require_running_plan(plan, "allocate_stage")
+        expected_stages = tuple(
+            self._plan_stages(
+                axes, collab_context_id, method_binding_id, stage.swarm_plan_ref
+            )
+        )
+        if workflow is not None:
+            stage = freeze_inputs(
+                workflow, collab_context_id, plan, stage, expected_stages
+            )
+        elif stage.workflow_node is not None:
+            raise ContextCollabValidationError("workflow policy unavailable")
         stage_allocations = self._stage_allocations(
             axes, collab_context_id, method_binding_id, stage.stage_id
         )
@@ -232,11 +273,15 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
                 f"execution profile {command.execution_profile_ref!r} which "
                 f"is not declared on method binding {method_binding_id!r}"
             )
-        if any("/role-bindings/" in ref for ref in stage.requirement_refs):
+        if workflow is not None or any(
+            "/role-bindings/" in ref for ref in stage.requirement_refs
+        ):
             record = self._collab_repo.get_current_status(collab_context_id)
             if record is None:
                 raise ContextCollabNotFoundError("stage Collet not found")
-            validate_enrolled_participation(collab_context_id, record.events, self._store)
+            validate_enrolled_participation(
+                collab_context_id, record.events, self._store
+            )
             candidates = stage_role_candidates(
                 collab_context_id, stage, current_participation(record.events)
             )
@@ -253,6 +298,21 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
                 raise ContextCollabValidationError(
                     "execution profile does not match stage role target"
                 )
+            if workflow is not None:
+                selected = next(
+                    p for p in candidates if p.participant_id == command.target_ref
+                )
+                if sum(p.agent_ref == selected.agent_ref for p in candidates) != 1:
+                    raise ContextCollabValidationError("ambiguous workflow participant")
+                node = stage.workflow_node
+                if (
+                    execution.input_contract_ref != node.input_contract_ref
+                    or execution.output_contract_ref != node.output_contract_ref
+                ):
+                    raise ContextCollabValidationError(
+                        "execution profile changed workflow I/O contracts"
+                    )
+                self._artifact_validator.validate_inputs(stage, selected)
         allocation_id = command.allocation_id or f"alloc_{uuid4().hex[:12]}"
         now = _now()
         reason = command.reason or "swarm.stage.allocate"
@@ -290,8 +350,8 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
             )
             if existing is not None:
                 if _shape_of(
-                    existing.to_dict(), _ALLOCATION_REQUEST_FIELDS
-                ) == _shape_of(candidate.to_dict(), _ALLOCATION_REQUEST_FIELDS):
+                    existing.to_dict(), ALLOCATION_REQUEST_FIELDS
+                ) == _shape_of(candidate.to_dict(), ALLOCATION_REQUEST_FIELDS):
                     return ProfileOpAcceptedResult(
                         accepted=True,
                         collab_context_id=collab_context_id,
@@ -319,19 +379,30 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
             transitioned_by=context.actor.principal_id,
             transitioned_at=now,
         )
-        self._store.update_stage_state(
-            axes, method_binding_id, updated_stage, collab_context_id
-        )
-        self._store.insert_allocation(
-            axes, method_binding_id, candidate, collab_context_id
-        )
+        if workflow is not None:
+            candidate = self._store.commit_workflow_allocation(
+                axes,
+                method_binding_id,
+                collab_context_id,
+                plan,
+                expected_stages,
+                updated_stage,
+                candidate,
+            )
+        else:
+            self._store.update_stage_state(
+                axes, method_binding_id, updated_stage, collab_context_id
+            )
+            self._store.insert_allocation(
+                axes, method_binding_id, candidate, collab_context_id
+            )
         return ProfileOpAcceptedResult(
             accepted=True,
             collab_context_id=collab_context_id,
             method_binding_id=method_binding_id,
             object_kind="swarm_allocation",
-            object_id=allocation_id,
-            state=AllocationState.ACTIVE.value,
+            object_id=candidate.allocation_id,
+            state=candidate.state.value,
         )
 
     def complete_stage(
@@ -403,9 +474,40 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
                     f"{allocation.lease_expires_at!r}; release and "
                     "re-allocate before completing the stage"
                 )
+        workflow = self._workflow_policies.workflow_for(
+            collab_context_id, method_binding_id
+        )
+        bindings = ()
+        if workflow is not None:
+            plan = self._require_plan(
+                axes, collab_context_id, method_binding_id, stage.swarm_plan_ref
+            )
+            require_stage(workflow, collab_context_id, plan, stage)
+            if len(target_ids) != 1 or {
+                a.allocation_id
+                for a in stage_allocations
+                if a.state is AllocationState.ACTIVE
+            } != set(target_ids):
+                raise ContextCollabValidationError(
+                    "workflow requires exactly one live allocation"
+                )
+            bindings = normalize_outputs(
+                stage, command.output_bindings, command.artifact_refs
+            )
+            record = self._collab_repo.get_current_status(collab_context_id)
+            if record is None:
+                raise ContextCollabValidationError("workflow Collet unavailable")
+            validate_enrolled_participation(
+                collab_context_id, record.events, self._store
+            )
+            require_done_evidence(record, plan, stage, by_id[target_ids[0]], bindings)
+            self._artifact_validator.validate_outputs(stage, bindings)
+        elif stage.workflow_node is not None or command.output_bindings:
+            raise ContextCollabValidationError("workflow policy unavailable")
         new_state = _resolve_stage_state(stage.state.value, "swarm.stage.complete")
         now = _now()
         reason = command.reason or "swarm.stage.complete"
+        released_allocations = []
         for allocation_id in target_ids:
             allocation = by_id[allocation_id]
             released = replace(
@@ -420,21 +522,35 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
                 transitioned_by=context.actor.principal_id,
                 transitioned_at=now,
             )
-            self._store.update_allocation_state(
-                axes, method_binding_id, released, collab_context_id
-            )
+            released_allocations.append(released)
+            if workflow is None:
+                self._store.update_allocation_state(
+                    axes, method_binding_id, released, collab_context_id
+                )
         updated = replace(
             stage,
             output_artifact_refs=tuple(command.artifact_refs),
+            output_bindings=bindings,
             state=StageState.from_wire(new_state),
             transitioned_from=stage.state.value,
             transition_reason=reason,
             transitioned_by=context.actor.principal_id,
             transitioned_at=now,
         )
-        self._store.update_stage_state(
-            axes, method_binding_id, updated, collab_context_id
-        )
+        if workflow is not None:
+            self._store.commit_workflow_completion(
+                axes,
+                method_binding_id,
+                collab_context_id,
+                stage,
+                tuple(stage_allocations),
+                updated,
+                tuple(released_allocations),
+            )
+        else:
+            self._store.update_stage_state(
+                axes, method_binding_id, updated, collab_context_id
+            )
         plan = self._require_plan(
             axes, collab_context_id, method_binding_id, stage.swarm_plan_ref
         )

@@ -85,12 +85,15 @@ from agentclaw.community.core.task.task_context.task_artifact.artifact_object_fi
     TaskArtifactObjectFileService,
     TaskArtifactObjectFileServiceProtocol,
 )
-from agentclaw.community.core.task.task_context.task_context_service import TaskContextService
+from agentclaw.community.core.task.task_context.task_context_service import (
+    TaskContextService,
+)
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
 from agentclaw.community.core.task.repository.task_intake_repository import (
-    TaskIntakeRepository, TaskIntakeRepositoryProtocol,
+    TaskIntakeRepository,
+    TaskIntakeRepositoryProtocol,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
@@ -98,7 +101,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.repository import (
     ContextCollabRepository as L4ContextCollabRepository,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
 from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
     ContextStatusRecord,
     ProductRecordDecoder,
@@ -141,14 +146,16 @@ class TaskPersistenceModule(Module):
     def l4_context_collab_repository(
         self,
         db: DatabasePlugin,
-        catalog: ProductCatalog,
+        catalog: ProductProfileReader,
     ) -> L4ContextCollabRepositoryProtocol[ContextStatusRecord]:
         # L4 owns SQL and only sees a lower read contract. L6 decodes optional
         # product metadata from that same read; creation never invokes it.
         return L4ContextCollabRepository(db, ProductRecordDecoder(catalog))
 
     def configure(self, binder: Binder) -> None:
-        binder.bind(TaskIntakeRepositoryProtocol, to=TaskIntakeRepository, scope=singleton)
+        binder.bind(
+            TaskIntakeRepositoryProtocol, to=TaskIntakeRepository, scope=singleton
+        )
         # L6 product storage is separate from the L4 primitive provider above.
         # Both delegate Collet/Task/Event SQL to the same canonical L4 models.
         binder.bind(
@@ -188,7 +195,9 @@ class TaskPersistenceModule(Module):
         # repo (TaskTrajectoryRepositoryProtocol → TaskTrajectoryRepository
         # above); light DI-constructable service-layer object. Bound alongside
         # the trajectory repo so P5's analysis service can Injected(...) it.
-        binder.bind(TaskTrajectoryAssembler, to=TaskTrajectoryAssembler, scope=singleton)
+        binder.bind(
+            TaskTrajectoryAssembler, to=TaskTrajectoryAssembler, scope=singleton
+        )
         binder.bind(
             TaskCallbackCorrelationRepositoryProtocol,
             to=TaskCallbackCorrelationRepository,
@@ -298,9 +307,7 @@ class TaskPersistenceModule(Module):
 
     @singleton
     @provider
-    def task_trajectory_analyzer(
-        self, injector: Injector
-    ) -> TaskTrajectoryAnalyzer:
+    def task_trajectory_analyzer(self, injector: Injector) -> TaskTrajectoryAnalyzer:
         """Construct the trajectory analysis multi-executor (REQ-9, P5a).
 
         Resolves its two optional dependencies the way ``TaskModule`` resolves
@@ -323,7 +330,8 @@ class TaskPersistenceModule(Module):
         except Exception as exc:  # noqa: BLE001  unbound in lightweight DI injectors
             logger.info(
                 "[task-persistence] OpenApiBotPort 未绑定 → 轨迹分析 tc_bot 执行者不可用:%s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             bot = None
         try:
@@ -331,7 +339,8 @@ class TaskPersistenceModule(Module):
         except Exception as exc:  # noqa: BLE001  ConfigModule 未装配时降级默认
             logger.info(
                 "[task-persistence] TrajectoryAnalysisConfig 未绑定 → 使用默认配置:%s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             config = None
         return TaskTrajectoryAnalyzer(bot=bot, config=config)
@@ -363,7 +372,8 @@ class TaskPersistenceModule(Module):
         except Exception as exc:  # noqa: BLE001  ConfigModule 未装配时降级 None
             logger.info(
                 "[task-persistence] TrajectoryAnalysisConfig 未绑定 → 轨迹服务分析 bot 未配置:%s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             config = None
         # RUNNING 节点会话明细探测的两个可选协作方(决策 #14 精神:未接线 → 探测
@@ -377,7 +387,8 @@ class TaskPersistenceModule(Module):
         except Exception as exc:  # noqa: BLE001  轻量 DI 未装配 TaskModule
             logger.info(
                 "[task-persistence] TaskGraphService 未绑定 → RUNNING 会话探测关闭:%s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             graph = None
         try:
@@ -385,7 +396,8 @@ class TaskPersistenceModule(Module):
         except Exception as exc:  # noqa: BLE001  轻量 DI 未装配 runner profile
             logger.info(
                 "[task-persistence] BcsClientPort 未绑定 → RUNNING 会话探测关闭:%s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             bcs = None
         # 持有者 bot session_token 解析(方案一:会话历史读口带参与者 Bearer,否则
@@ -397,7 +409,8 @@ class TaskPersistenceModule(Module):
         except Exception as exc:  # noqa: BLE001  未装配 provider
             logger.info(
                 "[task-persistence] BcsBotTokenProvider 未绑定 → 会话历史匿名读取(401 降级):%s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             bcs_bot_tokens = None
         # 引擎侧会话(``agent:main:session:*`` 等)读通道:BaaS Open API
@@ -410,7 +423,8 @@ class TaskPersistenceModule(Module):
         except Exception as exc:  # noqa: BLE001  未装配 runner profile
             logger.info(
                 "[task-persistence] OpenApiBotPort 未绑定 → 引擎会话明细读取降级:%s: %s",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             openapi_bot = None
         return TaskTrajectoryService(
@@ -426,9 +440,7 @@ class TaskPersistenceModule(Module):
 
     @singleton
     @provider
-    def task_context_service(
-        self, injector: Injector
-    ) -> TaskContextServiceProtocol:
+    def task_context_service(self, injector: Injector) -> TaskContextServiceProtocol:
         """Construct the ``task_context`` facade (spec 2026-09-18): the single对外
         entry for trajectory read + write, relaying to the internal
         ``TaskTrajectoryService`` (bound just above as

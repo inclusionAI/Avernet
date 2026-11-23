@@ -15,6 +15,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_policies imp
     MethodPolicy,
     OpenMethodPolicy,
     SwarmMethodPolicy,
+    SwarmWorkflowPolicy,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ApplicationState,
@@ -62,7 +63,11 @@ def test_l5_contracts_accept_structural_roles_without_l6_definitions(admission, 
     )
     publication = OpenPublicationProfile(admission)
     policy = OpenMethodPolicy(publication)
-    assert set(get_args(MethodPolicy)) == {OpenMethodPolicy, SwarmMethodPolicy}
+    assert set(get_args(MethodPolicy)) == {
+        OpenMethodPolicy,
+        SwarmMethodPolicy,
+        SwarmWorkflowPolicy,
+    }
     assert policy.publication.admission is admission
     assert policy.method == "Open"
     for value, field, replacement in (

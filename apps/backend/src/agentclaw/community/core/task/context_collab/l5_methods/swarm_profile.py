@@ -31,6 +31,19 @@ P1 裁决两条(spec §2 / §8.1 引注):
 
 from __future__ import annotations
 
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.artifact_manifest import (
+    ArtifactPortBinding,
+    bindings_from_dict,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow import (
+    SwarmWorkflowNode,
+    WORKFLOW_TYPES,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.value_codec import (
+    encode,
+    decode,
+)
+
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -174,9 +187,7 @@ class ExecutionMode(str, Enum):
 
 
 # supported_work_kinds 的闭合词汇(spec §4.3 YAML)。
-SWARM_WORK_KINDS = frozenset(
-    {"PLAN", "MATCH", "SCHEDULE", "EVALUATE", "EXECUTE"}
-)
+SWARM_WORK_KINDS = frozenset({"PLAN", "MATCH", "SCHEDULE", "EVALUATE", "EXECUTE"})
 
 
 def _assert_state_machine_alignments() -> None:
@@ -243,6 +254,11 @@ _PLAN_FIELDS = (
 )
 
 _STAGE_FIELDS = (
+    "objective",
+    "workflow_node",
+    "workflow_digest",
+    "input_bindings",
+    "output_bindings",
     "stage_id",
     "swarm_plan_ref",
     "task_ref",
@@ -259,6 +275,22 @@ _STAGE_FIELDS = (
     "transitioned_by",
     "transitioned_at",
 )
+
+# 幂等重放(§8.3)的"请求形态"白名单:排除服务端生成的时间/审计/
+# 状态机事实(``transitioned_*``)与 ``attempt``(既有分配数 + 1 的派生
+# 计数,首次落库后随 store 状态漂移——沿 bind 重放排除 version 先例);
+# ``lease_ref`` 由服务端按分配 id 派生,同 id 重放恒等,保留在比对面。
+ALLOCATION_REQUEST_FIELDS = (
+    "stage_ref",
+    "target_kind",
+    "target_ref",
+    "execution_profile_ref",
+    "lease_ref",
+    "lease_expires_at",
+    "qualification_evidence_refs",
+    "authorization_evidence_refs",
+)
+
 
 _ALLOCATION_FIELDS = (
     "allocation_id",
@@ -358,27 +390,17 @@ class SwarmPlan:
             )
         return cls(
             swarm_plan_id=_required_str(data, "swarm_plan_id", "SwarmPlan"),
-            method_binding_id=_required_str(
-                data, "method_binding_id", "SwarmPlan"
-            ),
+            method_binding_id=_required_str(data, "method_binding_id", "SwarmPlan"),
             task_ref=_required_str(data, "task_ref", "SwarmPlan"),
-            max_parallelism=_positive_int(
-                data, "max_parallelism", "SwarmPlan"
-            ),
+            max_parallelism=_positive_int(data, "max_parallelism", "SwarmPlan"),
             max_depth=_positive_int(data, "max_depth", "SwarmPlan"),
             state=PlanState.from_wire(_required_str(data, "state", "SwarmPlan")),
-            budget_resource_refs=_str_tuple(
-                data, "budget_resource_refs", "SwarmPlan"
-            ),
+            budget_resource_refs=_str_tuple(data, "budget_resource_refs", "SwarmPlan"),
             termination_condition=_required_dict(
                 data, "termination_condition", "SwarmPlan"
             ),
-            transitioned_from=_audit_str(
-                data, "transitioned_from", "SwarmPlan"
-            ),
-            transition_reason=_audit_str(
-                data, "transition_reason", "SwarmPlan"
-            ),
+            transitioned_from=_audit_str(data, "transitioned_from", "SwarmPlan"),
+            transition_reason=_audit_str(data, "transition_reason", "SwarmPlan"),
             transitioned_by=_audit_str(data, "transitioned_by", "SwarmPlan"),
             transitioned_at=_audit_str(data, "transitioned_at", "SwarmPlan"),
         )
@@ -428,6 +450,11 @@ class Stage:
     transitioned_by: str = ""
     transitioned_at: str = ""
     output_artifact_refs: tuple[str, ...] = ()
+    objective: str = field(default="", kw_only=True)
+    workflow_node: SwarmWorkflowNode | None = field(default=None, kw_only=True)
+    workflow_digest: str = field(default="", kw_only=True)
+    input_bindings: tuple[ArtifactPortBinding, ...] = field(default=(), kw_only=True)
+    output_bindings: tuple[ArtifactPortBinding, ...] = field(default=(), kw_only=True)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Stage":
@@ -448,25 +475,32 @@ class Stage:
                 f"unknown field(s) in Stage: {sorted(unknown)}"
             )
         return cls(
+            objective=_audit_str(
+                {"objective": data.get("objective", "")}, "objective", "Stage"
+            ),
+            workflow_node=decode(
+                data["workflow_node"], SwarmWorkflowNode, WORKFLOW_TYPES
+            )
+            if data.get("workflow_node") is not None
+            else None,
+            workflow_digest=_audit_str(
+                {"workflow_digest": data.get("workflow_digest", "")},
+                "workflow_digest",
+                "Stage",
+            ),
+            input_bindings=bindings_from_dict(data.get("input_bindings", [])),
+            output_bindings=bindings_from_dict(data.get("output_bindings", [])),
             output_artifact_refs=_str_tuple(data, "output_artifact_refs", "Stage"),
             stage_id=_required_str(data, "stage_id", "Stage"),
             swarm_plan_ref=_required_str(data, "swarm_plan_ref", "Stage"),
             task_ref=_required_str(data, "task_ref", "Stage"),
             name=_required_str(data, "name", "Stage"),
             state=StageState.from_wire(_required_str(data, "state", "Stage")),
-            completion_condition=_required_dict(
-                data, "completion_condition", "Stage"
-            ),
-            dependency_stage_refs=_str_tuple(
-                data, "dependency_stage_refs", "Stage"
-            ),
+            completion_condition=_required_dict(data, "completion_condition", "Stage"),
+            dependency_stage_refs=_str_tuple(data, "dependency_stage_refs", "Stage"),
             requirement_refs=_str_tuple(data, "requirement_refs", "Stage"),
-            input_artifact_refs=_str_tuple(
-                data, "input_artifact_refs", "Stage"
-            ),
-            output_artifact_roles=_str_tuple(
-                data, "output_artifact_roles", "Stage"
-            ),
+            input_artifact_refs=_str_tuple(data, "input_artifact_refs", "Stage"),
+            output_artifact_roles=_str_tuple(data, "output_artifact_roles", "Stage"),
             transitioned_from=_audit_str(data, "transitioned_from", "Stage"),
             transition_reason=_audit_str(data, "transition_reason", "Stage"),
             transitioned_by=_audit_str(data, "transitioned_by", "Stage"),
@@ -477,6 +511,25 @@ class Stage:
         """输出全部声明字段;枚举取 wire 值、元组降为列表,保证
         ``from_dict(to_dict(x)) == x``。"""
         return {
+            **({"objective": self.objective} if self.objective else {}),
+            **(
+                {
+                    "workflow_node": encode(self.workflow_node),
+                    "workflow_digest": self.workflow_digest,
+                }
+                if self.workflow_node is not None
+                else {}
+            ),
+            **(
+                {"input_bindings": [b.to_dict() for b in self.input_bindings]}
+                if self.input_bindings
+                else {}
+            ),
+            **(
+                {"output_bindings": [b.to_dict() for b in self.output_bindings]}
+                if self.output_bindings
+                else {}
+            ),
             "stage_id": self.stage_id,
             "swarm_plan_ref": self.swarm_plan_ref,
             "task_ref": self.task_ref,
@@ -558,9 +611,7 @@ class StageAllocation:
                 data, "execution_profile_ref", "StageAllocation"
             ),
             lease_ref=_required_str(data, "lease_ref", "StageAllocation"),
-            lease_expires_at=_required_str(
-                data, "lease_expires_at", "StageAllocation"
-            ),
+            lease_expires_at=_required_str(data, "lease_expires_at", "StageAllocation"),
             state=AllocationState.from_wire(
                 _required_str(data, "state", "StageAllocation")
             ),
@@ -571,18 +622,10 @@ class StageAllocation:
             authorization_evidence_refs=_str_tuple(
                 data, "authorization_evidence_refs", "StageAllocation"
             ),
-            transitioned_from=_audit_str(
-                data, "transitioned_from", "StageAllocation"
-            ),
-            transition_reason=_audit_str(
-                data, "transition_reason", "StageAllocation"
-            ),
-            transitioned_by=_audit_str(
-                data, "transitioned_by", "StageAllocation"
-            ),
-            transitioned_at=_audit_str(
-                data, "transitioned_at", "StageAllocation"
-            ),
+            transitioned_from=_audit_str(data, "transitioned_from", "StageAllocation"),
+            transition_reason=_audit_str(data, "transition_reason", "StageAllocation"),
+            transitioned_by=_audit_str(data, "transitioned_by", "StageAllocation"),
+            transitioned_at=_audit_str(data, "transitioned_at", "StageAllocation"),
         )
 
     def to_dict(self) -> dict:
@@ -596,12 +639,8 @@ class StageAllocation:
             "execution_profile_ref": self.execution_profile_ref,
             "lease_ref": self.lease_ref,
             "lease_expires_at": self.lease_expires_at,
-            "qualification_evidence_refs": list(
-                self.qualification_evidence_refs
-            ),
-            "authorization_evidence_refs": list(
-                self.authorization_evidence_refs
-            ),
+            "qualification_evidence_refs": list(self.qualification_evidence_refs),
+            "authorization_evidence_refs": list(self.authorization_evidence_refs),
             "attempt": self.attempt,
             "state": self.state.value,
             "transitioned_from": self.transitioned_from,
@@ -645,16 +684,12 @@ class SwarmExecutionProfile:
             raise ContextCollabValidationError(
                 f"SwarmExecutionProfile must be an object, got: {data!r}"
             )
-        unknown = [
-            key for key in data if key not in _EXECUTION_PROFILE_FIELDS
-        ]
+        unknown = [key for key in data if key not in _EXECUTION_PROFILE_FIELDS]
         if unknown:
             raise ContextCollabValidationError(
                 f"unknown field(s) in SwarmExecutionProfile: {sorted(unknown)}"
             )
-        kinds = _str_tuple(
-            data, "supported_work_kinds", "SwarmExecutionProfile"
-        )
+        kinds = _str_tuple(data, "supported_work_kinds", "SwarmExecutionProfile")
         if not kinds:
             raise ContextCollabValidationError(
                 "SwarmExecutionProfile.supported_work_kinds must be a "
@@ -674,9 +709,7 @@ class SwarmExecutionProfile:
             mode=ExecutionMode.from_wire(
                 _required_str(data, "mode", "SwarmExecutionProfile")
             ),
-            target_ref=_required_str(
-                data, "target_ref", "SwarmExecutionProfile"
-            ),
+            target_ref=_required_str(data, "target_ref", "SwarmExecutionProfile"),
             supported_work_kinds=kinds,
             input_contract_ref=_required_str(
                 data, "input_contract_ref", "SwarmExecutionProfile"
@@ -742,9 +775,7 @@ class SwarmExecutionRecord:
             raise ContextCollabValidationError(
                 f"SwarmExecutionRecord must be an object, got: {data!r}"
             )
-        unknown = [
-            key for key in data if key not in _EXECUTION_RECORD_FIELDS
-        ]
+        unknown = [key for key in data if key not in _EXECUTION_RECORD_FIELDS]
         if unknown:
             raise ContextCollabValidationError(
                 f"unknown field(s) in SwarmExecutionRecord: {sorted(unknown)}"
@@ -753,9 +784,7 @@ class SwarmExecutionRecord:
             execution_record_id=_required_str(
                 data, "execution_record_id", "SwarmExecutionRecord"
             ),
-            operation_ref=_required_str(
-                data, "operation_ref", "SwarmExecutionRecord"
-            ),
+            operation_ref=_required_str(data, "operation_ref", "SwarmExecutionRecord"),
             external_execution_id=_required_str(
                 data, "external_execution_id", "SwarmExecutionRecord"
             ),
@@ -774,12 +803,8 @@ class SwarmExecutionRecord:
             transition_reason=_audit_str(
                 data, "transition_reason", "SwarmExecutionRecord"
             ),
-            transitioned_by=_audit_str(
-                data, "transitioned_by", "SwarmExecutionRecord"
-            ),
-            transitioned_at=_audit_str(
-                data, "transitioned_at", "SwarmExecutionRecord"
-            ),
+            transitioned_by=_audit_str(data, "transitioned_by", "SwarmExecutionRecord"),
+            transitioned_at=_audit_str(data, "transitioned_at", "SwarmExecutionRecord"),
         )
 
     def to_dict(self) -> dict:
@@ -822,14 +847,10 @@ def layer_metrics(stages: list["Stage"]) -> tuple[int, int] | None:
         progressed = False
         for stage_id in sorted(remaining):
             deps = [
-                ref
-                for ref in by_id[stage_id].dependency_stage_refs
-                if ref in by_id
+                ref for ref in by_id[stage_id].dependency_stage_refs if ref in by_id
             ]
             if all(ref in depth for ref in deps):
-                depth[stage_id] = 1 + max(
-                    (depth[ref] for ref in deps), default=0
-                )
+                depth[stage_id] = 1 + max((depth[ref] for ref in deps), default=0)
                 remaining.discard(stage_id)
                 progressed = True
         if not progressed:
@@ -858,35 +879,26 @@ def structural_violations(plan: "SwarmPlan", stages: list["Stage"]) -> list[str]
     for stage in stages:
         if not stage.completion_condition:
             violations.append(
-                f"stage {stage.stage_id!r} must carry a non-empty "
-                "completion_condition"
+                f"stage {stage.stage_id!r} must carry a non-empty completion_condition"
             )
         for ref in stage.dependency_stage_refs:
             if ref not in stage_ids:
                 violations.append(
-                    f"stage {stage.stage_id!r} references undefined "
-                    f"dependency {ref!r}"
+                    f"stage {stage.stage_id!r} references undefined dependency {ref!r}"
                 )
                 has_undefined_ref = True
     edges = [
-        (ref, stage.stage_id)
-        for stage in stages
-        for ref in stage.dependency_stage_refs
+        (ref, stage.stage_id) for stage in stages for ref in stage.dependency_stage_refs
     ]
     has_cycle = detect_cycle(edges)
     if has_cycle:
         violations.append("stage dependency graph contains a cycle")
-    metrics = (
-        layer_metrics(stages)
-        if not (has_undefined_ref or has_cycle)
-        else None
-    )
+    metrics = layer_metrics(stages) if not (has_undefined_ref or has_cycle) else None
     if metrics is not None:
         depth, width = metrics
         if depth > plan.max_depth:
             violations.append(
-                f"dependency depth {depth} exceeds plan max_depth "
-                f"{plan.max_depth}"
+                f"dependency depth {depth} exceeds plan max_depth {plan.max_depth}"
             )
         if width > plan.max_parallelism:
             violations.append(

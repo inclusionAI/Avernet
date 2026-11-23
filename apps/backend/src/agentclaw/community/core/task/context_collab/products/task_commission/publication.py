@@ -1,16 +1,7 @@
 """Commission-owned, versioned designated-executor admission strategies."""
 
-from dataclasses import dataclass
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
-    ParticipationType,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.publication import (
-    AdmissionRole,
-    OpenAdmissionPolicy,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.publication import (
     BotSelfApplicationAdmission as BotSelfApplicationAdmission,
@@ -20,43 +11,10 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 )
 
 
-@dataclass(frozen=True)
-class DesignatedOpenAdmission(OpenAdmissionPolicy):
-    """Publisher-mediated admission, not applicant impersonation or a resource grant.
-
-    Only this bounded strategy is implemented. A different contribution kind or
-    step sequence needs a matching executor, not a silently ignored template.
-    """
-
-    strategy: str = "publisher_mediated"
-    steps: tuple[str, ...] = (
-        "publish_opportunity",
-        "submit_application",
-        "screen",
-        "admit",
-    )
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        if (
-            self.strategy != "publisher_mediated"
-            or self.participation_type is not ParticipationType.SINGLE_CONTRIBUTION
-            or self.steps
-            != ("publish_opportunity", "submit_application", "screen", "admit")
-        ):
-            raise ContextCollabValidationError("unsupported Open publication strategy")
-
-    def validate_roles(self, roles: tuple[AdmissionRole, ...]) -> None:
-        super().validate_roles(roles)
-        role_map = {role.name: role for role in roles}
-        for name, source in (
-            (self.applicant_role, "executor_ref"),
-            (self.accountable_role, "principal_ref"),
-        ):
-            if role_map[name].participant_source != source:
-                raise ContextCollabValidationError(
-                    "designated admission requires executor and principal subjects"
-                )
+# Identity reexport; the serializable admission value is owned by L5.
+from agentclaw.community.core.task.context_collab.l5_methods.publication import (
+    DesignatedOpenAdmission as DesignatedOpenAdmission,
+)
 
 
 def require_designated_admission(

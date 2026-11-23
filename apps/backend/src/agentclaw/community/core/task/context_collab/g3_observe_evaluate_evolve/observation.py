@@ -57,6 +57,11 @@ class EventProjection:
     created_at: datetime
     payload: dict[str, object] = field(default_factory=dict)
 
+    @property
+    def occurred_at(self) -> datetime:
+        """Event occurrence time; created_at is the Todo-compatible view name."""
+        return self.created_at
+
 
 def default_projected_status() -> str:
     """current_event_id 为 None(或不在事件集内)时的投影状态。"""

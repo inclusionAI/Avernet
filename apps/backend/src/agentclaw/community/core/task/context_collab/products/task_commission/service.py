@@ -54,8 +54,8 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
     prepare_product_profile,
     product_definition,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
@@ -161,7 +161,7 @@ class TaskCommissionService:
         # 发布必须驱动真方法生命周期。
         dispatch_port: "TaskDispatchPort" = None,
         *,
-        product_catalog: ProductCatalog,
+        product_catalog: ProductProfileReader,
     ) -> None:
         self._product_catalog = product_catalog
         self._repo = collab_repo

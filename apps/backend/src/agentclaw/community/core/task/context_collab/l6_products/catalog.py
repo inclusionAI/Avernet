@@ -1,4 +1,8 @@
-"""Immutable, code-owned product definitions; no mutable runtime registry or database."""
+"""Immutable definition snapshot for authoring, tests and capability projection.
+
+Production DI uses ProductProfileReader backed by published SQL rows, not this
+static snapshot as a missing-row fallback.
+"""
 
 from __future__ import annotations
 

@@ -18,6 +18,7 @@
 - runtime 协议满足性:``StructuralMethodOpsAuthorizer`` 通过
   ``MethodOpsAuthorizerProtocol`` 的 ``isinstance`` 检查。
 """
+
 from dataclasses import dataclass
 
 import pytest
@@ -79,15 +80,12 @@ class ApplicationRow:
 
 
 # 治理面操作全集 × 四个接缝方法:owner 通过 / 陌生 actor 拒绝的矩阵输入。
-OWNER_OP_CASES = [
-    ("check_lifecycle_op", op) for op in LIFECYCLE_OWNER_OPS
-] + [
-    ("check_group_op", op) for op in GROUP_OWNER_OPS
-] + [
-    ("check_swarm_op", op) for op in SWARM_OWNER_OPS
-] + [
-    ("check_open_op", op) for op in OPEN_OWNER_OPS
-]
+OWNER_OP_CASES = (
+    [("check_lifecycle_op", op) for op in sorted(LIFECYCLE_OWNER_OPS)]
+    + [("check_group_op", op) for op in sorted(GROUP_OWNER_OPS)]
+    + [("check_swarm_op", op) for op in sorted(SWARM_OWNER_OPS)]
+    + [("check_open_op", op) for op in sorted(OPEN_OWNER_OPS)]
+)
 
 
 def run_check(
@@ -112,9 +110,7 @@ def run_check(
 
 
 def test_structural_authorizer_satisfies_protocol():
-    assert isinstance(
-        StructuralMethodOpsAuthorizer(), MethodOpsAuthorizerProtocol
-    )
+    assert isinstance(StructuralMethodOpsAuthorizer(), MethodOpsAuthorizerProtocol)
 
 
 @pytest.mark.parametrize("check_name,op", OWNER_OP_CASES)
@@ -330,11 +326,19 @@ def test_falsy_actor_identity_denied_everywhere():
             "adopt_plan", binding, empty_actor, PRINCIPAL_ID, EXECUTOR_ID
         ),
         lambda: authorizer.check_open_op(
-            "query_opportunities", binding, empty_actor, None, PRINCIPAL_ID,
+            "query_opportunities",
+            binding,
+            empty_actor,
+            None,
+            PRINCIPAL_ID,
             EXECUTOR_ID,
         ),
         lambda: authorizer.check_open_op(
-            "submit_application", binding, empty_actor, None, PRINCIPAL_ID,
+            "submit_application",
+            binding,
+            empty_actor,
+            None,
+            PRINCIPAL_ID,
             EXECUTOR_ID,
         ),
         lambda: authorizer.check_open_op(

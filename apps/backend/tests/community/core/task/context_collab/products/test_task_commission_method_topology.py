@@ -1,5 +1,9 @@
 """Independent Method bindings, explicit composition and pinned topology recovery."""
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 import json
 from dataclasses import replace
 
@@ -102,7 +106,7 @@ def _recovery(injector, store):
     return ProductMethodBindingRecovery(
         store,
         injector.get(ContextCollabRepositoryProtocol),
-        injector.get(ProductCatalog),
+        injector.get(ProductProfileReader),
     )
 
 

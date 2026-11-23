@@ -10,8 +10,8 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.method_author
 from agentclaw.community.core.task.context_collab.l5_methods.operations.lifecycle import (
     MethodLifecycleService as LayerMethodLifecycleService,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     ProductMethodBindingRecovery,
@@ -35,7 +35,7 @@ class MethodLifecycleService(LayerMethodLifecycleService):
         authorizer: MethodOpsAuthorizerProtocol,
         collab_repo: ContextCollabRepositoryProtocol,
         *,
-        product_catalog: ProductCatalog,
+        product_catalog: ProductProfileReader,
     ) -> None:
         self._product_catalog = product_catalog
         super().__init__(

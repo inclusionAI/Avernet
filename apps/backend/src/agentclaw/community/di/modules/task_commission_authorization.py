@@ -33,8 +33,8 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     product_definition,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_method_kind,
@@ -77,7 +77,7 @@ class TaskMethodOpsAuthorizer(StructuralMethodOpsAuthorizer):
     @inject
     def __init__(
         self,
-        catalog: ProductCatalog,
+        catalog: ProductProfileReader,
         repository: L4ContextCollabRepositoryProtocol[ContextStatusRecord],
     ) -> None:
         self._catalog = catalog
@@ -151,7 +151,9 @@ class TaskMethodOpsAuthorizer(StructuralMethodOpsAuthorizer):
 
 class CommissionAdmissionAuthorizer(StructuralContextCollabAuthorizer):
     @inject
-    def __init__(self, catalog: ProductCatalog, method_ops: TaskMethodOpsPort) -> None:
+    def __init__(
+        self, catalog: ProductProfileReader, method_ops: TaskMethodOpsPort
+    ) -> None:
         self._catalog = catalog
         self._method_ops = method_ops
 

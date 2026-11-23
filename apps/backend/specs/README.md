@@ -12,6 +12,7 @@ Use the [repository knowledge standard](../../../docs/agents/knowledge-standard.
 
 ## Existing change records
 
+- [2026-11-23-context-collab-swarm-workflow-mode](2026-11-23-context-collab-swarm-workflow-mode/spec.md): database-backed, versioned ProductProfiles with embedded Swarm DAGs, named artifact handoffs and random eligible Agent selection. Implemented locally; 708 target tests pass. Broad regression/full CI retain reproducible baseline failures; see [delivery evidence](2026-11-23-context-collab-swarm-workflow-mode/delivery.md) for cutover prerequisites and unverified integration/deployment.
 - [2026-11-13-context-collab-l6-product-contracts](2026-11-13-context-collab-l6-product-contracts/spec.md): executable versioned composition and pinned instance contracts; see record for verification and scope limits.
 
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.

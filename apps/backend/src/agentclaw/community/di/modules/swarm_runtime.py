@@ -2,6 +2,27 @@
 
 from dataclasses import dataclass
 from collections.abc import Mapping
+from agentclaw.community.core.task.context_collab.l6_products.profile_publication import (
+    ProductProfilePublicationServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.workflow_planning import (
+    WorkflowPlanningService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+    SwarmWorkflowPolicyReader,
+    SwarmArtifactEvidenceValidator,
+    UnavailableSwarmArtifactValidator,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.product_profile_publication import (
+    ProductProfilePublicationService,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
+    ProductProfilePublicationAuthorizer,
+    ProfilePublisherAllowlist,
+)
+from agentclaw.community.core.task.context_collab.l6_products.topology import (
+    product_binding_refs,
+)
 
 from injector import Module, Binder, inject, provider, singleton
 
@@ -35,6 +56,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.swarm_driver_contra
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     SwarmMethodPolicy,
+    SwarmWorkflowPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     actor_has_role,
@@ -45,8 +67,8 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     resolve_event_contract,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
     ContextStatusRecord,
@@ -66,7 +88,7 @@ class ProductSwarmRuntimeResolver:
     def __init__(
         self,
         repository: ContextCollabRepositoryProtocol[ContextStatusRecord],
-        catalog: ProductCatalog,
+        catalog: ProductProfileReader,
         capabilities: SwarmPlanningCapabilities,
     ):
         self.repository, self.catalog, self.capabilities = (
@@ -84,6 +106,16 @@ class ProductSwarmRuntimeResolver:
         ref = record.product_instance.profile_ref
         definition = self.catalog.get(ref.profile_id, ref.version)
         policy = definition.composition.require_policy("Swarm")
+        if isinstance(policy, SwarmWorkflowPolicy):
+            coordinator = ActorContext(record.task.principal_ref, source="swarm_driver")
+            return SwarmRuntimeConfiguration(
+                WorkflowPlanningService(policy.workflow),
+                coordinator,
+                self._start_actor(record, definition)
+                if record.task.status == "created"
+                else coordinator,
+                max(100, 2 * (len(policy.workflow.nodes) + 1) + 4),
+            )
         if not isinstance(policy, SwarmMethodPolicy):
             raise ContextCollabValidationError("Swarm requires its own planning policy")
         service_ref = policy.plan_service_ref
@@ -98,6 +130,30 @@ class ProductSwarmRuntimeResolver:
             self._start_actor(record, definition)
             if record.task.status == "created"
             else coordinator,
+        )
+
+    def workflow_for(self, collet_id: str, binding_id: str):
+        record = self.repository.get_current_status(collet_id)
+        if record is None:
+            raise ContextCollabValidationError("workflow Collet not found")
+        if record.product_instance is None:
+            return None
+        ref = record.product_instance.profile_ref
+        definition = self.catalog.get(ref.profile_id, ref.version)
+        if binding_id not in product_binding_refs(collet_id, definition):
+            # Nested/non-product Swarm retains its explicitly unmanaged behavior.
+            return None
+        policies = [
+            d.policy
+            for d in definition.composition.required_methods
+            if d.profile.method_kind == "Swarm"
+        ]
+        if len(policies) > 1:
+            raise ContextCollabValidationError("ambiguous product Swarm policy")
+        return (
+            policies[0].workflow
+            if policies and isinstance(policies[0], SwarmWorkflowPolicy)
+            else None
         )
 
     @staticmethod
@@ -148,6 +204,20 @@ class ProductSwarmRuntimeResolver:
 
 class SwarmRuntimeModule(Module):
     def configure(self, binder: Binder) -> None:
+        binder.bind(
+            SwarmArtifactEvidenceValidator,
+            to=UnavailableSwarmArtifactValidator,
+            scope=singleton,
+        )
+        binder.bind(
+            SwarmWorkflowPolicyReader, to=ProductSwarmRuntimeResolver, scope=singleton
+        )
+        binder.bind(ProductProfilePublicationAuthorizer, to=ProfilePublisherAllowlist())
+        binder.bind(
+            ProductProfilePublicationServiceProtocol,
+            to=ProductProfilePublicationService,
+            scope=singleton,
+        )
         binder.bind(SwarmPlanningCapabilities, to=SwarmPlanningCapabilities({}))
         binder.bind(
             SwarmRuntimeResolver, to=ProductSwarmRuntimeResolver, scope=singleton

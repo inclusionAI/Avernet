@@ -87,10 +87,6 @@ from agentclaw.community.api.task.task_context_service import TaskContextService
 from agentclaw.community.core.task.services.bot_grant_reconciliation_service import (
     BotGrantReconciliationService,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
-    ContextCollabAuthorizerProtocol,
-    StructuralContextCollabAuthorizer,
-)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
     MethodOpsAuthorizerProtocol,
 )
@@ -114,9 +110,6 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.single_g
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.service import (
     SwarmMethodService,
-)
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
@@ -150,7 +143,9 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.record
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
-from agentclaw.community.di.modules.context_collab_runtime import ContextCollabRuntimeModule
+from agentclaw.community.di.modules.context_collab_runtime import (
+    ContextCollabRuntimeModule,
+)
 from agentclaw.community.di.modules.swarm_runtime import SwarmRuntimeModule
 from agentclaw.community.di.modules.task_commission_authorization import (
     TaskMethodOpsAuthorizer,
@@ -256,15 +251,11 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
-from agentclaw.community.core.task.context_collab.executor import (
-    ContextCollabExecutor,
-    UnavailableContextCollabExecutor,
-)
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
 )
-from agentclaw.community.di.modules.context_collab_products import build_product_catalog
+from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.di.modules.task_commission_module import TaskCommissionModule
 from agentclaw.community.di.modules.telemetry_module import TelemetryModule
 from agentclaw.community.plugin_api.notify_sender import (
@@ -275,7 +266,6 @@ from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
     ForumInteractionTargetVerifierProtocol,
 )
-from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.di.modules.task.todo_bindings import TaskTodoBindings
 from injector import Binder, Injector, Module, inject, provider, singleton
 
@@ -393,9 +383,7 @@ class TaskModule(Module):
         # singleton,``ContextCollabService`` 构造路径新增 method_store 依赖
         # 后必须绑定;P2 持久化经同一 MethodStoreProtocol 键整体替换,服务层
         # (method_lifecycle_service 等)零改动。
-        binder.bind(
-            MethodStoreProtocol, to=InMemoryMethodStore, scope=singleton
-        )
+        binder.bind(MethodStoreProtocol, to=InMemoryMethodStore, scope=singleton)
         binder.bind(
             TopLevelBindingRecovery, to=ProductMethodBindingRecovery, scope=singleton
         )
@@ -403,17 +391,17 @@ class TaskModule(Module):
         # 协议键整体替换);生命周期服务 singleton 但 P1 纯内部 API,不上
         # HTTP wire,collab_repo 同上由 TaskPersistenceModule 绑定。
         binder.bind(
-            ColletLifecycleStore, to=InMemoryColletLifecycleStore,
+            ColletLifecycleStore,
+            to=InMemoryColletLifecycleStore,
             scope=singleton,
         )
-        binder.bind(
-            ColletLifecycleService, to=ColletLifecycleService, scope=singleton
-        )
+        binder.bind(ColletLifecycleService, to=ColletLifecycleService, scope=singleton)
         # BBS 公开讨论产品层(2026-11-12 bbs-public-discussion-product spec
         # §3.4):模块级交付面(P1 无 HTTP),自持编排组合协议层;仓储/
         # 作者器/MethodStore 均复用上面既有绑定,无新基建。
         binder.bind(
-            BbsPublicDiscussionServiceProtocol, to=BbsPublicDiscussionService,
+            BbsPublicDiscussionServiceProtocol,
+            to=BbsPublicDiscussionService,
             scope=singleton,
         )
         # L5 method 服务接线(2026-11-12 L5 method objects spec §5/§13):
@@ -429,19 +417,23 @@ class TaskModule(Module):
             scope=singleton,
         )
         binder.bind(
-            MethodLifecycleServiceProtocol, to=MethodLifecycleService,
+            MethodLifecycleServiceProtocol,
+            to=MethodLifecycleService,
             scope=singleton,
         )
         binder.bind(
-            GroupMethodOpsServiceProtocol, to=SingleGroupMethodService,
+            GroupMethodOpsServiceProtocol,
+            to=SingleGroupMethodService,
             scope=singleton,
         )
         binder.bind(
-            SwarmMethodOpsServiceProtocol, to=SwarmMethodService,
+            SwarmMethodOpsServiceProtocol,
+            to=SwarmMethodService,
             scope=singleton,
         )
         binder.bind(
-            OpenMethodOpsServiceProtocol, to=OpenMethodService,
+            OpenMethodOpsServiceProtocol,
+            to=OpenMethodService,
             scope=singleton,
         )
         binder.bind(
@@ -467,54 +459,7 @@ class TaskModule(Module):
         """Expose the same repository through L4's narrow read contract."""
         return repository
 
-    @singleton
-    @provider
-    def context_collab_product_catalog(self) -> ProductCatalog:
-        return build_product_catalog()
 
-    @singleton
-    @provider
-    @inject
-    def context_collab_executor(
-        self,
-        injector: Injector,
-        task_dispatch: TaskDispatchConfig,
-    ) -> ContextCollabExecutor:
-        """Build direct Todo execution with optional legacy BCS compatibility."""
-        try:
-            openapi_bot = injector.get(OpenApiBotPort)
-        except Exception as exc:  # noqa: BLE001 lightweight deployment
-            logger.info(
-                "[task][context-collab] OpenApiBotPort unavailable: %s",
-                exc,
-            )
-            return UnavailableContextCollabExecutor(str(exc))
-        if openapi_bot is None:
-            return UnavailableContextCollabExecutor("OpenApiBotPort resolved to None")
-        try:
-            bcs = injector.get(BcsClientPort)
-        except Exception as exc:  # noqa: BLE001 lightweight deployment
-            logger.info(
-                "[task][context-collab] BcsClientPort unavailable; "
-                "legacy group-backed Todo resume disabled: %s",
-                exc,
-            )
-            bcs = None
-        try:
-            bot_tokens = injector.get(BcsBotTokenProvider)
-        except Exception as exc:  # noqa: BLE001 lightweight deployment
-            logger.info(
-                "[task][context-collab] BcsBotTokenProvider unavailable; "
-                "legacy group-backed Todo resume disabled: %s",
-                exc,
-            )
-            bot_tokens = NullBcsBotTokenProvider()
-        return ContextCollabExecutor(
-            openapi_bot,
-            bcs=bcs,
-            bot_tokens=bot_tokens,
-            backend_url=task_dispatch.backend_url,
-        )
 
     @singleton
     @provider

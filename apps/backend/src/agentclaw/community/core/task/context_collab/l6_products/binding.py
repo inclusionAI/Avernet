@@ -21,8 +21,8 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
@@ -39,7 +39,7 @@ def product_definition(
     workflow_kind: str | None,
     method_kind: str | None,
     profile_ref: VersionedProfileRef | None,
-    catalog: ProductCatalog,
+    catalog: ProductProfileReader,
 ) -> ProductProfileDefinition | None:
     """Resolve the pinned L6 profile, or ``None`` for generic L4 creation."""
     if product_kind is None:
@@ -74,7 +74,7 @@ def validate_product_selection(
     profile_ref: VersionedProfileRef | None,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
-    catalog: ProductCatalog,
+    catalog: ProductProfileReader,
 ) -> ProductProfileDefinition | None:
     """Validate profile topology and required ScenarioRole sources."""
     profile = product_definition(
@@ -107,7 +107,11 @@ def validate_role_sources(
     for role in profile.scenario_roles:
         if role.participant_source == "agent_ref":
             profile.participant_scope.require(role.agent_ref)
-        elif role.participant_source != "open_admission" and role.required and sources.get(role.participant_source) is None:
+        elif (
+            role.participant_source != "open_admission"
+            and role.required
+            and sources.get(role.participant_source) is None
+        ):
             raise ContextCollabValidationError(
                 f"product role {role.name!r} requires {role.participant_source}"
             )
@@ -121,7 +125,7 @@ def prepare_product_profile(
     profile_ref: VersionedProfileRef | None,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
-    catalog: ProductCatalog,
+    catalog: ProductProfileReader,
 ) -> ProductProfileDefinition | None:
     """Select an exact installed profile without mutating a creation object."""
     return validate_product_selection(

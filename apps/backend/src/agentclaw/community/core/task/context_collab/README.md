@@ -38,6 +38,24 @@ It implements bounded local contracts, not full ACCS conformance.
   L6 composes lower-layer contracts; concrete business templates stay in
   `products/`. G1–G4 cross-cut these layers.
 
+## Published ProductProfiles and managed Swarm DAGs
+
+Production configuration is read through the exact-version, current-scope
+`ProductProfileReader`. [L6 storage and cutover](l6_products/PROFILE-STORAGE.md)
+own the new `ac_context_collab_product_profile` table, full-definition JSON,
+independent publication authorization and explicit seed/import. The module now
+has five tables (Collet, Event, Task, Telemetry and ProductProfile); workflow
+nodes/edges/artifacts do not add separate tables in this increment.
+`ProductCatalog` remains an explicit immutable snapshot, not a production
+missing-row fallback. Configuration persistence is not execution recovery.
+
+`SwarmWorkflowPolicy` configures a Stage DAG on the Swarm MethodTemplate, separate
+from the root Task's `WorkflowProfile`. The [L5 managed runtime contract](l5_methods/README.md#managed-swarm-workflow)
+owns serial DAG dispatch, random eligible per-node Agent selection, named
+fixed-version artifact handoffs, compound MethodStore allocation/completion and
+read-only content/access validation. The host must install a real validator;
+public managed defaults fail closed. Dynamic Swarm remains supported.
+
 ## Unified Swarm planning boundary
 
 [`swarm_planning.py`](swarm_planning.py) owns the collaboration-domain outbound
@@ -624,6 +642,12 @@ Collet.root_task_ref ──→ Task.task_id
 
 ### Database cutover
 
+Before the database-backed Profile reader is used, also apply the
+[ProductProfile DDL](sql/2026_11_23_context_collab_product_profile.sql) and perform
+[explicit historical-profile import](l6_products/PROFILE-STORAGE.md#explicit-import-and-cutover).
+No request-path table creation or seed fallback is supplied.
+
+
 Apply [the Task migration](sql/2026_11_13_context_collab_task.sql) **after**
 [the baseline schema](sql/2026_11_11_context_collab.sql), before starting the new
 runtime. It adds the root link, Event subject/revision and independent Task
@@ -756,3 +780,14 @@ Worker completion evidence belongs in Task events and Stage output refs; it is
 not a G3 telemetry-only observation. Root acceptance remains separate. The
 [Swarm integration test](../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py)
 checks child Work SQL reload and five phase artifacts.
+
+### Todo consumer compatibility
+
+Todo uses L6 combined creation and canonical L4 Work/Event authority. Its
+run/resume/refresh orchestration lives in
+[`todos/collaboration/context_runtime.py`](../todos/collaboration/context_runtime.py),
+not the L4 service. Optional executor-owner addressing stays in L6 creation
+facts; it grants no access. Rich Todo interactions use authorized `get_events`
+while the public status projection stays compact. See the
+[Todo boundary](../todos/README.md) for the legacy round-completion/resume
+semantics and direct Bot versus historical BCS handles.

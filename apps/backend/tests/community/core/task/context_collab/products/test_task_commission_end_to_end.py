@@ -11,6 +11,10 @@ Bot 随后执行,直接调用 G3 记录步骤 Observation、进度 MetricSample 
 网关转发或 LLM 执行。
 """
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 import secrets
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
@@ -197,16 +201,20 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
 
     # 2. 协议要求Instantiate：创建 ProductInstance，并实例化 Collet、MethodBinding、RoleBinding 与策略引用
     # 此时无 Task;后续 L4 Work.start 才创建并启动Task。
-    instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
+    instance = injector.get(
+        ProductInstantiationServiceProtocol
+    ).instantiate(
         ProductInstantiateNewCommand(
             collet=ColletCreateCommand(
                 initiator_ref=HUMAN.actor,
                 title="XX代办任务",
                 description="Open 参与 + Single 选定执行者,成果由用户验收",
             ),
-            profile_ref=profile.ref,                                    # profile
-            participant_refs=(AgentRef("bot", BOT_ASSIGNEE),),          # 创建代办任务的时候，可以指定特定执行者，也可以不指定(在profile限定的参与者范围内)
-            resource_refs=INPUT_RESOURCES,                              # 输入的资源
+            profile_ref=profile.ref,  # profile
+            participant_refs=(
+                AgentRef("bot", BOT_ASSIGNEE),
+            ),  # 创建代办任务的时候，可以指定特定执行者，也可以不指定(在profile限定的参与者范围内)
+            resource_refs=INPUT_RESOURCES,  # 输入的资源
         ),
         HUMAN,
     )
@@ -842,7 +850,7 @@ def _commission_runtime(
         definitions = tuple(
             item for item in INSTALLED_PRODUCT_PROFILES if item.ref != profile.ref
         )
-        binder.bind(ProductCatalog, to=ProductCatalog((*definitions, profile)))
+        binder.bind(ProductProfileReader, to=ProductCatalog((*definitions, profile)))
 
     injector = Injector([TaskPersistenceModule(), TaskModule(), local_database])
     app = FastAPI()

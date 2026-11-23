@@ -14,7 +14,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.context_
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     ContextCollabRepositoryProtocol,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
 from agentclaw.community.core.task.context_collab.l6_products.open_enrollment import (
     ProductOpenEnrollmentServiceProtocol,
 )
@@ -38,6 +40,11 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 )
 
 
+from agentclaw.community.core.task.context_collab.l6_products.persistence.profile_repository import (
+    SqlProductProfileRepository,
+)
+
+
 class ContextCollabRuntimeModule(Module):
     def configure(self, binder: Binder) -> None:
         binder.bind(
@@ -53,11 +60,18 @@ class ContextCollabRuntimeModule(Module):
 
     @singleton
     @provider
+    def context_collab_product_catalog(
+        self, repository: SqlProductProfileRepository
+    ) -> ProductProfileReader:
+        return repository
+
+    @singleton
+    @provider
     def l4_context_service(
         self,
         repository: ContextCollabRepositoryProtocol[ContextStatusRecord],
         authorizer: ContextCollabAuthorizerProtocol,
-        catalog: ProductCatalog,
+        catalog: ProductProfileReader,
         store: MethodStoreProtocol,
     ) -> ContextServiceProtocol:
         """L4 owns operations; the adapter retains G1/G4 and live Open checks."""

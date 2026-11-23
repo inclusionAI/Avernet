@@ -45,8 +45,8 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     prepare_product_profile,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_method_kind,
@@ -139,7 +139,7 @@ class BbsPublicDiscussionService:
         authorizer: ContextCollabAuthorizerProtocol,
         method_store: MethodStoreProtocol,
         *,
-        product_catalog: ProductCatalog,
+        product_catalog: ProductProfileReader,
     ) -> None:
         self._product_catalog = product_catalog
         self._repo = collab_repo
@@ -376,7 +376,11 @@ class BbsPublicDiscussionService:
                 "a bbs public discussion"
             )
 
-        title = record.task.objective if record.task is not None else record.creation_facts["objective"]
+        title = (
+            record.task.objective
+            if record.task is not None
+            else record.creation_facts["objective"]
+        )
         for event in record.events:
             if event.event_kind == _CREATION_EVENT_KIND:
                 # title 新主:初始事件 payload 的 objective(创建事实

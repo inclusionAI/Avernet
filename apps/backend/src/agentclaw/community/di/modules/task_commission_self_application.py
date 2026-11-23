@@ -54,8 +54,8 @@ from agentclaw.community.core.task.context_collab.l6_products.creation_facts imp
     creation_product_kind,
     creation_workflow_kind,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
@@ -107,7 +107,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
     def __init__(
         self,
         open_ops: OpenMethodOpsServiceProtocol,
-        product_catalog: ProductCatalog,
+        product_catalog: ProductProfileReader,
         store: MethodStoreProtocol,
         repository: ContextCollabRepositoryProtocol,
         group_ops: GroupMethodOpsServiceProtocol,

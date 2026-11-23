@@ -9,6 +9,11 @@ the store uses the real ``InMemoryMethodStore``, and all state transitions are a
 The HTTP facet has been covered by adapters' delivery tests (no double-testing).
 """
 
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+    UnmanagedSwarmPolicies,
+    UnavailableSwarmArtifactValidator,
+)
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -153,6 +158,8 @@ class _Services:
             store=self.store,
             authorizer=self.authorizer,
             collab_repo=self.repo,
+            workflow_policies=UnmanagedSwarmPolicies(),
+            artifact_validator=UnavailableSwarmArtifactValidator(),
         )
         self.open = OpenMethodService(
             store=self.store,

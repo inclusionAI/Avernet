@@ -16,6 +16,9 @@ provides:
   - MethodPolicy
   - OpenMethodPolicy
   - SwarmMethodPolicy
+  - SwarmWorkflowPolicy
+  - SwarmWorkflowPolicyReader
+  - SwarmArtifactEvidenceValidator
   - AdmissionRole
   - OpenAdmissionPolicy
   - OpenPublicationProfile
@@ -66,7 +69,7 @@ including reversed `Swarm + Open`.
 ## Method policy ownership
 
 - [method_policies.py](method_policies.py) defines `MethodPolicy` and
-  `OpenMethodPolicy` and `SwarmMethodPolicy`. L6 co-locates each policy with its
+  `OpenMethodPolicy`, `SwarmMethodPolicy` and `SwarmWorkflowPolicy`. L6 co-locates each policy with its
   exact L5 Profile in `MethodTemplate(profile, policy)`; the policy must match
   that Method. Only required declarations enable runtime policy lookup; optional
   declarations do not implicitly activate capabilities. L6 defines an authoring
@@ -217,8 +220,8 @@ pre-Work/write-failure fences.
 supplies only `collet_id` through DI's `AssistedBuilder[SwarmDriver].build`;
 ports are constructor-injected, not obtained from a global injector/registry.
 The composition adapter resolves the pinned ProductProfile's explicit
-`SwarmMethodPolicy.plan_service_ref` on its required Swarm declaration and the
-one ACTIVE Swarm binding. An omitted or unknown
+`SwarmMethodPolicy.plan_service_ref` or `SwarmWorkflowPolicy.workflow` on its
+required Swarm declaration and the one ACTIVE Swarm binding. An omitted or unknown
 capability fails closed. No coding names, L6 imports or filesystem predicates
 belong in L5. [Runtime assembly tests](../../../../../../../tests/community/di/modules/test_swarm_runtime.py)
 cover startup identity selection; [wake regressions](../../../../../../../tests/community/core/task/context_collab/test_swarm_driver_wake.py)
@@ -290,3 +293,54 @@ and the same report can reconcile already-submitted/accepted child Work only
 when its artifacts match the committed Task evidence. The coding journey covers
 the successful path, not failure recovery, child CAS conflicts or SQL rollback.
 Existing candidate provenance is not an external compute-job lifecycle record.
+
+
+## Managed Swarm workflow
+
+The immutable [workflow contracts](swarm_workflow.py) and
+[compiler](workflow_compilation.py) add a managed DAG mode without changing
+root Task workflow semantics or the dynamic policy's required planning ref.
+The [product storage guide](../l6_products/PROFILE-STORAGE.md) owns publication,
+cutover and configuration details. No L6 or DI dependency is introduced in L5.
+
+`SwarmWorkflowPolicyReader` resolves the pinned, trusted product policy for both
+the driver and direct Method callers. Managed candidate submission must match
+the complete compiled graph; allocation independently rechecks the configured
+Agent whitelist, actual participation/admission, exact execution-profile I/O and
+dependency success. One live allocation across the plan is admitted under one
+MethodStore lock, together with the frozen named input manifest. Stable IDs are
+not a recovery mechanism; existing SQL children with lost Method history block
+redispatch. Managed allocation IDs derive from Stage/attempt; exact request
+replay (including a concurrent replay) returns the first allocation without
+renewing its lease or overwriting frozen inputs. Current G1 authorization still
+applies, while a changed target/profile/lease under the same key conflicts.
+Duplicate in-flight wakes neither reselect nor redispatch.
+
+Each node declares named required outputs, type/content contracts and cardinality;
+inputs bind only named accepted outputs of direct predecessors. Control-only
+edges do not copy artifacts. `ArtifactPortBinding` is G4-owned evidence over L4
+Artifact references, never transferred resource bodies. Resource revisions must
+be exact and provider-guaranteed immutable. Stage output role names are projected
+from declarations, not separately configured. The selected Agent's current
+resource access is checked before allocation and again at dispatch.
+
+`SwarmArtifactEvidenceValidator` is a narrow read-only port: it owns no dispatch
+or Method write capability. Public DI defaults to unavailable/fail-closed for
+managed evidence. A host must install its immutable-resource, content-contract
+and access adapter. The existing executor `accepts(stage, report)` signature
+remains compatible, but cannot alone authorize managed completion. Report
+validation occurs before any child Work submission; direct completion rechecks
+actual resources, done child Work, actor identities and full versioned manifests.
+Manifest and Stage success/allocation releases commit together in MethodStore;
+child SQL and external I/O remain separate failure domains. Exact-manifest retry
+may reconcile partial SQL reports, while changed ports/revisions are rejected.
+The root standard Task payload contract is unchanged.
+
+The planner proposes the next configuration-order READY node and uniformly
+chooses one actual eligible configured Agent. Fork/AND join is supported with
+serial dispatch; graph layer width remains structural, not execution parallelism.
+The driver event budget scales with validated node count (dynamic mode retains
+100). Asynchronous completion still needs an explicit host wake. No automatic
+retry, reassignment, scheduler, persistent Method recovery or root acceptance is
+provided. The [local acceptance test](../../../../../../../tests/community/core/task/context_collab/products/test_swarm_workflow_end_to_end.py)
+uses DB publication, real SQLite, G1/G4 and content-addressed temporary resources.

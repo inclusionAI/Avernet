@@ -16,6 +16,10 @@ inspection)、``GroupMethodOpsServiceProtocol``(spec §5 裁决:Single
 
 from __future__ import annotations
 
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.artifact_manifest import (
+    ArtifactPortBinding,
+)
+
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -226,6 +230,7 @@ class SwarmStageOutcomeCommand:
     allocation_refs: list[str] = field(default_factory=list)
     reason: str = ""
     artifact_refs: tuple[str, ...] = ()
+    output_bindings: tuple[ArtifactPortBinding, ...] = field(default=(), kw_only=True)
 
 
 @dataclass

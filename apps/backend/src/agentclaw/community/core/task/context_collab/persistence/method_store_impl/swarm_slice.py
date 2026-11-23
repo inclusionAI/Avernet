@@ -29,6 +29,7 @@ from agentclaw.community.core.task.context_collab.errors import (
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
     Stage,
+    ALLOCATION_REQUEST_FIELDS,
     StageAllocation,
     SwarmExecutionProfile,
     SwarmExecutionRecord,
@@ -62,7 +63,9 @@ class SwarmSlice:
         重复提交抛 ``ContextCollabValidationError``。plan 值对象自带
         method_binding_id,键段取自对象。"""
         key = self._id_key(
-            axes, collab_context_id, plan.method_binding_id,
+            axes,
+            collab_context_id,
+            plan.method_binding_id,
             plan.swarm_plan_id,
         )
         with self._lock:
@@ -79,9 +82,7 @@ class SwarmSlice:
     ) -> SwarmPlan | None:
         with self._lock:
             return self._plans.get(
-                self._id_key(
-                    axes, collab_context_id, method_binding_id, swarm_plan_id
-                )
+                self._id_key(axes, collab_context_id, method_binding_id, swarm_plan_id)
             )
 
     def list_plans(
@@ -96,8 +97,7 @@ class SwarmSlice:
             return [
                 plan
                 for key, plan in self._plans.items()
-                if self._key_in_binding(key, axes, collab_context_id,
-                                        method_binding_id)
+                if self._key_in_binding(key, axes, collab_context_id, method_binding_id)
             ]
 
     def update_plan_state(
@@ -109,7 +109,9 @@ class SwarmSlice:
         """覆盖式换新计划实例(adopt/start/pause/resume/terminate 经其
         落值);键必须已存在,否则抛 ``ContextCollabNotFoundError``。"""
         key = self._id_key(
-            axes, collab_context_id, plan.method_binding_id,
+            axes,
+            collab_context_id,
+            plan.method_binding_id,
             plan.swarm_plan_id,
         )
         with self._lock:
@@ -125,6 +127,106 @@ class SwarmSlice:
     # swarm stage 切片(spec §4.3 权威面)
     # ------------------------------------------------------------------
 
+    def commit_workflow_allocation(
+        self,
+        axes,
+        method_binding_id,
+        collab_context_id,
+        expected_plan,
+        expected_stages,
+        stage,
+        allocation,
+    ) -> StageAllocation:
+        with self._lock:
+            key = self._id_key(
+                axes, collab_context_id, method_binding_id, allocation.allocation_id
+            )
+            existing = self._allocations.get(key)
+            if existing is not None:
+                old, new = existing.to_dict(), allocation.to_dict()
+                if all(old[field] == new[field] for field in ALLOCATION_REQUEST_FIELDS):
+                    return existing
+                raise ContextCollabValidationError(
+                    "idempotent workflow allocation differs from the stored shape"
+                )
+            plan_key = self._id_key(
+                axes, collab_context_id, method_binding_id, expected_plan.swarm_plan_id
+            )
+            stages = tuple(
+                s
+                for k, s in self._stages.items()
+                if self._key_in_binding(k, axes, collab_context_id, method_binding_id)
+                and s.swarm_plan_ref == expected_plan.swarm_plan_id
+            )
+            active = [
+                a
+                for k, a in self._allocations.items()
+                if self._key_in_binding(k, axes, collab_context_id, method_binding_id)
+                and a.stage_ref in {s.stage_id for s in stages}
+                and a.state.value == "ACTIVE"
+            ]
+            binding_key = (
+                axes.avernet_tenant,
+                axes.env,
+                collab_context_id,
+                method_binding_id,
+            )
+            binding = self._bindings.get(binding_key)
+            if (
+                self._plans.get(plan_key) != expected_plan
+                or stages != expected_stages
+                or active
+                or binding is None
+                or binding.state.value != "ACTIVE"
+            ):
+                raise ContextCollabValidationError("stale workflow allocation snapshot")
+            self._stages[
+                self._id_key(axes, collab_context_id, method_binding_id, stage.stage_id)
+            ] = stage
+            self._allocations[key] = allocation
+            return allocation
+
+    def commit_workflow_completion(
+        self,
+        axes,
+        method_binding_id,
+        collab_context_id,
+        expected_stage,
+        expected_allocations,
+        stage,
+        allocations,
+    ):
+        with self._lock:
+            key = self._id_key(
+                axes, collab_context_id, method_binding_id, stage.stage_id
+            )
+            current = tuple(
+                a
+                for k, a in self._allocations.items()
+                if self._key_in_binding(k, axes, collab_context_id, method_binding_id)
+                and a.stage_ref == stage.stage_id
+            )
+            binding = self._bindings.get(
+                (axes.avernet_tenant, axes.env, collab_context_id, method_binding_id)
+            )
+            if (
+                self._stages.get(key) != expected_stage
+                or current != expected_allocations
+                or binding is None
+                or binding.state.value != "ACTIVE"
+            ):
+                raise ContextCollabValidationError("stale workflow completion snapshot")
+            self._stages[key] = stage
+            for allocation in allocations:
+                self._allocations[
+                    self._id_key(
+                        axes,
+                        collab_context_id,
+                        method_binding_id,
+                        allocation.allocation_id,
+                    )
+                ] = allocation
+
     def insert_stage(
         self,
         axes: "StoreAxes",
@@ -136,9 +238,7 @@ class SwarmSlice:
         同键同 ``to_dict`` 返回既有实例,同键异形态抛校验错。Stage 值
         对象不携带 binding(域内引用只有 swarm_plan_ref),method_binding_id
         显式入参充当键段。"""
-        key = self._id_key(
-            axes, collab_context_id, method_binding_id, stage.stage_id
-        )
+        key = self._id_key(axes, collab_context_id, method_binding_id, stage.stage_id)
         with self._lock:
             return self._insert_swarm_object_locked(
                 self._stages, key, stage, "swarm stage"
@@ -153,9 +253,7 @@ class SwarmSlice:
     ) -> Stage | None:
         with self._lock:
             return self._stages.get(
-                self._id_key(
-                    axes, collab_context_id, method_binding_id, stage_id
-                )
+                self._id_key(axes, collab_context_id, method_binding_id, stage_id)
             )
 
     def list_stages(
@@ -170,8 +268,7 @@ class SwarmSlice:
             return [
                 stage
                 for key, stage in self._stages.items()
-                if self._key_in_binding(key, axes, collab_context_id,
-                                        method_binding_id)
+                if self._key_in_binding(key, axes, collab_context_id, method_binding_id)
             ]
 
     def update_stage_state(
@@ -183,9 +280,7 @@ class SwarmSlice:
     ) -> None:
         """覆盖式换新 Stage 实例(ready/allocate/run/complete/fail
         经其落值);键必须已存在,否则抛 ``ContextCollabNotFoundError``。"""
-        key = self._id_key(
-            axes, collab_context_id, method_binding_id, stage.stage_id
-        )
+        key = self._id_key(axes, collab_context_id, method_binding_id, stage.stage_id)
         with self._lock:
             if key not in self._stages:
                 raise ContextCollabNotFoundError(
@@ -212,7 +307,9 @@ class SwarmSlice:
         Stage 并行 ACTIVE 上限是服务层结构断言(需要 plan 的
         max_parallelism)。"""
         key = self._id_key(
-            axes, collab_context_id, method_binding_id,
+            axes,
+            collab_context_id,
+            method_binding_id,
             allocation.allocation_id,
         )
         with self._lock:
@@ -229,9 +326,7 @@ class SwarmSlice:
     ) -> StageAllocation | None:
         with self._lock:
             return self._allocations.get(
-                self._id_key(
-                    axes, collab_context_id, method_binding_id, allocation_id
-                )
+                self._id_key(axes, collab_context_id, method_binding_id, allocation_id)
             )
 
     def list_allocations(
@@ -246,8 +341,7 @@ class SwarmSlice:
             return [
                 allocation
                 for key, allocation in self._allocations.items()
-                if self._key_in_binding(key, axes, collab_context_id,
-                                        method_binding_id)
+                if self._key_in_binding(key, axes, collab_context_id, method_binding_id)
             ]
 
     def update_allocation_state(
@@ -260,7 +354,9 @@ class SwarmSlice:
         """覆盖式换新分配实例(release/expire/revoke 经其落值);键
         必须已存在,否则抛 ``ContextCollabNotFoundError``。"""
         key = self._id_key(
-            axes, collab_context_id, method_binding_id,
+            axes,
+            collab_context_id,
+            method_binding_id,
             allocation.allocation_id,
         )
         with self._lock:
@@ -287,12 +383,16 @@ class SwarmSlice:
         返回既有实例,同键异形态抛校验错。profile 无状态列,不做
         update 替换。"""
         key = self._id_key(
-            axes, collab_context_id, method_binding_id,
+            axes,
+            collab_context_id,
+            method_binding_id,
             profile.execution_profile_id,
         )
         with self._lock:
             return self._insert_swarm_object_locked(
-                self._execution_profiles, key, profile,
+                self._execution_profiles,
+                key,
+                profile,
                 "swarm execution profile",
             )
 
@@ -306,7 +406,9 @@ class SwarmSlice:
         with self._lock:
             return self._execution_profiles.get(
                 self._id_key(
-                    axes, collab_context_id, method_binding_id,
+                    axes,
+                    collab_context_id,
+                    method_binding_id,
                     execution_profile_id,
                 )
             )
@@ -322,8 +424,7 @@ class SwarmSlice:
             return [
                 profile
                 for key, profile in self._execution_profiles.items()
-                if self._key_in_binding(key, axes, collab_context_id,
-                                        method_binding_id)
+                if self._key_in_binding(key, axes, collab_context_id, method_binding_id)
             ]
 
     # ------------------------------------------------------------------
@@ -341,12 +442,16 @@ class SwarmSlice:
         返回既有实例,同键异形态抛校验错。Computation Plane 派发
         P1 不实现:record 只增不改,不做 update 替换(§2)。"""
         key = self._id_key(
-            axes, collab_context_id, method_binding_id,
+            axes,
+            collab_context_id,
+            method_binding_id,
             record.execution_record_id,
         )
         with self._lock:
             return self._insert_swarm_object_locked(
-                self._execution_records, key, record,
+                self._execution_records,
+                key,
+                record,
                 "swarm execution record",
             )
 
@@ -360,7 +465,9 @@ class SwarmSlice:
         with self._lock:
             return self._execution_records.get(
                 self._id_key(
-                    axes, collab_context_id, method_binding_id,
+                    axes,
+                    collab_context_id,
+                    method_binding_id,
                     execution_record_id,
                 )
             )
@@ -377,8 +484,7 @@ class SwarmSlice:
             return [
                 record
                 for key, record in self._execution_records.items()
-                if self._key_in_binding(key, axes, collab_context_id,
-                                        method_binding_id)
+                if self._key_in_binding(key, axes, collab_context_id, method_binding_id)
             ]
 
     # ------------------------------------------------------------------
@@ -429,8 +535,7 @@ class SwarmSlice:
             if existing.to_dict() == obj.to_dict():
                 return existing
             raise ContextCollabValidationError(
-                f"idempotent re-submit of {kind_name} differs from the "
-                "stored shape"
+                f"idempotent re-submit of {kind_name} differs from the stored shape"
             )
         collection[key] = obj
         return obj

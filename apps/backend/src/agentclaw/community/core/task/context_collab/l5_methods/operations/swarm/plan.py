@@ -23,6 +23,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 from uuid import uuid4
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.workflow_guards import (
+    require_candidate,
+)
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -78,6 +81,9 @@ _PLAN_REQUEST_FIELDS = (
     "termination_condition",
 )
 _STAGE_REQUEST_FIELDS = (
+    "objective",
+    "workflow_node",
+    "workflow_digest",
     "swarm_plan_ref",
     "task_ref",
     "name",
@@ -297,6 +303,33 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
             method_binding_id,
             context,
         )
+        workflow = self._workflow_policies.workflow_for(
+            collab_context_id, method_binding_id
+        )
+        if workflow is not None:
+            require_candidate(workflow, collab_context_id, command)
+            record = self._collab_repo.get_current_status(collab_context_id)
+            if (
+                record is None
+                or record.task is None
+                or record.task.task_id != command.task_ref
+            ):
+                raise ContextCollabValidationError(
+                    "workflow candidate must reference current root Task"
+                )
+            if any(
+                t.task_id in {e["task_ref"] for e in command.stages}
+                for t in record.tasks
+            ) and not self._store.get_plan(
+                axes, command.swarm_plan_id, method_binding_id, collab_context_id
+            ):
+                raise ContextCollabValidationError(
+                    "Method history missing for persisted workflow child Tasks; restart recovery is not supported"
+                )
+        elif any(e.get("workflow_node") is not None for e in command.stages):
+            raise ContextCollabValidationError(
+                "unmanaged plan cannot claim workflow provenance"
+            )
         plan_id = command.swarm_plan_id or f"sp_{uuid4().hex[:12]}"
         now = _now()
         reason = command.reason or "swarm.submit_plan_candidate"
@@ -321,6 +354,11 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
             candidate_stages.append(
                 Stage.from_dict(
                     {
+                        **{
+                            key: entry[key]
+                            for key in ("objective", "workflow_node", "workflow_digest")
+                            if key in entry
+                        },
                         "stage_id": entry.get("stage_id"),
                         "swarm_plan_ref": plan_id,
                         "task_ref": entry.get("task_ref", command.task_ref),
@@ -430,7 +468,23 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
             == _shape_of(candidate_plan.to_dict(), _PLAN_REQUEST_FIELDS)
             and set(stored_stages) == set(candidate_by_id)
             and all(
-                _shape_of(stored_stages[stage_id].to_dict(), _STAGE_REQUEST_FIELDS)
+                _shape_of(
+                    {
+                        **stored_stages[stage_id].to_dict(),
+                        **(
+                            {
+                                "input_artifact_refs": list(
+                                    stored_stages[
+                                        stage_id
+                                    ].workflow_node.input_artifact_refs
+                                )
+                            }
+                            if stored_stages[stage_id].workflow_node
+                            else {}
+                        ),
+                    },
+                    _STAGE_REQUEST_FIELDS,
+                )
                 == _shape_of(
                     candidate_by_id[stage_id].to_dict(),
                     _STAGE_REQUEST_FIELDS,

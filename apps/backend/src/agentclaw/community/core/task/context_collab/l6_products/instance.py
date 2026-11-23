@@ -20,8 +20,8 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
     role_binding_refs,
     validate_role_sources,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     GovernanceRequirements,
@@ -137,7 +137,7 @@ def _resolve_profile(
     *,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
-    catalog: ProductCatalog,
+    catalog: ProductProfileReader,
 ) -> ProductProfileDefinition:
     normalized = decode_creation_facts(facts)
     profile = product_definition(
@@ -202,7 +202,7 @@ def instantiate_product(
     event_id: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
-    catalog: ProductCatalog,
+    catalog: ProductProfileReader,
 ) -> ProductInstance | None:
     normalized = decode_creation_facts(facts)
     if normalized.get("product_kind") is None:
@@ -238,7 +238,7 @@ def decode_product_instance(
     event_id: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
-    catalog: ProductCatalog,
+    catalog: ProductProfileReader,
 ) -> ProductInstance | None:
     """Validate historical facts; never renegotiate with today's capabilities."""
     normalized = decode_creation_facts(facts)

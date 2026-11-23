@@ -5,6 +5,10 @@ A2A mock 边界,检查跨层关联、交付时序及拒绝操作无写入。仅�
 数据库与外部交付边界;用户视角闭环另见 test_task_commission_end_to_end.py。
 """
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 import json
 from dataclasses import dataclass
 
@@ -59,9 +63,6 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     STANDARD_TASK_CONTRACT_REF,
-)
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
@@ -166,7 +167,7 @@ def test_commission_protocol_and_persistence_integration(product_app, db, engine
     repo = product_app.get(ContextCollabRepositoryProtocol)
     store = product_app.get(MethodStoreProtocol)
     delivery = product_app.get(A2aDeliveryPort)
-    catalog = product_app.get(ProductCatalog)
+    catalog = product_app.get(ProductProfileReader)
     assert isinstance(repo, ContextCollabRepository)
     assert isinstance(delivery, _RecordingDelivery)
     profile = catalog.get(

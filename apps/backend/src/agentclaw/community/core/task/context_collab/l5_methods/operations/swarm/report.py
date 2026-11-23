@@ -10,6 +10,18 @@ Failures propagate, and reconciliation can resume a partially committed report.
 from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import uuid4
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.artifact_manifest import (
+    manifest_envelope,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+    SwarmArtifactEvidenceValidator,
+    SwarmWorkflowPolicyReader,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.workflow_guards import (
+    normalize_outputs,
+    require_stage,
+    stage_contract_envelope,
+)
 
 from injector import inject
 
@@ -39,7 +51,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     Participant,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import validate_enrolled_participation
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.participation import (
+    validate_enrolled_participation,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.stage import (
     _parse_timestamp,
 )
@@ -72,9 +86,15 @@ class SwarmStageReportService:
         writer: EventWriter,
         swarm: SwarmMethodOpsServiceProtocol,
         executor: StageExecutionService,
+        artifact_validator: SwarmArtifactEvidenceValidator,
+        workflow_policies: SwarmWorkflowPolicyReader,
     ) -> None:
         self.store, self.reader, self.writer = store, reader, writer
         self.swarm, self.executor = swarm, executor
+        self.artifact_validator, self.workflow_policies = (
+            artifact_validator,
+            workflow_policies,
+        )
 
     def start_task(
         self,
@@ -111,15 +131,33 @@ class SwarmStageReportService:
             ),
             None,
         )
-        if allocation is None:
-            raise ContextCollabValidationError("child Work requires allocated Agent")
+        current = self.store.get_stage(
+            current_axes(), stage.stage_id, binding_id, collet_id
+        )
+        binding = self.store.get_binding(current_axes(), binding_id, collet_id)
+        if (
+            allocation is None
+            or current != stage
+            or stage.state is not StageState.RUNNING
+            or binding is None
+            or binding.state.value != "ACTIVE"
+            or _parse_timestamp(
+                allocation.lease_expires_at, "allocation", "lease_expires_at"
+            )
+            <= datetime.now(timezone.utc)
+        ):
+            raise ContextCollabValidationError(
+                "child Work requires live allocated Agent and unchanged Stage"
+            )
+        if stage.workflow_node is not None:
+            self.artifact_validator.validate_inputs(stage, participant)
         if any(t.task_id == stage.task_ref for t in record.tasks):
             raise ContextCollabValidationError("Stage Task already exists")
         creation_ref = f"evt_{uuid4().hex}"
         task = Task(
             stage.task_ref,
             collet_id,
-            stage.name,
+            stage.objective or stage.name,
             "created",
             1,
             parent.principal_ref,
@@ -129,7 +167,16 @@ class SwarmStageReportService:
             creation_ref,
             creation_ref,
         )
-        self._work(record, task, "task.started", {}, actor, creation=task)
+        payload = (
+            {
+                "swarm_stage_contract": stage_contract_envelope(
+                    stage, allocation.allocation_id
+                )
+            }
+            if stage.workflow_node is not None
+            else {}
+        )
+        self._work(record, task, "task.started", payload, actor, creation=task)
 
     def _work(
         self,
@@ -226,6 +273,25 @@ class SwarmStageReportService:
         plan = self.store.get_plan(
             axes, stage.swarm_plan_ref, report.binding_id, report.collet_id
         )
+        workflow = self.workflow_policies.workflow_for(
+            report.collet_id, report.binding_id
+        )
+        bindings = ()
+        payload = {"artifacts": list(report.artifact_refs)}
+        if workflow is not None:
+            if plan is None:
+                raise ContextCollabValidationError("workflow plan unavailable")
+            require_stage(workflow, report.collet_id, plan, stage)
+            bindings = normalize_outputs(
+                stage, report.output_bindings, report.artifact_refs
+            )
+            self.artifact_validator.validate_outputs(stage, bindings)
+            report = replace(report, output_bindings=bindings)
+            payload["swarm_artifact_manifest"] = manifest_envelope(
+                stage.stage_id, allocation.allocation_id, bindings
+            )
+        elif stage.workflow_node is not None or report.output_bindings:
+            raise ContextCollabValidationError("workflow policy unavailable")
         if (
             task is None
             or plan is None
@@ -252,6 +318,11 @@ class SwarmStageReportService:
                 or previous.task_ref != task.task_id
                 or previous.event_kind != expected
                 or previous.payload.get("artifacts") != list(report.artifact_refs)
+                or (
+                    workflow is not None
+                    and previous.payload.get("swarm_artifact_manifest")
+                    != payload["swarm_artifact_manifest"]
+                )
             ):
                 raise ContextCollabValidationError(
                     "completion report changed committed Task evidence"
@@ -264,7 +335,7 @@ class SwarmStageReportService:
                 record,
                 task,
                 "task.submitted",
-                {"artifacts": list(report.artifact_refs)},
+                payload,
                 actor,
             )
             record = self.reader.get_current_status(report.collet_id)
@@ -274,7 +345,7 @@ class SwarmStageReportService:
                 record,
                 task,
                 "task.accepted",
-                {"artifacts": list(report.artifact_refs)},
+                payload,
                 owner,
             )
         elif task.status != "done":
@@ -289,6 +360,7 @@ class SwarmStageReportService:
                 [report.allocation_ref],
                 "worker G4 completion report",
                 report.artifact_refs,
+                output_bindings=bindings,
             ),
             owner,
         )

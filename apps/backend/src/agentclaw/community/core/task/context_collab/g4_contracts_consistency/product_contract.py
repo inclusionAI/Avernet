@@ -18,8 +18,8 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
     actor_has_role,
     product_definition,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_method_kind,
@@ -40,7 +40,7 @@ def validate_product_event(
     *,
     creation_facts: dict,
     product_instance: ProductInstance | None,
-    catalog: ProductCatalog,
+    catalog: ProductProfileReader,
     task: Task | None,
     event_kind: str,
     primitive_type: str,

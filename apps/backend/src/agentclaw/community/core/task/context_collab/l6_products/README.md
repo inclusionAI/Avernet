@@ -27,28 +27,23 @@ itself; the L4 service/repository do not acquire a dependency on L6.
 | DomainProfile | [contracts.py](contracts.py) | Maps product vocabulary to L3 Resource and L4 Collet/Task/Message/Artifact authority, not duplicate product-owned entities. |
 | TaskLifecycleContract / TaskAction | [task_contracts.py](task_contracts.py), [contracts.py](contracts.py) | Reusable, exactly versioned Task lifecycle/action contract, independent of product orchestration. References the existing G4 machine; never executes a Bot plan. |
 | WorkflowProfile | [contracts.py](contracts.py) | Optional product orchestration contract. Existing profiles own their action mappings and reference a versioned G4 machine over L4 Task, or explicitly declare a nontransition event stream. Not required merely to run an autonomous Bot. |
-| MethodPolicy / OpenMethodPolicy / SwarmMethodPolicy | [L5 method_policies.py](../l5_methods/method_policies.py) | L5-owned Method policies attached to their own `MethodTemplate`: Open publication/admission and Swarm planning capability selection. No policy means no implicit capability. |
+| MethodPolicy / OpenMethodPolicy / SwarmMethodPolicy / SwarmWorkflowPolicy | [L5 method_policies.py](../l5_methods/method_policies.py) | L5-owned Method policies attached to their own `MethodTemplate`: Open publication/admission, Swarm dynamic planning capability selection or a configured Stage DAG. No policy means no implicit capability. |
 | OpenAdmissionPolicy / OpenPublicationProfile / BotSelfApplicationAdmission | [L5 publication.py](../l5_methods/publication.py) | L5-owned participation/role/capacity constraints, bounded Bot self-application, ADMITTED delivery gate and partial-failure behavior. L6 selects these values; product services and DI execute the journey. |
 | ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: Collet ID and optional independent root Task ID (absent before L4 Work creation), product and selected Task/workflow/domain versions, actual MethodBinding references for the pinned topology, selected Method versions, actual RoleBinding references, pinned participant eligibility, governance requirements and negotiation result. No independent lifecycle state. |
 | Compatibility selection | `negotiate(profile, offer)` | Exact required profile/Method/ACCS/layer/extension/governance match. Reports missing required and omitted optional capabilities separately. Never silently chooses a newer version or weaker policy. |
 
-`profiles.py` retains the wire ID enums for compatibility; IDs alone are not
-profile definitions. L6 supplies the immutable `ProductCatalog` mechanism, not
-an installed/default global catalog. Product teams author concrete definitions in
-`products/`; the composition root explicitly installs them in
-[`di/modules/context_collab_products.py`](../../../../di/modules/context_collab_products.py).
-`TaskModule` provides one catalog per injector and injects that same instance into
-repositories, generic/product services, L6 Method bootstrap/recovery and the bounded
-Open adapter. Pure selection, instance and G4 helpers require this catalog
-explicitly; none fall back to global/default product installation. An empty or
-incomplete installation rejects unknown profiles rather than silently recovering
-one from another catalog. Historical definitions must remain installed for their
-instances to load and execute.
+`profiles.py` retains wire ID enums, not profile definitions. Production DI now
+injects the scoped, exact-version `ProductProfileReader` backed by published SQL
+rows into all Catalog consumers. `ProductCatalog` remains an immutable snapshot
+for authoring, explicit isolated test assemblies and capability projection;
+constructing one does not register or publish a runtime product.
 
-Installing a profile requires explicit code/composition changes and tests, not an
-enum change. Constructing a separate catalog does **not** dynamically register a
-runtime product. Tests may assemble isolated catalogs. There is no mutable
-runtime registry, catalog database or registration API.
+See [Profile storage, publication and cutover](PROFILE-STORAGE.md) for the additive
+DDL, independent publisher authority, explicit transactionally replayable seed,
+historical-reference checks, strict codec and host resource-validation seam.
+There is no latest/code fallback or automatic request-path seed. Instances
+continue to pin their old exact versions; configuration durability does not
+provide MethodStore restart continuation.
 
 
 ## Create a product profile
@@ -96,8 +91,9 @@ profile = create_product_profile(
         # Fixed standard_task@1 still governs Task actions and completion.
     )
 )
-# Installation is a separate, explicit composition-root step:
+# Authoring snapshot only; production publication is explicit and authorized:
 catalog = ProductCatalog((profile,))
+# publication.publish(ProductProfilePublishCommand(profile), trusted_actor)
 ```
 
 Omitting `scenario_roles` (or supplying `()`) resolves the standard responsible
