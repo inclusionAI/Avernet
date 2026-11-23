@@ -28,29 +28,68 @@ impl MySqlGroupStore {
     /// (the previous default in-memory filter returned the all-kinds total
     /// which made the X-of-Y display lie for filtered queries).
     pub(crate) async fn count_by_kind_sql(&self, kind: Option<bcs_service_api::GroupKind>) -> u64 {
-        let rows =
-            match kind {
-                None => self
-                    .db
-                    .query_with(
-                        &self.logical_db,
-                        "SELECT COUNT(*) as cnt FROM bcs_groups WHERE env = ?",
-                        vec![Value::from(self.env.as_str())],
-                    )
-                    .await
-                    .unwrap_or_default(),
-                Some(k) => {
-                    let kind_str = Self::group_kind_to_str(k);
-                    self.db.query_with(
-                    &self.logical_db,
-                    "SELECT COUNT(*) as cnt FROM bcs_groups WHERE env = ? AND group_kind = ?",
-                    vec![Value::from(self.env.as_str()), Value::from(kind_str)],
-                ).await.unwrap_or_default()
-                }
-            };
+        // Without a kind the query is exactly the unfiltered count.
+        let Some(kind) = kind else {
+            return self.count_sql().await;
+        };
+        let kind_str = Self::group_kind_to_str(kind);
+        let rows = self
+            .db
+            .query_with(
+                &self.logical_db,
+                "SELECT COUNT(*) as cnt FROM bcs_groups WHERE env = ? AND group_kind = ?",
+                vec![Value::from(self.env.as_str()), Value::from(kind_str)],
+            )
+            .await
+            .unwrap_or_default();
         rows.first()
             .and_then(|row| db_get_column::<i64>(row, "cnt").ok())
             .unwrap_or(0) as u64
+    }
+
+    /// Build the shared `list_paginated` / `list_paginated_by_kind` statement.
+    ///
+    /// Only the fixed inner fragment differs between the two entries: `""` or
+    /// `" AND group_kind = ?"`, placed between the inner `WHERE env = ?` and
+    /// `LIMIT ? OFFSET ?` so `LIMIT`/`OFFSET` apply to the filtered group rows.
+    /// The outer participant JOIN literal and its `gp.env = ?` binding never
+    /// depend on `kind`.
+    fn paginated_groups_statement(
+        &self,
+        kind: Option<bcs_service_api::GroupKind>,
+        offset: u64,
+        limit: u64,
+    ) -> (String, Vec<Value>) {
+        let kind_filter = if kind.is_some() {
+            " AND group_kind = ?"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
+                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
+                    gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
+                    gs.created_ts, gs.updated_ts, \
+                    gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
+             FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
+                          service_group_uuid, service_mode, version, record_status, \
+                          {} AS created_ts, {} AS updated_ts, \
+                          group_kind, dm_pair_key, group_strategy, visibility, human_mention_notify_mode \
+                   FROM bcs_groups WHERE env = ?{} LIMIT ? OFFSET ?) gs \
+             LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
+            self.flavor.unix_ts("gmt_create"),
+            self.flavor.unix_ts("gmt_modified"),
+            kind_filter,
+        );
+
+        let mut params = vec![Value::from(self.env.as_str())];
+        if let Some(k) = kind {
+            params.push(Value::from(Self::group_kind_to_str(k)));
+        }
+        params.push(Value::from(limit as i64));
+        params.push(Value::from(offset as i64));
+        params.push(Value::from(self.env.as_str()));
+        (sql, params)
     }
 
     /// CR-4: paginate groups optionally filtered by `group_kind`.
@@ -68,71 +107,11 @@ impl MySqlGroupStore {
         limit: u64,
     ) -> Vec<Group> {
         // We share the same SELECT shape as `list_paginated` (subquery
-        // paginates groups → outer JOIN fetches participants) but conditionally
-        // append `AND group_kind = ?` to the inner WHERE. This keeps the
-        // same row → Group reduction logic below.
-        let created_ts_expr = self.flavor.unix_ts("gmt_create");
-        let updated_ts_expr = self.flavor.unix_ts("gmt_modified");
-        let rows_result = match kind {
-            None => {
-                let sql = format!(
-                    "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
-                            gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
-                            gs.created_ts, gs.updated_ts, \
-                            gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
-                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
-                                  service_group_uuid, service_mode, version, record_status, \
-                                  {} AS created_ts, {} AS updated_ts, \
-                                  group_kind, dm_pair_key, group_strategy, visibility, human_mention_notify_mode \
-                           FROM bcs_groups WHERE env = ? LIMIT ? OFFSET ?) gs \
-                     LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
-                    created_ts_expr, updated_ts_expr,
-                );
-                self.db
-                    .query_with(
-                        &self.logical_db,
-                        &sql,
-                        vec![
-                            Value::from(self.env.as_str()),
-                            Value::from(limit as i64),
-                            Value::from(offset as i64),
-                            Value::from(self.env.as_str()),
-                        ],
-                    )
-                    .await
-            }
-            Some(k) => {
-                let kind_str = Self::group_kind_to_str(k);
-                let sql = format!(
-                    "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
-                            gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
-                            gs.created_ts, gs.updated_ts, \
-                            gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
-                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
-                                  service_group_uuid, service_mode, version, record_status, \
-                                  {} AS created_ts, {} AS updated_ts, \
-                                  group_kind, dm_pair_key, group_strategy, visibility, human_mention_notify_mode \
-                           FROM bcs_groups WHERE env = ? AND group_kind = ? LIMIT ? OFFSET ?) gs \
-                     LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
-                    created_ts_expr, updated_ts_expr,
-                );
-                self.db
-                    .query_with(
-                        &self.logical_db,
-                        &sql,
-                        vec![
-                            Value::from(self.env.as_str()),
-                            Value::from(kind_str),
-                            Value::from(limit as i64),
-                            Value::from(offset as i64),
-                            Value::from(self.env.as_str()),
-                        ],
-                    )
-                    .await
-            }
-        };
+        // paginates groups → outer JOIN fetches participants) through
+        // `paginated_groups_statement`, which only swaps the inner kind
+        // fragment. This keeps the same row → Group reduction logic below.
+        let (sql, params) = self.paginated_groups_statement(kind, offset, limit);
+        let rows_result = self.db.query_with(&self.logical_db, &sql, params).await;
 
         let rows = match rows_result {
             Ok(r) => r,
@@ -321,35 +300,8 @@ impl MySqlGroupStore {
         // Task G.2: project group_kind / dm_pair_key from both inner and outer
         // SELECT so dm groups stay tagged after pagination.
         let _start = std::time::Instant::now();
-        let paginated_sql = format!(
-            "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
-                    gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
-                    gs.created_ts, gs.updated_ts, \
-                    gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
-             FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
-                          service_group_uuid, service_mode, version, record_status, \
-                          {} AS created_ts, {} AS updated_ts, \
-                          group_kind, dm_pair_key, group_strategy, visibility, human_mention_notify_mode \
-                   FROM bcs_groups WHERE env = ? LIMIT ? OFFSET ?) gs \
-             LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
-            self.flavor.unix_ts("gmt_create"),
-            self.flavor.unix_ts("gmt_modified"),
-        );
-        let rows = match self
-            .db
-            .query_with(
-                &self.logical_db,
-                &paginated_sql,
-                vec![
-                    Value::from(self.env.as_str()),
-                    Value::from(limit as i64),
-                    Value::from(offset as i64),
-                    Value::from(self.env.as_str()),
-                ],
-            )
-            .await
-        {
+        let (paginated_sql, params) = self.paginated_groups_statement(None, offset, limit);
+        let rows = match self.db.query_with(&self.logical_db, &paginated_sql, params).await {
             Ok(r) => {
                 let elapsed = _start.elapsed();
                 if elapsed.as_millis() > 100 {
