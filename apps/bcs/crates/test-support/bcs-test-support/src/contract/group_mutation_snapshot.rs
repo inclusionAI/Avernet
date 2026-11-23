@@ -43,4 +43,3 @@ pub async fn group_mutation_snapshot_contract_tests(repo: Arc<dyn GroupRepoPort>
     assert_eq!(current.label, Some(format!("version-{version}")));
     assert!(repo.read_card_snapshot(&group.id).await.unwrap().unwrap().catalog_labels.is_empty());
 }
-
