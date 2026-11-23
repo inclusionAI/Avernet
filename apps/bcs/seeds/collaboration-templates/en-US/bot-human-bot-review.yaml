@@ -2,7 +2,6 @@
 # participants declares only logical roles that must bind to actual bots. The Human is
 # the current group member, so the human_input node has no assignee or participant binding.
 
-api_version: bcs.collaboration/v1
 name: Bot-Human-Bot Review
 
 metadata:
