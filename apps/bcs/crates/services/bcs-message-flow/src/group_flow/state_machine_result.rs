@@ -60,7 +60,8 @@ impl ResultMessage {
 }
 
 pub(super) async fn publish(flow: &BcsMessageFlow, cmd: StateMachineResultPublishCommand) -> ServiceResult<()> {
-    let key = format!("state-machine-result:{}", cmd.run_id);
+    let key_prefix = if cmd.terminal_result.is_some() { "run-result" } else { "state-machine-result" };
+    let key = format!("{key_prefix}:{}", cmd.run_id);
     let result = ResultMessage {
         id: physical_message_id(&key),
         message: NewMessage {

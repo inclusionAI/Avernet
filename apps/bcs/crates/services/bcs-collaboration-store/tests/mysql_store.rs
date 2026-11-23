@@ -28,7 +28,8 @@ use bcs_service_api::port::{EventRepoPort, NewEvent};
 use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
 use bcs_service_api::{
     CollaborationEventRepoPort, GroupRuntimeBindingRepoPort, MarkHumanNodeRunningCommand,
-    StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
+    StateMachineChatResultPayload, StateMachineDefinitionRepoPort, StateMachineResultPublishCommand,
+    StateMachineRunRepoPort, StateMachineRunResultPayload, StateMachineTerminalReason,
 };
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -407,6 +408,77 @@ async fn sqlite_run_start_and_public_event_batch_commit_in_one_transaction() {
         .expect("started Event");
     assert_eq!(created.envelope.stream.sequence, 1);
     assert_eq!(started.envelope.stream.sequence, 2);
+}
+
+#[tokio::test]
+async fn sqlite_abort_preserves_existing_chat_result_checkpoint() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("SQLite plugin"));
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("apply SQLite schema");
+    let store = MySqlCollaborationStore::sqlite(db, "test".to_string());
+    let mut run = test_run();
+    run.run_id = "sm-run-atomic".to_string();
+    run.status = StateMachineRunStatus::Running;
+    let mut node = test_node();
+    node.run_id = run.run_id.clone();
+    node.status = StateMachineNodeStatus::Completed;
+    node.artifact_text = Some("original result".into());
+    node.completed_at = Some(100);
+    store.create_run(run.clone(), vec![node]).await.unwrap();
+
+    let legacy = StateMachineChatResultPayload {
+        command: StateMachineResultPublishCommand {
+            run_id: run.run_id.clone(),
+            group_id: run.group_id.clone(),
+            session_id: run.session_id.clone(),
+            sender_bot_id: run.created_by.clone().unwrap(),
+            content: "original result".into(),
+            terminal_result: None,
+            created_at_ms: 100,
+        },
+        deadline_ms: 200,
+    };
+    assert!(store.save_chat_result(legacy).await.unwrap());
+
+    let terminal_result = StateMachineRunResultPayload::aborted(
+        run.run_id.clone(),
+        run.group_id.clone(),
+        run.session_id.clone(),
+        "workflow".into(),
+        run.created_by.clone().unwrap(),
+        StateMachineTerminalReason::UserAborted,
+        Vec::new(),
+        300,
+    );
+    let terminal_payload = StateMachineChatResultPayload {
+        command: StateMachineResultPublishCommand {
+            run_id: run.run_id.clone(),
+            group_id: run.group_id.clone(),
+            session_id: run.session_id.clone(),
+            sender_bot_id: run.created_by.clone().unwrap(),
+            content: terminal_result.render_manager_message(),
+            terminal_result: Some(terminal_result),
+            created_at_ms: 300,
+        },
+        deadline_ms: 400,
+    };
+    assert!(store
+        .commit_eventful_transition(StateMachineEventfulTransition::AbortRun {
+            run_id: run.run_id,
+            reason: Some("user cancellation".into()),
+            completed_at_ms: 300,
+            event: public_event("evt-sqlite-run-aborted", "state_machine.run.aborted", None),
+            terminal_result: Some(terminal_payload.clone()),
+        })
+        .await
+        .unwrap());
+
+    let saved = store.get_chat_result("sm-run-atomic").await.unwrap().unwrap();
+    assert_eq!(saved.status, bcs_service_api::StateMachineChatResultStatus::Pending);
+    assert_eq!(saved.payload.command.terminal_result, None);
+    assert_eq!(saved.payload.command.content, "original result");
+    assert_eq!(saved.payload.deadline_ms, 200);
 }
 
 #[tokio::test]
@@ -1936,3 +2008,14 @@ mod publication_contract;
 
 #[path = "support/terminal_im_contract.rs"]
 mod terminal_im_contract;
+#[path = "support/terminal_result_contract.rs"]
+mod terminal_result_contract;
+
+
+#[tokio::test]
+async fn terminal_result_contract_sqlite() {
+    let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
+    let store = MySqlCollaborationStore::sqlite(db, "test".into());
+    terminal_result_contract::terminal_result_contract(&store).await;
+}

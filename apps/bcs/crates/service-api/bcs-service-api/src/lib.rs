@@ -239,7 +239,7 @@ pub use port::{
     UpsertOrganizationMemberRecord,
     RelationRepoPort, RunFallbackDelivery,
     SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
-    SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineResultPublishCommand,
+    SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineResultPublishCommand, StateMachineRunResultPayload, StateMachineRunTerminalStatus, StateMachineTerminalReason,
     StateMachineResultPublisherPort, StateMachineRunRepoPort, StateMachineTerminalEvent,
     StateMachineTerminalStatus, UserIdentity, UserIdentityRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,

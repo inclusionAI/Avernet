@@ -326,6 +326,7 @@ pub async fn state_machine_result_publisher_port_contract_tests<
         session_id: "contract-group:00000001".to_string(),
         sender_bot_id: "contract-initiator".to_string(),
         content: "contract final result".to_string(),
+        terminal_result: None,
     })
     .await
     .expect("publish state-machine result under the initiating Bot identity");

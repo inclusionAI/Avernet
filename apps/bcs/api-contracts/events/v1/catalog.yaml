@@ -140,6 +140,22 @@ events:
     stream: state_machine_run
     content_fields: [output]
     data_schema: "#/$defs/StateMachineRunCompletedData"
+  # Terminal failure and abortion carry only metadata: no Node artifacts, raw
+  # error text or caller-supplied abort reasons.
+  - event_type: state_machine.run.failed
+    family: state_machine.run.*
+    schema_version: "1.0"
+    subject_type: state_machine.run
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    data_schema: "#/$defs/StateMachineRunFailedData"
+  - event_type: state_machine.run.aborted
+    family: state_machine.run.*
+    schema_version: "1.0"
+    subject_type: state_machine.run
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    data_schema: "#/$defs/StateMachineRunAbortedData"
 
   - event_type: message.created
     family: message.*

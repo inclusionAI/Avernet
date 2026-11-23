@@ -118,3 +118,75 @@ async fn chat_publication_two_recoverers_send_pending_result_once() {
     assert_eq!(publisher.commands.lock().await.len(), 1);
     assert_eq!(h.store.get_run(&run.run_id).await.unwrap().unwrap().status, StateMachineRunStatus::Completed);
 }
+
+#[tokio::test]
+async fn aborted_terminal_result_survives_terminal_cleanup_recovery() {
+    let mut h = Harness::new(&[]).await;
+    let started = start_chat(&h, single_node_yaml()).await;
+    let mut run = started.clone();
+    run.run_id = "aborted-cleanup-recovery".into();
+    run.status = StateMachineRunStatus::Aborted;
+    run.created_by = Some("driver-bot".into());
+    run.output = None;
+    run.error = Some("user cancellation".into());
+    run.completed_at = Some(100);
+    run.created_at = 1;
+    run.updated_at = 100;
+    StateMachineRunRepoPort::create_run(&*h.store, run.clone(), Vec::new())
+        .await
+        .unwrap();
+    let sender_bot_id = run.created_by.clone().expect("run creator");
+    let created_at_ms = bcs_protocol::now_ms();
+    let terminal_result = bcs_service_api::StateMachineRunResultPayload::aborted(
+        run.run_id.clone(),
+        run.group_id.clone(),
+        run.session_id.clone(),
+        "single_node".into(),
+        sender_bot_id.clone(),
+        bcs_service_api::StateMachineTerminalReason::UserAborted,
+        Vec::new(),
+        created_at_ms,
+    );
+    let payload = bcs_service_api::StateMachineChatResultPayload {
+        command: StateMachineResultPublishCommand {
+            run_id: run.run_id.clone(),
+            group_id: run.group_id.clone(),
+            session_id: run.session_id.clone(),
+            sender_bot_id,
+            content: terminal_result.render_manager_message(),
+            terminal_result: Some(terminal_result),
+            created_at_ms,
+        },
+        deadline_ms: created_at_ms + 90_000,
+    };
+    assert!(h.store.save_chat_result(payload.clone()).await.unwrap());
+    let publisher = Arc::new(RecordingResultPublisher::default());
+    h.runtime = h.runtime.with_result_publisher(publisher.clone());
+
+    h.runtime
+        .cleanup_state_machine_terminal_work(None, 32)
+        .await
+        .unwrap();
+
+    let saved = h.store.get_chat_result(&run.run_id).await.unwrap().unwrap();
+    assert_eq!(saved.status, Status::Delivered);
+    assert_eq!(saved.payload, payload);
+    assert_eq!(publisher.commands.lock().await.len(), 1);
+    assert!(publisher.commands.lock().await[0].terminal_result.is_some());
+}
+
+#[tokio::test]
+async fn chat_disconnect_persists_structured_terminal_result_once() {
+    let h = Harness::new(&[]).await;
+    let run = start_chat(&h, single_node_yaml()).await;
+
+    assert!(h.runtime.handle_bot_disconnect("driver-bot").await.unwrap() >= 1);
+    let checkpoint = h.store.get_chat_result(&run.run_id).await.unwrap().expect("terminal result checkpoint");
+    let terminal_result = checkpoint.payload.command.terminal_result.as_ref().expect("structured terminal result");
+    assert_eq!(terminal_result.status, bcs_service_api::StateMachineRunTerminalStatus::Failed);
+    assert_eq!(terminal_result.reason, bcs_service_api::StateMachineTerminalReason::NodeFailed);
+    assert!(!checkpoint.payload.command.content.contains("disconnected"));
+
+    assert_eq!(h.runtime.handle_bot_disconnect("driver-bot").await.unwrap(), 0);
+    assert_eq!(h.store.get_chat_result(&run.run_id).await.unwrap().unwrap().payload, checkpoint.payload);
+}

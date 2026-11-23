@@ -1,0 +1,11 @@
+n,session,run_id,stage,victim,failed_at_ms,reopened_run,latency_s,outcome,run_result,notes
+1,bcs_grp_afa7b66a95574546a12d6007a6f9a8a4:8748993c,sm-64e2e816-1695-4340-aa0a-a1d0ae9165bf,speak,玩家稳健老陈,1795265394485,sm-67f24798-38da-4828-90de-3aec5e772d85,23.4,recovered,delivered,
+2,bcs_grp_afa7b66a95574546a12d6007a6f9a8a4:8748993c,sm-3876e409-b4d8-4b14-b2dd-a9be7eee3be7,speak,玩家逻辑控林工,1795265446693,sm-99d28c3a-3130-4d8f-8c1b-d4c8bfc1f395,23.9,recovered,delivered,
+3,bcs_grp_0ff8519b30934e8fbb28de834d66a9c8:d792d624,sm-ddee1576-e201-4c90-9c00-d8e7a829c943,speak,玩家逻辑控林工,1795265524057,sm-7820f197-6042-4c16-b05e-55d38e401bec,26.4,recovered,delivered,
+4,bcs_grp_0ff8519b30934e8fbb28de834d66a9c8:d792d624,sm-0f334fbb-9ab2-4763-90b2-ad102ff9a455,speak,玩家戏精阿浪,1795265587536,sm-04fa57e4-4c6c-4176-9312-30beef8337d1,20.5,recovered,delivered,
+5,bcs_grp_b02eba0be7ff41f2b91712fae4554431:80448864,sm-2f9cf667-f875-4db2-b558-a28c22295ca6,speak,玩家和事佬阿和,1795265663599,sm-7888c46e-1095-4856-8d0b-46349e23ce63,6.5,recovered,delivered,
+6,bcs_grp_b02eba0be7ff41f2b91712fae4554431:80448864,sm-1c83d4c8-d95a-4f15-a682-e7203871f22d,speak,玩家稳健老陈,1795265705716,sm-ea914686-f4f8-4490-b97a-9457f66114d5,12.5,recovered,delivered,
+7,bcs_grp_7c0fda6f8cad4faba6cbc22e1b73b4dd:337b4008,sm-529fcfe2-2614-4663-8b32-b7b3a5b69826,speak,玩家话痨小满,1795265779335,sm-ecd17a2c-585b-48aa-8714-883d80f28605,52.0,recovered,delivered,
+8,bcs_grp_7c0fda6f8cad4faba6cbc22e1b73b4dd:337b4008,sm-f61ccf2a-89d8-4ec7-9582-2b3476de445a,speak,玩家和事佬阿和,1795265860867,sm-569ce2a3-4e78-4915-afe7-728513dfb3df,52.5,recovered,delivered,
+9,bcs_grp_7c0fda6f8cad4faba6cbc22e1b73b4dd:337b4008,sm-d49082c7-d5da-434b-a2ec-d26f82e870d1,speak,玩家话痨小满,1795265938715,sm-e65f3fa8-ce60-4734-bfcc-6d1e83619efe,27.7,recovered,delivered,
+10,bcs_grp_7c0fda6f8cad4faba6cbc22e1b73b4dd:337b4008,sm-8d0e6a44-3e61-407f-9d77-42ac2c5c1b75,speak,玩家和事佬阿和,1795265997550,sm-0211996a-b58f-4ca4-945c-4455d7810490,21.9,recovered,delivered,

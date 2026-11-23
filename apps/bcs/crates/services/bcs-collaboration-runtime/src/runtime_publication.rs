@@ -1,17 +1,20 @@
 use super::*;
 use bcs_service_api::{StateMachineChatResultPayload, StateMachineChatResultClaim,
-    StateMachineChatResultStatus as Status, StateMachineChatResultOutcome as Outcome};
+    StateMachineChatResultStatus as Status, StateMachineChatResultOutcome as Outcome, StateMachineRunResultPayload};
 
-const CHAT_RESULT_TIMEOUT_MS: u64 = 90_000;
+pub(super) const CHAT_RESULT_TIMEOUT_MS: u64 = 90_000;
 
 impl CollaborationRuntime {
     /// True only when the publication barrier is satisfied or inapplicable.
     /// Persistence errors propagate; they must not become a publication failure.
     pub(super) async fn ensure_chat_result(&self, run: &StateMachineRun, session: &Session,
-        output: Option<&str>, completed_at_ms: u64) -> Result<bool, CollaborationRuntimeError> {
+        output: Option<&str>, terminal_result: Option<&StateMachineRunResultPayload>, completed_at_ms: u64) -> Result<bool, CollaborationRuntimeError> {
+        let content = terminal_result
+            .map(StateMachineRunResultPayload::render_manager_message)
+            .or_else(|| output.map(str::to_string));
         let mut saved = self.runs.get_chat_result(&run.run_id).await?;
         if saved.is_none() {
-            let (Some(sender_bot_id), Some(content)) = (run.created_by.as_ref(), output) else { return Ok(true); };
+            let (Some(sender_bot_id), Some(content)) = (run.created_by.as_ref(), content.as_deref()) else { return Ok(true); };
             if !session.participants.iter().any(|p| p.is_bot() && p.bot_uuid == *sender_bot_id) {
                 return Ok(true);
             }
@@ -19,7 +22,7 @@ impl CollaborationRuntime {
             // can have started in this version before this save succeeds.
             let payload = StateMachineChatResultPayload {
                 command: StateMachineResultPublishCommand { run_id: run.run_id.clone(), group_id: run.group_id.clone(),
-                    session_id: run.session_id.clone(), sender_bot_id: sender_bot_id.clone(), content: content.into(),
+                    session_id: run.session_id.clone(), sender_bot_id: sender_bot_id.clone(), content: content.into(), terminal_result: terminal_result.cloned(),
                     created_at_ms: completed_at_ms },
                 deadline_ms: completed_at_ms.saturating_add(CHAT_RESULT_TIMEOUT_MS),
             };
@@ -28,8 +31,20 @@ impl CollaborationRuntime {
         }
         let saved = saved.ok_or_else(|| CollaborationRuntimeError::InvalidRequest("Chat result checkpoint disappeared".into()))?;
         let cmd = &saved.payload.command;
+        if terminal_result.is_some() && cmd.terminal_result.is_none() {
+            // A completed result checkpoint is immutable. A later failure/abort
+            // must not overwrite or reinterpret the already-created success result.
+            return Ok(false);
+        }
+        let saved_is_aborted = cmd.terminal_result.as_ref()
+            .is_some_and(|result| result.status == bcs_service_api::StateMachineRunTerminalStatus::Aborted);
+        let requested_is_aborted = terminal_result
+            .is_some_and(|result| result.status == bcs_service_api::StateMachineRunTerminalStatus::Aborted);
+        if saved_is_aborted != requested_is_aborted && (saved_is_aborted || requested_is_aborted) {
+            return Ok(false);
+        }
         if cmd.run_id != run.run_id || cmd.group_id != run.group_id || cmd.session_id != run.session_id
-            || Some(&cmd.sender_bot_id) != run.created_by.as_ref() || Some(cmd.content.as_str()) != output {
+            || Some(&cmd.sender_bot_id) != run.created_by.as_ref() || Some(cmd.content.as_str()) != content.as_deref() || cmd.terminal_result.as_ref() != terminal_result {
             return Err(CollaborationRuntimeError::InvalidRequest("Chat result checkpoint conflicts with original Run output or target".into()));
         }
         match saved.status {
@@ -37,7 +52,9 @@ impl CollaborationRuntime {
             Status::Superseded => return Ok(false),
             Status::Failed => {
                 let error = saved.error.ok_or_else(|| CollaborationRuntimeError::InvalidRequest("Chat result failure has no saved error".into()))?;
-                self.fail_run(run, format!("state-machine result publication failed: {error}")).await?;
+                if run.status == StateMachineRunStatus::Running {
+                    Box::pin(self.fail_run(run, RunFailure::publication(format!("state-machine result publication failed: {error}")))).await?;
+                }
                 return Ok(false);
             }
             Status::Pending | Status::Delivering => {}
@@ -61,7 +78,9 @@ impl CollaborationRuntime {
             Status::Superseded => Ok(false),
             Status::Failed => {
                 let error = saved.error.ok_or_else(|| CollaborationRuntimeError::InvalidRequest("Chat result failure has no saved error".into()))?;
-                self.fail_run(run, format!("state-machine result publication failed: {error}")).await?;
+                if run.status == StateMachineRunStatus::Running {
+                    Box::pin(self.fail_run(run, RunFailure::publication(format!("state-machine result publication failed: {error}")))).await?;
+                }
                 Ok(false)
             }
             Status::Pending | Status::Delivering => Ok(false),

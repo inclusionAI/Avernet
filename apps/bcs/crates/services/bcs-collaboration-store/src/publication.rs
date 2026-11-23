@@ -18,7 +18,13 @@ fn same(saved: &Payload, requested: &Payload) -> ServiceResult<bool> {
     Ok(true)
 }
 fn active(inner: &StoreInner, run: &str) -> bool {
-    inner.runs.get(run).is_some_and(|r| r.status == StateMachineRunStatus::Running)
+    let Some(state) = inner.runs.get(run) else { return false; };
+    match state.status {
+        StateMachineRunStatus::Running | StateMachineRunStatus::Completed | StateMachineRunStatus::Failed => true,
+        StateMachineRunStatus::Aborted => inner.publications.get(run)
+            .is_some_and(|checkpoint| checkpoint.payload.command.terminal_result.is_some()),
+        StateMachineRunStatus::Pending => false,
+    }
 }
 fn owns(saved: &Checkpoint, claim: &Claim) -> bool {
     saved.payload == claim.payload && saved.lease_owner.as_ref() == Some(&claim.owner)
@@ -38,9 +44,14 @@ impl MemoryCollaborationStore {
         let mut inner = self.inner.write().await;
         let c = &payload.command;
         if let Some(saved) = inner.publications.get(&c.run_id) { return same(&saved.payload, &payload); }
-        if !inner.runs.get(&c.run_id).is_some_and(|r| r.status == StateMachineRunStatus::Running
-            && r.group_id == c.group_id && r.session_id == c.session_id && r.created_by.as_ref() == Some(&c.sender_bot_id))
-            || inner.nodes.values().any(|n| n.run_id == c.run_id && !matches!(n.status, StateMachineNodeStatus::Completed | StateMachineNodeStatus::Skipped)) {
+        let Some(run) = inner.runs.get(&c.run_id) else { return Ok(false); };
+        if run.group_id != c.group_id || run.session_id != c.session_id
+            || run.created_by.as_ref() != Some(&c.sender_bot_id)
+            || !matches!(run.status, StateMachineRunStatus::Running | StateMachineRunStatus::Completed | StateMachineRunStatus::Failed | StateMachineRunStatus::Aborted)
+            || (run.status == StateMachineRunStatus::Running
+                && inner.nodes.values().any(|n| n.run_id == c.run_id && !matches!(n.status, StateMachineNodeStatus::Completed | StateMachineNodeStatus::Skipped)))
+            || (run.status == StateMachineRunStatus::Failed
+                && inner.nodes.values().any(|n| n.run_id == c.run_id && n.status == StateMachineNodeStatus::Running)) {
             return Ok(false);
         }
         inner.publications.insert(c.run_id.clone(), Checkpoint { payload, status: Status::Pending,
@@ -100,7 +111,7 @@ impl MemoryCollaborationStore {
     }
 }
 
-const ACTIVE: &str = "EXISTS (SELECT 1 FROM bcs_state_machine_runs r WHERE r.env = bcs_collaboration_delivery_checkpoints.env AND r.run_id = bcs_collaboration_delivery_checkpoints.aggregate_id AND r.status = 'running' AND r.record_status = 'active')";
+const ACTIVE: &str = "EXISTS (SELECT 1 FROM bcs_state_machine_runs r WHERE r.env = bcs_collaboration_delivery_checkpoints.env AND r.run_id = bcs_collaboration_delivery_checkpoints.aggregate_id AND (r.status IN ('running', 'completed', 'failed') OR (r.status = 'aborted' AND bcs_collaboration_delivery_checkpoints.payload_json LIKE '%\"terminal_result\":%')) AND r.record_status = 'active')";
 fn db_error(error: DbError) -> ServiceError { invalid(&format!("Chat result store: {error}")) }
 
 impl MySqlCollaborationStore {
@@ -113,8 +124,12 @@ impl MySqlCollaborationStore {
             "INSERT INTO bcs_collaboration_delivery_checkpoints (env, operation_key, aggregate_kind, aggregate_id, operation_kind, payload_json, status, created_at_ms, deadline_ms) \
              SELECT r.env, ?, 'state_machine_run', r.run_id, 'chat_result', ?, 'pending', ?, ? FROM bcs_state_machine_runs r \
              WHERE r.env = ? AND r.run_id = ? AND r.group_id = ? AND r.session_id = ? AND r.created_by = ? \
-             AND r.status = 'running' AND r.record_status = 'active' AND NOT EXISTS (SELECT 1 FROM bcs_state_machine_node_runs n \
-             WHERE n.env = r.env AND n.run_id = r.run_id AND n.record_status = 'active' AND n.status NOT IN ('completed', 'skipped')) {suffix}"),
+             AND r.status IN ('running', 'completed', 'failed', 'aborted') AND r.record_status = 'active' \
+             AND ((r.status IN ('running', 'completed') AND NOT EXISTS (SELECT 1 FROM bcs_state_machine_node_runs n \
+             WHERE n.env = r.env AND n.run_id = r.run_id AND n.record_status = 'active' AND n.status NOT IN ('completed', 'skipped'))) \
+               OR (r.status = 'failed' AND NOT EXISTS (SELECT 1 FROM bcs_state_machine_node_runs n \
+             WHERE n.env = r.env AND n.run_id = r.run_id AND n.record_status = 'active' AND n.status = 'running')) \
+               OR r.status = 'aborted') {suffix}"),
             vec![DbValue::from(key(&c.run_id)), DbValue::from(serde_json::to_string(&p).map_err(|e| invalid(&e.to_string()))?),
                 DbValue::from(c.created_at_ms), DbValue::from(p.deadline_ms), DbValue::from(self.env.as_str()), DbValue::from(c.run_id.as_str()),
                 DbValue::from(c.group_id.as_str()), DbValue::from(c.session_id.as_str()), DbValue::from(c.sender_bot_id.as_str())])).await.map_err(db_error)?;

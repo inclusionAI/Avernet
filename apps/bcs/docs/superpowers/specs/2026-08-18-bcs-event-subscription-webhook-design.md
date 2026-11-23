@@ -952,7 +952,7 @@ status、latency、error category、stream key hash。日志不得记录完整 U
 
 - event type 使用小写 dot-separated 名称；
 - `created` 表示资源从不存在或不可用进入已提交、可读状态；
-- `completed` 只表示成功终态；失败、取消和超时事件延期，不在 MVP Contract 中预注册；
+- `completed` 只表示成功终态；失败、取消和超时事件默认延期，但 State Machine Run 的失败和终止事件按 16.5 明确登记；
 - participant 使用 actor-neutral 命名，不能继续假设所有成员都是 Bot；
 - Event data 只放本次事实所需的最小字段；
 - 每个 Event 的 `schema_version` 首版为 `1.0`；
@@ -1001,6 +1001,8 @@ thinking 或原始工具参数。
 | `state_machine.run.created` | run 与定义快照持久化完成 | run | `definition_id`, `definition_version`, `run_mode`, `status=running` |
 | `state_machine.run.started` | run 开始调度首批节点 | run | `run_mode`, `started_at`, `input` |
 | `state_machine.run.completed` | run 首次进入 Completed | run | `completed_at`, `output`, `duration_ms` |
+| `state_machine.run.failed` | run 首次进入 Failed | run | `failed_at`, `reason`, `failed_node`, `attempt`, `max_attempts`, `completed_nodes`, `duration_ms` |
+| `state_machine.run.aborted` | run 首次进入 Aborted | run | `aborted_at`, `reason`, `completed_nodes`, `duration_ms` |
 
 `run_mode`：
 
@@ -1009,6 +1011,10 @@ thinking 或原始工具参数。
 
 当前 runtime 直接创建 Running run；`run.created` 和 `run.started` 可以在同一业务请求中连续提交，但必须是两个
 不同 sequence 的事件，以区分一次性状态机的“创建”和“执行”。
+
+`state_machine.run.failed` 与 `state_machine.run.aborted` 为 metadata-only 事件：不得携带原始错误、Node artifact 或玩家内容。
+`failed.reason` 只允许 `node_failed`、`human_timeout`、`startup_failed`、`publication_failed`；`aborted.reason`
+只允许 `user_aborted`、`session_closed`、`group_closed`。
 
 ### 16.6 State Machine Node
 
