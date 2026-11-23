@@ -104,11 +104,10 @@ fn whole_decision_rejects_terminal_status_after_an_otherwise_valid_show() {
 }
 
 #[test]
-fn output_exhaustion_is_distinct_from_unbounded_private_runner_state() {
-    assert!(matches!(
-        check(decision(vec![show("x".repeat(1_048_575))])),
-        Err(DecisionFailure::OutputQuota)
-    ));
+fn large_output_is_accepted_while_private_runner_state_remains_bounded() {
+    let text = "x".repeat(9 * 1024 * 1024);
+    let output = check(decision(vec![show(text.clone())])).unwrap();
+    assert_eq!(output.display.units[0].content, serde_json::json!(text));
     let mut candidate = decision(vec![]);
     candidate.next_state.value = serde_json::json!("x".repeat(65_536));
     assert!(matches!(

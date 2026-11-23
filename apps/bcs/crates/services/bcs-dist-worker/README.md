@@ -1,5 +1,45 @@
 # Distributed Worker runtime
 
+## Admission boundary
+
+`WorkerTaskAdmission` implements the public `TaskAdmissionCoreService`. Gateway
+supplies authenticated scope and stable caller input, plus a resolved group
+proposal when creating a session. Worker admission owns creation time, initial
+Submitted task, diagnostic usage and versioned empty neutral display. It first
+reads Inbox's scoped canonical request and compares caller intent. A matching
+retry confirms or repairs that original request through Inbox `admit`; lookup
+alone is never a successful admission. First-request races use Inbox's atomic
+selection and recover its winner after a content conflict. Changed caller body
+or target remains a conflict; later directory revisions do not replace the frozen
+spec. Both Accepted and Duplicate carry the same successful Gateway receipt.
+
+The [admission regressions](tests/admission_replay.rs) force concurrent missing
+lookups and lost durable-write responses. [Gateway chain tests](tests/gateway_chain.rs)
+also exercise real HTTP adapters through Inbox, Worker, TaskFeed and SQLite.
+
+## Output read boundary
+
+`WorkerOutputReader` implements
+[`DistTaskOutputReaderPort`](../../service-api/bcs-service-api/src/port/dist_output.rs)
+over the neutral `TaskReaderPort`, immutable Blob reads and one injected pure
+`DistOutputAdapterPort`. Restore resolves and formats the full view; follow
+resolves and formats every artifact update while retaining event identities,
+lifecycle events and replay cursors. List formats inline snapshots and leaves
+references opaque without additional Blob reads. Formatting failures are read
+errors, never silently omitted artifacts. This facade makes no storage writes
+and does not change the reader's authorization, consistent cut or replay rules.
+
+The host wires a formatter at composition time. The
+[A2A implementation](../../adapters/output/bcs-dist-a2a-output/README.md) formats
+full artifacts and Upsert/AppendText changes using the same stable identity.
+Gateway core forwards the formatted results; protocol DTOs stay in adapters.
+Neutral `DisplaySnapshot` and `ArtifactChange` persistence remains unchanged.
+Snapshot history/status messages have no ordinary Worker source and are omitted;
+the adapter preserves explicit sources if supplied. Structured input and
+interaction conversion (A02) remains separate.
+
+## Coordination runtime
+
 This crate implements the provider-independent coordination policy from the
 [Worker SPEC](../../../specs/2026-11-17-worker-coordination/spec.md). It consumes
 repository ports and the peer-transport port; it does not issue storage commands,
@@ -145,7 +185,7 @@ The [lifecycle](tests/processor_lifecycle.rs),
 public Worker and storage providers with the conformance model and SQLite. They
 verify consumed control inputs, frozen archive retries, committed cancellation,
 remote Unknown supervision after local termination, publication coverage during
-trim, and preserved output followed by a healthy task after quota failure. The
+trim, and preserved output followed by a healthy task after action-count failure. The
 publication race counts actual full snapshot Blob arguments separately as unique
 content, fault retry bytes, and other idempotent writes; these are logical port
 bytes, not database physical writes or a production capacity measurement.

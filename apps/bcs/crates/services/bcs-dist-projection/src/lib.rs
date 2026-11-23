@@ -42,9 +42,6 @@ impl OutputProjectionCoreService for OutputProjectionService {
         if snapshot.output_limits != *frozen {
             return Err(ProjectionError::FrozenLimitsChanged);
         }
-        if snapshot.output_usage.cumulative_bytes > frozen.max_total_output_bytes {
-            return Err(invalid_snapshot("usage_exceeds_frozen_limit"));
-        }
         Ok(())
     }
 
@@ -97,7 +94,7 @@ fn identity(
 fn validate_snapshot(
     snapshot: &DisplaySnapshot,
     limits: &OutputLimits,
-) -> Result<(u64, u64), ProjectionError> {
+) -> Result<(), ProjectionError> {
     if snapshot.format_version != limits.display_format {
         return Err(ProjectionError::UnsupportedFormat {
             format: snapshot.format_version,
@@ -107,7 +104,6 @@ fn validate_snapshot(
         return Err(invalid_snapshot("too_many_artifacts"));
     }
     let mut identities = BTreeSet::new();
-    let mut content_bytes = 0;
     for unit in &snapshot.units {
         identity(&unit.node, &unit.artifact_id, limits)
             .map_err(|_| invalid_snapshot("artifact_identity"))?;
@@ -119,12 +115,8 @@ fn validate_snapshot(
         if !identities.insert((&unit.node.0, &unit.artifact_id.0, class)) {
             return Err(invalid_snapshot("duplicate_artifact_identity"));
         }
-        content_bytes += encoded_bytes(&unit.content, u64::from(limits.max_unit_bytes))
-            .ok_or_else(|| invalid_snapshot("unit_bytes"))?;
     }
-    let total = encoded_bytes(snapshot, u64::from(limits.max_snapshot_bytes))
-        .ok_or_else(|| invalid_snapshot("snapshot_bytes"))?;
-    Ok((total, content_bytes))
+    Ok(())
 }
 
 fn project(
@@ -137,15 +129,7 @@ fn project(
     if changes.len() > limits.max_actions as usize {
         return Err(quota(OutputBudget::Actions));
     }
-    let (mut snapshot_bytes, current_content_bytes) = validate_snapshot(current, limits)?;
-    if let Some(usage) = usage {
-        if usage.cumulative_bytes > limits.max_total_output_bytes {
-            return Err(invalid_snapshot("usage_exceeds_frozen_limit"));
-        }
-        if usage.cumulative_bytes < current_content_bytes {
-            return Err(invalid_snapshot("usage_below_display"));
-        }
-    }
+    validate_snapshot(current, limits)?;
     let mut result = OutputProjection {
         snapshot: current.clone(),
         usage: usage.unwrap_or_default(),
@@ -164,31 +148,18 @@ fn project(
         if matches!(change.update, ArtifactUpdate::AppendText { .. }) && !value.is_string() {
             return Err(invalid_artifact("append_requires_text"));
         }
-        let bytes = encoded_bytes(value, u64::from(limits.max_unit_bytes))
-            .ok_or_else(|| quota(OutputBudget::UnitBytes))?;
-        // Thinking remains bounded as an individual event but never enters the
-        // durable projection, cumulative accounting or publication cadence.
+        // Thinking never enters the durable display or output accounting.
         if change.class == OutputClass::Thinking {
             continue;
         }
+        let bytes = encoded_bytes(value, u64::MAX)
+            .ok_or_else(|| invalid_artifact("output_encoding"))?;
         if usage.is_some() {
-            result.usage.cumulative_bytes = result
-                .usage
-                .cumulative_bytes
-                .checked_add(bytes)
-                .filter(|n| *n <= limits.max_total_output_bytes)
-                .ok_or_else(|| quota(OutputBudget::CumulativeBytes))?;
+            result.usage.cumulative_bytes = result.usage.cumulative_bytes.saturating_add(bytes);
         }
-        apply(
-            &mut result.snapshot,
-            change,
-            value,
-            bytes,
-            &mut snapshot_bytes,
-            limits,
-        )?;
+        apply(&mut result.snapshot, change, value, limits)?;
         result.display_events += 1;
-        result.charged_bytes += bytes;
+        result.charged_bytes = result.charged_bytes.saturating_add(bytes);
     }
     Ok(result)
 }
@@ -197,8 +168,6 @@ fn apply(
     snapshot: &mut DisplaySnapshot,
     change: &ArtifactChange,
     value: &Value,
-    payload_bytes: u64,
-    snapshot_bytes: &mut u64,
     limits: &OutputLimits,
 ) -> Result<(), ProjectionError> {
     let index = snapshot.units.iter().position(|unit| {
@@ -208,26 +177,6 @@ fn apply(
     });
     if let Some(index) = index {
         let unit = &mut snapshot.units[index];
-        let old_bytes = encoded_bytes(&unit.content, u64::from(limits.max_unit_bytes))
-            .ok_or_else(|| invalid_snapshot("unit_bytes"))?;
-        let new_bytes = match &change.update {
-            ArtifactUpdate::Upsert { .. } => payload_bytes,
-            ArtifactUpdate::AppendText { .. } => {
-                if !unit.content.is_string() {
-                    return Err(invalid_artifact("append_requires_text"));
-                }
-                // Both values are encoded strings; concatenation removes the
-                // two middle quotation marks and preserves all escaping.
-                old_bytes + payload_bytes - 2
-            }
-        };
-        if new_bytes > u64::from(limits.max_unit_bytes) {
-            return Err(quota(OutputBudget::UnitBytes));
-        }
-        *snapshot_bytes = *snapshot_bytes - old_bytes + new_bytes;
-        if *snapshot_bytes > u64::from(limits.max_snapshot_bytes) {
-            return Err(quota(OutputBudget::SnapshotBytes));
-        }
         match (&change.update, &mut unit.content, value) {
             (ArtifactUpdate::AppendText { .. }, Value::String(current), Value::String(delta)) => {
                 current.push_str(delta)
@@ -245,12 +194,6 @@ fn apply(
             class: change.class,
             content: value.clone(),
         };
-        let added = encoded_bytes(&unit, u64::from(limits.max_snapshot_bytes))
-            .ok_or_else(|| quota(OutputBudget::SnapshotBytes))?;
-        *snapshot_bytes += added + u64::from(!snapshot.units.is_empty());
-        if *snapshot_bytes > u64::from(limits.max_snapshot_bytes) {
-            return Err(quota(OutputBudget::SnapshotBytes));
-        }
         snapshot.units.push(unit);
     }
     Ok(())

@@ -253,6 +253,14 @@ fn in_session(sid: &Sid, tid: &Tid) -> bool {
 
 #[async_trait]
 impl TaskReaderPort for StoreTaskReader {
+    async fn load_snapshot(
+        &self,
+        scope: &TaskScope,
+        tid: &Tid,
+    ) -> Result<Option<TaskSnapshot>, StoreError> {
+        Ok(self.shared.snapshot(tid).await?.filter(|snapshot| &snapshot.scope == scope))
+    }
+
     async fn restore(
         &self,
         scope: &TaskScope,
@@ -330,7 +338,7 @@ impl TaskReaderPort for StoreTaskReader {
         let index = shared
             .zset
             .range(
-                &shared.layout.tasks(sid)?,
+                &shared.layout.session_tasks(sid)?,
                 &ZSetRange {
                     min: Bound::Unbounded,
                     max: Bound::Unbounded,

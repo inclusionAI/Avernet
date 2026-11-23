@@ -26,7 +26,7 @@ pub async fn session_spec_admission_contract_tests(
     assert_eq!(store.get_spec(sid).await?, Some(expected.clone()));
     assert_eq!(
         producer.admit(request.clone()).await?,
-        AdmitOutcome::Accepted(receipt)
+        AdmitOutcome::Duplicate(receipt)
     );
     assert_eq!(store.get_spec(sid).await?, Some(expected));
     Ok(())

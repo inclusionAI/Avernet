@@ -87,7 +87,7 @@ fn gateway_over(p: &Ports, inbox: Arc<dyn InboxProducerPort>) -> DistGateway {
 }
 
 fn gateway_with(p: &Ports, inbox: Arc<dyn InboxProducerPort>, groups: Arc<Groups>) -> DistGateway {
-    let core = DistGatewayCore::new(inbox, p.tasks.clone(), p.sessions.clone(), p.blobs.clone());
+    let core = DistGatewayCore::new(Arc::new(bcs_dist_worker::WorkerTaskAdmission::new(inbox, Arc::new(|| TimestampMillis(common::NOW)))), Arc::new(bcs_dist_worker::WorkerOutputReader::new(p.tasks.clone(), p.blobs.clone(), Arc::new(bcs_dist_a2a_output::A2aOutputAdapter))), p.sessions.clone());
     let mut config = DistGatewayConfig::new(64);
     config.snapshot_cover_retry = Duration::from_millis(10);
     config.snapshot_cover_limit = Duration::from_millis(300);
@@ -184,6 +184,10 @@ struct LosesFirstResponse {
 }
 #[async_trait]
 impl InboxProducerPort for LosesFirstResponse {
+    async fn lookup(&self, scope: &TaskScope, id: &InputId) -> Result<Option<AdmitRequest>, StoreError> {
+        self.inner.lookup(scope, id).await
+    }
+
     async fn admit(&self, request: AdmitRequest) -> Result<AdmitOutcome, StoreError> {
         let id = request.input.input_id.0.clone();
         let outcome = self.inner.admit(request).await;

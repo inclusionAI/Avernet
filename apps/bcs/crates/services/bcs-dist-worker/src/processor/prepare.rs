@@ -373,10 +373,7 @@ impl WorkerProcessor {
             .unwrap_or(&metadata.content);
         let value = self
             .references
-            .resolve(
-                &content.snapshot,
-                metadata.output_limits.max_snapshot_bytes as usize,
-            )
+            .resolve_output(&content.snapshot)
             .await
             .map_err(store_error)?;
         serde_json::from_value(value).map_err(|_| err("display_format"))
@@ -509,7 +506,6 @@ impl WorkerProcessor {
             .evaluation
             .as_mut()
             .ok_or_else(|| err("evaluation_missing"))?;
-        let maximum = frozen.metadata.output_limits.max_snapshot_bytes as usize;
         if frozen.decision.actions.len() <= frozen.metadata.output_limits.max_actions as usize {
             for action in &mut frozen.decision.actions {
                 let payload = match action {
@@ -527,7 +523,7 @@ impl WorkerProcessor {
                 {
                     *payload = Payload::Inline(
                         self.references
-                            .resolve(payload, maximum)
+                            .resolve_output(payload)
                             .await
                             .map_err(store_error)?,
                     );

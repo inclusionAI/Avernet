@@ -2,7 +2,7 @@
 mod archive_support;
 use archive_support::*;
 use bcs_dist_model::*;
-use bcs_dist_store::archive::{DbArchiveStore, MAX_BLOB_BYTES, blob_reference};
+use bcs_dist_store::archive::{DbArchiveStore, blob_reference};
 use bcs_service_api::port::repo::distributed::{common::*, result::*};
 use std::sync::Arc;
 
@@ -209,16 +209,9 @@ async fn concurrent_same_identity_has_one_immutable_winner() {
 }
 
 #[tokio::test]
-async fn size_limits_and_reserved_result_keys_fail_before_database_access() {
+async fn reserved_result_keys_fail_before_database_access() {
     let f = Fixture::new().await;
     let store = f.reopen();
-    let oversized = vec![0; MAX_BLOB_BYTES + 1];
-    assert!(matches!(
-        store
-            .put_immutable(blob_reference("large", &oversized), oversized)
-            .await,
-        Err(StoreError::Invalid { .. })
-    ));
     assert!(matches!(
         store
             .put_immutable(blob_reference("result:forged", b"x"), b"x".to_vec())
@@ -252,9 +245,9 @@ async fn absent_row_after_unclassified_failure_is_not_definite_nonapplication() 
 }
 
 #[tokio::test]
-async fn blob_access_cost_is_bounded_for_maximum_normal_and_retry_paths() {
+async fn large_blob_access_cost_is_constant_for_normal_read_and_retry_paths() {
     let f = Fixture::new().await;
-    let bytes = vec![42; MAX_BLOB_BYTES];
+    let bytes = vec![42; 9 * 1024 * 1024];
     let reference = blob_reference("maximum", &bytes);
     assert_eq!(
         f.store
@@ -265,10 +258,12 @@ async fn blob_access_cost_is_bounded_for_maximum_normal_and_retry_paths() {
     );
     assert_eq!((f.db.reads(), f.db.writes()), (1, 1));
     assert_eq!(
-        f.store.put_immutable(reference, bytes).await.unwrap(),
+        f.store.put_immutable(reference.clone(), bytes.clone()).await.unwrap(),
         IdempotentWrite::AlreadyApplied
     );
     assert_eq!((f.db.reads(), f.db.writes()), (2, 1));
+    assert_eq!(f.reopen().get(&reference).await.unwrap(), Some(bytes));
+    assert_eq!((f.db.reads(), f.db.writes()), (3, 1));
 }
 
 #[tokio::test]
@@ -293,4 +288,18 @@ async fn completion_racing_first_lookup_and_head_verification_resolves_from_arch
         SavedResult::AlreadySaved(reference)
     );
     assert_eq!(f.db.writes(), 1);
+}
+
+#[tokio::test]
+async fn final_record_can_exceed_the_former_archive_byte_quota() {
+    let f = Fixture::new().await;
+    let (mut source, mut record) = final_effect();
+    record.result = Payload::Inline(serde_json::json!("x".repeat(17 * 1024 * 1024)));
+    source = source_for(&source.commit, &record);
+    f.persist(&source, &record).await;
+    let SavedResult::Saved(reference) = f.store.save_final(source.clone(), record.clone()).await.unwrap() else {
+        panic!("saved")
+    };
+    assert_eq!(f.reopen().get_final(&record.scope, &record.tid).await.unwrap(), Some(record.clone()));
+    assert_eq!(f.store.save_final(source, record).await.unwrap(), SavedResult::AlreadySaved(reference));
 }

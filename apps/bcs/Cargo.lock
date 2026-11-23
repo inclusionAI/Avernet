@@ -683,10 +683,13 @@ name = "bcs-app-dist-gateway"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-dist-a2a-output",
  "bcs-dist-gateway",
  "bcs-dist-gateway-store",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
+ "bcs-dist-worker",
  "bcs-domain",
  "bcs-service-api",
  "bcs-store-api",
@@ -1484,6 +1487,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-a2a-output"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "bcs-dist-model",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde_json",
+]
+
+[[package]]
 name = "bcs-dist-encoding"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1498,9 +1512,12 @@ name = "bcs-dist-gateway"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-dist-a2a-output",
  "bcs-dist-gateway-store",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
+ "bcs-dist-worker",
  "bcs-service-api",
  "bcs-store-api",
  "bcs-test-support",
@@ -1518,10 +1535,13 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bcs-app-dist-gateway",
+ "bcs-dist-a2a-output",
  "bcs-dist-gateway",
  "bcs-dist-gateway-store",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
+ "bcs-dist-worker",
  "bcs-domain",
  "bcs-service-api",
  "bcs-store-api",
@@ -1541,6 +1561,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
  "bcs-service-api",
  "bcs-store-api",
@@ -1598,9 +1619,14 @@ name = "bcs-dist-worker"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "axum",
+ "bcs-app-dist-gateway",
  "bcs-db-local",
  "bcs-db-migrations",
+ "bcs-dist-a2a-output",
  "bcs-dist-encoding",
+ "bcs-dist-gateway",
+ "bcs-dist-gateway-http",
  "bcs-dist-model",
  "bcs-dist-projection",
  "bcs-dist-store",
@@ -1613,6 +1639,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "tower",
  "tracing",
  "uuid",
 ]

@@ -19,3 +19,8 @@ mod rebuilding_feed;
 mod scan_resources;
 
 pub mod supervisor;
+
+mod admission;
+pub use admission::WorkerTaskAdmission;
+mod output;
+pub use output::WorkerOutputReader;

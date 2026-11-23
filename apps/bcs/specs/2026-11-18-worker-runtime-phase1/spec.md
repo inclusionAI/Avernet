@@ -7,6 +7,11 @@ owner: BCS distributed Worker
 
 # BCN Worker 第一批通用运行时 SPEC v1
 
+2026-11-19 integration amendment: user-authorized changes in sections 3.3, 4.1
+and the acceptance matrix remove output-body byte quotas and integrate Gateway
+admission and independent output formatting. See the [current integration evidence](../2026-11-19-gateway-worker-admission/verification.md). Original proposal status
+and pinned history below are not current implementation acceptance claims.
+
 > Membership amendment (2026-11-20):
 > [RetainedLease](../2026-11-20-retained-membership-lease/spec.md) replaces the
 > earlier StrictLease/time/permanent-tombstone requirements. Earlier verification
@@ -55,7 +60,7 @@ owner: BCS distributed Worker
 | 存储插件 | 扩展已有独立 `DocumentCas`／`DocumentStorePlugin` 子集，提供持久文档读取、同版本路径投影、原子创建、精确版本条件下的 Replace／Patch |
 | Inbox provider | 补齐持久受理意图、规范内容与位置、受理代次及在途登记、持久受理结论、受理修复、监听状态和调度；明确 Quarantined／OutcomeUnknown 及重试语义，保持生产、消费、调度端口分离 |
 | SessionStore | 增加精确 owner＋业务 head 保护的隔离状态、风险尝试结果及条件解除隔离；控制写不推进 `commit_seq` |
-| Runner／输出 | `Show` 增加稳定 artifact 身份和明确更新操作；输出事件、展示草稿及恢复读取共享确定性投影；增加冻结的输出额度、快照进度及独立的任务终结状态转换 |
+| Runner／输出 | `Show` 增加稳定 artifact 身份和明确更新操作；输出事件、展示草稿及恢复读取共享确定性投影；Worker 冻结内部物理输出配置、初始化用量和展示版本，维护快照进度及独立的任务终结状态转换；不设输出正文大小配额 |
 | Worker 控制面 | 保留 `snapshot/drain(grace)`，通过 application facade 暴露受权隔离查询和条件恢复，不新增业务提交入口 |
 
 ### 3.1 持久 JSON CAS 子集
@@ -79,29 +84,65 @@ owner: BCS distributed Worker
 
 Thinking 只产生临时事件，不进入完整展示快照和最终归档，也不能驱动策略。`SetStatus` 只接受非终态；Completed／Failed／Canceled／Rejected 必须通过 `FinishTask` 和第 6 节归档路径。先验证整个 Decision，再构建候选；不合法动作不能部分提交或执行。
 
-### 3.3 输出额度与引用写入
+### 3.3 Output persistence and phase-one policy (2026-11-19 integration amendment)
 
-以下是第一批的初始安全配置，不是已测得的 provider 容量。额度及投影格式在 task 创建时冻结，接管或配置调整不得改变同一 Decision 的额度判定；调低限制不追溯改变在途任务。provider 组合须在启用前验证编码后的实际上限，无法容纳时拒绝启用该配置。
+This phase has no byte-size quota for one output unit, cumulative task output,
+or the complete display snapshot. The former 1 MiB/8 MiB quotas are removed.
+Output-limit policy and OSS/object-store integration are deferred. Existing
+Result/Blob storage is retained. OutputUsage is internal diagnostic accounting:
+committed Upsert values and AppendText increments count once; replay does not
+charge again and numeric overflow saturates rather than rejecting task output.
 
-| 预算 | 初始值与计量 |
+Worker admission owns initialization and the internal display version. Gateway
+supplies neither output policy nor accounting. The following physical working
+parameters remain internal and do not cap total task output:
+
+| Parameter | Rule |
 | --- | --- |
-| 单展示单元当前完整内容 | 1 MiB；按公共编码后的 UTF-8 字节计，包括 JSON 转义 |
-| 单任务累计可持久输出 | 8 MiB；累计已提交 Upsert 的完整内容及 AppendText 增量，替换不返还额度，重放不重复计数；排除 Thinking，后者仍受事件／速率预算约束 |
-| 单任务完整展示快照 | 8 MiB，包含单元身份、顺序及元数据；不能仅统计文本正文 |
-| 草稿／快照内联阈值 | 64 KiB；超过即使用同一已持久化不可变 Ref，较小内容也可因总文档预算提前引用化 |
-| 编码后的 checkpoint／outbox | checkpoint 最多 1 MiB（含 outbox 和 provider 封装），其中 outbox 最多 256 KiB；普通候选各预留至少 64 KiB 给收尾控制及终态 effects，outbox 是总量的子预算 |
+| Inline threshold | 64 KiB; larger snapshot/event/result values are immutable references |
+| Checkpoint/outbox frame | 1 MiB including provider wrapper; outbox is a 256 KiB subset |
+| Finalization reserve | At least 64 KiB each for checkpoint and outbox control/terminal work |
 
-每个 Decision 最多一个 `SetStatus`；重复状态动作整批拒绝，避免不可外置的 interaction 元数据耗尽收尾余量。批次动作数、展示单元数、排队 task 数、dispatch 数及引用元数据也受显式上限约束，不能靠正文外置绕过文档限制。启动时须验证最大合法候选和分批收尾候选均能满足上述预算；不满足时收紧准入／批次配置或拒绝启用，不能等到无法写终态才发现余量不足。调度文档的在途槽位另受条数和编码字节上限约束。`SessionStorePort::checkpoint_capacity()` 必须声明总文档与非业务封装上限；Worker 对未声明或不可容纳最大候选的组合拒绝启动。宿主声明的私有封装余量也计入真实写前检查，不能只预算逻辑 checkpoint。
+Action count, artifact count, queued tasks, dispatches, identities and reference
+metadata retain their structural bounds. A Decision accepts at most one SetStatus.
+Startup must validate maximum legal candidate/finalization shapes against the
+provider envelope and SessionStorePort::checkpoint_capacity(). Unsupported physical
+profiles fail startup; no Gateway change is needed to choose internal parameters.
 
-引用化发生在 Worker／provider：先计算确定性内容和摘要，使用稳定 Blob 身份执行 `put_immutable`，确认持久化后才提交含 Ref 的 checkpoint。未知结果以原身份确认；不确认成功就不能提交引用。`view_drafts`、PublishSnapshot 和 SaveResult 对同一版本的完整展示内容共享该 Ref，不重复内联大正文。AppendEvents 中的 Upsert／AppendText 载荷以及最终 result 也必须在超过内联阈值或 outbox 预算时以稳定 Ref 外置，不能只外置快照却把大事件留在 outbox。投影、restore／follow 消费及归档读取必须按同一编码解析 Ref、核对摘要，再应用原操作；额度统计解析后的内容，不能按引用字符串长度计费。候选失败产生的孤儿 Blob 首批保留；Blob IO 不进入纯 Runner。
+Reference creation is Worker/provider work. Deterministic content and digests use
+stable immutable Blob identities; put_immutable must be confirmed before a
+checkpoint references the object. Unknown writes are confirmed with the same
+identity. View drafts, snapshots and archive share a reference for identical
+content. Large Upsert/AppendText event bodies and final results are externalized
+before outbox encoding too. Readers resolve and verify references and apply the
+same projection. Blob IO stays outside the pure Runner. Orphan cleanup is deferred.
 
-超过输出额度时，拒绝整个未提交 Decision，保留此前已确认内容；独立终结器以稳定原因 `OutputQuotaExceeded` 将该任务经 §6 终结为 Failed，并为未结束 dispatch 建立 §7.2 的已提交取消义务。不静默截断、不重试同一必然超额 candidate，也不因此隔离整个 Session。包含其他任务动作的批次须拆分重算，不能确认未处理输入。相应契约必须使任务生命周期与待运行队列由 Worker 管理，允许丢弃该任务的候选／私有 Runner 状态，并在其终态发布后为下一任务重新 init；不依赖坏 Runner 自己生成 FinishTask，也不把失败状态传给下一任务。TaskPhase、收尾进度与 consumed 同一次提交，后续该任务输入仅用于去重或监督，不再 reduce。
+Structural-limit failures still reject the entire uncommitted Decision and may
+finalize only that task as OutputQuotaExceeded through section 6, preserving prior
+confirmed output and committed cancellation obligations. Unit/cumulative/snapshot
+body size alone no longer triggers this failure. Uninterpretable checkpoints and
+unbounded Runner state follow section 7.2. No partial Decision or silent truncation
+is allowed. Actual backend failures must not be reported as success.
 
-这是输出额度耗尽的处理，不适用于无法解释的 checkpoint 或不受约束的 RunnerState 增长。后者按 §7.2 分类，无法安全验证收尾则 Blocked。快照、事件及 Blob 的实际累计读写字节须分别计量：Ref 只控制 checkpoint 大小；首批写完整快照 Blob 仍可能有累计 O(n²) 成本，由任务额度及 §5.1 发布节奏限制规模。不可变分片可作为后续优化，但在分片编码、顺序恢复、覆盖和裁剪契约验证前，不纳入本批依赖或宣称 O(n)。
+Full-snapshot Blob writes can still have quadratic cumulative byte cost. The
+publication cadence in section 5.1 remains; no unlimited-capacity or linear-cost
+claim is made. Immutable snapshot chunking, retention policy and measured
+production capacity remain later work.
 
 ## 4. 可靠受理、消费与调度
 
 ### 4.1 持久受理与规范输入
+
+Integration amendment: Gateway submits a trusted scope and stable business command
+through TaskAdmissionCoreService. WorkerTaskAdmission generates initial task state,
+creation time and the versioned empty display. Same scoped input and caller content
+reuse the selected original request even after clock/directory changes. Changed
+body/target still conflicts. InboxProducerPort::lookup returns canonical content,
+not acceptance proof: admit must confirm or repair durable activation. Concurrent
+first requests use the existing atomic canonical selection and recover the winner
+only after comparing caller intent. Accepted/Duplicate map to one success receipt
+for Gateway; success is admission, not task completion.
+
 
 关键输入采用下列协议，不假定跨 Key 事务。新业务指新 Task 的 Start；关键 Agent 回流、既有任务的控制义务和已有 InputId 重试须按其既有身份处理，不能统一按新业务拒绝。新业务 gate／封闭代次的拒绝条件仅适用于 Start；既有控制与关键回流使用保留登记配额继续受理，其身份、内容校验及持久激活要求不变。
 
@@ -219,7 +260,7 @@ Worker 只写 dispatch 意图，不直接调用 Agent，也不把远端恢复算
 | --- | --- |
 | 固定状态、输入与上下文下的非法 Decision／确定性执行失败 | **首次确认即停止重跑**（同一失败候选额外重试 0 次）；checkpoint 和独立收尾候选可验证则 Quarantined，否则 Blocked |
 | CorruptState、UnsupportedFormat，或 InvalidWorkflow 导致无法安全解释任务／状态 | 首次确认即 Blocked，不机械转换为 Failed；错误码本身不授权终结 |
-| §3.3 的正常输出额度耗尽 | 仅该任务 Failed，不计入隔离失败次数 |
+| §3.3 的结构性输出限制违反 | 仅该任务 Failed，不计入隔离失败次数；单条、累计或完整展示的正文字节数不触发此分支 |
 | 暂态存储、连接或 Blob 读取失败 | 按预算退避；结果未知先确认，不计入毒性失败，不能用次数把 Unknown 变成确定失败 |
 
 `takeover_streak` 只是原始恢复计数，不能代替上述分类，也不是机械隔离阈值。失败证据绑定业务 head、输入／上下文摘要及 attempt；同一次 attempt 重试计数一次。进程崩溃而没有确定失败证据时保留未决 attempt，由监督继续确认，不能把接管次数冒充 Runner 已确定失败次数。
@@ -317,7 +358,7 @@ owner、spec、checkpoint、受理及 effect 证据在首批不自动过期、�
 | 协调竞争 | 提交／封印／控制写交错保留最新业务头；接收方 observe 后旧 settle 被拒；交接不等待整个远端任务 |
 | Effects | 半批重放、旧 Worker 迟到、同 ID 内容冲突、append 成功而 receipt 丢失；ID 错误不冒充已完成 |
 | 输出恢复 | Upsert／AppendText 一致折叠、Thinking 排除、初始空快照、并发裁剪及 Gap；恢复得到同一 cut 的完整内容 |
-| 输出预算 | 单文档内联阈值以上且任务额度以内的输出以 Ref 成功，包括单条 1 MiB Upsert／大 AppendText 不能撑爆 AppendEvents outbox；Blob 成功但 checkpoint 未提交／结果未知、编码膨胀及元数据边界均覆盖；超过单元／累计额度仅当前任务 Failed，保留已确认内容、无部分 Decision，下一任务重新 init |
+| 输出引用与结构边界 | 超过旧单条、累计和快照大小上限的 Upsert／AppendText／归档可经 Ref 成功，不撑爆 AppendEvents outbox；覆盖 Blob 成功但 checkpoint 未提交／结果未知、编码膨胀、元数据与 artifact 数量边界；结构限制失败保留已确认内容、不提交部分 Decision，下一任务重新 init |
 | 快照节奏 | 状态／interaction／终态必发，纯增量触发条数／字节／时间阈值；最后增量后无输入、重启、慢存储和并发 trim 下仍可恢复完整 cut，未发布草稿不授权裁剪；记录完整 Blob 累计写量而不宣称 O(n) |
 | 归档 | 两次提交及归档之间各断点、保存未知与重复写、终态发布失败；下一任务不提前启动 |
 | 控制监督 | 人工回复重试、取消与完成竞争、超时身份稳定、Unknown 不当 Dead；任务结束后继续监督未知远端义务 |
@@ -347,6 +388,6 @@ owner、spec、checkpoint、受理及 effect 证据在首批不自动过期、�
 | 并发受理与隔离 | §4.1／§7.2：激活 EQ 判定、持久在途登记与结论、封闭代次收口及未消费任务终结；预检查和最终扫描不能代替协议 |
 | 发现与历史成本 | §4.2／§8.2：分开修复与发现职责、明确容量记录／扫描预算／告警背压；首批不引入 GC／TTL，也不将完成水位当成裁剪授权 |
 | 调度 EQ 争用 | §4.2／§8.2：保留单文档原子校验，限定重试、退避及未知结果责任；未经等价证明不拆 owner 与激活计数 |
-| 输出规模与快照 | §3.3／§5.1：明确初始阈值、先持久化 Blob、发布节奏和任务级额度失败；不强制小快照外置，分片优化后置 |
+| 输出规模与快照 | §3.3／§5.1：无输出正文大小配额；保留内部物理阈值、先持久化 Blob、发布节奏和任务级结构限制失败；不强制小快照外置，分片和后续限制策略另评估 |
 | 隔离触发与取消 | §7.2：首次确定性失败分类、Blocked 边界、已提交 RequestCancel 及终态后监督；不以接管计数代替失败证据 |
 | 依赖定位 | §8：固定版本 §3.3 章节链接及 checkpoint 缺失前提；更正 #4126 文档合入状态，保留历史代码对照 |

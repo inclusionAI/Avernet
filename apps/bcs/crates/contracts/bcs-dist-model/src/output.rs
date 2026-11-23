@@ -55,14 +55,12 @@ pub struct SnapshotPolicy {
 
 /// Frozen at task creation, copied unchanged into checkpoint task progress and
 /// every published snapshot. A takeover/configuration change cannot replace it.
+/// Output content has no per-unit, cumulative or full-snapshot byte quota.
 /// The host must also prove its physical checkpoint wrapper and bounded terminal
 /// candidates fit these budgets before enabling the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputLimits {
     pub display_format: u32,
-    pub max_unit_bytes: u32,
-    pub max_total_output_bytes: u64,
-    pub max_snapshot_bytes: u32,
     pub inline_threshold_bytes: u32,
     pub max_checkpoint_bytes: u32,
     pub max_outbox_bytes: u32,
@@ -81,9 +79,6 @@ pub struct OutputLimits {
 /// Initial safe profile, not a measured provider throughput/capacity claim.
 pub const PHASE_ONE_OUTPUT_LIMITS: OutputLimits = OutputLimits {
     display_format: DISPLAY_FORMAT_VERSION,
-    max_unit_bytes: 1_048_576,
-    max_total_output_bytes: 8_388_608,
-    max_snapshot_bytes: 8_388_608,
     inline_threshold_bytes: 65_536,
     max_checkpoint_bytes: 1_048_576,
     max_outbox_bytes: 262_144,
@@ -106,7 +101,8 @@ pub const PHASE_ONE_OUTPUT_LIMITS: OutputLimits = OutputLimits {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputUsage {
     /// Committed Upsert complete values plus AppendText deltas, in encoded JSON
-    /// UTF-8 bytes. Replacement gives no refund; effect/read replay never charges.
+    /// UTF-8 bytes. Diagnostic only, saturating at u64::MAX. Replacement gives no
+    /// refund; effect/read replay never counts the same committed change again.
     pub cumulative_bytes: u64,
 }
 

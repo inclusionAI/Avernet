@@ -143,13 +143,11 @@ pub(super) fn apply_decision(
                 .pending_events
                 .checked_add(1)
                 .ok_or_else(|| invalid("snapshot_event_count"))?;
-            let bytes = encoded_size(event, 2 * 1024 * 1024)
-                .ok_or_else(|| invalid("snapshot_delta_bound"))? as u64;
-            task.publication.pending_bytes = task
-                .publication
-                .pending_bytes
-                .checked_add(bytes)
-                .ok_or_else(|| invalid("snapshot_delta_count"))?;
+            // Count for publication cadence, without imposing an output quota
+            // before the event is externalized into its bounded transport frame.
+            let bytes = encoded_size(event, usize::MAX)
+                .ok_or_else(|| invalid("snapshot_delta_encoding"))? as u64;
+            task.publication.pending_bytes = task.publication.pending_bytes.saturating_add(bytes);
         }
     }
     if !outputs.is_empty() {
