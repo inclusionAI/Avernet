@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -16,7 +17,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     RuntimeProjectionResult,
     RuntimeProjectionStatus,
 )
-from agentclaw.community.core.skill_center.services.capability_delivery_guard import CapabilityDeliveryGuard
+from agentclaw.community.core.skill_center.services.capability_delivery_guard import CapabilityDeliveryGuard, CapabilityDeliveryUnavailable
 from agentclaw.community.core.skill_center.services.capability_projection_reconciler import CapabilityProjectionReconciler
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.plugin_api.models import BotModel
@@ -45,9 +46,9 @@ class _Device:
     def get_active_by_bot_and_owner(self, *_args):
         return self.get_by_id(self.id)
 
-    def update_device_props(self, *, binding_id, props):
-        assert binding_id == self.id
-        self.props.update(props)
+    def mutate_device_property(self, *, binding_id, device_id, key, mutate):
+        assert binding_id == self.id and device_id == self.device_id
+        self.props[key] = mutate(self.props.get(key))
 
 
 class _Projector:
@@ -346,3 +347,53 @@ async def test_repeat_uninstall_uses_the_release_saved_before_dispatch():
     )
     assert projector.calls[-1][0].released_mcp == {"saved-mcp"}
     assert all(value is None for value in device.props.values())
+
+
+@pytest.mark.asyncio
+async def test_busy_delivery_preserves_committed_local_and_mcp_releases():
+    class UnavailableGuard:
+        @asynccontextmanager
+        async def hold(self, **kwargs):
+            raise CapabilityDeliveryUnavailable()
+            yield
+
+    async def unused_legacy():
+        pytest.fail("Combined delivery must use the shared lease")
+
+    device = _Device()
+    projector = _Projector(RuntimeProjectionResult.converged())
+    unavailable = CapabilityProjectionReconciler(
+        projector=projector, guard=UnavailableGuard(), bots=device, bindings=device, defer_enabled=True,
+    )
+    local = PoolSkillMapping(corpus="local", relative_path="removed", link_name="removed")
+    releases = frozenset({"removed-mcp"})
+    result = await unavailable.project_competing_change(
+        **ADDRESS, owner_id="owner", scope=ProjectionScope(skills=True, mcp=True, released_mcp=releases),
+        retired_mappings=(local,), legacy=unused_legacy,
+    )
+    assert result.issues[0].code == "CAPABILITY_DELIVERY_BUSY"
+    assert projector.calls == []
+
+    reconciler = _reconciler(projector, device)
+    async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+        result, _ = await apply.finish(initialize=True)
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert projector.calls[0][0].released_mcp == releases
+    assert projector.calls[0][1] == [local]
+
+
+@pytest.mark.asyncio
+async def test_delivery_receipt_preserves_a_concurrent_release_of_the_same_code():
+    device = _Device()
+
+    class ConcurrentCommit(_Projector):
+        async def apply_plan(self, **kwargs):
+            await reconciler.remember_mcp_releases(**ADDRESS, codes=frozenset({"old-mcp"}))
+            return await super().apply_plan(**kwargs)
+
+    projector = ConcurrentCommit(RuntimeProjectionResult.converged())
+    reconciler = _reconciler(projector, device)
+    await reconciler.remember_mcp_releases(**ADDRESS, codes=frozenset({"old-mcp"}))
+    async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+        await apply.finish(initialize=True)
+    assert next(iter(device.props.values()))["released_mcp"] == ["old-mcp"]

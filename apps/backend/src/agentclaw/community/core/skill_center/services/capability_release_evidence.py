@@ -1,6 +1,7 @@
 """Capability release evidence for incomplete standalone delivery."""
 
 from collections.abc import Sequence
+from uuid import uuid4
 
 from agentclaw.community.core.devices.repository.record import capability_release_property
 from agentclaw.community.core.devices.services.device_context import RuntimeBindingTarget
@@ -62,17 +63,40 @@ class CapabilityReleaseEvidence:
             tenant=get_current_avernet_tenant(), bot_id=target.bot_id, entity_id=target.entity_id,
         )
 
-    def load(self) -> CapabilityProjectionRetry:
-        binding = self._bindings.get_by_id(self._binding_id)
-        if binding is None or binding.device_id != self._device_id:
-            raise CapabilityDeliveryUnavailable()
-        stored = CapabilityProjectionRetry.from_payload(binding.device_props.get(self._key))
+    def _decode(self, raw: object) -> CapabilityProjectionRetry:
+        stored = CapabilityProjectionRetry.from_payload(raw)
         if stored is not None and stored.device_id == self._device_id:
             return stored
         return CapabilityProjectionRetry(self._device_id)
 
+    def load(self) -> CapabilityProjectionRetry:
+        binding = self._bindings.get_by_id(self._binding_id)
+        if binding is None or binding.device_id != self._device_id:
+            raise CapabilityDeliveryUnavailable()
+        self._snapshot = binding.device_props.get(self._key)
+        return self._decode(self._snapshot)
+
+    def remember(
+        self, retired: Sequence[PoolSkillMapping], released: frozenset[str],
+    ) -> None:
+        def merge(raw: object) -> dict[str, object]:
+            previous = self._decode(raw)
+            evidence = CapabilityProjectionRetry(
+                self._device_id,
+                tuple(dict.fromkeys((*retired, *previous.retired_mappings))),
+                previous.released_mcp | released,
+            )
+            # A new commit can need the same release as an in-flight send.
+            return {**evidence.to_payload(), "revision": uuid4().hex}
+
+        self._bindings.mutate_device_property(
+            binding_id=self._binding_id, device_id=self._device_id, key=self._key, mutate=merge,
+        )
+
     def save(self, pending: CapabilityProjectionRetry) -> None:
         stored = pending.to_payload() if pending.retired_mappings or pending.released_mcp else None
-        self._bindings.update_device_props(
-            binding_id=self._binding_id, props={self._key: stored},
+        # A completed delivery can acknowledge only the evidence it read.
+        self._bindings.mutate_device_property(
+            binding_id=self._binding_id, device_id=self._device_id, key=self._key,
+            mutate=lambda current: stored if current == self._snapshot else current,
         )

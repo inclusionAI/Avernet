@@ -9,6 +9,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
@@ -100,6 +101,14 @@ class DeviceBindingRepository(Protocol):
     @abstractmethod
     def update_status_and_alive_at(self, *, binding_id: int, status: str) -> None:
         """更新设备状态并刷新 alive 时间戳."""
+        ...
+
+    @abstractmethod
+    def mutate_device_property(
+        self, *, binding_id: int, device_id: str, key: str,
+        mutate: Callable[[Any], Any],
+    ) -> None:
+        # Update one property under the write lock of the expected binding.
         ...
 
     @abstractmethod

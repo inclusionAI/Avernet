@@ -236,6 +236,11 @@ class CapabilityProjectionReconciler:
             scope = replace(scope, skills=True)
         if not self.defer_enabled and not (scope.requires_device_delivery or scope.passport):
             return RuntimeProjectionResult.skipped(reason="NO_CAPABILITY_PROJECTION")
+        recorded_binding = None
+        if self.defer_enabled:
+            local = tuple(mapping for mapping in retired_mappings if mapping.corpus == "local")
+            if local or scope.released_mcp:
+                recorded_binding = await self._remember_releases(bot_id, entity_id, local, scope.released_mcp)
         try:
             async with self._guard.hold(bot_id=bot_id, entity_id=entity_id) as lease:
                 if not self.defer_enabled:
@@ -244,6 +249,11 @@ class CapabilityProjectionReconciler:
                 binding = await asyncio.to_thread(self.current_binding, bot_id, entity_id)
                 if binding is None:
                     return _ApplyDelivery._not_ready()
+                if recorded_binding is not None and binding != recorded_binding:
+                    return RuntimeProjectionResult.pending(
+                        code="CAPABILITY_BINDING_CHANGED",
+                        reason="The Bot Runtime binding changed before synchronization.",
+                    )
                 return await self._deliver_standalone(
                     lease, binding, scope, retired_mappings,
                     mcp_and_cli_only=mcp_and_cli_only, desktop_recovery=desktop_recovery,
@@ -256,16 +266,16 @@ class CapabilityProjectionReconciler:
     ) -> None:
         if not self.defer_enabled:
             return
-        async with self._guard.hold(bot_id=bot_id, entity_id=entity_id) as lease:
-            binding = await asyncio.to_thread(self.current_binding, bot_id, entity_id)
-            if binding is None:
-                return
+        await self._remember_releases(bot_id, entity_id, (), codes)
+
+    async def _remember_releases(
+        self, bot_id: str, entity_id: str, retired: Sequence[PoolSkillMapping], released: frozenset[str],
+    ) -> RuntimeBindingTarget | None:
+        binding = await asyncio.to_thread(self.current_binding, bot_id, entity_id)
+        if binding is not None:
             evidence = self.release_evidence(binding)
-            previous = await asyncio.to_thread(evidence.load)
-            retained = previous.released_mcp | codes
-            if retained != previous.released_mcp:
-                await lease.verify()
-                await asyncio.to_thread(evidence.save, replace(previous, released_mcp=retained))
+            await asyncio.to_thread(evidence.remember, retired, released)
+        return binding
 
     async def _deliver_standalone(
         self, lease: CapabilityDeliveryLease, binding: RuntimeBindingTarget, scope: ProjectionScope,

@@ -437,6 +437,8 @@ converges. Only send retirement identities for names without current supply.
 With combined capability delivery enabled, an incomplete standalone delivery
 leaves unresolved Local identities and MCP release codes in the current
 binding's private metadata for the next projection of the affected domain.
+Record known standalone releases before attempting to acquire the delivery
+lease. A receipt can clear only the evidence read by its own delivery.
 Existing Desktop Skill recovery uses the same delivery lease and evidence.
 
 The edit lease protects package operations while a request is active. An
