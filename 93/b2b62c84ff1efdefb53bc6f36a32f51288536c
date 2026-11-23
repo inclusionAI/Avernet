@@ -61,6 +61,7 @@ apps/bcs/scripts/ci/tests/import_scope_regression.sh
 apps/bcs/crates/services/bcs-dist-worker/src/output.rs
   s_f7d55f87099234::t_5748792e64f2da 44-46
   s_f7d55f87099234::t_f3b38c33897d7d 1-2,4-7,9-13,15-43,47-52,54-63,65-126
+  s_b033c54cc00da7::t_e1bd4cd585e218 3,8,14,53,64,127-128
 apps/bcs/crates/adapters/output/bcs-dist-a2a-output/CONTEXT.md
   s_f7d55f87099234::t_21d37ebbe874fa 1-9
 apps/bcs/crates/services/bcs-dist-worker/tests/admission_replay.rs
@@ -248,6 +249,14 @@ singlebox/verity/test_singlebox_coverage_gate.sh
   "base_commit_sha": "93b2b62c84ff1efdefb53bc6f36a32f51288536c",
   "prompts": {},
   "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    },
     "s_f7d55f87099234": {
       "agent_id": {
         "tool": "codex",
