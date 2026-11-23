@@ -1,0 +1,23 @@
+engine/adapter/docs/openclaw-session-resume.md
+  s_ad6596e5f395ca::t_fd01b7170df121 62-63
+docs/flows/README.md
+  s_ad6596e5f395ca::t_fd01b7170df121 13
+apps/backend/src/agentclaw/community/core/task/README.md
+  s_ad6596e5f395ca::t_fd01b7170df121 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "da5a18fcc7d316196e1577eb0a42d58c275cfab6",
+  "prompts": {},
+  "sessions": {
+    "s_ad6596e5f395ca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e724-7273-7761-8b9a-88eacb18b252",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

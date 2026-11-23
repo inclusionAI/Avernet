@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/user_list/user_list_service_protocol.py
+  s_fc1557df5d7924::t_3379d0a27e376d 41
+apps/backend/src/agentclaw/community/core/user_list/service.py
+  s_fc1557df5d7924::t_3379d0a27e376d 124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "64759ac086e0fd64da97b0c8b35c4aecd46ad000",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

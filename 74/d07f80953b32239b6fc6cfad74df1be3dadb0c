@@ -1,0 +1,27 @@
+engine/adapter/src/engine/community/core/engine/base.py
+  s_3d36bb45bb2a35::t_5314eace832ae2 158
+engine/adapter/src/engine/community/core/engine/capability.py
+  s_3d36bb45bb2a35::t_34313ac8a09deb 75-76
+engine/adapter/src/engine/community/engines/openclaw/engine.py
+  s_3d36bb45bb2a35::t_dfe86d13789a92 107
+engine/adapter/src/engine/community/engines/openclaw/tests/test_f2_baseline_parity.py
+  s_3d36bb45bb2a35::t_23270f22deae98 64
+engine/adapter/src/engine/community/tests/core/skills/test_local_package_publisher.py
+  s_3d36bb45bb2a35::t_5cd1820114f15b 7,54-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "74d07f80953b32239b6fc6cfad74df1be3dadb0c",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
