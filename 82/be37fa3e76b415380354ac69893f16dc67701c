@@ -1,0 +1,376 @@
+apps/bcs/crates/services/bcs-dist-store/src/inbox/closure/progress.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-358
+apps/bcs/crates/auxiliary/bcs-dist-encoding/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-18
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_maintenance.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-552
+apps/bcs/crates/services/bcs-dist-store/tests/building_blocks.rs
+  s_b033c54cc00da7::t_ea39ed94040cec 35
+apps/bcs/crates/services/bcs-dist-store/src/evidence.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-113
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
+  s_b033c54cc00da7::t_67bf468abc153c 276,287,748
+apps/bcs/crates/services/bcs-dist-store/src/inbox/maintenance.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-465
+apps/bcs/crates/services/bcs-dist-store/src/inbox/scan_scheduler.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-263
+apps/bcs/crates/services/bcs-dist-store/tests/control_support/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-441
+apps/bcs/crates/services/bcs-dist-store/tests/task_feed.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-907
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/commands.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-191
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/budget.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-32
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 10-15
+apps/bcs/crates/services/bcs-dist-store/tests/latency_support/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-60
+apps/bcs/crates/services/bcs-dist-store/tests/admission_closure.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-661
+apps/bcs/crates/services/bcs-dist-store/src/inbox/producer.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-5,8-17,25-44,51-105,107,111,113-131,134-137,139-140,155-157,159-175,179-185,188-191,193-195,197-202,204-207,210,214,220-277,281-295,297,299-309,311-314,316-333,335,337,339-345,347,350
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/dispatch.rs
+  s_b033c54cc00da7::t_67bf468abc153c 41-43,48-51,55
+apps/bcs/crates/test-support/bcs-test-support/tests/coordination_primitives.rs
+  s_b033c54cc00da7::t_67bf468abc153c 227-266
+apps/bcs/crates/contracts/bcs-dist-model/src/lib.rs
+  s_b033c54cc00da7::t_67bf468abc153c 10,18
+apps/bcs/crates/services/bcs-dist-store/tests/scan_budget.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-37
+apps/bcs/crates/services/bcs-dist-store/src/coordination/control/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-192
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/friend_cutover_tests.rs
+  s_b033c54cc00da7::t_67bf468abc153c 8
+apps/bcs/crates/services/bcs-dist-projection/src/limits.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-114
+apps/bcs/crates/services/bcs-dist-store/src/coordination/capacity.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-103
+apps/bcs/crates/services/bcs-dist-store/src/inbox/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-3,5-13,15,17-23
+apps/bcs/crates/services/bcs-dist-store/tests/archive_support/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-247
+apps/bcs/crates/services/bcs-dist-store/src/coordination/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 3-6,34-35,53,62-66,70-75,95-101,110-117,120,127-128,170,181-185,195-199,202-203,226,231-252,276,287-295,306,312-319,341-355
+  s_b033c54cc00da7::t_8357d8bf5b8c4a 356
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
+  s_b033c54cc00da7::t_67bf468abc153c 9,48,69,98,127,129
+apps/bcs/crates/services/bcs-dist-projection/CONTEXT.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-11
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-111
+apps/bcs/crates/services/bcs-dist-store/tests/dispatch_faults.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-965
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_latency.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-562
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/inbox.rs
+  s_b033c54cc00da7::t_67bf468abc153c 33,60
+  s_b033c54cc00da7::t_790756ffdf439b 16
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/state.rs
+  s_b033c54cc00da7::t_67bf468abc153c 79-81,84-86
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/admission.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-158
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_pressure.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-250
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/queue.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-129
+apps/bcs/crates/services/bcs-dist-projection/src/encoding.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-28
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/control.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-216
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/ports.rs
+  s_b033c54cc00da7::t_67bf468abc153c 91-96,147-155,177-180,258-264
+apps/bcs/crates/plugin-api/bcs-store-api/src/document.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1,4,16-37,42,52-142
+apps/bcs/crates/services/bcs-dist-store/src/inbox/storage.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-197
+apps/bcs/crates/plugin-api/bcs-store-api/tests/types.rs
+  s_b033c54cc00da7::t_67bf468abc153c 2,17
+apps/bcs/crates/services/bcs-dist-store/src/inbox/scheduling.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-440
+apps/bcs/crates/services/bcs-dist-projection/src/metadata.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-54
+apps/bcs/crates/services/bcs-dist-projection/tests/conformance_projection.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-6
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/follow.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-160
+apps/bcs/specs/2026-11-20-retained-membership-lease/plan.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-48
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/task_feed.rs
+  s_b033c54cc00da7::t_67bf468abc153c 95-102
+apps/bcs/crates/services/bcs-dist-store/src/coordination/control/history.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-99
+apps/bcs/crates/contracts/bcs-dist-model/CONTEXT.md
+  s_b033c54cc00da7::t_67bf468abc153c 14,40-50,68-71
+  s_b033c54cc00da7::t_66f48593183d3f 72
+apps/bcs/crates/service-api/bcs-service-api/tests/distributed_contracts.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-2,8,13-16,27-30,46-48,58-73
+apps/bcs/crates/services/bcs-dist-store/src/inbox/listener.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-2,13-14,16-18,20-34
+apps/bcs/crates/test-support/bcs-test-support/tests/lease_contract_faults.rs
+  s_b033c54cc00da7::t_67bf468abc153c 14,23-25,75,88,102
+apps/bcs/specs/2026-11-20-retained-membership-lease/verification.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-30
+apps/bcs/crates/services/bcs-dist-store/src/inbox/consumer.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-598
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/inbox.rs
+  s_b033c54cc00da7::t_67bf468abc153c 84,127,132
+  s_b033c54cc00da7::t_a484533f4f6d2e 20
+apps/bcs/crates/test-support/bcs-test-support/src/store_model/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 78-80
+apps/bcs/migrations/mysql/048_dist_immutable_objects.sql
+  s_b033c54cc00da7::t_67bf468abc153c 1-11
+apps/bcs/crates/services/bcs-dist-store/tests/task_feed_support/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-281
+apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs
+  s_b033c54cc00da7::t_67bf468abc153c 40
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/ownership.rs
+  s_b033c54cc00da7::t_67bf468abc153c 92-94,100-101
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/storage.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-153
+apps/bcs/crates/services/bcs-dist-store/src/identity.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-3
+apps/bcs/crates/services/bcs-dist-store/src/inbox/pressure.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-43
+apps/bcs/crates/services/bcs-dist-worker/tests/support/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 66,180-183,229-232,292-295,301-305,503,506
+apps/bcs/crates/services/bcs-dist-store/tests/terminal_evidence.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-161
+apps/bcs/crates/services/bcs-dist-store/src/inbox/journal.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-250
+apps/bcs/crates/services/bcs-dist-store/src/inbox/health.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-365
+apps/bcs/crates/services/bcs-dist-store/tests/failures.rs
+  s_b033c54cc00da7::t_67bf468abc153c 18-24,38,70-81,83-94,99,101-102,104-108,112-115,119-126,128-134
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/document.rs
+  s_b033c54cc00da7::t_67bf468abc153c 3,10-18,32,59,63-127,152,180-202,205,224-264
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/session.rs
+  s_b033c54cc00da7::t_67bf468abc153c 18-20,25-48,53-54,94-97,111,114-117,153-155,159-170,174,208-223,226-231,236-238,243-245,264-269
+apps/bcs/crates/services/bcs-dist-store/Cargo.toml
+  s_b033c54cc00da7::t_67bf468abc153c 11,14,17,21-22,25-26,28-30
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/services.rs
+  s_b033c54cc00da7::t_67bf468abc153c 105
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/held.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-299
+apps/bcs/crates/services/bcs-dist-store/tests/archive.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-296
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/retention.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-262
+apps/bcs/crates/service-api/bcs-service-api/src/core/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 44
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_retention.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-303
+apps/bcs/crates/services/bcs-dist-store/src/coordination/control/recovery.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-296
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-306
+apps/bcs/crates/contracts/bcs-dist-model/tests/output_shape.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-47
+apps/bcs/crates/services/bcs-dist-store/tests/conformance_archive.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-25
+apps/bcs/crates/services/bcs-dist-store/tests/conformance_task_feed.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-77
+apps/bcs/crates/services/bcs-dist-store/tests/dispatch_support/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-310
+apps/bcs/Cargo.toml
+  s_b033c54cc00da7::t_67bf468abc153c 7,28,162,164
+apps/bcs/crates/services/bcs-dist-projection/src/lib.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-257
+apps/bcs/crates/services/bcs-dist-store/tests/conformance_inbox.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-104
+apps/bcs/crates/services/bcs-dist-projection/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-87
+apps/bcs/crates/auxiliary/bcs-dist-encoding/Cargo.toml
+  s_b033c54cc00da7::t_67bf468abc153c 1-17
+apps/bcs/crates/plugin-api/bcs-store-api/src/lease.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1,6-11,16-18,23-24,27-29,45-56,67-69,71-75,84-85
+apps/bcs/crates/services/bcs-dist-store/src/coordination/control/attempts.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-390
+apps/bcs/crates/auxiliary/bcs-dist-encoding/src/lib.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-88
+apps/bcs/crates/services/bcs-dist-store/src/archive/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-268
+apps/bcs/crates/services/bcs-dist-store/src/lib.rs
+  s_b033c54cc00da7::t_67bf468abc153c 2,4-5,15,18,20,24,28-29
+apps/bcs/crates/services/bcs-dist-store/tests/common/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 20,31-33,37-39,52-87,127-148,173-175,211-220,223-242,299-304,317-319,322,404-410,413-414
+apps/bcs/crates/services/bcs-dist-store/tests/coordination_limits.rs
+  s_b033c54cc00da7::t_67bf468abc153c 135,138,219,259,310,315,338,380-382,430,516-518,570,685-708
+  s_b033c54cc00da7::t_4b1004e2bcc75f 709
+apps/bcs/crates/services/bcs-dist-store/src/coordination/control/acquire.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-141
+apps/bcs/specs/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 11-12
+apps/bcs/crates/services/bcs-dist-store/src/inbox/capacity.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-174
+apps/bcs/crates/plugin-api/bcs-store-api/src/common.rs
+  s_b033c54cc00da7::t_67bf468abc153c 21,24-25,55-79
+apps/bcs/specs/2026-11-20-retained-membership-lease/spec.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-75
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_flow.rs
+  s_b033c54cc00da7::t_67bf468abc153c 45,63-65,78
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/terminal.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-224
+apps/bcs/crates/contracts/bcs-dist-model/src/task.rs
+  s_b033c54cc00da7::t_67bf468abc153c 2,58-61,95,97
+apps/bcs/crates/plugin-api/bcs-store-api/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 34,40-41,241-243,260,296,299-302,312-374
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 3-7,13,42-43,58-64,124-143,195-201,293-305
+apps/bcs/crates/services/bcs-dist-projection/tests/projection.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-477
+apps/bcs/crates/services/bcs-dist-store/tests/control_faults.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-731
+apps/bcs/crates/services/bcs-dist-store/tests/dispatch.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-235
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_cancellation.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-118
+apps/bcs/crates/services/bcs-dist-store/src/coordination/session.rs
+  s_b033c54cc00da7::t_67bf468abc153c 6-10,60-63,96-99,101-102,106-108,114,211-213,224,249-273,276-281,292,328-330,352-354,430,444-447,449-451,483-537
+apps/bcs/crates/services/bcs-dist-store/tests/coordination.rs
+  s_b033c54cc00da7::t_67bf468abc153c 35-53,56,102,109-111,171,190,564-597,619-621,860-930
+  s_b033c54cc00da7::t_237dd1535bf89b 931-935
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/auth_session_version_migration_tests.rs
+  s_b033c54cc00da7::t_67bf468abc153c 91
+apps/bcs/crates/services/bcs-dist-store/tests/conformance_coordination.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-97
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/state.rs
+  s_b033c54cc00da7::t_67bf468abc153c 6-8,17,21,199-204
+apps/bcs/crates/services/bcs-dist-store/tests/reliable_inbox.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-272
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/lease.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1,29,178-183
+apps/bcs/crates/services/bcs-dist-store/src/inbox/closure/recovery.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-159
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/scan_scheduler.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-173
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/storage.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-292
+apps/bcs/crates/services/bcs-dist-store/src/archive/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-74
+apps/bcs/crates/services/bcs-dist-store/src/coordination/capacity_tests.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-129
+apps/bcs/crates/services/bcs-dist-store/src/inbox/state.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-131
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/publish.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-224
+apps/bcs/crates/services/bcs-dist-store/tests/admission.rs
+  s_b033c54cc00da7::t_67bf468abc153c 9-11,31-37,51,81-106,136-139,141-144,148-150,158-164,204-207,224-235,244-247,260-262,264-265,268-271,278-288,293-295,300,304,310-314,337-343,372-373,378-382,394,408,453,462-465
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_gates.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-506
+apps/bcs/migrations/sqlite/046_dist_immutable_objects.sql
+  s_b033c54cc00da7::t_67bf468abc153c 1-13
+apps/bcs/crates/services/bcs-db-migrations/src/lib.rs
+  s_b033c54cc00da7::t_67bf468abc153c 165,594-599,706-708,750-753
+apps/bcs/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 17-18,20-23
+apps/bcs/specs/2026-11-17-worker-coordination/spec.md
+  s_b033c54cc00da7::t_67bf468abc153c 9-13,158,161,167,170-172
+apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs
+  s_b033c54cc00da7::t_67bf468abc153c 60,62,66,71,188,190
+apps/bcs/crates/services/bcs-dist-projection/Cargo.toml
+  s_b033c54cc00da7::t_67bf468abc153c 1-20
+apps/bcs/crates/services/bcs-dist-store/src/inbox/progress.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-201
+apps/bcs/crates/contracts/bcs-dist-model/src/runner.rs
+  s_b033c54cc00da7::t_67bf468abc153c 2,11,16,19,21-22
+apps/bcs/crates/services/bcs-dist-store/src/coordination/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 3-5,16-25,32,55-66,76-87,95-150
+apps/bcs/crates/test-support/bcs-test-support/src/store_model/coordination.rs
+  s_b033c54cc00da7::t_67bf468abc153c 11-12,47,51-55,65-69,71,84,95,109-111,114,122-123,134,145,153,161-171,184,187
+apps/bcs/crates/service-api/bcs-service-api/src/core/dist_runner.rs
+  s_b033c54cc00da7::t_67bf468abc153c 4,12,33,38,40,44,64,67-68
+apps/bcs/crates/services/bcs-dist-store/src/budget.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-167
+apps/bcs/crates/bootstrap/bcs/tests/bot_authority_migration.rs
+  s_b033c54cc00da7::t_67bf468abc153c 269,271
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/common.rs
+  s_b033c54cc00da7::t_67bf468abc153c 35
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-52
+apps/bcs/crates/contracts/bcs-dist-model/src/ids.rs
+  s_b033c54cc00da7::t_67bf468abc153c 24-25
+apps/bcs/crates/services/bcs-dist-store/tests/conformance_runtime_safety.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-68
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-289
+apps/bcs/crates/service-api/bcs-service-api/src/core/dist_projection.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-80
+apps/bcs/crates/services/bcs-dist-store/src/inbox/admission.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-177
+apps/bcs/crates/plugin-api/bcs-store-api/CONTEXT.md
+  s_b033c54cc00da7::t_67bf468abc153c 5-8,10-11,40-42
+apps/bcs/crates/services/bcs-dist-store/tests/conformance_dispatch.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-89
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/fixtures.rs
+  s_b033c54cc00da7::t_67bf468abc153c 91,131-132,161,166-169,172-175,178,182
+apps/bcs/crates/services/bcs-dist-store/src/coordination/control/isolation.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-122
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_reader.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-337
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/mod.rs
+  s_b033c54cc00da7::t_67bf468abc153c 12
+apps/bcs/crates/services/bcs-dist-store/src/archive/sql.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-70
+apps/bcs/crates/services/bcs-db-migrations/CONTEXT.md
+  s_b033c54cc00da7::t_67bf468abc153c 9,16,57,64-68
+apps/bcs/crates/services/bcs-dist-store/src/inbox/validation.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-166
+apps/bcs/crates/services/bcs-dist-store/src/layout.rs
+  s_b033c54cc00da7::t_67bf468abc153c 13,75-121,132-137,167-171,200-288
+  s_b033c54cc00da7::t_999e43c1c06c27 289
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/dist_archive_tests.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-62
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/reader.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-410
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/runtime_safety.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-145
+apps/bcs/crates/services/bcs-dist-worker/tests/lifecycle.rs
+  s_b033c54cc00da7::t_7a88ccefb9fcc2 268
+apps/bcs/crates/contracts/bcs-dist-model/src/input.rs
+  s_b033c54cc00da7::t_67bf468abc153c 65-68
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/control.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-222
+apps/bcs/crates/services/bcs-dist-projection/tests/capacity_profile.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-52
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/inbox.rs
+  s_b033c54cc00da7::t_67bf468abc153c 4,7,9-10,19,33-36,38-41,69-74,79-81,106-112,115,132-139,169-172
+apps/bcs/crates/services/bcs-dist-store/src/inbox/closure.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-175
+apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md
+  s_b033c54cc00da7::t_67bf468abc153c 1-283
+apps/bcs/crates/services/bcs-dist-store/tests/session_control.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-564
+apps/bcs/crates/test-support/bcs-test-support/tests/document_subset.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-175
+apps/bcs/crates/contracts/bcs-dist-model/src/output.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-120
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/scan.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-205
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/append.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-298
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/dispatch.rs
+  s_b033c54cc00da7::t_67bf468abc153c 81
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/services.rs
+  s_b033c54cc00da7::t_67bf468abc153c 245
+apps/bcs/crates/services/bcs-dist-store/src/dispatch/journal.rs
+  s_b033c54cc00da7::t_67bf468abc153c 1-272
+apps/bcs/Cargo.lock
+  s_b033c54cc00da7::t_6fbcf6652ced3e 1485-1494,1561-1571,1577-1580,1582,1586,1589,1592
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "82be37fa3e76b415380354ac69893f16dc67701c",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
