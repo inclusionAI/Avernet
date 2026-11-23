@@ -13,6 +13,7 @@ apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/commands.rs
   s_9dac9fbdf9fc56::t_1b89b398bea9a4 263
 singlebox/ci/tests/test_singlebox_companion_coverage.py
   s_9dac9fbdf9fc56::t_2d9434cefc20c8 64,101-102,104,106,108,110,117-118,138-139,141-142,154,173
+  s_b033c54cc00da7::t_b4a642c4150e27 174
 apps/bcs/crates/bootstrap/bcs/Cargo.toml
   s_9dac9fbdf9fc56::t_ac1b36f16394f8 30-35,38,45-50
 singlebox/verity/test_singlebox_coverage_gate.sh
@@ -69,6 +70,7 @@ apps/bcs/Cargo.lock
   s_9dac9fbdf9fc56::t_39139fc50755de 340,379-382,434
 apps/bcs/crates/bootstrap/bcs/CONTEXT.md
   s_9dac9fbdf9fc56::t_5e71d10e86bc84 312,323-330
+  s_b033c54cc00da7::t_b4a642c4150e27 322
 apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
   s_9dac9fbdf9fc56::t_f646e10d87b8eb 89,346-355
 ---
@@ -83,6 +85,14 @@ apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
         "tool": "codex",
         "id": "01a1ef8f-99fd-7003-aabd-a16850889d4d",
         "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    },
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
       },
       "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
     }
