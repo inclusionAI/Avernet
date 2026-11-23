@@ -303,6 +303,10 @@ class SwarmPlanOpsMixin(SwarmMethodServiceBase):
             method_binding_id,
             context,
         )
+        if "execution_revision" in command.termination_condition:
+            raise ContextCollabValidationError(
+                "execution revisions require SwarmExecutionService"
+            )
         workflow = self._workflow_policies.workflow_for(
             collab_context_id, method_binding_id
         )

@@ -286,8 +286,10 @@ product termination-condition expressions are not evaluated by a new DSL.
 
 Calls/exceptions are synchronous and propagate. The queue and MethodStore are
 in-process, not durable; a remote completion needs a driver wake after its
-report. There is no production scheduler, transport adapter, automatic retry or
-replanning, persisted Decision API or distributed SQL/MethodStore transaction.
+report. The Driver itself is not a production scheduler or automatic retry engine.
+The [bounded execution Service API](SWARM-EXECUTION.md) now adds authenticated
+HTTP step/stages/interactions, explicit execution revisions and journaled human
+feedback/clarification. It does not add a distributed SQL/MethodStore transaction.
 SQL child Work uses CAS; a failure between SQL and Method completion propagates,
 and the same report can reconcile already-submitted/accepted child Work only
 when its artifacts match the committed Task evidence. The coding journey covers
@@ -344,3 +346,14 @@ The driver event budget scales with validated node count (dynamic mode retains
 retry, reassignment, scheduler, persistent Method recovery or root acceptance is
 provided. The [local acceptance test](../../../../../../../tests/community/core/task/context_collab/products/test_swarm_workflow_end_to_end.py)
 uses DB publication, real SQLite, G1/G4 and content-addressed temporary resources.
+
+
+## Swarm execution Service API
+
+[Bounded execution and Stage conversations](SWARM-EXECUTION.md) owns the current
+step/stages/interactions contract, authorization, request journaling, execution
+revision semantics, clarification notification/reply flow and public-local
+integration limits. This supersedes the earlier Driver-only exclusion of explicit
+replanning and HTTP delivery, not immutable workflow publication or root Work
+acceptance. The execution Service API is exported through the flat `api/` surface;
+L5 still imports neither L6 nor a delivery framework.

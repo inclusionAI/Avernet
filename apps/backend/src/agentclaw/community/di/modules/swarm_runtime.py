@@ -204,6 +204,9 @@ class ProductSwarmRuntimeResolver:
 
 class SwarmRuntimeModule(Module):
     def configure(self, binder: Binder) -> None:
+        from agentclaw.community.di.modules.swarm_execution import SwarmExecutionModule
+
+        binder.install(SwarmExecutionModule())
         binder.bind(
             SwarmArtifactEvidenceValidator,
             to=UnavailableSwarmArtifactValidator,

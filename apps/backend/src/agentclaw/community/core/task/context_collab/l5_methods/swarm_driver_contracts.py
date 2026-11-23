@@ -43,6 +43,12 @@ class SwarmRuntimeResolver(Protocol):
 class StageExecutionService(Protocol):
     """Dispatch worker; worker must actively report through StageReportProtocol.
 
+    A worker may request clarification via SwarmExecutionServiceProtocol using
+    its authenticated ActorContext, return from dispatch, poll its scoped Stage
+    session for the reply, then report. Reply never triggers a second execute().
+    execute() must return promptly; it must not join a cross-thread report while
+    the local orchestration guard is held.
+
     Returning from dispatch alone does not complete anything. It may return before
     a remote worker reports. No coding/artifact-specific predicates live in L5.
     """

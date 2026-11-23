@@ -14,7 +14,7 @@ group roster/member 各自成片)——1000 行 CI 边界的拆分由协议与�
 也不携带,selection 各方法的 ``collab_context_id`` 一律显式入参,键位
 与 binding/edge 同域锚定上下文。store 不读运行环境,保持纯内存语义。
 
-单把粗粒度 ``threading.Lock`` 覆盖全部写与 list 读——store 操作短小,
+单把粗粒度 ``threading.RLock`` 覆盖全部写与 list 读——store 操作短小,
 先以一锁压住正确性,成为热点再细分。构造无参(DI 单例,Task 8/13 接线)。
 """
 
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+from contextlib import AbstractContextManager
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -90,6 +91,30 @@ class MethodStoreProtocol(Protocol):
     键定域(spec §4.3 YAML 只在 plan 上落 binding 字段);execution
     record 只增不改(Computation Plane 派发 P1 不实现,§2)。
     """
+
+    def swarm_guard(self, axes: StoreAxes, collet_id: str) -> AbstractContextManager:
+        """Reentrant per-axis/Collet guard shared by step/interaction/reports.
+
+        Dispatch must return promptly; this is not a distributed transaction.
+        """
+        ...
+
+    def commit_swarm_revision(
+        self,
+        axes: StoreAxes,
+        collab_context_id: str,
+        binding_id: str,
+        expected_plan: SwarmPlan,
+        expected_stages: tuple[Stage, ...],
+        expected_allocations: tuple[StageAllocation, ...],
+        previous_plan: SwarmPlan,
+        previous_stages: tuple[Stage, ...],
+        allocations: tuple[StageAllocation, ...],
+        plan: SwarmPlan,
+        stages: tuple[Stage, ...],
+    ) -> None:
+        """CAS whole old execution plus install a complete new revision atomically."""
+        ...
 
     def upsert_binding(
         self, axes: StoreAxes, binding: MethodBinding

@@ -418,8 +418,12 @@ from agentclaw.community.core.task.todos.services.todo_template_service import (
     TodoTemplateService,
 )
 
+from agentclaw.community.api.swarm_execution_service import SwarmExecutionServiceProtocol
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_service import SwarmExecutionService
+
 _PAIRS = [
     (TodoTemplateManagementServiceProtocol, TodoTemplateService),
+    (SwarmExecutionServiceProtocol, SwarmExecutionService),
     (EngineSessionFilesProtocol, EngineSessionFilesService),
     (BotOverviewServiceProtocol, BotOverviewService),
     (ConversationKnowledgeServiceProtocol, ConversationKnowledgeService),

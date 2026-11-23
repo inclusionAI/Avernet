@@ -5,6 +5,12 @@ are injected once by the composition root. No L6 import or service locator.
 The bounded in-process queue is not a durable scheduler or a retry engine.
 """
 
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_state import (
+    current_plan,
+    pending_clarifications,
+    pending_interactions,
+)
+from copy import deepcopy
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -127,9 +133,7 @@ class SwarmDriver:
             for p in self.store.list_plans(self.axes, self.binding_id, self.collet_id)
             if p.task_ref == self.task_ref
         ]
-        if len(plans) > 1:
-            raise ContextCollabValidationError("ambiguous Swarm plans")
-        return plans[0] if plans else None
+        return current_plan(plans)
 
     def stages(self) -> list[Stage]:
         plan = self.plan()
@@ -195,13 +199,19 @@ class SwarmDriver:
         self,
     ) -> tuple[int, SwarmPlan | None, tuple[Stage, ...]]:
         record = self._record()
-        return (
-            record.collet.version,
-            self.plan(),
-            tuple(self.stages()),
+        return deepcopy(
+            (
+                record.collet.version,
+                self.plan(),
+                tuple(self.stages()),
+            )
         )
 
     def step(self) -> bool:
+        with self.store.swarm_guard(self.axes, self.collet_id):
+            return self._step()
+
+    def _step(self) -> bool:
         if not self.queue:
             return False
         event = self.queue.popleft()
@@ -216,14 +226,26 @@ class SwarmDriver:
             ):
                 return True
             record = self._record()
+            if pending_interactions(record.events, self.binding_id) or any(
+                pending_clarifications(record.events, self.binding_id, s.stage_id)
+                for s in self.stages()
+            ):
+                return True
             snapshot = self._snapshot()
             decision = self.planner.plan(
                 PlanningRequest(
                     self.collet_id,
                     self.task_ref,
                     record.task.objective,
-                    tuple(self.stages()),
+                    deepcopy(tuple(self.stages())),
                     current_participation(record.events),
+                    tuple(
+                        {**e.payload, "event_ref": e.event_id}
+                        for e in record.events
+                        if (e.payload or {}).get("binding_id") == self.binding_id
+                        and e.event_kind
+                        in {"swarm.interaction.posted", "swarm.clarification.replied"}
+                    ),
                 )
             )
             self.queue.append(_Computed(decision, snapshot))
@@ -234,6 +256,44 @@ class SwarmDriver:
                 raise ContextCollabValidationError("stale external plan decision")
             self._apply(event.decision)
         return True
+
+    def advance_stage(self) -> None:
+        """External step boundary: reconcile/dispatch once, never drain auto-wakes."""
+        with self.store.swarm_guard(self.axes, self.collet_id):
+            record = self._record()
+            if pending_interactions(record.events, self.binding_id) or any(
+                pending_clarifications(record.events, self.binding_id, s.stage_id)
+                for s in self.stages()
+            ):
+                return
+            # Recover candidate/adoption-only failures, but never re-dispatch an
+            # already accepted allocation whose external side effect is uncertain.
+            plan = self.plan()
+            if plan is not None and plan.state is PlanState.DRAFT:
+                self.swarm.adopt_plan(
+                    self.collet_id,
+                    self.binding_id,
+                    plan.swarm_plan_id,
+                    SwarmPlanOpCommand(),
+                    self.actor,
+                )
+                plan = self.plan()
+            if plan is not None and plan.state is PlanState.READY:
+                self.swarm.start_plan(
+                    self.collet_id,
+                    self.binding_id,
+                    plan.swarm_plan_id,
+                    SwarmPlanOpCommand(),
+                    self.actor,
+                )
+            self.queue.clear()
+            self.pending = False
+            self.wake()
+            self.step()  # Compute one decision, or observe existing in-flight work.
+            if self.queue:
+                self.step()  # Apply that decision only; discard synchronous auto-wake.
+            self.queue.clear()
+            self.pending = False
 
     def drain(self) -> None:
         for _ in range(self.max_events):

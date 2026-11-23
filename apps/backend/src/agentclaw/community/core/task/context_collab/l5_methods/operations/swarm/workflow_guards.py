@@ -36,7 +36,8 @@ def require_candidate(workflow, collet_id, command):
 
 
 def require_stage(workflow, collet_id, plan, stage):
-    expected = compile_workflow(workflow, collet_id, plan.task_ref)
+    revision = plan.termination_condition.get("execution_revision")
+    expected = compile_workflow(workflow, collet_id, plan.task_ref, revision)
     entry = next((e for e in expected.stages if e["stage_id"] == stage.stage_id), None)
     if (
         entry is None
@@ -63,7 +64,10 @@ def freeze_inputs(workflow, collet_id, plan, stage, stages):
         by_id[d].state is not StageState.SUCCEEDED for d in stage.dependency_stage_refs
     ):
         raise ContextCollabValidationError("workflow dependencies have not succeeded")
-    _, ids = workflow_ids(workflow, collet_id, plan.task_ref)
+    revision = plan.termination_condition.get("execution_revision", {})
+    _, ids = workflow_ids(
+        workflow, collet_id, plan.task_ref, revision.get("revision_id", "")
+    )
     bindings = []
     for port in stage.workflow_node.inputs:
         source = by_id[ids[port.from_node]]
@@ -125,6 +129,11 @@ def stage_contract_envelope(stage, allocation_ref):
         "workflow_digest": stage.workflow_digest,
         "node": encode(stage.workflow_node),
         "input_bindings": [b.to_dict() for b in stage.input_bindings],
+        **(
+            {"context_event_refs": list(stage.context_event_refs)}
+            if stage.context_event_refs
+            else {}
+        ),
     }
 
 

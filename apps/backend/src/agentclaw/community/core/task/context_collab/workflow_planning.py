@@ -41,7 +41,18 @@ class WorkflowPlanningService:
             if not request.stages
             else None
         )
+        # Revisions retain the pinned node graph but receive fresh Stage IDs.
         _, ids = workflow_ids(self.workflow, request.collet_id, request.task_ref)
+        if request.stages:
+            ids = {
+                s.workflow_node.node_id: s.stage_id
+                for s in request.stages
+                if s.workflow_node is not None
+            }
+            if set(ids) != {n.node_id for n in self.workflow.nodes}:
+                raise ContextCollabValidationError(
+                    "runtime nodes differ from pinned workflow"
+                )
         states = {s.stage_id: s.state for s in request.stages}
         if request.stages and set(states) != set(ids.values()):
             raise ContextCollabValidationError(

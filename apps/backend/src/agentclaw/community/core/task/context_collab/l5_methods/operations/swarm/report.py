@@ -68,6 +68,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.swarm_driver_contra
     StageExecutionService,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
+    PlanState,
     AllocationState,
     StageState,
     Stage,
@@ -212,6 +213,10 @@ class SwarmStageReportService:
         return prepared.commit(self.writer)
 
     def report(self, report: StageExecutionReport, actor: ActorContext) -> None:
+        with self.store.swarm_guard(current_axes(), report.collet_id):
+            self._report(report, actor)
+
+    def _report(self, report: StageExecutionReport, actor: ActorContext) -> None:
         if (
             not isinstance(report.artifact_refs, tuple)
             or not report.artifact_refs
@@ -273,6 +278,19 @@ class SwarmStageReportService:
         plan = self.store.get_plan(
             axes, stage.swarm_plan_ref, report.binding_id, report.collet_id
         )
+        from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_state import (
+            pending_clarifications,
+            pending_interactions,
+        )
+
+        if plan is None or plan.state is not PlanState.RUNNING:
+            raise ContextCollabValidationError("report plan is no longer running")
+        if pending_interactions(record.events, report.binding_id):
+            raise ContextCollabValidationError("interaction awaits planner resolution")
+        if pending_clarifications(record.events, report.binding_id, stage.stage_id):
+            raise ContextCollabValidationError(
+                "Stage is waiting for human clarification"
+            )
         workflow = self.workflow_policies.workflow_for(
             report.collet_id, report.binding_id
         )

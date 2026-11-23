@@ -184,3 +184,5 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-10-13-openapi-id-and-cron-errors.md](2026-10-13-openapi-id-and-cron-errors.md)
 - [2026-10-18-default-skill-withdrawal.md](2026-10-18-default-skill-withdrawal.md)
 - [2026-11-05-routine-run-conversation.md](2026-11-05-routine-run-conversation.md)
+
+- [2026-11-23 Swarm execution and interactions](2026-11-23-swarm-execution-interactions/spec.md)

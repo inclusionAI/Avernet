@@ -4,6 +4,11 @@ Owner: Backend `core/task/context_collab`. This is the ACCS collaboration path,
 separate from the older goal-driven TaskGraph framework in the parent directory.
 It implements bounded local contracts, not full ACCS conformance.
 
+The [Swarm execution API](l5_methods/SWARM-EXECUTION.md) provides one-Stage
+steps, complete graph/session projection, planner-adjudicated human feedback and
+worker clarification/reply. It reuses Event persistence; Method runtime state
+remains process-local.
+
 ## Context Boundary
 
 - **Provides:** transport-free generic collaboration services, L4 primitives,

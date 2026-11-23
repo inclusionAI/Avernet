@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
+    ContextCollabVersionConflict,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
     Stage,
@@ -48,6 +49,62 @@ _SwarmKey = tuple[str, str, str, str, str]
 class SwarmSlice:
     """``MethodStoreProtocol`` 的 swarm plan/stage/allocation/
     execution profile/execution record 切片实现。"""
+
+    def commit_swarm_revision(
+        self,
+        axes,
+        collab_context_id,
+        binding_id,
+        expected_plan,
+        expected_stages,
+        expected_allocations,
+        previous_plan,
+        previous_stages,
+        allocations,
+        plan,
+        stages,
+    ) -> None:
+        with self._lock:
+            binding = self.get_binding(axes, binding_id, collab_context_id)
+            if (
+                self.get_plan(
+                    axes, expected_plan.swarm_plan_id, binding_id, collab_context_id
+                )
+                != expected_plan
+                or tuple(
+                    s
+                    for s in self.list_stages(axes, binding_id, collab_context_id)
+                    if s.swarm_plan_ref == expected_plan.swarm_plan_id
+                )
+                != expected_stages
+                or tuple(self.list_allocations(axes, binding_id, collab_context_id))
+                != expected_allocations
+                or self.get_plan(
+                    axes, plan.swarm_plan_id, binding_id, collab_context_id
+                )
+                is not None
+                or any(
+                    self.get_stage(axes, s.stage_id, binding_id, collab_context_id)
+                    is not None
+                    for s in stages
+                )
+                or binding is None
+                or binding.state.value != "ACTIVE"
+            ):
+                raise ContextCollabVersionConflict("stale Swarm revision snapshot")
+            # All validation precedes writes. No callbacks/IO inside this commit.
+            for p in (previous_plan, plan):
+                self._plans[
+                    self._id_key(axes, collab_context_id, binding_id, p.swarm_plan_id)
+                ] = p
+            for s in (*previous_stages, *stages):
+                self._stages[
+                    self._id_key(axes, collab_context_id, binding_id, s.stage_id)
+                ] = s
+            for a in allocations:
+                self._allocations[
+                    self._id_key(axes, collab_context_id, binding_id, a.allocation_id)
+                ] = a
 
     # ------------------------------------------------------------------
     # swarm plan 切片(spec §4.3 权威面)

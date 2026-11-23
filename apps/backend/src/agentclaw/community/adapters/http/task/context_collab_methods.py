@@ -67,8 +67,12 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
 )
 from agentclaw.community.core.task.context_collab.service_api import ActorContext
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.task.context_collab_swarm_execution import (
+    router as swarm_execution_router,
+)
 
 router = APIRouter(prefix="/api/v1/collaboration/task", tags=["task-context-collab"])
+router.include_router(swarm_execution_router)
 
 
 def _actor_context(user: AuthenticatedUser) -> ActorContext:

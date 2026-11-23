@@ -24,6 +24,7 @@ class PlanningRequest:
     objective: str
     stages: tuple[Stage, ...]
     facts: ParticipationFacts
+    interactions: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)

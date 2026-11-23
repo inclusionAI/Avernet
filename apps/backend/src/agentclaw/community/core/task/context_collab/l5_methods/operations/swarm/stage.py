@@ -62,6 +62,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.contract
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     _shape_of,
+    current_axes,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.base import (
     SwarmMethodServiceBase,
@@ -413,6 +414,19 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
         command: SwarmStageOutcomeCommand,
         context: ActorContext,
     ) -> ProfileOpAcceptedResult:
+        with self._store.swarm_guard(current_axes(), collab_context_id):
+            return self._complete_stage(
+                collab_context_id, method_binding_id, stage_ref, command, context
+            )
+
+    def _complete_stage(
+        self,
+        collab_context_id,
+        method_binding_id,
+        stage_ref,
+        command,
+        context,
+    ):
         """CompleteStage 用例:Stage RUNNING─swarm.stage.complete→
         SUCCEEDED,指定的 ACTIVE 分配查验租约后逐一 RELEASED。
 
@@ -427,6 +441,19 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
         stage = self._require_stage(
             axes, collab_context_id, method_binding_id, stage_ref
         )
+        from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_state import (
+            pending_clarifications,
+            pending_interactions,
+        )
+
+        record = self._collab_repo.get_current_status(collab_context_id)
+        if record is not None and (
+            pending_clarifications(record.events, method_binding_id, stage.stage_id)
+            or pending_interactions(record.events, method_binding_id)
+        ):
+            raise ContextCollabValidationError(
+                "Stage is waiting for human clarification/interaction resolution"
+            )
         if not stage.completion_condition:
             raise ContextCollabValidationError(
                 f"swarm stage {stage_ref!r} carries an empty "

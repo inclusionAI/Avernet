@@ -254,6 +254,7 @@ _PLAN_FIELDS = (
 )
 
 _STAGE_FIELDS = (
+    "context_event_refs",
     "objective",
     "workflow_node",
     "workflow_digest",
@@ -450,6 +451,7 @@ class Stage:
     transitioned_by: str = ""
     transitioned_at: str = ""
     output_artifact_refs: tuple[str, ...] = ()
+    context_event_refs: tuple[str, ...] = field(default=(), kw_only=True)
     objective: str = field(default="", kw_only=True)
     workflow_node: SwarmWorkflowNode | None = field(default=None, kw_only=True)
     workflow_digest: str = field(default="", kw_only=True)
@@ -475,6 +477,7 @@ class Stage:
                 f"unknown field(s) in Stage: {sorted(unknown)}"
             )
         return cls(
+            context_event_refs=_str_tuple(data, "context_event_refs", "Stage"),
             objective=_audit_str(
                 {"objective": data.get("objective", "")}, "objective", "Stage"
             ),
@@ -511,6 +514,11 @@ class Stage:
         """输出全部声明字段;枚举取 wire 值、元组降为列表,保证
         ``from_dict(to_dict(x)) == x``。"""
         return {
+            **(
+                {"context_event_refs": list(self.context_event_refs)}
+                if self.context_event_refs
+                else {}
+            ),
             **({"objective": self.objective} if self.objective else {}),
             **(
                 {

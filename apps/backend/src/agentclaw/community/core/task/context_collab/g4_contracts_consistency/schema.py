@@ -24,6 +24,14 @@ REGISTERED_EVENT_KINDS: frozenset[str] = frozenset(
         "task.completed",
         "artifact.reported",
         "user_interaction.posted",
+        "swarm.step.requested",
+        "swarm.step.completed",
+        "swarm.step.dispatched",
+        "swarm.interaction.posted",
+        "swarm.interaction.decided",
+        "swarm.interaction.applied",
+        "swarm.clarification.requested",
+        "swarm.clarification.replied",
     }
 )
 
@@ -32,7 +40,12 @@ ALLOWED_VISIBILITY: frozenset[str] = frozenset({"public", "workspace", "private"
 
 
 def validate_event_body(
-    *, event_kind: str, primitive_type: str, visibility: str, payload: dict,
+    *,
+    event_kind: str,
+    primitive_type: str,
+    visibility: str,
+    payload: dict,
+    internal_execution: bool = False,
 ) -> None:
     """校验事件体,非法即抛 ``ContextCollabValidationError``。规则:
 
@@ -44,9 +57,7 @@ def validate_event_body(
        - payload 含 content_ref 即拒绝(消息内容必须内联)。
     """
     if event_kind not in REGISTERED_EVENT_KINDS:
-        raise ContextCollabValidationError(
-            f"unregistered event_kind: {event_kind!r}"
-        )
+        raise ContextCollabValidationError(f"unregistered event_kind: {event_kind!r}")
     if primitive_type not in ALLOWED_PRIMITIVE_TYPES:
         raise ContextCollabValidationError(
             f"invalid primitive_type: {primitive_type!r}"
@@ -54,6 +65,34 @@ def validate_event_body(
     if visibility not in ALLOWED_VISIBILITY:
         raise ContextCollabValidationError(f"invalid visibility: {visibility!r}")
 
+    if event_kind.startswith("swarm."):
+        if not internal_execution or visibility != "workspace":
+            raise ContextCollabValidationError(
+                "Swarm execution events require the authorized execution Service API"
+            )
+        if primitive_type != "Message" or not isinstance(payload, dict):
+            raise ContextCollabValidationError(
+                "Swarm execution events require Message/object payload"
+            )
+        if not all(
+            isinstance(payload.get(k), str) and payload[k].strip()
+            for k in ("binding_id", "request_id")
+        ):
+            raise ContextCollabValidationError(
+                "Swarm events require binding_id and request_id"
+            )
+        if event_kind in {
+            "swarm.interaction.posted",
+            "swarm.clarification.requested",
+            "swarm.clarification.replied",
+        }:
+            if not all(
+                isinstance(payload.get(k), str) and payload[k].strip()
+                for k in ("stage_ref", "session_ref", "content")
+            ):
+                raise ContextCollabValidationError(
+                    "Swarm messages require Stage/session/content"
+                )
     if event_kind == "user_interaction.posted":
         if primitive_type != "Message":
             raise ContextCollabValidationError(

@@ -2,7 +2,7 @@
 
 L5 值对象不携带租户/环境,存储键自带 (avernet_tenant, env,
 collab_context_id, ...) 前缀,由调用方显式传 ``StoreAxes``;store 不读
-运行环境,保持纯内存语义。单把粗粒度 ``threading.Lock`` 覆盖全部写与
+运行环境,保持纯内存语义。单把粗粒度 ``threading.RLock`` 覆盖全部写与
 list 读——store 操作短小,先以一锁压住正确性,成为热点再细分。
 
 切片模块(binding/selection/group/swarm...)按 mixin 组合到
@@ -21,7 +21,7 @@ class InMemoryMethodStoreBase:
 
     def __init__(self) -> None:
         # 单锁骨架:全部写与 list 读共用一把锁,操作短小,不做热点细分。
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._bindings: dict = {}
         self._edges: dict = {}
         self._selections: dict = {}
@@ -40,6 +40,13 @@ class InMemoryMethodStoreBase:
         self._applications: dict = {}
         self._admission_decisions: dict = {}
         self._participant_bindings: dict = {}
+        self._swarm_guards: dict = {}
+
+    def swarm_guard(self, axes, collet_id):
+        """Per-axis/Collet local coordination; not a DB/distributed lock."""
+        key = (axes.avernet_tenant, axes.env, collet_id)
+        with self._lock:
+            return self._swarm_guards.setdefault(key, threading.RLock())
 
     @staticmethod
     def _key_in_context(key: tuple, axes, collab_context_id: str) -> bool:

@@ -103,6 +103,7 @@ untangling first: `baas_service.py`, `bot_build_service.py`,
 ```yaml
 purpose: "Service API Protocols — transport-agnostic contracts between adapters and core services."
 provides:
+  - SwarmExecutionServiceProtocol
   - BotOwnershipSyncProtocol
   - CollaborationRepairServiceProtocol   # defined in its owning core module, re-exported by collaboration_repair_service.py
   - BuildIgnoreServiceProtocol
@@ -150,6 +151,7 @@ internal_dependencies:
   - agentclaw.community.core.task.todos.template_management_protocol  # Versioned Todo template management Service API contract re-export
   - agentclaw.community.core.task.todos.stage_outcome_protocol  # Todo Human-stage lifecycle Service API contract re-export
   - agentclaw.community.core.task.todos.template_creation_protocol  # Template-driven Todo creation Service API contract re-export
+  - agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts
   - agentclaw.community.core.caller_identity.scheduled_refresh  # Scheduled Caller refresh Service API v1
   - agentclaw.community.core.runtime_binding.models # Trusted target for Engine session-file operations
   - agentclaw.community.plugin_api.device_adapter_transport # Streaming response contract

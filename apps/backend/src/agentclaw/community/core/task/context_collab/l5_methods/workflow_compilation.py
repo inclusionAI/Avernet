@@ -13,7 +13,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.value_codec import 
 
 
 def workflow_ids(
-    workflow: SwarmWorkflowDefinition, collet_id: str, task_ref: str
+    workflow: SwarmWorkflowDefinition, collet_id: str, task_ref: str, revision: str = ""
 ) -> tuple[str, dict[str, str]]:
     key = json.dumps(
         [
@@ -26,14 +26,23 @@ def workflow_ids(
         ensure_ascii=False,
         separators=(",", ":"),
     )
+    if revision:
+        key += json.dumps(revision, ensure_ascii=False)
     prefix = sha256(key.encode()).hexdigest()[:32]
     return f"wfp_{prefix}", {
         n.node_id: f"wfs_{prefix}_{i}" for i, n in enumerate(workflow.nodes)
     }
 
 
-def compile_workflow(workflow: SwarmWorkflowDefinition, collet_id: str, task_ref: str):
-    plan_id, ids = workflow_ids(workflow, collet_id, task_ref)
+def compile_workflow(
+    workflow: SwarmWorkflowDefinition,
+    collet_id: str,
+    task_ref: str,
+    revision: dict | None = None,
+):
+    plan_id, ids = workflow_ids(
+        workflow, collet_id, task_ref, revision["revision_id"] if revision else ""
+    )
     depths = {}
     while len(depths) < len(workflow.nodes):
         for node in workflow.nodes:
@@ -51,11 +60,14 @@ def compile_workflow(workflow: SwarmWorkflowDefinition, collet_id: str, task_ref
             "workflow_ref": encode(workflow.ref),
             "workflow_digest": workflow.digest,
             "all_stages_succeeded": True,
+            **({"execution_revision": revision} if revision else {}),
         },
         stages=[
             {
                 "stage_id": ids[n.node_id],
-                "task_ref": f"wft_{ids[n.node_id][4:]}",
+                "task_ref": (revision or {})
+                .get("reused_tasks", {})
+                .get(n.node_id, f"wft_{ids[n.node_id][4:]}"),
                 "name": n.name,
                 "objective": n.objective,
                 "dependency_stage_refs": [ids[d] for d in n.depends_on],
