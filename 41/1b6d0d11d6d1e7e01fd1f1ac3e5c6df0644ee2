@@ -313,6 +313,7 @@ apps/bcs/specs/README.md
   s_b033c54cc00da7::t_94a11aa9669e78 55,58
   s_f7d55f87099234::t_74fd9da9daf080 55,58
   s_b033c54cc00da7::t_bfe588a8202920 11-12
+  s_b033c54cc00da7::t_13764625093d97 57
 apps/bcs/crates/services/bcs-dist-store/tests/building_blocks.rs
   s_f7d55f87099234::t_37ed316f8531ed 35
 apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/inbox.rs
