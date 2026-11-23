@@ -1,0 +1,29 @@
+engine/adapter/src/engine/community/plugin_api/openclaw/chat.py
+  s_3b198be521bb7f::t_73b5c5e8d405e9 32-34,36-42
+  s_3b198be521bb7f::t_79b22b8862fb8c 13,28-31,35,54
+engine/adapter/README.md
+  s_3b198be521bb7f::t_79b22b8862fb8c 32-41
+engine/adapter/src/engine/community/api/transport/chat_error_fields.py
+  s_3b198be521bb7f::t_79b22b8862fb8c 1-18
+engine/adapter/src/engine/community/api/tests/transport/test_chat_error_fields.py
+  s_3b198be521bb7f::t_392ac05bd31b90 142-171
+  s_3b198be521bb7f::t_8ed0746d770447 1-141
+engine/adapter/src/engine/community/api/transport/ws_server.py
+  s_3b198be521bb7f::t_79b22b8862fb8c 86,1085-1091
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d8deafbb9a35331a64b7b23e0412944172b099c",
+  "prompts": {},
+  "sessions": {
+    "s_3b198be521bb7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a166c7-61d8-7221-aa2e-e6efde122735",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
