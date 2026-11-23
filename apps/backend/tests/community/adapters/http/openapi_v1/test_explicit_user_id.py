@@ -669,8 +669,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # /bots/{bot_id}/eval: path 226 -> 233. Admin Caller expiry correction adds one
 # Bot-addressed operation: path 233 -> 234. Read-only Caller status adds one
 # Bot-path operation: path 234 -> 235. Bot MCP config read and update add two
-# Bot-path operations: path 235 -> 237.
-_BOT_ID_PLACEMENT = {"path": 237, "query": 2, "none": 174}
+# Bot-path operations: path 235 -> 237. Dedicated recycle operation query
+# adds one OWNER-only Bot-path read: path 237 -> 238.
+_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 174}
 
 
 def _schema() -> dict:
@@ -900,7 +901,8 @@ def test_the_pinned_number_of_operations_take_it():
     # The five template-driven stage lifecycle operations are also explicitly
     # user-scoped: 329 -> 334. Bot MCP config read and update both name the
     # acting user: 334 -> 336.
-    assert len(taking) == 336
+    # Dedicated recycle operation query adds one OWNER-only read: 336 -> 337.
+    assert len(taking) == 337
 
 
 def test_the_exempt_operations_take_none():

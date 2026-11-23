@@ -24,6 +24,7 @@ import base64
 import re
 import time
 import uuid
+from urllib.parse import quote
 
 import httpx
 from agentclaw.community.core.service_bot.services.baas_api_response import (
@@ -1327,6 +1328,32 @@ class BaasService:  # pragma: no cover
                 f"Failed to destroy bot in BaaS: {e}"
             )
             raise BaasServiceError(f"Failed to destroy bot in BaaS: {e}")
+
+    def is_physical_device_destroyed(self, *, provider_device_id: str) -> bool:
+        """Read the pinned PaaS resource, including its template/tenant suffix.
+
+        Only typed DEVICE_NOT_FOUND from the physical provider proves absence.
+        A present (even stopped) resource or logical Bot deletion is not proof.
+        Authentication, routing, transport and untyped 404 failures propagate.
+        """
+        if not provider_device_id:
+            raise BaasServiceError("Physical device identity is required")
+        try:
+            self._get_bots_api(
+                path=f"/api/v1/paas/devices/{quote(provider_device_id, safe='')}/info",
+                action="physical_device_info", log_response=False,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                try:
+                    body = exc.response.json()
+                except ValueError:
+                    body = None
+                detail = body.get("detail") if isinstance(body, dict) else None
+                if isinstance(detail, dict) and detail.get("error_code") == "DEVICE_NOT_FOUND":
+                    return True
+            raise
+        return False
 
     def get_bot(
         self,
