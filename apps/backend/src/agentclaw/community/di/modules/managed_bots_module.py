@@ -1,11 +1,19 @@
 from injector import Binder, Module, provider, singleton
 
 from agentclaw.community.core.bot_management.managed_bots import ManagedBotService
-from agentclaw.community.core.bot_management.managed_bots_protocol import ManagedBotServiceProtocol
-from agentclaw.community.core.repository.implementations.bot.template_bots import TemplateBotRepository
-from agentclaw.community.core.repository.protocols.bot.template_bots import TemplateBotRepositoryProtocol
+from agentclaw.community.core.bot_management.managed_bots_protocol import (
+    ManagedBotServiceProtocol,
+)
+from agentclaw.community.core.repository.implementations.bot.template_bots import (
+    TemplateBotRepository,
+)
+from agentclaw.community.core.repository.protocols.bot.template_bots import (
+    TemplateBotRepositoryProtocol,
+)
 from agentclaw.community.di.modules import config_module
-from agentclaw.community.di.openapi_bot_operations_config import OpenApiBotOperationsConfig
+from agentclaw.community.di.openapi_bot_operations_config import (
+    OpenApiBotOperationsConfig,
+)
 
 
 class ManagedBotsModule(Module):
