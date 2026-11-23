@@ -1,0 +1,22 @@
+apps/backend/docs/bot-config-manifest/design.zh-CN.md
+  s_bcc2d0974a665d::t_06d2bd31ad16ba 328,331
+apps/backend/docs/bot-config-manifest/user-manual.zh-CN.md
+  s_bcc2d0974a665d::t_06d2bd31ad16ba 233,235,250-251
+  s_bcc2d0974a665d::t_fe2b99bee0e478 252,255,590,1643,1823,2302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "948c6cd805e99bd8ba5090f11e3e8e175d64f694",
+  "prompts": {},
+  "sessions": {
+    "s_bcc2d0974a665d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d9-072f-7481-adc1-c3e3d78b7fd1",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/tests/caller_tests.rs
+  s_d2bf2069ff97fe::t_16d119c0a6e1f0 49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bb3cecbd533f4796d06545fc53657a2561c08c12",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

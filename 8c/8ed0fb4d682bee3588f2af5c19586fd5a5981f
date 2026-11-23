@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/corp/plugins/prod/mcp_auth.py
+  s_763a81eb308339::t_495fab7f64f9f1 342,346-353
+  s_763a81eb308339::t_89f5fa43995402 338-340,487-488,508-509,527-541
+  s_763a81eb308339::t_a2e24a42c4f524 542
+apps/backend/tests/corp/plugins/prod/test_mcp_auth.py
+  s_763a81eb308339::t_28ceee2fa01596 442-456
+  s_763a81eb308339::t_c751b567aff72b 281-294,425-440
+  s_763a81eb308339::t_8c791aa5ab0407 441
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8c8ed0fb4d682bee3588f2af5c19586fd5a5981f",
+  "prompts": {},
+  "sessions": {
+    "s_763a81eb308339": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed82-b79a-76e0-8143-6b80bc462b82",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

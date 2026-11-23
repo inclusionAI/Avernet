@@ -1,0 +1,34 @@
+apps/backend/tests/corp/di/test_jit_authenticated_caller.py
+  s_fc1557df5d7924::t_24f73f5c59025a 1-92,94-102,104-105,107-129,131-152,155,157-171,177-180,185,192-193
+  s_fc1557df5d7924::t_bc47630e75c274 93,103,106,156,172-176,186-191,194-258
+  s_fc1557df5d7924::t_d7fd95f0dc2d59 153-154,181-184
+  s_fc1557df5d7924::t_5e3f796098124a 130
+apps/backend/src/agentclaw/corp/di/token_exchange.py
+  s_fc1557df5d7924::t_5e3f796098124a 89-97,102,114-119
+apps/backend/tests/corp/di/test_jit_teclaw_eligibility.py
+  s_fc1557df5d7924::t_91f6e6208c2973 33,245-246
+apps/backend/tests/corp/di/test_jit_token_injection.py
+  s_fc1557df5d7924::t_91f6e6208c2973 16,53-54,175-176
+apps/backend/tests/corp/di/test_token_exchange_adapters.py
+  s_fc1557df5d7924::t_91f6e6208c2973 28,175,225
+apps/backend/tests/corp/plugins/prod/test_token_exchange_jit.py
+  s_fc1557df5d7924::t_91f6e6208c2973 29,158
+docs/flows/backend-runtime-targeting.md
+  s_fc1557df5d7924::t_d7fd95f0dc2d59 30-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e6d74d0894c2fd4b7439cc73623c32e2f71a148d",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

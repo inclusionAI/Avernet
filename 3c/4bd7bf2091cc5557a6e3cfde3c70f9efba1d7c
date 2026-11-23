@@ -1,0 +1,57 @@
+apps/bcsfuse/tests/alipay/test_operations_http.py
+  s_89ee1c722ef961::t_cd9a814ec8514b 50-54,103-109,152-158
+  s_89ee1c722ef961::t_05caebf689dde3 47-49
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_89ee1c722ef961::t_877f50293c8ef7 15,74-75,81
+apps/bcsfuse/tests/alipay/test_http_retrieval_options.py
+  s_89ee1c722ef961::t_cd9a814ec8514b 24-26,37-39,44-46,64-66,74-76
+  s_89ee1c722ef961::t_ad05404a1adc63 18,91,121
+apps/bcsfuse/tests/alipay/test_resource_cards.py
+  s_89ee1c722ef961::t_cd9a814ec8514b 200
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_89ee1c722ef961::t_906335f976aff7 129-132
+apps/bcsfuse/tests/alipay/test_minimal_http_contract.py
+  s_89ee1c722ef961::t_cd9a814ec8514b 24-42,53-210
+  s_89ee1c722ef961::t_5acd0ebe5337f7 6,51
+  s_89ee1c722ef961::t_390eac60a3aae8 1-5,7-23,43-50,52,211-212
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_89ee1c722ef961::t_877f50293c8ef7 28-30,46,48-49,86,98,111,120,122,143-144
+apps/bcsfuse/docs/architecture/alipay-index-rebuild-minimal.md
+  s_89ee1c722ef961::t_877f50293c8ef7 14,40,42,71,135
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/search_response.py
+  s_89ee1c722ef961::t_906335f976aff7 45
+apps/bcsfuse/docs/architecture/alipay-catalog.md
+  s_89ee1c722ef961::t_877f50293c8ef7 94-96
+apps/bcsfuse/tests/alipay/test_simple_card_api.py
+  s_89ee1c722ef961::t_5acd0ebe5337f7 23
+  s_89ee1c722ef961::t_cd9a814ec8514b 32,54,70,85,91-97
+  s_89ee1c722ef961::t_769fd2e32a8eff 15-17
+apps/bcsfuse/docs/architecture/alipay-operations-extension.md
+  s_89ee1c722ef961::t_877f50293c8ef7 4,18,27-29
+apps/bcsfuse/tests/alipay/test_catalog_http.py
+  s_89ee1c722ef961::t_242817af2f5d91 82
+apps/bcsfuse/tests/alipay/test_catalog_retrieval.py
+  s_89ee1c722ef961::t_a74419853e7c7c 169
+apps/bcsfuse/tests/alipay/test_default_candidates.py
+  s_89ee1c722ef961::t_aa0f23f02a8265 325
+apps/bcsfuse/tests/alipay/test_discovery_input_cards.py
+  s_89ee1c722ef961::t_f757042e36de00 269-270,272
+apps/bcsfuse/tests/alipay/test_resource_types.py
+  s_89ee1c722ef961::t_9a555cbda2eb6d 144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3c4bd7bf2091cc5557a6e3cfde3c70f9efba1d7c",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

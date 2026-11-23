@@ -1,0 +1,34 @@
+apps/backend/specs/2026-08-20-skill-capability-upgrade/phase2-openapi-contract.md
+  s_c3635e70e0c280::t_8b392b33edd4c0 644-647
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_c3635e70e0c280::t_5a7ff14986e282 11-15
+  s_c3635e70e0c280::t_e0aac21183916f 9,16
+  s_c3635e70e0c280::t_79d05d538eb78c 10
+apps/backend/tests/community/core/skill_center/test_skill_center_reference_processor.py
+  s_c3635e70e0c280::t_c2475ecaf267f8 491-493
+  s_c3635e70e0c280::t_7d058e85f320b8 431-436,438-441,457-459,462-466,532-534,536-539,550-552,555-562,570-573,577-581,585-589
+  s_c3635e70e0c280::t_e479b186ee0356 420-430,437,442-456,460-461,467-472
+  s_c3635e70e0c280::t_fa6a294d294fb7 473-490,494-501
+apps/backend/specs/2026-08-20-skill-capability-upgrade/frontend-api.md
+  s_c3635e70e0c280::t_8b392b33edd4c0 653-656
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_center_reference_processor.py
+  s_c3635e70e0c280::t_fae12070931bd4 33-38,71-74,354,548-560
+  s_c3635e70e0c280::t_7d058e85f320b8 123,220-221,334,414-417,538-541
+  s_c3635e70e0c280::t_9a5650457f9ae4 561-562
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "438c1ccb1dded6ad20948c3b14550de2a22000ec",
+  "prompts": {},
+  "sessions": {
+    "s_c3635e70e0c280": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e77f-372c-7113-9501-d75fefd234b4",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

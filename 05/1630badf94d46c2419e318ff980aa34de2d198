@@ -1,0 +1,43 @@
+apps/backend/tests/community/core/token_exchange/test_actor_identity.py
+  s_fc1557df5d7924::t_5f5cfc72973e92 1-249,252,258,267,270,278-279,282,289-290
+  s_fc1557df5d7924::t_b4e1de073e169b 250-251,253-257,259-266,268-269,271-277,280-281,283-288,291
+apps/backend/src/agentclaw/community/plugin_api/token_plugin.py
+  s_fc1557df5d7924::t_5031ab424a2fb7 23
+  s_fc1557df5d7924::t_44d1da6438b0fb 6,24-25
+apps/backend/tests/community/core/service_bot/services/test_baas_service_token_outbound_target.py
+  s_fc1557df5d7924::t_5f5cfc72973e92 398-404,406-408,410-418,420-432
+  s_fc1557df5d7924::t_54b10ffd46a436 433-434,437-444,446,460-462,476
+  s_fc1557df5d7924::t_538619647df60e 405,409,419,435-436,445,447-459,463-475,477-485
+apps/backend/src/agentclaw/community/di/modules/caller_identity_module.py
+  s_fc1557df5d7924::t_5031ab424a2fb7 287,294
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_fc1557df5d7924::t_54b10ffd46a436 3400-3402
+  s_fc1557df5d7924::t_0b149ba012e6e1 3403-3405
+apps/backend/tests/community/core/token_exchange/test_pipeline.py
+  s_fc1557df5d7924::t_5031ab424a2fb7 3,161-163,195-197,232-234,266-268,305-307,352-354
+  s_fc1557df5d7924::t_3d7625d9c5177f 404-434
+apps/backend/src/agentclaw/community/plugin_api/README.md
+  s_fc1557df5d7924::t_54b10ffd46a436 225-232
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  s_fc1557df5d7924::t_40fc23426616b6 4-5,15,30,35,81-100,120,127-128,144-174,186-188
+apps/backend/src/agentclaw/community/core/token_exchange/pipeline.py
+  s_fc1557df5d7924::t_18ffb08b6a6bd9 52
+apps/backend/tests/community/api/test_dingtalk_token_orchestrator.py
+  s_fc1557df5d7924::t_e90a05d3a9c964 32,69,87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "051630badf94d46c2419e318ff980aa34de2d198",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

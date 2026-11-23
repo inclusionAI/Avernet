@@ -1,0 +1,98 @@
+apps/bcs/README.md
+  s_9dac9fbdf9fc56::t_f7d9ce767380cd 19
+apps/bcs/crates/service-api/bcs-service-api/src/core/dist_runner.rs
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 37,39,43
+apps/bcs/crates/services/bcs-dist-projection/Cargo.toml
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 1-17
+apps/bcs/crates/service-api/bcs-service-api/src/core/mod.rs
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 44
+apps/bcs/crates/contracts/bcs-dist-model/src/ids.rs
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 24-25
+apps/bcs/crates/service-api/bcs-service-api/src/core/dist_projection.rs
+  s_9dac9fbdf9fc56::t_0eb7e8fa1e2f34 37-39
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 1-4,13-36,40-47,53-55,63-66,73
+  s_9dac9fbdf9fc56::t_07460175c73b8b 5-12,48-52,56-62,67-72
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/fixtures.rs
+  s_9dac9fbdf9fc56::t_a818fa44c9e760 130-131,164-167,170
+apps/bcs/crates/services/bcs-dist-store/tests/common/mod.rs
+  s_9dac9fbdf9fc56::t_a818fa44c9e760 307-308
+apps/bcs/crates/services/bcs-dist-store/tests/coordination_limits.rs
+  s_9dac9fbdf9fc56::t_a818fa44c9e760 135
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/README.md
+  s_9dac9fbdf9fc56::t_f7d9ce767380cd 39-40,114-126,128-132
+  s_9dac9fbdf9fc56::t_88e73acab0a879 127
+  s_9dac9fbdf9fc56::t_6dad37c2b31470 133
+apps/bcs/crates/services/bcs-dist-projection/src/encoding.rs
+  s_9dac9fbdf9fc56::t_0eb7e8fa1e2f34 1-11,16-17,21-24,28
+  s_9dac9fbdf9fc56::t_07460175c73b8b 12-15,18-20,25-27
+apps/bcs/crates/services/bcs-dist-projection/tests/projection.rs
+  s_9dac9fbdf9fc56::t_a42b69c1bc6275 243-251,258,270-273,291,303-310,321-322,342-343,350-351,362-366,378-379,386-392,397-401,427,432-433,440
+  s_9dac9fbdf9fc56::t_e9e451c0b47443 441-444,448,453,465,477
+  s_9dac9fbdf9fc56::t_dd606fd6f88971 1-6,13,22-24,28-30,39-42,57-63,72-79,95-100,105,137-155,186-187,199,206-210,234-235,242
+  s_9dac9fbdf9fc56::t_3ab429953a8039 110,287
+  s_9dac9fbdf9fc56::t_07460175c73b8b 7-12,14-21,25-27,31-38,43-56,64-71,80-94,101-104,106-109,111-113,115-136,156-185,188-198,200-205,211-233,236-241,252-257,259-269,274-286,288-290,292-302,311-320,323-341,344-349,352-361,367-377,380-385,393-396,402-426,428-431,434-439,445-447,449-452,454-464,466-476
+  s_9dac9fbdf9fc56::t_0eb7e8fa1e2f34 114
+apps/bcs/crates/contracts/bcs-dist-model/tests/output_shape.rs
+  s_9dac9fbdf9fc56::t_07460175c73b8b 5-6,14-17,23-24,26-32,38-39
+  s_9dac9fbdf9fc56::t_e9e451c0b47443 1-4,7-13,18-22,25,33-37,40-47
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
+  s_9dac9fbdf9fc56::t_708600b8d087d6 84-93
+apps/bcs/crates/contracts/bcs-dist-model/CONTEXT.md
+  s_9dac9fbdf9fc56::t_f7d9ce767380cd 14,40-50,68-71
+  s_9dac9fbdf9fc56::t_ba792f5f0a9189 72
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_9dac9fbdf9fc56::t_f7d9ce767380cd 41-51
+apps/bcs/crates/services/bcs-dist-projection/CONTEXT.md
+  s_9dac9fbdf9fc56::t_f7d9ce767380cd 1-11
+apps/bcs/crates/services/bcs-dist-projection/README.md
+  s_9dac9fbdf9fc56::t_f7d9ce767380cd 1-87
+apps/bcs/crates/contracts/bcs-dist-model/src/task.rs
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 2,58-61,95,97
+apps/bcs/crates/services/bcs-dist-store/tests/coordination.rs
+  s_9dac9fbdf9fc56::t_a818fa44c9e760 35-44
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/session.rs
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 22-45,102
+apps/bcs/crates/contracts/bcs-dist-model/src/output.rs
+  s_9dac9fbdf9fc56::t_07460175c73b8b 13-15,17-19
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 1-12,16,20-21,24-120
+  s_9dac9fbdf9fc56::t_0195ff63f01b10 22-23
+apps/bcs/crates/services/bcs-dist-worker/tests/support/mod.rs
+  s_9dac9fbdf9fc56::t_a818fa44c9e760 489
+apps/bcs/Cargo.toml
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 27,162
+apps/bcs/crates/contracts/bcs-dist-model/src/lib.rs
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 10,18
+apps/bcs/crates/services/bcs-dist-projection/src/lib.rs
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 1,5-6,10-14,88,91,107,238,240
+  s_9dac9fbdf9fc56::t_0eb7e8fa1e2f34 2-4,7-9,15-18,24-33,41-43,50-63,69-71,75-79,84,89-90,92-94,97-106,108-112,119-132,137-143,147-153,157,162-164,173-178,192-198,202-206,210,214,218-221,231-233,237,239
+  s_9dac9fbdf9fc56::t_07460175c73b8b 19-23,34-40,44-49,64-68,72-74,80-83,85-87,95-96,113-118,133-136,144-146,154-156,158-161,165-172,179-191,199-201,207-209,211-213,215-217,222-230,234-236
+apps/bcs/crates/service-api/bcs-service-api/tests/distributed_contracts.rs
+  s_9dac9fbdf9fc56::t_a818fa44c9e760 2,8,13-16,27-29
+  s_9dac9fbdf9fc56::t_e9e451c0b47443 1,55-70
+  s_9dac9fbdf9fc56::t_e10503a5459091 30
+apps/bcs/crates/services/bcs-dist-projection/src/limits.rs
+  s_9dac9fbdf9fc56::t_07460175c73b8b 7-9,11-19,24-27,29-44,46-81,83-85,89-90,96-100
+  s_9dac9fbdf9fc56::t_0eb7e8fa1e2f34 1-6,10,22-23,28,45,82,86-88,91-95,101-104
+  s_9dac9fbdf9fc56::t_a42b69c1bc6275 20-21
+apps/bcs/crates/contracts/bcs-dist-model/src/runner.rs
+  s_9dac9fbdf9fc56::t_dd606fd6f88971 11
+  s_9dac9fbdf9fc56::t_dbeac5cbabdd57 2,16,19,21-22
+apps/bcs/Cargo.lock
+  s_9dac9fbdf9fc56::t_997a1356ebafcf 1551-1560
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f3ee7a05dac6c844b429e566f57b7db0b72045aa",
+  "prompts": {},
+  "sessions": {
+    "s_9dac9fbdf9fc56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ef8f-99fd-7003-aabd-a16850889d4d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

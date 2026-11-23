@@ -1,0 +1,266 @@
+apps/bcs-internal/Cargo.toml
+  h_fa66fe7c023b4b 24,127-130,133,136
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 2,189,191-194,197-240
+apps/bcs-internal/vendor/README.md
+  h_fa66fe7c023b4b 21-41
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/.cargo_vcs_info.json
+  h_fa66fe7c023b4b 1-6
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/CHANGELOG.md
+  h_fa66fe7c023b4b 1-40
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/Cargo.toml
+  h_fa66fe7c023b4b 1-31
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/LEGAL.md
+  h_fa66fe7c023b4b 1-7
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/README.md
+  h_fa66fe7c023b4b 1-489
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/SNAPSHOT.md
+  h_fa66fe7c023b4b 1-8
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/a2a/access_mode.rs
+  h_fa66fe7c023b4b 1-5
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/a2a/auth.rs
+  h_fa66fe7c023b4b 1-7
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/a2a/grant.rs
+  h_fa66fe7c023b4b 1-5
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/a2a/mod.rs
+  h_fa66fe7c023b4b 1-13
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/cache/fifo.rs
+  h_fa66fe7c023b4b 1-109
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/cache/mod.rs
+  h_fa66fe7c023b4b 1-4
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/cache/user_cache.rs
+  h_fa66fe7c023b4b 1-82
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/client.rs
+  h_fa66fe7c023b4b 1-857
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/config.rs
+  h_fa66fe7c023b4b 1-148
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/config_sync/drm_config.rs
+  h_fa66fe7c023b4b 1-163
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/config_sync/local_config_storage.rs
+  h_fa66fe7c023b4b 1-231
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/config_sync/mod.rs
+  h_fa66fe7c023b4b 1-15
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/config_sync/scheduler.rs
+  h_fa66fe7c023b4b 1-212
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/credential/agent_credential.rs
+  h_fa66fe7c023b4b 1-5
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/credential/delegation_credential.rs
+  h_fa66fe7c023b4b 1-6
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/credential/execution_credential.rs
+  h_fa66fe7c023b4b 1-4
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/credential/mod.rs
+  h_fa66fe7c023b4b 1-17
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/credential/pass_check.rs
+  h_fa66fe7c023b4b 1-4
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/credential/resource_access_credential.rs
+  h_fa66fe7c023b4b 1-7
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/error.rs
+  h_fa66fe7c023b4b 1-141
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/http.rs
+  h_fa66fe7c023b4b 1-211
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/initializer.rs
+  h_fa66fe7c023b4b 1-86
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/jwt/jwks.rs
+  h_fa66fe7c023b4b 1-437
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/jwt/mod.rs
+  h_fa66fe7c023b4b 1-11
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/jwt/payload.rs
+  h_fa66fe7c023b4b 1-274
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/jwt/verify.rs
+  h_fa66fe7c023b4b 1-395
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/lib.rs
+  h_fa66fe7c023b4b 1-89
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/models/enums.rs
+  h_fa66fe7c023b4b 1-180
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/models/mod.rs
+  h_fa66fe7c023b4b 1-7
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/models/request.rs
+  h_fa66fe7c023b4b 1-441
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/models/response.rs
+  h_fa66fe7c023b4b 1-545
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/models/url.rs
+  h_fa66fe7c023b4b 1-66
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/models/user.rs
+  h_fa66fe7c023b4b 1-41
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/permission/check.rs
+  h_fa66fe7c023b4b 1-40
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/permission/dingtalk.rs
+  h_fa66fe7c023b4b 1-4
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/permission/mod.rs
+  h_fa66fe7c023b4b 1-10
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/sign.rs
+  h_fa66fe7c023b4b 1-302
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/spi/identity_provider.rs
+  h_fa66fe7c023b4b 1-52
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/spi/mod.rs
+  h_fa66fe7c023b4b 1-4
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/spi/rpc_trace.rs
+  h_fa66fe7c023b4b 1-80
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/user/mod.rs
+  h_fa66fe7c023b4b 1-11
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/user/request_adapter.rs
+  h_fa66fe7c023b4b 1-94
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/user/user_resolve.rs
+  h_fa66fe7c023b4b 1-1125
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/user/user_util.rs
+  h_fa66fe7c023b4b 1-519
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/util/digest.rs
+  h_fa66fe7c023b4b 1-35
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/util/log_util.rs
+  h_fa66fe7c023b4b 1-256
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/util/logger.rs
+  h_fa66fe7c023b4b 1-844
+apps/bcs-internal/vendor/agent-acm-sdk-1.8.2/src/util/mod.rs
+  h_fa66fe7c023b4b 1-5
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/.cargo_vcs_info.json
+  h_fa66fe7c023b4b 1-6
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/Cargo.toml
+  h_fa66fe7c023b4b 1-109
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/LEGAL.md
+  h_fa66fe7c023b4b 1-7
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/README.md
+  h_fa66fe7c023b4b 1-366
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/SNAPSHOT.md
+  h_fa66fe7c023b4b 1-8
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/build.rs
+  h_fa66fe7c023b4b 1-16
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/bin/oauth-pipeline.rs
+  h_fa66fe7c023b4b 1-962
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/bin/oauth-test.rs
+  h_fa66fe7c023b4b 1-683
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/callback.rs
+  h_fa66fe7c023b4b 1-270
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/client.rs
+  h_fa66fe7c023b4b 1-2058
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/config.rs
+  h_fa66fe7c023b4b 1-941
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/core.rs
+  h_fa66fe7c023b4b 1-1107
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/device.rs
+  h_fa66fe7c023b4b 1-754
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/error.rs
+  h_fa66fe7c023b4b 1-245
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/lib.rs
+  h_fa66fe7c023b4b 1-87
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/lock.rs
+  h_fa66fe7c023b4b 1-436
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/logger.rs
+  h_fa66fe7c023b4b 1-586
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/polling_client.rs
+  h_fa66fe7c023b4b 1-710
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/securestore/encrypt.rs
+  h_fa66fe7c023b4b 1-166
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/securestore/keymanager.rs
+  h_fa66fe7c023b4b 1-108
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/securestore/keymanager_darwin.rs
+  h_fa66fe7c023b4b 1-137
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/securestore/keymanager_linux.rs
+  h_fa66fe7c023b4b 1-291
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/securestore/keymanager_stub.rs
+  h_fa66fe7c023b4b 1-125
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/securestore/keymanager_windows.rs
+  h_fa66fe7c023b4b 1-301
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/securestore/mod.rs
+  h_fa66fe7c023b4b 1-42
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/securestore/store.rs
+  h_fa66fe7c023b4b 1-645
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/storage.rs
+  h_fa66fe7c023b4b 1-521
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/types.rs
+  h_fa66fe7c023b4b 1-983
+apps/bcs-internal/vendor/agent-client-sdk-1.3.3/src/oauthsdk/utils.rs
+  h_fa66fe7c023b4b 1-157
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/.cargo_vcs_info.json
+  h_fa66fe7c023b4b 1-6
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/Cargo.toml
+  h_fa66fe7c023b4b 1-64
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/LEGAL.md
+  h_fa66fe7c023b4b 1-7
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/README.md
+  h_fa66fe7c023b4b 1-739
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/SNAPSHOT.md
+  h_fa66fe7c023b4b 1-8
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/adapter/mod.rs
+  h_fa66fe7c023b4b 1-49
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/core/agent_pass_user_util.rs
+  h_fa66fe7c023b4b 1-363
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/core/config_manager.rs
+  h_fa66fe7c023b4b 1-51
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/core/memory_cache_manager.rs
+  h_fa66fe7c023b4b 1-106
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/core/mod.rs
+  h_fa66fe7c023b4b 1-11
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/core/public_key_pool.rs
+  h_fa66fe7c023b4b 1-96
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/core/sdk_config.rs
+  h_fa66fe7c023b4b 1-58
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/error.rs
+  h_fa66fe7c023b4b 1-41
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/lib.rs
+  h_fa66fe7c023b4b 1-42
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/model/buservice_login_user.rs
+  h_fa66fe7c023b4b 1-40
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/model/json_web_key_set.rs
+  h_fa66fe7c023b4b 1-39
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/model/mod.rs
+  h_fa66fe7c023b4b 1-5
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/remote/mod.rs
+  h_fa66fe7c023b4b 1-5
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/remote/remote_user_service.rs
+  h_fa66fe7c023b4b 1-14
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/remote/remote_user_service_impl.rs
+  h_fa66fe7c023b4b 1-281
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/util/commons/base64_util.rs
+  h_fa66fe7c023b4b 1-46
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/util/commons/mod.rs
+  h_fa66fe7c023b4b 1-5
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/util/commons/sign_utils.rs
+  h_fa66fe7c023b4b 1-98
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/util/http_cookie_util.rs
+  h_fa66fe7c023b4b 1-14
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/util/jwt_util.rs
+  h_fa66fe7c023b4b 1-234
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/util/mod.rs
+  h_fa66fe7c023b4b 1-8
+apps/bcs-internal/vendor/agent-pass-user-sdk-2.2.0/src/util/string_util.rs
+  h_fa66fe7c023b4b 1-38
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/.cargo_vcs_info.json
+  h_fa66fe7c023b4b 1-6
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/Cargo.toml
+  h_fa66fe7c023b4b 1-46
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/LEGAL.md
+  h_fa66fe7c023b4b 1-7
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/README.md
+  h_fa66fe7c023b4b 1-31
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/SNAPSHOT.md
+  h_fa66fe7c023b4b 1-8
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/src/collector/antfamily.rs
+  h_fa66fe7c023b4b 1-168
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/src/collector/file_hash.rs
+  h_fa66fe7c023b4b 1-133
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/src/collector/mod.rs
+  h_fa66fe7c023b4b 1-224
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/src/collector/process.rs
+  h_fa66fe7c023b4b 1-257
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/src/collector/starpoint.rs
+  h_fa66fe7c023b4b 1-137
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/src/error.rs
+  h_fa66fe7c023b4b 1-110
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/src/lib.rs
+  h_fa66fe7c023b4b 1-746
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/src/rpc/mod.rs
+  h_fa66fe7c023b4b 1-629
+apps/bcs-internal/vendor/agentpass-lic-sdk-0.5.1/src/types.rs
+  h_fa66fe7c023b4b 1-453
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2db432e4b43dafed65eea1a7ef42982b862aaffb",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_20c3b110241190::t_a4d59f6c1886ad 152
+apps/bcsfuse/docs/architecture/alipay-catalog.md
+  s_20c3b110241190::t_dc3a1db4ab249b 86,93
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_20c3b110241190::t_2bd61cd52c067f 182,186
+apps/bcsfuse/docs/architecture/alipay-retrieval-runtime.md
+  s_20c3b110241190::t_191a6f3b96f3ab 50
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_20c3b110241190::t_5cfe0fe239f176 145
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay_catalog.py
+  s_20c3b110241190::t_ff55b89d92adb2 104-108
+apps/bcsfuse/internal/zbcsfuse_internal/application/card_metadata.py
+  s_20c3b110241190::t_1f4c3e26a30f70 5,9,11,75-78,89-113
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/documents.py
+  s_20c3b110241190::t_fd1bc4047fdfbb 21,103-109
+apps/bcsfuse/internal/zbcsfuse_internal/providers/bcn_metadata.py
+  s_20c3b110241190::t_da0b9f1d0d128b 113,121,126,154,169,175,178
+apps/bcsfuse/tests/alipay/test_bcn_metadata.py
+  s_20c3b110241190::t_ac0da7cd008cc3 122,241,310,317,450-455
+apps/bcsfuse/tests/alipay/test_card_timeout_fallback.py
+  s_20c3b110241190::t_b064153673721d 22-25,79-83,93,168-270
+submodules/avernet
+  s_20c3b110241190::t_dd54983cf05599 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1bff2a86adb65b69d2c89c7e884fc06f570e8bc7",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

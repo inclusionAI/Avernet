@@ -1,0 +1,42 @@
+apps/gateway/src/gateway/community/core/forwarding/_openapi.py
+  s_7c97e57846d67d::t_20b59a5544755d 58,81-119
+  s_7c97e57846d67d::t_30e86218e11d75 120-121
+apps/gateway/tests/unit/core/forwarding/test_combined_schema_catalogs.py
+  s_7c97e57846d67d::t_0632ec7817486a 66-75
+  s_7c97e57846d67d::t_3946b78c94c65b 368-377,379-384,386-393
+  s_7c97e57846d67d::t_9cf9a2254c6d8d 378
+  s_7c97e57846d67d::t_26da0466d11eb7 385
+apps/gateway/tests/unit/core/forwarding/test_served_openapi.py
+  s_7c97e57846d67d::t_20b59a5544755d 41-90
+apps/gateway/src/gateway/community/bootstrap/_forwarding.py
+  s_7c97e57846d67d::t_68fa396489a704 40,55-57,61-62,81-82
+  s_7c97e57846d67d::t_5d504bdadc3f81 58-60
+  s_7c97e57846d67d::t_55ab707f05edd0 83-84
+apps/gateway/tests/unit/plugins/test_authn_registry.py
+  s_7c97e57846d67d::t_414cd60d5bd249 21,28
+apps/gateway/src/gateway/community/core/forwarding/_orchestration.py
+  s_7c97e57846d67d::t_775a74b7b58a1c 83-88,95-99
+  s_7c97e57846d67d::t_cc74023da2a0e3 82,89-94,100-103,106
+apps/gateway/src/gateway/community/plugin_registry.py
+  s_7c97e57846d67d::t_5d504bdadc3f81 22-24,89-92,145-150
+  s_7c97e57846d67d::t_3700b3a5415726 19,25-26,87-88
+  s_7c97e57846d67d::t_ffe7dfc09006dc 20-21
+apps/gateway/tests/unit/plugins/test_plugin_registry.py
+  s_7c97e57846d67d::t_414cd60d5bd249 24,29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e14c1ae5d01062051f93bc3d6b553a92c248cc93",
+  "prompts": {},
+  "sessions": {
+    "s_7c97e57846d67d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ee18-34ed-7dc1-9e5d-7bce40c3556e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

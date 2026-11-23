@@ -1,0 +1,37 @@
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_20c3b110241190::t_50f20235c64497 96,104-106,127-133,141,210-212,222,269-270
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_card.py
+  s_20c3b110241190::t_0c65345aff76fb 3,18-38,57
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/resource_cards.py
+  s_20c3b110241190::t_b249642d390f77 121-129
+apps/bcsfuse/internal/zbcsfuse_internal/generated/AgentDiscoverFacade.py
+  s_20c3b110241190::t_f2ee82b1923d54 78,91,93,102
+apps/bcsfuse/internal/zbcsfuse_internal/providers/card_repository.py
+  s_20c3b110241190::t_39f7c8d224577e 11,18-33
+apps/bcsfuse/tests/alipay/test_card_wire_validation.py
+  s_20c3b110241190::t_0c4c0f32e72ef7 9,14,64-136
+apps/bcsfuse/tests/alipay/test_tr_server.py
+  s_20c3b110241190::t_f2b148e8ac93cd 46-54,63,124
+apps/bcsfuse/tr/java/pom.xml
+  s_20c3b110241190::t_c107d7096913ca 9
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/CardInterface.java
+  s_20c3b110241190::t_ee8948d9c22e00 24-25,57-64
+apps/bcsfuse/tr/rpc.proto
+  s_20c3b110241190::t_8edcbb2e1dfff9 3,101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "021fb926e48c41fd14d492acc0024e918b8bb5f1",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

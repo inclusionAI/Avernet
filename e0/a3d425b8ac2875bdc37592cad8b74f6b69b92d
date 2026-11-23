@@ -1,0 +1,50 @@
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_89ee1c722ef961::t_6465aded6d3207 142
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/index_builds.py
+  s_89ee1c722ef961::t_6465aded6d3207 63-67,69-73
+apps/bcsfuse/tests/alipay/test_index_build_reuse.py
+  s_89ee1c722ef961::t_07a46e511e76e5 1-45,47-161
+  s_89ee1c722ef961::t_2f6a150bb7a8d5 46,194-227
+  s_89ee1c722ef961::t_2630c620110a3a 162-193
+apps/bcsfuse/tests/alipay/test_index_rebuild_server.py
+  s_89ee1c722ef961::t_0d29264f04b52c 137-142
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/rebuild.py
+  s_89ee1c722ef961::t_0c838074346e6a 24,27-34,41
+apps/bcsfuse/configs/zbcsfuse/application.yaml
+  s_89ee1c722ef961::t_dda0989f7cf767 56-57,66
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/materialization.py
+  s_89ee1c722ef961::t_0c838074346e6a 25
+  s_89ee1c722ef961::t_89e008b16017a2 5,29-31
+apps/bcsfuse/scripts/sql/init_bcsfuse_index_builds.sql
+  s_89ee1c722ef961::t_dda0989f7cf767 1-2
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/documents.py
+  s_89ee1c722ef961::t_7e60852369b2ef 9,61-68,75
+apps/bcsfuse/docs/architecture/alipay-index-rebuild-minimal.md
+  s_89ee1c722ef961::t_dda0989f7cf767 7-22,60,63-64,74,79-84,86,116,118-122,126,128-131
+  s_89ee1c722ef961::t_563846ba3aef92 44,78,85,87,127
+apps/bcsfuse/tests/alipay/test_default_index.py
+  s_89ee1c722ef961::t_cf044cb34f81b0 1-51,53-61,63-66
+  s_89ee1c722ef961::t_7c8a570119645a 52,62
+apps/bcsfuse/tests/alipay/test_index_build_http.py
+  s_89ee1c722ef961::t_61be117a477036 76-78,99-100,104,108,111-142,144-145
+  s_89ee1c722ef961::t_0d863aaf39f656 143
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/index_builds.py
+  s_89ee1c722ef961::t_97505b39777647 43-47
+  s_89ee1c722ef961::t_0c838074346e6a 32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e0a3d425b8ac2875bdc37592cad8b74f6b69b92d",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+apps/gateway/tests/unit/core/forwarding/test_served_openapi.py
+  s_7c97e57846d67d::t_e0b3e6572658b8 15
+  s_7c97e57846d67d::t_4c9d9de61eb720 23-26,47-48
+  s_7c97e57846d67d::t_6f77734efb6ea0 146
+  s_7c97e57846d67d::t_7c7d0df9469b0a 16,58-85,89-91,96-99
+  s_7c97e57846d67d::t_a85c0859325db1 104-106,132-134,138-145
+  s_7c97e57846d67d::t_6af8d4f14680e4 107-131,135-137
+  s_7c97e57846d67d::t_eaa84e6e9c40b9 51-57,86-88,92-95,100-103
+  s_7c97e57846d67d::t_78082469b10c8e 147
+  s_7c97e57846d67d::t_81189cec6e9c1f 49-50
+apps/gateway/src/gateway/community/core/forwarding/_openapi.py
+  s_7c97e57846d67d::t_d5154eaa6b5498 114,120-130
+  s_7c97e57846d67d::t_a7c215d2f7bb1f 155
+  s_7c97e57846d67d::t_6f08041cf2d909 115,119
+  s_7c97e57846d67d::t_7c7d0df9469b0a 116-118,131-133
+  s_7c97e57846d67d::t_545e90c9205803 145-146,150-154,156-158,165-172,179-193,299-300,311
+  s_7c97e57846d67d::t_6af8d4f14680e4 147-149,173-178,312-321
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "032a469e1f420a47894b90833bc7c50e1bdb4ed5",
+  "prompts": {},
+  "sessions": {
+    "s_7c97e57846d67d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ee18-34ed-7dc1-9e5d-7bce40c3556e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apps/backend/tests/community/core/user_list/test_department_matching.py
+  s_fc1557df5d7924::t_b1af8b0ee6fce8 179-227
+apps/backend/src/agentclaw/community/core/user_list/user_list_service_protocol.py
+  s_fc1557df5d7924::t_b1af8b0ee6fce8 40,42-46
+apps/backend/src/agentclaw/community/core/user_list/service.py
+  s_fc1557df5d7924::t_b1af8b0ee6fce8 77,93-95,128,133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1e549b5c4703d2ddef24580124bcd43bfa7de9db",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

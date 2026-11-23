@@ -1,0 +1,19 @@
+apps/bcsfuse/tests/alipay/test_resource_types.py
+  s_89ee1c722ef961::t_e26f074a697a0f 27-28,30-37,39-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5675909a014b84bcbeda05959071990ffe01913a",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
