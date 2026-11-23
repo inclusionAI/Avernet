@@ -2,11 +2,13 @@
 set -euo pipefail
 # Only required-features companion binaries; never replace the production bcs.
 bcs_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+features=test-utils
 case "${1:-all}" in
   caller) bins=(--bin bcs-caller-e2e --bin bcs-a2a-grpc-peer) ;;
   oauth) bins=(--bin bcs-oauth-e2e) ;;
-  all) bins=(--bin bcs-caller-e2e --bin bcs-oauth-e2e --bin bcs-a2a-grpc-peer) ;;
-  *) echo "expected caller, oauth or all" >&2; exit 2 ;;
+  worker) features=worker-runtime-e2e; bins=(--bin bcs-worker-e2e) ;;
+  all) features=test-utils,worker-runtime-e2e; bins=(--bin bcs-caller-e2e --bin bcs-oauth-e2e --bin bcs-a2a-grpc-peer --bin bcs-worker-e2e) ;;
+  *) echo "expected caller, oauth, worker or all" >&2; exit 2 ;;
 esac
 cd "$bcs_dir"
 mkdir -p target/tmp target/cov-e2e/llvm-cov-target
@@ -15,4 +17,4 @@ export CARGO_INCREMENTAL=0
 export CARGO_PROFILE_DEV_DEBUG=line-tables-only
 export CARGO_TARGET_DIR="$bcs_dir/target/cov-e2e/llvm-cov-target"
 export LLVM_PROFILE_FILE="$bcs_dir/target/tmp/companion-build-%m-%p.profraw"
-cargo build -p bcs --features test-utils "${bins[@]}"
+cargo build -p bcs --features "$features" "${bins[@]}"

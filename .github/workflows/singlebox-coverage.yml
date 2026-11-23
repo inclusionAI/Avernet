@@ -260,6 +260,7 @@ jobs:
         run: |
           uv run --project apps/backend python -m pytest -q \
             singlebox/ci/tests/test_singlebox_companion_coverage.py \
+            singlebox/ci/tests/test_worker_companion_lifecycle.py \
             singlebox/ci/tests/test_singlebox_coverage_workflow.py \
             singlebox/ci/tests/test_singlebox_e2e_phases.py \
             singlebox/ci/tests/test_singlebox_parallel_pipeline.py \

@@ -27,6 +27,29 @@ covers only A2A conversion and A03/A04/A05. It does not certify deployment.
 
 ## Joint validation
 
+The opt-in `bcs-worker-e2e` companion is built from this checkout. It uses the
+explicit in-memory Store mock and existing SQLite Result/Blob provider. Python
+issues actual loopback A2A JSON-RPC and SSE requests to an axum listener, while
+the companion drives real Inbox, Worker and TaskFeed services. These are process
+and network tests, not production storage-durability tests.
+
+Command (from `apps/bcs`; binary path may be supplied by the caller):
+
+```sh
+cargo build --locked --offline -p bcs --features worker-runtime-e2e --bin bcs-worker-e2e
+python3 scripts/e2e-test/worker_runtime_story.py --binary target/debug/bcs-worker-e2e --report /tmp/worker-gateway-process.json
+```
+
+Result: 15 scenarios passed, including three new Gateway scenarios:
+
+- Discard first HTTP response, same-ID retry returns original task, changed body
+  conflicts, Runner executes once; retry after completion also succeeds.
+- Two concurrent first HTTP requests converge to one task and one Runner call.
+- Actual SSE delivers Upsert plus 70,000-byte AppendText; stable artifact ID and
+  folded text agree with GetTask and the final SQLite-backed view.
+
+The prior twelve scenarios still pass: document CAS, archive/late cancel, HumanReply,
+Unknown supervision, authorization/isolation, follow/trim/Gap, takeover and drain.
 The in-process `gateway_chain` target independently covers the same shared HTTP
 adapter chain and a changed directory revision. `admission_replay` forces both
 initial lookups to miss with different clocks, checks unequal concurrent bodies,
@@ -72,8 +95,17 @@ write cost. These tests prove correctness at selected sizes, not capacity.
   unequal-body regression added after the full run. Distinct passing tests across
   these runs: 628; the other four repeated admission tests are not added twice.
 - Single-process HTTP adapter joint target: 2 passed (included in package count).
+- External process loopback HTTP/SSE story: 15 passed; memory Store + SQLite,
+  not TBase PROXY. Its report declares durable_store=false.
 - Independent review found no actionable production defect in the selected
   scope. Reviewer separately observed 26 focused tests pass (overlapping counts).
+- Singlebox artifact validation now requires all three Gateway process scenarios;
+  missing any of them fails closed. Numeric coverage thresholds/exclusions are unchanged.
+  Six verifier test functions were executed directly with isolated temporary
+  fixtures and passed; the actual process report was also accepted. Pytest is
+  absent and its temporary dependency download timed out. The shell gate
+  regression could not start its checks because the existing backend virtualenv
+  Python path is absent; no full local Singlebox coverage result is claimed.
 - Port-purity check and 14 import-scope regression cases pass. Full import checker
   still reports pre-existing violations; none refer to a changed source file.
 - Strict Clippy (`cargo +stable clippy --lib --no-deps -- -D warnings`) passes

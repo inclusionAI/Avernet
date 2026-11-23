@@ -31,6 +31,20 @@ def _write_bcs_reports(reports_dir: Path, endpoint_overall: str) -> None:
         "checks": [{"path": "/auth/url", "status": 200}],
         "provider_calls": {"authorize": 1, "exchange": 1, "userinfo": 1},
     }))
+    (bcs_dir / "worker_e2e.json").write_text(json.dumps({
+        "status": "passed", "store": "memory_mock", "durable_store": False, "archive": "sqlite",
+        "checks": ["gateway_http_retry_conflict_once", "gateway_http_concurrent_first_request", "gateway_http_sse_get_task_consistency",
+                   "document_projection_atomic_patch_and_unknown",
+                   "finish_archive_restore_and_late_cancel", "append_archive_restore_and_late_cancel",
+                   "cancel_independent_of_runner", "quarantine_and_control_authorization",
+                   "blocked_and_control_authorization", "memory_store_worker_takeover",
+                   "graceful_handoff_preserves_pending_task",
+                   "human_reply_dispatch_input_once",
+                   "holder_input_acceptance_and_cancel_unknown",
+                   "live_follow_snapshot_trim_gap_restore",
+                   "sending_unknown_late_evidence_without_rerun",
+        ],
+    }))
     (bcs_dir / "summary.json").write_text(
         '{"data":[{"totals":{"lines":{"covered":45,"count":100},'
         '"functions":{"covered":40,"count":100}}}]}\n',
@@ -130,3 +144,31 @@ def test_default_bcs_thresholds_are_inclusive(tmp_path: Path, monkeypatch):
         errors: list[str] = []
         VERIFIER.validate_bcs_artifacts(tmp_path, args, errors)
         assert errors == expected_errors
+
+
+def test_worker_e2e_fails_closed_for_missing_failed_or_misrepresented_evidence(tmp_path):
+    _write_bcs_reports(tmp_path, '<overall covered="4" total="4" uncovered="0" percent="100.0"/>')
+    path = tmp_path / "bcs/worker_e2e.json"
+    valid = json.loads(path.read_text())
+    errors = []
+    VERIFIER.validate_worker_e2e(tmp_path, errors)
+    assert not errors
+    for field, value in [("status", "failed"), ("checks", []), ("store", "persistent"),
+                         ("durable_store", True), ("archive", "mock")]:
+        path.write_text(json.dumps({**valid, field: value}))
+        errors = []
+        VERIFIER.validate_worker_e2e(tmp_path, errors)
+        assert errors, field
+    for scenario in ["gateway_http_retry_conflict_once",
+                     "gateway_http_concurrent_first_request",
+                     "gateway_http_sse_get_task_consistency"]:
+        path.write_text(json.dumps({**valid, "checks": [
+            check for check in valid["checks"] if check != scenario
+        ]}))
+        errors = []
+        VERIFIER.validate_worker_e2e(tmp_path, errors)
+        assert errors, scenario
+    path.unlink()
+    errors = []
+    VERIFIER.validate_worker_e2e(tmp_path, errors)
+    assert errors

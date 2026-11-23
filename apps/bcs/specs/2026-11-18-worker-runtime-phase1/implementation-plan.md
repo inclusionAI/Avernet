@@ -179,3 +179,44 @@ entries from this change. Reconstructed readers use the same conformance harness
 Production failover durability and real host database verification remain distinct;
 the latter was explicitly deferred. GitHub publication, internal mirror availability,
 OCB gitlink integration and deployment are separate delivery states.
+
+
+## Original SPEC re-audit and Singlebox verification
+
+The [clause-by-clause audit](spec-audit.md) uses the original #4144 commit, rather
+than silently replacing its requirements with the implementation copy. Current
+follow-up changes include fail-closed checkpoint capacity declarations, actual
+maximum-candidate startup checks, one SetStatus per Decision, bounded legacy
+recovery metadata, a 5-second retry ceiling, and ordinary-pool congestion gating
+for new Start only. Existing pending identities and critical controls retain
+recovery access. Production behavior remains in Avernet; transport observations
+and provider envelope proofs belong to the host.
+
+The opt-in [Worker companion](../../crates/bootstrap/bcs/tests/worker_runtime/README.md)
+uses the user's selected memory Store mock and existing SQLite archives. Its
+external process story passes twelve functional categories. Local changed-line
+coverage is 9118/11983 (76.09%) with the unchanged 65% threshold. Published candidate
+`decdab6ea7` subsequently passed complete Singlebox CI at 61.33% line / 54.47%
+method / 76.27% changed-line, plus BCS unit CI and the real MySQL full migration
+chain. These results belong to that SHA; later Review increments require their
+own PR-head checks. The Singlebox gate
+requires its fresh report and joins its process before aggregation, preserving
+all existing thresholds. Lifecycle follow-up evidence is tracked in the audit;
+no aggregate count is a substitute for each clause's evidence.
+
+Local stress testing is explicitly out of scope under the latest user direction.
+DEV timing is diagnostic only. Storage-node HA is a user-confirmed platform
+prerequisite, not a node-failover test performed by this change. Real OB acceptance
+remains deferred. Persistent-provider functional verification continues via PROXY.
+
+Follow-up Review identified lifetime capacity exhaustion and the coordination
+prototype's incompatible format-1 checkpoint body. The retained-budget fix
+preserves hard limits and all obligations, exposes remaining charge budgets and
+early warnings, and supports coordinated expansion in the same namespace.
+Startup bounds the history profile by the maximum encoded pending Scan document;
+it does not allow unlimited history. Fixed-profile exhaustion may still pause
+repair and requires capacity recovery. Checkpoint reads classify unsupported
+headers/prototype layouts before typed decoding, with no implicit migration.
+Deterministic boundary tests and a one-intent real PROXY regression verify these
+paths; counters are seeded rather than filling DEV storage. See the audit's
+latest section for exact evidence and production limits.
