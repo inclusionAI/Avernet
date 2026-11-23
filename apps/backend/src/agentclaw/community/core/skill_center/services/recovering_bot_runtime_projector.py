@@ -82,12 +82,15 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
         )
         return result
 
-    async def remember_mcp_releases(
+    async def remember_release_candidates(
         self, *, bot_id: str, entity_id: str, codes: frozenset[str],
+        candidates: Sequence[PoolSkillMapping] = (),
+        candidate_device_id: str | None = None,
     ) -> None:
         if self._capability_projection is not None:
-            await self._capability_projection.remember_mcp_releases(
-                bot_id=bot_id, entity_id=entity_id, codes=codes,
+            await self._capability_projection.remember_release_candidates(
+                bot_id=bot_id, entity_id=entity_id, codes=codes, candidates=candidates,
+                candidate_device_id=candidate_device_id,
             )
 
     def resolve_plan(

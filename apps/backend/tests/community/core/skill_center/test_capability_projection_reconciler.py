@@ -339,7 +339,7 @@ async def test_repeat_uninstall_uses_the_release_saved_before_dispatch():
     async def unused_legacy():
         pytest.fail("The current Bot is using combined capability delivery")
 
-    await reconciler.remember_mcp_releases(**ADDRESS, codes=frozenset({"saved-mcp"}))
+    await reconciler.remember_release_candidates(**ADDRESS, codes=frozenset({"saved-mcp"}))
     assert projector.calls == []
 
     await reconciler.project_competing_change(
@@ -383,17 +383,42 @@ async def test_busy_delivery_preserves_committed_local_and_mcp_releases():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("candidate_device_id", ["device", "old-device"])
+async def test_unchanged_apply_checks_saved_preflight_candidates_against_current_supply(candidate_device_id):
+    device = _Device()
+    projector = _Projector(RuntimeProjectionResult.converged())
+    reconciler = _reconciler(projector, device)
+    removed = PoolSkillMapping(corpus="local", relative_path="removed", link_name="removed")
+    supplied = PoolSkillMapping(corpus="local", relative_path="kept", link_name="kept")
+    await reconciler.remember_release_candidates(
+        **ADDRESS, codes=frozenset(), candidates=(removed, supplied, SKILL),
+        candidate_device_id=candidate_device_id,
+    )
+    assert projector.calls == []
+    projector.previous = (supplied,)
+    projector.supplies = (supplied,)
+
+    async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+        result, retry = await apply.finish(initialize=True)
+
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert retry is None
+    assert projector.calls[0][1] == ([removed] if candidate_device_id == device.device_id else [])
+    assert all(value is None for value in device.props.values())
+
+
+@pytest.mark.asyncio
 async def test_delivery_receipt_preserves_a_concurrent_release_of_the_same_code():
     device = _Device()
 
     class ConcurrentCommit(_Projector):
         async def apply_plan(self, **kwargs):
-            await reconciler.remember_mcp_releases(**ADDRESS, codes=frozenset({"old-mcp"}))
+            await reconciler.remember_release_candidates(**ADDRESS, codes=frozenset({"old-mcp"}))
             return await super().apply_plan(**kwargs)
 
     projector = ConcurrentCommit(RuntimeProjectionResult.converged())
     reconciler = _reconciler(projector, device)
-    await reconciler.remember_mcp_releases(**ADDRESS, codes=frozenset({"old-mcp"}))
+    await reconciler.remember_release_candidates(**ADDRESS, codes=frozenset({"old-mcp"}))
     async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
         await apply.finish(initialize=True)
     assert next(iter(device.props.values()))["released_mcp"] == ["old-mcp"]

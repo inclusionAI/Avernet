@@ -238,9 +238,7 @@ class CapabilityProjectionReconciler:
             return RuntimeProjectionResult.skipped(reason="NO_CAPABILITY_PROJECTION")
         recorded_binding = None
         if self.defer_enabled:
-            local = tuple(mapping for mapping in retired_mappings if mapping.corpus == "local")
-            if local or scope.released_mcp:
-                recorded_binding = await self._remember_releases(bot_id, entity_id, local, scope.released_mcp)
+            recorded_binding = await self._remember_releases(bot_id, entity_id, retired_mappings, scope.released_mcp)
         try:
             async with self._guard.hold(bot_id=bot_id, entity_id=entity_id) as lease:
                 if not self.defer_enabled:
@@ -261,20 +259,32 @@ class CapabilityProjectionReconciler:
         except CapabilityDeliveryUnavailable:
             return self.delivery_busy()
 
-    async def remember_mcp_releases(
+    async def remember_release_candidates(
         self, *, bot_id: str, entity_id: str, codes: frozenset[str],
+        candidates: Sequence[PoolSkillMapping] = (),
+        candidate_device_id: str | None = None,
     ) -> None:
         if not self.defer_enabled:
             return
-        await self._remember_releases(bot_id, entity_id, (), codes)
+        await self._remember_releases(
+            bot_id, entity_id, candidates if candidate_device_id else (), codes,
+            candidate_device_id=candidate_device_id,
+        )
 
     async def _remember_releases(
-        self, bot_id: str, entity_id: str, retired: Sequence[PoolSkillMapping], released: frozenset[str],
+        self, bot_id: str, entity_id: str, candidates: Sequence[PoolSkillMapping], released: frozenset[str],
+        *, candidate_device_id: str | None = None,
     ) -> RuntimeBindingTarget | None:
+        local = tuple(mapping for mapping in candidates if mapping.corpus == "local")
+        if not local and not released:
+            return None
         binding = await asyncio.to_thread(self.current_binding, bot_id, entity_id)
         if binding is not None:
-            evidence = self.release_evidence(binding)
-            await asyncio.to_thread(evidence.remember, retired, released)
+            if candidate_device_id is not None and binding.device_id != candidate_device_id:
+                local = ()
+            if local or released:
+                evidence = self.release_evidence(binding)
+                await asyncio.to_thread(evidence.remember, local, released)
         return binding
 
     async def _deliver_standalone(

@@ -378,13 +378,13 @@ async def test_unchanged_desired_state_retries_a_failed_runtime_delivery() -> No
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("preflight", ["not_ready", "initial_snapshot", "final_snapshot"])
-async def test_early_runtime_failure_retains_the_committed_mcp_release(preflight):
+async def test_early_runtime_failure_retains_committed_release_candidates(preflight):
     class Repository(_Repository):
         def commit_capability_mutation(self, *, mutation, **_kwargs):
             return mutation()
 
     runtime = _PlanRuntime()
-    runtime.remember_mcp_releases = AsyncMock()
+    runtime.remember_release_candidates = AsyncMock()
     if preflight == "initial_snapshot":
         runtime.snapshot_skill_mappings = AsyncMock(side_effect=RuntimeError("runtime snapshot unavailable"))
     runtime.fail_resolve = preflight == "final_snapshot"
@@ -392,12 +392,12 @@ async def test_early_runtime_failure_retains_the_committed_mcp_release(preflight
     released = frozenset({"retired-mcp"})
     result = await flow.apply(
         bot={
-            "owner_id": "owner-1", "entity_id": "entity-1",
+            "owner_id": "owner-1", "entity_id": "entity-1", "device_id": "device-1",
             "status": "OFFLINE" if preflight == "not_ready" else "ACTIVE",
         },
         bot_id="bot-1",
         engine_type="openclaw",
-        scope=ProjectionScope(mcp=True, released_mcp=released),
+        scope=ProjectionScope(skills=True, mcp=True, released_mcp=released),
         mutation=lambda: DesiredStateMutation(
             item={"id": "retired-mcp"},
             changed=True,
@@ -409,6 +409,8 @@ async def test_early_runtime_failure_retains_the_committed_mcp_release(preflight
     assert result["changed"] is True
     assert result["runtime_projection"]["status"] == "PENDING"
     assert runtime.applied_plan is None
-    runtime.remember_mcp_releases.assert_awaited_once_with(
+    runtime.remember_release_candidates.assert_awaited_once_with(
         bot_id="bot-1", entity_id="entity-1", codes=released,
+        candidates=runtime.before if preflight == "final_snapshot" else (),
+        candidate_device_id="device-1" if preflight == "final_snapshot" else None,
     )

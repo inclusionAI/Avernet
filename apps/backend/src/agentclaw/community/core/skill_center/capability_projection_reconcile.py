@@ -76,8 +76,10 @@ class CapabilityProjectionReconcileProtocol(Protocol):
 
 @runtime_checkable
 class CapabilityReleaseRecorder(Protocol):
-    async def remember_mcp_releases(
+    async def remember_release_candidates(
         self, *, bot_id: str, entity_id: str, codes: frozenset[str],
+        candidates: Sequence[PoolSkillMapping] = (),
+        candidate_device_id: str | None = None,
     ) -> None: ...
 
 
