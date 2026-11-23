@@ -370,6 +370,10 @@ class EngineProvisioningStrategy(ABC):
         engine-agnostic and backward compatible.
         """
 
+    def restart_config_error_is_fatal(self, error: Exception) -> bool:
+        """Declare mandatory write refusals without changing legacy optional inputs."""
+        return False
+
     @abstractmethod
     def refresh_restart_authorization(
         self,

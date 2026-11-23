@@ -34,6 +34,10 @@ class MissingPrincipalError(Exception):
     """
 
 
+class BotOperationsForbiddenError(Exception):
+    """The verified application is not approved for cross-Owner Bot operations."""
+
+
 class GrantNotResolvableError(Exception):
     """Raised when an application caller holds no grant for what it addressed (→ 404).
 

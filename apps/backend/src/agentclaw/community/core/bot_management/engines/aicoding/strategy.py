@@ -21,6 +21,9 @@ from agentclaw.community.core.bot_management.errors import (
     BotCombinationUnsupportedError,
     BotTemplateInvalidError,
 )
+from agentclaw.community.core.bot_management.snapshot_guard import (
+    ManagedSnapshotConflictError, ManagedSnapshotPersistenceError, template_snapshot_hash,
+)
 from agentclaw.community.core.workspace.runtime_identity import (
     uses_aicoding_runtime,
 )
@@ -765,11 +768,11 @@ class AicodingProvisioningStrategy(AicodingRecycleMixin, AicodingSubmissionMixin
 
     @staticmethod
     def _clear_restart_resync_marker(
-        ctx: BotProvisioningContext, *, template_service: Any
+        ctx: BotProvisioningContext, *, template_service: Any, template_config: Any
     ) -> None:
         if template_service is None:
             return
-        current = template_service.get_template_config(ctx.bot_id)
+        current = template_config
         if (
             not isinstance(current, dict)
             or not AicodingProvisioningStrategy._has_restart_resync_marker(current)
@@ -777,9 +780,10 @@ class AicodingProvisioningStrategy(AicodingRecycleMixin, AicodingSubmissionMixin
             return
         updated = deepcopy(current)
         updated.pop(_AICODING_RESTART_MARKER_KEY, None)
-        template_service.update_template(
+        template_service.update_template_conditionally(
             bot_id=ctx.bot_id,
             template_config=updated,
+            expected_hash=template_snapshot_hash(current),
             template_type=ctx.template_type,
             active_engine=ctx.active_engine,
         )
@@ -788,53 +792,15 @@ class AicodingProvisioningStrategy(AicodingRecycleMixin, AicodingSubmissionMixin
             ctx.bot_id,
         )
 
-    def apply_restart_extra_configs(
-        self,
-        ctx: BotProvisioningContext,
-        extra_configs: dict[str, Any] | None,
-        *,
-        template_service: Any,
-    ) -> None:
-        """Persist a frontend-composed AICoding/Claude Code restart snapshot.
+    def apply_restart_extra_configs(self, ctx: BotProvisioningContext,
+                                    extra_configs: dict[str, Any] | None, *, template_service: Any) -> None:
+        from .restart_template import apply_restart_template
 
-        Publication and version selection belong to the frontend. Reuse the
-        existing template service for create-or-update and token encryption;
-        do not change the shared restart hook's ordering or failure policy.
-        """
-        active_engine = self.normalize_engine_type(ctx.active_engine, default="")
-        if active_engine not in TEMPLATE_CONFIG_CONSUMING_ENGINES:
-            return
-        if not isinstance(extra_configs, dict):
-            return
-        candidate = extra_configs.get("template_config")
-        if not isinstance(candidate, dict) or not candidate:
-            return
+        apply_restart_template(self, ctx, extra_configs, template_service=template_service,
+                               consuming_engines=TEMPLATE_CONFIG_CONSUMING_ENGINES)
 
-        # The frontend owns publication/version selection and full-snapshot
-        # composition. Same-version and unversioned snapshots are valid (e.g.
-        # published env policy refresh or a legacy bot's first migration).
-        incoming_version = self._template_version_id(candidate)
-        persisted_config = candidate
-        if extra_configs.get("confirmed_template_update"):
-            persisted_config = self._with_restart_resync_marker(
-                candidate, template_version_id=incoming_version
-            )
-
-        saved = template_service.create_or_update_template(
-            bot_id=ctx.bot_id,
-            template_config=persisted_config,
-            template_type=ctx.template_type,
-            active_engine=ctx.active_engine,
-        )
-        if not saved:
-            raise RuntimeError("Failed to persist coding restart template snapshot")
-        logger.info(
-            "[aicoding.restart] persisted restart template snapshot: "
-            "bot_id=%s version=%s resync_marker=%s",
-            ctx.bot_id,
-            incoming_version,
-            persisted_config is not candidate,
-        )
+    def restart_config_error_is_fatal(self, error: Exception) -> bool:
+        return isinstance(error, (ManagedSnapshotConflictError, ManagedSnapshotPersistenceError))
 
     def refresh_restart_authorization(
         self,
@@ -872,6 +838,7 @@ class AicodingProvisioningStrategy(AicodingRecycleMixin, AicodingSubmissionMixin
         def _run() -> None:
             import asyncio
 
+            cleanup_snapshot = template_service.get_template_config(ctx.bot_id) if template_service is not None else None
             refresh_succeeded = True
             skill_set_service = None
             logger.info(
@@ -970,7 +937,7 @@ class AicodingProvisioningStrategy(AicodingRecycleMixin, AicodingSubmissionMixin
             if refresh_succeeded and should_resync and template_service is not None:
                 try:
                     self._clear_restart_resync_marker(
-                        ctx, template_service=template_service
+                        ctx, template_service=template_service, template_config=cleanup_snapshot
                     )
                 except Exception as clear_error:
                     logger.warning(
