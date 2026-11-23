@@ -14,9 +14,12 @@ apps/bcs/migrations/sqlite/047_dist_immutable_objects.sql
 apps/bcs/crates/services/bcs-db-migrations/src/lib.rs
   s_9dac9fbdf9fc56::t_1ba95e6943e023 595,603,605-607,716
   s_9dac9fbdf9fc56::t_a5a046b31f774d 758,763-765
+  s_b033c54cc00da7::t_ea6521ee12da36 166,602,604,760,762
+  s_b033c54cc00da7::t_a33c0a623a3cb8 714-715
 apps/bcs/crates/services/bcs-dist-store/src/archive/README.md
   s_9dac9fbdf9fc56::t_360ec1bd027fb9 1-9,11-39,44-74
   s_9dac9fbdf9fc56::t_9903d8a84cddab 40-43
+  s_b033c54cc00da7::t_ea6521ee12da36 10
 apps/bcs/crates/services/bcs-dist-store/tests/archive.rs
   s_9dac9fbdf9fc56::t_8bca19f909fa8b 1-4,6-13,21,33-34,48-53,58-61,72-75,85-88,96-97,102-109,117-121,126-133,147-156,161,169-171,181-192,197-213,228-229,272
   s_9dac9fbdf9fc56::t_ebfb0f09df59a9 230-236,243-244,252-256,258,266,271
@@ -41,11 +44,13 @@ apps/bcs/crates/services/bcs-db-migrations/CONTEXT.md
   s_9dac9fbdf9fc56::t_14700bb5633fa7 9,16,57,64-68
 apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
   s_9dac9fbdf9fc56::t_3e9159cf5cb44d 9,48,99,128,130
+  s_b033c54cc00da7::t_ea6521ee12da36 70
 apps/bcs/README.md
   s_9dac9fbdf9fc56::t_14700bb5633fa7 20
 apps/bcs/crates/services/bcs-db-migrations/src/migrations/dist_archive_tests.rs
   s_9dac9fbdf9fc56::t_a5a046b31f774d 8-11,24-28,30-46,55-59
   s_9dac9fbdf9fc56::t_924aac3e7cb87a 1-7,12-23,29,47-51,53-54,60-62
+  s_b033c54cc00da7::t_ea6521ee12da36 52
 apps/bcs/crates/services/bcs-dist-store/tests/archive_support/mod.rs
   s_9dac9fbdf9fc56::t_324264b94b6801 193-195,223-225
   s_9dac9fbdf9fc56::t_c8602cfbca97d7 6-9,11-13,22-28,32-38,46-47,49,54,67-68,87,95-100,105-108,138-140,155-163,166-167,204-208,219-221,227-228,232-234,244-245
@@ -61,8 +66,11 @@ apps/bcs/Cargo.lock
   s_9dac9fbdf9fc56::t_9ce023b7b1b3f8 1566-1568,1577
 apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
   s_9dac9fbdf9fc56::t_47294aa6fa5bdb 288
+  s_b033c54cc00da7::t_ea6521ee12da36 277,750
 apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
   s_9dac9fbdf9fc56::t_0893df0c720e85 93-102
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/auth_session_version_migration_tests.rs
+  s_b033c54cc00da7::t_ea6521ee12da36 92
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -75,6 +83,14 @@ apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
         "tool": "codex",
         "id": "01a1ef8f-99fd-7003-aabd-a16850889d4d",
         "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    },
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
       },
       "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
     }
