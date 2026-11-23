@@ -2,8 +2,11 @@
 use super::ContractResult;
 use bcs_dist_model::*;
 use bcs_service_api::{
+    application::dist_runtime::DistWorkerIsolationService,
     core::dist_projection::OutputProjectionCoreService,
+    port::dist_runtime::*,
     port::repo::distributed::{admission::*, budget::*, common::SessionOwnership, control::*},
+    types::dist_runtime::WorkerControlAction,
 };
 
 /// Fresh budget: every declared permit is available, and releases restore it.
@@ -142,4 +145,46 @@ pub fn output_projection_core_service_contract_tests(port: &dyn OutputProjection
         .expect("repeat"),
         a
     );
+}
+/// Fixture policy grants inspect but denies recovery for this actor/target pair.
+pub async fn dist_worker_control_authorizer_port_contract_tests(
+    port: &dyn DistWorkerControlAuthorizerPort,
+    actor: &TaskScope,
+    target: &TaskScope,
+) -> ContractResult {
+    assert!(
+        port.authorize(actor, target, WorkerControlAction::Inspect)
+            .await?
+    );
+    assert!(
+        !port
+            .authorize(actor, target, WorkerControlAction::Resume)
+            .await?
+    );
+    Ok(())
+}
+/// Wrong task scope cannot read another Session's isolation state.
+pub async fn dist_worker_isolation_control_port_contract_tests(
+    port: &dyn DistWorkerIsolationControlPort,
+    wrong: &TaskScope,
+    sid: &Sid,
+) -> ContractResult {
+    assert!(port.isolation(wrong, sid).await?.is_none());
+    Ok(())
+}
+/// Unauthorized actor is rejected before the administrative engine is invoked.
+pub async fn dist_worker_isolation_service_contract_tests(
+    port: &dyn DistWorkerIsolationService,
+    actor: TaskScope,
+    target: TaskScope,
+    sid: Sid,
+) -> ContractResult {
+    assert_eq!(
+        port.isolation(actor, target, sid)
+            .await
+            .expect_err("authorization required")
+            .code,
+        "worker_control_forbidden"
+    );
+    Ok(())
 }

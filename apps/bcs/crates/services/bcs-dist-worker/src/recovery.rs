@@ -161,6 +161,10 @@ impl WorkerRuntime {
         sid: &Sid,
         claim: &ShardClaim,
     ) -> Result<(), RuntimeError> {
+        let Some(_scan_visit) = self.begin_session_scan()? else {
+            self.retry_later(sid, claim, self.config.check_interval)?;
+            return Ok(());
+        };
         if !self.state()?.acquisitions.contains_key(sid) {
             // Nothing that can change ownership has been issued yet. Missing
             // spec or initializer failure must not become an in-flight write.
@@ -254,6 +258,15 @@ impl WorkerRuntime {
                     Ok(Err(StoreError::OutcomeUnknown { .. })) | Err(_) => {
                         return Err(err("session_acquire_unknown"));
                     }
+                    Ok(Err(
+                        error @ (StoreError::Invalid { .. } | StoreError::UnsupportedFormat { .. }),
+                    )) => {
+                        let code = store_error(error).code;
+                        if let Some(acquisition) = self.state()?.acquisitions.get_mut(sid) {
+                            acquisition.stage = AcquisitionStage::Diagnostic { code: code.clone() };
+                        }
+                        return Err(err(&code));
+                    }
                     Ok(Err(error)) => {
                         if !uncertain {
                             self.state()?.acquisitions.remove(sid);
@@ -263,6 +276,7 @@ impl WorkerRuntime {
                     }
                 }
             }
+            AcquisitionStage::Diagnostic { .. } => return Ok(()),
             AcquisitionStage::Observe(_) | AcquisitionStage::Release(_) => {}
         }
         let stage = self.state()?.acquisitions.get(sid).map(|a| a.stage.clone());

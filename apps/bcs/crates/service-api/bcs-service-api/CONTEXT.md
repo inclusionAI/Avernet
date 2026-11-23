@@ -38,6 +38,17 @@ updated; workspace path consumers rebuild together.
 
 ## Version 6.1.0: Distributed coordination contracts
 
+The phase-one refinement adds the pure
+[`OutputProjectionCoreService`](src/core/dist_projection.rs), stable artifact
+operations and frozen task output profiles. Candidate projection charges only
+newly committed output; read-side folding applies the same transform and safety
+checks without charging again. The implementation is
+[bcs-dist-projection](../../services/bcs-dist-projection/README.md).
+Checkpoint Runner state is optional and bound to one task; finalization retains
+the frozen archive record and terminal publication progress independently of it.
+These unpublished v1 declarations require a fresh phase-one namespace and rebuild
+of workspace consumers; no legacy records are migrated or HTTP endpoints changed.
+
 Add opt-in Gateway, Worker and Connector service/port declarations plus
 `bcs-dist-model` shared data. No existing trait method, wire endpoint, runtime
 registration or stored record changes. All workspace path consumers rebuild;
@@ -47,8 +58,13 @@ The [distributed contract](src/port/repo/distributed/README.md) owns admission,
 atomic checkpoint/effect replay, scheduling, consistent task recovery and
 dispatch ownership semantics. State and queue adapters remain replaceable.
 The [change record](../../../specs/2026-11-15-distributed-contracts/spec.md) links
-ordered implementation tasks and actual validation; concrete providers and
-runtime implementations remain pending.
+ordered implementation tasks and actual validation. The public
+[Inbox provider](../../services/bcs-dist-store/src/inbox/README.md) implements
+scoped canonical admission, consumption and independent repair/discovery.
+`AdmitRequest.scope` binds trusted scope; `FeedBatch.failures` requires Worker
+watch recovery. `AdmissionControlPort` exposes gate/cut obligations, while
+terminal/archive confirmation and authorized resume remain runtime duties.
+Complete runtime assembly and provider acceptance remain separate.
 
 `SessionStorePort::get_spec` owns frozen-session specification reads, even before
 the first checkpoint. Inbox producer/consumer ports and the stateful shard feed

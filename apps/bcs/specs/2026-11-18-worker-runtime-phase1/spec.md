@@ -7,6 +7,11 @@ owner: BCS distributed Worker
 
 # BCN Worker 第一批通用运行时 SPEC v1
 
+> Membership amendment (2026-11-20):
+> [RetainedLease](../2026-11-20-retained-membership-lease/spec.md) replaces the
+> earlier StrictLease/time/permanent-tombstone requirements. Earlier verification
+> below records the implementation tested then; it is not evidence for the new provider.
+
 ## 1. 状态、目标与基线
 
 本稿定义 Worker 的通用执行与恢复闭环，供实现前评审。本次仅提交 SPEC 和导航，不修改 Rust 契约、运行时、插件、配置或数据库迁移；文档合入不代表功能实现、测试通过或部署完成。
@@ -17,6 +22,7 @@ owner: BCS distributed Worker
 
 相关契约和导航：
 
+- [实现计划与进度](implementation-plan.md)：开发验证单独记录，不将 SPEC 送审等同于功能交付。
 - [分布式契约 SPEC](../2026-11-15-distributed-contracts/spec.md)及[任务划分](../2026-11-15-distributed-contracts/tasks.md)。
 - [业务存储端口](../../crates/service-api/bcs-service-api/src/port/repo/distributed/README.md)、[SessionStore](../../crates/service-api/bcs-service-api/src/port/repo/distributed/session.rs)、[Inbox 与调度](../../crates/service-api/bcs-service-api/src/port/repo/distributed/inbox.rs)。
 - [Runner](../../crates/service-api/bcs-service-api/src/core/dist_runner.rs)、[输出与任务模型](../../crates/contracts/bcs-dist-model/src/task.rs)、[TaskFeed](../../crates/service-api/bcs-service-api/src/port/repo/distributed/task_feed.rs)。
@@ -46,7 +52,7 @@ owner: BCS distributed Worker
 
 | 边界 | 变化 |
 | --- | --- |
-| 存储插件 | 新增受限的 `PersistentJsonCas` 能力及独立接口，提供持久文档读取、同版本路径投影、原子创建、精确版本条件下的 Replace／Patch |
+| 存储插件 | 扩展已有独立 `DocumentCas`／`DocumentStorePlugin` 子集，提供持久文档读取、同版本路径投影、原子创建、精确版本条件下的 Replace／Patch |
 | Inbox provider | 补齐持久受理意图、规范内容与位置、受理代次及在途登记、持久受理结论、受理修复、监听状态和调度；明确 Quarantined／OutcomeUnknown 及重试语义，保持生产、消费、调度端口分离 |
 | SessionStore | 增加精确 owner＋业务 head 保护的隔离状态、风险尝试结果及条件解除隔离；控制写不推进 `commit_seq` |
 | Runner／输出 | `Show` 增加稳定 artifact 身份和明确更新操作；输出事件、展示草稿及恢复读取共享确定性投影；增加冻结的输出额度、快照进度及独立的任务终结状态转换 |
@@ -54,7 +60,9 @@ owner: BCS distributed Worker
 
 ### 3.1 持久 JSON CAS 子集
 
-`PersistentJsonCas` 支持不存在时原子创建，以及读取到的精确文档版本下的一次更新；首次创建版本为 1，每次成功更新推进版本，失败不修改内容或版本，耗尽失败而不回绕。存在性和版本条件必须与写入原子核对，不能以先 GET 再普通覆盖实现。
+本节原提案名 `PersistentJsonCas` 在实际集成基线上对应已有的 [`DocumentCas`／`DocumentStorePlugin`](../../crates/plugin-api/bcs-store-api/src/document.rs)，不另建等价能力。支持不存在时原子创建，以及读取到的精确文档版本下的一次更新；首次创建版本为 1，每次成功更新推进版本，失败不修改内容或版本，耗尽失败而不回绕。存在性和版本条件必须与写入原子核对，不能以先 GET 再普通覆盖实现。
+
+路径读取可从一次一致文档读取中投影；Patch 可先在内存中完成全部编辑，再以原 expected version 做一次原子 Replace，期间并发更新必须使该次写入拒绝。此实现最多一次读取和一次 EQ 写入，无隐藏重试，不降低失败原子性；读取和写入仍计完整文档字节，不能宣称为原生局部更新。配置 provider 可提供通过相同 conformance 的原生实现。
 
 逻辑 Replace 必须删除旧值中不再存在的字段；Patch 沿用现有 JSON 指针和有序编辑语义，真实 null 与字段缺失可区分，多处编辑全部成功或全部失败。元数据与业务 JSON 隔离，业务 `rev`、`_store` 等名字不被禁用。适配器可以使用可逆私有编码，但不能要求所有后端都存字符串。
 
@@ -83,7 +91,7 @@ Thinking 只产生临时事件，不进入完整展示快照和最终归档，�
 | 草稿／快照内联阈值 | 64 KiB；超过即使用同一已持久化不可变 Ref，较小内容也可因总文档预算提前引用化 |
 | 编码后的 checkpoint／outbox | checkpoint 最多 1 MiB（含 outbox 和 provider 封装），其中 outbox 最多 256 KiB；普通候选各预留至少 64 KiB 给收尾控制及终态 effects，outbox 是总量的子预算 |
 
-批次动作数、展示单元数、排队 task 数、dispatch 数及引用元数据也受显式上限约束，不能靠正文外置绕过文档限制。启动时须验证最大合法候选和分批收尾候选均能满足上述预算；不满足时收紧准入／批次配置或拒绝启用，不能等到无法写终态才发现余量不足。调度文档的在途槽位另受条数和编码字节上限约束。
+每个 Decision 最多一个 `SetStatus`；重复状态动作整批拒绝，避免不可外置的 interaction 元数据耗尽收尾余量。批次动作数、展示单元数、排队 task 数、dispatch 数及引用元数据也受显式上限约束，不能靠正文外置绕过文档限制。启动时须验证最大合法候选和分批收尾候选均能满足上述预算；不满足时收紧准入／批次配置或拒绝启用，不能等到无法写终态才发现余量不足。调度文档的在途槽位另受条数和编码字节上限约束。`SessionStorePort::checkpoint_capacity()` 必须声明总文档与非业务封装上限；Worker 对未声明或不可容纳最大候选的组合拒绝启动。宿主声明的私有封装余量也计入真实写前检查，不能只预算逻辑 checkpoint。
 
 引用化发生在 Worker／provider：先计算确定性内容和摘要，使用稳定 Blob 身份执行 `put_immutable`，确认持久化后才提交含 Ref 的 checkpoint。未知结果以原身份确认；不确认成功就不能提交引用。`view_drafts`、PublishSnapshot 和 SaveResult 对同一版本的完整展示内容共享该 Ref，不重复内联大正文。AppendEvents 中的 Upsert／AppendText 载荷以及最终 result 也必须在超过内联阈值或 outbox 预算时以稳定 Ref 外置，不能只外置快照却把大事件留在 outbox。投影、restore／follow 消费及归档读取必须按同一编码解析 Ref、核对摘要，再应用原操作；额度统计解析后的内容，不能按引用字符串长度计费。候选失败产生的孤儿 Blob 首批保留；Blob IO 不进入纯 Runner。
 
@@ -278,6 +286,8 @@ Worker 只写 dispatch 意图，不直接调用 Agent，也不把远端恢复算
 ### 8.3 兼容性与保留
 
 运行时保持 opt-in。新输出动作和持久内容采用显式格式版本；旧 `Show` 不能默认解释为 AppendText。新协议使用独立 namespace，不与旧 GT 写入方混写。现有存量若需迁移，须另行授权并停写、核对版本和证据；本批不承诺透明在线迁移。
+
+实施兼容性说明：#4145 协调原型的 checkpoint 同样使用数字版本 1，但 `runner_state` 是无 task 归属的 `{format_version,value}`；本批采用 `null | {tid,state}` 及 task 生命周期状态。原型 namespace 不支持直接复用，不能因为数字版本相同而推断布局兼容，也不自动推断 tid 或丢弃旧数据。普通读取先核版本头，并把已知原型布局报告为 `UnsupportedFormat { format: 1 }`，不改写或 seal 该 checkpoint；新启用仍须使用全新 namespace。旧证据保留和离线迁移另行授权。
 
 owner、spec、checkpoint、受理及 effect 证据在首批不自动过期、淘汰或回收。持续运行的历史扫描成本和容量上限必须披露；这不是第三批保留治理已完成的证明。
 
