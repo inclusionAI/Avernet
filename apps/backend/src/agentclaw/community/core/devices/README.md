@@ -46,6 +46,7 @@ consumes:
   - "DeviceAccessor (models only)"
   - "Layout initialization confirmation implementation"
 internal_dependencies:
+  - agentclaw.community.core.ports.runtime_binding
   - agentclaw.community.core.access    # configured super-admin scope for instance restart
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module

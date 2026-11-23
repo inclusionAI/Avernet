@@ -104,7 +104,9 @@ def _make_publish_record_with_bindings(
 
 
 def _make_binding(*, binding_id: int, device_provider: str):
-    return SimpleNamespace(id=binding_id, device_provider=device_provider)
+    return SimpleNamespace(
+        id=binding_id, device_provider=device_provider, device_id=f"bound-device-{binding_id}",
+    )
 
 
 def _make_device(
@@ -2628,8 +2630,10 @@ class TestForwardRequestUsesResolver:
         )
 
         binding_repo.get_by_id.assert_called_once_with(30)
-        teclaw_builder.build.assert_called_once()
-        assert teclaw_builder.build.call_args.kwargs["device_uuid"] == "DEVICE-T1"
+        teclaw_builder.build.assert_called_once_with(
+            binding_repo.get_by_id.return_value, "owner-1", device_uuid="DEVICE-T1",
+        )
+        transport.invoke.assert_awaited_once()
         sent_conn_info = transport.invoke.await_args.args[0]
         assert sent_conn_info["engine_type"] == "teclaw"
         assert sent_conn_info["bind_id"] == 30

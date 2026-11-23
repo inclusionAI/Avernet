@@ -11,6 +11,9 @@ from __future__ import annotations
 from typing import Any, Optional, Sequence
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
+    RuntimeProjectionResult,
+)
 from agentclaw.community.api.apply_run_service import (
     ApplyReport,
     ApplyRunServiceProtocol,
@@ -257,6 +260,7 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
     that drifted would be the one nobody was reading.
     """
     payload = report.as_payload()
+    projection = payload.get("runtime_projection")
     return ConfigManifestApply(
         apply_id=payload["apply_id"],
         bot_id=payload["bot_id"],
@@ -274,6 +278,9 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
         entries=[ConfigManifestApplyEntry(**entry) for entry in payload["entries"]],
         notes=list(payload.get("notes") or ()),
         state=ConfigManifestApplyState(**payload["state"]),
+        runtime_projection=(
+            RuntimeProjectionResult.model_validate(projection) if projection is not None else None
+        ),
     )
 
 

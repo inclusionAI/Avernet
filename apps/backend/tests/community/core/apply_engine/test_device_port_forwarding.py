@@ -49,6 +49,7 @@ from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
 from agentclaw.community.core.ports.skill_package_upload_port import (
+    BatchSkillPackageUploadPort,
     SkillPackageUploadPort,
 )
 
@@ -100,7 +101,7 @@ def _sentinels(port, method_name: str) -> dict:
 
 
 def _port_methods(port) -> list[str]:
-    return sorted(m for m in vars(port) if not m.startswith("_") and callable(vars(port)[m]))
+    return sorted(port.__abstractmethods__)
 
 
 #: (port, device implementation). Every field of MaterialiserPorts that is
@@ -113,7 +114,7 @@ _DEVICE_IMPLS = [
 
 _DEVICE_SURFACES = [
     *_DEVICE_IMPLS,
-    (SkillPackageUploadPort, DeviceSkillPackageUpload),
+    (BatchSkillPackageUploadPort, DeviceSkillPackageUpload),
 ]
 
 _CASES = [
@@ -194,6 +195,24 @@ async def test_device_skill_package_port_uses_explicit_upload_and_delete_service
         )
     ]
     assert len(upload.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_device_batch_port_forwards_packages_to_the_upload_service() -> None:
+    upload = _Recorder()
+    upload._async_names = frozenset({"upload_local_skill_batch"})
+    delete = _Recorder()
+    delegate = DeviceSkillPackageUpload(upload, delete)
+    args = {
+        "bot_id": "bot",
+        "owner_id": "owner",
+        "actor_id": "actor",
+        "packages": (("first", b"package-1"), ("second", b"package-2")),
+    }
+
+    await delegate.upload_local_skill_batch(**args)
+    assert upload.calls == [("upload_local_skill_batch", (), args)]
+    assert delete.calls == []
 
 
 @pytest.mark.asyncio

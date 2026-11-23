@@ -198,6 +198,7 @@ internal_dependencies:
   - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer
   - agentclaw.community.core.config_compose.protocols  # ManagedFilesReader + PlatformOwnershipReader, the compose seams the managed-files reader inherits
   - agentclaw.community.core.content_store
+  - agentclaw.community.core.devices.services.device_context
   - agentclaw.community.core.mcp
   - agentclaw.community.core.ports
   - agentclaw.community.core.repository

@@ -10,6 +10,14 @@ from urllib.parse import urlsplit
 from injector import inject
 
 from agentclaw.community.core.bot_management.addressing import ResolvedBotContext
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionCompetitionProtocol,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+    RuntimeProjectionResult,
+    RuntimeProjectionStatus,
+)
 
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
 from agentclaw.community.core.mcp.mcp_market_service_protocol import MCPMarketServiceProtocol
@@ -216,6 +224,7 @@ async def write_scoped_config(
     market_service: MCPMarketServiceProtocol,
     sync_service: MCPSyncServiceProtocol,
     capability_reader: EffectiveMCPStateReaderProtocol,
+    capability_projection: CapabilityProjectionCompetitionProtocol | None = None,
 ) -> ScopedMCPConfig:
     """Validate, atomically persist, then best-effort project one snapshot."""
     _validate_endpoint_env(endpoint_env)
@@ -291,7 +300,11 @@ async def write_scoped_config(
         if is_consumer:
             consumers.append(bot_id)
 
-    command_repo.replace(
+    projection_options = (
+        {} if capability_projection is None
+        else {"create_projection": capability_projection.defer_enabled}
+    )
+    applicable = command_repo.replace(
         user_id=user_id,
         server_code=server_code,
         headers=user_headers,
@@ -301,8 +314,20 @@ async def write_scoped_config(
         transport_protocol=normalized_protocol,
         user_url=user_url,
         bot_urls=bot_urls,
+        **projection_options,
     )
 
+    tracked_consumers: dict[str, str] = {}
+    if capability_projection is not None:
+        preflight_consumers = set(consumers)
+        tracked_consumers = {
+            bot_id: entity_id
+            for bot_id, entity_id in applicable.items()
+            if bot_id in preflight_consumers and entity_id is not None
+        }
+        consumers = [
+            bot_id for bot_id in consumers if bot_id in applicable and bot_id not in tracked_consumers
+        ]
     sync_results: tuple[dict[str, Any], ...] = ()
     sync_summary = _projection_summary(sync_results)
     if consumers:
@@ -329,6 +354,29 @@ async def write_scoped_config(
                 for bot_id in consumers
             )
             sync_summary = _projection_summary(sync_results)
+
+    if tracked_consumers and capability_projection is not None:
+        scope = ProjectionScope(mcp=True, updated_mcp=frozenset({server_code}))
+
+        async def unavailable() -> RuntimeProjectionResult:
+            return RuntimeProjectionResult.skipped(reason="CAPABILITY_PROJECTION_SUPERSEDED")
+
+        results = list(sync_results)
+        for bot_id in sorted(tracked_consumers):
+            try:
+                projection = await capability_projection.project_competing_change(
+                    bot_id=bot_id, owner_id=user_id, entity_id=tracked_consumers[bot_id],
+                    scope=scope, retired_mappings=(), legacy=unavailable,
+                )
+                synced = projection.status is RuntimeProjectionStatus.CONVERGED
+            except Exception:
+                synced = False
+            item = {"bot_id": bot_id, "synced": synced}
+            if not synced:
+                item["reason"] = "MCP_PROJECTION_FAILED"
+            results.append(item)
+        sync_results = tuple(results)
+        sync_summary = _projection_summary(sync_results)
 
     saved = read_scoped_config(
         user_id=user_id,
@@ -361,6 +409,7 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
         market_service: MCPMarketServiceProtocol,
         sync_service: MCPSyncServiceProtocol,
         capability_reader: EffectiveMCPStateReaderProtocol,
+        capability_projection: CapabilityProjectionCompetitionProtocol | None = None,
     ) -> None:
         self._config_service = config_service
         self._bot_config_repo = bot_config_repo
@@ -369,6 +418,7 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
         self._market_service = market_service
         self._sync_service = sync_service
         self._capability_reader = capability_reader
+        self._capability_projection = capability_projection
 
     def read(self, *, user_id: str, server_code: str) -> ScopedMCPConfig:
         return read_scoped_config(
@@ -403,6 +453,7 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
             market_service=self._market_service,
             sync_service=self._sync_service,
             capability_reader=self._capability_reader,
+            capability_projection=self._capability_projection,
         )
 
 
@@ -448,10 +499,26 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
             if detail and (detail.get("runMode") or detail.get("run_mode")) == "LOCAL":
                 raise McpConfigValueError("LOCAL MCP does not accept remote configuration")
 
+        projection_options = {}
+        if self._capability_projection is not None:
+            create_projection = self._capability_projection.defer_enabled
+            if create_projection:
+                try:
+                    # Materialize legacy Installation sources before taking
+                    # the write lock. The repository re-reads current supply.
+                    await asyncio.to_thread(
+                        self._capability_reader.effective_mcp_server_codes,
+                        bot_id=bot.bot_id, owner_id=bot.current_owner_id, bot=bot.bot,
+                    )
+                except Exception:
+                    # Existing Installation facts still govern the write.
+                    pass
+            projection_options["create_projection"] = create_projection
         config, changed = await asyncio.to_thread(
             self._command_repo.patch_bot,
             bot_pk=bot.bot_pk, bot_id=bot.bot_id, entity_id=bot.entity_id,
             current_owner_id=bot.current_owner_id, server_code=server_code, patch=patch,
+            **projection_options,
         )
         try:
             effective = await asyncio.to_thread(
@@ -460,17 +527,34 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
             )
             if server_code not in effective:
                 return BotMCPConfigUpdate(config, changed, "SKIPPED", "MCP_NOT_EFFECTIVE")
-            if not setting_override:
-                detail = await asyncio.to_thread(self._market_service.get_mcp_detail, server_code)
-            delivery = await self._sync_service.sync_mcp_details_for_bot(
-                user_id=bot.current_owner_id,
-                entity_id=bot.entity_id,
-                bot_id=bot.bot_id,
-                mcp_entries=[detail or {"serverCode": server_code}],
-                engine_type=bot.bot.get("active_engine") or bot.bot.get("engine"),
-                config_target=bot,
-            )
-            if delivery.get("success"):
+
+            async def legacy_delivery() -> RuntimeProjectionResult:
+                current_detail = detail
+                if not setting_override:
+                    current_detail = await asyncio.to_thread(self._market_service.get_mcp_detail, server_code)
+                delivery = await self._sync_service.sync_mcp_details_for_bot(
+                    user_id=bot.current_owner_id,
+                    entity_id=bot.entity_id,
+                    bot_id=bot.bot_id,
+                    mcp_entries=[current_detail or {"serverCode": server_code}],
+                    engine_type=bot.bot.get("active_engine") or bot.bot.get("engine"),
+                    config_target=bot,
+                )
+                if delivery.get("success"):
+                    return RuntimeProjectionResult.converged()
+                return RuntimeProjectionResult.pending(
+                    code="MCP_PROJECTION_FAILED", reason="MCP device delivery failed",
+                )
+
+            if self._capability_projection is None:
+                projection = await legacy_delivery()
+            else:
+                projection = await self._capability_projection.project_competing_change(
+                    bot_id=bot.bot_id, owner_id=bot.current_owner_id, entity_id=bot.entity_id,
+                    scope=ProjectionScope(mcp=True, updated_mcp=frozenset({server_code})),
+                    retired_mappings=(), legacy=legacy_delivery,
+                )
+            if projection.status is RuntimeProjectionStatus.CONVERGED:
                 return BotMCPConfigUpdate(config, changed, "CONVERGED")
         except Exception:
             # The write is durable and delivery errors can contain connection data.

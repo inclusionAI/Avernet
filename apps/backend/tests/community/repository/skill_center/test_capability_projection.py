@@ -1,0 +1,336 @@
+"""Committed capability changes and recovery records are one transaction."""
+
+import pytest
+from sqlalchemy.exc import IntegrityError
+
+from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
+    CapabilityDesiredStateRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
+    CapabilityProjectionRepository,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+    RuntimeProjectionIssue,
+    RuntimeProjectionResult,
+    RuntimeProjectionStatus,
+)
+from agentclaw.community.core.skills_pool.mapping_intent import retirement_request
+from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+from agentclaw.community.plugin_api.models import BotModel
+
+from .capability_desired_state_support import _Database
+
+
+def test_claim_rolls_back_when_pending_projection_cannot_be_persisted():
+    db = _Database()
+    desired = CapabilityDesiredStateRepository(db)
+    projection = CapabilityProjectionRepository(db)
+    with db.engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TRIGGER reject_projection
+            BEFORE INSERT ON ac_bot_capability_projection
+            BEGIN
+              SELECT RAISE(ABORT, 'cannot write projection');
+            END
+            """
+        )
+
+    with pytest.raises(IntegrityError, match="cannot write projection"):
+        desired.commit_projection_mutation(
+            bot_id="bot",
+            entity_id="owner",
+            mutation=lambda: desired.claim_apply_mcp(
+                bot_id="bot",
+                owner_id="owner",
+                server_code="new-server",
+                config={},
+                platform_default_codes=frozenset(),
+            ),
+            scope_from_result=lambda result: ProjectionScope(
+                mcp=True, claimed_mcp=result.mcp_codes,
+            ),
+            retired_mappings=(),
+            create=True,
+        )
+
+    assert desired.list_installed_mcps(bot_id="bot", owner_id="owner") == set()
+    assert projection.read(bot_id="bot", entity_id="owner") is None
+
+
+
+def test_known_old_receipt_releases_the_dispatch_fence_without_confirming_newer_work():
+    repository = CapabilityProjectionRepository(_Database())
+    locator = {"bot_id": "bot", "entity_id": "owner"}
+    first = repository.require(**locator, scope=ProjectionScope(skills=True))
+    assert repository.begin(first)
+    assert not repository.begin(first)
+
+    newer = repository.require(
+        **locator, scope=ProjectionScope(mcp=True, released_mcp=frozenset({"withdrawn"})),
+    )
+    assert newer.write_blocked
+    assert repository.due(env="dev", limit=10) == ()
+
+    assert not repository.complete(first, RuntimeProjectionResult.converged())
+    pending = repository.read(**locator)
+    assert pending is not None and pending.version == newer.version
+    assert pending.result.status is RuntimeProjectionStatus.PENDING
+    assert pending.scope.released_mcp == frozenset({"withdrawn"})
+    assert pending.needs_recovery
+    assert len(repository.due(env="dev", limit=10)) == 1
+
+
+def test_a_new_binding_reconciles_without_accepting_an_old_binding_receipt():
+    db = _Database()
+    repository = CapabilityProjectionRepository(db)
+    locator = {"bot_id": "bot", "entity_id": "owner"}
+    with db.transactional_orm_session() as session:
+        bot = session.query(BotModel).filter_by(**locator).one()
+        bot.binding_id = 17
+        bot.device_id = "original"
+    first = repository.require(**locator, scope=ProjectionScope(skills=True))
+    assert repository.begin(first)
+    assert repository.complete(
+        first, RuntimeProjectionResult.pending(code="NO_RECEIPT", reason="unknown"),
+        write_blocked=True,
+    )
+
+    with db.transactional_orm_session() as session:
+        bot = session.query(BotModel).filter_by(**locator).one()
+        bot.binding_id = 42
+        bot.device_id = "replacement"
+
+    observed = repository.read(**locator)
+    assert observed is not None and not observed.is_current_binding
+    assert observed.result.status is RuntimeProjectionStatus.PENDING
+    assert len(repository.due(env="dev", limit=10)) == 1
+    assert not repository.complete(first, RuntimeProjectionResult.converged())
+
+    current = repository.prepare(**locator)
+    assert current is not None and current.binding_id == 42
+    assert current.is_current_binding and current.version > first.version
+    assert not current.write_blocked and current.scope == ProjectionScope.everything()
+    assert repository.complete(current, RuntimeProjectionResult.converged())
+    assert repository.due(env="dev", limit=10) == ()
+
+
+def test_returning_to_a_previous_device_keeps_its_unknown_dispatch_fence():
+    db = _Database()
+    repository = CapabilityProjectionRepository(db)
+    locator = {"bot_id": "bot", "entity_id": "owner"}
+
+    def bind(binding_id, device_id):
+        with db.transactional_orm_session() as session:
+            bot = session.query(BotModel).filter_by(**locator).one()
+            bot.binding_id = binding_id
+            bot.device_id = device_id
+
+    bind(17, "device-a")
+    original = repository.require(**locator, scope=ProjectionScope(skills=True))
+    assert repository.begin(original)
+
+    bind(42, "device-b")
+    replacement = repository.prepare(**locator)
+    assert replacement is not None and not replacement.write_blocked
+    assert repository.begin(replacement)
+    assert repository.complete(replacement, RuntimeProjectionResult.converged())
+
+    bind(43, "device-a")
+    returned = repository.prepare(**locator)
+    assert returned is not None and returned.write_blocked
+    assert not repository.begin(returned)
+    assert repository.due(env="dev", limit=10) == ()
+
+    assert not repository.complete(original, RuntimeProjectionResult.converged())
+    current = repository.prepare(**locator)
+    assert current is not None and current.needs_recovery
+    assert current.result.status is RuntimeProjectionStatus.PENDING
+
+
+def test_retry_retains_only_the_unconfirmed_domain_and_keeps_its_retirement_evidence():
+    repository = CapabilityProjectionRepository(_Database())
+    locator = {"bot_id": "bot", "entity_id": "owner"}
+    retired = PoolSkillMapping(corpus="local", relative_path="retired", link_name="retired")
+    work = repository.require(
+        **locator, scope=ProjectionScope(skills=True, mcp=True), retired_mappings=(retired,),
+    )
+    assert repository.complete(work, RuntimeProjectionResult(
+        status=RuntimeProjectionStatus.PENDING,
+        components={
+            "skills": RuntimeProjectionStatus.PENDING,
+            "mcp": RuntimeProjectionStatus.CONVERGED,
+        },
+    ))
+    pending = repository.prepare(**locator)
+    assert pending is not None
+    assert pending.scope == ProjectionScope(skills=True)
+    assert pending.retired_mappings == (retired,)
+
+    assert repository.complete(pending, RuntimeProjectionResult.converged(
+        components={"skills": RuntimeProjectionStatus.CONVERGED},
+    ))
+    completed = repository.read(**locator)
+    assert completed is not None and completed.retired_mappings == ()
+    assert completed.result.components == {
+        "skills": RuntimeProjectionStatus.CONVERGED,
+        "mcp": RuntimeProjectionStatus.CONVERGED,
+    }
+
+
+def test_rebinding_the_same_device_keeps_the_prior_dispatch_fence():
+    db = _Database()
+    repository = CapabilityProjectionRepository(db)
+    locator = {"bot_id": "bot", "entity_id": "owner"}
+    with db.transactional_orm_session() as session:
+        bot = session.query(BotModel).filter_by(**locator).one()
+        bot.binding_id = 17
+        bot.device_id = "same-device"
+    first = repository.require(**locator, scope=ProjectionScope(skills=True))
+    assert repository.begin(first)
+
+    for binding_id, device_id in ((None, None), (42, "same-device")):
+        with db.transactional_orm_session() as session:
+            bot = session.query(BotModel).filter_by(**locator).one()
+            bot.binding_id = binding_id
+            bot.device_id = device_id
+        current = repository.prepare(**locator)
+        assert current is not None and current.write_blocked
+
+    assert repository.due(env="dev", limit=10) == ()
+    assert not repository.complete(first, RuntimeProjectionResult.converged())
+    current = repository.prepare(**locator)
+    assert current is not None and current.needs_recovery
+    assert current.result.status is RuntimeProjectionStatus.PENDING
+
+
+
+@pytest.mark.parametrize(
+    ("code", "write_blocked", "should_retry"),
+    [
+        ("RETIRED_TARGET_IDENTITY_MISMATCH", False, True),
+        ("RETIRED_TARGET_IDENTITY_MISMATCH", True, False),
+        ("UNMANAGED_ACTIVE_ENTRY_RETAINED", False, False),
+    ],
+)
+def test_only_confirmed_managed_mismatch_triggers_the_next_retirement_candidate(
+    code, write_blocked, should_retry,
+):
+    repository = CapabilityProjectionRepository(_Database())
+    locator = {"bot_id": "bot", "entity_id": "owner"}
+    first = PoolSkillMapping(corpus="repo", relative_path="old/first", link_name="old")
+    second = PoolSkillMapping(corpus="local", relative_path="old/second", link_name="old")
+    still_supplied = PoolSkillMapping(corpus="local", relative_path="active", link_name="active")
+    current = PoolSkillMapping(corpus="repo", relative_path="new/active", link_name="active")
+    work = repository.require(
+        **locator, scope=ProjectionScope(skills=True),
+        retired_mappings=(first, second, still_supplied),
+    )
+    assert retirement_request(work.retired_mappings, (current,)) == [first]
+    assert repository.complete(work, RuntimeProjectionResult(
+        status=RuntimeProjectionStatus.DEGRADED,
+        components={"skills": RuntimeProjectionStatus.DEGRADED},
+        issues=(RuntimeProjectionIssue(
+            resource_type="SKILL", name="old", requested_action="RETIRE",
+            code=code, reason="a known runtime result",
+            status=RuntimeProjectionStatus.DEGRADED, retryable=False,
+        ),),
+    ), write_blocked=write_blocked)
+    pending = repository.prepare(**locator)
+    assert pending is not None
+    if should_retry:
+        assert pending.needs_recovery
+        assert pending.result.status is RuntimeProjectionStatus.PENDING
+        assert retirement_request(pending.retired_mappings, (current,)) == [second]
+    else:
+        assert not pending.needs_recovery
+        assert pending.result.status is RuntimeProjectionStatus.DEGRADED
+        assert retirement_request(pending.retired_mappings, (current,)) == [first]
+
+
+@pytest.mark.parametrize("superseded_by", ["desired-write", "runtime-binding"])
+def test_passport_obligation_survives_a_superseded_authorization_receipt(superseded_by):
+    import json
+    from dataclasses import replace
+
+    from agentclaw.community.core.models.capability_projection import BotCapabilityProjection
+
+    db = _Database()
+    repository = CapabilityProjectionRepository(db)
+    address = {"bot_id": "bot", "entity_id": "owner"}
+    current = repository.require(**address, scope=ProjectionScope.everything())
+
+    # An existing row stored this failure only as an issue and cleared both domains.
+    previous_result = RuntimeProjectionResult.pending(
+        code="PASSPORT_RUNTIME_UNAVAILABLE", reason="temporary authorization failure",
+    )
+    with db.transactional_orm_session() as session:
+        row = session.get(BotCapabilityProjection, current.bot_pk)
+        old_scope = json.loads(row.scope_json)
+        old_scope.update(
+            skills=False, mcp=False, claim_all_mcp=False,
+        )
+        old_scope.pop("passport")
+        row.scope_json = json.dumps(old_scope)
+        row.result_json = json.dumps(previous_result.to_dict())
+
+    pending = repository.prepare(**address)
+    assert pending.revision == current.revision
+    assert pending.scope == ProjectionScope(passport=True)
+    assert repository.begin(pending, device_delivery=False)
+    assert not repository.read(**address).write_blocked
+
+    if superseded_by == "desired-write":
+        current = repository.require(**address, scope=ProjectionScope(skills=True))
+    else:
+        with db.transactional_orm_session() as session:
+            bot = session.query(BotModel).filter_by(**address).one()
+            bot.binding_id = 5
+            bot.device_id = "next-device"
+        current = repository.prepare(**address)
+
+    receipt = replace(RuntimeProjectionResult.converged(), passport_updated=True)
+    assert not repository.complete(pending, receipt)
+    assert not repository.begin(pending, device_delivery=False)
+    state = repository.read(**address)
+    assert state.revision == current.revision
+    assert state.revision != pending.revision
+    assert state.scope.passport and state.scope.skills
+    assert state.retry_pending
+
+
+def test_reads_legacy_cutover_receipt_as_passport_only_when_mcp_is_confirmed():
+    import json
+    from dataclasses import replace
+
+    from agentclaw.community.core.models.capability_projection import BotCapabilityProjection
+
+    db = _Database()
+    repository = CapabilityProjectionRepository(db)
+    address = {"bot_id": "bot", "entity_id": "owner"}
+    retired = PoolSkillMapping(corpus="local", link_name="obsolete", relative_path="obsolete")
+    current = repository.require(
+        **address,
+        scope=ProjectionScope(mcp=True, released_mcp=frozenset({"mcp.removed"})),
+        retired_mappings=(retired,),
+    )
+    confirmed = RuntimeProjectionResult.converged(components={"mcp": RuntimeProjectionStatus.CONVERGED})
+    failure = RuntimeProjectionResult.pending(code="PASSPORT_RUNTIME_UNAVAILABLE", reason="authorization failed")
+    with db.transactional_orm_session() as session:
+        row = session.get(BotCapabilityProjection, current.bot_pk)
+        scope = json.loads(row.scope_json)
+        scope.pop("passport")
+        row.scope_json = json.dumps(scope)
+        row.result_json = json.dumps(RuntimeProjectionResult.combine(confirmed, failure).to_dict())
+
+    pending = repository.prepare(**address)
+    assert pending.scope == ProjectionScope(skills=True, passport=True)
+    assert pending.retired_mappings == (retired,)
+    assert pending.revision == current.revision
+
+    both_fail = RuntimeProjectionResult.pending(code="MCP_RUNTIME_UNAVAILABLE", reason="MCP device offline")
+    with db.transactional_orm_session() as session:
+        row = session.get(BotCapabilityProjection, current.bot_pk)
+        row.result_json = json.dumps(RuntimeProjectionResult.combine(confirmed, failure, both_fail).to_dict())
+    assert repository.read(**address).scope == replace(current.scope, passport=True)

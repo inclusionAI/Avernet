@@ -10,6 +10,8 @@ from threading import Lock
 
 from injector import inject
 
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.participation import (
     SkillLayoutParticipation,
@@ -79,10 +81,14 @@ class SkillsPoolEditGuard:
         cache: CachePlugin,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         participation_resolver: SkillLayoutParticipationResolver,
+        binding_repository: DeviceBindingRepository,
+        skill_repository: SkillRepository,
     ) -> None:
         self._cache = cache
         self._layouts = layout_repository
         self._participation_resolver = participation_resolver
+        self._bindings = binding_repository
+        self._skills = skill_repository
         self._ordinary_locks_guard = Lock()
         self._ordinary_locks: dict[str, _OrdinaryEditLockEntry] = {}
 
@@ -111,14 +117,6 @@ class SkillsPoolEditGuard:
             )
             raise SkillsPoolEditBusyError(
                 "Another skill update is already in progress; please retry shortly"
-            )
-
-        # Legacy Bots have no Pool rollback to serialize against, but still
-        # need this ordinary mutex so concurrent same-name uploads cannot both
-        # observe an absent Skill and create competing records/packages.
-        if not participation.participates_in_pool_layout:
-            return SkillsPoolEditLease(
-                key="", token=None, ordinary_lock_entry=ordinary_lock_entry
             )
 
         try:
@@ -192,6 +190,13 @@ class SkillsPoolEditGuard:
                     raise
                 raise
 
+    def acquire_for_migration(self, *, scope: BotSkillLayoutScope) -> SkillsPoolEditLease:
+        lease = self.acquire_for_edit(scope=scope)
+        if self._package_dispatch_blocks_layout(scope):
+            self.release(lease)
+            raise SkillsPoolEditBusyError("A previous Skill package request is unresolved")
+        return lease
+
     def acquire_for_rollback(
         self,
         *,
@@ -227,12 +232,35 @@ class SkillsPoolEditGuard:
         if token is None:
             self._release_ordinary_lock(ordinary_lock_entry)
             return None
-        return SkillsPoolEditLease(
+        lease = SkillsPoolEditLease(
             key=key,
             token=token,
             ttl_seconds=self._LOCK_TTL_SECONDS,
             ordinary_lock_entry=ordinary_lock_entry,
         )
+        if self._package_dispatch_blocks_layout(scope):
+            self.release(lease)
+            return None
+        return lease
+
+    def _package_dispatch_blocks_layout(self, scope: BotSkillLayoutScope) -> bool:
+        try:
+            who = dict(bot_id=scope.bot_id, entity_id=scope.entity_id)
+            if not self._skills.has_pending_local_skill_dispatch(**who):
+                return False
+            # Resolve through the same Bot binding lookup used by runtime
+            # package transport. An absent/ambiguous current binding cannot
+            # establish that the old dispatch has lost write authority.
+            binding = self._bindings.get_active_by_bot_and_owner(scope.bot_id, scope.entity_id)
+            return binding is None or self._skills.has_pending_local_skill_dispatch(
+                **who, device_id=binding.device_id,
+            )
+        except Exception:
+            logger.exception(
+                "Could not verify Local Skill dispatches before layout edit bot_id=%s",
+                scope.bot_id,
+            )
+            return True
 
     def _acquire_for_edit(
         self, *, scope: BotSkillLayoutScope
@@ -264,6 +292,18 @@ class SkillsPoolEditGuard:
         return SkillsPoolEditLease(
             key=key, token=token, ttl_seconds=self._LOCK_TTL_SECONDS
         )
+
+    def refresh(self, lease: SkillsPoolEditLease) -> None:
+        """Renew a held lease before publishing or committing another package."""
+        assert lease.token is not None and lease.ttl_seconds is not None
+        try:
+            held = self._cache.renew_lock_strict(
+                lease.key, lease.token, ttl=lease.ttl_seconds
+            )
+        except CacheLockInfrastructureError as exc:
+            raise SkillsPoolEditLockUnavailableError("Local Skill edit lease cannot be renewed") from exc
+        if not held:
+            raise SkillsPoolEditBusyError("Local Skill edit lease was lost")
 
     def release(self, lease: SkillsPoolEditLease) -> bool:
         if lease.token is None:

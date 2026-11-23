@@ -72,8 +72,9 @@ def test_read_returns_explicit_groups_without_copying_inherited_values() -> None
     )
 
 
+@pytest.mark.parametrize("supply_removed_before_commit", [False, True])
 def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
-    monkeypatch,
+    monkeypatch, supply_removed_before_commit,
 ) -> None:
     engine = create_engine("sqlite:///:memory:")
     UserMCPConfig.__table__.create(engine)
@@ -152,6 +153,21 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
         lambda _engine: [],
     )
 
+    command_repo = ScopedMCPConfigRepository(db)
+    projection = None
+    if supply_removed_before_commit:
+        # The service's preflight saw a consumer before the concurrent removal.
+        # The command reports current applicability independently of that read.
+        persist = command_repo.replace
+        command_repo = MagicMock()
+
+        def replace(**kwargs):
+            kwargs.pop("create_projection")
+            persist(**kwargs)
+            return {}
+
+        command_repo.replace.side_effect = replace
+        projection = MagicMock(defer_enabled=False)
     result = asyncio.run(write_scoped_config(
         user_id="owner", server_code="mcp.weather", endpoint_env="PROD",
         transport_protocol="SSE",
@@ -164,8 +180,9 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
             URLRule(url="https://bot.example.test/mcp", bots=("bot-x",)),
         ),
         config_service=config, bot_config_repo=bot_config_repo, bot_repo=bots,
-        command_repo=ScopedMCPConfigRepository(db), market_service=market,
+        command_repo=command_repo, market_service=market,
         sync_service=sync, capability_reader=capability,
+        capability_projection=projection,
     ))
 
     override = bot_config_repo.get_by_bot_and_server_code(
@@ -181,7 +198,12 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
         URLRule(url="https://global.example.test/mcp", bots=()),
         URLRule(url="https://bot.example.test/mcp", bots=("bot-x",)),
     )
-    assert result.sync_summary["offline"] == 1
+    if supply_removed_before_commit:
+        assert result.sync_results == ()
+        sync.sync_mcp_detail_to_all_bots.assert_not_awaited()
+        projection.project_competing_change.assert_not_called()
+    else:
+        assert result.sync_summary["offline"] == 1
     assert UserMCPConfigRepository(db).get_by_user_and_server_code(
         "owner", "mcp.weather"
     )["api_key"] == "existing-secret"
