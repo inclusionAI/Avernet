@@ -348,7 +348,7 @@ async def test_offline_publish_success_and_errors():
     resp = await router_publish.offline_publish(1, user=_USER, publish_service=service)
     assert resp.success is True
     assert resp.message == "offline ok"
-    service.offline_publish.assert_awaited_once_with(publish_id=1)
+    service.offline_publish.assert_awaited_once_with(publish_id=1, operator_id="u1")
 
     service.offline_publish = AsyncMock(return_value={})
     resp = await router_publish.offline_publish(1, user=_USER, publish_service=service)
@@ -561,7 +561,9 @@ async def test_retry_publish_for_others_success_and_errors():
     flow.retry = AsyncMock(return_value=ModelDumpResult(message="retried"))
     resp = await router_publish.retry_publish_for_others(1, user=_ADMIN, publish_service=publish_service, flow_service=flow)
     assert resp.success is True
-    flow.retry.assert_awaited_once_with(publish_id=1, operator="owner-9")
+    flow.retry.assert_awaited_once_with(
+        publish_id=1, operator="owner-9", audit_operator_id="100000"
+    )
 
     flow.retry = AsyncMock(return_value=DictOnlyResult(status=PublishStatus.FAILED, message="failed"))
     resp = await router_publish.retry_publish_for_others(1, user=_ADMIN, publish_service=publish_service, flow_service=flow)
@@ -627,7 +629,9 @@ async def test_upgrade_bot_type_for_others_success_and_errors():
     service.upgrade_bot_to_service.return_value = {"bot": {"id": "bot"}, "publish_record": Record()}
     resp = await router_publish.upgrade_bot_type_for_others(request=req, user=_ADMIN, publish_service=service)
     assert resp.success is True
-    service.upgrade_bot_to_service.assert_called_once_with(bot_id="bot", owner_id="owner-2")
+    service.upgrade_bot_to_service.assert_called_once_with(
+        bot_id="bot", owner_id="owner-2", audit_operator_id="100000"
+    )
 
     resp = await router_publish.upgrade_bot_type_for_others(request=req, user=_ANON, publish_service=service)
     assert_error(resp, 400, "无法获取用户信息")

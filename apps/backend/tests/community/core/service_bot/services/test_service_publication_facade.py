@@ -703,7 +703,7 @@ def test_convert_returns_created_publication(deps, monkeypatch):
 
     assert result["publication_id"] == 7
     deps.publish_service.upgrade_bot_to_service.assert_called_once_with(
-        bot_id="bot-1", owner_id="owner"
+        bot_id="bot-1", owner_id="owner", audit_operator_id="owner"
     )
 
 
@@ -986,7 +986,7 @@ async def test_offline_honors_approval_then_executes_when_skipped(deps, monkeypa
     )
     executed = await deps.facade.offline("bot-1", actor_id="owner", owner_id="owner")
     assert executed["operation_status"] == "pending"
-    deps.publish_service.offline_publish.assert_awaited_once_with(3)
+    deps.publish_service.offline_publish.assert_awaited_once_with(3, operator_id="owner")
 
 
 def test_delete_delegates_the_domain_rule(deps, monkeypatch):

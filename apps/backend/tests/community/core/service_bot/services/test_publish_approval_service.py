@@ -797,7 +797,7 @@ class TestTriggerOffline:
         await service._trigger_offline(publish_id=1, applicant="user_001")
 
         # 验证 offline_publish 被调用
-        publish_service.offline_publish.assert_called_once_with(publish_id=1)
+        publish_service.offline_publish.assert_called_once_with(publish_id=1, operator_id="user_001")
         # 验证状态更新为 EXECUTED
         publish_service.update_publish_ext.assert_called()
         last_call_args = publish_service.update_publish_ext.call_args

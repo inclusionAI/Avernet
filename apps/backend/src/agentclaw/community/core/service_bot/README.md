@@ -63,6 +63,8 @@ consumes:
   - "PassportPlugin"
   - "UserListRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.plugin_api.database
+  - agentclaw.community.plugin_api.service_bot_release_audit
   - agentclaw.community.core.bot_knowledge.protocols    # optional best-effort stage selection Service API
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
@@ -367,3 +369,34 @@ Complete/Fail, status/ext/CAS, rollback or restart execution. No new task,
 retry/compensation infrastructure or publish lock is introduced. These optional
 DB calls can still wait on existing driver/connection timeouts; this is not a
 promise of hard time isolation or DB-outage resilience.
+## Service Bot release audit
+
+Each attributed draft or accepted verify/online change inserts one row in
+`ac_service_bot_release_audit`. It freezes the original creator, authenticated
+operator, source Bot identity, version, system environment, prior/desired stage
+and submission times. Background completion updates that same change with its
+result and first completion time; retries and stages have distinct change IDs.
+
+The publication repository injects `ServiceBotReleaseAuditPlugin` and calls its
+`create(session, snapshot)` / `complete(session, ...)` operations using the same
+`DatabasePlugin.transactional_orm_session()` as the native publication write.
+Plugins do not open or commit another session. A persistence failure rolls back
+both writes; a rejected native CAS does not modify audit data. Completion only
+updates a pending row for the exact change/publication/environment and expected
+stage. The publication's trusted change/tenant metadata restores the original
+tenant for a background update; external requests cannot select that context.
+
+There is no event table, outbox, delivery queue, scanner, revision counter or
+serialized snapshot copy. The first implementation is a database participant;
+a future external SLS implementation needs its own explicitly designed
+consistency contract. Apply `sql/2026_11_13_service_bot_release_audit.sql` before
+deploying. The migration creates only the audit table; it does not drop existing
+preview data or invent history.
+
+Business success is `validating` for verify and `success` for online. Queue
+expiry or one device result does not fabricate completion. Existing restart
+workflow/change fences and artifact-last ext serialization remain intact.
+Source Bot creation times retain their stored timezone semantics; new audit
+times are UTC. Diagnose `release_audit.create.*` and `release_audit.complete.*`
+using change/publication IDs, environment, actor, result and completion time.
+Raw publication config/ext and authentication credentials are not logged.

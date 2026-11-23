@@ -51,10 +51,15 @@ from agentclaw.community.core.service_bot.repository.models import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.service_bot_release_audit import ServiceBotReleaseAuditPlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+
+from agentclaw.community.core.repository.implementations.publishing.release_audit import (
+    record_created, record_transition,
+)
 
 logger = get_logger()
 
@@ -71,9 +76,13 @@ class BotPublishRepository(
 
     @inject
     def __init__(
-        self, db: DatabasePlugin, offload: ConfigArtifactOffloader
+        self, db: DatabasePlugin, offload: ConfigArtifactOffloader,
+        audit: Optional[ServiceBotReleaseAuditPlugin] = None
     ) -> None:
         self._db = db
+        # Direct legacy callers may omit audit only for unattributed writes.
+        # The configured provider always passes it; attributed writes fail closed.
+        self._audit = audit
         self.Model = BotPublishModel
         # Offloads an oversized config_artifact out of the ext TEXT column.
         self._offload = offload
@@ -95,7 +104,7 @@ class BotPublishRepository(
     def insert(self, data: Dict[str, Any]) -> BotPublishRecord:
         ext = data.get("ext")
         env = data.get("env", get_current_env())
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             row = self.Model(
                 source_bot_pk=data["source_bot_pk"],
                 source_bot_id=data["source_bot_id"],
@@ -125,6 +134,7 @@ class BotPublishRepository(
             row.ext = ext_json
             self._offload.upload(pending)
             db.flush()
+            record_created(db, row, data.get("audit_operator_id"), self._audit)
             logger.info("[insert] inserted bot publish id=%s", new_id)
         # Re-read after commit — prod returns get_by_id(inserted_id),
         # so the returned record carries DB-populated gmt_create /
@@ -471,8 +481,10 @@ class BotPublishRepository(
         publish_id: int,
         target_status: str,
         source_status: Optional[str] = None,
+        *,
+        audit_operator_id: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id
             )
@@ -485,6 +497,9 @@ class BotPublishRepository(
                 },
                 synchronize_session=False,
             )
+            if affected > 0:
+                row = db.query(self.Model).filter(self.Model.id == publish_id).populate_existing().first()
+                record_transition(db, row, source_status=source_status, actor=audit_operator_id, audit=self._audit)
         if source_status is not None and affected == 0:
             return None
         return self.get_by_id(publish_id)
@@ -495,11 +510,13 @@ class BotPublishRepository(
         target_status: str,
         ext: Dict[str, Any],
         source_status: Optional[str] = None,
+        *,
+        audit_operator_id: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
         ext_json, pending = self._offload.prepare(
             ext, publish_id, get_current_env()
         )
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id
             )
@@ -520,6 +537,9 @@ class BotPublishRepository(
             # Inside the txn so a put failure rolls back.
             if affected > 0:
                 self._offload.upload(pending)
+            if affected > 0:
+                row = db.query(self.Model).filter(self.Model.id == publish_id).populate_existing().first()
+                record_transition(db, row, source_status=source_status, actor=audit_operator_id, audit=self._audit)
         if source_status is not None and affected == 0:
             return None
         return self.get_by_id(publish_id)
@@ -540,7 +560,7 @@ class BotPublishRepository(
         env = get_current_env()
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
         ext_json, pending = self._offload.prepare(ext, publish_id, env)
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             query = db.query(self.Model).filter(self.Model.id == publish_id)
             if expected_json is None:
                 query = query.filter(self.Model.ext.is_(None))
@@ -555,6 +575,8 @@ class BotPublishRepository(
             )
             if affected > 0:
                 self._offload.upload(pending)
+                row = db.query(self.Model).filter(self.Model.id == publish_id).populate_existing().first()
+                record_transition(db, row, source_status=row.status, actor=None, audit=self._audit)
         if affected == 0:
             return None
         return self.get_by_id(publish_id)
@@ -567,12 +589,13 @@ class BotPublishRepository(
         target_status: str,
         expected_ext: Optional[Dict[str, Any]],
         ext: Dict[str, Any],
+        audit_operator_id: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
         """CAS status and the exact serialized ext snapshot in one UPDATE."""
         env = get_current_env()
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
         ext_json, pending = self._offload.prepare(ext, publish_id, env)
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id,
                 self.Model.status == source_status,
@@ -591,6 +614,9 @@ class BotPublishRepository(
             )
             if affected > 0:
                 self._offload.upload(pending)
+            if affected > 0:
+                row = db.query(self.Model).filter(self.Model.id == publish_id).populate_existing().first()
+                record_transition(db, row, source_status=source_status, actor=audit_operator_id, audit=self._audit)
         if affected == 0:
             return None
         return self.get_by_id(publish_id)
