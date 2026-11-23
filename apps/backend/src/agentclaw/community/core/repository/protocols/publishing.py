@@ -347,6 +347,8 @@ class BotPublishRepositoryProtocol(Protocol):
         publish_id: int,
         target_status: str,
         source_status: Optional[str] = None,
+        *,
+        audit_operator_id: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
         """Update the publish status.
 
@@ -368,6 +370,8 @@ class BotPublishRepositoryProtocol(Protocol):
         target_status: str,
         ext: Dict[str, Any],
         source_status: Optional[str] = None,
+        *,
+        audit_operator_id: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
         """Update the publish status and ext field (optimistic lock).
 
@@ -407,6 +411,7 @@ class BotPublishRepositoryProtocol(Protocol):
         target_status: str,
         expected_ext: Optional[Dict[str, Any]],
         ext: Dict[str, Any],
+        audit_operator_id: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
         """Atomically replace status and ext when both snapshots still match."""
         ...
