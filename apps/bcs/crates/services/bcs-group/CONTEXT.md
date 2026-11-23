@@ -2,6 +2,14 @@
 
 ## Provides
 
+- `mutate_with_snapshot` returns a Group PATCH's version-fenced metadata and
+  labels together. SQL captures at most one indexed Card row inside the existing
+  transaction (a current locking read on MySQL); Memory captures under its Group
+  write guard. Legacy `mutate` keeps its result and SQL read cost unchanged.
+  No-op PATCH does not write/increment the version: its strict Card snapshot
+  must still match the metadata version, or the operation returns Conflict.
+  Neither path constructs a successful response using a post-commit label read.
+
 - Optional post-commit catalog change notifications for Group creation, provisioning, metadata, visibility and deletion.
 
 - `GroupCoreService::read_card_snapshot` delegates the strict, environment-scoped
@@ -63,6 +71,13 @@
 The crate owns group session business rules and lifecycle decisions. It does not own HTTP/WS handling or implementation selection.
 
 ## Tests
+
+- `python3 apps/bcs/scripts/e2e-test/group_card_story.py --binary apps/bcs/target/debug/bcs`
+  launches an isolated real HTTP server. ManagerWorker and StateMachine PATCH
+  responses are checked against read-only SQLite metadata/Card rows for label
+  replacement, omission, no-op version/timestamp preservation, clear, restore,
+  per-key deletion, and rejection without partial mutation. It preserves the
+  caller's LLVM profile path and also runs in the Singlebox story inventory.
 
 - `cargo test --package bcs-group --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-group --all-targets --manifest-path src/bcs/Cargo.toml`

@@ -2,6 +2,13 @@
 
 ## Provides
 
+- PATCH details use `GroupCoreService::mutate_with_snapshot`: name, version
+  and catalog labels are from the same commit, not a later Card query. Omitted
+  labels preserve that commit's collection; an explicit empty collection clears.
+  Display-profile work after COMMIT cannot replace these committed labels.
+  Deterministic SQLite tests pause A after COMMIT, commit B through another
+  facade/store, and then check both complete responses.
+
 - Normal Group summaries resolve nullable `driver_bot_name` from the driver
   participant after existing Bot-name backfill, without extra registry reads.
   Normal Group details resolve nullable `driver_bot_owner` (`human_<created_by>`)

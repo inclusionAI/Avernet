@@ -97,6 +97,7 @@ impl GroupRepoPort for MemoryGroupRepo {
             super::card_template::project_stored_template(card, id, group.label.as_deref(), group.context.as_deref())
         ).transpose()?;
         Ok(Some(bcs_service_api::types::GroupCardSnapshot {
+            version: group.version,
             catalog_labels:self.catalog_labels.read().await.get(id).cloned().unwrap_or_default(),
             group_id: group.id.clone(), group_kind: group.group_kind,
             group_strategy: group.group_strategy, visibility: group.visibility.clone(),
@@ -155,6 +156,13 @@ impl GroupRepoPort for MemoryGroupRepo {
         &self,
         command: CommitGroupEventfulMutation,
     ) -> ServiceResult<DomainGroup> {
+        Ok(self.commit_eventful_mutation_with_snapshot(command).await?.group)
+    }
+
+    async fn commit_eventful_mutation_with_snapshot(
+        &self,
+        command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
         let mut groups = self.groups.write().await;
         let current = groups
             .get(&command.group_id)
@@ -234,9 +242,11 @@ impl GroupRepoPort for MemoryGroupRepo {
             super::card_template::update_memory_template(&mut cards, &candidate);
         }
         if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
-            if let Some(labels)=&patch.catalog_labels { self.catalog_labels.write().await.insert(command.group_id,labels.clone()); }
+            if let Some(labels)=&patch.catalog_labels { self.catalog_labels.write().await.insert(command.group_id.clone(),labels.clone()); }
         }
-        Ok(candidate)
+        let catalog_labels = self.catalog_labels.read().await
+            .get(&command.group_id).cloned().unwrap_or_default();
+        Ok(bcs_service_api::types::GroupMutationSnapshot { group: candidate, catalog_labels })
     }
 
     async fn upsert(&self, group: DomainGroup) -> ServiceResult<()> {

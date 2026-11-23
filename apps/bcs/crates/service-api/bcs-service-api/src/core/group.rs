@@ -193,6 +193,13 @@ pub trait GroupCoreService: Send + Sync {
         })
     }
 
+    /// Apply a PATCH and return labels captured by the same commit boundary.
+    /// An unchanged PATCH returns a version-checked read snapshot, without a write.
+    /// The default fails closed rather than mixing a mutation with a later read.
+    async fn mutate_with_snapshot(&self, _command: GroupMutationCommand) -> ServiceResult<crate::types::GroupMutationSnapshot> {
+        Err(super::ServiceError::InternalError("Group mutation snapshots are not configured".into()))
+    }
+
     /// Apply one Group lifecycle mutation and its public Event in the same
     /// repository transaction. Implementations return the existing state for
     /// idempotent no-ops without producing an Event.

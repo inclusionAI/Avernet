@@ -552,3 +552,51 @@ async fn failed_create_rolls_back_group_members_template_labels_and_notification
         labels("running")
     );
 }
+
+#[tokio::test]
+async fn mutation_snapshots_capture_replace_clear_and_omission_without_postcommit_queries() {
+    for supplied in [None, Some(labels("running")), Some(CatalogLabels::default())] {
+        let f = fixture().await;
+        let expected = supplied.clone().unwrap_or_else(|| labels("trial"));
+        f.db.arm(false);
+        let snapshot = f.core.mutate_with_snapshot(command(GroupMutationKind::PatchMutableFields(
+            GroupMutableFieldsPatch {
+                label: Some("Snapshot".into()), catalog_labels: supplied, ..Default::default()
+            },
+        ))).await.unwrap();
+        assert_eq!(snapshot.group.label.as_deref(), Some("Snapshot"));
+        assert_eq!(snapshot.catalog_labels, expected);
+        assert_eq!(f.db.transactions.load(Ordering::SeqCst), 1);
+        assert_eq!(f.db.failed_reads.load(Ordering::SeqCst), 0);
+        assert_eq!(*f.changes.ids.lock().unwrap(), vec![GROUP.to_string()]);
+        let reader = MySqlGroupStore::sqlite(f.db.inner.clone(), ENV.to_string());
+        let persisted = reader.read_card_snapshot(GROUP).await.unwrap().unwrap();
+        assert_eq!(persisted.version, snapshot.group.version);
+        assert_eq!(persisted.catalog_labels, snapshot.catalog_labels);
+    }
+}
+
+#[tokio::test]
+async fn failed_snapshot_mutation_rolls_back_labels_metadata_and_notifications() {
+    let f = fixture().await;
+    f.db.arm(true);
+    assert!(f.core.mutate_with_snapshot(command(GroupMutationKind::PatchMutableFields(patch(true)))).await.is_err());
+    assert_eq!(f.db.transactions.load(Ordering::SeqCst), 1);
+    assert_eq!(f.db.successful_transactions.load(Ordering::SeqCst), 0);
+    assert!(f.changes.ids.lock().unwrap().is_empty());
+    let reader = MySqlGroupStore::sqlite(f.db.inner.clone(), ENV.to_string());
+    assert_eq!(reader.try_get(GROUP).await.unwrap().unwrap().label.as_deref(), Some("Before"));
+    assert_eq!(reader.read_card_snapshot(GROUP).await.unwrap().unwrap().catalog_labels, labels("trial"));
+}
+
+#[tokio::test]
+async fn unchanged_snapshot_patch_rejects_a_stale_cached_version_instead_of_mixing_labels() {
+    let f = fixture().await;
+    let other = GroupCore::with_repo(Arc::new(MySqlGroupStore::sqlite(f.db.inner.clone(), ENV.to_string())));
+    other.mutate(command(GroupMutationKind::PatchMutableFields(patch(true)))).await.unwrap();
+    let result = f.core.mutate_with_snapshot(command(GroupMutationKind::PatchMutableFields(
+        GroupMutableFieldsPatch { label: Some("Before".into()), ..Default::default() },
+    ))).await;
+    assert!(matches!(result, Err(bcs_service_api::ServiceError::Conflict(_))));
+    assert!(f.changes.ids.lock().unwrap().is_empty());
+}

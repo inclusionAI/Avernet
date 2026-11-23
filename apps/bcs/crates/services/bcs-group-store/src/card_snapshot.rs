@@ -6,7 +6,7 @@ use bcs_service_api::types::GroupCardSnapshot;
 impl MySqlGroupStore {
     pub(crate) async fn read_card_snapshot_sql(&self, id: &str) -> ServiceResult<Option<GroupCardSnapshot>> {
         let rows = self.db.query_with(&self.logical_db,
-            "SELECT g.group_id, g.group_kind, g.group_strategy, g.visibility, g.record_status, \
+            "SELECT g.version, g.group_id, g.group_kind, g.group_strategy, g.visibility, g.record_status, \
              g.label, g.context, c.card_template, c.catalog_labels FROM bcs_groups AS g \
              LEFT JOIN bcs_group_agent_cards AS c ON c.env = g.env AND c.group_id = g.group_id \
              WHERE g.env = ? AND g.group_id = ? LIMIT 1",
@@ -29,6 +29,7 @@ impl MySqlGroupStore {
             card_template::project_stored_template(card, id, label.as_deref(), context.as_deref())
         }).transpose()?;
         Ok(Some(GroupCardSnapshot {
+            version: db_get_column(row, "version").map_err(|e| ServiceError::InternalError(format!("decode Group Card version: {e}")))?,
             catalog_labels:bcs_service_api::types::catalog_labels::CatalogLabels::from_storage(optional("catalog_labels")?.as_deref())?,
             group_id: required("group_id")?, group_kind, group_strategy,
             visibility: required("visibility")?, record_status: required("record_status")?, card_template,

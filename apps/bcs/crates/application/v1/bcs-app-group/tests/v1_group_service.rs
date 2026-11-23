@@ -213,7 +213,15 @@ impl Fixture {
         friends: Option<Arc<FriendCore>>,
         bots: Option<Arc<BotCore>>,
     ) -> Self {
-        let group_repo = Arc::new(MemoryGroupRepo::new());
+        Self::build_with_group_repo(runtime, friends, bots, Arc::new(MemoryGroupRepo::new())).await
+    }
+
+    async fn build_with_group_repo(
+        runtime: Option<Arc<dyn CollaborationRuntimeService>>,
+        friends: Option<Arc<FriendCore>>,
+        bots: Option<Arc<BotCore>>,
+        group_repo: Arc<dyn bcs_service_api::port::repo::GroupRepoPort>,
+    ) -> Self {
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
         let bots = bots.unwrap_or_else(|| Arc::new(BotCore::memory()));
         let relation = Arc::new(RelationCore::memory());
@@ -909,3 +917,6 @@ mod activity_sort;
 
 #[path="v1_group_service/catalog_labels.rs"]
 mod catalog_labels;
+
+#[path = "v1_group_service/catalog_snapshot.rs"]
+mod catalog_snapshot;

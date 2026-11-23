@@ -101,7 +101,7 @@ impl GroupServiceImpl {
         };
         let persisted = self
             .groups
-            .mutate(GroupMutationCommand {
+            .mutate_with_snapshot(GroupMutationCommand {
                 group_id: command.group_id.clone(),
                 actor: mutation_actor,
                 correlation_id: None,
@@ -110,7 +110,7 @@ impl GroupServiceImpl {
             })
             .await
             .map_err(map_service_error)?;
-        self.project_detail_with_state_machine(persisted, state_machine_projection)
+        self.project_detail_with_labels(persisted.group, state_machine_projection, Some(persisted.catalog_labels))
             .await
     }
 

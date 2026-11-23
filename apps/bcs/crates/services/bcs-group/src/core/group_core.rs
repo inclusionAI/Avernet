@@ -32,6 +32,92 @@ pub struct GroupCore {
 }
 
 impl GroupCore {
+    async fn mutate_snapshot_impl(&self, command: GroupMutationCommand, capture_labels: bool) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
+        let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
+        let current = self
+            .repo
+            .try_get(&command.group_id)
+            .await?
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        if let Some(registry) = &self.collaboration_registry {
+            let mut actors = current.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+            match &command.mutation {
+                GroupMutationKind::AddParticipant { participant, .. } => actors.push(participant.bot_uuid.clone()),
+                GroupMutationKind::RemoveParticipant { actor_id, .. } => actors.retain(|id| id != actor_id),
+                _ => {},
+            }
+            if registry.collaboration_owner(&actors).await?.is_some() {
+                let visibility = match &command.mutation {
+                    GroupMutationKind::PatchMutableFields(patch) => patch.visibility.as_deref().unwrap_or(&current.visibility),
+                    _ => &current.visibility,
+                };
+                if visibility != "private" {
+                    return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+                }
+            }
+        }
+        let next_version = current.version.checked_add(1).ok_or_else(|| {
+            ServiceError::Conflict(format!("Group '{}' version overflow", current.id))
+        })?;
+        let Some(prepared) = prepare_group_mutation(&current, &command.mutation, next_version)?
+        else {
+            let catalog_labels = if capture_labels {
+                let snapshot = self.repo.read_card_snapshot(&current.id).await?
+                    .ok_or_else(|| ServiceError::GroupNotFound(current.id.clone()))?;
+                if snapshot.version != current.version {
+                    return Err(ServiceError::Conflict("Group changed during unchanged PATCH".into()));
+                }
+                snapshot.catalog_labels
+            } else { Default::default() };
+            return Ok(bcs_service_api::types::GroupMutationSnapshot { group: current, catalog_labels });
+        };
+        let mutated_at = Utc::now();
+        let mutated_at_ms = u64::try_from(mutated_at.timestamp_millis()).map_err(|_| {
+            ServiceError::InternalError("Group mutation timestamp is out of range".to_string())
+        })?;
+        let event = match (prepared.event, self.event_record_factory.as_ref()) {
+            (Some(event), Some(factory)) => factory
+                .prepare(NewEvent {
+                    event_id: format!("evt_{}", uuid::Uuid::new_v4()),
+                    event_type: event.event_type.to_string(),
+                    schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+                    producer: "bcs-group".to_string(),
+                    producer_key: format!("{}:{}:v{}", event.event_type, current.id, next_version),
+                    occurred_at: mutated_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+                    subject: event.subject,
+                    scope: EventScope {
+                        group_id: Some(current.id.clone()),
+                        ..EventScope::default()
+                    },
+                    stream_key: format!("group:{}", current.id),
+                    actor: Some(command.actor),
+                    correlation_id: command.correlation_id,
+                    causation_event_id: None,
+                    trace_id: command.trace_id,
+                    data: event.data,
+                })
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+            _ => None,
+        };
+        let commit = CommitGroupEventfulMutation {
+                group_id: current.id.clone(),
+                expected_version: current.version,
+                mutated_at_ms,
+                mutation: prepared.mutation,
+                event,
+            };
+        let result = if capture_labels {
+            self.repo.commit_eventful_mutation_with_snapshot(commit).await?
+        } else {
+            bcs_service_api::types::GroupMutationSnapshot {
+                group: self.repo.commit_eventful_mutation(commit).await?,
+                catalog_labels: Default::default(),
+            }
+        };
+        self.catalog_changed(&current.id);
+        Ok(result)
+    }
+
     pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
         self.catalog_changes = port;
         self
@@ -164,75 +250,16 @@ impl GroupCoreService for GroupCore {
     }
 
     async fn mutate(&self, command: GroupMutationCommand) -> ServiceResult<Group> {
-        let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
-        let current = self
-            .repo
-            .try_get(&command.group_id)
-            .await?
-            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
-        if let Some(registry) = &self.collaboration_registry {
-            let mut actors = current.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
-            match &command.mutation {
-                GroupMutationKind::AddParticipant { participant, .. } => actors.push(participant.bot_uuid.clone()),
-                GroupMutationKind::RemoveParticipant { actor_id, .. } => actors.retain(|id| id != actor_id),
-                _ => {},
-            }
-            if registry.collaboration_owner(&actors).await?.is_some() {
-                let visibility = match &command.mutation {
-                    GroupMutationKind::PatchMutableFields(patch) => patch.visibility.as_deref().unwrap_or(&current.visibility),
-                    _ => &current.visibility,
-                };
-                if visibility != "private" {
-                    return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
-                }
-            }
+        Ok(self.mutate_snapshot_impl(command, false).await?.group)
+    }
+
+    async fn mutate_with_snapshot(&self, command: GroupMutationCommand) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
+        if !matches!(&command.mutation, GroupMutationKind::PatchMutableFields(_)) {
+            return Err(ServiceError::InvalidOperation {
+                message: "Group detail mutation snapshot requires PATCH".into(), request_id: None,
+            });
         }
-        let next_version = current.version.checked_add(1).ok_or_else(|| {
-            ServiceError::Conflict(format!("Group '{}' version overflow", current.id))
-        })?;
-        let Some(prepared) = prepare_group_mutation(&current, &command.mutation, next_version)?
-        else {
-            return Ok(current);
-        };
-        let mutated_at = Utc::now();
-        let mutated_at_ms = u64::try_from(mutated_at.timestamp_millis()).map_err(|_| {
-            ServiceError::InternalError("Group mutation timestamp is out of range".to_string())
-        })?;
-        let event = match (prepared.event, self.event_record_factory.as_ref()) {
-            (Some(event), Some(factory)) => factory
-                .prepare(NewEvent {
-                    event_id: format!("evt_{}", uuid::Uuid::new_v4()),
-                    event_type: event.event_type.to_string(),
-                    schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
-                    producer: "bcs-group".to_string(),
-                    producer_key: format!("{}:{}:v{}", event.event_type, current.id, next_version),
-                    occurred_at: mutated_at.to_rfc3339_opts(SecondsFormat::Millis, true),
-                    subject: event.subject,
-                    scope: EventScope {
-                        group_id: Some(current.id.clone()),
-                        ..EventScope::default()
-                    },
-                    stream_key: format!("group:{}", current.id),
-                    actor: Some(command.actor),
-                    correlation_id: command.correlation_id,
-                    causation_event_id: None,
-                    trace_id: command.trace_id,
-                    data: event.data,
-                })
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?,
-            _ => None,
-        };
-        let result = self.repo
-            .commit_eventful_mutation(CommitGroupEventfulMutation {
-                group_id: current.id.clone(),
-                expected_version: current.version,
-                mutated_at_ms,
-                mutation: prepared.mutation,
-                event,
-            })
-            .await?;
-        self.catalog_changed(&current.id);
-        Ok(result)
+        self.mutate_snapshot_impl(command, true).await
     }
 
     async fn patch_mutable_fields(
