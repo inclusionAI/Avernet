@@ -42,6 +42,7 @@ from .capability_delivery_guard import (
     CapabilityDeliveryUnavailable,
 )
 from .passport_write_checkpoint import passport_write_checkpoint
+from .skill_retirement import SkillRetirementEvidence, unresolved_retirements
 
 
 logger = get_logger()
@@ -95,23 +96,29 @@ class _ApplyDelivery:
                     mcp=scope.mcp or bool(retry.released_mcp),
                     released_mcp=scope.released_mcp | retry.released_mcp,
                 )
+            evidence = self.reconciler.retirement_evidence(binding)
+            standalone = await asyncio.to_thread(evidence.load) if scope.skills else ()
+            if standalone and retry is not None:
+                candidates = tuple(dict.fromkeys((*retry.retired_mappings, *standalone)))
+                retry = replace(retry, retired_mappings=candidates)
             plan = await asyncio.to_thread(
                 self.projector.resolve_plan,
                 bot_id=bot_id, owner_id=binding.owner_id, scope=scope,
             )
             if not is_bot_ready(plan.bot):
                 return self._not_ready(), retry
-            supplies = plan.projection.skill_mappings
-            supplied = {mapping.link_name for mapping in supplies}
-            candidates = (
-                tuple(mapping for mapping in retry.retired_mappings if mapping.link_name not in supplied)
-                if retry is not None else ()
-            )
-            retired = retirement_request(candidates, supplies) if scope.skills else []
+            candidates = retry.retired_mappings if retry is not None else ()
+            retired = retirement_request(candidates, plan.projection.skill_mappings) if scope.skills else []
             result = await self.reconciler.deliver(
                 self.lease, binding,
                 partial(self.projector.apply_plan, plan=plan, retired_mappings=retired, scope=scope),
             )
+            pending = unresolved_retirements(candidates, retired, result)
+            if standalone:
+                remaining = tuple(mapping for mapping in pending if mapping in standalone)
+                if remaining != standalone:
+                    await self.lease.verify()
+                    await asyncio.to_thread(evidence.save, remaining)
         except CapabilityDeliveryUnavailable:
             return self.reconciler.delivery_busy(), retry
         except Exception:
@@ -121,30 +128,15 @@ class _ApplyDelivery:
                 reason="Capability synchronization could not be confirmed.",
             ), retry
 
-        settled = {RuntimeProjectionStatus.CONVERGED, RuntimeProjectionStatus.SKIPPED}
-        if result.status in settled:
+        if result.status is RuntimeProjectionStatus.CONVERGED:
             return result, None
-        if result.components.get("skills") is RuntimeProjectionStatus.CONVERGED:
-            candidates = ()
-        elif not result.delivery_uncertain:
-            # If there is another exact candidate, let the next manual Apply
-            # try it after this one was confirmed to mismatch.
-            rejected = {
-                issue.name for issue in result.issues
-                if issue.requested_action == "RETIRE" and issue.code == "RETIRED_TARGET_IDENTITY_MISMATCH"
-            }
-            candidates = tuple(
-                mapping for mapping in candidates
-                if not (
-                    mapping in retired and mapping.link_name in rejected
-                    and any(other.link_name == mapping.link_name and other != mapping for other in candidates)
-                )
-            )
+        if result.status is RuntimeProjectionStatus.SKIPPED and not pending and not scope.released_mcp:
+            return result, None
         releases = (
             frozenset() if result.components.get("mcp") is RuntimeProjectionStatus.CONVERGED
             else scope.released_mcp
         )
-        return result, CapabilityProjectionRetry(binding.device_id, candidates, releases)
+        return result, CapabilityProjectionRetry(binding.device_id, pending, releases)
 
     def _retry_for(
         self, scope: ProjectionScope, binding: RuntimeBindingTarget | None,
@@ -236,19 +228,45 @@ class CapabilityProjectionReconciler:
                 binding = await asyncio.to_thread(self.current_binding, bot_id, entity_id)
                 if binding is None:
                     return _ApplyDelivery._not_ready()
-                plan = await asyncio.to_thread(
-                    self._projector.resolve_plan, bot_id=bot_id, owner_id=binding.owner_id, scope=scope,
+                return await self._deliver_standalone(
+                    lease, binding, scope, retired_mappings, mcp_and_cli_only=mcp_and_cli_only,
                 )
-                if not is_bot_ready(plan.bot):
-                    return _ApplyDelivery._not_ready()
-                if mcp_and_cli_only:
-                    operation = partial(self._projector.apply_mcp_and_cli_plan, plan=plan, scope=scope)
-                else:
-                    retired = retirement_request(retired_mappings, plan.projection.skill_mappings)
-                    operation = partial(self._projector.apply_plan, plan=plan, retired_mappings=retired, scope=scope)
-                return await self.deliver(lease, binding, operation)
         except CapabilityDeliveryUnavailable:
             return self.delivery_busy()
+
+    async def _deliver_standalone(
+        self, lease: CapabilityDeliveryLease, binding: RuntimeBindingTarget, scope: ProjectionScope,
+        retired_mappings: Sequence[PoolSkillMapping], *, mcp_and_cli_only: bool,
+    ) -> RuntimeProjectionResult:
+        evidence = self.retirement_evidence(binding)
+        previous = await asyncio.to_thread(evidence.load) if scope.skills else ()
+        candidates = tuple(dict.fromkeys((*retired_mappings, *previous)))
+        attempted: list[PoolSkillMapping] = []
+        result = None
+        try:
+            plan = await asyncio.to_thread(
+                self._projector.resolve_plan, bot_id=binding.bot_id, owner_id=binding.owner_id, scope=scope,
+            )
+            if not is_bot_ready(plan.bot):
+                return _ApplyDelivery._not_ready()
+            if mcp_and_cli_only:
+                operation = partial(self._projector.apply_mcp_and_cli_plan, plan=plan, scope=scope)
+            else:
+                attempted = retirement_request(candidates, plan.projection.skill_mappings)
+                operation = partial(self._projector.apply_plan, plan=plan, retired_mappings=attempted, scope=scope)
+            result = await self.deliver(lease, binding, operation)
+            return result
+        finally:
+            remaining = tuple(
+                mapping for mapping in unresolved_retirements(candidates, attempted, result)
+                if mapping.corpus == "local"
+            )
+            if remaining != previous:
+                await lease.verify()
+                await asyncio.to_thread(evidence.save, remaining)
+
+    def retirement_evidence(self, binding: RuntimeBindingTarget) -> SkillRetirementEvidence:
+        return SkillRetirementEvidence(self._bindings, binding)
 
     def current_binding(self, bot_id: str, entity_id: str) -> RuntimeBindingTarget | None:
         bot = self._bots.get_by_id_and_entity(bot_id, entity_id)

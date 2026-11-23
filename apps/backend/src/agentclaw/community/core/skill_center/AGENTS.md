@@ -432,6 +432,13 @@ candidates. An explicit Apply can send the current desired state again without
 a configuration diff. Retirement requires the same physical device, no current
 supply for the target, and an exact identity check by the Runtime.
 
+Keep superseded mapping identities in retry evidence until Skill delivery
+converges. Only send retirement identities for names without current supply.
+With combined capability delivery enabled, an incomplete standalone Skill
+delivery leaves its unresolved Local identities in the current binding's private
+metadata for the next Skill projection.
+Existing Desktop Skill recovery uses the same delivery lease and evidence.
+
 The edit lease protects package operations while a request is active. An
 unconfirmed package receipt remains `UNKNOWN`, and a later request can compete
 for the lease. A timed-out device request can still complete after lease release.

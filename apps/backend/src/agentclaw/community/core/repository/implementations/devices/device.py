@@ -498,6 +498,7 @@ class DeviceRepository(
             row = (
                 db.query(EntityDeviceBinding.device_props)
                 .filter(EntityDeviceBinding.id == binding_id)
+                .with_for_update()
                 .first()
             )
             if row is None:

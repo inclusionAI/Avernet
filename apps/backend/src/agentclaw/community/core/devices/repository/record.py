@@ -9,6 +9,17 @@ from datetime import datetime
 from typing import Any
 
 
+_SKILL_RETIREMENT_PREFIX = "_local_skill_retirements:"
+
+
+def skill_retirement_property(*, bot_id: str, entity_id: str, tenant: str) -> str:
+    return f"{_SKILL_RETIREMENT_PREFIX}{len(tenant)}:{tenant}:{len(entity_id)}:{entity_id}:{bot_id}"
+
+
+def public_device_props(props: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in props.items() if not key.startswith(_SKILL_RETIREMENT_PREFIX)}
+
+
 @dataclass
 class DeviceBindingRecord:
     """设备绑定记录数据类.
@@ -36,6 +47,7 @@ class DeviceBindingRecord:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict — compatible with Pydantic model_dump()."""
         result = asdict(self)
+        result["device_props"] = public_device_props(self.device_props)
         # Convert datetime objects to ISO format strings for JSON serialization
         for key in ("released_at", "last_alive_at", "gmt_create", "gmt_modified"):
             val = result.get(key)
