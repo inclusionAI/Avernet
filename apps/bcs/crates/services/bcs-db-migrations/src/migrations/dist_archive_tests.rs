@@ -39,7 +39,7 @@ async fn archive_upgrade_preserves_history_and_immutable_unique_rows() -> DbResu
         .is_err()
     );
     assert_eq!(
-        applied_sqlite_migration(&db, 46)
+        applied_sqlite_migration(&db, 47)
             .await?
             .map(|migration| migration.name),
         Some("dist_immutable_objects".into())
