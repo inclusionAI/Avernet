@@ -101,7 +101,7 @@ VALUES ('ctx-owners-upgrade', 'owner_upgrade', 'session', 'sess-upgrade', 'v1', 
 fn mysql_group_context_owners_migration_adds_nullable_column_without_backfill() {
     let migration = include_str!("../../../../../../migrations/mysql/034_group_context_owners.sql");
     assert_eq!(
-        migration.replace("\r\n", "\n").trim(),
+        migration.trim(),
         "ALTER TABLE bcs_group_contexts\n    ADD COLUMN owners_json VARCHAR(4096) NULL;"
     );
 }
@@ -111,7 +111,7 @@ fn oceanbase_group_context_owners_migration_adds_nullable_column_without_backfil
     let migration =
         include_str!("../../../../../../migrations/oceanbase/032_group_context_owners.sql");
     assert_eq!(
-        migration.replace("\r\n", "\n").trim(),
+        migration.trim(),
         "ALTER TABLE bcs_group_contexts\n    ADD COLUMN owners_json JSON NULL;"
     );
 }

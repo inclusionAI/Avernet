@@ -53,7 +53,7 @@ def recovery_outcome(
 ) -> str | None:
     if status in ("failed", "aborted"):
         return "failed"
-    if status != "completed":
+    if status != "completed" or run_result is None:
         return None
     if run_result != "delivered":
         return "failed"
