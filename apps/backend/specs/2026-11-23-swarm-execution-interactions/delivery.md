@@ -95,3 +95,29 @@ recovery is integrated here. The public default planner explicitly ignores
 replanning; a host must bind its planner for other modes. Workers request/read
 clarification through the trusted Service API and must cooperatively consume
 replies. Persistent notifications are exposed through polling/Event reads.
+
+## Commit preparation follow-up (2026-11-23)
+
+- Implementation commit: `7b9687c5f1` (`feat(backend): add Swarm stage execution and interaction APIs`).
+  This supersedes the initial working-tree-only status above; merge and deployment
+  are not claimed.
+- The HTTP fast gate initially found 41 uncovered routes, including the three new
+  Swarm execution endpoints. Added real full-app registered happy/error cases for
+  each new endpoint rather than expanding the frozen coverage baseline.
+- Registered runner: `pytest -q tests/community/endpoints/test_endpoint_runner.py -k swarm_execution`
+  passed **6 tests**. Cases retain real business services and SQL persistence;
+  only the worker/evidence and publication-authorization capability seams are
+  supplied through test DI. Assertions check dispatch, DAG preview, persisted
+  feedback and that unknown-binding requests cannot dispatch additional work.
+- Combined execution/revision/HTTP/schema, HTTP fast checks, coverage-framework
+  helpers and endpoint no-mock guards: **137 passed, 1 failed**. The sole failure
+  is `test_endpoint_coverage_against_baseline`, reporting 38 existing Method routes.
+  A clean detached worktree at the exact parent reproduced that failure and the
+  same 38 rendered gaps; set comparison found **zero new gaps**. The frozen
+  baseline and gate remain unchanged.
+- The earlier combined architecture + feature + HTTP fast run passed **561 tests**
+  with the same coverage-gate test failing before the new endpoint registrations
+  were added. Architecture source has not changed in this follow-up.
+- The new registered-case module is 171 lines and passes default Ruff checks;
+  the feature commit passes the repository's local Python SAST gate.
+- Full Backend CI/coverage and remote runtime integration remain unverified.

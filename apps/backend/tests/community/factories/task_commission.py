@@ -38,4 +38,3 @@ def commission_report_request(
     return {"jsonrpc": "2.0", "id": "rpc-1", "method": "message/send", "params": {
         "message": {"kind": "message", "messageId": "msg-1", "role": "user",
                     "parts": [{"kind": "data", "data": envelope}]}}}
-

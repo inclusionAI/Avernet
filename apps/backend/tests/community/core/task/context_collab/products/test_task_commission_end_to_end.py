@@ -184,7 +184,7 @@ OBJECTIVE = (
   - [ ] 任务如何推进的语义不明确：现在只有Workflow的时候建议通过Advance操作族推进，没有workflow的时候没有说明
 - 能力缺少
   - [ ] open模式下，协议中的DataModel只有机会发布、参与申请、决策结果这三个，缺少录取判断策略（谁来做录取判断、怎么判断）
-- 问题  
+- 问题
   - [ ] open方法中的参与类型，协议中的枚举不在一个维度：participation_type: COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | SINGLE_CONTRIBUTION
 """
 
