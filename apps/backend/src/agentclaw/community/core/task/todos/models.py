@@ -26,10 +26,30 @@ MAX_INTERACTION_MENTIONS = 20
 
 
 class TodoStatus(StrEnum):
-    PENDING = "pending"
+    """Product states that can be persisted on a Todo resource."""
+
+    NOT_STARTED = "not_started"
     IN_PROGRESS = "in_progress"
-    PENDING_ACCEPTANCE = "pending_acceptance"
+    INTERRUPTED = "interrupted"
+    PENDING_ACTION = "pending_action"
     COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+    # Source compatibility for callers compiled against the pre-template API.
+    # These aliases never create additional persisted/product states.
+    PENDING = NOT_STARTED
+    PENDING_ACCEPTANCE = PENDING_ACTION
+
+
+# Public response schemas and workbench filters use this explicit order.
+TODO_STATUS_ORDER: tuple[TodoStatus, ...] = (
+    TodoStatus.NOT_STARTED,
+    TodoStatus.IN_PROGRESS,
+    TodoStatus.PENDING_ACTION,
+    TodoStatus.INTERRUPTED,
+    TodoStatus.COMPLETED,
+    TodoStatus.CANCELLED,
+)
 
 
 class AcceptanceVerdict(StrEnum):
@@ -65,7 +85,7 @@ class TodoAcceptanceTarget:
 
 @dataclass(frozen=True)
 class TodoRecord:
-    """The product Todo owned by A; execution details stay in B events."""
+    """The product Todo owned by A; execution details stay in events."""
 
     todo_id: str
     space_id: int
@@ -78,6 +98,13 @@ class TodoRecord:
     created_by: str
     created_at: datetime
     updated_at: datetime
+    template_id: str = ""
+    template_version_id: str = ""
+    template_name_snapshot: str = ""
+    current_stage_instance_id: str | None = None
+    pending_action_kind: str | None = None
+    state_reason: str | None = None
+    requested_action: str | None = None
 
 
 @dataclass(frozen=True)

@@ -51,6 +51,7 @@ from agentclaw.community.core.task.todos.models import (
     TodoRecord,
     TodoStatus,
 )
+from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
 from agentclaw.community.core.task.todos.source_models import (
     MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
@@ -198,6 +199,14 @@ class TodoService(TodoServiceProtocol):
             todo_id=todo.todo_id,
             env=env,
         )
+
+    def list_stages(
+        self, *, todo_id: str, actor_id: str, env: str | None = None
+    ) -> tuple[TodoStageRecord, ...]:
+        todo, _normalized_actor_id = self._load_todo(
+            todo_id=todo_id, actor_id=actor_id, env=env
+        )
+        return self._repository.list_stages(todo_id=todo.todo_id)
 
     def list_events(
         self, *, todo_id: str, actor_id: str, env: str | None = None
@@ -707,8 +716,15 @@ class TodoService(TodoServiceProtocol):
             return value
         if not isinstance(value, str):
             raise ValidationError("status must be a string")
+        normalized = value.strip()
+        legacy = {
+            "pending": TodoStatus.NOT_STARTED,
+            "pending_acceptance": TodoStatus.PENDING_ACTION,
+        }
+        if normalized in legacy:
+            return legacy[normalized]
         try:
-            return TodoStatus(value.strip())
+            return TodoStatus(normalized)
         except ValueError as exc:
             raise ValidationError("status is invalid") from exc
 

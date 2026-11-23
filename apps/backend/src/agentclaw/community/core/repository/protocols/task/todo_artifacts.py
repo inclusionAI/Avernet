@@ -23,6 +23,7 @@ class TodoArtifactRepositoryProtocol(Protocol):
         collab_context_id: str,
         token_hash: str,
         executor_id: str,
+        stage_instance_id: str | None = None,
     ) -> TodoExecutionRecord: ...
 
     @abstractmethod

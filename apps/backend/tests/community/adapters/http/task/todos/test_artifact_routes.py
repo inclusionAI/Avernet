@@ -13,6 +13,7 @@ from agentclaw.community.adapters.http.task.todos.artifact_routes import (
     ReportTodoArtifactRequest,
     report_todo_artifact,
     upload_todo_artifact_file,
+    router,
 )
 from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactKind,
@@ -26,6 +27,10 @@ def _request(path: str) -> Request:
     request = Request(scope={"type": "http", "method": "POST", "path": path})
     request.state.trace_id = "trace-todo-artifact"
     return request
+
+
+def test_bot_stage_outcome_route_is_not_exposed():
+    assert not any(route.path.endswith("/outcome") for route in router.routes)
 
 
 def _record(kind: TodoArtifactKind, content: dict[str, object]) -> TodoArtifactRecord:
@@ -126,6 +131,8 @@ async def test_complete_route_passes_execution_credential_and_returns_acknowledg
         body=CompleteTodoRequest(
             todo_execution_id="todoexec_1",
             collab_context_id="context_from_untrusted_legacy_client",
+            summary="Implementation completed and verified.",
+            result={"verification": "passed", "pr_url": "https://example.test/pr/1"},
         ),
         request=_request("/api/v1/collaboration/tasks/todos/todo_1/complete"),
         execution_token="secret-token",
@@ -143,6 +150,8 @@ async def test_complete_route_passes_execution_credential_and_returns_acknowledg
                 "todo_id": "todo_1",
                 "todo_execution_id": "todoexec_1",
                 "execution_token": "secret-token",
+                "summary": "Implementation completed and verified.",
+                "result": {"verification": "passed", "pr_url": "https://example.test/pr/1"},
             },
         )
     ]
@@ -155,6 +164,16 @@ def test_complete_request_accepts_legacy_execution_id_during_compatibility_windo
     )
 
     assert body.todo_execution_id == "todoexec_legacy"
+
+
+def test_complete_request_defaults_completion_content_for_legacy_clients():
+    body = CompleteTodoRequest(
+        todo_execution_id="todoexec_legacy",
+        collab_context_id="context_legacy",
+    )
+
+    assert body.summary is None
+    assert body.result == {}
 
 
 def test_complete_request_rejects_conflicting_execution_identifiers():

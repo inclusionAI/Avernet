@@ -269,7 +269,7 @@ def _bind_source_world(world) -> None:
 
 def _todo(
     *,
-    status: TodoStatus = TodoStatus.PENDING,
+    status: TodoStatus = TodoStatus.NOT_STARTED,
     context_id: str | None = None,
     todo_id: str = "todo_1",
 ) -> TodoRecord:
@@ -296,7 +296,7 @@ class _InMemoryTodos:
         self.todo = _todo(
             todo_id="todo_created",
             context_id=None,
-            status=TodoStatus.PENDING,
+            status=TodoStatus.NOT_STARTED,
         )
         self.todo = replace(
             self.todo,
@@ -336,7 +336,7 @@ class _InMemoryTodos:
         return (self.todo,)[: kwargs["limit"]]
 
     def bind_context_if_pending(self, **kwargs: Any) -> TodoRecord:
-        if self.todo.status is not TodoStatus.PENDING or self.todo.collab_context_id:
+        if self.todo.status is not TodoStatus.NOT_STARTED or self.todo.collab_context_id:
             raise TodoStateConflictError("Todo is not available for context binding")
         self.todo = replace(
             self.todo,
@@ -365,7 +365,7 @@ class _InMemoryTodos:
 def _bind_todo_world(
     world,
     *,
-    status: TodoStatus = TodoStatus.PENDING,
+    status: TodoStatus = TodoStatus.NOT_STARTED,
     context_id: str | None = None,
     seed_context: bool = False,
     seed_interaction: str | None = None,
@@ -467,7 +467,7 @@ def list_todos_forbidden():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/collaboration/tasks/todos",
-    scenario="create_pending",
+    scenario="create_not_started",
     input=CaseInput(
         query_params={"user_id": _USER_ID},
         headers=_principal_headers(),
@@ -484,7 +484,7 @@ def list_todos_forbidden():
     ),
 )
 def create_todo_ok():
-    """A Space member creates a pending Todo for an eligible Bot."""
+    """A Space member creates a not-started Todo for an eligible Bot."""
 
 
 @endpoint_test(
@@ -652,7 +652,7 @@ def get_dima_work_item_draft_forbidden():
 @endpoint_test(
     method="GET",
     path="/openapi/v1/collaboration/tasks/todos/{todo_id}",
-    scenario="get_pending",
+    scenario="get_not_started",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
         query_params={"user_id": _USER_ID},
@@ -661,11 +661,11 @@ def get_dima_work_item_draft_forbidden():
     seed=lambda world: _bind_todo_world(world),
     expect=ExpectSuccess(
         status=200,
-        json_contains={"code": 200000, "data": {"status": "pending"}},
+        json_contains={"code": 200000, "data": {"status": "not_started"}},
     ),
 )
 def get_todo_ok():
-    """The owner reads a pending Todo."""
+    """The owner reads a not-started Todo."""
 
 
 @endpoint_test(
@@ -687,7 +687,7 @@ def get_todo_not_found():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/collaboration/tasks/todos/{todo_id}/run",
-    scenario="dispatch_pending",
+    scenario="dispatch_not_started",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
         query_params={"user_id": _USER_ID},

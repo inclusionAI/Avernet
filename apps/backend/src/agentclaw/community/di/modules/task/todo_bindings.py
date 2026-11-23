@@ -10,12 +10,16 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 from agentclaw.community.core.repository.implementations.task.todos import (
     TodoArtifactRepository,
     TodoRepository,
+    TodoTemplateRepository,
 )
 from agentclaw.community.core.repository.protocols.task.todo_artifacts import (
     TodoArtifactRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.todo_templates import (
+    TodoTemplateRepositoryProtocol,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.context_collab.service_api import (
@@ -40,12 +44,22 @@ from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
 from agentclaw.community.core.task.todos.scheduler import TodoScheduler
+from agentclaw.community.core.task.todos.stage_outcome_protocol import TodoStageServiceProtocol
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
 from agentclaw.community.core.task.todos.source_client_protocol import (
     TodoSourceClientProtocol,
 )
 from agentclaw.community.core.task.todos.source_service_protocol import (
     TodoSourceServiceProtocol,
+)
+from agentclaw.community.core.task.todos.template_capability_protocol import (
+    TodoTemplateCapabilityServiceProtocol,
+)
+from agentclaw.community.core.task.todos.template_creation_protocol import (
+    TodoTemplateCreationServiceProtocol,
+)
+from agentclaw.community.core.task.todos.template_management_protocol import (
+    TodoTemplateManagementServiceProtocol,
 )
 from agentclaw.community.core.task.todos.services.dima_source_client import (
     DimaSourceClient,
@@ -59,6 +73,16 @@ from agentclaw.community.core.task.todos.services.todo_execution_service import 
 from agentclaw.community.core.task.todos.services.todo_service import TodoService
 from agentclaw.community.core.task.todos.services.todo_source_service import (
     TodoSourceService,
+)
+from agentclaw.community.core.task.todos.services.todo_stage_service import TodoStageService
+from agentclaw.community.core.task.todos.services.todo_template_capability_service import (
+    TodoTemplateCapabilityService,
+)
+from agentclaw.community.core.task.todos.services.todo_template_creation_service import (
+    TodoTemplateCreationService,
+)
+from agentclaw.community.core.task.todos.services.todo_template_service import (
+    TodoTemplateService,
 )
 from agentclaw.community.di.modules.config_module import _as_bool, _as_int, _block
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
@@ -74,11 +98,32 @@ class TaskTodoBindings(Module):
     def configure(self, binder: Binder) -> None:
         binder.bind(TodoRepositoryProtocol, to=TodoRepository, scope=singleton)
         binder.bind(
+            TodoTemplateRepositoryProtocol,
+            to=TodoTemplateRepository,
+            scope=singleton,
+        )
+        binder.bind(
             TodoArtifactRepositoryProtocol,
             to=TodoArtifactRepository,
             scope=singleton,
         )
         binder.bind(TodoServiceProtocol, to=TodoService, scope=singleton)
+        binder.bind(TodoStageServiceProtocol, to=TodoStageService, scope=singleton)
+        binder.bind(
+            TodoTemplateCapabilityServiceProtocol,
+            to=TodoTemplateCapabilityService,
+            scope=singleton,
+        )
+        binder.bind(
+            TodoTemplateManagementServiceProtocol,
+            to=TodoTemplateService,
+            scope=singleton,
+        )
+        binder.bind(
+            TodoTemplateCreationServiceProtocol,
+            to=TodoTemplateCreationService,
+            scope=singleton,
+        )
         binder.bind(
             TodoSourceClientProtocol,
             to=DimaSourceClient,

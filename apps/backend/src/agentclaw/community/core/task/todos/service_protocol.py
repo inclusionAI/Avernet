@@ -15,6 +15,7 @@ from agentclaw.community.core.task.todos.models import (
     TodoStatus,
 )
 from agentclaw.community.core.task.todos.source_models import TodoSourceInput
+from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
 
 
 @runtime_checkable
@@ -55,6 +56,11 @@ class TodoServiceProtocol(Protocol):
     async def start_todo(
         self, *, todo_id: str, actor_id: str, env: str | None = None
     ) -> TodoRecord: ...
+
+    @abstractmethod
+    def list_stages(
+        self, *, todo_id: str, actor_id: str, env: str | None = None
+    ) -> tuple[TodoStageRecord, ...]: ...
 
     @abstractmethod
     def list_events(

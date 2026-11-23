@@ -339,6 +339,25 @@ def test_report_completion_is_idempotent_for_same_execution() -> None:
     ]
 
 
+def test_report_completion_persists_custom_completion_content() -> None:
+    service, _, _, _, credential, collaboration = _service()
+
+    _complete(
+        service,
+        credential,
+        summary="需求已澄清，验收项已确认。",
+        result={"acceptance_items": ["all tests pass"], "pr_url": "https://example.test/pr/1"},
+    )
+
+    event = collaboration.context.events[0]
+    assert event.content == "需求已澄清，验收项已确认。"
+    assert event.payload["summary"] == "需求已澄清，验收项已确认。"
+    assert event.payload["result"] == {
+        "acceptance_items": ["all tests pass"],
+        "pr_url": "https://example.test/pr/1",
+    }
+
+
 def test_report_completion_rejects_invalid_token() -> None:
     service, _, _, _, credential, collaboration = _service()
 

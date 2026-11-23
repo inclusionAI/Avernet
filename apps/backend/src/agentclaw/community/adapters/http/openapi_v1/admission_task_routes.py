@@ -178,6 +178,44 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
 
 #: Todo workbench is a browser Human self-service surface; app-only callers are refused.
 TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-template-capabilities",
+    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions",
+    ): AdmissionMode.REFUSED,
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/validate",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/publish",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/archive",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/activate",
+    ): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     (
@@ -192,33 +230,35 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items/{work_item_id}",
     ): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): AdmissionMode.REFUSED,
     (
         "POST",
-        "/openapi/v1/collaboration/tasks/todos/{todo_id}/run",
+        "/openapi/v1/collaboration/tasks/todos/from-template",
     ): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): AdmissionMode.REFUSED,
     (
         "GET",
-        "/openapi/v1/collaboration/tasks/todos/{todo_id}/events",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages",
     ): AdmissionMode.REFUSED,
-    (
-        "GET",
-        "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions",
-    ): AdmissionMode.REFUSED,
-    (
-        "GET",
-        "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts",
-    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/events"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts"): AdmissionMode.REFUSED,
     (
         "GET",
         "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts/{artifact_id}/content",
     ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance"): AdmissionMode.REFUSED,
     (
         "POST",
-        "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages/{stage_instance_id}/complete",
     ): AdmissionMode.REFUSED,
     (
         "POST",
-        "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/resume",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/cancel",
     ): AdmissionMode.REFUSED,
 }

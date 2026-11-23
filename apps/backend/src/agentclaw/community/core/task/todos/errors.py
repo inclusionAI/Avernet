@@ -76,3 +76,15 @@ class TodoSourceAlreadyImportedError(Conflict):
     def __init__(self, existing_todo_id: str) -> None:
         super().__init__("Dima work item already imported")
         self.existing_todo_id = existing_todo_id
+
+
+class TodoTemplateValidationError(ValidationError):
+    """A Todo template definition violates the supported product contract."""
+
+
+class TodoTemplateNotFoundError(NotFound):
+    """The requested Todo template or version is outside the current scope."""
+
+
+class TodoTemplateStateConflictError(Conflict):
+    """The requested Todo template mutation is illegal in its current state."""
