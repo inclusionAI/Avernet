@@ -10,7 +10,8 @@ pub struct AdmissionClosure {
     pub sid: Sid,
     pub generation: u64,
     pub operation_id: RequestId,
-    /// Fixed inclusive upper bound in this session's shard journal partition.
+    /// Compatibility field retained for wire stability. The MVP has no
+    /// shard-wide admission journal, so this is always zero.
     pub journal_cut: u64,
 }
 
@@ -43,11 +44,13 @@ pub struct AdmissionMaintenance {
 
 #[async_trait]
 pub trait AdmissionMaintenancePort: Send + Sync {
-    /// Independently repairs durable intents, including crashes before canonical
-    /// selection. Bounded work; one unresolved session cannot block other pages.
+    /// Compatibility maintenance hook. The MVP does not promise recovery for
+    /// an admission document that was never created; callers retry the same
+    /// scoped InputId instead.
     async fn repair(&self, shard: ShardId) -> Result<AdmissionMaintenance, StoreError>;
-    /// Own persistent cursor and fixed cut; completion of repair never removes
-    /// historical sessions from discovery, including future deadlines.
+    /// Compatibility maintenance hook for worker health reporting. Session
+    /// discovery comes from the durable active index and schedule/checkpoint
+    /// state, not from an admission journal.
     async fn discover(&self, shard: ShardId) -> Result<AdmissionMaintenance, StoreError>;
 }
 
@@ -60,10 +63,8 @@ pub trait AdmissionControlPort: Send + Sync {
         expected_generation: u64,
         operation_id: RequestId,
     ) -> Result<GateCloseOutcome, StoreError>;
-    /// Includes released Accepted slots and creators paused before task creation.
-    /// Closure still requires terminal archival/publication for every obligation.
-    /// A bounded page may retain the same continuation while one durable
-    /// admission phase advances; retry through the supervised maintenance queue.
+    /// Returns closure obligations derived from the Session-local schedule and
+    /// checkpoint state. It does not scan a shard-wide admission journal.
     async fn closure_obligations(
         &self,
         closure: &AdmissionClosure,
@@ -133,16 +134,15 @@ pub enum GateReopenOutcome {
 }
 #[async_trait]
 pub trait AdmissionClosurePort: AdmissionControlPort {
-    /// Advances provider-owned durable coverage; never trusts a caller cursor.
-    /// A pending Start is create-once materialized before returning its obligation.
-    /// It remains pending until TerminalTaskEvidencePort verifies actual evidence.
+    /// Advances provider-owned Session-local closure coverage. A pending Start
+    /// remains pending until TerminalTaskEvidencePort verifies actual evidence.
     async fn advance_closure(
         &self,
         owner: &SessionOwnership,
         closure: &AdmissionClosure,
     ) -> Result<ClosureWork, StoreError>;
-    /// Requires the exact current Recovering control state and completed cut.
-    /// Reopens once, advances generation, and records the authority gate receipt.
+    /// Requires the exact current Recovering control state and completed local
+    /// closure coverage. Reopens once and records the authority gate receipt.
     async fn reopen_gate(
         &self,
         guard: super::control::ControlGuard,

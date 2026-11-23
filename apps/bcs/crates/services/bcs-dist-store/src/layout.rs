@@ -253,21 +253,10 @@ impl KeyLayout {
     pub fn dispatch_scan(&self, shard: ShardId) -> String {
         format!("{}:dispatch-scan", self.shard_prefix(shard))
     }
-    pub fn admission_root(&self, shard: ShardId) -> String {
-        format!("{}:admission-root", self.shard_prefix(shard))
-    }
-    pub fn admission_intent(&self, shard: ShardId, sequence: u64) -> String {
-        format!("{}:admission-intent:{sequence}", self.shard_prefix(shard))
-    }
-    pub fn admission_scan(&self, shard: ShardId, kind: &str) -> Result<String, StoreError> {
-        segment(kind)?;
-        Ok(format!(
-            "{}:admission-scan:{kind}",
-            self.shard_prefix(shard)
-        ))
-    }
-    /// Canonical identity is scope-wide, independent of the requested shard/target.
-    pub fn canonical_admission(
+    /// One durable admission document keyed by the caller scope and InputId.
+    /// The key is independent of the target session so retries with the same
+    /// scoped InputId always find the same repair record.
+    pub fn admission(
         &self,
         scope: &bcs_dist_model::TaskScope,
         id: &InputId,
@@ -280,11 +269,36 @@ impl KeyLayout {
             scope.principal.0.as_bytes(),
             id.0.as_bytes(),
         ]);
+        Ok(format!("{}:admission:{}", self.namespace_identity(), crate::identity::hex_of(&digest)))
+    }
+
+    /// Retained for source compatibility with old tests and migration tools.
+    /// Production admission no longer creates or reads this shard-wide key.
+    #[deprecated(note = "the MVP admission layout has no journal root")]
+    pub fn admission_root(&self, shard: ShardId) -> String {
+        format!("{}:admission-root", self.shard_prefix(shard))
+    }
+    /// Retained for source compatibility with old migration tooling only.
+    #[deprecated(note = "the MVP admission layout has no intent records")]
+    pub fn admission_intent(&self, shard: ShardId, sequence: u64) -> String {
+        format!("{}:admission-intent:{sequence}", self.shard_prefix(shard))
+    }
+    pub fn admission_scan(&self, shard: ShardId, kind: &str) -> Result<String, StoreError> {
+        segment(kind)?;
         Ok(format!(
-            "{}:canonical:{}",
-            self.namespace_identity(),
-            crate::identity::hex_of(&digest)
+            "{}:admission-scan:{kind}",
+            self.shard_prefix(shard)
         ))
+    }
+    /// Legacy spelling retained for source compatibility; it resolves to the
+    /// single admission document key and does not create a canonical record.
+    #[deprecated(note = "use admission(scope, input_id)")]
+    pub fn canonical_admission(
+        &self,
+        scope: &bcs_dist_model::TaskScope,
+        id: &InputId,
+    ) -> Result<String, StoreError> {
+        self.admission(scope, id)
     }
 
     fn shard_prefix(&self, shard: ShardId) -> String {

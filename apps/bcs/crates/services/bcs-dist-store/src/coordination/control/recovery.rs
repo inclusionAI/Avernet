@@ -78,9 +78,6 @@ impl CoordinationStore {
         certificate: &ClosureCertificate,
     ) -> Result<bool, StoreError> {
         let closure = &certificate.closure;
-        if certificate.completed_through != closure.journal_cut {
-            return Ok(false);
-        }
         Ok(self
             .read::<ClosureCertificate>(
                 &self
@@ -129,7 +126,6 @@ impl CoordinationStore {
                 if schedule.value["owner"] != encode_json(&guard.owner.owner)?
                     || closed["operation"] != encode_json(&closure.operation_id)?
                     || closed["generation"] != closure.generation
-                    || closed["cut"] != closure.journal_cut
                 {
                     return Ok(not_ready());
                 }

@@ -15,56 +15,19 @@ pub(super) enum Progress {
     Done(AdmitOutcome),
 }
 impl StoreInboxProducer {
-    pub(super) async fn repair_one(&self, intent: &Intent) -> Result<bool, StoreError> {
-        let key = self
-            .inner
-            .layout
-            .canonical_admission(&intent.request.scope, &intent.request.input.input_id)?;
-        let Some((v, c)) = self.canonical(&key).await? else {
-            self.save(&key, None, &self.initial_canonical(intent), &key)
-                .await?;
-            return Ok(false);
-        };
-        if c.intent.sid() != intent.sid() || c.intent.sequence != intent.sequence {
-            // The winner's own retained journal carries canonical responsibility.
-            // This losing intent can release its full pending copy independently.
-            self.release_precanonical(intent).await?;
-            return Ok(true);
-        }
-        Ok(matches!(
-            self.progress(v, c, &key, false).await?,
-            Progress::Done(_)
-        ))
-    }
     pub(super) async fn progress(
         &self,
         v: Version,
-        mut c: Canonical,
+        mut c: AdmissionRecord,
         key: &str,
         new: bool,
     ) -> Result<Progress, StoreError> {
-        if c.decision.is_some() && c.phase == Phase::Selected {
-            // Closure may decide a journal-only operation before its producer
-            // reaches registration. Do not mark repair complete while its full
-            // root reservation still occupies the bounded pre-canonical pool.
-            self.release_precanonical(&c.intent).await?;
-            c.phase = Phase::Released;
-            return Ok(if self.save(key, Some(v), &c, key).await? {
-                Progress::Changed
-            } else {
-                Progress::Retry
-            });
-        }
         if let Some(decision) = &c.decision {
             self.release_slot(key, &c).await?;
             return Ok(Progress::Done(self.outcome(&c, decision, new)));
         }
         match c.phase {
-            Phase::Selected => {
-                self.release_precanonical(&c.intent).await?;
-                c.phase = Phase::Released;
-            }
-            Phase::Released => {
+            Phase::Created => {
                 if let Some(decision) = self.register(key, &c).await? {
                     c.decision = Some(decision);
                 } else {
@@ -73,7 +36,7 @@ impl StoreInboxProducer {
                 }
             }
             Phase::Registered => {
-                if let Some(spec) = &c.intent.request.create_session {
+                if let Some(spec) = &c.request.create_session {
                     let spec_key = self.inner.layout.spec(&spec.sid)?;
                     if !self.save(&spec_key, None, spec, key).await? {
                         let (_, stored) = self
@@ -85,7 +48,7 @@ impl StoreInboxProducer {
                         }
                     }
                 }
-                c.phase = if c.intent.request.create_task.is_some() {
+                c.phase = if c.request.create_task.is_some() {
                     Phase::SpecReady
                 } else {
                     Phase::TaskReady
@@ -93,7 +56,6 @@ impl StoreInboxProducer {
             }
             Phase::SpecReady | Phase::ScopeIndexed => {
                 let task = c
-                    .intent
                     .request
                     .create_task
                     .as_ref()
@@ -126,7 +88,6 @@ impl StoreInboxProducer {
             }
             Phase::SessionIndexed => {
                 let task = c
-                    .intent
                     .request
                     .create_task
                     .as_ref()
@@ -160,16 +121,16 @@ impl StoreInboxProducer {
     async fn append_step(
         &self,
         v: Version,
-        mut c: Canonical,
+        mut c: AdmissionRecord,
         key: &str,
     ) -> Result<Progress, StoreError> {
-        let mut fields = crate::codec::encode_inbox_entry(&c.intent.request.input)?;
-        fields.insert("canonical".into(), key.as_bytes().to_vec());
+        let mut fields = crate::codec::encode_inbox_entry(&c.request.input)?;
+        fields.insert("admission".into(), key.as_bytes().to_vec());
         if c.append_credits == 0 {
             self.reserve_append(
-                c.intent.sid(),
-                self.reliable_bytes(&c.intent.request)?,
-                c.intent.start(),
+                c.sid(),
+                self.reliable_bytes(&c.request)?,
+                c.start(),
                 true,
                 key,
             )
@@ -191,8 +152,8 @@ impl StoreInboxProducer {
         let Some(claimed) = self.save_version(key, Some(v), &c, key).await? else {
             return Ok(Progress::Retry);
         };
-        let id = self.append(c.intent.sid(), &fields, key).await?;
-        c.position = Some(self.position(c.intent.sid(), id));
+        let id = self.append(c.sid(), &fields, key).await?;
+        c.position = Some(self.position(c.sid(), id));
         // A racing claim/decision may win. Its position/decision is authoritative;
         // this append remains a physical duplicate with durable responsibility.
         self.save(key, Some(claimed), &c, key).await?;

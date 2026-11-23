@@ -53,7 +53,6 @@ impl StoreAdmissionControl {
             || !schedule.closed.as_ref().is_some_and(|c| {
                 c.operation == closure.operation_id
                     && c.generation == closure.generation
-                    && c.cut == Some(closure.journal_cut)
             })
         {
             return Err(invalid("stale_closure"));

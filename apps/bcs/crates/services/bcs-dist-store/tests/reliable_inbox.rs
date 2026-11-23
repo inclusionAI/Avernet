@@ -49,7 +49,7 @@ async fn caller_digest_cannot_hide_changed_business_content() {
     assert_eq!(p.admit(b).await.unwrap(), AdmitOutcome::ContentConflict);
 }
 #[tokio::test]
-async fn canonical_identity_is_scope_wide_across_shards() {
+async fn admission_identity_is_scope_wide_across_shards() {
     let store = Arc::new(Recorder::default());
     let p = provider(store.clone());
     assert!(matches!(
@@ -83,116 +83,69 @@ async fn canonical_identity_is_scope_wide_across_shards() {
     );
 }
 #[tokio::test]
-async fn every_lost_write_repairs_without_a_caller_retry() {
-    let baseline = Arc::new(Recorder::default());
-    provider(baseline.clone())
-        .admit(request("baseline"))
-        .await
-        .unwrap();
-    let writes = baseline
-        .calls()
-        .iter()
-        .filter(|c| !c.starts_with("document.read"))
-        .count();
-    for failed in 1..=writes {
-        let store = Arc::new(Recorder::default());
-        store.lose_write(failed);
-        let p = provider(store.clone());
-        let _ = p.admit(request("crash")).await;
-        let restarted = provider(store);
-        for _ in 0..8 {
-            let _ = restarted.repair(ShardId(42)).await;
-        }
-        // Only the read here uses the original identity; no repair via admit.
-        assert!(
-            restarted
-                .admission_decision(&scope(), &InputId("crash".into()))
-                .await
-                .unwrap()
-                .is_some(),
-            "write {failed}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn pending_canonical_retry_never_reports_definite_failure_then_accepts_later() {
+async fn retry_repairs_after_the_admission_document_was_created() {
     let store = Arc::new(Recorder::default());
+    store.lose_write(1); // the admission create is applied, but its reply is lost.
     let p = provider(store.clone());
-    store.lose_write(4); // canonical create succeeded; journal remains repairable.
-    assert!(p.admit(request("pending-retry")).await.is_err());
-    store.fail_write(1); // retry's first missing step definitely fails.
     assert!(matches!(
-        p.admit(request("pending-retry")).await,
+        p.admit(request("created-before-reply")).await,
         Err(bcs_service_api::port::repo::distributed::common::StoreError::OutcomeUnknown { .. })
     ));
-    for _ in 0..8 {
-        p.repair(ShardId(42)).await.unwrap();
-    }
+
+    let retry = provider(store.clone());
     assert!(matches!(
-        p.admission_decision(&scope(), &InputId("pending-retry".into()))
-            .await
-            .unwrap(),
-        Some(AdmitOutcome::Duplicate(_))
+        retry.admit(request("created-before-reply")).await,
+        Ok(AdmitOutcome::Duplicate(_))
     ));
+    assert!(retry
+        .admission_decision(&scope(), &InputId("created-before-reply".into()))
+        .await
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]
-async fn precanonical_read_failures_remain_unknown_and_repair_without_retry() {
-    use bcs_service_api::port::repo::distributed::common::StoreError;
-    for boundary in [":spec:", ":task:", ":canonical:", ":admission-root"] {
-        let store = Arc::new(Recorder::default());
-        let p = provider(store.clone());
-        let pause = store.pause_after("before.document.create", ":canonical:", 1);
-        let pending = tokio::spawn({
-            let p = p.clone();
-            async move { p.admit(request("precanonical")).await }
-        });
-        pause.reached().await;
-        pending.abort();
-        let _ = pending.await;
-        store.fail_document_read(boundary);
-        let cold = provider(store.clone());
-        assert!(
-            matches!(
-                cold.admit(request("precanonical")).await,
-                Err(StoreError::OutcomeUnknown { .. })
-            ),
-            "read {boundary}"
-        );
-        for _ in 0..8 {
-            cold.repair(ShardId(42)).await.unwrap();
-        }
-        assert!(
-            matches!(
-                cold.admission_decision(&scope(), &InputId("precanonical".into()))
-                    .await
-                    .unwrap(),
-                Some(AdmitOutcome::Duplicate(_))
-            ),
-            "repair {boundary}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn cold_retry_assists_materialized_intent_before_canonical_selection() {
+async fn a_failure_before_admission_creation_is_recovered_only_by_caller_retry() {
     let store = Arc::new(Recorder::default());
+    store.fail_write(1); // no admission document is created.
     let p = provider(store.clone());
-    let pause = store.pause_after("before.document.create", ":canonical:", 1);
-    let pending = tokio::spawn({
-        let p = p.clone();
-        async move { p.admit(request("precanonical")).await }
-    });
-    pause.reached().await;
-    pending.abort();
-    let _ = pending.await;
+    assert!(p.admit(request("before-create")).await.is_err());
+    assert!(p
+        .admission_decision(&scope(), &InputId("before-create".into()))
+        .await
+        .unwrap()
+        .is_none());
+    let maintenance = p.repair(ShardId(42)).await.unwrap();
+    assert!(maintenance.round_complete);
+    assert_eq!(maintenance.pending, 0);
+
     assert!(matches!(
         provider(store)
-            .admit(request("precanonical"))
+            .admit(request("before-create"))
             .await
             .unwrap(),
         AdmitOutcome::Accepted(_)
+    ));
+}
+
+#[tokio::test]
+async fn an_existing_admission_record_is_repaired_by_same_input_id_after_a_read_failure() {
+    let store = Arc::new(Recorder::default());
+    let p = provider(store.clone());
+    p.admit(request("read-retry")).await.unwrap();
+    store.fail_document_read(":admission:");
+    assert!(matches!(
+        provider(store.clone())
+            .admit(request("read-retry"))
+            .await,
+        Err(bcs_service_api::port::repo::distributed::common::StoreError::OutcomeUnknown { .. })
+    ));
+    assert!(matches!(
+        provider(store)
+            .admit(request("read-retry"))
+            .await
+            .unwrap(),
+        AdmitOutcome::Duplicate(_)
     ));
 }
 
@@ -252,7 +205,7 @@ async fn different_scope_can_independently_admit_the_same_input_id() {
 }
 
 #[tokio::test]
-async fn invalid_frozen_output_limits_are_rejected_before_any_journal_intent() {
+async fn invalid_frozen_output_limits_are_rejected_before_admission_creation() {
     use bcs_service_api::port::repo::distributed::common::StoreError;
     let store = Arc::new(Recorder::default());
     let p = provider(store);

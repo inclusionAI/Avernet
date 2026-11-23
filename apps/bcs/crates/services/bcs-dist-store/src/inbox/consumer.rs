@@ -168,7 +168,7 @@ impl StoreInboxProducer {
             .map_err(|_| unknown(&input.input_id.0))?;
         Ok(self.position(&r.sid, id))
     }
-    /// None: unresolved canonical position, stop only this session. Some(None):
+    /// None: unresolved admission position, stop only this session. Some(None):
     /// durable duplicate/rejection, advance coverage without invoking the Runner.
     async fn classify(
         &self,
@@ -176,22 +176,22 @@ impl StoreInboxProducer {
         row: &StreamEntry,
     ) -> Result<Option<Option<InputEnvelope>>, StoreError> {
         let input = decode_inbox_entry(sid, &row.fields)?;
-        if let Some(key) = row.fields.get("canonical") {
-            let key = std::str::from_utf8(key).map_err(|_| invalid("canonical_key"))?;
+        if let Some(key) = row.fields.get("admission") {
+            let key = std::str::from_utf8(key).map_err(|_| invalid("admission_key"))?;
             if !key.starts_with(&format!(
-                "{}:canonical:",
+                "{}:admission:",
                 self.inner.layout.namespace_identity()
             )) {
-                return Err(invalid("canonical_namespace"));
+                return Err(invalid("admission_namespace"));
             }
-            let Some((_, c)) = self.canonical(key).await? else {
+            let Some((_, c)) = self.admission_record(key).await? else {
                 return Ok(None);
             };
-            if c.intent.sid() != sid
-                || c.intent.request.input.input_id != input.input_id
-                || c.intent.request.input.business_digest != input.business_digest
+            if c.sid() != sid
+                || c.request.input.input_id != input.input_id
+                || c.request.input.business_digest != input.business_digest
             {
-                return Err(invalid("canonical_input_mismatch"));
+                return Err(invalid("admission_input_mismatch"));
             }
             match c.decision {
                 None => Ok(None),
@@ -202,7 +202,7 @@ impl StoreInboxProducer {
                         .as_ref()
                         .ok_or_else(|| invalid("accepted_without_position"))?;
                     if self.cursor(sid, pos)? == row.id {
-                        Ok(Some(Some(c.intent.request.input)))
+                        Ok(Some(Some(c.request.input)))
                     } else {
                         Ok(Some(None))
                     }
@@ -585,7 +585,7 @@ impl InboxConsumerPort for StoreInboxProducer {
     }
     async fn trim_committed(&self, proof: &CommitReceipt) -> Result<(), StoreError> {
         self.validate_proof(proof).await?;
-        // Phase one deliberately retains Inbox and all canonical evidence.
+        // Phase one deliberately retains Inbox and all admission evidence.
         Ok(())
     }
     async fn enumerate_pending(

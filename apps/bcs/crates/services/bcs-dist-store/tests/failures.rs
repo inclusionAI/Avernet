@@ -67,7 +67,7 @@ async fn the_merged_port_harness_passes() {
 }
 
 #[tokio::test]
-async fn admit_reports_a_definite_error_only_before_journal_reservation() {
+async fn admit_reports_a_definite_error_only_before_admission_creation() {
     let baseline = Arc::new(Recorder::default());
     producer(&baseline)
         .admit(new_session("count", "hello"))
@@ -96,7 +96,7 @@ async fn admit_reports_a_definite_error_only_before_journal_reservation() {
 }
 
 #[tokio::test]
-async fn existing_task_control_is_journaled_before_delivery() {
+async fn existing_task_control_is_persisted_before_delivery() {
     let store = Arc::new(Recorder::default());
     let p = producer(&store);
     p.admit(new_session("start", "hello")).await.unwrap();
@@ -109,7 +109,7 @@ async fn existing_task_control_is_journaled_before_delivery() {
 }
 
 #[tokio::test]
-async fn intermediate_activation_failure_is_unknown_and_discoverable() {
+async fn intermediate_activation_hint_loss_does_not_fail_durable_append() {
     let store = Arc::new(Recorder::default());
     let p = producer(&store);
     p.admit(new_session("start", "hello")).await.unwrap();
@@ -125,11 +125,18 @@ async fn intermediate_activation_failure_is_unknown_and_discoverable() {
             payload: Payload::Inline(serde_json::json!("delta")),
         },
     };
-    store.fail_write(3); // one atomic quota reservation, Inbox, then activation.
-    assert!(matches!(
-        p.append_stream(request).await,
-        Err(StoreError::OutcomeUnknown { .. })
-    ));
+    store.clear();
+    store.fail_write(3); // Inbox append, schedule activation, then active hint.
+    assert!(p.append_stream(request).await.is_ok());
     use bcs_service_api::port::repo::distributed::admission::AdmissionMaintenancePort;
-    assert!(p.discover(ShardId(42)).await.unwrap().activated > 0);
+    use bcs_store_api::document::DocumentStorePlugin;
+    let schedule_key = KeyLayout::new("c01", "main")
+        .unwrap()
+        .schedule(&Sid(SID.into()))
+        .unwrap();
+    let schedule = store.model.read_document(&schedule_key).await.unwrap().unwrap();
+    assert!(schedule.value["activation"].as_u64().unwrap() > 0);
+    let maintenance = p.discover(ShardId(42)).await.unwrap();
+    assert!(maintenance.round_complete);
+    assert_eq!(maintenance.activated, 0);
 }

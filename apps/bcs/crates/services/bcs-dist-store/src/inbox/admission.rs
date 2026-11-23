@@ -10,9 +10,9 @@ impl StoreInboxProducer {
         loop {
             budget.attempt(key).await?;
             let (v, c) = budget
-                .io(key, self.canonical(key))
+                .io(key, self.admission_record(key))
                 .await?
-                .ok_or_else(|| invalid("canonical_missing"))?;
+                .ok_or_else(|| invalid("admission_missing"))?;
             match budget.io(key, self.progress(v, c, key, new)).await? {
                 super::progress::Progress::Done(outcome) => {
                     if new
@@ -31,17 +31,17 @@ impl StoreInboxProducer {
     pub(super) async fn register(
         &self,
         key: &str,
-        c: &Canonical,
+        c: &AdmissionRecord,
     ) -> Result<Option<Decision>, StoreError> {
-        let sid = c.intent.sid();
+        let sid = c.sid();
         let sk = self.inner.layout.schedule(sid)?;
         let mut budget = EqBudget::new();
         loop {
             budget.attempt(key).await?;
             let (v, mut s) = budget.io(key, self.schedule(sid)).await?;
             if let Some(slot) = s.slots.get(key) {
-                if slot.sequence != c.intent.sequence || slot.generation != c.intent.generation {
-                    return Err(invalid("canonical_slot_mismatch"));
+                if slot.generation != c.generation {
+                    return Err(invalid("admission_slot_mismatch"));
                 }
                 if slot.decision.is_some() {
                     return Ok(slot.decision.clone());
@@ -57,27 +57,26 @@ impl StoreInboxProducer {
                 }
                 return Ok(None);
             }
-            if c.intent.start() && (s.closed.is_some() || s.generation != c.intent.generation) {
+            if c.start() && (s.closed.is_some() || s.generation != c.generation) {
                 return Ok(Some(Decision::Rejected));
             }
             if s.slots.len() >= 64
-                || (c.intent.start() && s.slots.values().filter(|s| s.start).count() >= 56)
+                || (c.start() && s.slots.values().filter(|s| s.start).count() >= 56)
             {
                 return Err(unknown(key));
             }
             s.slots.insert(
                 key.into(),
                 Slot {
-                    sequence: c.intent.sequence,
-                    generation: c.intent.generation,
-                    start: c.intent.start(),
+                    generation: c.generation,
+                    start: c.start(),
                     decision: None,
                 },
             );
             let size = serde_json::to_vec(&s)
                 .map_err(|_| invalid("schedule_encoding"))?
                 .len();
-            if size > 64 * 1024 - if c.intent.start() { 8 * 1024 } else { 0 } {
+            if size > 64 * 1024 - if c.start() { 8 * 1024 } else { 0 } {
                 return Err(unknown(key));
             }
             if budget.io(key, self.save(&sk, v, &s, key)).await? {
@@ -105,9 +104,9 @@ impl StoreInboxProducer {
     pub(super) async fn activate_slot(
         &self,
         key: &str,
-        c: &Canonical,
+        c: &AdmissionRecord,
     ) -> Result<Decision, StoreError> {
-        let sid = c.intent.sid();
+        let sid = c.sid();
         let sk = self.inner.layout.schedule(sid)?;
         let mut budget = EqBudget::new();
         loop {
@@ -115,9 +114,9 @@ impl StoreInboxProducer {
             let (v, mut s) = budget.io(key, self.schedule(sid)).await?;
             let Some(slot) = s.slots.get_mut(key) else {
                 let latest = self
-                    .canonical(key)
+                    .admission_record(key)
                     .await?
-                    .ok_or_else(|| invalid("canonical_missing"))?
+                    .ok_or_else(|| invalid("admission_missing"))?
                     .1;
                 return latest.decision.ok_or_else(|| unknown(key));
             };
@@ -146,19 +145,19 @@ impl StoreInboxProducer {
             }
         }
     }
-    pub(super) async fn release_slot(&self, key: &str, c: &Canonical) -> Result<(), StoreError> {
+    pub(super) async fn release_slot(&self, key: &str, c: &AdmissionRecord) -> Result<(), StoreError> {
         if c.decision.is_none() {
             return Err(invalid("release_without_decision"));
         }
-        let sk = self.inner.layout.schedule(c.intent.sid())?;
+        let sk = self.inner.layout.schedule(c.sid())?;
         let mut budget = EqBudget::new();
         loop {
             budget.attempt(key).await?;
-            let (v, mut s) = budget.io(key, self.schedule(c.intent.sid())).await?;
-            if c.intent.start()
+            let (v, mut s) = budget.io(key, self.schedule(c.sid())).await?;
+            if c.start()
                 && s.closed
                     .as_ref()
-                    .is_some_and(|closed| closed.generation == c.intent.generation)
+                    .is_some_and(|closed| closed.generation == c.generation)
                 && s.slots.contains_key(key)
             {
                 // A canonical decision is not a terminal publication proof.

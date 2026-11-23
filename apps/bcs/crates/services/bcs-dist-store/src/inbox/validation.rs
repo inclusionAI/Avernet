@@ -17,7 +17,7 @@ impl StoreInboxProducer {
         self.inner.layout.task(&i.tid)?;
         self.inner
             .layout
-            .canonical_admission(&r.scope, &i.input_id)?;
+            .admission(&r.scope, &i.input_id)?;
         if !i.tid.0.starts_with(&format!("{}.", i.sid.0)) {
             return Err(invalid("tid_not_in_session"));
         }
@@ -123,10 +123,10 @@ impl StoreInboxProducer {
         r.input.business_digest = request_digest(r)?;
         let mut fields = crate::codec::encode_inbox_entry(&r.input)?;
         fields.insert(
-            "canonical".into(),
+            "admission".into(),
             self.inner
                 .layout
-                .canonical_admission(&r.scope, &r.input.input_id)?
+                .admission(&r.scope, &r.input.input_id)?
                 .into_bytes(),
         );
         if fields.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() + 512

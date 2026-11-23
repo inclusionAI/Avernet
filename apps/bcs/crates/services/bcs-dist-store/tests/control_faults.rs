@@ -314,7 +314,7 @@ async fn close_and_cut_lost_responses_retry_the_original_operation() {
                 other => panic!("{other:?}"),
             }
         };
-        assert_eq!(closure.journal_cut, 1);
+        assert_eq!(closure.journal_cut, 0);
         assert_eq!(
             f.control.gate_state(&f.owner).await.unwrap().closure,
             Some(closure)

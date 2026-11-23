@@ -199,13 +199,13 @@ impl AdmissionControlPort for StoreInboxProducer {
         Ok(AdmissionGateState {
             generation: s.generation,
             closed_operation: s.closed.as_ref().map(|c| c.operation.clone()),
-            closure: s.closed.and_then(|c| {
-                c.cut.map(|cut| AdmissionClosure {
-                    sid: owner.sid.clone(),
-                    generation: c.generation,
-                    operation_id: c.operation,
-                    journal_cut: cut,
-                })
+            closure: s.closed.map(|c| AdmissionClosure {
+                sid: owner.sid.clone(),
+                generation: c.generation,
+                operation_id: c.operation,
+                // Kept as a compatibility field; MVP closure coverage is
+                // session-local and no longer derives a shard-wide cut.
+                journal_cut: 0,
             }),
         })
     }
@@ -245,43 +245,35 @@ impl AdmissionControlPort for StoreInboxProducer {
                 .is_some_and(|closed| closed.operation != operation)
             {
                 // A freshly authorized isolation supersedes an older close.
-                // The new fixed cut will re-cover every old-generation intent.
+                // Session-local closure work is re-evaluated for the new operation.
                 s.closed = None;
             }
             if let Some(closed) = &s.closed {
                 if closed.operation != operation || closed.generation != generation {
                     return Ok(GateCloseOutcome::Conflict);
                 }
-                if let Some(cut) = closed.cut {
+                if budget
+                    .io(&operation.0, self.save(&key, v, &s, &operation.0))
+                    .await?
+                {
                     return Ok(GateCloseOutcome::Closed(AdmissionClosure {
                         sid: owner.sid.clone(),
                         generation,
                         operation_id: operation,
-                        journal_cut: cut,
+                        journal_cut: 0,
                     }));
                 }
-                let cut = budget
-                    .io(
-                        &operation.0,
-                        self.load::<JournalRoot>(&self.inner.layout.admission_root(owner.shard)),
-                    )
-                    .await?
-                    .map_or(0, |(_, r)| r.next);
-                if let Some(closed) = s.closed.as_mut() {
-                    closed.cut = Some(cut)
-                }
-            } else {
-                s.closed = Some(ClosedGate {
-                    operation: operation.clone(),
-                    generation,
-                    cut: None,
-                });
-                s.activation = s
-                    .activation
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("activation_exhausted"))?;
-                s.next_check = Some(self.inner.clock.now());
+                continue;
             }
+            s.closed = Some(ClosedGate {
+                operation: operation.clone(),
+                generation,
+            });
+            s.activation = s
+                .activation
+                .checked_add(1)
+                .ok_or_else(|| invalid("activation_exhausted"))?;
+            s.next_check = Some(self.inner.clock.now());
             if budget
                 .io(&operation.0, self.save(&key, v, &s, &operation.0))
                 .await?
@@ -297,67 +289,21 @@ impl AdmissionControlPort for StoreInboxProducer {
         closure: &AdmissionClosure,
         page: PageRequest,
     ) -> Result<Page<AdmissionObligation>, StoreError> {
-        let work = async {
-            if page.limit.get() > 128 {
-                return Err(invalid("page_limit"));
-            }
-            let (_, s) = self.schedule(&closure.sid).await?;
-            if !s.closed.as_ref().is_some_and(|c| {
-                c.operation == closure.operation_id
-                    && c.generation == closure.generation
-                    && c.cut == Some(closure.journal_cut)
-            }) {
-                return Err(invalid("stale_closure"));
-            }
-            let shard = crate::layout::KeyLayout::shard_of(&closure.sid)?;
-            let mut cursor = page
-                .after
-                .map(|p| p.0.parse::<u64>().map_err(|_| invalid("closure_cursor")))
-                .transpose()?
-                .unwrap_or(0);
-            if cursor > closure.journal_cut {
-                return Err(invalid("closure_cursor"));
-            }
-            let mut items = Vec::new();
-            let initial_cursor = cursor;
-            let started = std::time::Instant::now();
-            let mut bytes = 0;
-            let end = cursor
-                .saturating_add(u64::from(page.limit.get()))
-                .min(closure.journal_cut);
-            while cursor < end
-                && started.elapsed() < std::time::Duration::from_millis(80)
-                && bytes + self.inner.config.max_input_bytes + 512 <= 1024 * 1024
-            {
-                let next = cursor + 1;
-                let deadline = started + std::time::Duration::from_millis(80);
-                let item = tokio::time::timeout_at(
-                    tokio::time::Instant::from_std(deadline),
-                    self.closure_item(closure, shard, next),
-                )
-                .await;
-                match item {
-                    Ok(Ok(Some((obligation, size)))) => {
-                        bytes += size;
-                        cursor = next;
-                        if let Some(obligation) = obligation {
-                            items.push(obligation);
-                        }
-                    }
-                    Ok(Ok(None)) | Err(_) => break,
-                    Ok(Err(error)) if cursor == initial_cursor => return Err(error),
-                    Ok(Err(_)) => break,
-                }
-            }
-            Ok(Page {
-                items,
-                next: (cursor < closure.journal_cut).then(|| PageToken(cursor.to_string())),
-            })
-        };
-        tokio::time::timeout(std::time::Duration::from_millis(100), work)
-            .await
-            .map_err(|_| unknown("closure_obligations_page"))?
+        if page.limit.get() > 128 || page.after.is_some() {
+            return Err(invalid("closure_cursor"));
+        }
+        let (_, schedule) = self.schedule(&closure.sid).await?;
+        if !schedule.closed.as_ref().is_some_and(|c| {
+            c.operation == closure.operation_id && c.generation == closure.generation
+        }) {
+            return Err(invalid("stale_closure"));
+        }
+        // There is no shard-wide admission journal in the MVP.  Admission
+        // documents are repaired by the caller's InputId retry; closure work
+        // covers the session checkpoint and the current schedule slots.
+        Ok(Page { items: Vec::new(), next: None })
     }
+
 }
 
 impl StoreInboxProducer {
@@ -385,56 +331,5 @@ impl StoreInboxProducer {
                 == serde_json::to_value(&guard.owner.owner)
                     .map_err(|_| invalid("owner_encoding"))?
             && raw["checkpoint"]["commit_seq"] == guard.expected_head.0)
-    }
-    pub(super) async fn closure_item(
-        &self,
-        closure: &AdmissionClosure,
-        shard: ShardId,
-        sequence: u64,
-    ) -> Result<Option<(Option<AdmissionObligation>, usize)>, StoreError> {
-        let intent = self.intent(shard, sequence).await?;
-        let bytes = encoded_size(&intent, self.inner.config.max_input_bytes + 512)?;
-        if intent.sid() != &closure.sid {
-            return Ok(Some((None, bytes)));
-        }
-        let key = self
-            .inner
-            .layout
-            .canonical_admission(&intent.request.scope, &intent.request.input.input_id)?;
-        let Some((v, mut c)) = self.canonical(&key).await? else {
-            self.save(&key, None, &self.initial_canonical(&intent), &key)
-                .await?;
-            return Ok(None);
-        };
-        if c.intent.sid() != &closure.sid
-            || !c.intent.start()
-            || c.intent.generation != closure.generation
-            || c.intent.sequence != sequence
-        {
-            return Ok(Some((None, bytes)));
-        }
-        let decision = if let Some(decision) = c.decision.clone() {
-            decision
-        } else {
-            // Closing does not replay initial creation. The same authoritative
-            // slot preserves an earlier Accepted or fixes the old generation's
-            // Rejected decision; creators already authorized remain obligations.
-            let Some(decision) = self.register(&key, &c).await? else {
-                return Ok(None);
-            };
-            c.decision = Some(decision.clone());
-            if !self.save(&key, Some(v), &c, &key).await? {
-                return Ok(None);
-            }
-            decision
-        };
-        Ok(Some((
-            Some(AdmissionObligation {
-                request: c.intent.request,
-                accepted: decision == Decision::Accepted,
-                may_have_created_task: c.registered,
-            }),
-            bytes,
-        )))
     }
 }

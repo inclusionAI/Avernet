@@ -264,7 +264,7 @@ async fn one_corrupt_session_is_reported_without_poisoning_other_sessions() {
     p.admit(request("corrupt")).await.unwrap();
     p.admit(another(request("healthy"))).await.unwrap();
     let key = layout()
-        .canonical_admission(&scope(), &InputId("corrupt".into()))
+        .admission(&scope(), &InputId("corrupt".into()))
         .unwrap();
     let original = store.read_document(&key).await.unwrap().unwrap();
     let mut bad = original.value.clone();

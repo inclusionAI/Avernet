@@ -52,43 +52,34 @@ parsing or artifact conversion. See the
 
 ## Admission, identity and queue replacement
 
-Successful `admit` means all required facts are recoverable: immutable session
-definition if new, initial Submitted task if new, the logical input and durable
-activation. A retry repairs an unfinished admission before returning Accepted;
-an input already admitted with the same digest is Accepted too, with no
-separate duplicate outcome.
-The provider owns the atomic transaction or durable reconciliation protocol.
-Initial task creation is create-once as part of Gateway admission; a delayed
-retry must not replace a task already advanced by Worker. Session specification
-and task scope must match the admitted input. An existing frozen specification
-cannot be replaced by a retry with newer group configuration.
+Successful `admit` means all required facts are recoverable: the single scoped
+admission document, immutable session definition when new, initial Submitted
+task when new, logical Inbox input and durable activation. A retry repairs an
+unfinished admission before returning `Accepted`; a previously accepted record
+returns `Duplicate` with the same receipt. A different business digest under the
+same `(scope, input_id)` returns `ContentConflict`.
 
-`AdmitRequest.scope` is trusted application scope and must match the frozen
-Session and task. Providers recompute business digests and select canonical
-InputId identity independently of sid/shard. Durable admission maintenance and
-gate/cut ports are Worker infrastructure, not another business submission API.
-`FeedBatch.failures` isolates failed Session watches; Worker resolves retained
-candidates and rebuilds failed watches from committed consumed before reuse.
+The provider stores the request and repair phases in one JSON-CAS document keyed
+by `(scope, input_id)`. There is no shard-wide admission root, sequence journal,
+separate intent document or canonical document. The recovery guarantee starts
+after the document create-if-absent succeeds. If that first write never applies,
+the provider does not promise background recovery; the caller retries the same
+InputId. A lost response after creation is repaired by the same retry.
+
+Admission creation remains create-once for the frozen Session specification and
+initial task. A delayed retry cannot replace a task already advanced by Worker,
+and a newer workflow revision cannot replace a frozen specification. `schedule`,
+`ckpt` and `inbox` remain separate Session-local authorities. `active` and `wake`
+are disposable discovery hints, not admission authority.
 
 An identity collision compares canonical business content, not transport
-metadata, a queue offset, a retry counter or holder incarnation. Critical Agent
+metadata, a queue offset, retry counter or holder incarnation. Critical Agent
 events use admission with stable input identity; intermediate Agent events use
-`append_stream`. For the latter, the provider wraps the event into an input
-envelope with deterministic identity from its scoped `(did, holder_epoch, seq)`.
-Worker keeps the dispatch sequence in the checkpoint and rejects old/repeated
-events; sequence progress cannot be reset within one holder generation.
+`append_stream`. Worker keeps dispatch sequence in the checkpoint and rejects
+old or repeated events.
 
-`ShardFeedPort` allows batching multiple sessions. It does not require one queue
-per session, one connection per session, or one global commit barrier. Providers
-may implement log reads, consumer groups, database polling or push delivery.
-Each session is ordered; different sessions may commit independently.
-
-`read_through` is the candidate recovery position. `DeliveryReceipt` is an
-ephemeral acknowledgement handle and cannot be serialized into checkpoint state.
-Only committed coverage authorizes an acknowledgement. A shared physical
-partition can advance its broker acknowledgement only across a contiguous
-committed prefix, even if later sessions have already completed. Duplicate
-physical records may produce a progress-only batch with no logical inputs.
+`ShardFeedPort` allows batching multiple Sessions. It does not require one queue
+per Session, one connection per Session, or one global commit barrier.
 
 ## Shard identity and session ownership
 
@@ -316,10 +307,11 @@ for retained evidence, IO budgets and validation limits.
 
 Gateway delegates stable input to TaskAdmissionCoreService and reads already
 formatted output through DistTaskOutputReaderPort. Worker admission initializes
-tasks, recovers scoped canonical requests, and assists the winner of a first-input
-race. Caller intent and full initialized-request integrity are separate checks.
-Canonical lookup is not durable activation proof. The provider may return
-Accepted/Duplicate; both map to the original successful Gateway receipt.
+tasks and resumes the single scoped admission document when the same InputId is
+retried. Caller intent and full initialized-request integrity are separate checks.
+An admission document is not durable activation proof until its decision and Inbox
+position are recorded. The provider may return Accepted/Duplicate; both map to the
+original successful Gateway receipt.
 
 TaskReaderPort retains neutral display data. WorkerOutputReader resolves it and
 applies an injected format adapter to snapshots and explicit artifact operations.

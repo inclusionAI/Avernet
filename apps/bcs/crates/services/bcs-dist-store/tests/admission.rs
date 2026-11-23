@@ -10,7 +10,7 @@ use bcs_dist_store::inbox::{
     InboxProducerConfig, ListenerState, StoreInboxProducer, read_listener,
 };
 use bcs_dist_store::layout::KeyLayout;
-use bcs_service_api::port::repo::distributed::common::StoreError;
+use bcs_service_api::port::repo::distributed::common::{PageRequest, StoreError};
 use bcs_service_api::port::repo::distributed::inbox::*;
 use bcs_service_api::port::repo::distributed::session::SessionStorePort;
 use bcs_store_api::document::DocumentStorePlugin;
@@ -71,7 +71,7 @@ async fn inbox_len(store: &Recorder) -> usize {
 }
 
 #[tokio::test]
-async fn writes_happen_in_the_fixed_order() {
+async fn writes_happen_in_the_fixed_order_without_a_journal_root() {
     let store = Arc::new(Recorder::default());
     let outcome = producer(&store)
         .admit(new_task_request("adm-9c41e7", "hello"))
@@ -79,13 +79,12 @@ async fn writes_happen_in_the_fixed_order() {
         .unwrap();
     assert!(matches!(outcome, AdmitOutcome::Accepted(ref r) if r.tid.0 == TID));
     let calls = store.calls();
-    let root = calls
+    assert!(calls.iter().all(|c| !c.contains(":admission-root")));
+    assert!(calls.iter().all(|c| !c.contains(":admission-intent:")));
+    assert!(calls.iter().all(|c| !c.contains(":canonical:")));
+    let admission = calls
         .iter()
-        .position(|c| c.starts_with("document.create") && c.ends_with(":admission-root"))
-        .unwrap();
-    let canonical = calls
-        .iter()
-        .position(|c| c.starts_with("document.create") && c.contains(":canonical:"))
+        .position(|c| c.starts_with("document.create") && c.contains(":admission:"))
         .unwrap();
     let slot = calls
         .iter()
@@ -99,7 +98,7 @@ async fn writes_happen_in_the_fixed_order() {
         .iter()
         .position(|c| c.starts_with("stream.append") && c.contains(":inbox:"))
         .unwrap();
-    assert!(root < canonical && canonical < slot && slot < task_create && task_create < inbox);
+    assert!(admission < slot && slot < task_create && task_create < inbox);
     assert!(
         calls.len() <= 48,
         "bounded normal-path provider calls: {}",
@@ -127,6 +126,14 @@ async fn writes_happen_in_the_fixed_order() {
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].member, SID);
     assert_eq!(active[0].score, NOW as f64);
+    let admission_key = KeyLayout::new("c01", "main")
+        .unwrap()
+        .admission(&scope(), &InputId("adm-9c41e7".into()))
+        .unwrap();
+    let admission = store.model.read_document(&admission_key).await.unwrap().unwrap();
+    assert!(admission.value.get("request").is_some());
+    assert!(admission.value.get("intent").is_none());
+    assert!(admission.value.get("sequence").is_none());
 }
 
 #[tokio::test]
@@ -532,4 +539,25 @@ async fn documents_of_an_unsupported_version_are_never_written() {
         );
         assert!(store.calls().is_empty(), "{which}: nothing read or written");
     }
+}
+
+#[tokio::test]
+async fn takeover_enumerates_active_sessions_without_an_admission_journal() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    p.admit(new_task_request("enumerate-active", "hello"))
+        .await
+        .unwrap();
+    let page = p
+        .enumerate_pending(
+            ShardId(42),
+            PageRequest {
+                after: None,
+                limit: NonZeroU32::new(16).unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items, vec![Sid(SID.into())]);
+    assert!(store.calls().iter().all(|c| !c.contains(":admission-root")));
 }

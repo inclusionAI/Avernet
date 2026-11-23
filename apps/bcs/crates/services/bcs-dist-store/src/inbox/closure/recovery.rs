@@ -122,7 +122,6 @@ impl StoreAdmissionControl {
                     || !schedule.closed.as_ref().is_some_and(|c| {
                         c.operation == isolation.operation_id
                             && c.generation == closure.generation
-                            && c.cut == Some(closure.journal_cut)
                     }))
             {
                 return Ok(GateReopenOutcome::Conflict);
