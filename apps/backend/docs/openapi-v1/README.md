@@ -1817,6 +1817,16 @@ Normal Center endpoints resolve user and Bot Headers by case-insensitive name,
 with Bot values winning; custom Bot URLs do not inherit user credentials.
 The existing `/config` routes remain user-only and retain their wire contracts.
 
+Bot-addressed overrides use a separate pair,
+`GET|PUT /openapi/v1/bots/{bot_id}/mcps/{server_code}/config`. Read requires
+MEMBER access; write requires ADMIN access (and the Bot edit lock where
+applicable, plus a live app grant for application callers). The write updates
+only that Bot's explicit Header names and URL override and reports
+`desired_state.status` plus a best-effort `runtime_projection.status`; it does
+not install the MCP. The authoritative semantics, including masked reads,
+Header clearing and URL-redirect risk, are in
+[core/mcp](../../src/agentclaw/community/core/mcp/README.md#bot-mcp-configuration-openapi).
+
 The unified marketplace search also exposes
 `POST /openapi/v1/bots/market/mcp-servers`. Its JSON request supports the full
 legacy catalogue filter set: `keyword`, `page_num`, `page_size`, `server_codes`,

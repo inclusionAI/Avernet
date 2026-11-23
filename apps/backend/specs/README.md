@@ -156,6 +156,7 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-11-13-context-collab-l1-interoperate-deliver](2026-11-13-context-collab-l1-interoperate-deliver/)
 - [2026-11-13-context-collab-task-commission-product](2026-11-13-context-collab-task-commission-product/)
 - [2026-11-18-kb-deletion-forwarding](2026-11-18-kb-deletion-forwarding/)
+- [2026-11-19-parallel-token-pipelines](2026-11-19-parallel-token-pipelines/)
 - [caller-token-expiry-20261113](caller-token-expiry-20261113/)
 - [dingtalk-caller-token](dingtalk-caller-token/)
 - [hourly-asc-refresh-20261115](hourly-asc-refresh-20261115/)
