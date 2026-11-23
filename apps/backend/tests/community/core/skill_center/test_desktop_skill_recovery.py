@@ -716,7 +716,7 @@ def test_reference_set_and_track_latest_share_one_task_for_latest_combined_plan(
             self.outcomes.append(self._fanout.handle({"skill_id": version.skill_id}))
 
     class _DesiredStateRepository:
-        def commit_projection_mutation(self, *, mutation, **_kwargs):
+        def commit_capability_mutation(self, *, mutation, **_kwargs):
             return mutation()
 
         @contextmanager

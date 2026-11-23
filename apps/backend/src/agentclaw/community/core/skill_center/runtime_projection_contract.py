@@ -85,7 +85,7 @@ class RuntimeProjectionResult:
     issues: tuple[RuntimeProjectionIssue, ...] = ()
     reason: str | None = None
     delivery_uncertain: bool = False
-    # Internal receipt consumed by the durable projector, outside public serialization.
+    # Internal authorization receipt, outside public serialization.
     passport_updated: bool | None = field(default=None, compare=False, repr=False)
 
     @classmethod
@@ -428,8 +428,7 @@ class ProjectionScope:
     released_mcp: frozenset[str] = frozenset()
     #: Treat *every* projected MCP code as claimed, ignoring ``claimed_mcp``.
     #:
-    #: Set by the device lifecycle and when establishing a durable projection
-    #: baseline. Re-declaring the allow-list is insufficient when the current
+    #: Set by the device lifecycle and when an Apply must resend a full configuration. Re-declaring the allow-list is insufficient when the current
     #: Runtime may not have the configuration behind it.
     #: Every mutation-triggered path names its own delta instead.
     #:

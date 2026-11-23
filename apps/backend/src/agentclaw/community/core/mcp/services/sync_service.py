@@ -45,7 +45,7 @@ from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepos
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.log import get_logger
-from agentclaw.community.core.mcp.mcp_sync_service_protocol import MCPSyncServiceProtocol
+from agentclaw.community.core.mcp.mcp_sync_service_protocol import MCP_CONFIG_FANOUT_LIMIT, MCPSyncServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -57,7 +57,6 @@ logger = get_logger()
 
 _DESIRED_STATE_DETAIL_CONCURRENCY = 10
 _COLLECTED_DETAIL_CONCURRENCY = 5
-_USER_CONFIG_FANOUT_CONCURRENCY = 5
 
 
 @dataclass
@@ -617,7 +616,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 "error": None,
             }
 
-        semaphore = asyncio.Semaphore(_USER_CONFIG_FANOUT_CONCURRENCY)
+        semaphore = asyncio.Semaphore(MCP_CONFIG_FANOUT_LIMIT)
 
         async def _sync_one(bot_id: str) -> dict[str, Any]:
             bot_owner_id = (target_bot_owners or {}).get(bot_id, user_id)

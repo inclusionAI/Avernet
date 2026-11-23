@@ -13,6 +13,7 @@ deleting, and ``get_if_stale`` judges the TTL entirely on the database clock.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -21,6 +22,7 @@ from injector import inject
 from sqlalchemy import DateTime, func, select, type_coerce
 from sqlalchemy.exc import IntegrityError
 
+from agentclaw.community.core.skill_center.capability_projection_reconcile import PROJECTION_RETRY_FIELD
 from agentclaw.community.core.apply_engine.repository.apply_models import (
     BotConfigManifestApplyLockModel,
     BotConfigManifestApplyLockRecord,
@@ -200,6 +202,29 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
                 filters.append(self._Apply.trigger == trigger)
             row = db.query(self._Apply).filter(*filters).order_by(self._Apply.id.desc()).first()
             return row.to_record() if row is not None else None
+
+    def latest_projection_checkpoint(
+        self, *, env: str, entity_id: str, bot_id: str,
+    ) -> BotConfigManifestApplyRecord | None:
+        """Latest Apply that stored a capability delivery snapshot."""
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self._Apply)
+                .filter(
+                    *self._match(env=env, entity_id=entity_id, bot_id=bot_id),
+                    self._Apply.finished_at.is_not(None),
+                )
+                .order_by(self._Apply.id.desc())
+                .yield_per(16)
+            )
+            for row in rows:
+                try:
+                    payload = json.loads(row.report)
+                except ValueError:
+                    continue
+                if isinstance(payload, dict) and PROJECTION_RETRY_FIELD in payload:
+                    return row.to_record()
+        return None
 
     def recent(
         self, *, env: str, entity_id: str, bot_id: str, limit: int

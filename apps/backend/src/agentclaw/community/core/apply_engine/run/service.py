@@ -88,6 +88,7 @@ from agentclaw.community.core.apply_engine.run.report_codec import (
 )
 from agentclaw.community.core.apply_engine.run.capability_projection import (
     finish_capability_projection,
+    previous_projection_retry,
 )
 from agentclaw.community.core.skill_center.capability_projection_reconcile import (
     CapabilityProjectionReconcileProtocol,
@@ -475,7 +476,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
                         bot_id=ctx.bot_id,
                         apply_id=apply_id,
                         status=report.status.value,
-                        report=json.dumps(report.as_payload()),
+                        report=json.dumps(report.as_stored_payload()),
                     )
                     # Before the lock is released, so the producer's record is in place before the
                     # bot's next apply can start.
@@ -591,7 +592,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
                         bot_id=bot_id,
                         apply_id=apply_id,
                         status=report.status.value,
-                        report=json.dumps(report.as_payload()),
+                        report=json.dumps(report.as_stored_payload()),
                     )
                 else:
                     report = report_from_payload(
@@ -838,11 +839,12 @@ class ApplyRunService(ApplyRunServiceProtocol):
             ):
                 projection = None
             deferred = projection.deferred_apply(
-                bot_id=ctx.bot_id, entity_id=ctx.entity_id, owner_id=ctx.owner_id,
+                bot_id=ctx.bot_id, entity_id=ctx.entity_id,
+                retry=previous_projection_retry(self._applies, ctx),
             ) if projection is not None else nullcontext()
-            async with deferred as write_scope:
+            async with deferred as delivery:
                 report = await self._orchestrator(strategy).apply(
-                    dataclasses.replace(ctx, capability_write_scope=write_scope),
+                    dataclasses.replace(ctx, capability_write_scope=delivery.write_scope if delivery else None),
                     compiled.state,
                     apply_id=apply_id,
                     trigger=trigger,
@@ -850,8 +852,8 @@ class ApplyRunService(ApplyRunServiceProtocol):
                     phase=phase,
                     sources=compiled.sources,
                 )
-                if projection is not None:
-                    report = await finish_capability_projection(projection, ctx, report)
+                if delivery is not None:
+                    report = await finish_capability_projection(delivery, report)
             report = dataclasses.replace(report, state=state)
             try:
                 note = await strategy.finish(ctx, report)
@@ -948,14 +950,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
             self._locks, env=get_current_env(), entity_id=entity_id, bot_id=bot_id
         ):
             status = ApplyStatus.FAILED
-        report = report_from_payload(payload, record=record, status=status)
-        projection = self._capability_projection
-        if projection is not None and report.runtime_projection_revision is not None:
-            result = projection.observe(
-                bot_id=bot_id, entity_id=entity_id, revision=report.runtime_projection_revision,
-            )
-            report = dataclasses.replace(report, runtime_projection=result)
-        return report
+        return report_from_payload(payload, record=record, status=status)
 
 
 __all__ = ["APPLY_LOCK_TTL_SECONDS", "ApplyRunService"]

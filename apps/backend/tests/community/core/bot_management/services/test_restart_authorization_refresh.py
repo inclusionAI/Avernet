@@ -20,6 +20,7 @@ from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
+    RuntimeProjectionResult,
 )
 from agentclaw.community.core.bot_management.engines.default import (
     DefaultProvisioningStrategy,
@@ -97,7 +98,7 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=RuntimeProjectionResult.converged())
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
@@ -126,11 +127,15 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
-def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_projection_error() -> None:
+@pytest.mark.parametrize("pending", [False, True])
+def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_projection_error(pending) -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(side_effect=RuntimeError("projection down"))
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(
+        return_value=RuntimeProjectionResult.pending(code="DELIVERY_BUSY", reason="Delivery unavailable"),
+        side_effect=None if pending else RuntimeError("projection down"),
+    )
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
@@ -175,7 +180,7 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     factory = MagicMock()
     skill_set_service = MagicMock()
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=RuntimeProjectionResult.converged())
     skill_set_service.project_skills = AsyncMock(return_value=False)
     factory.create.return_value = skill_set_service
 
@@ -343,7 +348,7 @@ def test_aicoding_refresh_clears_persisted_marker_after_confirmed_extra_success(
         },
     }
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=RuntimeProjectionResult.converged())
     template_service = MagicMock()
     template_service.get_template_config.return_value = stored_template_config
 
@@ -386,7 +391,7 @@ def test_aicoding_refresh_uses_persisted_template_marker_and_clears_after_succes
         template_config=template_config,
     )
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=RuntimeProjectionResult.converged())
     template_service = MagicMock()
     template_service.get_template_config.return_value = template_config
 
@@ -424,7 +429,7 @@ def test_aicoding_refresh_keeps_succeeded_refresh_when_marker_clear_fails() -> N
         template_config=template_config,
     )
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=RuntimeProjectionResult.converged())
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory = MagicMock()

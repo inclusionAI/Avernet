@@ -44,7 +44,7 @@ class _Repository:
         self.manifest_skill_remove_calls: list[dict] = []
         self.restore_calls: list[dict] = []
 
-    def commit_projection_mutation(self, *, mutation, **_kwargs):
+    def commit_capability_mutation(self, *, mutation, **_kwargs):
         return mutation()
 
     #: Dependencies the Skill under test declares, mirrored onto the mutation

@@ -27,7 +27,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillLayoutRollbackError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
-    LocalSkillPackageDispatchPendingError,
     LocalSkillStorageError,
 )
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
@@ -111,7 +110,7 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
             self._skill_repo.require_unreferenced_for_delete(skill_id)
             locator = str(skill["git_path"])[len("local://") :]
             context = self._device_context(
-                bot_id=bot_id, owner_id=resolved_owner_id, name=str(skill["name"]),
+                bot_id=bot_id, owner_id=resolved_owner_id,
             )
             binding = RuntimeBindingTarget(
                 bot_id, str(bot["owner_id"]), resolved_owner_id, context.binding_id, context.device_id,
@@ -182,17 +181,13 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
         except Exception as exc:
             raise LocalSkillStorageError() from exc
 
-    def _device_context(self, *, bot_id: str, owner_id: str, name: str) -> DeviceContext:
+    def _device_context(self, *, bot_id: str, owner_id: str) -> DeviceContext:
         try:
             context = self._device_context_resolver_provider().resolve_for_bot(
                 bot_id, owner_id
             )
         except Exception as exc:
             raise LocalSkillStorageError() from exc
-        if self._skill_repo.has_pending_local_skill_dispatch(
-            bot_id=bot_id, entity_id=owner_id, name=name, device_id=context.device_id,
-        ):
-            raise LocalSkillPackageDispatchPendingError()
         return context
 
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:

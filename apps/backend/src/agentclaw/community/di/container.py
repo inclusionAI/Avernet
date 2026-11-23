@@ -107,7 +107,6 @@ from agentclaw.community.di.modules.collaboration_repair_module import (
 from agentclaw.community.di.modules.owner_handoff_module import OwnerHandoffModule
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.resources_module import ResourcesModule
-from agentclaw.community.di.modules.capability_projection_module import CapabilityProjectionModule
 from agentclaw.community.di.modules.runtime_projection_recovery_module import (
     RuntimeProjectionRecoveryModule,
 )
@@ -227,7 +226,6 @@ def build_injector(
         SkillCenterModule(),
         SkillCenterGroup4Module(),
         RuntimeProjectionRecoveryModule(),
-        CapabilityProjectionModule(),
         SkillVersionModule(),
         ServiceBotModule(),
         DesktopBotModule(),

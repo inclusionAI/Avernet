@@ -15,7 +15,6 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 _TTL_SECONDS = 90
-_WAIT_SECONDS = 5
 
 
 class CapabilityDeliveryUnavailable(RuntimeError):
@@ -71,8 +70,10 @@ class CapabilityDeliveryGuard:
             await held.verify()
             yield held
             return
+        # Allow an active Apply to complete within one lease interval.
+        # Lifecycle callers without their own deadlines still get a receipt.
         clock = asyncio.get_running_loop()
-        deadline = clock.time() + _WAIT_SECONDS
+        deadline = clock.time() + _TTL_SECONDS
         while True:
             try:
                 token = await asyncio.to_thread(self._cache.acquire_lock_strict, key, _TTL_SECONDS)

@@ -183,7 +183,7 @@ Apply snapshot 包括 Bot Local 资产的全部持久 Set ID 引用映射；计�
 - Local、Draft 和 Center 完整包只以唯一包根 `SKILL.md`（或单层 transport wrapper 内的直属 manifest）确定身份；根 manifest 明确时，嵌套的 `capability/.../SKILL.md` 等文档按普通内容逐字保留，不独立安装，也不改写引用。无唯一包根、并列 Skill 或根 manifest 大小写冲突继续拒绝。Local 保留历史大小写和 YAML 兼容，Draft/Center 根 manifest 仍须使用 `SKILL.md` 和 YAML frontmatter。Engine package apply 已按唯一根 manifest 校验，仍需验证真实文件保留。
 - Git 来源 Draft 的选定根目录是完整包边界，快照包含其所有嵌套目录（含嵌套 `SKILL.md`），不包含根目录之外的并列 Skill；发布前应检查选定目录中的所有内容。
 - Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义；AICoding Legacy 可将同 Bot、同 Skill 的历史 Claude Code Host/NAS 或 Engine-view locator 解析到当前 Runtime Package Location；OpenClaw Legacy 也接受固定的 `/home/admin/.openclaw/workspace/skills/skills-local/<skill_name>` 历史 Engine-view locator，并将其映射到已授权 Bot 的当前 canonical Local 包地址。两者均只兼容读取记录中的旧 locator，`git_path` 不改写；设备操作仍绑定当前 Bot。Pool、Teclaw、其他 Engine、跨 Bot/Skill 及任意目录前缀继续在写入前拒绝。包根是目录，存在性判定必须使用 `list_dir`，不得用 `read_file` 读取目录进行探测。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `apps/backend/`）。
-- 已有设备 Bot 的 Manifest Apply 启用 `manifest_apply.defer_capability_projection` 时，Local 包先完成全部校验并按资产去重。在一个 Bot 编辑租约内发布不同目标，首个失败后停止派发、收齐在途结果并跳过后续能力写入。已有的手工上传、删除、布局前滚与回退共享该租约。设备须明确声明 `skills.local_package.parallel_targets.v1` 才可使用配置 `manifest_apply.local_skill_parallelism`（1 到 4，默认 1）。旧逐文件、未声明能力和 TeClaw 设备串行。OpenClaw 包替换与技能域待同步状态在同一事务提交，TeClaw 整包上传即生效，纯内容替换不单独写投影义务。
+- 已有设备 Bot 的 Manifest Apply 启用 `manifest_apply.defer_capability_projection` 时，Local 包先完成全部校验并按资产去重。在一个 Bot 编辑租约内发布不同目标，首个失败后停止派发、收齐在途结果并跳过后续能力写入。已有的手工上传、删除、布局前滚与回退共享该租约。设备须明确声明 `skills.local_package.parallel_targets.v1` 才可使用配置 `manifest_apply.local_skill_parallelism`（1 到 4，默认 1）。旧逐文件、未声明能力和 TeClaw 设备串行。OpenClaw 包替换成功提交后加入本次技能域投递。TeClaw 包内容随上传生效。
 - 设备包派发前写入 `ac_local_skill_package_dispatch`，回复确认后清除。Worker 退出或远端结果未知时保留记录，按租户、环境、Bot、绑定和名称阻止同一目标再次写入。同绑定存在未确认包时，布局前滚和回退同样等待。已终止批次不会由恢复任务继续上传。同绑定释放记录前须由运维确认先前请求已完成或失去写权限，再核对安装包摘要、元数据及安全观察；仅有相同摘要不能证明写入结束。部署受管数据库时先应用本模块的包派发迁移，自动建库场景由 ORM 创建。
 - Local 上传或替换的四条成功路径统一在 `LocalSkillUploadService` 持有 edit guard 时，把本次校验的 canonical ZIP 交给 `LocalSkillSecurityUploadHook`。公共部署默认 Noop；仅显式启用的企业装配使用真实观察服务，先保存不可变快照，再绑定 `tc:<uuid>` 身份、冻结本次名称与描述、登记独立观察记录，并为扫描和资产同步分别入队。该后置链路故障需记录可定位证据和可补报状态，不能把已成功的同步上传改判为失败；后台任务不得从可变 Runtime 目录重建旧包。当前观察结果不拦截 Skill 使用。
 - 观察交接有期限；超时后释放 edit guard、记录上传 ID/摘要/精确快照 locator 和 handoff-failure 事实。晚返线程受取消栅栏约束，不能把旧包选为当前。补报必须先读回原快照并核对摘要；数据库不可用时至少输出含阶段与归属的结构化日志。完整原包不可得时不能冒称可补扫。
@@ -425,25 +425,19 @@ CommunityDatabase 的 operator-managed SQLite（`create_schema=false`）在启�
 
 ## Existing-Bot Manifest capability delivery
 
-The deferred Manifest path writes the Bot's capability projection version,
-affected domains, and mapping retirement candidates in the same transaction as
-the corresponding desired-state change. Dispatch occurs after commit.
-Acknowledgements identify the exact Bot, binding, and desired-state version.
-For a Runtime without a confirmed ordering guarantee, a dispatch with an
-unknown outcome remains fenced until the device target changes or completion
-is established. Recovery scans for pending records and enqueues work by
-stable Bot identity, then re-reads the current binding and desired state.
-Retirement requests carry one recorded identity per target that has no
-current supply. A confirmed managed identity mismatch can advance to the
-next recorded candidate through recovery. It never replays a Manifest
-package batch.
+The deferred Manifest path collects the domains changed by successful commits
+and closes once under the Bot's capability delivery lease. If synchronization
+fails, the Apply report preserves its result and any unresolved retirement
+candidates. An explicit Apply can send the current desired state again without
+a configuration diff. Retirement requires the same physical device, no current
+supply for the target, and an exact identity check by the Runtime.
 
-Deploy the additive `ac_bot_capability_projection` table before starting
-Backend workers with an operator-managed database. In this directory, apply
-the `sql/2026_11_22_bot_capability_projection.sql` migration for MySQL or
-MariaDB, `sql/2026_11_22_bot_capability_projection_postgresql.sql` for
-PostgreSQL, or `sql/2026_11_22_bot_capability_projection_sqlite.sql` for SQLite.
-The managed schema bootstrap creates the same table. Existing Bots establish
-a projection baseline on their first eligible Apply. Keep the table and
-recovery workers available when disabling deferral so queued obligations can
-still reach the Runtime.
+The edit lease protects package operations while a request is active. An
+unconfirmed package receipt remains `UNKNOWN`, and a later request can compete
+for the lease. A timed-out device request can still complete after lease release.
+
+Deploy Backend with the two retired tables present or absent. In environments
+where they already exist, keep `ac_bot_capability_projection` and
+`ac_local_skill_package_dispatch` until older Workers are stopped, their recovery
+tasks are drained or cancelled, and the rollback window closes. Operations
+removes the tables separately after those conditions hold.

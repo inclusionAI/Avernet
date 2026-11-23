@@ -60,20 +60,9 @@ from agentclaw.community.core.repository.implementations.skill_center.bot_skills
     CENTER_MEMBERSHIP_IDENTITY_MISSING,
     center_membership_skill_uuid,
 )
-from agentclaw.community.core.repository.implementations.skill_center.local_skill_package_dispatch import (
-    LocalSkillPackageDispatches,
-)
 from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import (
-    require_locked_capability_bot,
     verify_runtime_binding_for_write,
 )
-from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
-    record_capability_projection,
-)
-from agentclaw.community.core.skill_center.capability_projection_intent import (
-    capability_projection_intent,
-)
-from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -185,7 +174,6 @@ def _mcp_assoc_to_dict(m) -> dict:
 
 
 class SkillRepository(
-    LocalSkillPackageDispatches,
     SkillRepositoryProtocol,
     SkillsPoolSkillRepositoryProtocol,
 ):
@@ -954,8 +942,6 @@ class SkillRepository(
         old_locator: str,
         new_locator: str,
         description: str,
-        defer_skills_projection: bool = False,
-        record_tracked_projection: bool = False,
     ) -> dict | None:
         """Update one Local Skill while preserving its canonical locator."""
 
@@ -964,8 +950,6 @@ class SkillRepository(
 
         with self._db.transactional_orm_session() as db:
             verify_runtime_binding_for_write(db, bot_id=bot_id, entity_id=owner_id)
-            if defer_skills_projection or record_tracked_projection:
-                require_locked_capability_bot(db, bot_id=bot_id, entity_id=owner_id)
             skill = (
                 db.query(self.Skill)
                 .filter(
@@ -983,13 +967,6 @@ class SkillRepository(
             skill.description = description
             skill.user_id = _normalize_user_id(owner_id)
             skill.gmt_modified = func.now()
-            if defer_skills_projection or record_tracked_projection:
-                intent = capability_projection_intent(bot_id=bot_id, entity_id=owner_id)
-                record_capability_projection(
-                    db, bot_id=bot_id, entity_id=owner_id, create=defer_skills_projection,
-                    scope=ProjectionScope(skills=True),
-                    retired_mappings=intent.retired_mappings if intent is not None else (),
-                )
             db.flush()
             result = _skill_to_dict(skill)
             return result

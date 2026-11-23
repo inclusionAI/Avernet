@@ -1,24 +1,40 @@
-"""The Bot-scoped handoff from Manifest execution to its capability writers."""
+"""Request-local handoff from Manifest Apply to its capability writers."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class CapabilityProjectionIntent:
-    tenant: str
-    env: str
     bot_id: str
     entity_id: str
-    retired_mappings: tuple[PoolSkillMapping, ...]
+    tenant: str = field(default_factory=get_current_avernet_tenant)
+    env: str = field(default_factory=get_current_env)
+    _committed: list[ProjectionScope] = field(default_factory=list, init=False)
+
+    def record(self, scope: ProjectionScope) -> None:
+        self._committed.append(scope)
+
+    def scope(self) -> ProjectionScope:
+        # Each writer appends after its commit. Apply reads the scopes after
+        # the capability writer and every in-flight package have returned.
+        return ProjectionScope(
+            skills=any(change.skills for change in self._committed),
+            mcp=any(change.mcp for change in self._committed),
+            claimed_mcp=frozenset().union(*(change.claimed_mcp for change in self._committed)),
+            updated_mcp=frozenset().union(*(change.updated_mcp for change in self._committed)),
+            released_mcp=frozenset().union(*(change.released_mcp for change in self._committed)),
+            claim_all_mcp=any(change.claim_all_mcp for change in self._committed),
+            passport=any(change.passport for change in self._committed),
+        )
 
 
 _ACTIVE_INTENT: ContextVar[CapabilityProjectionIntent | None] = ContextVar(
@@ -27,14 +43,8 @@ _ACTIVE_INTENT: ContextVar[CapabilityProjectionIntent | None] = ContextVar(
 
 
 @contextmanager
-def defer_capability_projection(
-    *, bot_id: str, entity_id: str, retired_mappings: Sequence[PoolSkillMapping],
-) -> Iterator[None]:
-    """Defer only the existing Bot's explicitly scoped Apply execution."""
-    token = _ACTIVE_INTENT.set(CapabilityProjectionIntent(
-        get_current_avernet_tenant(), get_current_env(), bot_id, entity_id,
-        tuple(retired_mappings),
-    ))
+def defer_capability_projection(intent: CapabilityProjectionIntent) -> Iterator[None]:
+    token = _ACTIVE_INTENT.set(intent)
     try:
         yield
     finally:

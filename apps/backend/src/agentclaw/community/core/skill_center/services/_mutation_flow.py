@@ -182,21 +182,22 @@ class MutationProjectionFlow:
             assert selected is not None
             return selected
 
-        def commit(mappings: Sequence[PoolSkillMapping] = ()) -> DesiredStateMutation:
+        def commit() -> DesiredStateMutation:
             if entity_id is not None and (deferred is not None or runtime_required):
-                result = self._repository.commit_projection_mutation(
+                result = self._repository.commit_capability_mutation(
                     bot_id=bot_id, entity_id=entity_id, mutation=mutation,
-                    scope_from_result=effective_scope, retired_mappings=mappings,
-                    create=deferred is not None,
+                    require_bot=deferred is not None,
                 )
             else:
                 result = mutation()
+            if deferred is not None and result.changed:
+                deferred.record(effective_scope(result))
             if on_committed is not None:
                 on_committed(result)
             return result
 
         if deferred is not None:
-            result = commit(deferred.retired_mappings)
+            result = commit()
             return {
                 **result.item,
                 "changed": result.changed,
@@ -254,7 +255,7 @@ class MutationProjectionFlow:
                 mapping_count=len(previous_mappings),
             )
         mutation_started_at = time.perf_counter()
-        result = commit(previous_mappings)
+        result = commit()
         self._log_timing(
             stage="desired_state_mutation",
             bot_id=bot_id,

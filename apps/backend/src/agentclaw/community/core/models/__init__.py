@@ -25,9 +25,6 @@ from agentclaw.community.core.models.mcp import (  # noqa: F401
 )
 from agentclaw.community.core.models.skill_propagation_log import SkillPropagationLog  # noqa: F401
 from agentclaw.community.core.models.skill_center_sync_log import SkillCenterSyncLog  # noqa: F401
-from agentclaw.community.core.models.local_skill_package_dispatch import (  # noqa: F401
-    LocalSkillPackageDispatch,
-)
 from agentclaw.community.core.models.local_skill_security_observation import (  # noqa: F401
     LocalSkillSecurityObservationModel,
 )
@@ -42,8 +39,4 @@ from agentclaw.community.core.models.space_skill import (  # noqa: F401
     SkillVersion,
     Space,
     SpaceMember,
-)
-
-from agentclaw.community.core.models.capability_projection import (  # noqa: F401
-    BotCapabilityProjection,
 )

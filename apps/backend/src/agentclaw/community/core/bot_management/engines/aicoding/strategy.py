@@ -904,14 +904,17 @@ class AicodingProvisioningStrategy(AicodingRecycleMixin, AicodingSubmissionMixin
                 try:
                     from agentclaw.community.core.skill_center.runtime_projection_contract import (
                         ProjectionScope,
+                        RuntimeProjectionStatus,
                     )
 
                     async def _do_mcp_projection() -> None:
-                        await runtime_reconciler.project_mcp_and_cli(
+                        result = await runtime_reconciler.project_mcp_and_cli(
                             bot_id=ctx.bot_id,
                             owner_id=effective_entity_id,
                             scope=ProjectionScope(mcp=True),
                         )
+                        if result.status in {RuntimeProjectionStatus.PENDING, RuntimeProjectionStatus.DEGRADED}:
+                            raise RuntimeError("MCP and CLI projection did not converge")
 
                     asyncio.run(_do_mcp_projection())
                     logger.info(

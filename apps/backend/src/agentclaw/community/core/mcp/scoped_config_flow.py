@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from functools import partial
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -21,7 +22,10 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
 from agentclaw.community.core.mcp.mcp_market_service_protocol import MCPMarketServiceProtocol
-from agentclaw.community.core.mcp.mcp_sync_service_protocol import MCPSyncServiceProtocol
+from agentclaw.community.core.mcp.mcp_sync_service_protocol import (
+    MCP_CONFIG_FANOUT_LIMIT,
+    MCPSyncServiceProtocol,
+)
 from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
     EffectiveMCPStateReaderProtocol,
 )
@@ -302,7 +306,7 @@ async def write_scoped_config(
 
     projection_options = (
         {} if capability_projection is None
-        else {"create_projection": capability_projection.defer_enabled}
+        else {"select_consumers": True}
     )
     applicable = command_repo.replace(
         user_id=user_id,
@@ -317,17 +321,10 @@ async def write_scoped_config(
         **projection_options,
     )
 
-    tracked_consumers: dict[str, str] = {}
+    selected: dict[str, str] = {}
     if capability_projection is not None:
-        preflight_consumers = set(consumers)
-        tracked_consumers = {
-            bot_id: entity_id
-            for bot_id, entity_id in applicable.items()
-            if bot_id in preflight_consumers and entity_id is not None
-        }
-        consumers = [
-            bot_id for bot_id in consumers if bot_id in applicable and bot_id not in tracked_consumers
-        ]
+        selected = {bot_id: applicable[bot_id] for bot_id in consumers if bot_id in applicable}
+        consumers = []
     sync_results: tuple[dict[str, Any], ...] = ()
     sync_summary = _projection_summary(sync_results)
     if consumers:
@@ -355,27 +352,48 @@ async def write_scoped_config(
             )
             sync_summary = _projection_summary(sync_results)
 
-    if tracked_consumers and capability_projection is not None:
+    if selected and capability_projection is not None:
         scope = ProjectionScope(mcp=True, updated_mcp=frozenset({server_code}))
 
-        async def unavailable() -> RuntimeProjectionResult:
-            return RuntimeProjectionResult.skipped(reason="CAPABILITY_PROJECTION_SUPERSEDED")
+        legacy_results: dict[str, dict[str, Any]] = {}
 
-        results = list(sync_results)
-        for bot_id in sorted(tracked_consumers):
-            try:
-                projection = await capability_projection.project_competing_change(
-                    bot_id=bot_id, owner_id=user_id, entity_id=tracked_consumers[bot_id],
-                    scope=scope, retired_mappings=(), legacy=unavailable,
-                )
-                synced = projection.status is RuntimeProjectionStatus.CONVERGED
-            except Exception:
-                synced = False
-            item = {"bot_id": bot_id, "synced": synced}
-            if not synced:
-                item["reason"] = "MCP_PROJECTION_FAILED"
-            results.append(item)
-        sync_results = tuple(results)
+        async def deliver(bot_id: str) -> RuntimeProjectionResult:
+            delivery = await sync_service.sync_mcp_detail_to_all_bots(
+                user_id=user_id, server_code=server_code, mcp_data=detail,
+                entity_id=user_id, entity_type="staff",
+                target_bot_ids=[bot_id], target_bot_owners={bot_id: user_id},
+            )
+            items = delivery.get("sync_results") or ()
+            if items:
+                legacy_results[bot_id] = items[0]
+            if items and items[0].get("synced"):
+                return RuntimeProjectionResult.converged()
+            return RuntimeProjectionResult.pending(
+                code="MCP_PROJECTION_FAILED", reason="MCP device delivery failed",
+            )
+
+        slots = asyncio.Semaphore(MCP_CONFIG_FANOUT_LIMIT)
+
+        async def project_one(bot_id: str, entity_id: str) -> dict[str, Any]:
+            async with slots:
+                try:
+                    projection = await capability_projection.project_competing_change(
+                        bot_id=bot_id, owner_id=user_id, entity_id=entity_id,
+                        scope=scope, retired_mappings=(), legacy=partial(deliver, bot_id),
+                    )
+                    synced = projection.status is RuntimeProjectionStatus.CONVERGED
+                except Exception:
+                    synced = False
+                if bot_id in legacy_results:
+                    return legacy_results[bot_id]
+                item = {"bot_id": bot_id, "synced": synced}
+                if not synced:
+                    item["reason"] = "MCP_PROJECTION_FAILED"
+                return item
+
+        sync_results = tuple(await asyncio.gather(
+            *(project_one(bot_id, selected[bot_id]) for bot_id in sorted(selected)),
+        ))
         sync_summary = _projection_summary(sync_results)
 
     saved = read_scoped_config(
@@ -499,26 +517,10 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
             if detail and (detail.get("runMode") or detail.get("run_mode")) == "LOCAL":
                 raise McpConfigValueError("LOCAL MCP does not accept remote configuration")
 
-        projection_options = {}
-        if self._capability_projection is not None:
-            create_projection = self._capability_projection.defer_enabled
-            if create_projection:
-                try:
-                    # Materialize legacy Installation sources before taking
-                    # the write lock. The repository re-reads current supply.
-                    await asyncio.to_thread(
-                        self._capability_reader.effective_mcp_server_codes,
-                        bot_id=bot.bot_id, owner_id=bot.current_owner_id, bot=bot.bot,
-                    )
-                except Exception:
-                    # Existing Installation facts still govern the write.
-                    pass
-            projection_options["create_projection"] = create_projection
         config, changed = await asyncio.to_thread(
             self._command_repo.patch_bot,
             bot_pk=bot.bot_pk, bot_id=bot.bot_id, entity_id=bot.entity_id,
             current_owner_id=bot.current_owner_id, server_code=server_code, patch=patch,
-            **projection_options,
         )
         try:
             effective = await asyncio.to_thread(
