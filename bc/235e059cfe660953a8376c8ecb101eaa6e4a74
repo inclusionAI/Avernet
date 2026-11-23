@@ -1,0 +1,90 @@
+singlebox/ci/tests/test_worker_companion_lifecycle.py
+  s_9dac9fbdf9fc56::t_7483318144fab8 1-62
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/README.md
+  s_9dac9fbdf9fc56::t_6cff41f4b77465 9-36
+  s_9dac9fbdf9fc56::t_230bb338412a0a 1-8,37-42
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/commands.rs
+  s_9dac9fbdf9fc56::t_4d97874492c483 139
+  s_9dac9fbdf9fc56::t_6cff41f4b77465 84-86
+  s_9dac9fbdf9fc56::t_3cb6dab2bcbe38 83
+  s_9dac9fbdf9fc56::t_de2b021c0f0217 1-82,87-105,111-138,140-183
+  s_9dac9fbdf9fc56::t_81ca11ba641c28 106-110
+.github/workflows/singlebox-coverage.yml
+  s_9dac9fbdf9fc56::t_1b89b398bea9a4 263
+singlebox/ci/tests/test_singlebox_companion_coverage.py
+  s_9dac9fbdf9fc56::t_2d9434cefc20c8 64,101-102,104,106,108,110,117-118,138-139,141-142,154,173
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_9dac9fbdf9fc56::t_ac1b36f16394f8 30-35,38,45-50
+singlebox/verity/test_singlebox_coverage_gate.sh
+  s_9dac9fbdf9fc56::t_fa98ee11550726 195-197,324
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/storage.rs
+  s_9dac9fbdf9fc56::t_5aded1d910fd13 1-59
+apps/bcs/scripts/e2e-test/worker_runtime_dispatch_story.py
+  s_9dac9fbdf9fc56::t_6151ae7133fb99 90
+  s_9dac9fbdf9fc56::t_38aec3afbda5fb 1-89,91-126
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/assembly.rs
+  s_9dac9fbdf9fc56::t_ac1b36f16394f8 1-333
+singlebox/ci/verify_singlebox_coverage_artifacts.py
+  s_9dac9fbdf9fc56::t_9b027fafb6bf89 35,212-238,245
+singlebox/ci/singlebox_coverage.sh
+  s_9dac9fbdf9fc56::t_2d9434cefc20c8 87,588,748,854
+apps/bcs/scripts/build_e2e_companions.sh
+  s_9dac9fbdf9fc56::t_2d9434cefc20c8 5,9-11,20
+apps/bcs/scripts/ci/companion_coverage.py
+  s_9dac9fbdf9fc56::t_2d9434cefc20c8 2,41,72,74,84-85
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/workload.rs
+  s_9dac9fbdf9fc56::t_4d97874492c483 38,44,52,54-56,66-68,102,112,125,134,153-155,178,213
+  s_9dac9fbdf9fc56::t_de2b021c0f0217 1-29,34-35,37,39-43,45-51,53,74-101,122-124,126-130,179-212,214-243
+  s_9dac9fbdf9fc56::t_799f57addc2fe3 57-65,69,103-111,113-117,131-133,135-152,156-177
+  s_9dac9fbdf9fc56::t_7d793b0052a5f7 118-121
+  s_9dac9fbdf9fc56::t_1cd6c376b91188 30-33,36,70-73
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/dispatch.rs
+  s_9dac9fbdf9fc56::t_aadd71a8857087 1-3,7-11,15-21,28,50,52-54,86-87,114-115,124-125,127-128,139-141,153-155,166,181-183,185,189-191,195-197,199-202,220-223,225-228,232-236,238-240,258,273,275-278
+  s_9dac9fbdf9fc56::t_799f57addc2fe3 4-6,12-14,22-27,29-49,51,55-85,88-113,116-123,126,129-138,142-152,156-165,167-180,184,186-188,192-194,198,203-219,224,229-231,237,241-257,259-272,274
+apps/bcs/scripts/e2e-test/worker_runtime_story.py
+  s_9dac9fbdf9fc56::t_b467ec60ca8bae 1-207,209-214,217-249
+  s_9dac9fbdf9fc56::t_1f0f3f7f83a1d8 208,216
+  s_9dac9fbdf9fc56::t_2cbcb507316333 215
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec-audit.md
+  s_9dac9fbdf9fc56::t_956b55483c0058 1,144,289,360-371
+  s_9dac9fbdf9fc56::t_6cff41f4b77465 2-4,6-143,145-225,227-265,267-282,290-358
+  s_9dac9fbdf9fc56::t_eda76c0af3fe7c 283-288
+  s_9dac9fbdf9fc56::t_24d4175ada3d54 5,226,266,359
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/runner.rs
+  s_9dac9fbdf9fc56::t_105764afc97bde 12-13
+  s_9dac9fbdf9fc56::t_ac1b36f16394f8 1-10,14-48
+  s_9dac9fbdf9fc56::t_4d97874492c483 11
+apps/bcs/scripts/worker_e2e_coverage.sh
+  s_9dac9fbdf9fc56::t_2d9434cefc20c8 1-26
+singlebox/ci/tests/test_verify_singlebox_coverage_artifacts.py
+  s_9dac9fbdf9fc56::t_41eb66f1ea9aaa 34-46,146-164
+apps/bcs/scripts/e2e_coverage.sh
+  s_9dac9fbdf9fc56::t_2d9434cefc20c8 269
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
+  s_9dac9fbdf9fc56::t_956b55483c0058 187-189
+  s_9dac9fbdf9fc56::t_6cff41f4b77465 172-186,190-197
+singlebox/ci/tests/test_singlebox_e2e_phases.py
+  s_9dac9fbdf9fc56::t_2d9434cefc20c8 25,106
+apps/bcs/Cargo.lock
+  s_9dac9fbdf9fc56::t_39139fc50755de 340,379-382,434
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_9dac9fbdf9fc56::t_5e71d10e86bc84 312,323-330
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
+  s_9dac9fbdf9fc56::t_f646e10d87b8eb 89,346-355
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bc235e059cfe660953a8376c8ecb101eaa6e4a74",
+  "prompts": {},
+  "sessions": {
+    "s_9dac9fbdf9fc56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ef8f-99fd-7003-aabd-a16850889d4d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
