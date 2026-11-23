@@ -163,6 +163,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 44, name: "group_context_preset" },
     SqliteMigration { version: 45, name: "message_activity_indexes" },
     SqliteMigration { version: 46, name: "configured_catalog_labels" },
+    SqliteMigration { version: 47, name: "dist_immutable_objects" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -598,6 +599,12 @@ async fn apply_sqlite_migration_body(
             db.transaction(steps).await?;
             Ok(())
         }
+        47 => {
+            db.execute(DbStatement::new(include_str!(
+                "../../../../migrations/sqlite/047_dist_immutable_objects.sql"
+            ))).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -704,6 +711,9 @@ fn sqlite_migration_checksum(migration: &SqliteMigration) -> String {
     hasher.update(b"\n");
     hasher.update(migration.name.as_bytes());
     hasher.update(b"\n");
+    if migration.version == 47 {
+        hasher.update(include_bytes!("../../../../migrations/sqlite/047_dist_immutable_objects.sql"));
+    }
     hex::encode(hasher.finalize())
 }
 
@@ -749,3 +759,7 @@ mod friend_cutover_tests;
 #[cfg(test)]
 #[path="migrations/catalog_labels_tests.rs"]
 mod catalog_labels_tests;
+
+#[cfg(test)]
+#[path = "migrations/dist_archive_tests.rs"]
+mod dist_archive_tests;

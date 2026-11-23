@@ -126,19 +126,16 @@ async fn discovery_prunes_expired_members_but_preserves_not_yet_registered_entri
 mod common;
 use bcs_service_api::port::repo::distributed::session::*;
 use common::Recorder;
-use serde_json::json;
 fn initial() -> Checkpoint {
     Checkpoint {
         format_version: 1,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),
-        runner_state: RunnerState {
-            format_version: 1,
-            value: json!({}),
-        },
+        runner_state: None,
         dispatch_seq: Default::default(),
         deadlines: vec![],
+        deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: None,
         outbox: None,
@@ -219,6 +216,7 @@ async fn configured_cache_capacity_rejects_new_sessions_then_reuses_released_slo
         CoordinationStoreConfig {
             max_cached_sessions: 1,
             max_handoff_timers: 2,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -258,6 +256,7 @@ async fn handoff_capacity_is_separate_and_reclaimed_after_completion() {
         CoordinationStoreConfig {
             max_cached_sessions: 2,
             max_handoff_timers: 1,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -308,10 +307,12 @@ fn zero_coordination_limits_are_rejected() {
         CoordinationStoreConfig {
             max_cached_sessions: 0,
             max_handoff_timers: 1,
+            ..Default::default()
         },
         CoordinationStoreConfig {
             max_cached_sessions: 1,
             max_handoff_timers: 0,
+            ..Default::default()
         },
     ] {
         let model = Arc::new(Model::default());
@@ -334,6 +335,7 @@ async fn definite_retry_error_keeps_a_previous_unknown_acquisition_reserved() {
         CoordinationStoreConfig {
             max_cached_sessions: 1,
             max_handoff_timers: 2,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -375,6 +377,9 @@ struct DelayedCreate {
     blocked: std::sync::atomic::AtomicBool,
 }
 impl bcs_store_api::StorePlugin for DelayedCreate {
+    fn pool_observation(&self) -> Option<bcs_store_api::StorePoolObservation> {
+        self.model.pool_observation()
+    }
     fn supports(&self, capability: bcs_store_api::StoreCapability) -> bool {
         self.model.supports(capability)
     }
@@ -422,6 +427,7 @@ async fn cancelled_checkpoint_write_keeps_the_cache_reservation_through_definite
         CoordinationStoreConfig {
             max_cached_sessions: 1,
             max_handoff_timers: 2,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -507,6 +513,9 @@ struct UncertainLease {
     mode: std::sync::atomic::AtomicU8,
 }
 impl bcs_store_api::StorePlugin for UncertainLease {
+    fn pool_observation(&self) -> Option<bcs_store_api::StorePoolObservation> {
+        self.model.pool_observation()
+    }
     fn supports(&self, capability: bcs_store_api::StoreCapability) -> bool {
         self.model.supports(capability)
     }
@@ -558,6 +567,7 @@ fn uncertain_setup() -> (Arc<Model>, Arc<UncertainLease>, CoordinationStore) {
         CoordinationStoreConfig {
             max_cached_sessions: 1,
             max_handoff_timers: 2,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -671,4 +681,29 @@ async fn uncertain_liveness_does_not_turn_claim_or_handoff_retries_into_definite
             Err(StoreError::OutcomeUnknown { .. })
         ));
     }
+}
+
+#[tokio::test]
+async fn recovery_attempt_bytes_preserve_room_for_control_and_retries() {
+    use bcs_store_api::document::DocumentStorePlugin;
+    let (model, store) = setup();
+    register(&store, "a").await;
+    let claim = claim_shard(&store, 42).await;
+    let sid = Sid("s0042.capacity".into());
+    let AcquireOutcome::Acquired(acquired) = store.acquire(&sid, &claim, initial()).await.unwrap() else { panic!() };
+    let request = |n: usize| RequestId(format!("{n:03}{}", "x".repeat(251)));
+    for n in 0..31 {
+        assert!(matches!(store.record_recovery_attempt(&acquired.ownership,
+            CommitSeq(0), request(n)).await.unwrap(), RecoveryUpdate::Recorded { .. }));
+    }
+    let key = layout().ckpt(&sid).unwrap();
+    let before = model.read_document(&key).await.unwrap().unwrap();
+    assert_eq!(store.record_recovery_attempt(&acquired.ownership, CommitSeq(0), request(31)).await,
+        Err(StoreError::NotApplied { code: "recovery_attempt_byte_budget".into() }));
+    assert_eq!(store.record_recovery_attempt(&acquired.ownership, CommitSeq(0), RequestId("x".repeat(255))).await,
+        Err(StoreError::Invalid { code: "recovery_attempt_identity".into() }));
+    assert_eq!(model.read_document(&key).await.unwrap().unwrap(), before);
+    assert!(matches!(store.record_recovery_attempt(&acquired.ownership,
+        CommitSeq(0), request(0)).await.unwrap(), RecoveryUpdate::Recorded { .. }));
+    assert_eq!(model.read_document(&key).await.unwrap().unwrap(), before);
 }

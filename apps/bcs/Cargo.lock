@@ -1483,6 +1483,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-encoding"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-dist-model",
+ "hex",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "bcs-dist-gateway"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1549,20 +1559,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-projection"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-dist-model",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bcs-dist-store"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-db-migrations",
+ "bcs-dist-encoding",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-service-api",
  "bcs-store-api",
  "bcs-test-support",
- "hex",
+ "futures",
  "serde",
  "serde_json",
- "sha2",
+ "tempfile",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

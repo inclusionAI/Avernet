@@ -88,6 +88,7 @@ pub fn receipt() -> AdmissionReceipt {
 
 pub fn admission() -> AdmitRequest {
     AdmitRequest {
+        scope: scope(),
         input: input(),
         create_session: Some(spec()),
         create_task: Some(snapshot()),
@@ -127,6 +128,8 @@ pub fn snapshot() -> TaskSnapshot {
         sid: owner().sid,
         tid: input().tid,
         content: content(),
+        output_limits: PHASE_ONE_OUTPUT_LIMITS,
+        output_usage: OutputUsage::default(),
         snapshot_event_id: Some(event_id()),
         source_commit: CommitSeq(8),
         created_at: TimestampMillis(100),
@@ -155,18 +158,28 @@ pub fn checkpoint() -> Checkpoint {
         commit_seq: CommitSeq(8),
         consumed: Some(position()),
         tasks: vec![TaskProgress {
+            steps: 0,
             tid: input().tid,
             phase: TaskPhase::Running,
             input: payload(),
             result_ref: None,
+            output_limits: PHASE_ONE_OUTPUT_LIMITS,
+            output_usage: OutputUsage::default(),
+            publication: SnapshotProgress::default(),
+            finalization: None,
         }]
         .into(),
-        runner_state: state(),
+        runner_state: Some(TaskRunnerState {
+            tid: input().tid,
+            state: state(),
+        }),
         dispatch_seq: Default::default(),
         deadlines: vec![],
+        deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: Some(event_id()),
         outbox: Some(CommittedBatch {
+            created_at: None,
             commit_id: proof().commit_id,
             source_commit: CommitSeq(8),
             content_digest: Digest("batch-digest".into()),

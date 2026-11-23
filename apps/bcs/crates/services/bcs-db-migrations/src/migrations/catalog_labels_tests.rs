@@ -23,6 +23,10 @@ async fn upgrade_retains_history_and_accepts_legacy_queries_inserts_and_runner()
         validate_applied_sqlite_migration(migration,&applied_sqlite_migration(&db,migration.version).await?.unwrap())?;
         apply_sqlite_migration(&db,migration).await?;
     }
-    assert_eq!(current_sqlite_version(&db,true).await?,Some(46));
+    assert_eq!(
+        applied_sqlite_migration(&db, 46).await?.map(|migration| migration.name),
+        Some("configured_catalog_labels".into())
+    );
+    assert_eq!(current_sqlite_version(&db,true).await?,Some(47));
     Ok(())
 }

@@ -1,13 +1,16 @@
 # Distributed repository contracts
 
-Status: declarations for an opt-in runtime; no concrete provider or runtime is
-implemented by this change. The Rust declarations own the exact method shapes.
+Status: contracts for an opt-in runtime. Public providers are being implemented
+in `bcs-dist-store`; complete runtime assembly and provider acceptance remain
+separate. The Rust declarations own the exact method shapes. See the
+[reliable Inbox provider](../../../../../../services/bcs-dist-store/src/inbox/README.md)
+for retained layout, cold-start health, resource bounds and validation limits.
 
 ## Boundaries
 
 | Boundary | Traits | Responsibility |
 | --- | --- | --- |
-| SessionInbox | `InboxProducerPort`, `InboxConsumerPort`, `ShardFeedPort`, `InboxSchedulingPort` | Durable admission, replayable per-session input, acknowledgements and recoverable activation |
+| SessionInbox | `InboxProducerPort`, `InboxConsumerPort`, `ShardFeedPort`, `InboxSchedulingPort`, `AdmissionMaintenancePort`, `AdmissionControlPort`, `AdmissionClosurePort` | Durable admission, replayable per-session input, acknowledgements and recoverable activation |
 | TaskFeed | `TaskPublisherPort`, `TaskReaderPort` | Committed output, task snapshots, consistent restore and resumable subscriptions |
 | DispatchBoard | `DispatchControlPort`, `DispatchQueuePort`, `HeldDispatchPort`, `CommandFeedPort` | Worker intent, Connector ownership, remote progress and notification hints |
 | Session state | `SessionStorePort` | Frozen spec reads, per-session owner seal, atomic business commit, unknown-result resolution and recovery metadata |
@@ -36,7 +39,8 @@ create/refresh state. Absence is None; storage failure is an error. Moving this
 read does not move creation: `AdmitRequest.create_session` and `create_task`
 remain part of `InboxProducerPort::admit` and its durable input/activation
 guarantee. The API move prescribes neither a new storage layout nor extra runtime
-database calls. The total remains 23 service/port traits.
+database calls. Output projection is a separate pure core contract, not another
+storage interface.
 
 ## Admission, identity and queue replacement
 
@@ -50,6 +54,13 @@ Initial task creation is create-once as part of Gateway admission; a delayed
 retry must not replace a task already advanced by Worker. Session specification
 and task scope must match the admitted input. An existing frozen specification
 cannot be replaced by a retry with newer group configuration.
+
+`AdmitRequest.scope` is trusted application scope and must match the frozen
+Session and task. Providers recompute business digests and select canonical
+InputId identity independently of sid/shard. Durable admission maintenance and
+gate/cut ports are Worker infrastructure, not another business submission API.
+`FeedBatch.failures` isolates failed Session watches; Worker resolves retained
+candidates and rebuilds failed watches from committed consumed before reuse.
 
 An identity collision compares canonical business content, not transport
 metadata, a queue offset, a retry counter or holder incarnation. Critical Agent
@@ -110,6 +121,26 @@ is not removed with the ownership placeholder strings.
 
 ## Checkpoint and effect replay
 
+Task lifecycle and the pending task queue belong to Worker, independently of the
+opaque Runner state. `Checkpoint.runner_state` is `Option<TaskRunnerState>` and
+binds state to exactly one active tid. The Worker may discard it during independent
+quota finalization and must init fresh state for the next task only after terminal
+publication. `TaskProgress` copies frozen output limits from the initial task and
+retains cumulative usage, snapshot publication counters/deadline and finalization.
+The AwaitingResult commit freezes `TaskFinalization.record` and operation identity;
+the Done commit stores the archive reference and terminal event identity. Done
+without confirmed `terminal_published` does not authorize starting the next task.
+The same immutable snapshot Ref is reused in draft, published content and archive.
+
+Show and Artifact events use stable artifact identities and explicit operations.
+Worker and TaskFeed inject the shared
+[`OutputProjectionCoreService`](../../../core/dist_projection.rs); event replay
+does not charge cumulative quota again. The pure implementation documents exact
+encoding, limits and recovery in
+[bcs-dist-projection](../../../../../../services/bcs-dist-projection/README.md).
+Whole-Decision validation must reject terminal SetStatus before any effects;
+Completed/Failed/Canceled/Rejected require the two-commit archive protocol.
+
 1. Claim the shard, enumerate **all** pending sessions (including future due
    times), acquire/seal each session and activate its input reader.
 2. Acquisition preserves the latest business checkpoint and its batch. A shard
@@ -161,15 +192,13 @@ must be serialized, and stale attempts cannot undo a business-progress reset.
 metadata, not a field copied into the next business candidate. Only actual
 business progress resets the failure streak.
 
-Owner records, checkpoint envelopes, commit receipts and recovery responses
-expose no independent revision. Storage adapters may use native versions or
-transactions internally. A TBase adapter may encode business writes using
-`epoch * 10^9 + commit_seq`, with range/overflow checks, and reserve the epoch
-boundary for sealing. Such encoding is not part of the portable API and does not
-by itself prove atomic owner/sequence checks or cross-path fencing. Recovery
-metadata must use an independent safe control-write protocol; it cannot rewrite
-the business checkpoint at the same timestamp or consume a timestamp reserved
-for its next commit. These backend guarantees remain to be verified.
+Owner records, checkpoint envelopes and commit receipts expose no storage
+revision. `SessionControl.revision` is a logical control fence used by admission
+closure and recovery; it is not a backend CAS version. Storage adapters may use native versions or
+transactions internally. Phase one uses opaque DocumentCAS versions shared by
+sealing, business commits and recovery control. It does not encode a version as
+`epoch * 10^9 + commit_seq`. Control writes preserve business sequence and outbox.
+Concrete backend atomicity and fencing remain provider acceptance obligations.
 
 Dispatch recheck `Revision` and inbox `ScheduleToken` remain: concurrent control
 updates can invalidate a scheduling decision without a new Worker epoch or
@@ -261,3 +290,16 @@ fencing is implemented in the repository provider. `release_local` drops only a
 quiescent local cache; it cannot delete durable state. Peer controls bind exact
 instances through the application boundary. See the Worker coordination SPEC and
 its implementation record for provider prerequisites and initialization scheme A.
+
+## Session isolation control
+
+[`SessionControlPort`](control.rs) persists frozen risk attempts and separates
+Normal/Quarantined/Blocked/Recovering from business state. Ordinary commits bind
+the control revision; independent finalization binds the isolation operation.
+[`AdmissionClosurePort`](admission.rs) owns recoverable close/cut scanning and
+conditional reopen, with actual `TerminalTaskEvidencePort` evidence. Application
+authorization must precede `RecoveryAuthorization`; neither an owner token nor a
+caller-created completion digest grants recovery rights. See the
+[control provider](../../../../../../services/bcs-dist-store/src/coordination/README.md)
+and [closure provider](../../../../../../services/bcs-dist-store/src/inbox/README.md)
+for retained evidence, IO budgets and validation limits.

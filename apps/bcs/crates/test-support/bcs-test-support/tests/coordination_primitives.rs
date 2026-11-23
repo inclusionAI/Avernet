@@ -224,3 +224,43 @@ async fn final_document_and_lease_versions_reject_without_mutation() {
         std::future::ready(())
     }).await;
 }
+
+#[tokio::test]
+async fn heartbeat_can_win_after_timeout_until_termination_is_committed() {
+    let p = Model::default();
+    let ttl = Duration::from_secs(3);
+    let LeaseRegistration::Active(first) = p.register_lease("late-winner", b"worker", ttl).await.unwrap() else { panic!("registration") };
+    p.advance(Duration::from_secs(4));
+    assert!(matches!(p.update_lease("late-winner", first.version, b"worker", Some(ttl)).await.unwrap(), LeaseWrite::Applied(_)));
+    assert!(matches!(p.read_lease("late-winner").await.unwrap(), LeaseState::Alive(_)));
+    p.advance(Duration::from_secs(4));
+    assert_eq!(p.read_lease("late-winner").await.unwrap(), LeaseState::Terminated);
+    assert_eq!(p.update_lease("late-winner", first.version, b"worker", Some(ttl)).await.unwrap(), LeaseWrite::Terminated);
+}
+
+#[tokio::test]
+async fn membership_retention_is_thirty_days_and_heartbeats_refresh_it() {
+    let p = Model::default();
+    let day = Duration::from_secs(24 * 60 * 60);
+    let LeaseRegistration::Active(first) = p.register_lease("old-instance", b"worker", day).await.unwrap() else { panic!("registration") };
+    p.advance(day * 29);
+    assert!(matches!(p.update_lease("old-instance", first.version, b"worker", Some(day)).await.unwrap(), LeaseWrite::Applied(_)));
+    p.advance(day * 2);
+    assert_eq!(p.read_lease("old-instance").await.unwrap(), LeaseState::Terminated);
+    p.advance(day * 29);
+    assert_eq!(p.read_lease("old-instance").await.unwrap(), LeaseState::Terminated);
+    p.advance(day);
+    assert_eq!(p.read_lease("old-instance").await.unwrap(), LeaseState::Absent);
+    assert_eq!(p.update_lease("old-instance", first.version, b"worker", Some(day)).await.unwrap(), LeaseWrite::ConditionNotMet);
+    assert!(matches!(p.register_lease("fresh-instance", b"worker", day).await.unwrap(), LeaseRegistration::Active(_)));
+}
+
+#[tokio::test]
+async fn lost_timeout_decision_reply_remains_unknown_until_read_back() {
+    let p = Model::default();
+    p.register_lease("lost-terminal", b"worker", Duration::from_secs(1)).await.unwrap();
+    p.advance(Duration::from_secs(2));
+    p.lose_next_response();
+    assert!(matches!(p.read_lease("lost-terminal").await, Err(StoreError::OutcomeUnknown(_))));
+    assert_eq!(p.read_lease("lost-terminal").await.unwrap(), LeaseState::Terminated);
+}

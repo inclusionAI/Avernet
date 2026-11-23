@@ -42,6 +42,7 @@ fn next_commit(session: &AcquiredSession) -> CommitRequest {
     let content_digest = Digest(format!("digest-{}", seq.0));
     candidate.commit_seq = seq;
     candidate.outbox = Some(CommittedBatch {
+        created_at: None,
         commit_id: commit_id.clone(),
         content_digest: content_digest.clone(),
         source_commit: seq,
@@ -59,6 +60,9 @@ fn next_commit(session: &AcquiredSession) -> CommitRequest {
         }],
     });
     CommitRequest {
+        purpose: CommitPurpose::Ordinary {
+            control_revision: 0,
+        },
         owner: session.ownership.clone(),
         expected_commit_seq: session.envelope.checkpoint.commit_seq,
         commit_id,
@@ -71,6 +75,7 @@ fn next_commit(session: &AcquiredSession) -> CommitRequest {
 async fn feed_preserves_batch_limits_and_caps_wait_without_consuming_unowned_shards() {
     let (world, worker, _) = ready_session().await;
     world.data.batches.lock().unwrap().push_back(FeedBatch {
+        failures: vec![],
         sessions: vec![],
         hints: vec![sid()],
     });

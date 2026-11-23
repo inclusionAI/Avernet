@@ -32,7 +32,7 @@ pub struct ShardOwner {
 /// Session processing identity returned after acquisition/sealing. Providers
 /// validate sid-to-shard membership and the exact owner sealed in the checkpoint;
 /// a caller-created value or a larger epoch alone cannot authorize a write.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionOwnership {
     pub sid: Sid,
     pub shard: ShardId,

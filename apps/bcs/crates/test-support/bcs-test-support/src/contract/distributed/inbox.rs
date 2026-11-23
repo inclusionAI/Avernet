@@ -13,7 +13,7 @@ pub async fn inbox_producer_port_contract_tests(
         AdmitOutcome::Accepted(receipt) => receipt,
         other => panic!("fresh admission was not accepted: {other:?}"),
     };
-    assert_eq!(port.admit(fresh).await?, AdmitOutcome::Accepted(receipt));
+    assert_eq!(port.admit(fresh).await?, AdmitOutcome::Duplicate(receipt));
     assert_eq!(port.admit(changed).await?, AdmitOutcome::ContentConflict);
     Ok(())
 }
@@ -30,7 +30,7 @@ pub async fn inbox_consumer_port_contract_tests(
             shard,
             PageRequest {
                 after: None,
-                limit: NonZeroU32::MAX,
+                limit: NonZeroU32::new(128).expect("positive page bound"),
             },
         )
         .await?;
@@ -57,7 +57,7 @@ pub async fn shard_feed_port_contract_tests(
             ReadLimits {
                 max_sessions: NonZeroU32::MIN,
                 max_entries: NonZeroU32::MIN,
-                max_bytes: NonZeroU32::MAX,
+                max_bytes: NonZeroU32::new(1024 * 1024).expect("positive byte bound"),
             },
             Duration::from_secs(1),
         )
