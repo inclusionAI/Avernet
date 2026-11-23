@@ -8,6 +8,8 @@ use bcs_db_api::{DbExecuteResult, DbHealth};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex as StdMutex;
 
+mod projection;
+
 #[derive(Default)]
 struct RecordingDbPlugin {
     transaction_sql: StdMutex<Vec<String>>,
