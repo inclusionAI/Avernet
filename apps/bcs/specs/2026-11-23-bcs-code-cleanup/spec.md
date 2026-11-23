@@ -1,10 +1,10 @@
 # BCS 分层重复与无效逻辑清理
 
-Status: draft; 方案 A 已获用户确认，Manifest 功能簇暂缓，修订后的书面设计与实现计划待用户一并审阅。
+Status: implemented（2026-11-23；Group/Event/CLI 三簇已按 plan 执行）。方案 A 已获用户确认；Manifest 功能簇暂缓；同 crate/跨 crate 转换与存量死代码扫描留待后续独立评估。
 Date: 2026-11-23.
 Owning module: `apps/bcs`.
 Public contract change: 当前批次无公开 API 变更；Manifest 的两个 `bcs-config-api` 加法方法暂缓，需后续独立决策和版本策略。
-Validation evidence: §8 及执行时创建的 `validation.md`。
+Validation: 验证范围和复现命令见 §8；实测结果随 PR 报告。
 
 ## Context
 
@@ -205,7 +205,7 @@ crates/services/bcs-event-store/src/validation.rs
 - 同级模块间需要调用的自由函数和 inherent helpers 均使用 `pub(super)`，不是模块私有 `fn`，也不扩大 crate 外可见性；
 - 保留所有公开签名、锁获取顺序、`.await` 和 public re-export，不拆成多个同 trait impl。
 
-拆分是独立提交和回滚点。实施计划必须给出具体函数提取集和各文件目标行数；初始长方法提取集包含 `purge_expired`、`claim_deliveries`、`complete_delivery_attempt` 和 replay 职责内的 `create_replay_target`，避免 `repo.rs` 只剩数十行余量。七组共享 validator 在拆分提交中暂留 `memory.rs`，下一提交直接迁至 crate 根 `validation.rs`，不做第三次搬家。按知识标准在 Event Store `CONTEXT.md` 新增 memory 子模块布局说明（现有文档仅描述 `src/db/`），并把实际 `wc -l` 输出写入 `validation.md`。
+拆分是独立提交和回滚点。实施计划必须给出具体函数提取集和各文件目标行数；初始长方法提取集包含 `purge_expired`、`claim_deliveries`、`complete_delivery_attempt` 和 replay 职责内的 `create_replay_target`，避免 `repo.rs` 只剩数十行余量。七组共享 validator 在拆分提交中暂留 `memory.rs`，下一提交直接迁至 crate 根 `validation.rs`，不做第三次搬家。按知识标准在 Event Store `CONTEXT.md` 新增 memory 子模块布局说明（现有文档仅描述 `src/db/`），并核对实际 `wc -l` 输出。
 
 现有 DB/Memory conformance tests 只作为回归保障的一部分。RetryWait 无未来重试时间、replay reason 超长、Delivery list limit 0/100/101 和后端首错等负例需明确新增共享单元测试及 Memory/DB store 级特征测试，不得把现有正向 conformance 当作这些边界的已有覆盖。
 
@@ -392,13 +392,13 @@ Group 验证分两层：`RecordingDbPlugin` 提供受控行，验证投影器的
 2. 七个 JOIN Participant 聚合不再对同一 Group 进行重复的 O(n²) 查重，事件式单次成员检查不在此范围；
 3. Event Store Memory / DB 共用 §2.2 的七组纯校验（列表限制仅指 Delivery）、replacement 的下一 revision 谓词和 append 的非空字段循环，replacement/append 的后端首错差异保持不变；
 4. CLI 八个 session/URL 函数只有一个权威实现源文件，`get_current_env` 复用 lib 的公开实现，两个 target 专属 resolver 包装保留且成对测试，clap 与 resolver 两层既有行为均保持不变；
-5. Manifest 功能簇保持暂缓：本批不增加 `bcs-config-api` 公开方法、不修改两个 adapter 的私有实现，并在 `validation.md` 记录暂缓原因；后续重新启用时另建独立变更并解决 API-1/version 策略；
+5. Manifest 功能簇保持暂缓：本批不增加 `bcs-config-api` 公开方法、不修改两个 adapter 的私有实现，并保留本 spec 中的暂缓原因；后续重新启用时另建独立变更并解决 API-1/version 策略；
 6. 删除的每个本次新增孤儿 helper/import 都有引用扫描、编译和测试证据，不删除无关存量代码；
 7. 既有公开 API、协议、数据库和兼容 fixture 保持不变；
 8. 阶段测试、明确的 Memory/DB 负例和 workspace 构建通过；真实 MySQL 等条件验证若未执行，必须记录为缺口而非通过；
 9. 现有基线失败与本次新增失败分开报告；
 10. 代码 diff 不包含全局格式化和无关文件变更，并以文件清单逐项核对归属；
-11. Event Store 布局和 CLI URL 优先级的 owning CONTEXT/注释同步更新；Manifest 暂缓原因、overlay、MySQL、Clippy 等未验证项在 `validation.md` 单列。
+11. Event Store 布局和 CLI URL 优先级的 owning CONTEXT/注释同步更新；Manifest 暂缓原因、overlay、MySQL、Clippy 等未验证项在 PR 验证说明中单列。
 
 ## 11. 实现计划
 
