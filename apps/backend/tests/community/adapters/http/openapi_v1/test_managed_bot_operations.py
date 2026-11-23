@@ -13,7 +13,8 @@ from agentclaw.community.adapters.http.openapi_v1.middleware import SensitiveRes
 from agentclaw.community.api.managed_bots import ManagedBotServiceProtocol
 from agentclaw.community.di.openapi_bot_operations_config import OpenApiBotOperationsConfig
 from tests.community.adapters.http.openapi_v1.conftest import mount_public_error_handlers
-from tests.community.adapters.http.openapi_v1.test_principal_seam import mint, signing_key
+from tests.community.adapters.http.openapi_v1.test_principal_seam import mint
+from tests.community.adapters.http.openapi_v1.test_principal_seam import signing_key as signing_key
 
 
 @pytest.fixture

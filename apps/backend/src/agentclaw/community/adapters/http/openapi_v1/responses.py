@@ -18,8 +18,6 @@ a builder on success and let the decorator handle the mapped failures.
 """
 
 from __future__ import annotations
-from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
-from agentclaw.community.core.bot_management.snapshot_guard import ManagedBotInputError, ManagedSnapshotConflictError, ManagedSnapshotPersistenceError
 
 from json import JSONDecodeError
 
@@ -56,8 +54,14 @@ from agentclaw.community.core.bot_management.engine_version.errors import (
     EngineVersionStageUnsupportedError, EngineVersionInstanceSelectionError,
 )
 from agentclaw.community.core.bot_management.errors import (
+    BotAddressNotFoundError,
     BotCreationRetainedError,
     BotLookupAmbiguousError,
+)
+from agentclaw.community.core.bot_management.snapshot_guard import (
+    ManagedBotInputError,
+    ManagedSnapshotConflictError,
+    ManagedSnapshotPersistenceError,
 )
 from agentclaw.community.api.bot_startup_script_service import (
     MAX_SCRIPT_BYTES,
