@@ -3,10 +3,14 @@ from functools import partial
 import pytest
 
 from agentclaw.community.core.bot_management.snapshot_guard import (
-    ManagedSnapshotConflictError, template_snapshot_hash, validate_snapshot_write,
+    ManagedSnapshotConflictError,
+    template_snapshot_hash,
+    validate_snapshot_write,
 )
-from agentclaw.community.core.repository.implementations.bot.template import TemplateRepository
-from tests.community.core.bot_management.test_template_bot_repository import Database, seed
+from agentclaw.community.core.repository.implementations.bot.template import (
+    TemplateRepository,
+)
+from tests.community.core.bot_management.managed_bot_support import Database, seed
 
 
 def test_conditional_write_rejects_stale_snapshot_and_keeps_newer_record():

@@ -195,3 +195,59 @@ class TemplateBotRepository(TemplateBotRepositoryProtocol):
                 .one_or_none()
             )
             return json.loads(document.ext) if document else None
+
+    def statuses(self, *, template_key: str, targets: list[tuple[str, str]]) -> list[dict[str, Any]]:
+        addresses = list(dict.fromkeys(targets))
+        if not addresses:
+            return []
+        restart_fields = ('operation_id', 'phase', 'failure_phase', 'backup_warning')
+        with self.db.orm_session() as session:
+            statement = (
+                select(
+                    BotModel.bot_id,
+                    BotModel.owner_id,
+                    BotModel.status,
+                    BotModel.active_engine,
+                    BotModel.template_type,
+                    BotModel.binding_id,
+                    BotModel.device_id,
+                    EntityDeviceBinding.status.label('binding_status'),
+                    EntityDeviceBinding.device_provider.label('device_provider'),
+                    _json_text(session, BotModel.ext, '$.start_status').label('start_status'),
+                    _json_text(session, BotModel.ext, '$.start_message').label('start_message'),
+                    *(
+                        _json_text(session, BotModel.ext, '$.coding_restart.' + field).label('restart_' + field)
+                        for field in restart_fields
+                    ),
+                )
+                .join(TemplateModel, TemplateModel.bot_id == BotModel.bot_id)
+                .outerjoin(EntityDeviceBinding, and_(
+                    EntityDeviceBinding.id == BotModel.binding_id,
+                    EntityDeviceBinding.env == get_current_env(),
+                ))
+                .where(
+                    self._scope(session, template_key),
+                    or_(*(
+                        and_(BotModel.bot_id == bot_id, BotModel.owner_id == owner_id)
+                        for bot_id, owner_id in addresses
+                    )),
+                )
+                .order_by(BotModel.owner_id, BotModel.bot_id)
+            )
+            items = []
+            for row in session.execute(statement).mappings():
+                bot = {key: row[key] for key in (
+                    'bot_id', 'owner_id', 'status', 'active_engine', 'template_type', 'binding_id', 'device_id',
+                )}
+                bot['ext'] = {
+                    'start_status': row['start_status'],
+                    'start_message': row['start_message'],
+                    'coding_restart': {field: row['restart_' + field] for field in restart_fields},
+                }
+                if row['binding_status'] is not None:
+                    bot['device_binding'] = {
+                        'status': row['binding_status'],
+                        'device_provider': row['device_provider'],
+                    }
+                items.append(bot)
+            return items

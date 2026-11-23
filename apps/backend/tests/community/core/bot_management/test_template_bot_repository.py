@@ -1,43 +1,18 @@
 import json
-from contextlib import contextmanager
+from unittest.mock import Mock
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+import pytest
+from sqlalchemy import event
 
+from agentclaw.community.core.bot_management.managed_bots import ManagedBotService
 from agentclaw.community.core.bot_management.repository.models import TemplateModel
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
-from agentclaw.community.core.repository.implementations.bot.template_bots import TemplateBotRepository
+from agentclaw.community.core.repository.implementations.bot.template_bots import (
+    TemplateBotRepository,
+)
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
-from agentclaw.community.plugin_api.models import BotModel
-
-
-class Database:
-    def __init__(self):
-        self.engine = create_engine('sqlite://')
-        for model in (BotModel, TemplateModel, BotPublishModel, EntityDeviceBinding):
-            model.__table__.create(self.engine)
-
-    @contextmanager
-    def orm_session(self):
-        with Session(self.engine) as session, session.begin():
-            yield session
-
-    transactional_orm_session = orm_session
-
-
-def seed(db, bot_id='bot', **overrides):
-    values = dict(bot_id=bot_id, bot_name='Example', entity_id=bot_id, entity_type='user',
-                  creator_id='owner', owner_id='owner', env='dev', status='ACTIVE')
-    values.update(overrides)
-    with db.orm_session() as session:
-        bot = BotModel(**values)
-        session.add(bot)
-        session.flush()
-        session.add(TemplateModel(bot_id=bot_id, ext=json.dumps({
-            'template_key': 'coding', 'template_version_id': 7, 'template_version': '1.2',
-            'envs': {'SECRET': 'do-not-return'},
-        })))
-        return bot.id
+from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+from tests.community.core.bot_management.managed_bot_support import Database, seed
 
 
 def test_query_is_scoped_filtered_and_display_safe():
@@ -88,3 +63,70 @@ def test_malformed_json_is_not_a_scan_failure():
     with db.orm_session() as session:
         session.query(TemplateModel).update({'ext': '{broken'})
     assert TemplateBotRepository(db).query(template_key='coding', offset=0, limit=20)['total'] == 0
+
+
+def test_status_batch_projects_readiness_and_public_restart_without_loading_snapshots():
+    db = Database()
+    for index in range(20):
+        seed(db, f'bot-{index}', active_engine='aicoding', template_type='applicationCoding',
+             binding_id=1, device_id='device', ext=json.dumps({
+                 'start_status': 'SUCCEEDED',
+                 'private': 'do-not-return',
+                 'coding_restart': {'operation_id': f'op-{index}', 'phase': 'SUCCEEDED',
+                                    'backup_warning': 'backup_failed_continue', 'private': 'do-not-return'},
+             }))
+    seed(db, 'deleted', is_delete=1)
+    seed(db, 'other-env', env='pre')
+    with avernet_tenant_scope('other-tenant'):
+        seed(db, 'other-tenant')
+    statements = []
+    event.listen(db.engine, 'before_cursor_execute', lambda _conn, _cursor, statement, _params, _context, _many:
+                 statements.append(statement))
+    lifecycle = Mock()
+    targets = [(f'bot-{index}', 'owner') for index in range(20)]
+    items = ManagedBotService(TemplateBotRepository(db), lifecycle).statuses(
+        template_key='coding', targets=[*targets, *targets, ('deleted', 'owner'),
+                                        ('other-env', 'owner'), ('other-tenant', 'owner'), ('bot-0', 'wrong-owner')],
+    )
+    assert len(items) == 20
+    assert all(item['is_ready'] for item in items)
+    assert items[0]['ext']['aicoding']['restart']['warning']['code'] == 'backup_failed_continue'
+    assert 'do-not-return' not in json.dumps(items)
+    lifecycle.get_bot.assert_not_called()
+    assert len(statements) == 1
+    projection = statements[0].split('FROM')[0]
+    assert 'ac_templates.ext,' not in projection
+    assert 'ac_bots.ext,' not in projection
+
+
+@pytest.mark.parametrize('start_status,binding_status,expected_ready', [
+    ('SUCCEEDED', 'ACTIVE', True),
+    ('PENDING', 'ACTIVE', False),
+    ('FAILED', 'ACTIVE', False),
+    (None, 'ACTIVE', True),
+    (None, 'PENDING', False),
+])
+def test_status_projection_keeps_existing_application_readiness_and_backup_failure_policy(
+    start_status, binding_status, expected_ready,
+):
+    db = Database()
+    seed(db, active_engine='aicoding', template_type='applicationCoding', binding_id=1, device_id='device',
+         ext=json.dumps({
+             'start_status': start_status,
+             'coding_restart': {'operation_id': 'op', 'phase': 'FAILED', 'failure_phase': 'BACKING_UP',
+                                'error_message': 'private provider diagnostic'},
+         }))
+    with db.orm_session() as session:
+        session.add(EntityDeviceBinding(
+            id=1, entity_id='owner', entity_type='user', device_id='device', device_provider='arca',
+            env='dev', status=binding_status, applied_by='owner', device_props='{"private":"value"}',
+        ))
+    items = ManagedBotService(TemplateBotRepository(db), Mock()).statuses(
+        template_key='coding', targets=[('bot', 'owner')],
+    )
+    assert len(items) == 1
+    assert items[0]['is_ready'] is expected_ready
+    restart = items[0]['ext']['aicoding']['restart']
+    assert restart['status'] == 'FAILED'
+    assert restart['phase'] == 'BACKING_UP'
+    assert 'private' not in json.dumps(items)

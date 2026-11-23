@@ -1,5 +1,5 @@
-from unittest.mock import AsyncMock, Mock
 import inspect
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI
@@ -9,18 +9,30 @@ from injector import Injector
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.adapters.http.openapi_v1.managed_bots.router import router
-from agentclaw.community.adapters.http.openapi_v1.middleware import SensitiveResponseHeaderMiddleware
+from agentclaw.community.adapters.http.openapi_v1.middleware import (
+    SensitiveResponseHeaderMiddleware,
+)
 from agentclaw.community.api.managed_bots import ManagedBotServiceProtocol
-from agentclaw.community.di.openapi_bot_operations_config import OpenApiBotOperationsConfig
-from tests.community.adapters.http.openapi_v1.conftest import mount_public_error_handlers
+from agentclaw.community.di.openapi_bot_operations_config import (
+    OpenApiBotOperationsConfig,
+)
+from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
+)
 from tests.community.adapters.http.openapi_v1.test_principal_seam import mint
-from tests.community.adapters.http.openapi_v1.test_principal_seam import signing_key as signing_key
+from tests.community.adapters.http.openapi_v1.test_principal_seam import (
+    signing_key as signing_key,
+)
 
 
 @pytest.fixture
 def operations_client():
     service = Mock(spec=ManagedBotServiceProtocol)
     service.restart = AsyncMock(return_value={'bot_id': 'bot', 'status': 'ACTIVE', 'active_engine': 'aicoding'})
+    service.query.return_value = {'total': 0, 'items': []}
+    service.snapshot_context.return_value = {
+        'template_config': {'template_key': 'coding'}, 'template_config_hash': 'a' * 64,
+    }
     service.statuses.return_value = [{'bot_id': 'bot', 'owner_id': 'owner', 'status': 'ACTIVE', 'is_ready': True,
         'ext': {'aicoding': {'restart': {'operation_id': 'op', 'status': 'FAILED', 'phase': 'BACKING_UP',
             'message': 'Backup failed', 'warning': {'code': 'backup_failed_continue', 'message': 'Risk'}}}}}]
@@ -87,7 +99,10 @@ def test_published_stage_and_oversized_batch_are_refused(operations_client):
 
 
 def test_snapshot_is_an_opaque_logging_field_even_with_unrecognised_secret_names():
-    from agentclaw.community.adapters.http.error_logging import capture_call_params, format_call_params
+    from agentclaw.community.adapters.http.error_logging import (
+        capture_call_params,
+        format_call_params,
+    )
     def handler(body):
         return body
     payload = {'bot_id': 'bot', 'extra_configs': {'template_config': {
@@ -116,3 +131,61 @@ def test_sensitive_snapshot_response_cannot_be_cached(operations_client):
     })
     assert response.status_code == 200
     assert 'no-store' in response.headers['cache-control']
+
+
+@pytest.mark.parametrize('operation,payload', [
+    ('template-queries', {'template_key': 'coding'}),
+    ('template-config-for-others', {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}),
+    ('restart-for-others', {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}),
+    ('status-for-others', {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}),
+])
+@pytest.mark.parametrize('identity', [
+    {'user_id': 'human'},
+    {'tenant': None},
+    {'user_id': None, 'tenant': 'untrusted-tenant'},
+])
+def test_managed_operations_reject_human_mixed_and_untrusted_application_identities(
+    operations_client, operation, payload, identity,
+):
+    client, service = operations_client
+    response = client.post(
+        '/openapi/v1/bots/' + operation,
+        headers={PRINCIPAL_HEADER: mint(**identity)},
+        json=payload,
+    )
+    assert response.status_code == 403
+    assert not service.mock_calls
+
+
+@pytest.mark.parametrize('operation,payload', [
+    ('template-queries', {'template_key': 'coding'}),
+    ('template-config-for-others', {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}),
+    ('restart-for-others', {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}),
+    ('status-for-others', {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}),
+])
+def test_managed_operations_admit_the_allowlisted_application_only_identity(operations_client, operation, payload):
+    client, _ = operations_client
+    response = client.post('/openapi/v1/bots/' + operation, headers=headers(), json=payload)
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize('receipt_id,expected_operation', [(None, None), ('different', None), ('old', 'old')])
+def test_submission_only_reports_the_operation_explicitly_identified_by_lifecycle(
+    operations_client, receipt_id, expected_operation,
+):
+    client, service = operations_client
+    service.restart.return_value = {
+        'status': 'PENDING',
+        'active_engine': 'aicoding',
+        'device_binding': {'status': 'PENDING'},
+        'restart_operation_id': receipt_id,
+        'ext': {'coding_restart': {'operation_id': 'old', 'phase': 'SUCCEEDED'}},
+    }
+    response = client.post('/openapi/v1/bots/restart-for-others', headers=headers(), json={
+        'bot_id': 'bot', 'owner_id': 'owner', 'template_key': 'coding',
+    })
+    assert response.status_code == 200
+    data = response.json()['data']
+    restart = ((data.get('ext') or {}).get('aicoding') or {}).get('restart')
+    assert (restart or {}).get('operation_id') == expected_operation
+    assert service.restart.return_value['ext']['coding_restart']['operation_id'] == 'old'

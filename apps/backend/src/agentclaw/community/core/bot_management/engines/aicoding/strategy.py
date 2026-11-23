@@ -834,11 +834,13 @@ class AicodingProvisioningStrategy(AicodingRecycleMixin, AicodingSubmissionMixin
         effective_entity_id = str(bot.get("entity_id") or ctx.owner_id or "")
         effective_entity_type = str(bot.get("entity_type") or "staff")
         effective_engine = ctx.active_engine or self.engine_type
+        cleanup_snapshot = deepcopy(ctx.template_config)
+        if cleanup_snapshot is None and template_service is not None:
+            cleanup_snapshot = deepcopy(template_service.get_template_config(ctx.bot_id))
 
         def _run() -> None:
             import asyncio
 
-            cleanup_snapshot = template_service.get_template_config(ctx.bot_id) if template_service is not None else None
             refresh_succeeded = True
             skill_set_service = None
             logger.info(

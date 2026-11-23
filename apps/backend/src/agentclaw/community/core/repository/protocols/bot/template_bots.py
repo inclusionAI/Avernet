@@ -17,3 +17,6 @@ class TemplateBotRepositoryProtocol(ABC):
 
     @abstractmethod
     def snapshot(self, *, bot_id: str, owner_id: str, template_key: str) -> dict[str, Any] | None: ...
+
+    @abstractmethod
+    def statuses(self, *, template_key: str, targets: list[tuple[str, str]]) -> list[dict[str, Any]]: ...

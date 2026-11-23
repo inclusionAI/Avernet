@@ -16,7 +16,10 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotOperationsForbiddenError,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_app_name
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    caller_app_name,
+    caller_names_a_user,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -56,7 +59,9 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
 def _trust(principal: Principal, config: OpenApiBotOperationsConfig) -> None:
-    if not config.allows(env=get_current_env(), tenant=principal.tenant, app_name=caller_app_name(principal)):
+    if caller_names_a_user(principal) or not config.allows(
+        env=get_current_env(), tenant=principal.tenant, app_name=caller_app_name(principal),
+    ):
         raise BotOperationsForbiddenError('calling application is not approved for Bot operations')
 
 
@@ -125,13 +130,20 @@ async def restart_for_others(
         template_config=body.extra_configs.template_config if body.extra_configs else None,
         expected_template_config_hash=body.extra_configs.expected_template_config_hash if body.extra_configs else None,
     )
+    ext = resolve_status_ext(bot, response_ext={}, public=True)
+    namespace = ext.get('aicoding') or {}
+    restart = namespace.get('restart')
+    if restart and restart.get('operation_id') != bot.get('restart_operation_id'):
+        namespace.pop('restart')
+        if not namespace:
+            ext.pop('aicoding', None)
     return envelope(
         ManagedBotStatus(
             bot_id=body.bot_id,
             owner_id=body.owner_id,
             status=bot.get('status') or '',
             is_ready=is_bot_ready(bot),
-            ext=resolve_status_ext(bot, response_ext={}, public=True),
+            ext=ext,
         ),
         request,
     )
