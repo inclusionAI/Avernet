@@ -740,6 +740,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         try:
             result = await self._publish_service.offline_publish(
                 publish_id=publish_id,
+                operator_id=applicant,
             )
             logger.info(
                 "[_trigger_offline] completed: publish_id=%s, result=%s",
