@@ -1,0 +1,179 @@
+apps/bcs/Cargo.lock
+  s_b033c54cc00da7::t_c6ba0649c41da2 708,1601-1603,1605,1607
+apps/bcs/README.md
+  s_b033c54cc00da7::t_f56820360fde60 20-21
+apps/bcs/crates/adapters/http/bcs-dist-worker-http/README.md
+  s_b033c54cc00da7::t_72b41f6044d811 5-8,10-14
+apps/bcs/crates/adapters/http/bcs-dist-worker-http/src/lib.rs
+  s_b033c54cc00da7::t_fa919860989263 1-4
+apps/bcs/crates/application/bcs-app-dist-runtime/Cargo.toml
+  s_b033c54cc00da7::t_b0e32fa6b29d05 16
+apps/bcs/crates/application/bcs-app-dist-runtime/src/isolation.rs
+  s_b033c54cc00da7::t_f4eb85b4265fff 1-64
+apps/bcs/crates/application/bcs-app-dist-runtime/src/lib.rs
+  s_b033c54cc00da7::t_22c53ea954aea0 3,14
+apps/bcs/crates/application/bcs-app-dist-runtime/tests/isolation_boundary.rs
+  s_b033c54cc00da7::t_2faf11c4406de8 1-121
+apps/bcs/crates/bootstrap/bcs/tests/bootstrap_auth_boundaries.rs
+  s_b033c54cc00da7::t_eb2f8f9a558e57 5
+apps/bcs/crates/external-clients/bcs-dist-worker-client/README.md
+  s_b033c54cc00da7::t_cfdcd0d6e418a4 4-6
+apps/bcs/crates/external-clients/bcs-dist-worker-client/src/lib.rs
+  s_b033c54cc00da7::t_e9e84c97541395 1-2,37
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_b033c54cc00da7::t_0992ef28eb604e 41-51,61-67
+apps/bcs/crates/service-api/bcs-service-api/src/application/dist_runtime.rs
+  s_b033c54cc00da7::t_772f6e27b0b382 1,4,10-11,13-20,22-30,32-39,51-68
+apps/bcs/crates/service-api/bcs-service-api/src/port/dist_runtime.rs
+  s_b033c54cc00da7::t_4ee760fbc5cfca 2-4,7,13-20,22-30,34-36,44-46,49-86
+apps/bcs/crates/service-api/bcs-service-api/src/types/dist_runtime.rs
+  s_b033c54cc00da7::t_89a16a02f0193f 23-28
+apps/bcs/crates/services/bcs-dist-worker/CONTEXT.md
+  s_b033c54cc00da7::t_f57c5b5ab9941d 3-16
+apps/bcs/crates/services/bcs-dist-worker/Cargo.toml
+  s_b033c54cc00da7::t_3fa0ca748600ac 11,17,24-27
+apps/bcs/crates/services/bcs-dist-worker/README.md
+  s_b033c54cc00da7::t_82e490f14a319d 1,23-33,55,61,65-66,119,122,135-151
+apps/bcs/crates/services/bcs-dist-worker/src/config.rs
+  s_b033c54cc00da7::t_47c32e66c5aa56 44,48
+apps/bcs/crates/services/bcs-dist-worker/src/lib.rs
+  s_b033c54cc00da7::t_5ab6c77f0e7d37 6,13-21
+apps/bcs/crates/services/bcs-dist-worker/src/processor/README.md
+  s_b033c54cc00da7::t_c46a261616cd15 1-95
+apps/bcs/crates/services/bcs-dist-worker/src/processor/acquisition.rs
+  s_b033c54cc00da7::t_70cbb331af27f8 1-143
+apps/bcs/crates/services/bcs-dist-worker/src/processor/admin.rs
+  s_b033c54cc00da7::t_d4697826dfb402 1-77
+apps/bcs/crates/services/bcs-dist-worker/src/processor/capacity.rs
+  s_b033c54cc00da7::t_42de51100278d6 1-292
+apps/bcs/crates/services/bcs-dist-worker/src/processor/capacity_tests.rs
+  s_b033c54cc00da7::t_20e5796f8a2ead 1-81
+apps/bcs/crates/services/bcs-dist-worker/src/processor/commit.rs
+  s_b033c54cc00da7::t_7f998e5c568465 1-121
+apps/bcs/crates/services/bcs-dist-worker/src/processor/control.rs
+  s_b033c54cc00da7::t_c057384fcb6f28 1-326
+apps/bcs/crates/services/bcs-dist-worker/src/processor/decision.rs
+  s_b033c54cc00da7::t_b3c8cfb7f4c611 1-276
+apps/bcs/crates/services/bcs-dist-worker/src/processor/diagnostics.rs
+  s_b033c54cc00da7::t_bd2d42628aa8e5 1-86
+apps/bcs/crates/services/bcs-dist-worker/src/processor/drive.rs
+  s_b033c54cc00da7::t_09f541893fc3ca 1-336
+apps/bcs/crates/services/bcs-dist-worker/src/processor/effects.rs
+  s_b033c54cc00da7::t_711aa67127b02b 1-229
+apps/bcs/crates/services/bcs-dist-worker/src/processor/encoding.rs
+  s_b033c54cc00da7::t_cfb705d04f7d25 1-25
+apps/bcs/crates/services/bcs-dist-worker/src/processor/engine.rs
+  s_b033c54cc00da7::t_f0c0b6727cf7f0 1-390
+apps/bcs/crates/services/bcs-dist-worker/src/processor/lifecycle.rs
+  s_b033c54cc00da7::t_746617b58a66a1 1-134
+apps/bcs/crates/services/bcs-dist-worker/src/processor/mod.rs
+  s_b033c54cc00da7::t_0dfd41a9d586d3 1-31
+apps/bcs/crates/services/bcs-dist-worker/src/processor/observations.rs
+  s_b033c54cc00da7::t_2dff3dc392db84 1-94
+apps/bcs/crates/services/bcs-dist-worker/src/processor/prepare.rs
+  s_b033c54cc00da7::t_b92114ad122423 1-634
+apps/bcs/crates/services/bcs-dist-worker/src/processor/references.rs
+  s_b033c54cc00da7::t_37539ae3deb3ff 1-219
+apps/bcs/crates/services/bcs-dist-worker/src/processor/replay.rs
+  s_b033c54cc00da7::t_40aa1fb579b142 1-127
+apps/bcs/crates/services/bcs-dist-worker/src/processor/risk.rs
+  s_b033c54cc00da7::t_cd96104fcbaa76 1-179
+apps/bcs/crates/services/bcs-dist-worker/src/processor/tests.rs
+  s_b033c54cc00da7::t_d83953fbbb3d92 1-580
+apps/bcs/crates/services/bcs-dist-worker/src/processor/tests/reference_tests.rs
+  s_b033c54cc00da7::t_25e4cdfabec712 1-309
+apps/bcs/crates/services/bcs-dist-worker/src/processor/thinking.rs
+  s_b033c54cc00da7::t_33b2fb8af08cab 1-123
+apps/bcs/crates/services/bcs-dist-worker/src/processor/transitions.rs
+  s_b033c54cc00da7::t_b7cbd54fcb9bf4 1-458
+apps/bcs/crates/services/bcs-dist-worker/src/processor_runtime.rs
+  s_b033c54cc00da7::t_b064d7113ac85e 1-221
+apps/bcs/crates/services/bcs-dist-worker/src/rebuilding_feed.rs
+  s_b033c54cc00da7::t_80575f10ba2667 1-62
+apps/bcs/crates/services/bcs-dist-worker/src/recovery.rs
+  s_b033c54cc00da7::t_30a27fd561ba80 164-167,261-269,279
+apps/bcs/crates/services/bcs-dist-worker/src/runtime.rs
+  s_b033c54cc00da7::t_ea6c64591a69ff 49-51,112,127-130,154-221,230,295-296,357,530-535,538-541,587-589,591-592,685-693,706-707,711-735,737,755-756,899-907,934-937,996-998,1004-1009
+apps/bcs/crates/services/bcs-dist-worker/src/scan_resources.rs
+  s_b033c54cc00da7::t_e8d4b3a9d9f2a1 1-82
+apps/bcs/crates/services/bcs-dist-worker/src/supervisor/README.md
+  s_b033c54cc00da7::t_3e94f3fd88b81b 1-101
+apps/bcs/crates/services/bcs-dist-worker/src/supervisor/evidence.rs
+  s_b033c54cc00da7::t_e0a110b10b60c2 1-156
+apps/bcs/crates/services/bcs-dist-worker/src/supervisor/mod.rs
+  s_b033c54cc00da7::t_c90546c4e4d1eb 1-297
+apps/bcs/crates/services/bcs-dist-worker/src/supervisor/visit.rs
+  s_b033c54cc00da7::t_f2eba327c2374f 1-163
+apps/bcs/crates/services/bcs-dist-worker/tests/conformance_isolation.rs
+  s_b033c54cc00da7::t_9d2bfad9924c54 1-34
+apps/bcs/crates/services/bcs-dist-worker/tests/conformance_rebuilding_feed.rs
+  s_b033c54cc00da7::t_aa0504c112cba2 1-33
+apps/bcs/crates/services/bcs-dist-worker/tests/dispatch_supervisor.rs
+  s_b033c54cc00da7::t_707d495b39383d 1-413
+apps/bcs/crates/services/bcs-dist-worker/tests/drain_scheduling.rs
+  s_b033c54cc00da7::t_f90694f5b9a2b5 247
+apps/bcs/crates/services/bcs-dist-worker/tests/lifecycle.rs
+  s_b033c54cc00da7::t_c271511ab76305 8,16,18-69
+apps/bcs/crates/services/bcs-dist-worker/tests/lifecycle_support/dispatch.rs
+  s_b033c54cc00da7::t_0445873de60c04 1-113
+apps/bcs/crates/services/bcs-dist-worker/tests/lifecycle_support/mod.rs
+  s_b033c54cc00da7::t_77331568461254 1-434
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_capacity.rs
+  s_b033c54cc00da7::t_c04e64671016af 1-97
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_control.rs
+  s_b033c54cc00da7::t_5f74e3cde9480c 1-771
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_execution.rs
+  s_b033c54cc00da7::t_ebb1302e87c468 1-489
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_finalization.rs
+  s_b033c54cc00da7::t_b6b5875a8a379d 1-359
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_large_append.rs
+  s_b033c54cc00da7::t_82bba0dda8f937 1-109
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_lifecycle.rs
+  s_b033c54cc00da7::t_cfedc3f8ab70f5 1-342
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_quota_lifecycle.rs
+  s_b033c54cc00da7::t_da1ce02ebf3879 1-165
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_resources.rs
+  s_b033c54cc00da7::t_542ad4f4a2d7a8 1-667
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_snapshot_race.rs
+  s_b033c54cc00da7::t_53c2e86a2a57ee 1-236
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_snapshots.rs
+  s_b033c54cc00da7::t_0b67ade9c7d77d 1-194
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_support/blob.rs
+  s_b033c54cc00da7::t_0a97d5d949a465 1-30
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_support/control.rs
+  s_b033c54cc00da7::t_ece5be32d4cbcd 1-196
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_support/control_runners.rs
+  s_b033c54cc00da7::t_02ea20c52b68bb 1-191
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_support/feed.rs
+  s_b033c54cc00da7::t_89127f06b6279e 1-82
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_support/mod.rs
+  s_b033c54cc00da7::t_1b0a21a045dd48 1-569
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_support/output.rs
+  s_b033c54cc00da7::t_cdfd14e7489b68 1-50
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_thinking.rs
+  s_b033c54cc00da7::t_af1f993ab36b53 1-271
+apps/bcs/crates/services/bcs-dist-worker/tests/supervisor_support/mod.rs
+  s_b033c54cc00da7::t_d0b87fc400dfe2 1-592
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/runtime_safety.rs
+  s_b033c54cc00da7::t_2ba9d48a29d393 5,7,9,149-190
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
+  s_b033c54cc00da7::t_d7ec745dba4dbf 1-176
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
+  s_b033c54cc00da7::t_68cd4b7d2f0472 10-14,25,55,63-65,94,290-291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fa1410749a11aa456f4fea711d6e33822c75316a",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
