@@ -1,3 +1,4 @@
+use super::common::invalid_message;
 use super::*;
 use bcs_service_api::port::repo::*;
 use bcs_service_api::types::EventDeliveryStatus;
@@ -107,6 +108,60 @@ async fn coverage_event_delivery_validation_preserves_target_and_inflight_attemp
         attempt_no: 1, now_ms: now + 3, lease_until_ms: now + 3, env: common::ENV.into() };
     assert!(matches!(repo.renew_delivery_lease(invalid_renewal).await, Err(EventRepoError::InvalidInput(_))));
     assert_eq!(repo.complete_delivery_attempt(valid).await.unwrap().status, EventDeliveryStatus::Succeeded);
+}
+
+#[tokio::test]
+async fn coverage_memory_replacement_and_append_keep_their_prefixed_first_error() {
+    let repo = MemoryEventStore::new();
+    repo.create_subscription(common::subscription("validated-order")).await.unwrap();
+    let mut replacement = ReplaceEventSubscriptionRevision {
+        subscription_id: String::new(),
+        expected_revision: 3,
+        name: "invalid revision".into(),
+        status: EventSubscriptionStatus::Active,
+        revision: common::revision("other", 9, vec!["group.*"]),
+        cancel_retired_pending_deliveries: false,
+        actor: common::actor(),
+        reason: None,
+        updated_at_ms: 1_755_561_600_100,
+        env: String::new(),
+    };
+    assert_eq!(
+        invalid_message(repo.replace_subscription_revision(replacement.clone()).await),
+        "subscription id and env must be non-empty"
+    );
+    replacement.subscription_id = "validated-order".into();
+    replacement.env = common::ENV.into();
+    assert_eq!(
+        invalid_message(repo.replace_subscription_revision(replacement.clone()).await),
+        "replacement must contain the next immutable revision"
+    );
+    replacement.expected_revision = u64::MAX;
+    assert_eq!(
+        invalid_message(repo.replace_subscription_revision(replacement).await),
+        "replacement must contain the next immutable revision"
+    );
+    let mut command =
+        common::append("validated-order-event", "validated-order-key", "group.updated");
+    command.event.producer.clear();
+    command.recorded_at = "not a timestamp".into();
+    assert_eq!(
+        invalid_message(repo.append_event(command).await),
+        "producer must be non-empty"
+    );
+    let mut command =
+        common::append("validated-order-event", "validated-order-key", "group.updated");
+    command.recorded_at = "not a timestamp".into();
+    assert!(
+        invalid_message(repo.append_event(command).await).starts_with("invalid RFC3339 timestamp")
+    );
+    let mut command =
+        common::append("validated-order-event", "validated-order-key", "group.updated");
+    command.event.occurred_at = "1969-12-31T23:59:59Z".into();
+    assert_eq!(
+        invalid_message(repo.append_event(command).await),
+        "timestamp predates Unix epoch: 1969-12-31T23:59:59Z"
+    );
 }
 
 #[tokio::test]

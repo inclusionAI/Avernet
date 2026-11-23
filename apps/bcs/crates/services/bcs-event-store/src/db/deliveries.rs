@@ -1,5 +1,8 @@
 //! SQL persistence for Event deliveries.
 
+use crate::validation::{
+    validate_claim, validate_completion, validate_lease_renewal, validate_list_limit,
+};
 use super::*;
 
 impl DbEventStore {

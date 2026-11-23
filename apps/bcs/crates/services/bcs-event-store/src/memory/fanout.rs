@@ -1,5 +1,7 @@
 //! In-memory Event fanout, causality and target creation helpers.
 
+use sha2::{Digest, Sha256};
+
 use super::*;
 
 pub(super) fn append_event_to_state(

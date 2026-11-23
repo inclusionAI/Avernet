@@ -4,7 +4,7 @@ use super::*;
 use super::delivery::delivery_unblocks_lane;
 
 impl MemoryEventStore {
-    pub(super) async fn purge_expired(
+    pub(super) async fn purge_expired_impl(
         &self,
         command: EventRetentionRequest,
     ) -> Result<EventRetentionResult, EventRepoError> {

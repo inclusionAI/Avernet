@@ -1,5 +1,20 @@
 //! In-memory Event repository port implementation.
+//!
+//! The long delivery and retention bodies live in `memory/delivery.rs` and
+//! `memory/retention.rs`; the `claim_deliveries`, `complete_delivery_attempt`,
+//! `create_replay_target` and `purge_expired` port methods below are thin
+//! delegating shells for the matching `*_impl` inherent methods.
 
+use async_trait::async_trait;
+
+use crate::validation::{
+    validate_claim, validate_lease_renewal, validate_list_limit, validate_materialization,
+    validate_new_subscription,
+};
+use super::fanout::{
+    complete_event_fanout_if_settled, existing_by_producer, resolve_causal_target, target_id,
+    target_ids_for_event, validate_causation,
+};
 use super::*;
 
 #[async_trait]
@@ -8,7 +23,7 @@ impl EventRepoPort for MemoryEventStore {
         &self,
         record: CreateEventSubscriptionRecord,
     ) -> Result<EventSubscriptionRecord, EventRepoError> {
-        validate_create_subscription(&record)?;
+        validate_new_subscription(&record)?;
         let scope = scope_key(&record.subscription.env, &record.subscription.scope);
         let _scope_guard = self.lock_scope(&scope).await;
         let key = record.subscription.subscription_id.clone();
@@ -647,16 +662,16 @@ impl EventRepoPort for MemoryEventStore {
         &self,
         command: ClaimEventDeliveries,
     ) -> Result<Vec<EventDeliveryRecord>, EventRepoError> {
-        // Body lives in `memory/delivery.rs` as an inherent method.
-        self.claim_deliveries(command).await
+        // Body lives in `memory/delivery.rs` as `claim_deliveries_impl`.
+        self.claim_deliveries_impl(command).await
     }
 
     async fn complete_delivery_attempt(
         &self,
         command: CompleteEventDeliveryAttempt,
     ) -> Result<EventDeliveryRecord, EventRepoError> {
-        // Body lives in `memory/delivery.rs` as an inherent method.
-        self.complete_delivery_attempt(command).await
+        // Body lives in `memory/delivery.rs` as `complete_delivery_attempt_impl`.
+        self.complete_delivery_attempt_impl(command).await
     }
 
     async fn get_delivery(
@@ -724,8 +739,8 @@ impl EventRepoPort for MemoryEventStore {
         &self,
         command: CreateEventReplayTarget,
     ) -> Result<EventFanoutTargetRecord, EventRepoError> {
-        // Body lives in `memory/delivery.rs` as an inherent method.
-        self.create_replay_target(command).await
+        // Body lives in `memory/delivery.rs` as `create_replay_target_impl`.
+        self.create_replay_target_impl(command).await
     }
 
     async fn skip_dead_lettered_delivery(
@@ -792,7 +807,7 @@ impl EventRepoPort for MemoryEventStore {
         &self,
         command: EventRetentionRequest,
     ) -> Result<EventRetentionResult, EventRepoError> {
-        // Body lives in `memory/retention.rs` as an inherent method.
-        self.purge_expired(command).await
+        // Body lives in `memory/retention.rs` as `purge_expired_impl`.
+        self.purge_expired_impl(command).await
     }
 }

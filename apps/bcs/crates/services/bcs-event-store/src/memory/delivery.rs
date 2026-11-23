@@ -1,9 +1,11 @@
 //! In-memory Event delivery claim, completion and replay.
 
+use crate::validation::{validate_claim, validate_completion, validate_replay};
+use super::fanout::resolve_causal_target;
 use super::*;
 
 impl MemoryEventStore {
-    pub(super) async fn claim_deliveries(
+    pub(super) async fn claim_deliveries_impl(
         &self,
         command: ClaimEventDeliveries,
     ) -> Result<Vec<EventDeliveryRecord>, EventRepoError> {
@@ -116,7 +118,7 @@ impl MemoryEventStore {
         Ok(claimed)
     }
 
-    pub(super) async fn complete_delivery_attempt(
+    pub(super) async fn complete_delivery_attempt_impl(
         &self,
         command: CompleteEventDeliveryAttempt,
     ) -> Result<EventDeliveryRecord, EventRepoError> {
@@ -205,7 +207,7 @@ impl MemoryEventStore {
         Ok(result)
     }
 
-    pub(super) async fn create_replay_target(
+    pub(super) async fn create_replay_target_impl(
         &self,
         command: CreateEventReplayTarget,
     ) -> Result<EventFanoutTargetRecord, EventRepoError> {
@@ -348,7 +350,10 @@ pub(super) fn delivery_is_eligible(
     }))
 }
 
-pub(super) fn delivery_dependency_satisfied(state: &MemoryState, delivery: &EventDeliveryRecord) -> bool {
+pub(super) fn delivery_dependency_satisfied(
+    state: &MemoryState,
+    delivery: &EventDeliveryRecord,
+) -> bool {
     let Some(dependency_id) = state
         .targets
         .get(&delivery.fanout_target_id)

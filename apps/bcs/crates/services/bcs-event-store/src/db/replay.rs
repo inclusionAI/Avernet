@@ -1,5 +1,6 @@
 //! SQL persistence for Event replay.
 
+use crate::validation::validate_replay;
 use super::*;
 
 impl DbEventStore {
