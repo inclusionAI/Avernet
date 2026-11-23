@@ -1,4 +1,4 @@
-//! Admission is journaled before selecting a scope-wide canonical operation.
+//! Admission is stored in one scoped document keyed by `(scope, input_id)`.
 //! Schedule EQ is the unique accept/close linearization point. All durable
 //! records are retained; the active set and wake stream are disposable hints.
 use super::{Clock, state::*, storage::*};
@@ -24,12 +24,17 @@ pub struct InboxProducerConfig {
     pub wake_max_len: u64,
     pub max_input_bytes: usize,
     pub max_document_bytes: usize,
-    /// Namespace-lifetime charge units, including physical append attempts.
-    /// A larger profile requires coordinated rollout and capacity validation.
+    /// Deprecated compatibility fields. The MVP no longer charges admission
+    /// against namespace-wide history or Session ledgers.
+    #[deprecated(note = "admission no longer maintains shard-wide max history entries budgets")]
     pub max_history_entries: u64,
+    #[deprecated(note = "admission no longer maintains shard-wide max history bytes budgets")]
     pub max_history_bytes: u64,
+    #[deprecated(note = "admission no longer maintains shard-wide reserved entries budgets")]
     pub reserved_entries: u64,
+    #[deprecated(note = "admission no longer maintains shard-wide reserved bytes budgets")]
     pub reserved_bytes: u64,
+    #[deprecated(note = "admission no longer maintains shard-wide max sessions budgets")]
     pub max_sessions: u64,
     pub max_inbox_entries: u64,
     pub max_inbox_bytes: u64,
@@ -44,6 +49,7 @@ pub struct InboxProducerConfig {
     pub pool_pressure_after: Duration,
 }
 impl InboxProducerConfig {
+    #[allow(deprecated)]
     pub fn new(backend: BackendId) -> Self {
         Self {
             backend,
@@ -74,16 +80,6 @@ impl InboxProducerConfig {
             || self.max_input_bytes > 64 * 1024
             || self.max_document_bytes > 1024 * 1024
             || self.max_document_bytes < 256 * 1024
-            || self.max_history_entries == 0
-            || self.reserved_entries == 0
-            || self.reserved_entries.saturating_add(64) >= self.max_history_entries
-            || self.reserved_bytes < 64 * 1024
-            || self.reserved_bytes.saturating_add(128 * 1024) >= self.max_history_bytes
-            || self.max_sessions == 0
-            // Preserve the previous effective bound independently of retained
-            // history. The distinct-Session ledger lives in one root document.
-            || self.max_sessions > 4096
-            || self.max_sessions > self.max_history_entries
             || self.max_watches == 0
             || self.max_watches > 128
             || self.max_readers == 0
@@ -99,11 +95,6 @@ impl InboxProducerConfig {
         {
             return Err(invalid("admission_configuration"));
         }
-        if super::capacity::maximum_scan_bytes(self.max_history_entries)
-            .is_none_or(|bytes| bytes > self.max_document_bytes as u64)
-        {
-            return Err(invalid("admission_scan_capacity"));
-        }
         Ok(())
     }
 }
@@ -111,7 +102,6 @@ pub const LOG_GENERATION: &str = "1";
 #[derive(Clone)]
 pub struct StoreInboxProducer {
     pub(super) inner: Arc<Inner>,
-    pub(super) scans: super::scan_scheduler::ScanHandle,
 }
 pub(super) struct Inner {
     pub projection: Arc<dyn bcs_service_api::core::dist_projection::OutputProjectionCoreService>,
@@ -128,7 +118,6 @@ pub(super) struct Inner {
     pub receipts: std::sync::Mutex<std::collections::BTreeMap<String, super::consumer::Delivery>>,
     pub receipt_sequence: AtomicU64,
     pub scan_budget: Arc<dyn bcs_service_api::port::repo::distributed::budget::ScanBudgetPort>,
-    pub health: std::sync::Mutex<super::health::Health>,
 }
 impl StoreInboxProducer {
     #[allow(
@@ -156,7 +145,6 @@ impl StoreInboxProducer {
         crate::budget::validate_profile(&scan_budget.profile(), config.connection_pool_size)?;
         super::pressure::validate_observation(documents.pool_observation(), config.connection_pool_size)?;
         Ok(Self {
-            scans: super::scan_scheduler::ScanHandle::new(),
             inner: Arc::new(Inner {
                 projection,
                 documents,
@@ -172,7 +160,6 @@ impl StoreInboxProducer {
                 receipts: std::sync::Mutex::new(Default::default()),
                 receipt_sequence: AtomicU64::new(0),
                 scan_budget,
-                health: std::sync::Mutex::new(Default::default()),
             }),
         })
     }
@@ -181,8 +168,8 @@ impl StoreInboxProducer {
         scope: &TaskScope,
         input_id: &InputId,
     ) -> Result<Option<AdmitOutcome>, StoreError> {
-        let key = self.inner.layout.canonical_admission(scope, input_id)?;
-        let Some((_, record)) = self.canonical(&key).await? else {
+        let key = self.inner.layout.admission(scope, input_id)?;
+        let Some((_, record)) = self.admission_record(&key).await? else {
             return Ok(None);
         };
         Ok(record
@@ -190,11 +177,11 @@ impl StoreInboxProducer {
             .as_ref()
             .map(|d| self.outcome(&record, d, false)))
     }
-    pub(super) fn outcome(&self, c: &Canonical, d: &Decision, new: bool) -> AdmitOutcome {
+    pub(super) fn outcome(&self, c: &AdmissionRecord, d: &Decision, new: bool) -> AdmitOutcome {
         if *d == Decision::Rejected {
             return AdmitOutcome::Quarantined;
         }
-        let i = &c.intent.request.input;
+        let i = &c.request.input;
         let receipt = AdmissionReceipt {
             sid: i.sid.clone(),
             tid: i.tid.clone(),
@@ -279,8 +266,8 @@ impl StoreInboxProducer {
 #[async_trait]
 impl InboxProducerPort for StoreInboxProducer {
     async fn lookup(&self, scope: &TaskScope, id: &InputId) -> Result<Option<AdmitRequest>, StoreError> {
-        let key = self.inner.layout.canonical_admission(scope, id)?;
-        self.canonical(&key).await.map(|record| record.map(|(_, c)| c.intent.request))
+        let key = self.inner.layout.admission(scope, id)?;
+        self.admission_record(&key).await.map(|record| record.map(|(_, c)| c.request))
     }
 
     fn scan_budget_profile(
@@ -290,11 +277,10 @@ impl InboxProducerPort for StoreInboxProducer {
     }
     async fn admit(&self, mut request: AdmitRequest) -> Result<AdmitOutcome, StoreError> {
         if let Err(error) = self.prepare(&mut request).await {
-            if matches!(&error,StoreError::Invalid{code} if code=="frozen_spec_conflict" || code=="frozen_task_conflict")
-            {
+            if matches!(&error, StoreError::Invalid { code } if code == "frozen_spec_conflict" || code == "frozen_task_conflict") {
                 return Ok(AdmitOutcome::ContentConflict);
             }
-            if matches!(&error,StoreError::NotApplied{code} if code!="session_not_found")
+            if matches!(&error, StoreError::NotApplied { code } if code != "session_not_found")
                 || matches!(&error, StoreError::OutcomeUnknown { .. })
             {
                 return Err(unknown(&request.input.input_id.0));
@@ -304,51 +290,21 @@ impl InboxProducerPort for StoreInboxProducer {
         let key = self
             .inner
             .layout
-            .canonical_admission(&request.scope, &request.input.input_id)?;
+            .admission(&request.scope, &request.input.input_id)?;
+        let op = request.input.input_id.0.clone();
         if let Some((_, existing)) = self
-            .canonical(&key)
+            .admission_record(&key)
             .await
-            .map_err(|_| unknown(&request.input.input_id.0))?
+            .map_err(|_| unknown(&op))?
         {
-            if existing.intent.request.input.business_digest != request.input.business_digest {
+            if existing.request.input.business_digest != request.input.business_digest {
                 return Ok(AdmitOutcome::ContentConflict);
             }
-            return self
-                .advance(&key, false)
-                .await
-                .map_err(|_| unknown(&request.input.input_id.0));
+            return self.advance(&key, false).await.map_err(|_| unknown(&op));
         }
-        let (_, schedule) = self
-            .schedule(&request.input.sid)
-            .await
-            .map_err(|_| unknown(&request.input.input_id.0))?;
-        let op = request.input.input_id.0.clone();
-        let digest = request.input.business_digest.clone();
-        let intent = match self.reserve_intent(request, schedule.generation).await {
-            Ok(intent) => intent,
-            Err(error @ StoreError::NotApplied { .. }) => {
-                // Capacity can fill while another copy of this identity wins
-                // canonical selection. A definite refusal must confirm that the
-                // previous missing-canonical read is still authoritative.
-                let Some((_, existing)) = self.canonical(&key).await.map_err(|_| unknown(&op))?
-                else {
-                    return Err(error);
-                };
-                if existing.intent.request.input.business_digest != digest {
-                    return Ok(AdmitOutcome::ContentConflict);
-                }
-                return self.advance(&key, false).await.map_err(|_| unknown(&op));
-            }
-            Err(error) => return Err(error),
-        };
-        self.materialize(&intent).await.map_err(|_| unknown(&op))?;
-        self.select(&intent).await.map_err(|_| unknown(&op))?;
-        let Some((_, selected)) = self.canonical(&key).await.map_err(|_| unknown(&op))? else {
-            return Err(unknown(&op));
-        };
-        if selected.intent.request.input.business_digest != intent.request.input.business_digest {
-            return Ok(AdmitOutcome::ContentConflict);
-        }
+        let (_, schedule) = self.schedule(&request.input.sid).await.map_err(|_| unknown(&op))?;
+        let admission = self.new_admission(request, schedule.generation)?;
+        self.create_if_absent(&admission).await?;
         self.advance(&key, true).await.map_err(|_| unknown(&op))
     }
     async fn append_stream(&self, request: AppendAgentEvent) -> Result<InboxPos, StoreError> {

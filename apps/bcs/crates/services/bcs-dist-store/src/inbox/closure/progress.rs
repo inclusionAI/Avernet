@@ -74,28 +74,6 @@ impl AdmissionClosurePort for StoreAdmissionControl {
                 .advance_pending(owner, &key, version, &mut progress)
                 .await;
         }
-        if progress.cursor < closure.journal_cut {
-            let sequence = progress.cursor + 1;
-            match self
-                .store
-                .closure_item(closure, owner.shard, sequence)
-                .await?
-            {
-                Some((Some(obligation), _)) => {
-                    progress.pending = Some(Pending {
-                        sequence,
-                        obligation,
-                        phase: Materialize::Spec,
-                    })
-                }
-                Some((None, _)) => progress.cursor = sequence,
-                None => return Ok(progress.work(None)),
-            }
-            self.store
-                .save(&key, version, &progress, &closure.operation_id.0)
-                .await?;
-            return Ok(progress.work(None));
-        }
         if let Some(tid) = progress.checkpoint_tasks.get(progress.checkpoint_cursor) {
             let (_, task) = self
                 .store
@@ -115,12 +93,12 @@ impl AdmissionClosurePort for StoreAdmissionControl {
                 .await?;
             return Ok(progress.work(None));
         }
-        if let Some((canonical, _)) = schedule
+        if let Some((admission_key, _)) = schedule
             .slots
             .iter()
             .find(|(_, slot)| slot.start && slot.generation == closure.generation)
         {
-            self.release_verified_slot(owner, closure, canonical)
+            self.release_verified_slot(owner, closure, admission_key)
                 .await?;
             return Ok(progress.work(None));
         }
@@ -314,19 +292,18 @@ impl StoreAdmissionControl {
         closure: &AdmissionClosure,
         key: &str,
     ) -> Result<(), StoreError> {
-        let (_, canonical) = self
+        let (_, admission) = self
             .store
-            .canonical(key)
+            .admission_record(key)
             .await?
-            .ok_or_else(|| invalid("closure_canonical_missing"))?;
-        if canonical.intent.sid() != &owner.sid
-            || canonical.intent.generation != closure.generation
-            || !canonical.intent.start()
+            .ok_or_else(|| invalid("closure_admission_missing"))?;
+        if admission.sid() != &owner.sid
+            || admission.generation != closure.generation
+            || !admission.start()
         {
             return Err(invalid("closure_slot_identity"));
         }
-        let task = canonical
-            .intent
+        let task = admission
             .request
             .create_task
             .as_ref()

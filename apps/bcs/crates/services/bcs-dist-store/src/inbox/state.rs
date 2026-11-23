@@ -1,17 +1,27 @@
 use bcs_dist_model::*;
 use bcs_service_api::port::repo::distributed::{common::*, inbox::AdmitRequest};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
+/// One durable admission state machine keyed by `(scope, input_id)`.
+///
+/// The request and all repair progress live in this single document. There is
+/// no separate intent or canonical record: retries read this document and
+/// advance it with JSON CAS until a decision is durable.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct Intent {
+pub(super) struct AdmissionRecord {
     pub schema_version: u32,
-    pub sequence: u64,
     pub generation: u64,
     pub request: AdmitRequest,
     pub created_at: TimestampMillis,
+    pub position: Option<InboxPos>,
+    pub decision: Option<Decision>,
+    pub registered: bool,
+    pub append_attempts: u64,
+    pub append_credits: u64,
+    pub phase: Phase,
 }
-impl Intent {
+impl AdmissionRecord {
     pub fn start(&self) -> bool {
         self.request.create_task.is_some()
     }
@@ -20,35 +30,11 @@ impl Intent {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(super) struct JournalRoot {
-    pub next: u64,
-    pub entries: u64,
-    pub bytes: u64,
-    pub normal_entries: u64,
-    pub normal_bytes: u64,
-    pub sessions: u64,
-    pub pending: BTreeMap<u64, Intent>,
-    pub inbox: BTreeMap<Sid, InboxBudget>,
-    pub repair_health: u64,
-    pub discovery_health: u64,
-    pub repair_healthy_round: u64,
-    pub discovery_healthy_round: u64,
-    pub repair_health_age_millis: u64,
-    pub discovery_health_age_millis: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(super) struct InboxBudget {
-    pub entries: u64,
-    pub bytes: u64,
-    pub normal_entries: u64,
-    pub normal_bytes: u64,
-}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum Phase {
-    Selected,
-    Released,
+    /// Admission document exists but schedule registration has not completed.
+    #[serde(alias = "Selected", alias = "Released")]
+    Created,
     Registered,
     SpecReady,
     ScopeIndexed,
@@ -61,22 +47,10 @@ pub(super) enum Decision {
     Accepted,
     Rejected,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct Canonical {
-    pub schema_version: u32,
-    pub intent: Intent,
-    pub position: Option<InboxPos>,
-    pub decision: Option<Decision>,
-    pub registered: bool,
-    pub append_attempts: u64,
-    pub append_credits: u64,
-    pub phase: Phase,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct Slot {
     pub generation: u64,
-    pub sequence: u64,
     pub start: bool,
     pub decision: Option<Decision>,
 }
@@ -84,7 +58,6 @@ pub(super) struct Slot {
 pub(super) struct ClosedGate {
     pub operation: RequestId,
     pub generation: u64,
-    pub cut: Option<u64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct Schedule {
@@ -117,15 +90,4 @@ impl Default for Schedule {
             slots: BTreeMap::new(),
         }
     }
-}
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(super) struct Scan {
-    pub cut: u64,
-    pub cursor: u64,
-    pub completed: u64,
-    pub pending: BTreeSet<u64>,
-    pub started_at: i64,
-    pub round: u64,
-    pub retry_after: u64,
-    pub retry_first: bool,
 }

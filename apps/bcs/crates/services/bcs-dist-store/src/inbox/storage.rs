@@ -1,6 +1,6 @@
 use super::{
     StoreInboxProducer,
-    state::{Canonical, Intent, Schedule},
+    state::{AdmissionRecord, Schedule},
 };
 use crate::{
     codec::{decode_json, encode_json},
@@ -132,31 +132,33 @@ impl StoreInboxProducer {
             WriteOutcome::ConditionNotMet => None,
         })
     }
-    pub(super) fn validate_intent(&self, intent: &Intent) -> Result<(), StoreError> {
-        encoded_size(&intent.request, self.inner.config.max_input_bytes)?;
-        if intent.schema_version != 1
-            || intent.sequence == 0
-            || intent.generation == 0
-            || intent.request.input.business_digest
-                != super::validation::request_digest(&intent.request)?
+    pub(super) fn validate_admission(
+        &self,
+        record: &AdmissionRecord,
+    ) -> Result<(), StoreError> {
+        encoded_size(&record.request, self.inner.config.max_input_bytes)?;
+        if record.schema_version != 1
+            || record.generation == 0
+            || record.request.input.business_digest
+                != super::validation::request_digest(&record.request)?
         {
-            return Err(invalid("stored_intent_digest"));
+            return Err(invalid("stored_admission_digest"));
         }
         Ok(())
     }
-    pub(super) async fn canonical(
+    pub(super) async fn admission_record(
         &self,
         key: &str,
-    ) -> Result<Option<(Version, Canonical)>, StoreError> {
-        let value = self.load::<Canonical>(key).await?;
+    ) -> Result<Option<(Version, AdmissionRecord)>, StoreError> {
+        let value = self.load::<AdmissionRecord>(key).await?;
         if let Some((_, record)) = &value {
-            self.validate_intent(&record.intent)?;
-            if self.inner.layout.canonical_admission(
-                &record.intent.request.scope,
-                &record.intent.request.input.input_id,
+            self.validate_admission(record)?;
+            if self.inner.layout.admission(
+                &record.request.scope,
+                &record.request.input.input_id,
             )? != key
             {
-                return Err(invalid("stored_canonical_identity"));
+                return Err(invalid("stored_admission_identity"));
             }
         }
         Ok(value)

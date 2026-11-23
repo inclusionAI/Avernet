@@ -52,7 +52,7 @@ async fn cancellation_after_first_watch_staged_keeps_both_inputs() {
         feed.watch(request.input.sid.clone(), None).await.unwrap();
     }
     let key = l
-        .canonical_admission(&scope(), &requests[1].input.input_id)
+        .admission(&scope(), &requests[1].input.input_id)
         .unwrap();
     let pause = s.pause_after("document.read", &key, 1);
     let limits = ReadLimits {

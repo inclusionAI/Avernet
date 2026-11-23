@@ -1,4 +1,4 @@
-//! Durable Inbox admission, consumption, scheduling and journal maintenance.
+//! Durable Inbox admission, consumption and scheduling.
 //! All ports share authoritative DocumentCAS state; wake/index writes are hints.
 //! See `README.md` for retained data, budgets and Worker integration obligations.
 
@@ -16,7 +16,6 @@ mod maintenance;
 mod producer;
 mod pressure;
 mod progress;
-mod scan_scheduler;
 mod scheduling;
 mod state;
 mod storage;
