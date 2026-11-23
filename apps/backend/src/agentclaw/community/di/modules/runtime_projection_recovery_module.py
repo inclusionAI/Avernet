@@ -14,11 +14,9 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
     CapabilityDesiredStateRepository,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
-)
-from agentclaw.community.core.repository.protocols.capability_projection import (
-    CapabilityProjectionRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.capability_projection_reconcile import (
     CapabilityProjectionCompetitionProtocol,
@@ -60,11 +58,9 @@ class RuntimeProjectionRecoveryModule(Module):
     @provider
     @inject
     def capability_desired_state_repository(
-        self, db: DatabasePlugin, config: ManifestApplyConfig,
+        self, db: DatabasePlugin,
     ) -> CapabilityDesiredStateRepository:
-        return CapabilityDesiredStateRepository(
-            db, track_competing_changes=config.defer_capability_projection,
-        )
+        return CapabilityDesiredStateRepository(db)
 
     @provider
     @inject
@@ -78,17 +74,17 @@ class RuntimeProjectionRecoveryModule(Module):
     @inject
     def capability_projection_reconciler(
         self,
-        repository: CapabilityProjectionRepositoryProtocol,
         projector: BotRuntimeProjector,
         cache: CachePlugin,
         bots: BotRepository,
+        bindings: DeviceBindingRepository,
         config: ManifestApplyConfig,
     ) -> CapabilityProjectionReconciler:
         return CapabilityProjectionReconciler(
-            repository=repository,
             projector=projector,
             guard=CapabilityDeliveryGuard(cache),
             bots=bots,
+            bindings=bindings,
             defer_enabled=config.defer_capability_projection,
         )
 

@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, ContextManager, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, ContextManager, Mapping, Protocol
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
-    from agentclaw.community.core.skills_pool.models import PoolSkillMapping
     from agentclaw.community.core.skill_center.skill_set_apply import (
         BotCapabilityScope, DefaultExclusionChange, ResolvedSkillSetWrite, SkillSetApplySnapshot,
     )
@@ -31,13 +29,12 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     """
 
     @abstractmethod
-    def commit_projection_mutation(
+    def commit_capability_mutation(
         self, *, bot_id: str, entity_id: str,
         mutation: Callable[[], DesiredStateMutation],
-        scope_from_result: Callable[[DesiredStateMutation], ProjectionScope],
-        retired_mappings: Sequence[PoolSkillMapping], create: bool,
+        require_bot: bool,
     ) -> DesiredStateMutation:
-        """Commit a capability command with its Runtime obligation."""
+        """Commit a capability command under the Bot mutation fence."""
         ...
 
     @abstractmethod

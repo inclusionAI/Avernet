@@ -18,6 +18,10 @@ from typing import Any
 from agentclaw.community.core.apply_engine.compiler import LEGACY_STATE, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 from agentclaw.community.core.ports.skill_package_upload_port import LocalSkillPackageReceipt
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    PROJECTION_RETRY_FIELD,
+    CapabilityProjectionRetry,
+)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     RuntimeProjectionResult,
 )
@@ -515,6 +519,7 @@ class ApplyReport:
     runtime_projection: RuntimeProjectionResult | None = None
     #: Stored report correlation. The HTTP report exposes only the observation.
     runtime_projection_revision: str | None = None
+    capability_projection_retry: CapabilityProjectionRetry | None = None
 
     @property
     def entries(self) -> tuple[EntryResult, ...]:
@@ -573,6 +578,13 @@ class ApplyReport:
             payload["runtime_projection"] = self.runtime_projection.to_dict()
         if self.runtime_projection_revision is not None:
             payload["runtime_projection_revision"] = self.runtime_projection_revision
+        return payload
+
+    def as_stored_payload(self) -> dict[str, Any]:
+        payload = self.as_payload()
+        if self.runtime_projection is not None and self.runtime_projection_revision is None:
+            retry = self.capability_projection_retry
+            payload[PROJECTION_RETRY_FIELD] = retry.to_payload() if retry is not None else None
         return payload
 
 

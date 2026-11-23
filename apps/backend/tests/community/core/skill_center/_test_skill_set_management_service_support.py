@@ -83,7 +83,7 @@ class _Repository:
         self.update_calls = []
         self.add_mcp_calls = []
 
-    def commit_projection_mutation(self, *, mutation, **_kwargs):
+    def commit_capability_mutation(self, *, mutation, **_kwargs):
         return mutation()
 
     def skill_batch(self, **_kwargs):

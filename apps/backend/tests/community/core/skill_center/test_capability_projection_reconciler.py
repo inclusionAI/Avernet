@@ -1,579 +1,424 @@
-"""Runtime receipts through the shared capability reconciliation service."""
+"""Apply closes committed capability changes under the shared delivery lease."""
+
 import asyncio
 from types import SimpleNamespace
+from contextlib import asynccontextmanager
 
 import pytest
 
-from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
-    CapabilityProjectionRepository,
-)
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+from agentclaw.community.core.devices.services.device_context import expected_runtime_binding
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
+from agentclaw.community.core.skill_center.capability_projection_intent import capability_projection_intent
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
+    RuntimeProjectionIssue,
     RuntimeProjectionResult,
     RuntimeProjectionStatus,
 )
-from agentclaw.community.core.skill_center.services.capability_delivery_guard import (
-    CapabilityDeliveryGuard,
-)
-from agentclaw.community.plugins.local.cache import MemoryCachePlugin
+from agentclaw.community.core.skill_center.services.capability_delivery_guard import CapabilityDeliveryGuard, CapabilityDeliveryUnavailable
+from agentclaw.community.core.skill_center.services.capability_projection_reconciler import CapabilityProjectionReconciler
+from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.plugins.local.cache import MemoryCachePlugin
 from tests.community.repository.skill_center.capability_desired_state_support import _Database
 
 
+ADDRESS = {"bot_id": "bot", "entity_id": "entity"}
+SKILL = PoolSkillMapping(corpus="repo", relative_path="skills/old", link_name="retired")
+
+
+class _Device:
+    def __init__(self):
+        self.id = 4
+        self.device_id = "device"
+        self.props = {}
+        self.bot = {"binding_id": self.id, "owner_id": "owner", "status": "ACTIVE"}
+
+    def get_by_id_and_entity(self, *_args):
+        return {**self.bot, "binding_id": self.id}
+
+    def get_by_id(self, binding_id):
+        assert binding_id == self.id
+        return SimpleNamespace(id=self.id, device_id=self.device_id, device_props=self.props)
+
+    def get_active_by_bot_and_owner(self, *_args):
+        return self.get_by_id(self.id)
+
+    def mutate_device_property(self, *, binding_id, device_id, key, mutate):
+        assert binding_id == self.id and device_id == self.device_id
+        self.props[key] = mutate(self.props.get(key))
+
+
 class _Projector:
-    def __init__(self, results):
-        self._results = iter(results)
-        self.scopes = []
+    def __init__(self, *results):
+        self.results = iter(results)
+        self.previous = (SKILL,)
+        self.supplies = ()
+        self.calls = []
 
-    def resolve_plan(self, **kwargs):
-        return SimpleNamespace(
-            bot={"status": "ACTIVE"},
-            projection=SimpleNamespace(skill_mappings=[]),
-        )
+    async def snapshot_skill_mappings(self, **_kwargs):
+        return self.previous
 
-    async def snapshot_skill_mappings(self, **kwargs):
-        return ()
+    def resolve_plan(self, **_kwargs):
+        return SimpleNamespace(bot={"status": "ACTIVE"}, projection=SimpleNamespace(skill_mappings=self.supplies))
 
     async def apply_plan(self, *, plan, retired_mappings, scope):
-        self.scopes.append(scope)
-        return next(self._results)
+        binding = expected_runtime_binding("bot", "entity")
+        self.calls.append((scope, retired_mappings, binding.device_id))
+        return next(self.results)
+
+
+def _reconciler(projector, device):
+    return CapabilityProjectionReconciler(
+        projector=projector, guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+        bots=device, bindings=device, defer_enabled=True,
+    )
 
 
 @pytest.mark.asyncio
-async def test_recovery_projects_only_the_failed_domain_then_keeps_converged_baseline(tmp_path):
-    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
-        CapabilityProjectionReconciler,
-    )
+async def test_aborted_apply_closes_only_committed_domains_once():
+    projector = _Projector(RuntimeProjectionResult.converged())
+    reconciler = _reconciler(projector, _Device())
+    async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+        with apply.write_scope():
+            intent = capability_projection_intent(**ADDRESS)
+            assert intent is not None
+            intent.record(ProjectionScope(skills=True))
+            intent.record(ProjectionScope(mcp=True, claimed_mcp=frozenset({"weather"})))
+        receipt, retry = await apply.finish(initialize=False)
+    assert receipt.status is RuntimeProjectionStatus.CONVERGED
+    assert retry is None
+    assert projector.calls == [
+        (ProjectionScope(skills=True, mcp=True, claimed_mcp=frozenset({"weather"})), [SKILL], "device"),
+    ]
 
-    address = {"bot_id": "bot", "entity_id": "owner"}
-    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
-    repository = CapabilityProjectionRepository(db)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["same-device", "supplied-again", "new-device"])
+async def test_unchanged_apply_retries_only_safe_retirements(case):
     projector = _Projector(
-        [
-            RuntimeProjectionResult.combine(
-                RuntimeProjectionResult.converged(
-                    components={"skills": RuntimeProjectionStatus.CONVERGED}
-                ),
-                RuntimeProjectionResult.pending(code="MCP_OFFLINE", reason="MCP device offline"),
-            ),
-            RuntimeProjectionResult.converged(
-                components={"mcp": RuntimeProjectionStatus.CONVERGED}
-            ),
-        ]
-    )
-    reconciler = CapabilityProjectionReconciler(
-        repository=repository,
-        projector=projector,
-        guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
-        bots=BotRepository(db),
-        defer_enabled=True,
-    )
-
-    async with reconciler.deferred_apply(**address, owner_id="owner"):
-        revision, result = await reconciler.finish_apply(**address, initialize=True)
-    assert result.status is RuntimeProjectionStatus.PENDING
-    assert projector.scopes == [ProjectionScope.everything()]
-
-    result = await reconciler.reconcile(**address)
-    assert result.status is RuntimeProjectionStatus.CONVERGED
-    assert len(projector.scopes) == 2
-    assert projector.scopes[1].mcp and not projector.scopes[1].skills
-    assert reconciler.observe(**address, revision=revision).components == {
-        "skills": RuntimeProjectionStatus.CONVERGED,
-        "mcp": RuntimeProjectionStatus.CONVERGED,
-    }
-
-    next_revision, result = await reconciler.finish_apply(**address, initialize=True)
-    assert next_revision == revision
-    assert result.status is RuntimeProjectionStatus.CONVERGED
-    assert len(projector.scopes) == 2
-
-
-@pytest.mark.asyncio
-async def test_unknown_artifact_receipt_waits_for_a_different_device(tmp_path):
-    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
-        CapabilityProjectionReconciler,
-    )
-
-    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
-    address = {"bot_id": "bot", "entity_id": "owner"}
-    repository = CapabilityProjectionRepository(db)
-    projector = _Projector([
-        RuntimeProjectionResult.pending(
-            code="ARTIFACT_APPLY_FAILED",
-            reason="The Runtime did not confirm artifact delivery",
-            delivery_uncertain=True,
-        ),
+        RuntimeProjectionResult.pending(code="LOST_RECEIPT", reason="Request timed out", delivery_uncertain=True),
         RuntimeProjectionResult.converged(),
-    ])
-    reconciler = CapabilityProjectionReconciler(
-        repository=repository,
-        projector=projector,
-        guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
-        bots=BotRepository(db),
-        defer_enabled=True,
     )
+    device = _Device()
+    reconciler = _reconciler(projector, device)
+    async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+        with apply.write_scope():
+            intent = capability_projection_intent(**ADDRESS)
+            assert intent is not None
+            intent.record(ProjectionScope(skills=True, mcp=True, released_mcp=frozenset({"old-mcp"})))
+        _, retry = await apply.finish(initialize=True)
+    assert retry.device_id == "device"
+    assert retry.retired_mappings == (SKILL,)
 
-    def bind(binding_id, device_id):
-        with db.transactional_orm_session() as session:
-            row = session.query(BotModel).filter_by(**address).one()
-            row.active_engine = "teclaw"
-            row.binding_id = binding_id
-            row.device_id = device_id
-
-    bind(1, "device-1")
-    revision, result = await reconciler.finish_apply(**address, initialize=True)
-    assert result.status is RuntimeProjectionStatus.PENDING
-    assert len(projector.scopes) == 1
-    assert any(issue.code == "CAPABILITY_DELIVERY_OUTCOME_UNKNOWN" for issue in result.issues)
-
-    bind(2, "device-1")
-    result = await reconciler.reconcile(**address)
-    assert result.status is RuntimeProjectionStatus.PENDING
-    assert len(projector.scopes) == 1
-
-    bind(3, "device-2")
-    result = await reconciler.reconcile(**address)
-    assert result.status is RuntimeProjectionStatus.CONVERGED
-    assert len(projector.scopes) == 2
-    assert reconciler.observe(**address, revision=revision).reason == "CAPABILITY_PROJECTION_SUPERSEDED"
+    device.id += 1
+    projector.previous = ()
+    if case == "supplied-again":
+        projector.supplies = (SKILL,)
+    if case == "new-device":
+        device.device_id = "replacement"
+    async with reconciler.deferred_apply(**ADDRESS, retry=retry) as apply:
+        receipt, retry = await apply.finish(initialize=True)
+    assert receipt.status is RuntimeProjectionStatus.CONVERGED
+    assert retry is None
+    scope, retirements, physical_device = projector.calls[-1]
+    assert scope.claim_all_mcp and scope.skills
+    assert scope.released_mcp == ({"old-mcp"} if case != "new-device" else set())
+    assert retirements == ([SKILL] if case == "same-device" else [])
+    assert physical_device == device.device_id
 
 
 @pytest.mark.asyncio
-async def test_committed_edit_during_delivery_never_inherits_the_older_receipt(tmp_path):
-    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
-        CapabilityProjectionReconciler,
-    )
+async def test_cancellation_keeps_the_lease_until_the_active_delivery_returns():
+    entered, release = asyncio.Event(), asyncio.Event()
 
-    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
-    address = {"bot_id": "bot", "entity_id": "owner"}
-    repository = CapabilityProjectionRepository(db)
-    sending = asyncio.Event()
-    release = asyncio.Event()
+    class BlockingProjector(_Projector):
+        async def apply_plan(self, **kwargs):
+            if not entered.is_set():
+                entered.set()
+                await release.wait()
+            return await super().apply_plan(**kwargs)
 
-    class Projector(_Projector):
-        async def apply_plan(self, *, plan, retired_mappings, scope):
-            sending.set()
-            await release.wait()
-            return await super().apply_plan(plan=plan, retired_mappings=retired_mappings, scope=scope)
+    projector = BlockingProjector(
+        RuntimeProjectionResult.converged(), RuntimeProjectionResult.converged(),
+    )
+    reconciler = _reconciler(projector, _Device())
 
-    projector = Projector([RuntimeProjectionResult.converged()] * 2)
-    reconciler = CapabilityProjectionReconciler(
-        repository=repository,
-        projector=projector,
-        guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
-        bots=BotRepository(db),
-        defer_enabled=True,
-    )
-    first = asyncio.create_task(reconciler.finish_apply(**address, initialize=True))
-    await sending.wait()
-    edited = repository.require(
-        **address,
-        scope=ProjectionScope(mcp=True, released_mcp=frozenset({"mcp.removed"})),
-    )
+    async def first_apply():
+        async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+            await apply.finish(initialize=True)
+
+    first = asyncio.create_task(first_apply())
+    await entered.wait()
+    first.cancel()
+    async def legacy():
+        pytest.fail("Deferred Apply must share the active delivery lease")
+
+    standalone = asyncio.create_task(reconciler.project_competing_change(
+        **ADDRESS, owner_id="owner", scope=ProjectionScope(skills=True), retired_mappings=(), legacy=legacy,
+    ))
+    await asyncio.sleep(0.06)
+    assert not standalone.done()
     release.set()
-    old_revision, result = await first
-    assert old_revision != edited.revision
-    assert result.status is RuntimeProjectionStatus.PENDING
-    assert reconciler.observe(**address, revision=edited.revision).status is RuntimeProjectionStatus.PENDING
-    assert (await reconciler.reconcile(**address)).status is RuntimeProjectionStatus.CONVERGED
-    assert projector.scopes[-1].released_mcp == frozenset({"mcp.removed"})
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert (await standalone).status is RuntimeProjectionStatus.CONVERGED
+    assert len(projector.calls) == 2
 
 
 @pytest.mark.asyncio
-async def test_enabled_first_apply_cannot_drop_a_competing_send_before_baseline(tmp_path):
-    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
-        CapabilityProjectionReconciler,
+async def test_failed_replacement_preserves_old_mapping_until_skill_delivery_converges():
+    replacement = PoolSkillMapping(corpus="local", relative_path="replacement/skill", link_name=SKILL.link_name)
+    old = PoolSkillMapping(corpus="local", relative_path="previous/skill", link_name=SKILL.link_name)
+    failed = RuntimeProjectionResult.pending(code="MAPPING_WRITE_FAILED", reason="Could not apply mapping")
+    mismatch = RuntimeProjectionResult(
+        status=RuntimeProjectionStatus.DEGRADED,
+        issues=(RuntimeProjectionIssue(
+            resource_type="SKILL", name=old.link_name, requested_action="RETIRE",
+            code="RETIRED_TARGET_IDENTITY_MISMATCH", reason="The previous link is still in use",
+            status=RuntimeProjectionStatus.DEGRADED, retryable=False,
+        ),),
     )
+    projector = _Projector(failed, mismatch, RuntimeProjectionResult.converged())
+    projector.previous = (old,)
+    projector.supplies = (replacement,)
+    reconciler = _reconciler(projector, _Device())
 
-    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
-    address = {"bot_id": "bot", "entity_id": "owner"}
-    repository = CapabilityProjectionRepository(db)
-    cache = MemoryCachePlugin()
-    projector = _Projector([RuntimeProjectionResult.converged()])
-    holder = CapabilityProjectionReconciler(
-        repository=repository, projector=projector, guard=CapabilityDeliveryGuard(cache),
-        bots=BotRepository(db), defer_enabled=True,
-    )
-    contender = CapabilityProjectionReconciler(
-        repository=repository, projector=projector, guard=CapabilityDeliveryGuard(cache),
-        bots=BotRepository(db), defer_enabled=True,
-    )
-    scope = ProjectionScope(mcp=True, updated_mcp=frozenset({"mcp.changed"}))
+    async def apply_change(retry):
+        async with reconciler.deferred_apply(**ADDRESS, retry=retry) as apply:
+            with apply.write_scope():
+                intent = capability_projection_intent(**ADDRESS)
+                assert intent is not None
+                intent.record(ProjectionScope(skills=True))
+            return await apply.finish(initialize=True)
 
-    async def legacy():
-        pytest.fail("Enabled competing delivery bypassed the capability fence")
+    _, retry = await apply_change(None)
+    assert projector.calls[-1][1] == []
+    assert retry.retired_mappings == (old,)
 
-    submitted = asyncio.Event()
-    async def compete():
-        submitted.set()
-        return await contender.project_competing_change(
-            **address, owner_id="owner", scope=scope, retired_mappings=(), legacy=legacy,
-        )
+    projector.previous = (replacement,)
+    projector.supplies = ()
+    _, retry = await apply_change(retry)
+    assert projector.calls[-1][1] == [replacement]
+    assert retry.retired_mappings == (old,)
 
-    async with holder.deferred_apply(**address, owner_id="owner"):
-        assert repository.read(**address) is None
-        pending = asyncio.create_task(compete())
-        await submitted.wait()
-        for _ in range(30):
-            state = await asyncio.to_thread(repository.read, **address)
-            if state is not None:
-                break
-            await asyncio.sleep(0.01)
-        assert state is not None
-        assert state.scope.updated_mcp == frozenset({"mcp.changed"})
-        assert not projector.scopes
-    assert (await pending).status is RuntimeProjectionStatus.CONVERGED
-
-
-@pytest.mark.asyncio
-async def test_busy_lifecycle_refresh_stays_due_after_a_converged_receipt(tmp_path, monkeypatch):
-    from agentclaw.community.core.skill_center.services import capability_delivery_guard
-    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
-        CapabilityProjectionReconciler,
-    )
-
-    monkeypatch.setattr(capability_delivery_guard, "_WAIT_SECONDS", 0)
-    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
-    address = {"bot_id": "bot", "entity_id": "owner"}
-    repository = CapabilityProjectionRepository(db)
-    projector = _Projector([RuntimeProjectionResult.converged()] * 2)
-    cache = MemoryCachePlugin()
-    holder = CapabilityDeliveryGuard(cache)
-    contender = CapabilityProjectionReconciler(
-        repository=repository, projector=projector, guard=CapabilityDeliveryGuard(cache),
-        bots=BotRepository(db), defer_enabled=False,
-    )
-    revision, result = await contender.finish_apply(**address, initialize=True)
+    projector.previous = ()
+    result, retry = await apply_change(retry)
+    assert projector.calls[-1][1] == [old]
     assert result.status is RuntimeProjectionStatus.CONVERGED
-
-    async def legacy():
-        pytest.fail("Lifecycle replay bypassed the existing ledger")
-
-    async with holder.hold(**address):
-        busy = await contender.project_competing_change(
-            **address, owner_id="owner", scope=ProjectionScope.everything(),
-            retired_mappings=(), legacy=legacy,
-        )
-        assert any(issue.code == "CAPABILITY_DELIVERY_BUSY" for issue in busy.issues)
-        assert len(projector.scopes) == 1
-        state = repository.read(**address)
-        assert state.revision != revision
-        assert state.retry_pending
-
-    assert (await contender.reconcile(**address)).status is RuntimeProjectionStatus.CONVERGED
-    assert projector.scopes == [ProjectionScope.everything()] * 2
+    assert retry is None
 
 
 @pytest.mark.asyncio
-async def test_cutover_mcp_receipt_preserves_pending_skills_and_shared_fence(tmp_path):
-    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
-        CapabilityProjectionReconciler,
-    )
-    from agentclaw.community.core.skill_center.services.recovering_bot_runtime_projector import (
-        RecoveringBotRuntimeProjector,
-    )
-
-    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
-    address = {"bot_id": "bot", "entity_id": "owner"}
-    repository = CapabilityProjectionRepository(db)
-    repository.require(**address, scope=ProjectionScope.everything())
-
-    class CutoverProjector(_Projector):
-        async def apply_mcp_and_cli_plan(self, *, scope, **kwargs):
-            self.scopes.append(scope)
-            assert repository.read(**address).write_blocked
-            return RuntimeProjectionResult.converged(
-                components={"mcp": RuntimeProjectionStatus.CONVERGED}
-            )
-
-    delegate = CutoverProjector([])
-    reconciler = CapabilityProjectionReconciler(
-        repository=repository, projector=delegate, guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
-        bots=BotRepository(db), defer_enabled=True,
-    )
-    projector = RecoveringBotRuntimeProjector(
-        delegate=delegate, recovery=None, capability_projection=reconciler,
-    )
-    result = await projector.project_mcp_and_cli(
-        bot_id="bot", owner_id="owner", scope=ProjectionScope(mcp=True, claim_all_mcp=True),
-    )
-    assert result.status is RuntimeProjectionStatus.CONVERGED
-    assert delegate.scopes == [ProjectionScope(mcp=True, claim_all_mcp=True)]
-    state = repository.read(**address)
-    assert state.scope == ProjectionScope(skills=True)
-    assert state.retry_pending
-    assert not state.write_blocked
-
-
-@pytest.mark.asyncio
-async def test_cutover_resolves_current_owner_and_keeps_preflight_failure_retryable(tmp_path):
-    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
-        CapabilityProjectionReconciler,
-    )
-    from agentclaw.community.core.skill_center.services.recovering_bot_runtime_projector import (
-        RecoveringBotRuntimeProjector,
-    )
-
-    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
-    address = {"bot_id": "bot", "entity_id": "owner"}
-    with db.transactional_orm_session() as session:
-        row = session.query(BotModel).filter_by(**address).one()
-        row.owner_id = "current-owner"
-    repository = CapabilityProjectionRepository(db)
-    repository.require(**address, scope=ProjectionScope.everything())
-    prepared = []
-
-    class CutoverProjector(_Projector):
-        def resolve_plan(self, *, bot_id, owner_id, scope):
-            prepared.append((bot_id, owner_id, scope))
-            assert not repository.read(**address).write_blocked
-            raise RuntimeError("configuration read temporarily unavailable")
-
-        async def project_mcp_and_cli(self, *, bot_id, owner_id, scope):
-            self.resolve_plan(bot_id=bot_id, owner_id=owner_id, scope=scope)
-
-    delegate = CutoverProjector([])
-    reconciler = CapabilityProjectionReconciler(
-        repository=repository, projector=delegate, guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
-        bots=BotRepository(db), defer_enabled=True,
-    )
-    projector = RecoveringBotRuntimeProjector(
-        delegate=delegate, recovery=None, capability_projection=reconciler,
-    )
-    scope = ProjectionScope(mcp=True, claim_all_mcp=True)
-    result = await projector.project_mcp_and_cli(bot_id="bot", owner_id="owner", scope=scope)
-    assert any(issue.code == "CAPABILITY_PROJECTION_PLAN_UNAVAILABLE" for issue in result.issues)
-    assert prepared == [("bot", "current-owner", scope)]
-    state = repository.read(**address)
-    assert state.scope == ProjectionScope.everything()
-    assert state.retry_pending
-    assert not state.write_blocked
-
-
-def _teclaw_reconciler(tmp_path, *, factory, passport, cache):
-    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
-        CapabilityProjectionReconciler,
-    )
-    from tests.community.core.skill_center._test_skill_set_management_service_support import (
-        _TeclawRuntimeBots, _teclaw_runtime,
-    )
-
-    address = {"bot_id": "bot-1", "entity_id": "entity-1"}
-    db = _Database(f"sqlite:///{tmp_path / 'state.db'}")
+@pytest.mark.parametrize("retry_with_apply", [False, True])
+async def test_standalone_retirement_survives_failed_delivery(tmp_path, retry_with_apply):
+    db = _Database(f"sqlite:///{tmp_path / 'standalone.db'}")
     with db.transactional_orm_session() as session:
         session.add(BotModel(
-            **address, owner_id="true-owner", creator_id="true-owner", entity_type="staff",
-            active_engine="teclaw", env="dev", status="ACTIVE",
+            bot_id="bot", entity_id="entity", owner_id="owner", creator_id="owner", env="dev",
+            entity_type="staff", status="ACTIVE", binding_id=4,
         ))
+        session.add(EntityDeviceBinding(
+            id=4, entity_id="entity", entity_type="staff", device_id="device", device_provider="arca",
+            env="dev", status="ACTIVE", applied_by="owner", device_props='{"adapter_port":20003}',
+        ))
+    bots, bindings = BotRepository(db), DeviceRepository(db)
 
-    class Bots(_TeclawRuntimeBots):
-        def get_by_id_and_owner(self, bot_id, owner_id):
-            return {**super().get_by_id_and_owner(bot_id, owner_id), "status": "ACTIVE"}
+    def new_worker(projector):
+        return CapabilityProjectionReconciler(
+            projector=projector, guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+            bots=bots, bindings=bindings, defer_enabled=True,
+        )
+    local = PoolSkillMapping(corpus="local", relative_path="local/removed", link_name="removed")
+    failed = _Projector(RuntimeProjectionResult.pending(code="FAILED", reason="Device unavailable"))
+    failed_reconciler = new_worker(failed)
 
-    repository = CapabilityProjectionRepository(db)
-    projector = _teclaw_runtime(factory, passport=passport)
-    projector._bot_repo = Bots()
-    reconciler = CapabilityProjectionReconciler(
-        repository=repository, projector=projector, guard=CapabilityDeliveryGuard(cache),
-        bots=BotRepository(db), defer_enabled=True,
+    async def unused_legacy():
+        pytest.fail("The current Bot is using combined capability delivery")
+
+    result = await failed_reconciler.project_competing_change(
+        **ADDRESS, owner_id="owner", scope=ProjectionScope(skills=True),
+        retired_mappings=(local,), legacy=unused_legacy,
     )
-    return address, repository, reconciler
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("device_succeeds", [True, False])
-async def test_passport_failure_retries_its_obligation_in_the_same_revision(tmp_path, device_succeeds):
-    from agentclaw.community.core.skill_center.errors import ArtifactProjectionNotDispatchedError
-    from tests.community.core.skill_center._test_skill_set_management_service_support import (
-        _RuntimeFactory, _RuntimePassport,
-    )
-
-    class Passport(_RuntimePassport):
-        def update_passport(self, **kwargs):
-            super().update_passport(**kwargs)
-            if len(self.calls) == 1:
-                raise RuntimeError("temporary Passport failure")
-
-    factory = _RuntimeFactory()
-    original = factory.service.project_whole_artifact
-    device_attempts = []
-
-    async def deliver(**kwargs):
-        device_attempts.append(kwargs)
-        if not device_succeeds and len(device_attempts) == 1:
-            raise ArtifactProjectionNotDispatchedError()
-        return await original(**kwargs)
-
-    factory.service.project_whole_artifact = deliver
-    passport = Passport()
-    address, repository, reconciler = _teclaw_reconciler(
-        tmp_path, factory=factory, passport=passport, cache=MemoryCachePlugin(),
-    )
-
-    revision, result = await reconciler.finish_apply(**address, initialize=True)
     assert result.status is RuntimeProjectionStatus.PENDING
-    codes = {issue.code for issue in result.issues}
-    assert "PASSPORT_RUNTIME_UNAVAILABLE" in codes
-    assert ("ARTIFACT_PROJECTION_NOT_DISPATCHED" in codes) is not device_succeeds
-    state = repository.read(**address)
-    assert state.scope.passport
-    assert state.scope.mcp is not device_succeeds
-    assert state.retry_pending
-    assert not state.write_blocked
+    assert failed.calls[0][1] == [local]
 
-    assert (await reconciler.reconcile(**address)).status is RuntimeProjectionStatus.CONVERGED
-    assert len(device_attempts) == (1 if device_succeeds else 2)
-    assert len(passport.calls) == 2
-    state = repository.read(**address)
-    assert state.revision == revision
-    assert state.scope == ProjectionScope()
-    assert not state.retry_pending
+    stored = bindings.get_by_id(4)
+    assert stored.to_dict()["device_props"] == {"adapter_port": 20003}
 
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("superseded_by", ["revision", "lease"])
-async def test_passport_checks_write_authority_after_slow_preparation(tmp_path, superseded_by):
-    import threading
-
-    from tests.community.core.skill_center._test_skill_set_management_service_support import (
-        _RuntimeFactory, _RuntimePassport,
-    )
-
-    preparing = threading.Event()
-    resume = threading.Event()
-
-    class Passport(_RuntimePassport):
-        def query_agent_passport(self, bot_id, owner_id):
-            if self.calls:
-                preparing.set()
-                resume.wait(3)
-            return super().query_agent_passport(bot_id, owner_id)
-
-        def update_passport(self, **kwargs):
-            super().update_passport(**kwargs)
-            if len(self.calls) == 1:
-                raise RuntimeError("initial Passport update did not succeed")
-
-    passport = Passport()
-    cache = MemoryCachePlugin()
-    factory = _RuntimeFactory()
-    address, repository, reconciler = _teclaw_reconciler(
-        tmp_path, factory=factory, passport=passport, cache=cache,
-    )
-    revision, _ = await reconciler.finish_apply(**address, initialize=True)
-    assert repository.read(**address).scope == ProjectionScope(passport=True)
-
-    running = asyncio.create_task(reconciler.reconcile(**address))
-    try:
-        assert await asyncio.to_thread(preparing.wait, 2)
-        if superseded_by == "lease":
-            cache.renew_lock_strict = lambda *args, **kwargs: False
-        else:
-            repository.require(**address, scope=ProjectionScope(skills=True))
-    finally:
-        resume.set()
-    result = await running
-
-    assert result.status is RuntimeProjectionStatus.PENDING
-    assert len(passport.calls) == 1
-    assert len(factory.service.runtime_syncs) == 1
-    state = repository.read(**address)
-    assert state.retry_pending and state.scope.passport
-    assert not state.write_blocked
-    assert (state.revision == revision) is (superseded_by == "lease")
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("with_device_delivery", [False, True])
-async def test_cancelled_passport_writer_keeps_lease_until_update_and_receipt_finish(
-    tmp_path, with_device_delivery,
-):
-    import threading
-
-    from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
-        CapabilityProjectionReconciler,
-    )
-    from tests.community.core.skill_center._test_skill_set_management_service_support import (
-        _RuntimeFactory, _RuntimePassport,
-    )
-
-    updating = threading.Event()
-    resume = threading.Event()
-    completed = []
-
-    class Passport(_RuntimePassport):
-        def update_passport(self, **kwargs):
-            super().update_passport(**kwargs)
-            if len(self.calls) == 1:
-                raise RuntimeError("initial Passport update did not succeed")
-            if len(self.calls) == 2:
-                updating.set()
-                resume.wait(4)
-                completed.append("old update")
-            else:
-                completed.append("new update")
-
-    class Cache(MemoryCachePlugin):
-        def __init__(self):
-            super().__init__()
-            self.watch_competitor = False
-            self.competitor_attempts = 0
-            self.competitor_checked = threading.Event()
-
-        def acquire_lock_strict(self, lock_key, ttl=30):
-            token = super().acquire_lock_strict(lock_key, ttl=ttl)
-            if self.watch_competitor:
-                self.competitor_attempts += 1
-                if token is not None or self.competitor_attempts >= 2:
-                    self.competitor_checked.set()
-            return token
-
-    passport = Passport()
-    cache = Cache()
-    address, repository, incumbent = _teclaw_reconciler(
-        tmp_path, factory=_RuntimeFactory(), passport=passport, cache=cache,
-    )
-    await incumbent.finish_apply(**address, initialize=True)
-    assert repository.read(**address).scope == ProjectionScope(passport=True)
-    if with_device_delivery:
-        repository.require(**address, scope=ProjectionScope(mcp=True))
-    old_revision = repository.read(**address).revision
-    original_complete = repository.complete
-
-    def record_receipt(state, result, **kwargs):
-        recorded = original_complete(state, result, **kwargs)
-        if state.revision == old_revision:
-            completed.append("old receipt")
-        return recorded
-
-    repository.complete = record_receipt
-    contender = CapabilityProjectionReconciler(
-        repository=repository, projector=incumbent._projector, guard=CapabilityDeliveryGuard(cache),
-        bots=incumbent._bots, defer_enabled=True,
-    )
-    old = asyncio.create_task(incumbent.reconcile(**address))
-    try:
-        assert await asyncio.to_thread(updating.wait, 2)
-        old.cancel("request disconnected")
-        repository.require(**address, scope=ProjectionScope(mcp=True))
-        cache.watch_competitor = True
-        next_attempt = asyncio.create_task(contender.reconcile(**address))
-        assert await asyncio.to_thread(cache.competitor_checked.wait, 2)
-        pending_during_cancel = not old.done() and not next_attempt.done()
-        writes_during_cancel = list(completed)
-        old.cancel("request cancelled again")
-        await asyncio.sleep(0)
-    finally:
-        resume.set()
-
-    with pytest.raises(asyncio.CancelledError, match="request disconnected"):
-        await old
-    result = await next_attempt
-
-    assert pending_during_cancel
-    assert writes_during_cancel == []
-    assert completed == ["old update", "old receipt", "new update"]
+    restarted = _Projector(RuntimeProjectionResult.converged(), RuntimeProjectionResult.converged())
+    restarted.previous = ()
+    new_reconciler = new_worker(restarted)
+    if retry_with_apply:
+        async with new_reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+            result, _ = await apply.finish(initialize=True)
+    else:
+        result = await new_reconciler.project_competing_change(
+            **ADDRESS, owner_id="owner", scope=ProjectionScope(skills=True),
+            retired_mappings=(), legacy=unused_legacy,
+        )
     assert result.status is RuntimeProjectionStatus.CONVERGED
-    assert not repository.read(**address).write_blocked
+    assert restarted.calls[0][1] == [local]
+    after = bindings.get_by_id(4).device_props
+    assert after["adapter_port"] == 20003
+    assert all(after[key] is None for key in after if key != "adapter_port")
+
+
+@pytest.mark.asyncio
+async def test_existing_desktop_recovery_delivers_a_pending_bots_skills():
+    class PendingDesktop(_Projector):
+        def resolve_plan(self, **kwargs):
+            plan = super().resolve_plan(**kwargs)
+            plan.bot = {"status": "PENDING", "bot_type": "desktop"}
+            return plan
+
+    async def unused_legacy():
+        pytest.fail("The current Bot is using combined capability delivery")
+
+    projector = PendingDesktop(RuntimeProjectionResult.converged())
+    reconciler = _reconciler(projector, _Device())
+    args = dict(**ADDRESS, owner_id="owner", scope=ProjectionScope(skills=True),
+                retired_mappings=(), legacy=unused_legacy)
+    normal = await reconciler.project_competing_change(**args)
+    assert normal.issues[0].code == "BOT_RUNTIME_NOT_READY"
+    assert projector.calls == []
+
+    recovering = await reconciler.project_competing_change(**args, desktop_recovery=True)
+    assert recovering.status is RuntimeProjectionStatus.CONVERGED
+    assert len(projector.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_with_apply", [False, True])
+async def test_standalone_mcp_releases_survive_failed_delivery(retry_with_apply):
+    device = _Device()
+    projector = _Projector(
+        RuntimeProjectionResult.pending(code="MCP_UNAVAILABLE", reason="Device unavailable"),
+        RuntimeProjectionResult.converged(components={"skills": RuntimeProjectionStatus.CONVERGED}),
+        RuntimeProjectionResult.converged(components={"mcp": RuntimeProjectionStatus.CONVERGED}),
+    )
+    reconciler = _reconciler(projector, device)
+    releases = frozenset({"old-mcp"})
+
+    async def unused_legacy():
+        pytest.fail("The current Bot is using combined capability delivery")
+
+    async def standalone(scope):
+        return await reconciler.project_competing_change(
+            **ADDRESS, owner_id="owner", scope=scope, retired_mappings=(), legacy=unused_legacy,
+        )
+
+    result = await standalone(ProjectionScope(mcp=True, released_mcp=releases))
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert projector.calls[-1][0].released_mcp == releases
+
+    # A successful Skill-only request cannot acknowledge the MCP retirement.
+    await standalone(ProjectionScope(skills=True))
+    assert not projector.calls[-1][0].mcp
+    assert projector.calls[-1][0].released_mcp == frozenset()
+
+    if retry_with_apply:
+        async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+            result, _ = await apply.finish(initialize=True)
+    else:
+        result = await standalone(ProjectionScope())
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert projector.calls[-1][0].released_mcp == releases
+    assert projector.calls[-1][0].updated_mcp == releases
+    assert all(value is None for value in device.props.values())
+
+
+@pytest.mark.asyncio
+async def test_repeat_uninstall_uses_the_release_saved_before_dispatch():
+    device = _Device()
+    projector = _Projector(RuntimeProjectionResult.converged())
+    reconciler = _reconciler(projector, device)
+
+    async def unused_legacy():
+        pytest.fail("The current Bot is using combined capability delivery")
+
+    await reconciler.remember_release_candidates(**ADDRESS, codes=frozenset({"saved-mcp"}))
+    assert projector.calls == []
+
+    await reconciler.project_competing_change(
+        **ADDRESS, owner_id="owner", scope=ProjectionScope(), retired_mappings=(), legacy=unused_legacy,
+    )
+    assert projector.calls[-1][0].released_mcp == {"saved-mcp"}
+    assert all(value is None for value in device.props.values())
+
+
+@pytest.mark.asyncio
+async def test_busy_delivery_preserves_committed_local_and_mcp_releases():
+    class UnavailableGuard:
+        @asynccontextmanager
+        async def hold(self, **kwargs):
+            raise CapabilityDeliveryUnavailable()
+            yield
+
+    async def unused_legacy():
+        pytest.fail("Combined delivery must use the shared lease")
+
+    device = _Device()
+    projector = _Projector(RuntimeProjectionResult.converged())
+    unavailable = CapabilityProjectionReconciler(
+        projector=projector, guard=UnavailableGuard(), bots=device, bindings=device, defer_enabled=True,
+    )
+    local = PoolSkillMapping(corpus="local", relative_path="removed", link_name="removed")
+    releases = frozenset({"removed-mcp"})
+    result = await unavailable.project_competing_change(
+        **ADDRESS, owner_id="owner", scope=ProjectionScope(skills=True, mcp=True, released_mcp=releases),
+        retired_mappings=(local,), legacy=unused_legacy,
+    )
+    assert result.issues[0].code == "CAPABILITY_DELIVERY_BUSY"
+    assert projector.calls == []
+
+    reconciler = _reconciler(projector, device)
+    async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+        result, _ = await apply.finish(initialize=True)
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert projector.calls[0][0].released_mcp == releases
+    assert projector.calls[0][1] == [local]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("candidate_device_id", ["device", "old-device"])
+async def test_unchanged_apply_checks_saved_preflight_candidates_against_current_supply(candidate_device_id):
+    device = _Device()
+    projector = _Projector(RuntimeProjectionResult.converged())
+    reconciler = _reconciler(projector, device)
+    removed = PoolSkillMapping(corpus="local", relative_path="removed", link_name="removed")
+    supplied = PoolSkillMapping(corpus="local", relative_path="kept", link_name="kept")
+    await reconciler.remember_release_candidates(
+        **ADDRESS, codes=frozenset(), candidates=(removed, supplied, SKILL),
+        candidate_device_id=candidate_device_id,
+    )
+    assert projector.calls == []
+    projector.previous = (supplied,)
+    projector.supplies = (supplied,)
+
+    async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+        result, retry = await apply.finish(initialize=True)
+
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert retry is None
+    assert projector.calls[0][1] == ([removed] if candidate_device_id == device.device_id else [])
+    assert all(value is None for value in device.props.values())
+
+
+@pytest.mark.asyncio
+async def test_delivery_receipt_preserves_a_concurrent_release_of_the_same_code():
+    device = _Device()
+
+    class ConcurrentCommit(_Projector):
+        async def apply_plan(self, **kwargs):
+            await reconciler.remember_release_candidates(**ADDRESS, codes=frozenset({"old-mcp"}))
+            return await super().apply_plan(**kwargs)
+
+    projector = ConcurrentCommit(RuntimeProjectionResult.converged())
+    reconciler = _reconciler(projector, device)
+    await reconciler.remember_release_candidates(**ADDRESS, codes=frozenset({"old-mcp"}))
+    async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
+        await apply.finish(initialize=True)
+    assert next(iter(device.props.values()))["released_mcp"] == ["old-mcp"]

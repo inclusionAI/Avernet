@@ -11,10 +11,11 @@ import pytest
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.core.ports.skill_package_upload_port import PackageMetadata, PackagePublication
 from agentclaw.community.core.skill_center.services.local_skill_package_runtime import LocalSkillPackageRuntime
-from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
-    CapabilityProjectionRepository,
-)
 from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository
+from agentclaw.community.core.skill_center.capability_projection_intent import (
+    CapabilityProjectionIntent,
+    defer_capability_projection,
+)
 from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
 from agentclaw.community.plugin_api.models import BotModel
 from tests.community.core.apply_engine.test_capability_full_replace_contract import _Database
@@ -142,7 +143,7 @@ def _bound_database(binding: _Binding | None = None) -> _Database:
 
 
 @pytest.mark.asyncio
-async def test_unknown_package_stays_fenced_across_workers_and_rebinding_the_same_device():
+async def test_unknown_package_allows_a_later_apply_on_the_same_device():
     binding = _Binding("teclaw")
     db = _bound_database(binding)
     transport = _Transport(unknown_first=True)
@@ -160,29 +161,9 @@ async def test_unknown_package_stays_fenced_across_workers_and_rebinding_the_sam
     ]
     transport.unknown_first = False
 
-    blocked = await worker().upload_local_skill_batch(**WHO, packages=_packages("first"))
-    assert blocked[0].receipt.publication is PackagePublication.UNKNOWN
-    assert transport.entered == ["first"]
-
-    binding.binding_id += 1
-    binding.persist(db)
-    rebound = await worker().upload_local_skill_batch(**WHO, packages=_packages("first"))
-    assert rebound[0].receipt.publication is PackagePublication.UNKNOWN
-    assert transport.entered == ["first"]
-
-    binding.binding_id += 1
-    binding.device_id = "device-b"
-    binding.persist(db)
-    published = await worker().upload_local_skill_batch(**WHO, packages=_packages("first"))
-    assert published[0].receipt.publication is PackagePublication.PUBLISHED
-    assert published[0].receipt.metadata is PackageMetadata.COMMITTED
-    assert transport.entered == ["first", "first"]
-
-    binding.binding_id += 1
-    binding.device_id = "device-a"
-    binding.persist(db)
-    returned = await worker().upload_local_skill_batch(**WHO, packages=_packages("first"))
-    assert returned[0].receipt.publication is PackagePublication.UNKNOWN
+    retried = await worker().upload_local_skill_batch(**WHO, packages=_packages("first"))
+    assert retried[0].receipt.publication is PackagePublication.PUBLISHED
+    assert retried[0].receipt.metadata is PackageMetadata.COMMITTED
     assert transport.entered == ["first", "first"]
 
 
@@ -205,7 +186,9 @@ async def test_deferred_replacement_keeps_asset_and_only_records_required_mappin
         "SKILL.md": b"---\nname: first\ndescription: replacement\n---\n",
         "data.txt": b"updated bytes",
     })
-    result = await service.upload_local_skill_batch(**WHO, packages=(("first", replacement),))
+    intent = CapabilityProjectionIntent("bot", "owner")
+    with defer_capability_projection(intent):
+        result = await service.upload_local_skill_batch(**WHO, packages=(("first", replacement),))
 
     assert result[0].receipt.metadata is PackageMetadata.COMMITTED
     assert result[0].receipt.content_digest != first[0].receipt.content_digest
@@ -213,20 +196,14 @@ async def test_deferred_replacement_keeps_asset_and_only_records_required_mappin
     assert result[0].upload["skill"]["description"] == "replacement"
     assert transport.confirmed == ["first", "first"]
     assert runtime.calls == 0
-    state = CapabilityProjectionRepository(db).read(bot_id="bot", entity_id="owner")
-    if requires_mapping:
-        assert state is not None and state.scope.skills
-        assert state.retry_pending
-    else:
-        assert state is None
+    assert intent.scope().skills is requires_mapping
 
 
 @pytest.mark.asyncio
-async def test_independent_replacement_commits_tracked_mapping_before_unlocked_delivery():
+async def test_independent_replacement_commits_metadata_before_unlocked_delivery():
     binding = _Binding()
     db = _bound_database(binding)
     skills = SkillRepository(db)
-    projections = CapabilityProjectionRepository(db)
     guard = _Guard()
     observer = _CapturedSecurityObserver(guard)
 
@@ -234,10 +211,8 @@ async def test_independent_replacement_commits_tracked_mapping_before_unlocked_d
         async def project(self, *, scope=None, **kwargs):
             assert not guard._lock.locked()
             assert len(observer.calls) == 2
-            pending = projections.read(bot_id="bot", entity_id="owner")
             assert scope == ProjectionScope(skills=True)
-            assert pending is not None and pending.scope.skills
-            assert pending.version == previous.version + 1
+            assert skills.get_by_id(first["skill"]["id"]) is not None
             return await super().project(scope=scope, **kwargs)
 
     runtime = ObservedDelivery([True])
@@ -249,8 +224,6 @@ async def test_independent_replacement_commits_tracked_mapping_before_unlocked_d
     service._device_context_resolver_provider = lambda: binding
     first = await service.upload_local_skill(**WHO, package=_packages("first")[0][1])
     assert first["operation"] == "created"
-    assert projections.read(bot_id="bot", entity_id="owner") is None
-    previous = projections.require(bot_id="bot", entity_id="owner", scope=ProjectionScope(skills=True))
 
     updated = await service.upload_local_skill(**WHO, package=_packages("first")[0][1])
 
@@ -339,9 +312,8 @@ async def test_completed_package_target_is_checked_again_in_relationship_transac
     binding.persist(db)
 
     with expect_runtime_binding(published.target), pytest.raises(RuntimeBindingChangedError):
-        CapabilityDesiredStateRepository(db).commit_projection_mutation(
+        CapabilityDesiredStateRepository(db).commit_capability_mutation(
             bot_id="bot", entity_id="owner",
             mutation=lambda: pytest.fail("Capability relationship write reached a new Runtime binding"),
-            scope_from_result=lambda _: ProjectionScope(skills=True),
-            retired_mappings=(), create=True,
+            require_bot=True,
         )

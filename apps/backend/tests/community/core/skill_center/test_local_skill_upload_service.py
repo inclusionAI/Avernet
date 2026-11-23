@@ -83,15 +83,6 @@ class _Repo:
     def __init__(self) -> None:
         self.created: list[dict] = []
 
-    def has_pending_local_skill_dispatch(self, **_kwargs):
-        return False
-
-    def reserve_local_skill_dispatch(self, **kwargs):
-        return ("key", kwargs["name"])
-
-    def finish_local_skill_dispatch(self, _key, _attempt):
-        pass
-
     def get_bot_local_by_name(self, **kwargs):
         return None
 
@@ -2625,8 +2616,6 @@ async def test_concurrent_same_name_uploads_serialize_then_converge_on_one_skill
         cache=_LockingCache(),
         layout_repository=_PoolLayouts(),
         participation_resolver=_Participation(),
-        binding_repository=Mock(),
-        skill_repository=repo,
     )
     package = _zip({"SKILL.md": _skill_md(description="concurrent")})
     first, second = await asyncio.gather(

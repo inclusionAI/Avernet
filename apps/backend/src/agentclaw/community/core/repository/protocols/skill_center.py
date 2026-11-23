@@ -431,25 +431,9 @@ class SkillRepository(Protocol):
         old_locator: str,
         new_locator: str,
         description: str,
-        defer_skills_projection: bool = False,
-        record_tracked_projection: bool = False,
     ) -> dict | None:
         """Atomically switch package authority at a canonical locator."""
         ...
-
-    @abstractmethod
-    def has_pending_local_skill_dispatch(
-        self, *, bot_id: str, entity_id: str, name: str | None = None, device_id: str | None = None,
-    ) -> bool: ...
-
-    @abstractmethod
-    def reserve_local_skill_dispatch(
-        self, *, bot_id: str, entity_id: str, binding_id: int, device_id: str | None,
-        name: str, digest: str,
-    ) -> tuple[str, str] | None: ...
-
-    @abstractmethod
-    def finish_local_skill_dispatch(self, target_key: str, dispatch_id: str) -> None: ...
 
     @abstractmethod
     def delete(self, skill_id: str) -> bool: ...

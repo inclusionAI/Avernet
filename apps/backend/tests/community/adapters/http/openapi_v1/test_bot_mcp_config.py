@@ -257,7 +257,9 @@ def test_clear_is_saved_even_when_catalog_lookup_for_projection_fails(mcp):
     mcp.sync.sync_mcp_details_for_bot.assert_not_called()
 
 
-def test_tracked_effective_override_delivers_explicit_url_without_catalogue(mcp, tmp_path):
+def test_effective_override_delivers_explicit_url_without_catalogue(mcp, tmp_path):
+    from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+    from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
     from agentclaw.community.core.devices.services.mcp_device_payload import convert_to_device_format
     from agentclaw.community.core.mcp.services.config_service import MCPConfigService
     from agentclaw.community.core.models.mcp import BotMCPInstallation
@@ -265,8 +267,7 @@ def test_tracked_effective_override_delivers_explicit_url_without_catalogue(mcp,
     from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import BotMCPConfigRepository
     from agentclaw.community.core.repository.implementations.bot.scoped_mcp_config import ScopedMCPConfigRepository
     from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
-    from agentclaw.community.core.repository.implementations.skill_center.capability_projection import CapabilityProjectionRepository
-    from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope, RuntimeProjectionResult
+    from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult
     from agentclaw.community.core.skill_center.services.capability_delivery_guard import CapabilityDeliveryGuard
     from agentclaw.community.core.skill_center.services.capability_projection_reconciler import CapabilityProjectionReconciler
     from agentclaw.community.core.skill_center.services.skill_set_projection import SkillSetRuntimeProjection
@@ -280,14 +281,15 @@ def test_tracked_effective_override_delivers_explicit_url_without_catalogue(mcp,
     with db.transactional_orm_session() as session:
         session.add(BotModel(
             id=42, bot_id="shared", entity_id="entity-1", owner_id="owner",
-            creator_id="owner", entity_type="staff", env="dev", status="ACTIVE",
+            creator_id="owner", entity_type="staff", env="dev", status="ACTIVE", binding_id=42,
+        ))
+        session.add(EntityDeviceBinding(
+            id=42, entity_id="entity-1", entity_type="staff", env="dev", status="ACTIVE",
+            device_id="device-42", device_provider="arca", applied_by="owner",
         ))
         session.add(BotMCPInstallation(
             bot_id="shared", owner_id="entity-1", server_code="weather", env="dev",
         ))
-    address = {"bot_id": "shared", "entity_id": "entity-1"}
-    repository = CapabilityProjectionRepository(db)
-    repository.require(**address, scope=ProjectionScope.everything())
     bots = PersistentBots(db)
     bot = bots.get_by_id_and_entity("shared", "entity-1")
     mcp.effective.effective_mcp_server_codes.return_value = {"weather"}
@@ -331,8 +333,8 @@ def test_tracked_effective_override_delivers_explicit_url_without_catalogue(mcp,
     mcp.service._config_service = config
     mcp.service._command_repo = ScopedMCPConfigRepository(db)
     mcp.service._capability_projection = CapabilityProjectionReconciler(
-        repository=repository, projector=Projector(), guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
-        bots=bots, defer_enabled=False,
+        projector=Projector(), guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+        bots=bots, bindings=DeviceRepository(db), defer_enabled=True,
     )
     url = "https://example.invalid/custom"
     response = mcp.client.put(PATH, json={"url": url})
@@ -343,4 +345,3 @@ def test_tracked_effective_override_delivers_explicit_url_without_catalogue(mcp,
     device.sync_single_mcp.assert_called_once()
     args, kwargs = device.sync_single_mcp.call_args
     assert convert_to_device_format(*args, **kwargs).to_dict()["url"] == url
-    assert repository.read(**address).result.status.value == "CONVERGED"

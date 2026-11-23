@@ -32,6 +32,7 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillRepository,
 )
+from agentclaw.community.core.skill_center.capability_projection_intent import capability_projection_intent
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
     LocalSkillEditBusyError,
@@ -39,7 +40,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditPausedError,
     LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
-    LocalSkillPackageDispatchPendingError,
     LocalSkillPackageOutcomeUnknownError,
     LocalSkillRuntimeUnavailableError,
     LocalSkillLayoutRollbackError,
@@ -245,11 +245,6 @@ class LocalSkillUploadService(
         async with self._edit(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id) as edit:
             skill = PreparedLocalSkill.from_package(self._validate_zip(package))
             context = self._device_context(bot_id=bot_id, owner_id=edit.owner_id)
-            if self._skill_repo.has_pending_local_skill_dispatch(
-                bot_id=bot_id, entity_id=edit.owner_id, name=skill.package.name,
-                device_id=context.device_id,
-            ):
-                raise LocalSkillPackageDispatchPendingError()
             is_teclaw = context.provider == "teclaw"
             binding = RuntimeBindingTarget(
                 bot_id, str(edit.bot["owner_id"]), edit.owner_id, context.binding_id, context.device_id,
@@ -262,7 +257,7 @@ class LocalSkillUploadService(
                         layout=target.location.layout, package=skill.package.canonical_zip,
                     )
                     result = await self._persist_package(
-                        edit, target, runtime_result, is_teclaw=is_teclaw, deferred=False
+                        edit, target, runtime_result, is_teclaw=is_teclaw
                     )
             except RuntimeBindingChangedError as exc:
                 raise LocalSkillRuntimeUnavailableError() from exc
@@ -330,7 +325,7 @@ class LocalSkillUploadService(
     async def _persist_package(
         self, edit: _LocalSkillEdit, target: _LocalSkillTarget,
         runtime_result: LocalSkillPackageRuntimeResult | None, *,
-        is_teclaw: bool, deferred: bool,
+        is_teclaw: bool,
     ) -> dict[str, Any]:
         validated = target.skill.package
         who = dict(bot_id=edit.bot_id, owner_id=edit.owner_id, actor_id=edit.actor_id)
@@ -338,7 +333,7 @@ class LocalSkillUploadService(
             if target.existing is not None:
                 return self._commit_runtime_replace(
                     **who, skill=target.existing, description=validated.description,
-                    runtime_result=runtime_result, deferred=deferred, is_teclaw=is_teclaw,
+                    runtime_result=runtime_result,
                 )
             return self._commit_runtime_create(
                 **who, name=validated.name, description=validated.description,
@@ -348,7 +343,7 @@ class LocalSkillUploadService(
             return await self._replace(
                 **who, skill=target.existing, bot=edit.bot, name=validated.name,
                 description=validated.description, files=list(validated.files),
-                is_teclaw=is_teclaw, deferred=deferred,
+                is_teclaw=is_teclaw,
             )
         return await self._create(
             **who, bot=edit.bot, name=validated.name, description=validated.description,
@@ -433,14 +428,6 @@ class LocalSkillUploadService(
             if not destination.matches(context):
                 raise LocalSkillRuntimeUnavailableError()
             self._edit_guard.refresh(edit.lease)
-            dispatch = self._skill_repo.reserve_local_skill_dispatch(
-                bot_id=edit.bot_id, entity_id=edit.owner_id, binding_id=context.binding_id,
-                device_id=context.device_id, name=name, digest=skill.digest,
-            )
-            if dispatch is None:
-                # A stopped local await or a worker crash cannot establish that
-                # the previous provider call no longer has write authority.
-                return package_result(name, skill.digest, PackagePublication.UNKNOWN)
             runtime_result = None
             started = perf_counter()
             if destination.supports_package_apply:
@@ -451,15 +438,11 @@ class LocalSkillUploadService(
                     )
                 except LocalSkillPackageOutcomeUnknownError:
                     return package_result(name, skill.digest, PackagePublication.UNKNOWN)
-                except Exception:
-                    self._skill_repo.finish_local_skill_dispatch(*dispatch)
-                    raise
                 publication = PackagePublication.PUBLISHED
                 logger.info(
                     "Local Skill package published bot_id=%s skill_name=%s upload_ms=%.3f",
                     edit.bot_id, name, (perf_counter() - started) * 1000,
                 )
-                self._skill_repo.finish_local_skill_dispatch(*dispatch)
                 self._edit_guard.refresh(edit.lease)
             else:
                 # A legacy command can fail after writing a subset of the files.
@@ -471,8 +454,12 @@ class LocalSkillUploadService(
             )
             with expect_runtime_binding(binding):
                 result = await self._persist_package(
-                    edit, target, runtime_result, is_teclaw=destination.is_teclaw, deferred=True,
+                    edit, target, runtime_result, is_teclaw=destination.is_teclaw,
                 )
+            if target.existing is not None and not destination.is_teclaw:
+                intent = capability_projection_intent(bot_id=edit.bot_id, entity_id=edit.owner_id)
+                if intent is not None:
+                    intent.record(ProjectionScope(skills=True))
             publication, metadata = PackagePublication.PUBLISHED, PackageMetadata.COMMITTED
             logger.info(
                 "Local Skill package committed bot_id=%s skill_name=%s %s=%.3f",
@@ -486,8 +473,6 @@ class LocalSkillUploadService(
                 "Local Skill package observation stage bot_id=%s skill_name=%s enabled=%s observation_ms=%.3f",
                 edit.bot_id, name, self._security_observation_enabled, (perf_counter() - started) * 1000,
             )
-            if runtime_result is None:
-                self._skill_repo.finish_local_skill_dispatch(*dispatch)
         except RuntimeBindingChangedError:
             return package_result(name, skill.digest, publication, PackageMetadata.FAILED)
         except Exception:
@@ -557,8 +542,6 @@ class LocalSkillUploadService(
         actor_id: str,
         description: str,
         runtime_result: LocalSkillPackageRuntimeResult,
-        deferred: bool,
-        is_teclaw: bool,
     ) -> dict[str, Any]:
         """Persist replace metadata while preserving the historical locator."""
 
@@ -571,8 +554,6 @@ class LocalSkillUploadService(
                 old_locator=old_locator,
                 new_locator=old_locator,
                 description=description,
-                defer_skills_projection=deferred and not is_teclaw,
-                record_tracked_projection=not deferred,
             )
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")
@@ -701,7 +682,6 @@ class LocalSkillUploadService(
         description: str,
         files: list[tuple[str, bytes]],
         is_teclaw: bool,
-        deferred: bool = False,
     ) -> dict[str, Any]:
         """Publish a replacement at the stable layout-owned package locator.
 
@@ -791,8 +771,6 @@ class LocalSkillUploadService(
                 old_locator=old_locator,
                 new_locator=old_locator,
                 description=description,
-                defer_skills_projection=deferred and not is_teclaw,
-                record_tracked_projection=not deferred,
             )
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")

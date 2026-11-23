@@ -351,65 +351,14 @@ def test_patch_refuses_the_same_bot_identity_under_another_tenant() -> None:
         assert session.query(BotMCPConfig).count() == 0
 
 
-def test_effective_projection_work_commits_with_scoped_bot_and_inherited_overrides() -> None:
-    from agentclaw.community.core.base import Base
-    from agentclaw.community.core.models.mcp import BotMCPInstallation
-    from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
-        CapabilityProjectionRepository,
-    )
-    from agentclaw.community.core.skill_center.runtime_projection_contract import ProjectionScope
-
-    db = _Database()
-    Base.metadata.create_all(db.engine)
-    with db.transactional_orm_session() as session:
-        session.add(BotMCPInstallation(
-            bot_id="bot-x", owner_id="owner", env=get_current_env(), server_code="weather",
-        ))
-    projections = CapabilityProjectionRepository(db)
-    base = projections.require(bot_id="bot-x", entity_id="owner", scope=ProjectionScope(skills=True))
-    repo = ScopedMCPConfigRepository(db)
-    with db.orm_session() as session:
-        bot_pk = session.query(BotModel).filter_by(bot_id="bot-x").one().id
-    address = dict(bot_pk=bot_pk, bot_id="bot-x", entity_id="owner",
-                   current_owner_id="owner", server_code="weather")
-
-    saved, changed = repo.patch_bot(**address, patch={"headers": {"X-Region": "sample"}},
-                                    create_projection=False)
-    assert changed and saved == {"headers": {"X-Region": "sample"}}
-    override = projections.read(bot_id="bot-x", entity_id="owner")
-    assert override.version == base.version + 1
-    assert override.scope.updated_mcp == {"weather"}
-
-    tracked = repo.replace(
-        user_id="owner", server_code="weather", headers={"X-Region": "new"},
-        bot_headers={}, owned_bot_ids={"bot-x", "bot-y"},
-        endpoint_env="PROD", transport_protocol=None, create_projection=False,
-    )
-    assert tracked == {"bot-x": "owner"}
-    assert projections.read(bot_id="bot-x", entity_id="owner").version == override.version + 1
-    assert projections.read(bot_id="bot-y", entity_id="owner") is None
-
-
 @pytest.mark.parametrize("supply", ["direct", "skill", "center-version"])
-def test_bulk_override_preserves_unrelated_inflight_receipt_and_tracks_new_consumer(supply):
+def test_bulk_override_selects_consumers_from_committed_supply(supply):
     from agentclaw.community.core.base import Base
     from agentclaw.community.core.models.mcp import BotMCPInstallation
     from agentclaw.community.core.models.skill import BotSkillInstallation, Skill
     from agentclaw.community.core.models.space_skill import SkillVersion
-    from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
-        CapabilityProjectionRepository,
-    )
-    from agentclaw.community.core.skill_center.runtime_projection_contract import (
-        ProjectionScope, RuntimeProjectionResult,
-    )
-
     db = _Database()
     Base.metadata.create_all(db.engine)
-    projections = CapabilityProjectionRepository(db)
-    consumer = projections.require(bot_id="bot-x", entity_id="owner", scope=ProjectionScope(skills=True))
-    unrelated = projections.require(bot_id="bot-y", entity_id="owner", scope=ProjectionScope(skills=True))
-    assert projections.begin(unrelated)
-
     # The preflight observed no consumers. Supply is committed before the
     # bulk config transaction takes the Bot lock and inspects installations.
     with db.transactional_orm_session() as session:
@@ -436,43 +385,10 @@ def test_bulk_override_preserves_unrelated_inflight_receipt_and_tracks_new_consu
                 bot_id="bot-x", owner_id="owner", env=get_current_env(), skill_id=skill.id,
             ))
 
-    tracked = ScopedMCPConfigRepository(db).replace(
+    selected = ScopedMCPConfigRepository(db).replace(
         user_id="owner", server_code="weather", headers={"X-Region": "east"},
         bot_headers={}, owned_bot_ids={"bot-x", "bot-y"},
-        endpoint_env="PROD", transport_protocol=None, create_projection=False,
+        endpoint_env="PROD", transport_protocol=None, select_consumers=True,
     )
 
-    assert tracked == {"bot-x": "owner"}
-    updated = projections.read(bot_id="bot-x", entity_id="owner")
-    assert updated.version == consumer.version + 1
-    assert updated.scope.updated_mcp == {"weather"}
-    assert projections.read(bot_id="bot-y", entity_id="owner").version == unrelated.version
-    assert projections.complete(unrelated, RuntimeProjectionResult.converged())
-
-
-def test_ineffective_bot_override_preserves_an_unrelated_inflight_receipt():
-    from agentclaw.community.core.base import Base
-    from agentclaw.community.core.repository.implementations.skill_center.capability_projection import (
-        CapabilityProjectionRepository,
-    )
-    from agentclaw.community.core.skill_center.runtime_projection_contract import (
-        ProjectionScope, RuntimeProjectionResult,
-    )
-
-    db = _Database()
-    Base.metadata.create_all(db.engine)
-    projections = CapabilityProjectionRepository(db)
-    address = {"bot_id": "bot-x", "entity_id": "owner"}
-    original = projections.require(**address, scope=ProjectionScope(skills=True))
-    assert projections.begin(original)
-    with db.orm_session() as session:
-        bot_pk = session.query(BotModel).filter_by(**address).one().id
-
-    saved, changed = ScopedMCPConfigRepository(db).patch_bot(
-        **address, bot_pk=bot_pk, current_owner_id="owner", server_code="weather",
-        patch={"headers": {"X-Region": "east"}}, create_projection=True,
-    )
-
-    assert changed and saved == {"headers": {"X-Region": "east"}}
-    assert projections.read(**address).version == original.version
-    assert projections.complete(original, RuntimeProjectionResult.converged())
+    assert selected == {"bot-x": "owner"}

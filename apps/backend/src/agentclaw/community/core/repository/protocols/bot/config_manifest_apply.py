@@ -93,6 +93,13 @@ class BotConfigManifestApplyRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def latest_projection_checkpoint(
+        self, *, env: str, entity_id: str, bot_id: str,
+    ) -> BotConfigManifestApplyRecord | None:
+        """Return the newest stored capability delivery snapshot for this Bot."""
+        ...
+
+    @abstractmethod
     def recent(
         self, *, env: str, entity_id: str, bot_id: str, limit: int
     ) -> list[BotConfigManifestApplyRecord]:

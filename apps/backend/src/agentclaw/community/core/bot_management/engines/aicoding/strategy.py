@@ -904,16 +904,16 @@ class AicodingProvisioningStrategy(AicodingRecycleMixin, AicodingSubmissionMixin
                 try:
                     from agentclaw.community.core.skill_center.runtime_projection_contract import (
                         ProjectionScope,
+                        RuntimeProjectionStatus,
                     )
 
-                    async def _do_mcp_projection() -> None:
-                        await runtime_reconciler.project_mcp_and_cli(
-                            bot_id=ctx.bot_id,
-                            owner_id=effective_entity_id,
-                            scope=ProjectionScope(mcp=True),
-                        )
-
-                    asyncio.run(_do_mcp_projection())
+                    result = asyncio.run(runtime_reconciler.project_mcp_and_cli(
+                        bot_id=ctx.bot_id,
+                        owner_id=effective_entity_id,
+                        scope=ProjectionScope(mcp=True),
+                    ))
+                    if result.status in {RuntimeProjectionStatus.PENDING, RuntimeProjectionStatus.DEGRADED}:
+                        raise RuntimeError("MCP and CLI projection did not converge")
                     logger.info(
                         "[aicoding.restart] MCP projection resync succeeded: "
                         "bot_id=%s, engine_type=%s",
@@ -942,10 +942,7 @@ class AicodingProvisioningStrategy(AicodingRecycleMixin, AicodingSubmissionMixin
                         "[aicoding.restart] start skill symlink resync after MCP stage: bot_id=%s, engine_type=%s",
                         ctx.bot_id, effective_engine,
                     )
-                    # ``project_skills`` is async so that both halves of the
-                    # capability boundary are awaited the same way; this is a
-                    # worker thread with no running loop, so it bridges the
-                    # same way ``_do_mcp_projection`` above does.
+                    # Both projection calls run in this thread without an event loop.
                     skill_synced = bool(asyncio.run(skill_set_service.project_skills()))
                     if skill_synced:
                         logger.info(

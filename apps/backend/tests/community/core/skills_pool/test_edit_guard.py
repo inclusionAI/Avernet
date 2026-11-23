@@ -96,14 +96,7 @@ class _RollbackAfterAcquireCache(_Cache):
 
 
 def _guard(**kwargs) -> SkillsPoolEditGuard:
-    bindings = kwargs.pop("binding_repository", None) or Mock()
-    skills = kwargs.pop("skill_repository", None)
-    if skills is None:
-        skills = Mock()
-        skills.has_pending_local_skill_dispatch.return_value = False
-    return SkillsPoolEditGuard(
-        **kwargs, binding_repository=bindings, skill_repository=skills,
-    )
+    return SkillsPoolEditGuard(**kwargs)
 
 
 def test_rollback_lease_excludes_new_local_edits() -> None:
@@ -142,32 +135,6 @@ def test_non_pool_edit_excludes_mutations_from_another_worker() -> None:
         assert first_worker.release(lease)
 
 
-def test_layout_edit_waits_for_unconfirmed_upload_on_current_device() -> None:
-    package_dispatches = Mock()
-    package_dispatches.has_pending_local_skill_dispatch.side_effect = (
-        lambda *, device_id=None, **_scope: device_id in (None, "device-a")
-    )
-    bindings = Mock()
-    bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(id=5, device_id="device-a")
-    guard = _guard(
-        cache=_Cache(), layout_repository=_Layouts(), participation_resolver=_Participation(),
-        binding_repository=bindings, skill_repository=package_dispatches,
-    )
-
-    with pytest.raises(SkillsPoolEditBusyError):
-        guard.acquire_for_migration(scope=SCOPE)
-    assert guard.acquire_for_rollback(scope=SCOPE) is None
-
-    bindings.get_active_by_bot_and_owner.return_value = None
-    with pytest.raises(SkillsPoolEditBusyError):
-        guard.acquire_for_migration(scope=SCOPE)
-    assert guard.acquire_for_rollback(scope=SCOPE) is None
-
-    bindings.get_active_by_bot_and_owner.return_value = SimpleNamespace(id=6, device_id="device-b")
-    assert guard.release(guard.acquire_for_migration(scope=SCOPE))
-    rollback = guard.acquire_for_rollback(scope=SCOPE)
-    assert rollback is not None
-    assert guard.release(rollback)
 
 
 def test_lock_identity_includes_entity_for_reused_bot_ids() -> None:

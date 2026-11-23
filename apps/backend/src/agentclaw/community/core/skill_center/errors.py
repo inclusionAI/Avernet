@@ -109,10 +109,6 @@ class LocalSkillPackageOutcomeUnknownError(LocalSkillRuntimeUnavailableError):
     """A dispatched package may still affect the target."""
 
 
-class LocalSkillPackageDispatchPendingError(LocalSkillStorageError):
-    """A previous request has no verified completion for this binding and name."""
-
-
 class SkillParameterValidationError(Exception):
     """The full Bot-level parameter object violates SKILL.md config."""
 

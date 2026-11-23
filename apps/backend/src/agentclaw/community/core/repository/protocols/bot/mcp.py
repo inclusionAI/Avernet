@@ -94,21 +94,15 @@ class ScopedMCPConfigRepositoryProtocol(Protocol):
         transport_protocol: str | None,
         user_url: str | None = None,
         bot_urls: dict[str, str] | None = None,
-        create_projection: bool | None = None,
-    ) -> dict[str, str | None]:
-        """Replace rules and return current consumers selected under the Bot lock.
-
-        A consumer's value is its entity ID when the projection is tracked.
-        Persistence-only callers omit the policy. False retains existing
-        obligations, and true also enrolls current consumers.
-        """
+        select_consumers: bool = False,
+    ) -> dict[str, str]:
+        """Replace rules and optionally return effective consumers under the Bot lock."""
         ...
-
 
     @abstractmethod
     def patch_bot(
         self, *, bot_pk: int, bot_id: str, entity_id: str, current_owner_id: str,
-        server_code: str, patch: BotMCPConfigPatch, create_projection: bool | None = None,
+        server_code: str, patch: BotMCPConfigPatch,
     ) -> tuple[dict[str, Any], bool]:
         """Merge one Bot override under the Bot mutation lock."""
         ...
