@@ -1,0 +1,33 @@
+apps/backend/src/agentclaw/community/core/apply_engine/outcomes.py
+  s_3d36bb45bb2a35::t_bb85ae58c040e1 20,327,341,347-351
+apps/backend/src/agentclaw/community/core/apply_engine/run/report_codec.py
+  s_3d36bb45bb2a35::t_bb85ae58c040e1 36,88-91
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_config_manifest_apply.py
+  s_3d36bb45bb2a35::t_bb85ae58c040e1 116-133,158-163,249-250
+apps/backend/docs/bot-config-manifest/user-manual.zh-CN.md
+  s_3d36bb45bb2a35::t_6aaff968e48ef6 1826-1829,1855-1857
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_bb85ae58c040e1 12
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_6aaff968e48ef6 2,20,91-181
+apps/backend/tests/community/core/apply_engine/test_apply_reports_and_failures.py
+  s_3d36bb45bb2a35::t_2cb5a7fdd7db36 127-185
+apps/gateway/configs/schemas/bots.openapi.json
+  s_3d36bb45bb2a35::t_a530aca6a090ef 4470,4482-4492,4571-4578,33304-33354
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a15f24aac6f8d82ec630365540c81fb4340e3a98",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

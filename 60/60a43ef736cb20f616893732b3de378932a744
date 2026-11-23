@@ -1,0 +1,52 @@
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_projection.py
+  s_3d36bb45bb2a35::t_aed717e63b7b39 7-11,143-144,197-198
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_reconcile.py
+  s_3d36bb45bb2a35::t_90ab8029e9707f 3,8,11,36-47
+  s_3d36bb45bb2a35::t_b279f948fbe064 48
+apps/backend/src/agentclaw/community/di/modules/runtime_projection_recovery_module.py
+  s_3d36bb45bb2a35::t_8c18332452e60d 13-19,26-31,37,51-77,85,90
+apps/backend/src/agentclaw/community/di/modules/bot_management_module.py
+  s_3d36bb45bb2a35::t_428d78c56d8d34 251-253,764,766,776
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_e4678d7f0848bd 42
+  s_3d36bb45bb2a35::t_1d786a5454daef 1-8,10-32,36-41,43-47,50-66,68-88
+  s_3d36bb45bb2a35::t_90ab8029e9707f 48-49
+  s_3d36bb45bb2a35::t_8c18332452e60d 9,67
+  s_3d36bb45bb2a35::t_811df28df6feed 33-35
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/per_domain.py
+  s_3d36bb45bb2a35::t_aed717e63b7b39 9,133,157,183-189,201,223-225,227,255
+apps/backend/src/agentclaw/community/core/skill_center/runtime_projection_contract.py
+  s_3d36bb45bb2a35::t_aeee3d4583da25 420-422,441-442
+  s_3d36bb45bb2a35::t_811df28df6feed 87,158-163
+  s_3d36bb45bb2a35::t_e4678d7f0848bd 122,136
+apps/backend/src/agentclaw/community/core/skill_center/services/recovering_bot_runtime_projector.py
+  s_3d36bb45bb2a35::t_90ab8029e9707f 6,8-10,42,46,63-66,68-74,107-110,112-119
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_e4678d7f0848bd 7,146-147,233-235
+  s_3d36bb45bb2a35::t_90ab8029e9707f 11,17,71,77,127-128,134-140
+  s_3d36bb45bb2a35::t_811df28df6feed 1-6,8-10,12-16,18-70,72-76,78-126,129-133,141-145,148-232,236-249
+apps/backend/tests/community/repository/skill_center/capability_desired_state_support.py
+  s_3d36bb45bb2a35::t_e4678d7f0848bd 28-29
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/skill_runtime_delivery.py
+  s_3d36bb45bb2a35::t_aeee3d4583da25 225,364-377
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/whole_artifact.py
+  s_3d36bb45bb2a35::t_e4678d7f0848bd 7-12,75,149-161,165
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_delivery_guard.py
+  s_3d36bb45bb2a35::t_486e63aa853e6a 1-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6060a43ef736cb20f616893732b3de378932a744",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

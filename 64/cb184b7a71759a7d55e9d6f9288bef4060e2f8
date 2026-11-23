@@ -1,0 +1,34 @@
+apps/backend/src/agentclaw/community/core/skill_center/README.md
+  s_3d36bb45bb2a35::t_a5f118f730fcf3 150
+apps/backend/tests/community/core/skill_center/test_skill_set_management_service_part5.py
+  s_3d36bb45bb2a35::t_639f6d0749f4c1 257,549-572
+  s_3d36bb45bb2a35::t_9d39755cfcd785 573-574
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_639f6d0749f4c1 28,203
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_projection.py
+  s_3d36bb45bb2a35::t_639f6d0749f4c1 82
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_write.py
+  s_3d36bb45bb2a35::t_84839a2eb4eaf2 81-82,207,221,239,253-254,285,311,334,341,343-347
+apps/backend/src/agentclaw/community/core/apply_engine/orchestrator.py
+  s_3d36bb45bb2a35::t_097b5332ad3e4d 202,204,212,214-216,237-238,240,252-253,257-263,276
+apps/backend/src/agentclaw/community/core/apply_engine/registry.py
+  s_3d36bb45bb2a35::t_2cb7e27721acdc 106,109-111,113-115,120-121
+apps/backend/tests/community/core/apply_engine/test_apply_reports_and_failures.py
+  s_3d36bb45bb2a35::t_7033326e8d4a78 429-432
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "64cb184b7a71759a7d55e9d6f9288bef4060e2f8",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

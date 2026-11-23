@@ -1,0 +1,42 @@
+apps/backend/tests/community/di/test_capability_projection_recovery.py
+  s_3d36bb45bb2a35::t_2cbdbf748006cf 1-42,44-74
+  s_3d36bb45bb2a35::t_b3a351661de933 43
+apps/backend/src/agentclaw/community/core/models/capability_projection.py
+  s_3d36bb45bb2a35::t_fa9fd4df746931 27
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_projection.py
+  s_3d36bb45bb2a35::t_6148093adc4917 12,128,151-156,195-204,233-242,276-284,286,294-295,297-303,306-308,313-321,323,333-334
+apps/backend/src/agentclaw/community/core/repository/protocols/capability_projection.py
+  s_3d36bb45bb2a35::t_1c32963bffaf6b 38-42,50-54
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_033f36fad34d54 423-444
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_recovery.py
+  s_3d36bb45bb2a35::t_f0fc77dca62291 1-122
+apps/backend/src/agentclaw/community/core/skill_center/sql/2026_11_22_bot_capability_projection.sql
+  s_3d36bb45bb2a35::t_c02fb3c35cce5d 1-19
+apps/backend/src/agentclaw/community/core/skill_center/sql/2026_11_22_bot_capability_projection_postgresql.sql
+  s_3d36bb45bb2a35::t_0473dbe075e91f 1-19
+apps/backend/src/agentclaw/community/core/skill_center/sql/2026_11_22_bot_capability_projection_sqlite.sql
+  s_3d36bb45bb2a35::t_bb0c509cd3c969 1-19
+apps/backend/src/agentclaw/community/di/container.py
+  s_3d36bb45bb2a35::t_df42bc8f248b32 110,230
+apps/backend/src/agentclaw/community/di/modules/capability_projection_module.py
+  s_3d36bb45bb2a35::t_609d66cd0f5c39 1-42
+apps/backend/tests/community/repository/skill_center/test_capability_projection.py
+  s_3d36bb45bb2a35::t_afc9a0e9ef96fc 12-18,58-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fde25e5a1bc373527a62f7556b144c7b42ef65ae",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
