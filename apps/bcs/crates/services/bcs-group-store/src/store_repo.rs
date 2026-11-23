@@ -14,6 +14,21 @@ impl GroupRepoPort for MySqlGroupStore {
         self.read_card_snapshot_sql(id).await
     }
 
+    async fn read_detail_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupMutationSnapshot>> {
+        // No display-cache fallback: otherwise a remote writer could leave this
+        // process indefinitely pairing stale metadata with current labels.
+        for _ in 0..3 {
+            let Some(group) = self.load_group_from_mysql(id).await? else { return Ok(None); };
+            let Some(card) = self.read_card_snapshot_sql(id).await? else { return Ok(None); };
+            if group.version == card.version {
+                return Ok(Some(bcs_service_api::types::GroupMutationSnapshot {
+                    group, catalog_labels: card.catalog_labels,
+                }));
+            }
+        }
+        Err(ServiceError::Conflict("Group changed during detail snapshot read".into()))
+    }
+
     async fn upsert_with_catalog_labels(&self,group:Group,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
         self.upsert_sql(group,labels,false).await
     }

@@ -193,6 +193,10 @@ impl GroupCoreService for GroupCore {
         self.repo.read_card_snapshot(id).await
     }
 
+    async fn read_detail_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupMutationSnapshot>> {
+        self.repo.read_detail_snapshot(id).await
+    }
+
     async fn upsert(&self,group:Group)->ServiceResult<()> {
         self.upsert_with_catalog_labels(group,None).await
     }

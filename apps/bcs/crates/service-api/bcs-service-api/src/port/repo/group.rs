@@ -69,6 +69,13 @@ pub trait GroupRepoPort: Send + Sync {
         Err(ServiceError::InternalError("Group Card snapshot reads are not configured".into()))
     }
 
+    /// Read uncached metadata/participants and labels from one effective Group
+    /// version. Concurrent version changes are retried at most three times;
+    /// exhausted races and storage failures are errors, never mixed details.
+    async fn read_detail_snapshot(&self, _id: &str) -> ServiceResult<Option<crate::types::GroupMutationSnapshot>> {
+        Err(ServiceError::InternalError("Group detail snapshots are not configured".into()))
+    }
+
     /// Process-local membership projection for Provider policy tightening.
     /// Persistent Provider stores enforce the equivalent condition atomically
     /// in their metadata UPDATE instead of issuing a separate Group read.

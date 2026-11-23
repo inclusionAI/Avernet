@@ -8,14 +8,27 @@ impl GroupServiceImpl {
         group: DomainGroup,
         state_machine_override: Option<StateMachineConfiguration>,
     ) -> Result<GroupDetail, ApplicationError> {
-        self.project_detail_with_labels(group, state_machine_override, None).await
+        let snapshot = self.detail_snapshot(group).await?;
+        self.project_detail_with_labels(snapshot.group, state_machine_override, snapshot.catalog_labels).await
+    }
+
+    pub(crate) async fn detail_snapshot(
+        &self, group: DomainGroup,
+    ) -> Result<bcs_service_api::types::GroupMutationSnapshot, ApplicationError> {
+        if group.group_kind == GroupKind::Normal
+            && matches!(group.group_strategy, GroupStrategy::ManagerWorker | GroupStrategy::StateMachine)
+        {
+            return self.groups.read_detail_snapshot(&group.id).await.map_err(map_service_error)?
+                .ok_or_else(|| ApplicationError::not_found("group_not_found", "Group was removed during detail read"));
+        }
+        Ok(bcs_service_api::types::GroupMutationSnapshot { group, catalog_labels: Default::default() })
     }
 
     pub(crate) async fn project_detail_with_labels(
         &self,
         mut group: DomainGroup,
         state_machine_override: Option<StateMachineConfiguration>,
-        committed_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabels>,
+        catalog_labels: bcs_service_api::types::catalog_labels::CatalogLabels,
     ) -> Result<GroupDetail, ApplicationError> {
         bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
         let mut participants = group
@@ -30,9 +43,6 @@ impl GroupServiceImpl {
             .avatar_map_for_ids(avatar::detail_bot_ids(&participants))
             .await?;
         avatar::apply_participant_avatars(&mut participants, &avatars);
-        let catalog_labels=if let Some(labels) = committed_labels { labels } else if group.group_kind==GroupKind::Normal && matches!(group.group_strategy,GroupStrategy::ManagerWorker|GroupStrategy::StateMachine) {
-            self.groups.read_card_snapshot(&group.id).await.map_err(map_service_error)?.map(|snapshot|snapshot.catalog_labels).unwrap_or_default()
-        } else {Default::default()};
         let common = DetailCommon {
             group_id: group.id.clone(),
             version: group.version,

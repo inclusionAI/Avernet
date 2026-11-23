@@ -84,6 +84,40 @@ labels but reject nonempty labels; this does not add Card support or Triple APIs
 Management views return `{}`, not null/omission, for empty/legacy labels. Group
 list summaries do not gain a label field or per-result label lookup.
 
+## Detail response consistency
+
+Versioned Group PATCH carries metadata and labels captured by its own commit.
+GET and create details for ManagerWorker/StateMachine Groups instead use an
+uncached `read_detail_snapshot`: metadata and participants are read first, then
+the indexed Group/Card read fences their version and supplies labels. A version
+change retries the complete local read at most three times; exhaustion is a
+Conflict, and storage/JSON failures propagate. No transaction or lock spans
+Bot-profile display reads or StateMachine runtime calls. The create response
+may reflect a later successfully committed Group version, but must not combine
+that version's labels with an earlier name/context. Legacy Group details and
+label/status/visibility response projections use the same coherent read.
+Participant-only V1 responses contain no labels; a subsequent detail GET uses
+the strict snapshot. Chat/DM details remain empty-labeled, and list summaries
+retain their existing lightweight path.
+
+GET authorizes the fresh metadata it will return, rather than a cached public
+visibility that another instance has changed to private. Display profiles,
+Session outputs and StateMachine configuration remain separately projected;
+this is not a promise of general multi-service snapshot isolation. Custom Core
+and repository implementations must implement this additive read capability;
+the default fails closed instead of falling back to stale cached metadata.
+
+SQL cost is three reads per attempt: one Group row, the existing batched
+participant query, and one indexed Group/Card row (at most nine reads under
+continuous version churn). There is no per-participant label query, new cache,
+new write, migration or schema change. An absent Group returns after one read.
+The V1 create flow can project both its legacy management result and final V1
+result; each label-bearing projection uses its own three-read snapshot (six
+normal snapshot reads in that flow), in addition to existing orchestration and
+authorization reads. Memory reads hold the existing groups-before-labels guards together. Tests cover
+Memory/SQLite conformance, 128 participants without N+1, stale-cache bypass,
+bounded churn, storage failure, and deterministic two-facade response races.
+
 ## Persistence, concurrency and publication
 
 Owning columns: `bcs_bots.catalog_labels` and

@@ -89,6 +89,15 @@ impl GroupMetricsSnapshotPort for MemoryGroupRepo {
 
 #[async_trait]
 impl GroupRepoPort for MemoryGroupRepo {
+    async fn read_detail_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupMutationSnapshot>> {
+        // Keep the same groups-before-labels lock order as atomic writers.
+        let groups = self.groups.read().await;
+        let labels = self.catalog_labels.read().await;
+        Ok(groups.get(id).map(|group| bcs_service_api::types::GroupMutationSnapshot {
+            group: group.clone(), catalog_labels: labels.get(id).cloned().unwrap_or_default(),
+        }))
+    }
+
     async fn read_card_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupCardSnapshot>> {
         let groups = self.groups.read().await;
         let Some(group) = groups.get(id) else { return Ok(None); };

@@ -168,6 +168,13 @@ pub trait GroupCoreService: Send + Sync {
         Err(super::ServiceError::InternalError("Group Card snapshot reads are not configured".into()))
     }
 
+    /// Read uncached metadata/participants and labels from one effective Group
+    /// version. Concurrent version changes are retried at most three times;
+    /// exhausted races and storage failures are errors, never mixed details.
+    async fn read_detail_snapshot(&self, _id: &str) -> ServiceResult<Option<crate::types::GroupMutationSnapshot>> {
+        Err(crate::ServiceError::InternalError("Group detail snapshots are not configured".into()))
+    }
+
     /// Create or update a group.
     /// Atomic Group/template/labels write. Legacy upserts preserve labels.
     async fn upsert_with_catalog_labels(&self, group: Group, labels: Option<crate::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {

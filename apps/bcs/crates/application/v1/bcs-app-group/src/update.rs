@@ -110,7 +110,7 @@ impl GroupServiceImpl {
             })
             .await
             .map_err(map_service_error)?;
-        self.project_detail_with_labels(persisted.group, state_machine_projection, Some(persisted.catalog_labels))
+        self.project_detail_with_labels(persisted.group, state_machine_projection, persisted.catalog_labels)
             .await
     }
 

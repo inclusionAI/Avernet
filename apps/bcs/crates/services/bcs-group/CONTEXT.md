@@ -2,6 +2,12 @@
 
 ## Provides
 
+- `read_detail_snapshot` forwards the repository's bounded uncached Group/labels
+  version-fenced read. Legacy details and label/status/visibility responses use
+  that complete persisted version while retaining operation/session-only output
+  fields. See [detail consistency](../../../docs/catalog-labels.md#detail-response-consistency)
+  for the three-read normal path, nine-read retry bound and isolation limits.
+
 - `mutate_with_snapshot` returns a Group PATCH's version-fenced metadata and
   labels together. SQL captures at most one indexed Card row inside the existing
   transaction (a current locking read on MySQL); Memory captures under its Group
