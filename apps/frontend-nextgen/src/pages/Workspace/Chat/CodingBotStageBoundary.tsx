@@ -48,7 +48,7 @@ function useOnlineServicePublishResolution(bot: ChatBotView, enabled: boolean) {
         if (requestRef.current === seq) {
           setResolution({
             phase: 'error',
-            error: error instanceof Error ? error.message : '解析线上服务发布信息失败',
+            error: error instanceof Error ? error.message : '解析正式运行的服务发布信息失败',
           });
         }
       });
@@ -103,7 +103,7 @@ export function CodingBotStageBoundary({
         <Empty
           className="w-full max-w-xl"
           title="服务运行环境解析失败"
-          description={resolution.error || '无法解析当前线上服务 Coding Bot 的发布信息。'}
+          description={resolution.error || '无法解析该服务 Coding Bot 的正式运行发布信息。'}
           action={<Button onClick={retry}>重新加载</Button>}
         />
       </section>

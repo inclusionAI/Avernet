@@ -1,5 +1,5 @@
 import type { ServicePublication, ServicePublicationAction } from '@/domain/botEditor';
-import type { BotDomain } from '@/domain/botWorkshop';
+import { serviceBotStageLabel, type BotDomain } from '@/domain/botWorkshop';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { serviceBotEvalService } from '@/services/botWorkshop/serviceBotEvalService';
 import { Points } from '@/tracking/points';
@@ -9,9 +9,9 @@ import { toast } from 'sonner';
 
 export type PublicationMenuAction = Exclude<ServicePublicationAction, 'restart_publish' | 'delete'>;
 export const publicationActionLabel: Record<PublicationMenuAction, string> = {
-  publish_staging: '发布到预发',
-  publish_online: '发布上线',
-  cancel_staging: '取消预发',
+  publish_staging: '提交试运行',
+  publish_online: '提交正式运行',
+  cancel_staging: '取消试运行',
   offline: '下线',
   retry: '重试',
   upgrade: '创建升级草稿',
@@ -21,9 +21,9 @@ export type PublicationMenuRunResult = 'success' | 'blocked' | 'failed';
 export const publicationStatusLabel: Record<ServicePublication['status'], string> = {
   draft: '草稿',
   deploying: '部署中',
-  prestable: '预发',
-  staging: '预发',
-  running: '线上',
+  prestable: serviceBotStageLabel.verify,
+  staging: serviceBotStageLabel.verify,
+  running: serviceBotStageLabel.online,
   offline: '已下线',
 };
 export function isPublicationMenuAction(action: ServicePublicationAction): action is PublicationMenuAction {
@@ -128,7 +128,11 @@ export function useBotPublicationMenu(
         action === 'upgrade'
           ? '升级草稿已创建'
           : action === 'cancel_staging'
-          ? '预发发布已取消'
+          ? '已取消试运行'
+          : action === 'publish_staging'
+          ? '试运行请求已提交'
+          : action === 'publish_online'
+          ? '正式运行请求已提交'
           : `${publicationActionLabel[action]}请求已提交`,
       );
       // 操作已成功，列表刷新失败不能提示用户重复提交。
