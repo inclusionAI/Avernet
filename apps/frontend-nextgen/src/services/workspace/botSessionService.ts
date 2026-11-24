@@ -68,9 +68,7 @@ export interface ChatBotView {
   /** 团队空间 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
   isTeamBot?: boolean;
   /** 目录 DTO 的 call_type 透传(历史兼容):新版 openapi_v1 目录接口族不下发该字段,
-   *  IAM/文件链 Caller 判据已运行时化(GET /caller-context 聚合 bot_call_type,见
-   *  botChatProvider.resolveCallerRuntimeTarget / useBotSessionFilesFeature);不要再以
-   *  此字段作判据——恒 undefined,判据死参数事故的根因。 */
+   *  恒 undefined;前端不再以此字段作任何判据,保留仅为类型兼容。 */
   callType?: string;
 }
 
