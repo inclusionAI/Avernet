@@ -112,13 +112,42 @@ class ProgressSyncMixin:
         restart_ext = ext.get("restart")
         if isinstance(restart_ext, dict):
             restart_ext.pop("restarting", None)
-        self._update_publish_status(
-            publish_id=publish_id,
-            target_status=target_status,
-            source_status=source_status,
-            ext=ext,
-            expected_ext=expected_ext,
-        )
+        try:
+            self._update_publish_status(
+                publish_id=publish_id,
+                target_status=target_status,
+                source_status=source_status,
+                ext=ext,
+                expected_ext=expected_ext,
+            )
+        except PublishNotFoundError:
+            # The durable poll task and a client-driven /restart_status (or /sync)
+            # poll can observe the same terminal BaaS workflow concurrently and
+            # both run this handler. The loser's conditional update hits zero rows
+            # and used to surface as an ERROR "Order not found" (a 404 for the
+            # caller) even though the record is already reconciled by the winner.
+            # Re-read and report the reconciled record instead; the winner has run
+            # the post-advance side effects, so skip them here. Only a genuinely
+            # missing record still raises.
+            reconciled = self.get_publish_record(publish_id)
+            if reconciled is None:
+                raise
+            current_status = PublishStatus(reconciled.status)
+            logger.warning(
+                f"[PublishFlowService._handle_sync_success] Concurrent writer "
+                f"already advanced publish_id={publish_id}: expected "
+                f"{source_status} -> {target_status}, now {current_status}; "
+                f"skipping post-advance side effects"
+            )
+            return PublishFlowResult(
+                publish_id=publish_id,
+                status=current_status,
+                message=(
+                    "Publish progress already reconciled by a concurrent writer: "
+                    f"publish_id={publish_id}, current status: {current_status.value}"
+                ),
+                data=progress,
+            )
         logger.info(
             f"[PublishFlowService._handle_sync_success] "
             f"Publish status updated: {source_status} -> {target_status}"
@@ -336,13 +365,41 @@ class ProgressSyncMixin:
             restart_ext.pop("restarting", None)
         ext["error_message"] = error_message
         ext["source_status"] = current_status.value
-        self._update_publish_status(
-            publish_id=publish_id,
-            target_status=PublishStatus.FAILED,
-            source_status=current_status,
-            ext=ext,
-            expected_ext=expected_ext,
-        )
+        try:
+            self._update_publish_status(
+                publish_id=publish_id,
+                target_status=PublishStatus.FAILED,
+                source_status=current_status,
+                ext=ext,
+                expected_ext=expected_ext,
+            )
+        except PublishNotFoundError:
+            # Same concurrent-reconcile race as the success handler: the durable
+            # poll task and a client-driven /restart_status poll can both observe
+            # the terminal BaaS FAILED outcome, and the loser's conditional
+            # update hits zero rows after the winner already marked the record
+            # FAILED. Report the reconciled record instead of raising a noisy
+            # "Order not found"; the ledger outcome correction above is
+            # idempotent, so re-running it was harmless. Only a genuinely
+            # missing record still raises.
+            reconciled = self.get_publish_record(publish_id)
+            if reconciled is None:
+                raise
+            reconciled_status = PublishStatus(reconciled.status)
+            logger.warning(
+                f"[PublishFlowService._handle_sync_failure] Concurrent writer "
+                f"already reconciled publish_id={publish_id}: expected "
+                f"{current_status} -> {PublishStatus.FAILED}, now {reconciled_status}"
+            )
+            return PublishFlowResult(
+                publish_id=publish_id,
+                status=reconciled_status,
+                message=(
+                    "BaaS failure already reconciled by a concurrent writer: "
+                    f"publish_id={publish_id}, current status: {reconciled_status.value}"
+                ),
+                data=progress,
+            )
 
         logger.error(f"[PublishFlowService._handle_sync_failure] {error_message}")
 
