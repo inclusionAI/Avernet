@@ -1,6 +1,11 @@
 //! Each repair visit advances one durable phase. Normal RTT cannot force every
 //! retry to repeat an unbounded prefix before reaching its next write.
-use super::{StoreInboxProducer, state::*, storage::*};
+use super::{
+    StoreInboxProducer,
+    admission::{OccupiedSlot, Registration},
+    state::*,
+    storage::*,
+};
 use bcs_dist_model::*;
 use bcs_service_api::port::repo::distributed::{common::StoreError, inbox::AdmitOutcome};
 use bcs_store_api::{
@@ -13,6 +18,7 @@ pub(super) enum Progress {
     Changed,
     Retry,
     Done(AdmitOutcome),
+    Full(OccupiedSlot),
 }
 impl StoreInboxProducer {
     pub(super) async fn progress(
@@ -27,14 +33,14 @@ impl StoreInboxProducer {
             return Ok(Progress::Done(self.outcome(&c, decision, new)));
         }
         match c.phase {
-            Phase::Created => {
-                if let Some(decision) = self.register(key, &c).await? {
-                    c.decision = Some(decision);
-                } else {
+            Phase::Created => match self.register(key, &c).await? {
+                Registration::Full(slot) => return Ok(Progress::Full(slot)),
+                Registration::Ready(Some(decision)) => c.decision = Some(decision),
+                Registration::Ready(None) => {
                     c.registered = true;
                     c.phase = Phase::Registered;
                 }
-            }
+            },
             Phase::Registered => {
                 if let Some(spec) = &c.request.create_session {
                     let spec_key = self.inner.layout.spec(&spec.sid)?;

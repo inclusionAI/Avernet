@@ -12,7 +12,7 @@ use bcs_store_api::{
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -115,6 +115,7 @@ pub(super) struct Inner {
     pub readers: Arc<tokio::sync::Semaphore>,
     pub watches: Arc<tokio::sync::Semaphore>,
     pub wake_appends: AtomicU64,
+    pub slot_rotation: AtomicUsize,
     pub receipts: std::sync::Mutex<std::collections::BTreeMap<String, super::consumer::Delivery>>,
     pub receipt_sequence: AtomicU64,
     pub scan_budget: Arc<dyn bcs_service_api::port::repo::distributed::budget::ScanBudgetPort>,
@@ -157,6 +158,7 @@ impl StoreInboxProducer {
                 watches: Arc::new(tokio::sync::Semaphore::new(config.max_watches)),
                 config,
                 wake_appends: AtomicU64::new(0),
+                slot_rotation: AtomicUsize::new(0),
                 receipts: std::sync::Mutex::new(Default::default()),
                 receipt_sequence: AtomicU64::new(0),
                 scan_budget,

@@ -61,10 +61,13 @@ same `(scope, input_id)` returns `ContentConflict`.
 
 The provider stores the request and repair phases in one JSON-CAS document keyed
 by `(scope, input_id)`. There is no shard-wide admission root, sequence journal,
-separate intent document or canonical document. The recovery guarantee starts
-after the document create-if-absent succeeds. If that first write never applies,
-the provider does not promise background recovery; the caller retries the same
-InputId. A lost response after creation is repaired by the same retry.
+separate intent document or canonical document. Callers without a confirmed result can retry the
+same scoped InputId. An incomplete request may execute, but creating its record
+alone does not guarantee unattended completion. An accepted input must be
+deliverable without another caller retrying an earlier input. Readers help
+resolve blocking Inbox rows; a producer facing a full Session helps an occupied
+slot before retrying registration. Neither timeout nor the mere presence of a
+row proves acceptance or permits skipping an undecided row.
 
 Admission creation remains create-once for the frozen Session specification and
 initial task. A delayed retry cannot replace a task already advanced by Worker,

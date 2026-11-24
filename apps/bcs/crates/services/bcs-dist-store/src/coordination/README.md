@@ -32,7 +32,10 @@ members only, never Absent or Unknown. The index has stable member-key
 continuation and bounded pages. The retained membership lease implementation supplies stable termination; a missing or failed
 read is Unknown, never evidence for fault takeover. Claim and handoff mutation
 checks propagate Unknown as an uncertain result; it cannot become Fenced or
-Rejected and release an earlier unknown operation's responsibility.
+Rejected and release an earlier unknown operation's responsibility. If no eligible
+Worker takes over before the old owner's 30-day membership retention expires,
+the shard can still name that owner; recovery then requires operator confirmation
+(operational follow-up: #4318).
 
 Handoff timers start at receiver method entry before storage I/O, use local
 monotonic time and retain at most one request per shard
