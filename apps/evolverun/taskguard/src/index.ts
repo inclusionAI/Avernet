@@ -22,6 +22,7 @@ import { startCallbackTimeoutPoller, captureCallbackPollerDeps, stopCallbackTime
 import type { PluginApi } from "./platform/openclaw-types.js";
 import type {
   ControllerAction,
+  ExecutorDispatchContext,
   ExecutorResult,
   FlowEvent,
   FlowState,
@@ -1092,7 +1093,7 @@ export function createExecutorDispatch(
   workflow?: WorkflowSpec,
   subworkflowDepsGetter?: () => SubworkflowDeps | undefined,
   packRoot?: string,
-): (node: WorkflowNode, templateCtx: TemplateContext, flowState: FlowState, flowId: string) => Promise<ExecutorResult> {
+): (node: WorkflowNode, templateCtx: TemplateContext, flowState: FlowState, flowId: string, executionContext?: ExecutorDispatchContext) => Promise<ExecutorResult> {
   // A fanout child has a distinct session identity. Never let a parent
   // tool context override that identity (sessionId/sessionFile/workspace) when
   // embedded-agent resolves its execution context. Keep the context only when
@@ -1108,6 +1109,7 @@ export function createExecutorDispatch(
     node: WorkflowNode,
     flowState: FlowState,
     flowId: string,
+    executionContext?: ExecutorDispatchContext,
   ): ExecuteEmbeddedAgentOptions {
     // ── Per-node inject budget (方案 B) ──
     // Each node gets a fixed budget of agent-event inject messages. Once
@@ -1127,7 +1129,7 @@ export function createExecutorDispatch(
       attempt: flowState.nodeStates[node.id]?.attempts ?? 1,
       workflow,
       executionMode: flowState.executionMode,
-      abortSignal,
+      abortSignal: executionContext?.abortSignal ?? abortSignal,
       compressionDefaults,
       sessionCompressionConfig,
       botId: _activeBotId ?? undefined,
@@ -1257,6 +1259,7 @@ export function createExecutorDispatch(
     templateCtx: TemplateContext,
     flowState: FlowState,
     flowId: string,
+    executionContext?: ExecutorDispatchContext,
   ): Promise<ExecutorResult> {
     const subagentResult = await executeSubagent(node, templateCtx, api, {
       flowId,
@@ -1285,7 +1288,7 @@ export function createExecutorDispatch(
         templateCtx,
         api as Parameters<typeof executeEmbeddedAgent>[2],
         {
-          ...embeddedAgentOptions(fallbackNode, flowState, flowId),
+          ...embeddedAgentOptions(fallbackNode, flowState, flowId, executionContext),
           runId: `clawmind:${flowState.workflowId}:${flowId}:${node.id}:fallback:${Date.now()}`,
         },
       ),
@@ -1297,13 +1300,14 @@ export function createExecutorDispatch(
     templateCtx: TemplateContext,
     flowState: FlowState,
     flowId: string,
+    executionContext?: ExecutorDispatchContext,
   ): Promise<ExecutorResult> {
     const embeddedNode = toEmbeddedFallbackNode(node);
     const result = await executeEmbeddedAgent(
       embeddedNode,
       templateCtx,
       api as Parameters<typeof executeEmbeddedAgent>[2],
-      embeddedAgentOptions(embeddedNode, flowState, flowId),
+      embeddedAgentOptions(embeddedNode, flowState, flowId, executionContext),
     );
     return validateApprovalFallbackResult(node, result);
   }
@@ -1346,13 +1350,14 @@ export function createExecutorDispatch(
     templateCtx: TemplateContext,
     flowState: FlowState,
     flowId: string,
+    executionContext?: ExecutorDispatchContext,
   ): Promise<ExecutorResult> {
     const embeddedNode = toEmbeddedFallbackNode(node);
     return executeEmbeddedAgent(
       embeddedNode,
       templateCtx,
       api as Parameters<typeof executeEmbeddedAgent>[2],
-      embeddedAgentOptions(embeddedNode, flowState, flowId),
+      embeddedAgentOptions(embeddedNode, flowState, flowId, executionContext),
     );
   }
 
@@ -1361,6 +1366,7 @@ export function createExecutorDispatch(
     templateCtx: TemplateContext,
     flowState: FlowState,
     flowId: string,
+    executionContext?: ExecutorDispatchContext,
   ): Promise<ExecutorResult> {
     const delivery = resolveApprovalDelivery(node, flowState);
     console.log("[taskguard] executeApprovalDelivery", {
@@ -1368,9 +1374,9 @@ export function createExecutorDispatch(
     });
     switch (delivery.primary) {
       case "subagent":
-        return executeSubagentWithEmbeddedFallback(node, templateCtx, flowState, flowId);
+        return executeSubagentWithEmbeddedFallback(node, templateCtx, flowState, flowId, executionContext);
       case "embedded-agent":
-        return executeApprovalEmbeddedAgent(node, templateCtx, flowState, flowId);
+        return executeApprovalEmbeddedAgent(node, templateCtx, flowState, flowId, executionContext);
       case "bcs-route":
         return executeBcsRoute(node, templateCtx, api, flowState, { workflow });
       case "bcs-cli":
@@ -1619,13 +1625,14 @@ export function createExecutorDispatch(
     templateCtx: TemplateContext,
     flowState: FlowState,
     flowId: string,
+    executionContext?: ExecutorDispatchContext,
   ): Promise<ExecutorResult> {
     const delivery = resolveCollaborationDelivery(node, flowState);
     switch (delivery.primary) {
       case "subagent":
-        return executeSubagentWithEmbeddedFallback(node, templateCtx, flowState, flowId);
+        return executeSubagentWithEmbeddedFallback(node, templateCtx, flowState, flowId, executionContext);
       case "embedded-agent":
-        return executeCollaborationEmbeddedAgent(node, templateCtx, flowState, flowId);
+        return executeCollaborationEmbeddedAgent(node, templateCtx, flowState, flowId, executionContext);
       case "bcs-route":
         return executeBcsRoute(node, templateCtx, api, flowState, { workflow });
       case "bcs-cli":
@@ -1635,7 +1642,7 @@ export function createExecutorDispatch(
     }
   }
 
-  return async (node, templateCtx, flowState, flowId) => {
+  return async (node, templateCtx, flowState, flowId, executionContext) => {
     // ── skipWhen: 通用闸,所有节点类型,在 type-specific 分发之前 ──
     const skipWhen = readNodeSkipWhen(node);
     if (skipWhen && evaluateSkipWhenConditions(skipWhen, templateCtx)) {
@@ -1648,13 +1655,13 @@ export function createExecutorDispatch(
     }
 
     if (getLegacyApprovalExecutor(node)) {
-      return executeApprovalDelivery(node, templateCtx, flowState, flowId);
+      return executeApprovalDelivery(node, templateCtx, flowState, flowId, executionContext);
     }
 
     switch (node.executor.type) {
       case "embedded-agent":
         return executeEmbeddedAgent(node, templateCtx, api as Parameters<typeof executeEmbeddedAgent>[2], {
-          ...embeddedAgentOptions(node, flowState, flowId),
+          ...embeddedAgentOptions(node, flowState, flowId, executionContext),
         });
       case "cli-script":
         return executeCliScript(node, templateCtx, undefined, packRoot);
@@ -1690,7 +1697,7 @@ export function createExecutorDispatch(
         return executeLlmOrchestrator(node, templateCtx, priorIterations, flowState.orchestrationState?.[node.id]);
       }
       case "subagent":
-        return executeSubagentWithEmbeddedFallback(node, templateCtx, flowState, flowId);
+        return executeSubagentWithEmbeddedFallback(node, templateCtx, flowState, flowId, executionContext);
       case "bcs-route":
         return executeBcsRoute(node, templateCtx, api, flowState, { workflow });
       case "baas-call":
@@ -1698,7 +1705,7 @@ export function createExecutorDispatch(
           reportNodeProgress(flowId, flowState.workflowId, node.id, "baas-call", flowState.nodeStates[node.id]?.attempts ?? 1, msg);
         });
       case "collaboration":
-        return executeCollaborationDelivery(node, templateCtx, flowState, flowId);
+        return executeCollaborationDelivery(node, templateCtx, flowState, flowId, executionContext);
       case "subworkflow":
         const swDeps = subworkflowDepsGetter?.();
         if (!swDeps) {

@@ -38,6 +38,7 @@ import {
 } from "../context/session-watch-compressor.js";
 import { extractSessionErrors } from "../session-error-extractor.js";
 import { acquireLlmPermit } from "./llm-semaphore.js";
+import { withExecutionDeadline, type ExecutionAttempt } from "./execution-deadline.js";
 import { appendWorkflowJsonlLog, buildDirectLogRecord, formatLocalIsoWithOffset } from "../workflow-log.js";
 
 export type EmbeddedAgentApi = EmbeddedAgentRuntimeApi & {
@@ -525,7 +526,24 @@ export async function executeEmbeddedAgent(
   if (node.executor.type !== "embedded-agent") {
     return { status: "failed", error: "not an embedded-agent node" };
   }
+  const executionOptions = normalizeOptions(options);
+  return withExecutionDeadline((node.executor.timeoutSeconds ?? 300) * 1000, executionOptions.abortSignal,
+    (attempt) => executeEmbeddedAgentAttempt(node, templateCtx, api, {
+      ...executionOptions,
+      abortSignal: attempt.signal,
+      progress: attempt.guard(executionOptions.progress),
+      agentEvent: attempt.guard(executionOptions.agentEvent),
+      finalOutput: attempt.guard(executionOptions.finalOutput),
+    }, attempt));
+}
 
+async function executeEmbeddedAgentAttempt(
+  node: WorkflowNode,
+  templateCtx: TemplateContext,
+  api: EmbeddedAgentApi,
+  options: ExecuteEmbeddedAgentOptions,
+  executionAttempt: ExecutionAttempt,
+): Promise<ExecutorResult> {
   const executor = node.executor as EmbeddedAgentExecutor;
   const resolvedPrompt = resolveTemplate(executor.prompt, templateCtx);
   /** Truncated resolved prompt for inclusion in ExecutorResult (max 4000 chars). */
@@ -631,6 +649,7 @@ export async function executeEmbeddedAgent(
       executionOptions.toolCtx,
       executionOptions.sessionKey,
     );
+    executionAttempt.throwIfInactive();
     const currentSessionFile = embeddedContext.sessionFile;
     if (!currentSessionFile) {
       throw new Error("无法解析当前 OpenClaw 会话文件，embedded-agent 未启动。");
@@ -641,6 +660,7 @@ export async function executeEmbeddedAgent(
           ensureBootstrapFiles: false,
         })
       : undefined;
+    executionAttempt.throwIfInactive();
     const workspaceDir = ensuredWorkspace
       && typeof ensuredWorkspace === "object"
       && typeof ensuredWorkspace.dir === "string"
@@ -651,6 +671,7 @@ export async function executeEmbeddedAgent(
     const resolvedSkill = skillName
       ? await resolveRequiredSkill(skillName, executionOptions.skillDirs)
       : undefined;
+    executionAttempt.throwIfInactive();
     const prompt = appendJsonOnlyInstruction(
       buildSkillPrompt(executor, resolvedPrompt, resolvedSkill),
       node,
@@ -692,6 +713,7 @@ export async function executeEmbeddedAgent(
       sessionCompressionConfig: executionOptions.sessionCompressionConfig,
     });
 
+    executionAttempt.throwIfInactive();
     // Capture session file for step trace persistence in finally block
     _sessionFileForTrace = nodeContext.sessionFile;
 
@@ -835,7 +857,7 @@ export async function executeEmbeddedAgent(
           `${node.title} 错峰等待 ${staggerDelay}ms`,
           { key: staggerKey, flowId: executionOptions.flowId, slot, delayMs: staggerDelay },
         );
-        await new Promise((resolve) => setTimeout(resolve, staggerDelay));
+        await executionAttempt.delay(staggerDelay);
       }
     }
 
@@ -866,6 +888,7 @@ export async function executeEmbeddedAgent(
       `executionOptions.sessionKey="${executionOptions.sessionKey ?? ""}", ` +
       `sessionFile="${nodeContext.sessionFile}"`,
     );
+    executionAttempt.throwIfInactive();
     registerSessionCompressionConfig(
       effectiveSessionKey,
       nodeContext.sessionFile,
@@ -914,7 +937,9 @@ export async function executeEmbeddedAgent(
       `[session-watch-compressor] [flowId=${effectiveFlowId}, node=${effectiveNodeName}] embedded-agent: registered compression for effectiveSessionKey="${effectiveSessionKey}"`,
     );
 
-    const runEmbedded = async (runPrompt: string) => api.runtime.agent.runEmbeddedPiAgent(withoutUndefined({
+    const runEmbedded = async (runPrompt: string) => {
+      executionAttempt.throwIfInactive();
+      return api.runtime.agent.runEmbeddedPiAgent(withoutUndefined({
       sessionId: embeddedContext.sessionId,
       sessionKey: effectiveSessionKey,
       agentId: embeddedContext.agentId,
@@ -939,29 +964,29 @@ export async function executeEmbeddedAgent(
       runId: executionOptions.runId,
       abortSignal: executionOptions.abortSignal,
       // ── Existing event callbacks ──
-      onAssistantMessageStart: async () => {
+      onAssistantMessageStart: executionAttempt.guard(async () => {
         if (assistantStartReported) return;
         assistantStartReported = true;
         await emitAgentEvent("assistant_started", `${node.title} 模型已开始分析`);
-      },
-      onReasoningStream: async (payload: Record<string, unknown>) => {
+      }),
+      onReasoningStream: executionAttempt.guard(async (payload: Record<string, unknown>) => {
         if (!reasoningReported) {
           reasoningReported = true;
         }
         await emitAgentEvent("reasoning_stream", `${node.title} 模型正在推理`, payload);
-      },
-      onReasoningEnd: async () => {
+      }),
+      onReasoningEnd: executionAttempt.guard(async () => {
         await emitAgentEvent("reasoning_end", `${node.title} 模型推理结束`);
-      },
-      onPartialReply: async (payload: { text?: string }) => {
+      }),
+      onPartialReply: executionAttempt.guard(async (payload: { text?: string }) => {
         if (partialReplyReported || !payload.text?.trim()) return;
         partialReplyReported = true;
         await emitAgentEvent("partial_reply", `${node.title} 模型正在生成结果`, payload);
-      },
-      onToolResult: async (payload: Record<string, unknown>) => {
+      }),
+      onToolResult: executionAttempt.guard(async (payload: Record<string, unknown>) => {
         await emitAgentEvent("tool_result", `${node.title} 工具调用已返回，继续分析`, payload);
-      },
-      onAgentEvent: async (event: { stream?: string; data?: Record<string, unknown> }) => {
+      }),
+      onAgentEvent: executionAttempt.guard(async (event: { stream?: string; data?: Record<string, unknown> }) => {
         const stream = event.stream ?? "unknown";
         // ── [diag] Capture the "loop done" milestone. runtime fires
         // stream="lifecycle" phase="end" (→ agent_end hook) when the agent
@@ -998,8 +1023,9 @@ export async function executeEmbeddedAgent(
           event.data,
           stream,
         );
-      },
-    }));
+      }),
+      }));
+    };
 
     // ── [diag] Gateway-call watchdog ──────────────────────────────────────
     // runEmbeddedPiAgent is an OpenClaw gateway RPC. When the gateway is
@@ -1060,8 +1086,12 @@ export async function executeEmbeddedAgent(
         );
       }, 30_000);
       if (timer.unref) timer.unref();
+      const stopHeartbeat = () => clearInterval(timer);
+      _abortSignal?.addEventListener("abort", stopHeartbeat, { once: true });
       try {
+        executionAttempt.throwIfInactive();
         const result = await fn();
+        executionAttempt.throwIfInactive();
         // ── [diag] RPC settled. If this log never appears but phase=end did,
         // the runEmbeddedPiAgent promise stuck open — gateway never closed it.
         _runEmbeddedResolveAt = Date.now();
@@ -1081,6 +1111,7 @@ export async function executeEmbeddedAgent(
         return result;
       } finally {
         clearInterval(timer);
+        _abortSignal?.removeEventListener("abort", stopHeartbeat);
         const elapsedMs = Date.now() - gwStart;
         const liveness =
           (run?.meta as Record<string, unknown> | undefined)?.livenessState ?? "n/a";
@@ -1110,7 +1141,7 @@ export async function executeEmbeddedAgent(
       flowId: executionOptions.flowId,
       nodeId: node.id,
       nodeTitle: node.title ?? node.id,
-    });
+    }, executionOptions.abortSignal);
     recordRpcDiag("permit_acquired", { waited_ms: Date.now() - _permitAcquireStart });
     console.log(
       `[embedded-agent][permit] ACQUIRED: node=${node.id} waitedMs=${Date.now() - _permitAcquireStart} ` +
@@ -1140,7 +1171,7 @@ export async function executeEmbeddedAgent(
             { retryAttempt: attempt, maxRetries: MAX_RATE_LIMIT_RETRIES, delayMs: delay },
             "lifecycle",
           );
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await executionAttempt.delay(delay);
           // Compact session before retry — it may have grown from the failed attempt
           {
             const retryCompact = await maybeCompactSessionFileSafe(nodeContext.sessionFile, {
@@ -1424,8 +1455,8 @@ export async function executeEmbeddedAgent(
       `rpcResolved=${_runEmbeddedResolveAt > 0} lifecycleEndSeen=${_lifecycleEndAt > 0} ` +
       `permitAcquired=${releaseLlmPermit !== null}`,
     );
-    // Always release the LLM semaphore permit so other waiting requests can proceed.
-    // This runs regardless of success, failure, or exception.
+    // Release only when this work truly settles. The caller-side deadline may
+    // already have returned failure while a runtime that ignores abort is alive.
     if (releaseLlmPermit) {
       releaseLlmPermit();
     }

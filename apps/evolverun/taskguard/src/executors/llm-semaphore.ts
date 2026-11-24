@@ -10,7 +10,7 @@
  * - FIFO 公平调度，先进先出
  * - 可通过 application.yaml (llm.maxConcurrentCalls) 或环境变量
  *   MAX_CONCURRENT_LLM_CALLS 配置（环境变量优先）
- * - 每个许可带超时保护，防止泄漏
+ * - 超时告警不释放仍在运行的许可，避免假并发
  * - 提供监控接口，方便诊断
  *
  * 配置优先级：环境变量 > application.yaml > 内置默认值 (3)
@@ -26,16 +26,26 @@ class SimpleSemaphore {
 
   constructor(private readonly max: number) {}
 
-  async acquire(): Promise<() => void> {
+  async acquire(signal?: AbortSignal): Promise<() => void> {
+    signal?.throwIfAborted();
     if (this.active < this.max) {
       this.active++;
       return this.createRelease();
     }
-    return new Promise<() => void>((resolve) => {
-      this.queue.push(() => {
+    return new Promise<() => void>((resolve, reject) => {
+      const onAbort = () => {
+        const index = this.queue.indexOf(grant);
+        if (index !== -1) this.queue.splice(index, 1);
+        signal?.removeEventListener("abort", onAbort);
+        reject(signal?.reason);
+      };
+      const grant = () => {
+        signal?.removeEventListener("abort", onAbort);
         this.active++;
         resolve(this.createRelease());
-      });
+      };
+      this.queue.push(grant);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 
@@ -85,7 +95,7 @@ export interface LlmSemaphoreStats {
 /** 默认最大并发 LLM 请求数 */
 const DEFAULT_MAX_CONCURRENT = 3;
 
-/** 许可最大持有时间 (ms)，超过后强制释放防止泄漏 */
+/** 许可持有告警阈值 (ms)；不能释放仍在运行的请求。 */
 const PERMIT_TTL_MS = 120_000; // 2 分钟
 
 /**
@@ -105,7 +115,7 @@ export function configureLlmSemaphore(config: { maxConcurrentCalls: number }): v
   if (typeof config.maxConcurrentCalls === "number" && Number.isFinite(config.maxConcurrentCalls) && config.maxConcurrentCalls > 0) {
     _yamlMaxConcurrent = config.maxConcurrentCalls;
     // 如果信号量尚未初始化，下次 getLlmSemaphore() 将使用新值
-    // 如果已初始化且配置值变化了，getLlmSemaphore() 将重建信号量
+    // 如果已初始化且配置值变化了，getLlmSemaphore() 将等空闲后重建信号量
     console.log(`[llm-semaphore] configured from application.yaml: maxConcurrentCalls=${config.maxConcurrentCalls}`);
   }
 }
@@ -148,11 +158,11 @@ const _stats = {
 
 /**
  * 获取或创建全局 LLM 信号量。
- * 支持运行时重新配置（通过环境变量变化）。
+ * 支持运行时重新配置（通过环境变量变化）；仅空闲时重建，避免丢失活跃许可。
  */
 export function getLlmSemaphore(): SimpleSemaphore {
   const maxConcurrent = resolveMaxConcurrent();
-  if (_semaphore === null || _maxConcurrent !== maxConcurrent) {
+  if (_semaphore === null || (_maxConcurrent !== maxConcurrent && _semaphore.activeCount === 0 && _semaphore.waitingCount === 0)) {
     _semaphore = new SimpleSemaphore(maxConcurrent);
     _maxConcurrent = maxConcurrent;
     console.log(
@@ -168,8 +178,8 @@ export function getLlmSemaphore(): SimpleSemaphore {
  * 获取 LLM 许可。在信号量可用前会阻塞等待。
  * 返回一个释放函数，**必须在 finally 块中调用**。
  *
- * 许可带有 TTL 保护：如果持有超过 PERMIT_TTL_MS (2分钟) 未释放，
- * 将自动释放并打印泄漏警告，防止异常路径导致信号量耗尽。
+ * 超过 PERMIT_TTL_MS (2分钟) 仅告警。忽略 abort 的请求仍持有许可，
+ * 必须等实际结束后由 finally 释放；超时放行会超发请求。
  *
  * @param context - 用于日志的上下文信息（flowId、nodeId 等）
  * @returns 释放函数
@@ -187,6 +197,7 @@ export function getLlmSemaphore(): SimpleSemaphore {
  */
 export async function acquireLlmPermit(
   context: { flowId?: string; nodeId?: string; nodeTitle?: string },
+  signal?: AbortSignal,
 ): Promise<() => void> {
   const semaphore = getLlmSemaphore();
   const waitStart = Date.now();
@@ -196,7 +207,12 @@ export async function acquireLlmPermit(
     (context.flowId ? ` flowId=${context.flowId}` : "") +
     (context.nodeId ? ` node=${context.nodeId}` : "");
 
-  const release = await semaphore.acquire();
+  const release = await semaphore.acquire(signal);
+  // Cancellation may arrive after a grant but before this continuation runs.
+  if (signal?.aborted) {
+    release();
+    signal.throwIfAborted();
+  }
 
   const waitTime = Date.now() - waitStart;
   _stats.totalAcquired++;
@@ -209,18 +225,14 @@ export async function acquireLlmPermit(
     );
   }
 
-  // 超时保护：如果持有许可超过 TTL 未释放，强制释放以防泄漏
+  // 仅告警：超时不等于底层结束，不能释放许可制造虚假容量。
   let released = false;
-  const acquiredAt = Date.now();
   const ttlTimer = setTimeout(() => {
     if (!released) {
       console.error(
         `[llm-semaphore] PERMIT LEAK DETECTED: flowId=${context.flowId ?? "unknown"} ` +
-        `node=${context.nodeId ?? "unknown"} held permit for ${PERMIT_TTL_MS}ms — force releasing`,
+        `node=${context.nodeId ?? "unknown"} held permit for ${PERMIT_TTL_MS}ms — retaining permit until execution settles`,
       );
-      released = true;
-      _stats.totalExecutionTimeMs += Date.now() - acquiredAt;
-      release();
     }
   }, PERMIT_TTL_MS);
 

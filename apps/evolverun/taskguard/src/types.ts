@@ -1564,6 +1564,12 @@ export type SubworkflowFlowMeta = {
 export const MAX_SUBWORKFLOW_DEPTH = 3;
 
 export type FlowState = {
+  /** Frozen at creation; absent on legacy runs, never inferred during recovery. */
+  flowTimeoutPolicy?: {
+    startedAt: number;
+    timeoutMs: number;
+    deadlineAt: number | null;
+  };
   workflowId: string;
   workflowVersion: number;
   params: Record<string, string>;
@@ -1713,7 +1719,14 @@ export type ExecutionWarning = {
   detail?: Record<string, unknown>;
 };
 
+/** Per-invocation context supplied by the controller, not a session-bound closure. */
+export type ExecutorDispatchContext = {
+  abortSignal?: AbortSignal;
+};
+
 export type ExecutorResult = {
+  /** False when retry could overlap an execution whose cancellation is unconfirmed. */
+  retryable?: boolean;
   status: "succeeded" | "waiting" | "failed";
   result?: Record<string, unknown>;
   waitConfig?: { prompt: string; hint?: string; waitKind?: string };

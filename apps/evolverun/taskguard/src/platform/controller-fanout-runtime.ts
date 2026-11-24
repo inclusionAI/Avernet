@@ -172,10 +172,14 @@ export function createControllerFanoutRuntime(options: ControllerFanoutRuntimeOp
     try {
       await executeWorkflow({deps:childDeps,workflow:request.childWorkflow,state,flowId:request.childFlowId,revision:1,runStartHooks:true});
     } catch (error) {
+      const cancelled = controller.signal.aborted && (error === controller.signal.reason
+        || (error instanceof Error && error.name === 'AbortError'));
       // A failed waiting-state write can itself be the lost acknowledgement of
       // the post-side-effect checkpoint. Once that boundary is uncertain, only
       // durable observation is safe; never re-enter controller execution.
-      if (postSideEffectPersistenceUncertain) return observe(request,controller.signal);
+      // Controller cancellation also stops local driving, not the remote action.
+      // A concurrent abort must not reclassify unrelated execution/storage errors.
+      if (postSideEffectPersistenceUncertain || cancelled) return observe(request,controller.signal);
       throw error;
     }
     const final=await store.readChild(parentFlowId,request.childFlowId);

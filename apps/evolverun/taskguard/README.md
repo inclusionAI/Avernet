@@ -16,6 +16,7 @@ taskguard is a YAML-defined Directed Acyclic Graph (DAG) workflow orchestration 
 
 ## Guides
 
+- [Embedded deadlines and owned flow timeouts](docs/timeout-hotfix.md) — cancellation, retry safety, watchdog ownership, and rollout limits.
 - [Subworkflow fanout v1](docs/subworkflow-fanout.md) — configuration, explicit release locks, result contracts, tests, and platform integration requirements.
 
 ## Architecture

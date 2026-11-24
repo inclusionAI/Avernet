@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import { homedir } from "node:os";
+import { setTimeout as sleepTimer } from "node:timers/promises";
 import { join, resolve } from "node:path";
 import yaml from "yaml";
 import { resolveSessionId } from "./session-resolver.js";
@@ -25,6 +26,7 @@ import type {
   HookActionSpec,
   WorkflowSpec,
   ExecutorResult,
+  ExecutorDispatchContext,
   AuditLogEntry,
   ExecutionMode,
   FlowEvent,
@@ -59,6 +61,11 @@ import {
   type TemplateContext,
 } from "./runner.js";
 import { resolveUserIdentity } from "./runtime/user-identity.js";
+import {
+  freezeFlowTimeoutPolicy,
+  readFrozenFlowTimeoutPolicy,
+  type FrozenFlowTimeoutPolicy,
+} from "./runtime/owned-flow-timeout.js";
 import { runHookActions, type HookRunOutcome } from "./actions/hook-runner.js";
 import { executeBcsApprovalBatch, type BcsApprovalBatchApi } from "./executors/bcs-approval-batch.js";
 import {
@@ -412,9 +419,6 @@ let _nodeExecutionRepository: INodeExecutionRepository | null = null;
 let _nodeStepTraceRepo: INodeStepTraceRepository | null = null;
 let _hallucinationCheckRepo: IHallucinationCheckRepository | null = null;
 let _flowRunRepository: IFlowRunRepository | null = null;
-/** Pending updateCompletion promises per flowId, used to ensure HTTP callbacks
- *  wait for the DB write to commit before querying flow_runs for ext_info. */
-const _pendingCompletionPromises = new Map<string, Promise<unknown>>();
 let _engineName: string | null = null;
 let _knowledgeBases: KnowledgeBase[] = [];
 let _knowledgeCache: Map<string, CacheEntry> | null = null;
@@ -516,12 +520,51 @@ const _workflowSpecByFlowId = new Map<string, WorkflowSpec>();
 
 // ── M2: Async Execution Engine ──
 
+/** Persistence ownership is captured once; ancillary targets are never rebound mid-closeout. */
+type FlowCompletionContext = Readonly<{
+  flowRunRepository: IFlowRunRepository | null;
+  nodeExecutionRepository: INodeExecutionRepository | null;
+  eventRepository: typeof _eventRepository;
+  runLogUploader: typeof _runLogUploader;
+  httpCallbackDispatcher: typeof _httpCallbackDispatcher;
+  workflowNotificationDispatcher: typeof _workflowNotificationDispatcher;
+  notificationConfigRepository: typeof _notificationConfigRepo;
+}>;
+
+function captureFlowCompletionContext(): FlowCompletionContext {
+  return Object.freeze({
+    flowRunRepository: _flowRunRepository,
+    nodeExecutionRepository: _nodeExecutionRepository,
+    eventRepository: _eventRepository,
+    runLogUploader: _runLogUploader,
+    httpCallbackDispatcher: _httpCallbackDispatcher,
+    workflowNotificationDispatcher: _workflowNotificationDispatcher,
+    notificationConfigRepository: _notificationConfigRepo,
+  });
+}
+
+/** Conservatively suppress ancillary effects if any launch-time target was rebound. */
+function isCurrentCompletionContext(context: FlowCompletionContext): boolean {
+  return context.flowRunRepository === _flowRunRepository &&
+    context.nodeExecutionRepository === _nodeExecutionRepository &&
+    context.eventRepository === _eventRepository &&
+    context.runLogUploader === _runLogUploader &&
+    context.httpCallbackDispatcher === _httpCallbackDispatcher &&
+    context.workflowNotificationDispatcher === _workflowNotificationDispatcher &&
+    context.notificationConfigRepository === _notificationConfigRepo;
+}
+
 /** Handle for a background async workflow execution. */
 export type AsyncExecutionHandle = {
   flowId: string;
   sessionKey: string;
   promise: Promise<void>;
   abortController: AbortController;
+  /** Copied from the persisted launch policy; never recalculated on resume. */
+  readonly timeoutPolicy?: FrozenFlowTimeoutPolicy;
+  readonly taskFlow?: ControllerDeps["boundTaskFlow"];
+  readonly completionContext?: FlowCompletionContext;
+  timeoutReaping?: boolean;
 };
 
 /**
@@ -532,6 +575,10 @@ export type AsyncExecutionHandle = {
  * 3. Prevent duplicate launches for the same flow
  */
 const activeAsyncExecutions = new Map<string, AsyncExecutionHandle>();
+
+function ownedCompletionContext(flowId: string): FlowCompletionContext | undefined {
+  return [...activeAsyncExecutions.values()].find((handle) => handle.flowId === flowId)?.completionContext;
+}
 
 function asyncExecutionKey(sessionKey: string, flowId: string): string {
   return `${sessionKey}:${flowId}`;
@@ -639,11 +686,14 @@ export function makeReliableChatInject(
 /** Abort all async executions for a given session. Returns count aborted. */
 export function abortAsyncExecutionsForSession(sessionKey: string): number {
   let aborted = 0;
-  for (const [key, handle] of activeAsyncExecutions) {
+  for (const handle of activeAsyncExecutions.values()) {
     if (handle.sessionKey === sessionKey) {
-      handle.abortController.abort();
-      activeAsyncExecutions.delete(key);
-      aborted += 1;
+      if (!handle.abortController.signal.aborted) {
+        handle.abortController.abort(new Error("Workflow session stopped"));
+        aborted += 1;
+      }
+      // Keep ownership until the old driver actually settles. Otherwise a
+      // concurrent resume can launch a second driver while cancellation drains.
     }
   }
   return aborted;
@@ -662,12 +712,11 @@ export function abortAsyncExecutionsForSession(sessionKey: string): number {
  * LLM/tool call to reject with AbortError → node failed → executeLoop finalizes.
  */
 export function abortAsyncExecutionForFlow(flowId: string): boolean {
-  for (const [key, handle] of activeAsyncExecutions) {
+  for (const handle of activeAsyncExecutions.values()) {
     if (handle.flowId === flowId) {
       if (!handle.abortController.signal.aborted) {
         handle.abortController.abort(new Error(`flow ${flowId} aborted (timeout watchdog)`));
       }
-      activeAsyncExecutions.delete(key);
       console.log(`[async-exec] aborted async execution for flow ${flowId} (timeout watchdog)`);
       return true;
     }
@@ -710,10 +759,18 @@ function launchAsyncExecution(
   state: FlowState,
   flowId: string,
   revision: number,
-  options?: { runStartHooks?: boolean; debug?: boolean; _conflictRedrivesLeft?: number },
+  options?: { runStartHooks?: boolean; debug?: boolean; _conflictRedrivesLeft?: number; _completionContext?: FlowCompletionContext },
 ): AsyncExecutionHandle {
+  // A cancelling driver is still an owner until its promise settles.
+  const existing = [...activeAsyncExecutions.values()].find((handle) => handle.flowId === flowId);
+  if (existing) return existing;
+  const completionContext = options?._completionContext ?? captureFlowCompletionContext();
   const abortController = new AbortController();
   const key = asyncExecutionKey(deps.sessionKey, flowId);
+  const timeoutPolicy = readFrozenFlowTimeoutPolicy(state.flowTimeoutPolicy);
+  if (!timeoutPolicy) {
+    console.warn(`[async-exec] flow ${flowId} has no trusted frozen timeout policy — watchdog disabled for this execution`);
+  }
 
   // Wire the per-flow AbortController into the executor path. Previously this
   // controller was created but its signal never reached `reliableDeps.abortSignal`
@@ -722,6 +779,7 @@ function launchAsyncExecution(
   // If the caller already provided a signal, cascade its abort into ours so
   // session-level stops still propagate.
   const upstreamSignal = deps.abortSignal;
+  const abortFromUpstream = () => abortController.abort(upstreamSignal?.reason ?? new Error("upstream signal aborted"));
   if (upstreamSignal) {
     if (upstreamSignal.aborted) {
       // Already aborted upstream — abort immediately.
@@ -729,7 +787,7 @@ function launchAsyncExecution(
     } else {
       upstreamSignal.addEventListener(
         "abort",
-        () => abortController.abort(upstreamSignal.reason ?? new Error("upstream signal aborted")),
+        abortFromUpstream,
         { once: true },
       );
     }
@@ -756,21 +814,32 @@ function launchAsyncExecution(
   // skip the fresh launch. See the conflict branch below + .finally() at end.
   let pendingRedrive: { state: FlowState; revision: number; retriesLeft: number } | null = null;
 
-  const promise = executeWorkflowForTest({
-    deps: reliableDeps,
-    workflow,
-    state,
-    flowId,
-    revision,
-    runStartHooks: options?.runStartHooks ?? false,
-    debug: options?.debug,
+  // Register the handle synchronously below, but never enter an executor on
+  // the dispatch tool's stack (including the initial startAsync path).
+  const promise = new Promise<void>((resolveExecution, rejectExecution) => {
+    setTimeout(() => {
+      executeWorkflowForTest({
+        deps: reliableDeps,
+        workflow,
+        state,
+        flowId,
+        revision,
+        runStartHooks: options?.runStartHooks ?? false,
+        debug: options?.debug,
+      }).then(() => resolveExecution(), rejectExecution);
+    }, 0);
   }).then(
     () => {
       // Normal completion — executeLoop already sent completion notifications
       console.log(`[async-exec] flow ${flowId} completed normally`);
     },
     async (err: unknown) => {
-      if (isFlowStateConflict(err)) {
+      // The watchdog already owns terminal persistence after its successful CAS.
+      if (handle.timeoutReaping) {
+        deps.flowControl?.releaseAllForFlow(flowId);
+        return;
+      }
+      if (isFlowStateConflict(err) && !abortController.signal.aborted) {
         // Another writer owns the latest revision. Check the actual flow status
         // in TaskFlow to decide whether to safely exit or retry.
         // If the flow is already in a terminal/waiting state, another writer
@@ -816,7 +885,7 @@ function launchAsyncExecution(
               `[async-exec] flow ${flowId} still "running" after state conflict, ` +
               `redrive exhausted — manual retry via /workflow retry`,
             );
-            enqueueRunLog({
+            if (isCurrentCompletionContext(completionContext)) enqueueRunLog({
               flow_id: flowId,
               level: "error",
               source: "workflow",
@@ -842,7 +911,7 @@ function launchAsyncExecution(
       console.error(`[async-exec] flow ${flowId} crashed:`, err);
       const errorMsg = err instanceof Error ? err.message : String(err);
       const errorStack = err instanceof Error ? (err.stack ?? "").split("\n").slice(0, 3).join(" | ") : "";
-      enqueueRunLog({
+      if (isCurrentCompletionContext(completionContext)) enqueueRunLog({
         flow_id: flowId,
         level: "error",
         source: "workflow",
@@ -865,12 +934,27 @@ function launchAsyncExecution(
       // 1. Mark the flow as failed in TaskFlow. A revision conflict means a
       // newer writer owns the flow, so this worker may only clean up.
       try {
+        let expectedRevision = revision;
+        if (abortController.signal.aborted) {
+          // The retained owner may have persisted several nodes since launch.
+          // Read only this binding's exact run; never overwrite waiting/terminal
+          // state or retry a lost CAS while cancellation drains.
+          const actualFlow = await deps.boundTaskFlow.get(flowId);
+          if (!actualFlow || actualFlow.status !== "running" || typeof actualFlow.revision !== "number") {
+            deps.flowControl?.releaseAllForFlow(flowId);
+            return;
+          }
+          expectedRevision = actualFlow.revision;
+        }
         const failResult = await deps.boundTaskFlow.fail({
           flowId,
-          expectedRevision: revision,
+          expectedRevision,
           resultJson: JSON.stringify({ error: errorMsg, crashed: true }),
         });
         assertFlowStateUpdateApplied(failResult as { applied?: boolean });
+        if ((failResult as { applied?: boolean } | undefined)?.applied !== true) {
+          throw new Error("TaskFlow fail() did not confirm CAS applied=true");
+        }
       } catch (failErr) {
         if (isFlowStateConflict(failErr)) {
           console.warn(`[async-exec] flow ${flowId} crash persistence lost a state conflict`);
@@ -879,32 +963,39 @@ function launchAsyncExecution(
         }
         const errMsg = failErr instanceof Error ? failErr.message : String(failErr);
         console.error(`[async-exec] failed to mark flow ${flowId} as failed:`, failErr);
-        enqueueRunLog({
+        if (isCurrentCompletionContext(completionContext)) enqueueRunLog({
           flow_id: flowId,
           level: "error",
           source: "engine",
           message: `boundTaskFlow.fail() failed in crash handler: ${errMsg}`,
           timestamp: Date.now(),
         });
+        deps.flowControl?.releaseAllForFlow(flowId);
+        return;
       }
 
       // 2. Try to notify the user via chatInject
-      try {
-        await deps.chatInject(
-          `[taskguard] ❌ 工作流异常终止 (flowId: ${flowId})\n错误: ${errorMsg}\n请使用 /workflow inspect 查看详情。`,
-          `${flowId}:flow:error:crash`,
-        );
-      } catch (chatErr) {
-        console.error(`[async-exec] failed to send crash notification for flow ${flowId}:`, chatErr);
+      if (isCurrentCompletionContext(completionContext)) {
+        try {
+          await deps.chatInject(
+            `[taskguard] ❌ 工作流异常终止 (flowId: ${flowId})\n错误: ${errorMsg}\n请使用 /workflow inspect 查看详情。`,
+            `${flowId}:flow:error:crash`,
+          );
+        } catch (chatErr) {
+          console.error(`[async-exec] failed to send crash notification for flow ${flowId}:`, chatErr);
+        }
       }
 
       // 3. Release flow control slots
       deps.flowControl?.releaseAllForFlow(flowId);
 
       // 4. Update flow run status + dispatch notifications
-      completeFlowRun(flowId, "failed", state.currentPhase ?? "running", JSON.stringify({ error: errorMsg, crashed: true }), computeDurationMs(state), state);
+      completeFlowRun(flowId, "failed", state.currentPhase ?? "running", JSON.stringify({ error: errorMsg, crashed: true }), computeDurationMs(state), state, undefined, completionContext);
     },
   ).finally(() => {
+    upstreamSignal?.removeEventListener("abort", abortFromUpstream);
+    // An older worker must never clear a successor's per-flow resources.
+    if (activeAsyncExecutions.get(key) !== handle) return;
     activeAsyncExecutions.delete(key);
     // Clean up per-flow registries (defensive — completeFlowRun should
     // have already deleted them, but in crash paths it may not have run).
@@ -919,12 +1010,13 @@ function launchAsyncExecution(
     // not skipped by the single-driver guard). Re-register the workflow spec
     // the new execution needs — launchAsyncExecution re-sets global
     // chatInject/verbosity itself, but not _workflowSpecByFlowId.
-    if (pendingRedrive) {
+    if (pendingRedrive && !abortController.signal.aborted) {
       const redrive = pendingRedrive;
       pendingRedrive = null;
       _workflowSpecByFlowId.set(flowId, workflow);
       launchAsyncExecution(deps, workflow, redrive.state, flowId, redrive.revision, {
         _conflictRedrivesLeft: redrive.retriesLeft,
+        _completionContext: completionContext,
       });
     }
   });
@@ -934,6 +1026,9 @@ function launchAsyncExecution(
     sessionKey: deps.sessionKey,
     promise,
     abortController,
+    timeoutPolicy,
+    taskFlow: deps.boundTaskFlow,
+    completionContext,
   };
 
   activeAsyncExecutions.set(key, handle);
@@ -1110,6 +1205,8 @@ export function setRunLogUploader(uploader: typeof _runLogUploader): void {
  * 同步操作，不阻塞，不抛异常。上报过程完全不影响工作流执行。
  */
 export function enqueueRunLog(entry: RunLogInsert): void {
+  const context = ownedCompletionContext(entry.flow_id);
+  if (context && !isCurrentCompletionContext(context)) return;
   if (!_runLogUploader) {
     if (!_runLogUploaderWarningEmitted) {
       _runLogUploaderWarningEmitted = true;
@@ -1605,10 +1702,13 @@ export async function ensureHttpCallbackConfigForWorkflow(workflowId: string): P
  * Returns undefined if repo is not set, query fails, or no config exists.
  * Fire-and-forget: never throws, never blocks workflow execution.
  */
-async function resolveDbNotificationConfig(workflowId: string): Promise<import("./types.js").DingTalkNotificationConfig | undefined> {
-  if (!_notificationConfigRepo) return undefined;
+async function resolveDbNotificationConfig(
+  workflowId: string,
+  repository = _notificationConfigRepo,
+): Promise<import("./types.js").DingTalkNotificationConfig | undefined> {
+  if (!repository) return undefined;
   try {
-    const row = await _notificationConfigRepo.findByWorkflowId(workflowId);
+    const row = await repository.findByWorkflowId(workflowId);
     if (!row) return undefined;
     return rowToDingtalkConfig(row);
   } catch (error) {
@@ -1645,6 +1745,13 @@ async function runPostWorkflowAnalysis(
  * Hooks are called synchronously but perform async DB writes internally.
  */
 function emitNodeEvent(event: NodeLifecycleEvent, payload: NodeLifecyclePayload): void {
+  const context = ownedCompletionContext(payload.flowId);
+  // An owned executor may settle after another session rebinds the globals.
+  // Suppress unsafe ancillary events rather than writing to that session's DB.
+  if (context && !isCurrentCompletionContext(context)) return;
+  const repository = context ? context.flowRunRepository : _flowRunRepository;
+  const notificationDispatcher = _workflowNotificationDispatcher;
+  const notificationRepository = _notificationConfigRepo;
   _metricsRecorder?.onEvent(event, payload);
   _alertRecorder?.onEvent(event, payload);
   if (event === "node_succeeded" || event === "node_failed") {
@@ -1708,10 +1815,10 @@ function emitNodeEvent(event: NodeLifecycleEvent, payload: NodeLifecyclePayload)
   }
 
   // Increment flow_runs succeeded/failed counts
-  if (_flowRunRepository) {
+  if (repository) {
     if (event === "node_succeeded" || event === "node_skipped") {
       void withRetry(
-        () => _flowRunRepository!.incrementNodeCount(payload.flowId, "succeeded_count"),
+        () => repository.incrementNodeCount(payload.flowId, "succeeded_count"),
         { callerId: "incrementNodeCount(succeeded)", flowId: payload.flowId, nodeId: payload.nodeId },
         (e) => {
           const errMsg = e instanceof Error ? e.message : String(e);
@@ -1729,7 +1836,7 @@ function emitNodeEvent(event: NodeLifecycleEvent, payload: NodeLifecyclePayload)
     } else if (event === "node_failed" && payload.attempt <= 1) {
       // Only count first-attempt failures to avoid double-counting retries
       void withRetry(
-        () => _flowRunRepository!.incrementNodeCount(payload.flowId, "failed_count"),
+        () => repository.incrementNodeCount(payload.flowId, "failed_count"),
         { callerId: "incrementNodeCount(failed)", flowId: payload.flowId, nodeId: payload.nodeId },
         (e) => {
           const errMsg = e instanceof Error ? e.message : String(e);
@@ -1766,7 +1873,7 @@ function emitNodeEvent(event: NodeLifecycleEvent, payload: NodeLifecyclePayload)
   if (event === "node_failed") {
     console.log(`[controller] notification-check: dispatcher=${_workflowNotificationDispatcher ? "yes" : "NO"} workflowSpec=${workflowSpecForNotification ? workflowSpecForNotification.id : "NULL"} flowId=${payload.flowId}`);
   }
-  if (event === "node_failed" && _workflowNotificationDispatcher && workflowSpecForNotification) {
+  if (event === "node_failed" && notificationDispatcher && workflowSpecForNotification) {
     console.log(`[controller] dispatching node_failure notification for workflow=${workflowSpecForNotification.id} node=${payload.nodeId}`);
     enqueueRunLog({
       flow_id: payload.flowId,
@@ -1777,8 +1884,9 @@ function emitNodeEvent(event: NodeLifecycleEvent, payload: NodeLifecyclePayload)
       timestamp: Date.now(),
     });
     void (async () => {
-      const dbNotifConfig = await resolveDbNotificationConfig(payload.workflowId);
-      _workflowNotificationDispatcher!.dispatchNodeFailure(workflowSpecForNotification!, {
+      const dbNotifConfig = await resolveDbNotificationConfig(payload.workflowId, notificationRepository);
+      if (context && !isCurrentCompletionContext(context)) return;
+      notificationDispatcher.dispatchNodeFailure(workflowSpecForNotification!, {
         workflowTitle: workflowSpecForNotification.title,
         workflowId: payload.workflowId,
         flowId: payload.flowId,
@@ -1865,10 +1973,13 @@ export function reportNodeProgress(
 
 /** Best-effort sync of flow_runs.current_phase and status to the engine DB. */
 function syncFlowRunPhase(flowId: string, currentPhase: string, status?: string): void {
-  if (!_flowRunRepository) { console.warn(`[taskguard] syncFlowRunPhase: _flowRunRepository is null, skipping flowId=${flowId}`); return; }
+  const context = ownedCompletionContext(flowId);
+  if (context && !isCurrentCompletionContext(context)) return;
+  const repository = context ? context.flowRunRepository : _flowRunRepository;
+  if (!repository) { console.warn(`[taskguard] syncFlowRunPhase: _flowRunRepository is null, skipping flowId=${flowId}`); return; }
   console.log(`[taskguard] syncFlowRunPhase flowId=${flowId} currentPhase=${currentPhase} status=${status ?? "(none)"}`);
   void withRetry(
-    () => _flowRunRepository!.updateCurrentPhase(flowId, currentPhase),
+    () => repository.updateCurrentPhase(flowId, currentPhase),
     { callerId: "updateCurrentPhase", flowId },
     (e) => {
       const errMsg = e instanceof Error ? e.message : String(e);
@@ -1885,7 +1996,7 @@ function syncFlowRunPhase(flowId: string, currentPhase: string, status?: string)
   ).then(() => { console.log(`[taskguard] updateCurrentPhase OK flowId=${flowId}`); }).catch(() => { /* handled in onExhausted */ });
   if (status) {
     void withRetry(
-      () => _flowRunRepository!.updateStatus(flowId, status),
+      () => repository.updateStatus(flowId, status),
       { callerId: "updateStatus", flowId },
       (e) => {
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -2094,11 +2205,20 @@ function buildSuccessResultJson(
 }
 
 /** Best-effort completion of a flow_runs row. */
-function completeFlowRun(flowId: string, status: string, currentPhase: string, resultJson?: string | null, totalDurationMs?: number | null, state?: FlowState, explicitWorkflowId?: string): void {
+function completeFlowRun(
+  flowId: string, status: string, currentPhase: string, resultJson?: string | null,
+  totalDurationMs?: number | null, state?: FlowState, explicitWorkflowId?: string,
+  context = ownedCompletionContext(flowId) ?? captureFlowCompletionContext(),
+): void {
+  const repository = context.flowRunRepository;
+  const nodeRepository = context.nodeExecutionRepository;
+  let completionPromise: Promise<unknown> | undefined;
+  const ancillaryIsSafe = () => isCurrentCompletionContext(context);
+  const completionLog = (entry: RunLogInsert) => { if (ancillaryIsSafe()) enqueueRunLog(entry); };
   const nodeSummary = summarizeNodeStates(state);
   const failedNodes = status === "failed" ? listFailedNodes(state) : "";
   console.log(`[controller] ══ FLOW_STATE_CHANGE ══ flowId=${flowId} status=${status} phase=${currentPhase} duration=${totalDurationMs ?? "n/a"}ms nodes=[${nodeSummary}]${failedNodes ? ` failed_nodes=[${failedNodes}]` : ""}`);
-  enqueueRunLog({
+  completionLog({
     flow_id: flowId,
     level: status === "failed" ? "error" : "info",
     source: "workflow",
@@ -2106,9 +2226,9 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
     timestamp: Date.now(),
   });
 
-  // ── DB persistence (depends on _flowRunRepository) ──
-  // This section is gated on _flowRunRepository, but notifications below are NOT.
-  if (_flowRunRepository) {
+  // Terminal persistence and reconcile always use the originating execution's
+  // repositories, even if another session rebinds module globals during CAS.
+  if (repository) {
     // On failure, build structured resultJson with detailed failure info
     // (failed node IDs, titles, executor types, errors, attempts) so that
     // flow_runs.result_json is self-contained for debugging without joins.
@@ -2152,7 +2272,7 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
     // persistNodeResult no longer writes to result_json (it's a no-op), so there
     // is no fire-and-forget race to guard against. The completion write below
     // is the only write path for the final structured result_json.
-    const completionPromise = _flowRunRepository.updateCompletion(flowId, {
+    completionPromise = repository.updateCompletion(flowId, {
       status,
       currentPhase,
       resultJson: effectiveResultJson,
@@ -2172,7 +2292,7 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
     }).catch((e) => {
       const errMsg = e instanceof Error ? e.message : String(e);
       console.error("[taskguard] updateCompletion failed:", errMsg);
-      enqueueRunLog({
+      completionLog({
         flow_id: flowId,
         level: "error",
         source: "engine",
@@ -2189,34 +2309,30 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
     // NOTE: Fire-and-forget with retries — completeFlowRun is synchronous so we
     // cannot await. Failures are logged via recordFailure.
     const isTerminalStatus = status === "succeeded" || status === "failed" || status === "cancelled";
-    if (isTerminalStatus && _nodeExecutionRepository) {
+    if (isTerminalStatus && nodeRepository) {
       void withRetry(
-        () => _nodeExecutionRepository!.reconcileStaleRunning(flowId, status),
+        () => nodeRepository.reconcileStaleRunning(flowId, status),
         { callerId: "reconcileStaleRunning", flowId, maxRetries: 3, baseDelayMs: 500 },
         (e) => {
           const errMsg = e instanceof Error ? e.message : String(e);
           console.error("[taskguard] reconcileStaleRunning failed after retries:", errMsg);
-          enqueueRunLog({
+          completionLog({
             flow_id: flowId,
             level: "error",
             source: "engine",
             message: `reconcileStaleRunning failed: ${errMsg}`,
             timestamp: Date.now(),
           });
-          recordFailure("reconcileStaleRunning", flowId, undefined, e, "error");
+          if (ancillaryIsSafe()) recordFailure("reconcileStaleRunning", flowId, undefined, e, "error");
         },
       ).catch(() => { /* handled in onExhausted */ });
     }
-
-    // Store the completion promise so that the HTTP callback below can await it
-    // before querying flow_runs, ensuring the callback sees the final status.
-    // Only store for terminal statuses — "waiting"/"blocked" don't trigger callbacks
-    // and would leak entries in the Map if stored.
-    if (isTerminalStatus) {
-      _pendingCompletionPromises.set(flowId, completionPromise);
-    }
   } else {
     console.warn(`[taskguard] completeFlowRun: _flowRunRepository is null — DB persist skipped for flowId=${flowId}`);
+  }
+
+  if (!ancillaryIsSafe()) {
+    console.warn(`[controller] completeFlowRun: launch targets rebound — ancillary effects skipped for flowId=${flowId}`);
   }
 
   // (New) Aggregated workflow failure notification via enterprise DingTalk
@@ -2230,7 +2346,7 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
   if (status === "failed") {
     console.log(`[controller] completeFlowRun-notification-check: dispatcher=${_workflowNotificationDispatcher ? "yes" : "NO"} workflowSpec=${workflowSpecForCompletion ? workflowSpecForCompletion.id : "NULL"} state=${state ? "yes" : "NO"} flowId=${flowId}`);
   }
-  if (status === "failed" && _workflowNotificationDispatcher && workflowSpecForCompletion && state) {
+  if (ancillaryIsSafe() && status === "failed" && context.workflowNotificationDispatcher && workflowSpecForCompletion && state) {
     const failedNodes = Object.entries(state.nodeStates)
       .filter(([, ns]) => ns.status === "failed")
       .map(([nodeId, ns]) => {
@@ -2244,7 +2360,7 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
       });
 
     if (failedNodes.length > 0) {
-      enqueueRunLog({
+      completionLog({
         flow_id: flowId,
         level: "info",
         source: "notification",
@@ -2252,13 +2368,16 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
         timestamp: Date.now(),
       });
       void (async () => {
-        const dbNotifConfig = await resolveDbNotificationConfig(state!.workflowId);
-        _workflowNotificationDispatcher!.dispatchWorkflowFailure(workflowSpecForCompletion!, {
+        const dbNotifConfig = await resolveDbNotificationConfig(state!.workflowId, context.notificationConfigRepository);
+        if (!ancillaryIsSafe()) return;
+        context.workflowNotificationDispatcher!.dispatchWorkflowFailure(workflowSpecForCompletion!, {
           workflowTitle: workflowSpecForCompletion.title,
           workflowId: state!.workflowId,
           flowId,
           failedNodes,
-        }, dbNotifConfig).catch((err) => recordFailure("completeFlowRun.dispatchWorkflowFailure", flowId, undefined, err, "warn"));
+        }, dbNotifConfig).catch((err) => {
+          if (ancillaryIsSafe()) recordFailure("completeFlowRun.dispatchWorkflowFailure", flowId, undefined, err, "warn");
+        });
       })();
     }
   }
@@ -2269,13 +2388,12 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
   // of a stale value (e.g. "running" or a previous "failed" from a prior run).
   if (status === "succeeded" || status === "failed" || status === "cancelled") {
     const workflowId = state?.workflowId ?? explicitWorkflowId ?? workflowSpecForCompletion?.id ?? "";
-    if (_httpCallbackDispatcher) {
+    if (ancillaryIsSafe() && context.httpCallbackDispatcher) {
       if (workflowIdForCompletion) {
         console.log(`[controller] httpCallback dispatchWorkflowEvent: flowId=${flowId} workflowId=${workflowIdForCompletion} status=${status}`);
-        const completionPromise = _pendingCompletionPromises.get(flowId);
         const dispatch = () => {
-          _pendingCompletionPromises.delete(flowId);
-          void _httpCallbackDispatcher!.dispatchWorkflowEvent(workflowIdForCompletion, flowId, status).catch((err) => {
+          if (!ancillaryIsSafe()) return;
+          void context.httpCallbackDispatcher!.dispatchWorkflowEvent(workflowIdForCompletion, flowId, status).catch((err) => {
             console.warn(`[controller] httpCallback dispatchWorkflowEvent failed: flowId=${flowId} status=${status} error=${err instanceof Error ? err.message : String(err)}`);
           });
         };
@@ -2301,7 +2419,7 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
   // flow's completion never lands in the wrong session.
   const flowChatInject = resolveChatInjectForFlow(flowId);
   const flowVerbosity = resolveInjectLevelForFlow(flowId);
-  if (flowChatInject && (status === "failed" || status === "succeeded" || status === "cancelled")) {
+  if (ancillaryIsSafe() && flowChatInject && (status === "failed" || status === "succeeded" || status === "cancelled")) {
     const workflowTitle = workflowSpecForCompletion?.title ?? state?.workflowId ?? flowId;
     // Build the first failed node detail for the enhanced message
     const firstFailedNode = status === "failed" && state ? (() => {
@@ -2560,167 +2678,89 @@ export async function recoverOrphanedFlows(
   });
 }
 
+/** Only one timeout sweep may claim a local driver at a time. */
+let _flowTimeoutSweep: Promise<number> | null = null;
+
 /**
- * Flow-timeout watchdog.
- *
- * Marks flows stuck in "running" longer than `timeoutMs` as **failed**. This is
- * the safety net for flows whose in-memory executor was abandoned (e.g. agent
- * session went zombie, engine restarted, chat.inject storm) and would otherwise
- * sit in "running" forever — the flow-control zombie-escape does NOT cover this
- * when `flowControl.enabled=false`.
- *
- * DB-level: it does not need the in-memory FlowState, so it can reap flows the
- * current process never owned. Only status="running" is targeted; flows parked
- * as "waiting"/"blocked" (e.g. awaiting human approval) are left alone. It also
- * aborts the in-memory async execution (if one is active in this process) so the
- * running LLM/tool call rejects with AbortError and the executor finalizes. If
- * the flow was abandoned in another process it can only flip the DB status.
- *
- * @returns number of flows reaped.
+ * Reap only executions owned by this process, using their persisted launch
+ * deadlines. The legacy arguments remain accepted for caller compatibility;
+ * current config/catalog lookups must not change an existing run's policy.
+ * Local candidates avoid both short-timeout cutoff misses and starvation by
+ * another process's oldest rows in a global status=running query.
  */
-export async function reapStaleRunningFlows(
-  timeoutMs: number,
+export function reapStaleRunningFlows(
+  _timeoutMs: number,
   limit = 100,
-  getStateForFlow?: (flowId: string) => Promise<FlowState | undefined>,
-  /**
-   *  Fail the flow in TaskFlow (status + revision update).
-   *  When provided, reapStaleRunningFlows will call boundTaskFlow.fail() BEFORE
-   *  completeFlowRun(), so that the in-memory executeLoop encounters a revision
-   *  conflict on its next boundTaskFlow.resume()/fail() call and exits without
-   *  overwriting the "failed" status with "succeeded". This prevents the race
-   *  condition where the watchdog marks the flow failed in flow_runs but the
-   *  executeLoop (unaware of the watchdog's action) later marks it succeeded.
-   */
-  failFlowInTaskFlow?: (flowId: string, stateJson: string, blockedSummary: string) => Promise<boolean>,
-  /**
-   *  Resolve per-workflow timeout in minutes. When provided, each flow is
-   *  checked against its own workflow's `flowTimeoutMinutes` instead of the
-   *  global default. Returns undefined if the workflow has no per-workflow
-   *  override (fall back to the global timeoutMs). May be async (e.g. a DB
-   *  lookup); awaited per stale row.
-   */
-  getWorkflowTimeoutMinutes?:
-    | ((workflowId: string) => number | undefined | Promise<number | undefined>),
+  _getStateForFlow?: (flowId: string) => Promise<FlowState | undefined>,
+  _failFlowInTaskFlow?: (flowId: string, stateJson: string, blockedSummary: string) => Promise<boolean>,
+  _getWorkflowTimeoutMinutes?: (workflowId: string) => number | undefined | Promise<number | undefined>,
 ): Promise<number> {
-  if (!_flowRunRepository) return 0;
-  const globalTimeoutSecs = Math.max(1, Math.floor(timeoutMs / 1000));
+  if (_flowTimeoutSweep) return _flowTimeoutSweep;
+  if (limit <= 0) return Promise.resolve(0);
+  _flowTimeoutSweep = reapOwnedRunningFlows(limit).finally(() => {
+    _flowTimeoutSweep = null;
+  });
+  return _flowTimeoutSweep;
+}
 
-  // Use the shortest possible timeout as the cutoff for the DB query.
-  // This ensures we don't miss any flows that might have a shorter per-workflow
-  // timeout. Per-workflow filtering happens in the row loop below.
-  let shortestTimeoutSecs = globalTimeoutSecs;
-  // The cutoff is conservatively computed from the global timeout. If a
-  // per-workflow timeout is shorter, those flows will be caught by this cutoff
-  // and then precisely filtered below. If a per-workflow timeout is longer,
-  // those flows will be caught by the cutoff but skipped in the row loop
-  // (ranForSecs < perWorkflowTimeoutSecs).
-  const cutoff = Math.floor(Date.now() / 1000) - shortestTimeoutSecs;
-
-  let rows: Awaited<ReturnType<IFlowRunRepository["findStaleRunning"]>>;
-  try {
-    rows = await _flowRunRepository.findStaleRunning(cutoff, limit);
-  } catch (e) {
-    console.error(`[controller] reapStaleRunningFlows: findStaleRunning threw: ${(e as Error)?.message ?? e}`);
-    return 0;
-  }
-  if (rows.length === 0) return 0;
-
+async function reapOwnedRunningFlows(limit: number): Promise<number> {
+  const sweepTime = Date.now();
+  const candidates = [...activeAsyncExecutions.values()]
+    .filter((handle) => handle.timeoutPolicy?.deadlineAt != null &&
+      handle.timeoutPolicy.deadlineAt <= sweepTime && !handle.abortController.signal.aborted)
+    .sort((left, right) => left.timeoutPolicy!.deadlineAt! - right.timeoutPolicy!.deadlineAt!);
   let reapedCount = 0;
-  const nowSecs = Math.floor(Date.now() / 1000);
-  for (const row of rows) {
-    const ranForSecs = Math.max(0, nowSecs - (row.started_at ?? nowSecs));
-
-    // Resolve per-workflow timeout: per-workflow YAML > global config.
-    let effectiveTimeoutSecs = globalTimeoutSecs;
-    if (getWorkflowTimeoutMinutes) {
-      const perWorkflowMinutes = await getWorkflowTimeoutMinutes(row.workflow_id);
-      if (perWorkflowMinutes !== undefined) {
-        if (perWorkflowMinutes === 0) {
-          // flowTimeoutMinutes=0 in workflow YAML disables the watchdog for this workflow.
-          continue;
-        }
-        effectiveTimeoutSecs = Math.max(1, perWorkflowMinutes * 60);
+  for (const handle of candidates) {
+    if (reapedCount >= limit) break;
+    const policy = handle.timeoutPolicy!;
+    const key = asyncExecutionKey(handle.sessionKey, handle.flowId);
+    const stillOwned = () => activeAsyncExecutions.get(key) === handle &&
+      !handle.abortController.signal.aborted && !handle.timeoutReaping;
+    const context = handle.completionContext;
+    const repository = context?.flowRunRepository;
+    if (!stillOwned() || !handle.taskFlow || !repository) continue;
+    try {
+      const row = await repository.findByFlowId(handle.flowId);
+      if (!row || row.status !== "running" || !stillOwned()) continue;
+      // Use this driver's originating TaskFlow binding, not the latest session.
+      const flow = await handle.taskFlow.get(handle.flowId);
+      if (!flow || flow.status !== "running" || typeof flow.revision !== "number" || !stillOwned()) continue;
+      const flowState = parseFlowState(flow);
+      const storedPolicy = readFrozenFlowTimeoutPolicy(flowState.flowTimeoutPolicy);
+      if (!storedPolicy || storedPolicy.startedAt !== policy.startedAt ||
+          storedPolicy.timeoutMs !== policy.timeoutMs || storedPolicy.deadlineAt !== policy.deadlineAt) continue;
+      const ranForSecs = Math.max(0, Math.floor((sweepTime - policy.startedAt) / 1000));
+      const effectiveTimeoutSecs = policy.timeoutMs / 1000;
+      const summary = `工作流执行超时（运行 ${ranForSecs}s，超过 ${effectiveTimeoutSecs}s 上限），已自动终止并置为失败`;
+      const failed = await handle.taskFlow.fail({
+        flowId: handle.flowId,
+        expectedRevision: flow.revision,
+        stateJson: JSON.stringify(flowState),
+        blockedSummary: summary,
+        endedAt: now(),
+      }) as { applied?: boolean } | undefined;
+      if (failed?.applied !== true) {
+        handle.timeoutReaping = false;
+        console.warn(`[controller] FLOW_TIMEOUT flowId=${handle.flowId} — TaskFlow CAS not applied; leaving terminal status unchanged`);
+        continue;
       }
+      // Claim closeout only after CAS succeeds; an executor settling while
+      // CAS is pending must not abandon its own failure cleanup on a lost CAS.
+      handle.timeoutReaping = true;
+      // Only the CAS winner may cancel the executor and publish terminal state.
+      const abortedInMemory = abortAsyncExecutionForFlow(handle.flowId);
+      const reason = JSON.stringify({
+        error: summary, reason: "flow_timeout", ranForSecs,
+        timeoutSecs: effectiveTimeoutSecs, abortedInMemory,
+      });
+      console.warn(`[controller] FLOW_TIMEOUT flowId=${handle.flowId} workflow=${row.workflow_id} ranFor=${ranForSecs}s > timeout=${effectiveTimeoutSecs}s`);
+      if (isCurrentCompletionContext(context)) enqueueRunLog({ flow_id: handle.flowId, level: "error", source: "workflow", message: reason, timestamp: sweepTime });
+      completeFlowRun(handle.flowId, "failed", row.current_phase ?? "timeout", reason, sweepTime - policy.startedAt, flowState, row.workflow_id, context);
+      reapedCount += 1;
+    } catch (error) {
+      handle.timeoutReaping = false;
+      console.warn(`[controller] reapStaleRunningFlows: owned flow ${handle.flowId} skipped: ${error instanceof Error ? error.message : String(error)}`);
     }
-
-    // Skip flows that haven't exceeded their effective timeout.
-    if (ranForSecs < effectiveTimeoutSecs) continue;
-
-    console.warn(
-      `[controller] FLOW_TIMEOUT flowId=${row.flow_id} workflow=${row.workflow_id} ` +
-      `ranFor=${ranForSecs}s > timeout=${effectiveTimeoutSecs}s — aborting execution and marking failed`,
-    );
-    enqueueRunLog({
-      flow_id: row.flow_id,
-      level: "error",
-      source: "workflow",
-      message: `Flow timed out: ranFor=${ranForSecs}s > timeout=${effectiveTimeoutSecs}s`,
-      timestamp: Date.now(),
-    });
-
-    // 1. Abort the in-memory async execution so the running LLM/tool call
-    //    throws AbortError → node failed → executeLoop finalizes. If the flow
-    //    was abandoned (no handle in this process, e.g. after a restart) this
-    //    is a no-op and the completeFlowRun below still reaps the DB row.
-    const abortedInMemory = abortAsyncExecutionForFlow(row.flow_id);
-    if (!abortedInMemory) {
-      console.log(`[controller] FLOW_TIMEOUT flowId=${row.flow_id} — no active in-process execution; only DB status reaped`);
-    }
-
-    // 2. Try to obtain FlowState for richer failure diagnostics.
-    // When state is available, completeFlowRun can build structured result_json
-    // (failed node IDs, titles, errors) and compute accurate succeeded/failed counts.
-    let flowState: FlowState | undefined;
-    if (getStateForFlow) {
-      try {
-        flowState = await getStateForFlow(row.flow_id);
-      } catch (e) {
-        console.warn(`[controller] reapStaleRunningFlows: getStateForFlow threw for ${row.flow_id}: ${(e as Error)?.message ?? e}`);
-      }
-    }
-
-    // 3. Persist the "failed" terminal status.
-    const reason = JSON.stringify({
-      error: `工作流执行超时（运行 ${ranForSecs}s，超过 ${effectiveTimeoutSecs}s 上限），已自动终止并置为失败`,
-      reason: "flow_timeout",
-      ranForSecs,
-      timeoutSecs: effectiveTimeoutSecs,
-      abortedInMemory,
-    });
-
-    // 3a. Fail the flow in TaskFlow so that the in-memory executeLoop
-    //     encounters a revision conflict on its next boundTaskFlow.resume()
-    //     or boundTaskFlow.fail() call and exits without overwriting the
-    //     "failed" status with "succeeded". This is the critical fix for the
-    //     race condition where the watchdog marks the flow failed but the
-    //     executeLoop (still running in-memory after abort) later marks it
-    //     succeeded because all remaining nodes complete normally.
-    if (failFlowInTaskFlow && flowState) {
-      try {
-        const failed = await failFlowInTaskFlow(
-          row.flow_id,
-          JSON.stringify(flowState),
-          `工作流执行超时（运行 ${ranForSecs}s，超过 ${effectiveTimeoutSecs}s 上限），已自动终止并置为失败`,
-        );
-        if (failed) {
-          console.log(`[controller] FLOW_TIMEOUT flowId=${row.flow_id} — TaskFlow status updated to failed`);
-        } else {
-          console.warn(`[controller] FLOW_TIMEOUT flowId=${row.flow_id} — TaskFlow fail() returned false (revision conflict or already terminal)`);
-        }
-      } catch (e) {
-        // Revision conflict means another writer already owns the flow.
-        // This is expected when the executeLoop already transitioned the flow.
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`[controller] FLOW_TIMEOUT flowId=${row.flow_id} — TaskFlow fail() threw: ${msg}`);
-      }
-    }
-
-    // 3b. Update flow_runs table with the failed status.
-    // Pass FlowState when available so completeFlowRun can build structured
-    // failure info. Pass row.workflow_id explicitly so HTTP callback can
-    // dispatch workflow_failed even without a FlowState object.
-    completeFlowRun(row.flow_id, "failed", row.current_phase ?? "timeout", reason, ranForSecs * 1000, flowState, row.workflow_id);
-    reapedCount += 1;
   }
   return reapedCount;
 }
@@ -2756,7 +2796,8 @@ function appendFlowEvent(
     void appendWorkflowJsonlLog(buildWorkflowLogRecord({ event: record, sessionKey: _sessionKey, botId: _botId, ownerId: _ownerId, rawError: options.rawError })).catch(() => { /* best-effort log */ });
   }
   // Dual-write to database (best-effort, non-blocking)
-  if (_eventRepository) {
+  const context = ownedCompletionContext(record.flowId);
+  if (_eventRepository && (!context || isCurrentCompletionContext(context))) {
     void _eventRepository.insert({
       id: record.id,
       time: record.time,
@@ -3180,9 +3221,10 @@ async function runNodeValidationActions(params: {
   });
 }
 
-async function sleep(ms: number): Promise<void> {
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   if (ms <= 0) return;
-  await new Promise((resolve) => setTimeout(resolve, ms));
+  await sleepTimer(ms, undefined, { signal });
 }
 
 function initNodeState(node: WorkflowNode, executorType: string, previousState?: NodeState): NodeState {
@@ -3219,6 +3261,7 @@ async function executeNodeWithRetry(
   let guardianRepair: GuardianRepair | null = null;
 
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt += 1) {
+    deps.abortSignal?.throwIfAborted();
     lastFailureReason = "executor-failed";
     // Use guardian-repaired node if available, otherwise original node
     const effectiveNode = guardianRepair ? applyRepair(node, guardianRepair) : node;
@@ -3356,7 +3399,8 @@ async function executeNodeWithRetry(
         }
       }
 
-      const result = await deps.executeNode(effectiveNode, ctx, state, flowId);
+      const result = await deps.executeNode(effectiveNode, ctx, state, flowId, { abortSignal: deps.abortSignal });
+      deps.abortSignal?.throwIfAborted();
       const durationMs = Date.now() - nodeStartTime;
 
       if (result.status === "waiting") {
@@ -3461,6 +3505,8 @@ async function executeNodeWithRetry(
       lastRawError = err;
     }
 
+    // Parent/flow cancellation is not an executor failure eligible for retry.
+    deps.abortSignal?.throwIfAborted();
     const durationMs = Date.now() - nodeStartTime;
 
     state.nodeStates[node.id] = {
@@ -3475,7 +3521,7 @@ async function executeNodeWithRetry(
       ...(lastFailedResult?.result ? { result: lastFailedResult.result } : {}),
     };
 
-    if (attempt < retry.maxAttempts && nodeRetryHandles(node, lastFailureReason)) {
+    if (lastFailedResult?.retryable !== false && attempt < retry.maxAttempts && nodeRetryHandles(node, lastFailureReason)) {
       // ── Node will retry ──
       console.log(`[controller] NODE_RETRY flowId=${flowId} node=${node.id} executor=${node.executor.type} attempt=${attempt}/${retry.maxAttempts} reason=${lastFailureReason} error=${(lastError ?? "").slice(0, 80)} duration=${durationMs}ms`);
 
@@ -3567,7 +3613,7 @@ async function executeNodeWithRetry(
         }
       }
 
-      await sleep(retry.backoffMs);
+      await sleep(retry.backoffMs, deps.abortSignal);
     } else {
       // ── Node failed (retries exhausted) ──
       console.log(`[controller] NODE_FAILED_FINAL flowId=${flowId} node=${node.id} executor=${node.executor.type} attempt=${attempt}/${retry.maxAttempts} reason=${lastFailureReason} error=${(lastError ?? "").slice(0, 100)} duration=${durationMs}ms`);
@@ -3973,6 +4019,7 @@ async function runNodeSuccessHooks(
 export async function executeWorkflowForTest(
   params: ExecuteWorkflowForTestParams,
 ): Promise<ExecuteLoopOutcome> {
+  params.deps.abortSignal?.throwIfAborted();
   const state = ensureFlowStateDefaults(params.state);
   state.flowHooks ??= {};
   if (state.subworkflowDependencies === undefined) state.subworkflowDependencies = snapshotWorkflowDependencies(params.workflow);
@@ -4010,7 +4057,10 @@ export async function executeWorkflowForTest(
   // captured for the parent session. Legacy node dispatch remains unchanged.
   const executionDeps = params.deps.subworkflowDeps ? {
     ...params.deps,
-    executeNode: async (node: WorkflowNode, context: TemplateContext, current: FlowState, flowId: string) => {
+    executeNode: async (
+      node: WorkflowNode, context: TemplateContext, current: FlowState, flowId: string,
+      executionContext?: ExecutorDispatchContext,
+    ) => {
       if (params.workflow.nodes.some(n => n.executor.type === "subworkflow" && n.executor.fanout)
         && params.deps.subworkflowDeps!.fanoutRuntime) {
         const status = await params.deps.subworkflowDeps!.fanoutRuntime.parentStatus(flowId);
@@ -4018,9 +4068,10 @@ export async function executeWorkflowForTest(
       }
       return node.executor.type === "subworkflow" && node.executor.fanout
         ? executeSubworkflow(node, context, current, flowId, params.deps.subworkflowDeps!)
-        : params.deps.executeNode(node, context, current, flowId);
+        : params.deps.executeNode(node, context, current, flowId, executionContext);
     },
   } : params.deps;
+  params.deps.abortSignal?.throwIfAborted();
   return executeLoop(
     executionDeps,
     params.workflow,
@@ -4045,6 +4096,8 @@ type ExecutorDispatchFn = (
   templateCtx: TemplateContext,
   flowState: FlowState,
   flowId: string,
+  /** Per-invocation signal; executor factories must not retain an older signal. */
+  executionContext?: ExecutorDispatchContext,
 ) => Promise<ExecutorResult>;
 
 // ── Controller ──
@@ -4638,6 +4691,12 @@ async function startWorkflowAfterPreflight(
     },
   }, { log: false });
 
+  initialState.flowTimeoutPolicy = freezeFlowTimeoutPolicy(
+    startedEvent.time,
+    workflow.flowTimeoutMinutes,
+    loadConfig().app.execution.flowTimeoutMinutes,
+  );
+
   const flow = await deps.boundTaskFlow.createManaged({
     controllerId: CONTROLLER_ID,
     workflowId,
@@ -4838,7 +4897,17 @@ async function startWorkflowAfterPreflight(
     console.warn(`[controller] FLOW_CONTROL_SKIPPED flowId=${flowId} workflow=${workflowId} — deps.flowControl is null/undefined, concurrency limiting is not active`);
   }
 
-const runWorkflow = async () => {
+  if (startAsync) {
+    // launchAsyncExecution registers ownership before returning, and its timer
+    // preserves the macrotask boundary required to avoid tool/agent re-entry.
+    launchAsyncExecution(deps, workflow, initialState, flowId, revision ?? 1, {
+      runStartHooks: true,
+      debug,
+    });
+    return flowId;
+  }
+
+  const runWorkflow = async () => {
     enqueueRunLog({
       flow_id: flowId,
       level: "info",
@@ -4848,35 +4917,15 @@ const runWorkflow = async () => {
     });
     try {
       await executeWorkflowForTest({
-        deps,
-        workflow,
-        state: initialState,
-        flowId,
-        revision: revision ?? 1,
-        runStartHooks: true,
-        debug,
+        deps, workflow, state: initialState, flowId,
+        revision: revision ?? 1, runStartHooks: true, debug,
       });
-} catch (err) {
-      // Safety net: release slots if executeLoop threw without reaching a terminal state.
+    } catch (err) {
       console.error(`[controller] handleRunWorkflow: executeLoop threw, releasing flow control slots for flow ${flowId}:`, err);
       deps.flowControl?.releaseAllForFlow(flowId);
-      if (!startAsync) throw err;
+      throw err;
     }
   };
-
-  if (startAsync) {
-    // Fully detach workflow execution from the current tool-call stack.
-    // Calling runWorkflow() inline would execute synchronously until its first await;
-    // an embedded-agent node reached in that window can re-enter the agent runtime
-    // while workflow_engine_dispatch is still waiting, recreating the deadlock we are avoiding.
-    setTimeout(() => {
-      void runWorkflow().catch((err) => {
-        console.error(`[controller] runWorkflow (async detach) failed for flowId=${flowId}:`, err);
-        recordFailure("runWorkflow (async)", flowId, undefined, err, "error");
-      });
-    }, 0);
-    return flowId;
-  }
 
   await runWorkflow();
   return flowId;
@@ -4923,6 +4972,17 @@ async function executeSubworkflowChild(
     },
   });
   const goalSuffix = [paramsDesc].filter(Boolean).join(", ");
+  const startedEvent = appendFlowEvent(childState, {
+    type: "workflow_started",
+    flowId: "pending",
+    workflowId: childWorkflow.id,
+    data: { parentFlowId, parentNodeId, depth, params: childParams },
+  }, { log: false });
+  childState.flowTimeoutPolicy = freezeFlowTimeoutPolicy(
+    startedEvent.time,
+    childWorkflow.flowTimeoutMinutes,
+    loadConfig().app.execution.flowTimeoutMinutes,
+  );
 
   const flow = await deps.boundTaskFlow.createManaged({
     controllerId: CONTROLLER_ID,
@@ -4934,6 +4994,7 @@ async function executeSubworkflowChild(
   });
 
   const childFlowId = readFlowId(flow);
+  startedEvent.flowId = childFlowId;
   const childRevision = (flow as Record<string, unknown>).revision as number | undefined ?? 1;
 
   try {
@@ -13088,6 +13149,7 @@ async function executeLoop(
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    deps.abortSignal?.throwIfAborted();
     loopIter += 1;
     mark("loop_top");
 
@@ -13102,9 +13164,11 @@ async function executeLoop(
     // This check queries flow_runs.status directly from the DB, which is
     // shared across processes. If the flow is already terminal, exit the loop
     // immediately without starting new nodes.
-    if (_flowRunRepository) {
+    const ownedContext = ownedCompletionContext(flowId);
+    const flowRepository = ownedContext ? ownedContext.flowRunRepository : _flowRunRepository;
+    if (flowRepository) {
       try {
-        const _flowRow = await _flowRunRepository.findByFlowId(flowId);
+        const _flowRow = await flowRepository.findByFlowId(flowId);
         if (_flowRow?.status && _flowRow.status !== "running" && _flowRow.status !== "waiting" && _flowRow.status !== "blocked") {
           console.warn(
             `[controller] executeLoop: flowId=${flowId} already terminal (status=${_flowRow.status}) in flow_runs — ` +
@@ -13588,6 +13652,7 @@ async function executeLoop(
       });
 
       const settled = await Promise.allSettled(promises);
+      deps.abortSignal?.throwIfAborted();
       const settledOutcome = await handleParallelNodeSettledResults({
         deps,
         workflow: effectiveWorkflow,

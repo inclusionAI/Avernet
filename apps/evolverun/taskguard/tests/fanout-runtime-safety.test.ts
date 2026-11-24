@@ -399,6 +399,24 @@ test("safety: aborting a waiting remote action does not fabricate a cancelled ch
   });
 });
 
+test("safety: cancellation racing a non-cancellation CAS error preserves that exact error", async () => {
+  await fixture(async f => {
+    const abort = f.newController();
+    const failure = new Error("状态更新冲突，请重试");
+    f.store.beforeCheckpoint = write => {
+      if (write.status === "succeeded") {
+        abort.abort(new Error("separate parent cancellation"));
+        throw failure;
+      }
+    };
+    await assert.rejects(bounded(f.start(f.runtime, abort.signal), "non-cancellation failure"), error => error === failure);
+    assert.equal(abort.signal.aborted, true);
+    assert.notEqual(abort.signal.reason, failure);
+    assert.equal(f.controls.dispatches, 1);
+    assert.equal(f.row().status, "running", "failed terminal persistence must not fabricate a terminal fact");
+  });
+});
+
 test("safety: TaskFlow persistence failure leaves both durable and controller revisions unchanged", async () => {
   await fixture(async f => {
     const adapter = f.seedAdapter();
