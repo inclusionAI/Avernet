@@ -293,5 +293,9 @@ async fn create_session_rejects_a_sid_without_a_well_formed_shard_prefix() {
             "{bad:?}"
         );
     }
+    // An invariant, not the distinguishing check: the store also refused these
+    // ids before the fix, but only after admission had accepted some of them
+    // (s+1.7f3a9c) with the store's own code. The error-code assertions above
+    // pin that the admission boundary rejects before any inbox write.
     assert_eq!(inbox_len(&store).await, 0);
 }

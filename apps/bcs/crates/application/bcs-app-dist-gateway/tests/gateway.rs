@@ -734,7 +734,7 @@ async fn a_retried_first_message_needs_no_directory_once_its_session_is_frozen()
 }
 
 #[tokio::test]
-async fn malformed_client_ids_are_refused_before_any_store_access() {
+async fn malformed_client_ids_fail_the_format_gate_before_business_checks() {
     let p = ports();
     let g = gateway(&p);
     for bad in [
