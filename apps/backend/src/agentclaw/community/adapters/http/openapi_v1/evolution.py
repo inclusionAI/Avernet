@@ -21,7 +21,12 @@ from agentclaw.community.utils.gateway_principal_config import (
     get_principal_verifier_config,
 )
 from avernet_evolution.adapters.backend_access import HEADER, fingerprint, issue_grant
-from avernet_evolution.control_contract import BindingsBody, CancelBody, RunBody
+from avernet_evolution.control_contract import (
+    BindingsBody,
+    CancelBody,
+    ReviewBody,
+    RunBody,
+)
 from avernet_genome.models import BotRef
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 
@@ -81,10 +86,14 @@ async def relay(request, bot, user_id, caller, config, clients) -> Response:
         suffix = suffix.replace(
             "{run_id}", quote(request.path_params["run_id"], safe="")
         )
+    if "candidate_id" in request.path_params:
+        suffix = suffix.replace(
+            "{candidate_id}", quote(request.path_params["candidate_id"], safe="")
+        )
     path = f"/openapi/v1/bots/{quote(bot.bot_id, safe='')}/evolution{suffix}"
     params = {
         name: request.query_params[name]
-        for name in ("page", "page_size", "after")
+        for name in ("page", "page_size", "after", "status", "min_tier")
         if name in request.query_params
     }
     params["entity_id"] = bot.entity_id
@@ -171,6 +180,9 @@ Reply = Annotated[Callable[[], Awaitable[Response]], Depends(delivery)]
 RunId = Annotated[
     str, Path(description="Evolution run ID scoped to the addressed Bot.")
 ]
+CandidateId = Annotated[
+    str, Path(description="Candidate content hash, e.g. sha256:c41e…")
+]
 
 
 @router.get("/bindings", response_model=Envelope[dict[str, Any]])
@@ -231,4 +243,55 @@ async def evidence(
 
 @router.get("/strategies", response_model=Envelope[dict[str, Any]])
 async def strategies(owner_id: OwnerIdDep, reply: Reply):
+    return await reply()
+
+
+# -- 09 §10.1 candidate report and review queue ------------------------------------------------
+# Same relay, same Bot gate; the report joins verification, gate and review state.
+
+
+@router.get("/candidates/{candidate_id}", response_model=Envelope[dict[str, Any]])
+async def candidate_report(
+    owner_id: OwnerIdDep, candidate_id: CandidateId, reply: Reply
+):
+    return await reply()
+
+
+@router.get("/review-queue", response_model=Envelope[dict[str, Any]])
+async def review_queue(
+    owner_id: OwnerIdDep,
+    reply: Reply,
+    status: str = Query(
+        "open", description="open, approved, rejected, superseded or all."
+    ),
+    min_tier: str | None = Query(None, description="Lowest risk tier to include."),
+    page: int = Query(1, ge=1, description="One-based page number."),
+    page_size: int = Query(
+        20, ge=1, le=100, description="Maximum review items returned per page."
+    ),
+):
+    return await reply()
+
+
+@router.post(
+    "/candidates/{candidate_id}:approve", response_model=Envelope[dict[str, Any]]
+)
+async def approve_candidate(
+    owner_id: OwnerIdDep,
+    candidate_id: CandidateId,
+    payload: ReviewBody,
+    reply: Reply,
+):
+    return await reply()
+
+
+@router.post(
+    "/candidates/{candidate_id}:reject", response_model=Envelope[dict[str, Any]]
+)
+async def reject_candidate(
+    owner_id: OwnerIdDep,
+    candidate_id: CandidateId,
+    payload: ReviewBody,
+    reply: Reply,
+):
     return await reply()

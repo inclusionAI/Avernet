@@ -20,6 +20,10 @@ OPERATIONS = (
     ("GET", "/runs/{run_id}/candidates"),
     ("GET", "/runs/{run_id}/evidence"),
     ("GET", "/strategies"),
+    ("GET", "/candidates/{candidate_id}"),
+    ("GET", "/review-queue"),
+    ("POST", "/candidates/{candidate_id}:approve"),
+    ("POST", "/candidates/{candidate_id}:reject"),
 )
 AUTHORIZATION = {
     (method, BASE + suffix): Check(PermissionLevel.MEMBER, explicit=method != "GET")

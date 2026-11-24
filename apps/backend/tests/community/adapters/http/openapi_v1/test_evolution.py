@@ -164,10 +164,16 @@ def request(client, method="GET", suffix="/bindings", *, token=True, **kwargs):
     )
 
 
+def _sample(suffix: str) -> str:
+    """A concrete path for a route template: ids carry the colon real candidates do."""
+
+    return suffix.replace("{run_id}", "run-1").replace("{candidate_id}", "sha256:c41e")
+
+
 @pytest.mark.parametrize("method,suffix", OPERATIONS)
 def test_all_operations_require_system_login_before_relay(surface, method, suffix):
     client, calls, *_ = surface
-    result = request(client, method, suffix.replace("{run_id}", "run-1"), token=False)
+    result = request(client, method, _sample(suffix), token=False)
     assert result.status_code == 401
     assert not calls
 
@@ -176,7 +182,7 @@ def test_all_operations_require_system_login_before_relay(surface, method, suffi
 def test_all_operations_require_bot_permission(surface, method, suffix):
     client, calls, collaborators, *_ = surface
     collaborators.level = PermissionLevel.NONE
-    result = request(client, method, suffix.replace("{run_id}", "run-1"))
+    result = request(client, method, _sample(suffix))
     assert result.status_code == 404
     assert not calls
 
@@ -331,3 +337,66 @@ def test_upstream_login_redirect_is_not_followed_or_forwarded(surface):
     assert len(calls) == 1
     assert "location" not in result.headers
     assert "login.example.test" not in result.text
+
+
+def test_candidate_report_and_review_queue_relay_paths_and_query(surface):
+    client, calls, *_ = surface
+    cid = "sha256:c41e"
+
+    report = request(client, "GET", f"/candidates/{cid}")
+    assert report.status_code == 200
+    req, _access = calls[0]
+    # 内容哈希里的冒号在线上是 %3A，服务端解码后仍是同一个 id，授权指纹两侧一致。
+    assert req.url.path == f"/openapi/v1/bots/{BOT}/evolution/candidates/sha256:c41e"
+    assert "%3A" in str(req.url)
+
+    queue = request(
+        client,
+        "GET",
+        "/review-queue",
+        params={"status": "all", "min_tier": "T1", "page": "2", "page_size": "5"},
+    )
+    assert queue.status_code == 200
+    req = calls[1][0]
+    params = dict(req.url.params)
+    assert req.url.path.endswith("/evolution/review-queue")
+    assert (
+        params["status"],
+        params["min_tier"],
+        params["page"],
+        params["page_size"],
+    ) == (
+        "all",
+        "T1",
+        "2",
+        "5",
+    )
+    assert params["entity_id"] == RESOURCE
+
+
+def test_approve_relays_the_suffixed_path_and_idempotency_key(surface):
+    client, calls, *_ = surface
+    cid = "sha256:c41e"
+    result = request(
+        client,
+        "POST",
+        f"/candidates/{cid}:approve",
+        json={"reason": "reviewed persona diff"},
+        headers={"Idempotency-Key": "review-1"},
+    )
+    assert result.status_code == 200
+    req, access = calls[0]
+    assert req.url.path.endswith("/evolution/candidates/sha256:c41e:approve")
+    assert "%3A" in str(req.url)
+    assert req.headers["idempotency-key"] == "review-1"
+    assert json.loads(req.content) == {"reason": "reviewed persona diff"}
+    assert access.actor == CALLER
+
+
+def test_review_body_is_validated_before_relay(surface):
+    client, calls, *_ = surface
+    result = request(
+        client, "POST", "/candidates/sha256:c41e:reject", json={"reason": ""}
+    )
+    assert result.status_code == 422
+    assert not calls
