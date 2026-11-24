@@ -9,7 +9,7 @@ use bcs_service_api::{BotAbortDeliveryCommand, BotAbortDeliveryResult, BotDelive
     BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotRunContextPort, ChatEventState,
     ProviderCredentialRepoPort, ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
     ProviderRunTransport, ServiceError, ServiceResult};
-use bcs_service_api::a2a_test_user::{A2aTestUserAdmission, A2aTestUserConfig, A2aTestUserSelection};
+use bcs_service_api::a2a_test_user::{A2aTestUserConfig, A2aTestUserSelection};
 use bcs_service_api::port::repo::a2a_run::{A2aContextScope, A2aRunRecord, A2aRunRepoPort, A2aRunState};
 use bcs_service_api::types::a2a_bot::A2aBinding;
 use serde_json::{json, Value};
@@ -64,41 +64,18 @@ impl Drop for Lease {
 fn invalid(message: &str) -> ServiceError {
     ServiceError::InvalidOperation { message: format!("A2A: {message}"), request_id: None }
 }
-pub fn test_user_admission(config: &A2aTestUserConfig) -> Option<A2aTestUserAdmission> {
-    config.accept_new.then(|| A2aTestUserAdmission {
-        selection: test_user_selection(config),
-        target_bot_id: config.target_bot_id.clone(),
-    })
-}
-
-fn test_user_selection(config: &A2aTestUserConfig) -> A2aTestUserSelection {
-    // Pin the routing configuration across queue dwell, including restarts.
-    // The switch can be closed independently so accepted work can drain.
-    let mut digest = Sha256::new();
-    for value in [&config.binding_ref, &config.alias, &config.caller_bot_id, &config.provider_id,
-        &config.target_bot_id, &config.interface_url, &config.header_name, &config.user_id_secret]
-    {
-        digest.update((value.len() as u64).to_be_bytes());
-        digest.update(value.as_bytes());
-    }
-    A2aTestUserSelection {
-        alias: config.alias.clone(),
-        binding_ref: hex::encode(digest.finalize()),
-        caller_bot_id: config.caller_bot_id.clone(),
-    }
-}
-
 fn test_user_header(
     config: Option<&A2aTestUserConfig>,
     selection: &A2aTestUserSelection,
     target: &BotDeliveryTarget,
 ) -> ServiceResult<(reqwest::header::HeaderName, reqwest::header::HeaderValue)> {
-    let denied = || ServiceError::DeliveryNotSent { code: "a2a_test_user_scope_changed", retryable: false };
+    let denied = || ServiceError::Forbidden("A2A test user destination is outside its configured scope".into());
     let config = config.ok_or_else(denied)?;
-    let BotDeliveryTarget::A2a { bot_id, provider_id, interface, .. } = target else { return Err(denied()); };
-    if test_user_selection(config) != *selection || config.target_bot_id != *bot_id
+    let BotDeliveryTarget::A2a { bot_id, provider_id, interface, credential_kind, .. } = target else { return Err(denied()); };
+    if config.caller_bot_id != selection.caller_bot_id || config.target_bot_id != *bot_id
         || config.provider_id != *provider_id || interface.binding != A2aBinding::JsonRpc
         || interface.update_mode != bcs_service_api::types::a2a::A2aUpdateMode::Stream
+        || credential_kind != bcs_service_api::types::a2a_auth::ANONYMOUS
     {
         return Err(denied());
     }
@@ -108,7 +85,7 @@ fn test_user_header(
         return Err(denied());
     }
     let name = reqwest::header::HeaderName::from_bytes(config.header_name.as_bytes()).map_err(|_| denied())?;
-    let mut value = reqwest::header::HeaderValue::from_str(config.user_id().ok_or_else(denied)?).map_err(|_| denied())?;
+    let mut value = reqwest::header::HeaderValue::from_str(selection.user_id()).map_err(|_| denied())?;
     value.set_sensitive(true);
     Ok((name, value))
 }
@@ -141,9 +118,12 @@ impl A2aHttpTransport {
         config.validate().map_err(invalid)?;
         let endpoint = reqwest::Url::parse(&config.interface_url).map_err(|_| invalid("invalid A2A test user URL"))?;
         if endpoint.scheme() != "https" || !endpoint.username().is_empty() || endpoint.password().is_some()
-            || endpoint.fragment().is_some() || config.user_id().is_none()
+            || endpoint.fragment().is_some()
         {
             return Err(invalid("invalid A2A test user configuration"));
+        }
+        if self.inner.identity.is_none() {
+            return Err(invalid("A2A test user requires application identity"));
         }
         Arc::get_mut(&mut self.inner).ok_or_else(|| invalid("configure A2A test user before sharing transport"))?.test_user = Some(config);
         Ok(self)
@@ -211,6 +191,7 @@ impl A2aHttpTransport {
             headers.insert("a2a-extensions", reqwest::header::HeaderValue::from_str(&negotiated)
                 .map_err(|_|invalid("extension header invalid"))?);
         }
+        let require_identity = submission_header.is_some();
         if let Some((name, value)) = submission_header {
             headers.insert(name, value);
         }
@@ -218,6 +199,9 @@ impl A2aHttpTransport {
         let mut http = crate::http_client::HttpClient::new(http);
         if let Some(identity) = &self.inner.identity {
             http = http.with_identity(identity.clone(), record.scope.provider_id.clone());
+        }
+        if require_identity {
+            http = http.require_identity();
         }
         if record.interface.binding == A2aBinding::JsonRpc {
             return Ok(BindingClient::JsonRpc(crate::jsonrpc::JsonRpcClient::with_http(

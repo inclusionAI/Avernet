@@ -724,12 +724,6 @@ mod gateway_principal_tests;
 mod candidate_search_wiring_tests;
 
 pub async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretAccessPort) -> crate::Result<()> {
-    if let Some(test_user) = &mut config.a2a_test_user {
-        let value = access.get_secret(&test_user.user_id_secret).await
-            .map_err(|_| crate::BcsError::InvalidConfig("A2A test user secret unavailable".into()))?;
-        test_user.set_user_id(value.value)
-            .map_err(|message| crate::BcsError::InvalidConfig(message.into()))?;
-    }
     if let Some(value) = resolve_secret_value(config.auth_sdk.secret_key_secret.as_deref(), access, "auth_sdk.secret_key_secret").await? {
         config.auth_sdk.secret_key = Some(value);
     }

@@ -593,8 +593,7 @@ impl bcs_service_api::A2aChatRunService for Runs {
         }
         if command.message == "test user" {
             let selection = command.a2a_test_user.as_ref().unwrap();
-            assert_eq!(selection.alias, "weather-smoke");
-            assert_eq!(selection.binding_ref, "fixture-v1");
+            assert_eq!(selection.user_id(), "12345678");
             assert_eq!(selection.caller_bot_id, "caller-bot");
             assert_eq!(command.session_key, format!("a2a-test:{}", command.run_id));
         } else {
@@ -672,24 +671,26 @@ async fn assert_named_chat_and_run_routes(prefix: &str) {
     );
     let path = format!("{prefix}/a2a/providers/orders/bots/remote/chat-async");
     let disabled = build_router(state.clone()).oneshot(request("POST", &path,
-        r#"{"message":"test user","test_user_ref":"weather-smoke"}"#)).await.unwrap();
+        r#"{"message":"test user","user_id":"12345678"}"#)).await.unwrap();
     assert_eq!(disabled.status(), StatusCode::FORBIDDEN);
-    use bcs_service_api::a2a_test_user::{A2aTestUserAdmission, A2aTestUserSelection};
-    let app = build_router(state.with_a2a_test_user_admission(Some(A2aTestUserAdmission {
-        selection: A2aTestUserSelection {
-            alias: "weather-smoke".into(), binding_ref: "fixture-v1".into(), caller_bot_id: "caller-bot".into(),
-        },
+    use bcs_service_api::a2a_test_user::A2aTestUserConfig;
+    let app = build_router(state.with_a2a_test_user_admission(Some(A2aTestUserConfig {
+        caller_bot_id: "caller-bot".into(),
         target_bot_id: "target-bot".into(),
+        provider_id: "orders".into(),
+        interface_url: "https://provider.example/rpc".into(),
+        header_name: "x-example-agent-user".into(),
     })));
     for (payload, status) in [
-        (r#"{"message":"test user","test_user_ref":"unknown"}"#, StatusCode::BAD_REQUEST),
-        (r#"{"message":"test user","test_user_ref":"weather-smoke","sessionId":"reuse"}"#, StatusCode::BAD_REQUEST),
-        (r#"{"message":"test user","test_user_ref":"weather-smoke"}"#, StatusCode::ACCEPTED),
+        (r#"{"message":"test user","test_user_ref":"weather-smoke"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"message":"test user","user_id":"unknown"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"message":"test user","user_id":"12345678","sessionId":"reuse"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"message":"test user","user_id":"12345678"}"#, StatusCode::ACCEPTED),
     ] {
         let response = app.clone().oneshot(request("POST", &path, payload)).await.unwrap();
         assert_eq!(response.status(), status);
         let json = read(response).await;
-        assert!(json.get("test_user_ref").is_none());
+        assert!(json.get("user_id").is_none());
     }
     let response = app
         .clone()

@@ -12,15 +12,11 @@ fn a2a_test_user_fixture_requires_pre_release_and_a_scoped_header() {
     let mut config = BcsConfig::default();
     assert!(validate_loaded_config_for_environment(&config, Environment::Prod).is_ok());
     config.a2a_test_user = Some(toml::from_str(r#"
-        accept_new = true
-        alias = "weather-smoke"
-        binding_ref = "fixture-v1"
         caller_bot_id = "test-caller"
         provider_id = "test-provider"
         target_bot_id = "test-target"
         interface_url = "https://agent.example.test/weather"
         header_name = "x-example-agent-user"
-        user_id_secret = "fixture-ref"
     "#).unwrap());
     assert!(validate_loaded_config_for_environment(&config, Environment::Pre).is_ok());
     assert!(validate_loaded_config_for_environment(&config, Environment::Prod).is_err());
