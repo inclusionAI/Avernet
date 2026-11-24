@@ -16,6 +16,7 @@ from agentclaw.community.core.service_bot.services.deploy.managed_composer impor
 from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
     NoopStoragePolicy,
 )
+from agentclaw.community.core.service_bot.services import baas_service as baas_module
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
@@ -162,15 +163,21 @@ def test_get_http_info_business_code_nonzero_raises(baas_service, http):
         baas_service.get_http_info(bind_id=42, port=20010, path="/x")
 
 
-def test_get_http_info_network_error_raises(baas_service, http):
-    """Transport error -> wrapped as BaasServiceError."""
+def test_get_http_info_network_error_raises(baas_service, http, monkeypatch):
+    """Transport error -> retried, then wrapped as BaasServiceError."""
+    monkeypatch.setattr(baas_module.time, "sleep", lambda _seconds: None)
+    attempts = []
+
     def _boom(*a, **kw):
+        attempts.append(1)
         raise httpx.ConnectError("connection refused")
 
     http.set_override("get", _boom)
 
-    with pytest.raises(BaasServiceError, match="Failed to get http info"):
+    with pytest.raises(BaasServiceError, match="failed after 4 attempts"):
         baas_service.get_http_info(bind_id=42, port=20010, path="/x")
+
+    assert len(attempts) == 4
 
 
 def test_get_http_info_uses_self_tenant_when_not_specified(baas_service, http):

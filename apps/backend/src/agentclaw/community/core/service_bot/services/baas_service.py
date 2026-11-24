@@ -241,7 +241,7 @@ def _error_chain(exc: BaseException) -> str:
 
     Walks ``__cause__`` / ``__context__`` (bounded, cycle-safe) and joins the
     messages, so a hook-wrapped transport failure reads as
-    ``Error in httpx send hook: The read operation timed out`` instead of the
+    ``Error in httpx send hook | The read operation timed out`` instead of the
     opaque first line alone. Only exception messages are copied — never
     responses, headers or credentials.
     """
@@ -309,7 +309,7 @@ def _retry_transient(
     for attempt in range(max_retries + 1):
         try:
             return call()
-        except Exception as exc:  # noqa: BLE001 — classified below
+        except Exception as exc:  # classified below; re-raised when not retryable
             if not _is_retryable_transport_error(exc):
                 raise
             if attempt >= max_retries:
@@ -320,7 +320,7 @@ def _retry_transient(
                     _error_chain(exc),
                 )
                 raise BaasServiceError(
-                    f"Failed after {max_retries + 1} attempts: "
+                    f"{operation} failed after {max_retries + 1} attempts: "
                     f"{_error_chain(exc)}"
                 ) from exc
             delay = base_delay * (2**attempt)
@@ -2995,10 +2995,13 @@ class BaasService:  # pragma: no cover
         )
 
         try:
-            response = self._http.get(
-                f"/api/v1/bots/{bot_uuid}/devices",
-                params={"tenant": effective_tenant},
-                timeout=timeout,
+            response = _retry_transient(
+                f"list_devices_by_bot_uuid(bot_uuid={bot_uuid})",
+                lambda: self._http.get(
+                    f"/api/v1/bots/{bot_uuid}/devices",
+                    params={"tenant": effective_tenant},
+                    timeout=timeout,
+                ),
             )
             response.raise_for_status()
             response_data = response.json()
@@ -3025,6 +3028,8 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+        except BaasServiceError:
+            raise
         except Exception as e:
             # Transport-layer errors (httpx.ConnectError/TimeoutException/...) are
             # not HTTPStatusError; normalize to BaasServiceError so callers (e.g.
@@ -4001,10 +4006,13 @@ class BaasService:  # pragma: no cover
             params["ws_conn_mode"] = ws_conn_mode
 
         try:
-            response = self._http.get(
-                f"/api/v1/bots/{device_id}/http-info",
-                params=params,
-                timeout=timeout,
+            response = _retry_transient(
+                f"get_http_info(device_id={device_id})",
+                lambda: self._http.get(
+                    f"/api/v1/bots/{device_id}/http-info",
+                    params=params,
+                    timeout=timeout,
+                ),
             )
             response.raise_for_status()
 

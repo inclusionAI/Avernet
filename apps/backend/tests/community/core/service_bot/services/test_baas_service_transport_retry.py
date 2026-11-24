@@ -13,14 +13,14 @@ import httpx
 import pytest
 
 from agentclaw.community.core.service_bot.services import baas_service as baas_module
-from agentclaw.community.core.service_bot.services.publish_flow.baas_publish_ops_mixin import (
-    BaasPublishOpsMixin,
-)
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
     _error_chain,
     _retry_transient,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.baas_publish_ops_mixin import (
+    BaasPublishOpsMixin,
 )
 
 
@@ -150,16 +150,59 @@ def test_get_publish_progress_exhausts_retries_with_diagnosable_error(monkeypatc
         _service_with_http(http).get_publish_progress(publish_id=97872)
 
     message = str(exc_info.value)
-    assert "Failed after 4 attempts" in message
+    assert "get_publish_progress(publish_id=97872) failed after 4 attempts" in message
     assert "The read operation timed out" in message
     assert len(http.calls) == 4
     assert sleeps == [1.0, 2.0, 4.0]
 
 
-def test_publish_ops_mixin_propagates_exhausted_error_for_poll_task():
-    """advance_publish_progress catches any Exception and returns a result, so
-    the durable poll task keeps ticking; the mixin must not swallow or rename
-    the diagnosable error before that handler sees it."""
+def test_list_devices_by_bot_uuid_retries_transient(monkeypatch):
+    """The other read-only BaaS GETs share the same retry policy (AC-4)."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(baas_module.time, "sleep", sleeps.append)
+    success = MagicMock()
+    success.raise_for_status.return_value = None
+    success.json.return_value = {"code": 0, "data": [{"items": [{"device_id": "d1"}]}]}
+    http = _FlakyHttp([httpx.ConnectError("connection refused"), success])
+
+    items = _service_with_http(http).list_devices_by_bot_uuid("bot-uuid-001")
+
+    assert items == [{"device_id": "d1"}]
+    assert len(http.calls) == 2
+    assert sleeps == [1.0]
+
+
+def test_get_http_info_retries_transient(monkeypatch):
+    """http-info lookups share the retry policy and keep the AC-1 error chain."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(baas_module.time, "sleep", sleeps.append)
+    success = MagicMock()
+    success.raise_for_status.return_value = None
+    success.json.return_value = {
+        "code": 0,
+        "data": {
+            "http_url": "http://10.0.0.1:20010",
+            "token": "abc",
+            "target": "TECLAW_b@4:20010",
+        },
+    }
+    http = _FlakyHttp([httpx.ReadTimeout("The read operation timed out"), success])
+    service = _service_with_http(http)
+    binding_repo = MagicMock()
+    binding_repo.get_by_id.return_value = MagicMock(device_id="bot-uuid-001")
+    service._device_binding_repo = binding_repo
+
+    info = service.get_http_info(bind_id=42, port=20010)
+
+    assert info.http_url == "http://10.0.0.1:20010"
+    assert len(http.calls) == 2
+    assert sleeps == [1.0]
+
+
+def test_publish_ops_mixin_does_not_swallow_diagnosable_error():
+    """The mixin logs and re-raises, so advance_publish_progress (which catches
+    any Exception and returns a PublishFlowResult) receives the full message;
+    the durable poll task's own retry behaviour is covered by its suite."""
 
     class _Ops(BaasPublishOpsMixin):
         pass
@@ -167,12 +210,12 @@ def test_publish_ops_mixin_propagates_exhausted_error_for_poll_task():
     ops = _Ops()
     ops._baas_service = MagicMock()
     ops._baas_service.get_publish_progress.side_effect = BaasServiceError(
-        "Failed after 4 attempts: Error in httpx send hook: "
-        "The read operation timed out"
+        "get_publish_progress(publish_id=97872) failed after 4 attempts: "
+        "Error in httpx send hook | The read operation timed out"
     )
 
     with pytest.raises(BaasServiceError) as exc_info:
         ops.get_baas_publish_progress(baas_publish_id=97872)
 
-    assert "Failed after 4 attempts" in str(exc_info.value)
+    assert "failed after 4 attempts" in str(exc_info.value)
     assert "The read operation timed out" in str(exc_info.value)
