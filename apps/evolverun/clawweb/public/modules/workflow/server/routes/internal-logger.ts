@@ -73,8 +73,8 @@ export function apiLog(method: ApiLogMethod, path: string, details: Record<strin
     // Console output (always)
     const consoleMethod = level === "ERROR" ? "error" : level === "WARN" ? "warn" : "log";
     const summary = `[internal-api] ${method} ${path} ${status ?? "pending"}`;
-    if (stack) console[consoleMethod](summary, stack);
-    else console[consoleMethod](summary);
+    if (stack) console[consoleMethod]("%s %s", summary, stack);
+    else console[consoleMethod]("%s", summary);
     ensureLogDir();
     appendFileSync(LOG_FILE, line + "\n", "utf-8");
     writeFailureReported = false;
@@ -83,7 +83,7 @@ export function apiLog(method: ApiLogMethod, path: string, details: Record<strin
     if (!writeFailureReported) {
       writeFailureReported = true;
       try {
-        console.error(`[clawweb] Cannot write internal API log to ${LOG_FILE}`, errorStack(error));
+        console.error("[clawweb] Cannot write internal API log to %s %s", LOG_FILE, errorStack(error));
       } catch {
         // Both destinations can be unavailable during the same request.
       }

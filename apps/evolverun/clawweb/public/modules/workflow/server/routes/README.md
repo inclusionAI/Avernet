@@ -28,6 +28,11 @@ fixed safe metadata and an explicitly identified observation stack, never the
 original sensitive exception text. Ordinary stack logging must not inspect
 Error extension properties such as HTTP headers, cookies, or request config.
 
+Multi-argument console diagnostics use a literal format string, with IDs and
+messages passed as `%s` data arguments and the original stack kept separate.
+Request-derived `%s`, `%d`, `%j`, and `%%` text must remain literal; it must not
+consume, reinterpret, or truncate the stack or approved structured metadata.
+
 ## Scope and compatibility
 
 The enterprise HTTP middleware applies this policy to an explicit set of Task
@@ -45,6 +50,8 @@ behavior, retries, or polling frequency.
 
 - `__tests__/internal-logger.test.ts`: console/file severity, original stacks,
   and best-effort logging behavior.
+- `__tests__/console-format-safety.test.ts`: literal format-token handling on
+  route failures, exact original stacks, and unchanged response/metadata contracts.
 - Task Guard route regression tests: response compatibility and caught exception
   evidence.
 - Enterprise middleware tests: route boundaries, warning/error channels, response

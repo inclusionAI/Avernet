@@ -443,7 +443,7 @@ export function createRunsRouter(
             console.log(`[runs] released flow-control for aborted flow ${flowId}: slots=${slotsReleased}, queue=${queueDeleted}`);
           }
         } catch (fcErr) {
-          console.warn(`[runs] failed to release flow-control for aborted flow ${flowId}:`, errorStack(fcErr));
+          console.warn("[runs] failed to release flow-control for aborted flow %s:", flowId, errorStack(fcErr));
         }
       }
 
@@ -467,7 +467,7 @@ export function createRunsRouter(
             },
           });
         } catch (eventErr) {
-          console.warn(`[runs] failed to record abort event for ${flowId}:`, errorStack(eventErr));
+          console.warn("[runs] failed to record abort event for %s:", flowId, errorStack(eventErr));
         }
       }
 
@@ -622,7 +622,7 @@ export function createRunsRouter(
           }
         } catch (fcErr) {
           // Flow control cleanup is best-effort — don't block the delete
-          console.warn(`[runs] failed to release flow-control for flow ${flowId}:`, errorStack(fcErr));
+          console.warn("[runs] failed to release flow-control for flow %s:", flowId, errorStack(fcErr));
         }
       }
 

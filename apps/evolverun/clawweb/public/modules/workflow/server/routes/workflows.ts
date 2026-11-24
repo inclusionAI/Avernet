@@ -262,7 +262,7 @@ export function createWorkflowsRouter(
           });
         } catch (permErr) {
           // Non-fatal: permission write failure should not block workflow save
-          console.error(`[clawweb] Failed to write bot permission for workflow ${workflowId}:`, permErr instanceof Error ? permErr.message : String(permErr), errorStack(permErr));
+          console.error("[clawweb] Failed to write bot permission for workflow %s: %s", workflowId, permErr instanceof Error ? permErr.message : String(permErr), errorStack(permErr));
         }
       }
 
@@ -304,7 +304,7 @@ export function createWorkflowsRouter(
           await workflowSpecRepo.updateVersion(workflowId, newVersion);
         } catch (dhErr) {
           // Non-fatal: deploy history write failure should not block workflow save
-          console.error(`[clawweb] Failed to write deploy_history for workflow ${workflowId}:`, dhErr instanceof Error ? dhErr.message : String(dhErr), errorStack(dhErr));
+          console.error("[clawweb] Failed to write deploy_history for workflow %s: %s", workflowId, dhErr instanceof Error ? dhErr.message : String(dhErr), errorStack(dhErr));
         }
       }
 

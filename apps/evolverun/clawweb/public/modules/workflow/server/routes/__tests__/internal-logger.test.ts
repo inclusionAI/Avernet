@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { format } from "node:util";
 
 const files = vi.hoisted(() => ({
   appendFileSync: vi.fn(), mkdirSync: vi.fn(), existsSync: vi.fn(() => true),
@@ -70,7 +71,7 @@ describe("workflow API severity and exception diagnostics", () => {
   it.each([401, 403, 404, 409, 429])("logs business HTTP %s only at WARN", async status => {
     const { apiLog } = await loadLogger();
     apiLog("READ", "/runs/id", { status, error: "Business rejection" });
-    expect(console.warn).toHaveBeenCalledWith(`[internal-api] READ /runs/id ${status}`);
+    expect(console.warn).toHaveBeenCalledWith("%s", `[internal-api] READ /runs/id ${status}`);
     expect(console.error).not.toHaveBeenCalled();
     expect(console.log).not.toHaveBeenCalled();
     expect(lastEntry()).toMatchObject({ status, error: "Business rejection" });
@@ -86,9 +87,28 @@ describe("workflow API severity and exception diagnostics", () => {
   ] as const)("prefers httpStatus over domain status: %j", async (details, level, method, status) => {
     const { apiLog } = await loadLogger();
     apiLog("WRITE", "/runs", details);
-    expect(vi.mocked(console[method]).mock.calls[0][0]).toBe(`[internal-api] WRITE /runs ${status}`);
+    expect(vi.mocked(console[method]).mock.calls[0][0]).toBe(level === "ERROR" ? "%s %s" : "%s");
+    expect(vi.mocked(console[method]).mock.calls[0][1]).toBe(`[internal-api] WRITE /runs ${status}`);
     expect(files.appendFileSync.mock.calls[0][1]).toContain(` ${level} [internal-api] {`);
     expect(lastEntry()).toMatchObject(details);
+  });
+
+  it.each([false, true])("renders path/status format tokens literally with stack=%s", async withStack => {
+    const { apiLog } = await loadLogger();
+    const path = "/runs/%s/%d/%j/%%";
+    const status = "failed %s %d %j %%";
+    const exception = new Error("upstream %s %d %j %%");
+    exception.stack = "Error: upstream %s %d %j %%\r\n    at origin (%s:%d:%j:%%)\n\ttrailing stack bytes  \n";
+    apiLog("WRITE", path, { status }, withStack ? exception : undefined);
+    const summary = `[internal-api] WRITE ${path} ${status}`;
+    const args = vi.mocked(console.log).mock.calls[0];
+    expect(args).toEqual(withStack ? ["%s %s", summary, exception.stack] : ["%s", summary]);
+    expect(format(...args)).toBe(withStack ? `${summary} ${exception.stack}` : summary);
+    expect(lastEntry()).toMatchObject({ method: "WRITE", path, status });
+    if (withStack) expect(lastEntry()).toMatchObject({ stack: exception.stack, stackSource: "exception" });
+    else expect(lastEntry()).not.toHaveProperty("stack");
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("preserves the caught Error identity, original stack and JSON error message", async () => {
@@ -96,7 +116,7 @@ describe("workflow API severity and exception diagnostics", () => {
     function databaseWriteOrigin() { return new Error("Database write failed"); }
     const exception = databaseWriteOrigin();
     apiLog("WRITE", "/runs", { status: 500, error: exception.message }, exception);
-    expect(console.error).toHaveBeenCalledWith("[internal-api] WRITE /runs 500", exception.stack);
+    expect(console.error).toHaveBeenCalledWith("%s %s", "[internal-api] WRITE /runs 500", exception.stack);
     expect(lastEntry()).toMatchObject({ error: "Database write failed", stack: exception.stack, stackSource: "exception" });
     expect(lastEntry().stack).toContain("databaseWriteOrigin");
     expect(lastEntry().stack).not.toContain("internal-logger.ts");
@@ -105,7 +125,7 @@ describe("workflow API severity and exception diagnostics", () => {
   it("labels a status-only system failure stack as an observation, never a caught exception", async () => {
     const { apiLog } = await loadLogger();
     apiLog("WRITE", "/runs", { status: 500, error: "Unconfirmed write" });
-    expect(console.error).toHaveBeenCalledWith("[internal-api] WRITE /runs 500", expect.stringContaining("Workflow API failure observed"));
+    expect(console.error).toHaveBeenCalledWith("%s %s", "[internal-api] WRITE /runs 500", expect.stringContaining("Workflow API failure observed"));
     expect(lastEntry()).toMatchObject({ error: "Unconfirmed write", stackSource: "observation" });
     expect(lastEntry().stack).toContain("Workflow API failure observed: Unconfirmed write");
   });
@@ -113,7 +133,7 @@ describe("workflow API severity and exception diagnostics", () => {
   it("keeps non-Error exceptions and explicitly labels their observation stack", async () => {
     const { apiLog } = await loadLogger();
     apiLog("WRITE", "/runs", { status: 500, error: "untyped failure" }, "untyped failure");
-    expect(console.error).toHaveBeenCalledWith("[internal-api] WRITE /runs 500", expect.stringContaining("Workflow API failure observed: untyped failure"));
+    expect(console.error).toHaveBeenCalledWith("%s %s", "[internal-api] WRITE /runs 500", expect.stringContaining("Workflow API failure observed: untyped failure"));
     expect(lastEntry()).toMatchObject({ error: "untyped failure", stackSource: "observation" });
     expect(lastEntry().stack).toContain("Workflow API failure observed: untyped failure");
   });
@@ -130,7 +150,7 @@ describe("workflow API severity and exception diagnostics", () => {
     const error = new Error("no original stack");
     delete error.stack;
     apiLog("WRITE", "/runs/id", { status: 500, error: error.message }, error);
-    expect(console.error).toHaveBeenCalledWith("[internal-api] WRITE /runs/id 500", expect.stringContaining("Workflow API failure observed: no original stack"));
+    expect(console.error).toHaveBeenCalledWith("%s %s", "[internal-api] WRITE /runs/id 500", expect.stringContaining("Workflow API failure observed: no original stack"));
     expect(lastEntry().stackSource).toBe("observation");
     expect(lastEntry().stack).toContain("Workflow API failure observed: no original stack");
   });
@@ -142,7 +162,7 @@ describe("workflow API severity and exception diagnostics", () => {
       token: "<private-token-marker>", cookies: ["<private-cookie-marker>"],
     });
     apiLog("WRITE", "/runs/id", { status: 500, error: exception.message }, exception);
-    expect(console.error).toHaveBeenCalledWith("[internal-api] WRITE /runs/id 500", exception.stack);
+    expect(console.error).toHaveBeenCalledWith("%s %s", "[internal-api] WRITE /runs/id 500", exception.stack);
     expect(lastEntry()).toMatchObject({ error: exception.message, stack: exception.stack, stackSource: "exception" });
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toMatch(/private-|Authorization|Cookie|config|token|cookies/);
     expect(files.appendFileSync.mock.calls[0][1]).not.toMatch(/private-|Authorization|Cookie|config|token|cookies/);
@@ -174,7 +194,7 @@ describe("workflow API severity and exception diagnostics", () => {
   ])("keeps the confirmed TaskGuard family at WARN: %s", async path => {
     const { apiLog } = await loadLogger();
     apiLog("READ", path, { httpStatus: 404, status: "failed" });
-    expect(console.warn).toHaveBeenCalledWith(`[internal-api] READ ${path} 404`);
+    expect(console.warn).toHaveBeenCalledWith("%s", `[internal-api] READ ${path} 404`);
     expect(console.error).not.toHaveBeenCalled();
     expect(files.appendFileSync.mock.calls[0][1]).toContain(" WARN [internal-api] ");
   });
@@ -188,7 +208,7 @@ describe("workflow API severity and exception diagnostics", () => {
     const { apiLog } = await loadLogger();
     const response = { locals: {} };
     apiLog("READ", path, { httpStatus: 404, error: "Not found" }, new Error("not found"), response);
-    expect(console.error).toHaveBeenCalledWith(`[internal-api] READ ${path} 404`);
+    expect(console.error).toHaveBeenCalledWith("%s", `[internal-api] READ ${path} 404`);
     expect(console.warn).not.toHaveBeenCalled();
     expect(files.appendFileSync.mock.calls[0][1]).toContain(" ERROR [internal-api] ");
     expect(lastEntry()).toEqual({ ts: expect.any(String), method: "READ", path, httpStatus: 404, error: "Not found" });
@@ -197,11 +217,17 @@ describe("workflow API severity and exception diagnostics", () => {
 
   it("keeps the original log persistence failure and re-arms after recovery", async () => {
     const { apiLog } = await loadLogger();
-    function logWriteOrigin() { return new Error("disk unavailable"); }
+    function logWriteOrigin() { return new Error("disk unavailable %s %d %j %%"); }
     const exception = logWriteOrigin();
     files.appendFileSync.mockImplementationOnce(() => { throw exception; });
     apiLog("WRITE", "/runs/id", {});
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Cannot write internal API log"), exception.stack);
+    expect(console.error).toHaveBeenCalledWith(
+      "[clawweb] Cannot write internal API log to %s %s",
+      "/home/admin/logs/clawweb/clawweb-internal-api.log", exception.stack,
+    );
+    expect(format(...vi.mocked(console.error).mock.calls[0])).toBe(
+      `[clawweb] Cannot write internal API log to /home/admin/logs/clawweb/clawweb-internal-api.log ${exception.stack}`,
+    );
     expect(exception.stack).toContain("logWriteOrigin");
     apiLog("WRITE", "/runs/id", {});
     files.appendFileSync.mockImplementationOnce(() => { throw exception; });

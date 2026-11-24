@@ -38,7 +38,7 @@ function scheduleTerminalObserver(
     void Promise.resolve()
       .then(() => observer(input))
       .catch((error) => {
-        console.warn(`[internal-runs] terminal observer failed for ${input.flowId}: ${error instanceof Error ? error.message : String(error)}`, errorStack(error));
+        console.warn("[internal-runs] terminal observer failed for %s: %s", input.flowId, error instanceof Error ? error.message : String(error), errorStack(error));
       });
   });
 }

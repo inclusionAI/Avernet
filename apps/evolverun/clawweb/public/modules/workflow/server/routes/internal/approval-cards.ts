@@ -127,7 +127,7 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
       const code = (error as any)?.code;
       const sqlMessage = (error as any)?.sqlMessage;
       apiLog("WRITE", "/approval-cards", { httpStatus: 500, error: msg, code, sqlMessage }, error, res);
-      console.error(`[approval-cards] insert failed: ${msg}`, { code, sqlMessage, flow_id, node_id, workflow_id }, captureApiError(res, error));
+      console.error("[approval-cards] insert failed: %s", msg, { code, sqlMessage, flow_id, node_id, workflow_id }, captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg, code, detail: sqlMessage });
     }
   }));

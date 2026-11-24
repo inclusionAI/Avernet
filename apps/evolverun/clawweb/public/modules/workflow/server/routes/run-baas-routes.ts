@@ -257,7 +257,7 @@ export function createRunBaasRouter(
             originSessionId: result.sessionId,
           });
         } catch (updateErr) {
-          console.warn(`[runs] failed to persist session_id for ${flowId}:`, errorStack(updateErr));
+          console.warn("[runs] failed to persist session_id for %s:", flowId, errorStack(updateErr));
         }
       }
 
@@ -282,7 +282,7 @@ export function createRunBaasRouter(
           });
         } catch (eventErr) {
           // Audit logging is best-effort, don't fail the intervention
-          console.warn(`[runs] failed to record intervention event for ${flowId}:`, errorStack(eventErr));
+          console.warn("[runs] failed to record intervention event for %s:", flowId, errorStack(eventErr));
         }
       }
 
@@ -413,7 +413,7 @@ export function createRunBaasRouter(
             },
           });
         } catch (eventErr) {
-          console.warn(`[runs] failed to record rerun event for ${flowId}:`, errorStack(eventErr));
+          console.warn("[runs] failed to record rerun event for %s:", flowId, errorStack(eventErr));
         }
       }
 
@@ -491,7 +491,7 @@ export function createRunBaasRouter(
             originSessionId: result.sessionId,
           });
         } catch (updateErr) {
-          console.warn(`[runs] failed to persist session_id for ${flowId}:`, errorStack(updateErr));
+          console.warn("[runs] failed to persist session_id for %s:", flowId, errorStack(updateErr));
         }
       }
 
@@ -514,7 +514,7 @@ export function createRunBaasRouter(
             },
           });
         } catch (eventErr) {
-          console.warn(`[runs] failed to record chat event for ${flowId}:`, errorStack(eventErr));
+          console.warn("[runs] failed to record chat event for %s:", flowId, errorStack(eventErr));
         }
       }
 

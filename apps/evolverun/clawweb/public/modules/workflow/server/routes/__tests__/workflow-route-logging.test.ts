@@ -94,8 +94,8 @@ describe("workflow route exception logging without response changes", () => {
     expect(await response.json()).toEqual({ success: false, error: "Internal Server Error", message: error.message });
     expect(db.exec).toHaveBeenCalledOnce();
     expect(diagnostics).toEqual([{ message: error.message, stack: error.stack, stackSource: "exception" }]);
-    expect(console.error).toHaveBeenCalledWith("[internal-api] WRITE /approval-cards 500", error.stack);
-    expect(console.error).toHaveBeenCalledWith(`[approval-cards] insert failed: ${error.message}`, expect.any(Object), error.stack);
+    expect(console.error).toHaveBeenCalledWith("%s %s", "[internal-api] WRITE /approval-cards 500", error.stack);
+    expect(console.error).toHaveBeenCalledWith("[approval-cards] insert failed: %s", error.message, expect.any(Object), error.stack);
     expect(lastFileLog().line).toContain(" ERROR [internal-api] ");
     expect(lastFileLog().entry).toMatchObject({ httpStatus: 500, error: error.message, stack: error.stack, stackSource: "exception" });
     expect(lastFileLog().entry.stack).toContain("persistenceFailureOrigin");
@@ -110,7 +110,7 @@ describe("workflow route exception logging without response changes", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ success: false, error: "Bad Request",
       message: "Missing required fields: flow_id, node_id, workflow_id, approver_ids" });
-    expect(console.warn).toHaveBeenCalledWith("[internal-api] WRITE /approval-cards 400");
+    expect(console.warn).toHaveBeenCalledWith("%s", "[internal-api] WRITE /approval-cards 400");
     expect(console.error).not.toHaveBeenCalled();
     expect(lastFileLog().line).toContain(" WARN [internal-api] ");
   });
@@ -120,7 +120,7 @@ describe("workflow route exception logging without response changes", () => {
     const response = await post(base, { event_id: "event-1", flow_id: "flow-1", workflow_id: "wf-1", event_type: "node.done" });
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ success: false, error: "Service Unavailable", message: "Event persistence not confirmed" });
-    const diagnostic = vi.mocked(console.error).mock.calls.find(call => call[0] === "[internal-api] WRITE /events 503")?.[1];
+    const diagnostic = vi.mocked(console.error).mock.calls.find(call => call[0] === "%s %s" && call[1] === "[internal-api] WRITE /events 503")?.[2];
     expect(diagnostic).toEqual(expect.stringContaining("Error: Workflow API failure observed: Event persistence not confirmed"));
     expect(lastFileLog().entry).toMatchObject({ error: "Event persistence not confirmed", stack: diagnostic, stackSource: "observation" });
     expect(lastFileLog().entry.stack).toContain("routes/internal/events.ts");
@@ -170,8 +170,8 @@ describe("workflow route exception logging without response changes", () => {
     expect(repo.findFullByFlowId).toHaveBeenCalledExactlyOnceWith("child-1");
     expect(console.error).toHaveBeenCalledWith("[internal-runs] registered run readback failed:", error.stack);
     expect(console.error).toHaveBeenCalledWith("[internal-runs] parent registration failed:", error.stack);
-    expect(console.error).toHaveBeenCalledWith("[internal-api] WRITE /runs 503", error.stack);
-    expect(vi.mocked(console.error).mock.calls.every(call => call[1] === error.stack)).toBe(true);
+    expect(console.error).toHaveBeenCalledWith("%s %s", "[internal-api] WRITE /runs 503", error.stack);
+    expect(vi.mocked(console.error).mock.calls.every(call => call.at(-1) === error.stack)).toBe(true);
     expect(diagnostics).toEqual([{ message: error.message, stack: error.stack, stackSource: "exception" }]);
     expect(lastFileLog().line).toContain(" ERROR [internal-api] ");
     expect(lastFileLog().entry).toMatchObject({ path: "/runs", status: 503, stack: error.stack, stackSource: "exception" });
