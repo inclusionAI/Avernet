@@ -73,7 +73,7 @@ export interface BotDomain {
   healthyInstances?: number;
   totalInstances?: number;
   lock?: BotLock;
-  /** 服务 Bot 草稿态发起评测入口是否可见；随评测门禁白名单实时查询结果刷新。 */
+  /** 服务 Bot 评测入口是否可见；随评测门禁白名单实时查询结果刷新，同时控制发起评测和历史评测记录入口。 */
   evalGateVisible?: boolean;
   /** 当前用户是否有该服务 Bot 的编辑权限；控制历史评测记录入口。 */
   canOpenEvalHistory?: boolean;
