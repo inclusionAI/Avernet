@@ -150,9 +150,16 @@ it('keeps the original status and completion contract usable with null, zero, an
   try {
     const runs = new FlowRunRepository(db);
     for (const epoch of [null, 0, 2]) {
-      for (const status of ['failed', 'succeeded', 'cancelled', 'blocked', 'waiting']) {
+      for (const status of ['failed', 'succeeded', 'cancelled', 'canceled', 'blocked', 'waiting']) {
         const id = `${epoch}-${status}`;
         raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch, started_at, completed_at) VALUES (?, ?, ?, 1, 100)').run(id, status, epoch);
+        if (['cancelled', 'canceled'].includes(status)) {
+          const before = raw.prepare('SELECT * FROM flow_runs WHERE flow_id = ?').get(id);
+          expect(await runs.updateStatus(id, 'running')).toBe(false);
+          expect(await runs.updateCompletion(id, { status: 'succeeded', completedAt: 200, succeededCount: 1, failedCount: 0 })).toBe(false);
+          expect(raw.prepare('SELECT * FROM flow_runs WHERE flow_id = ?').get(id)).toEqual(before);
+          continue;
+        }
         expect(await runs.updateStatus(id, 'running')).toBe(true);
         expect(raw.prepare('SELECT status, started_at, completed_at, retry_epoch FROM flow_runs WHERE flow_id = ?').get(id))
           .toEqual({ status: 'running', started_at: 1, completed_at: null, retry_epoch: epoch === 2 ? 0 : epoch });
@@ -165,15 +172,19 @@ it('keeps the original status and completion contract usable with null, zero, an
   } finally { await db.close(); }
 });
 
-it('allows deployed epoch clients to request retry from previously supported terminal states', async () => {
+it('allows deployed epoch clients to retry succeeded runs but not cancelled runs', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT, retry_epoch INTEGER, completed_at INTEGER, gmt_modified INTEGER);
-    INSERT INTO flow_runs VALUES ('succeeded', 'succeeded', 2, 100, 100), ('cancelled', 'cancelled', 2, 100, 100);`);
+    INSERT INTO flow_runs VALUES ('succeeded', 'succeeded', 2, 100, 100), ('cancelled', 'cancelled', 2, 100, 100), ('canceled', 'canceled', 2, 100, 100);`);
   const db = new SqliteDatabase(raw);
   try {
     const runs = new FlowRunRepository(db);
     expect(await runs.resumeForRetry('succeeded', 3)).toBe('resumed');
-    expect(await runs.resumeForRetry('cancelled', 3)).toBe('resumed');
+    for (const status of ['cancelled', 'canceled']) {
+      const before = raw.prepare('SELECT * FROM flow_runs WHERE flow_id = ?').get(status);
+      expect(await runs.resumeForRetry(status, 3)).toBe('conflict');
+      expect(raw.prepare('SELECT * FROM flow_runs WHERE flow_id = ?').get(status)).toEqual(before);
+    }
   } finally { await db.close(); }
 });
 
@@ -207,9 +218,15 @@ it('invalidates the preceding explicit epoch when the original status API reopen
   const db = new SqliteDatabase(raw);
   try {
     const runs = new FlowRunRepository(db);
-    for (const status of ['failed', 'blocked', 'waiting', 'succeeded', 'cancelled']) {
+    for (const status of ['failed', 'blocked', 'waiting', 'succeeded', 'cancelled', 'canceled']) {
       raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch, started_at, completed_at, result_json) VALUES (?, ?, 2, 1, 100, ?)')
         .run(status, status, 'previous result');
+      if (['cancelled', 'canceled'].includes(status)) {
+        const before = raw.prepare('SELECT * FROM flow_runs WHERE flow_id = ?').get(status);
+        expect(await runs.updateStatus(status, 'running')).toBe(false);
+        expect(raw.prepare('SELECT * FROM flow_runs WHERE flow_id = ?').get(status)).toEqual(before);
+        continue;
+      }
       expect(await runs.updateStatus(status, 'running')).toBe(true);
       expect(await runs.updateCompletion(status, { status: 'failed', completedAt: 200, resultJson: 'late old result', succeededCount: 0, failedCount: 1, retryEpoch: 2 })).toBe(false);
       expect(await runs.markFailedIfRunning(status, { reason: 'old timeout', currentPhase: 'P1', completedAt: 200, retryEpoch: 2 })).toBe(false);

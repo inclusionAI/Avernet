@@ -38,6 +38,13 @@ export type FlowRetryRequestInsert = {
   requester?: string | null;
 };
 
+export class RetryRequestCancelledError extends Error {
+  constructor(flowId: string) {
+    super(`Flow run "${flowId}" is cancelled and cannot be retried`);
+    this.name = 'RetryRequestCancelledError';
+  }
+}
+
 export class FlowRetryRequestRepository {
   constructor(private db: IDatabase) {}
 
@@ -48,23 +55,44 @@ export class FlowRetryRequestRepository {
    */
   async create(input: FlowRetryRequestInsert): Promise<FlowRetryRequestRow | null> {
     try {
-      const open = await this.db.query<FlowRetryRequestRow>(
-        "SELECT * FROM flow_retry_requests WHERE flow_id = ? AND status IN ('pending','claimed') ORDER BY id ASC LIMIT 1",
-        [input.flowId],
-      );
-      if (open[0]) return open[0];
-      const now = this.db.dialect.now();
-      await this.db.exec(
-        `INSERT INTO flow_retry_requests (request_id, flow_id, node_id, reason, requester, options_json, status, attempts, gmt_create, gmt_modified)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-        [input.requestId, input.flowId, input.nodeId ?? null, input.reason ?? null, input.requester ?? null, input.options ? JSON.stringify(input.options) : null, now, now],
-      );
-      const rows = await this.db.query<FlowRetryRequestRow>(
-        "SELECT * FROM flow_retry_requests WHERE request_id = ?",
-        [input.requestId],
-      );
-      return rows[0] ?? null;
+      return await this.db.transaction(async tx => {
+        // Lock the same run row as abort and other creators before deduping.
+        // Missing runs remain allowed; cancelled runs must not be touched.
+        await tx.exec("UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')", [input.flowId]);
+        const rejectCancelled = async () => {
+          const cancelled = await tx.query<{ flow_id: string }>(
+            "SELECT flow_id FROM flow_runs WHERE flow_id = ? AND status IN ('cancelled', 'canceled')",
+            [input.flowId],
+          );
+          if (cancelled.length) throw new RetryRequestCancelledError(input.flowId);
+        };
+        await rejectCancelled();
+        const open = await tx.query<FlowRetryRequestRow>(
+          `SELECT * FROM flow_retry_requests WHERE flow_id = ? AND status IN ('pending','claimed')
+           AND NOT EXISTS (SELECT 1 FROM flow_runs WHERE flow_id = ? AND status IN ('cancelled', 'canceled'))
+           ORDER BY id ASC LIMIT 1`,
+          [input.flowId, input.flowId],
+        );
+        if (open[0]) return open[0];
+        const now = tx.dialect.now();
+        const result = await tx.exec(
+          `INSERT INTO flow_retry_requests (request_id, flow_id, node_id, reason, requester, options_json, status, attempts, gmt_create, gmt_modified)
+           SELECT ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?
+           WHERE NOT EXISTS (SELECT 1 FROM flow_runs WHERE flow_id = ? AND status IN ('cancelled', 'canceled'))`,
+          [input.requestId, input.flowId, input.nodeId ?? null, input.reason ?? null, input.requester ?? null, input.options ? JSON.stringify(input.options) : null, now, now, input.flowId],
+        );
+        if (result.affectedRows === 0) {
+          await rejectCancelled();
+          throw new Error(`Failed to create retry request for flow ${input.flowId}`);
+        }
+        const rows = await tx.query<FlowRetryRequestRow>(
+          "SELECT * FROM flow_retry_requests WHERE request_id = ?",
+          [input.requestId],
+        );
+        return rows[0] ?? null;
+      });
     } catch (error) {
+      if (error instanceof RetryRequestCancelledError) throw error;
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRetryRequestRepository.create failed: ${msg} (dbType=${this.db.dbType}, flowId=${input.flowId})`);
       return null;
@@ -85,7 +113,8 @@ export class FlowRetryRequestRepository {
         : "";
       const candidates = await this.db.query<FlowRetryRequestRow>(
         `SELECT * FROM flow_retry_requests
-         WHERE ${supportsOptions ? "" : "(options_json IS NULL OR options_json = '{}') AND "}${flowFilter}(status = 'pending' OR (status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ?))
+         WHERE NOT EXISTS (SELECT 1 FROM flow_runs WHERE flow_runs.flow_id = flow_retry_requests.flow_id AND flow_runs.status IN ('cancelled', 'canceled'))
+           AND ${supportsOptions ? "" : "(options_json IS NULL OR options_json = '{}') AND "}${flowFilter}(status = 'pending' OR (status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ?))
          ORDER BY id ASC LIMIT ?`,
         [...(flowIds ?? []), leaseCutoff, limit],
       );
@@ -93,7 +122,8 @@ export class FlowRetryRequestRepository {
       for (const row of candidates) {
         const result = await this.db.exec(
           `UPDATE flow_retry_requests SET status = 'claimed', claim_engine = ?, claimed_at = ?
-           WHERE request_id = ? AND (status = 'pending' OR (status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ?))`,
+           WHERE request_id = ? AND (status = 'pending' OR (status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ?))
+             AND NOT EXISTS (SELECT 1 FROM flow_runs WHERE flow_runs.flow_id = flow_retry_requests.flow_id AND flow_runs.status IN ('cancelled', 'canceled'))`,
           [claimEngine, nowSecs, row.request_id, leaseCutoff],
         );
         if (result.affectedRows > 0) claimed.push({ ...row, status: "claimed", claim_engine: claimEngine, claimed_at: nowSecs });
