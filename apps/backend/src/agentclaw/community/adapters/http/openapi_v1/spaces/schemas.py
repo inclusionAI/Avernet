@@ -524,6 +524,10 @@ class SpaceSkillSummary(_UtcResponseModel):
     draft: SkillDraftSummary | None = Field(
         default=None, description="Current Draft summary, or null when no Draft exists."
     )
+    draft_publication_error_code: str | None = Field(
+        default=None,
+        description="Publication failure code for the current editable Draft revision, if any.",
+    )
     active_publication: PublicationAttemptSummary | None = Field(
         default=None, description="Current non-terminal Attempt, or null."
     )

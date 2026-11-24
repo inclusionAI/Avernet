@@ -214,6 +214,7 @@ class SpaceSkillQueryRecord(TypedDict):
 
 
 class SpaceSkillReadRecord(TypedDict):
+    draft_publication_error_code: str | None
     id: int
     skill_uuid: str
     name: str

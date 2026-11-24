@@ -205,7 +205,7 @@ Apply snapshot 包括 Bot Local 资产的全部持久 Set ID 引用映射；计�
 - `ac_skill.package_url` 用于发布 staged package；Attempt 的 `frozen_draft_locator` 固定本次内容，不能用可变 Draft 替换进行中的发布输入。
 - Grant 的 Owner/Manager 与 Space Membership 分别校验。编辑租约无 TTL/renew；Team 写入校验 holder/fencing token，修订冲突由 revision CAS 处理。发布入口由 Repository 在事务中协调租约和冻结，不能凭旧讨论给 Router 增加未实现的 token 参数。
 - 发布成功后清除当前 Draft；升级从精确 Published Version 创建后继 Draft。`published_version_draft.py` 优先读取 Canonical Store，缺失时按 SC 精确版本恢复。
-- 删除 Draft 使用现有 Repository 分支及 `deleted_scope`：Version、非 FAILED Attempt、成员/Installation、编辑工单等外部事实存在时仅清除 Draft；没有这些事实时清理自身关联并删除 Skill，允许清除仅剩 FAILED Attempt 的首次草稿。FROZEN Draft 不能删除。不要绕开检查直接删 `ac_skill`。
+- 删除 Draft 使用现有 Repository 分支及 `deleted_scope`：Version、Publication Attempt（含 FAILED）、成员/Installation 或编辑工单存在时只清除 Draft。没有这些事实时删除 Skill 及其自身关联。放弃首发 Draft 后，普通空间列表排除没有 Draft、已发布 Version、活跃 Attempt 或下线记录的 Skill，保留直接查询和发布历史。FROZEN Draft 不能删除。不要绕开检查直接删 `ac_skill`。
 - Editor Request 创建 `SKILL_COLLABORATOR` Work Order；`skill_collaborator_approval_handler.py` 在人工审批时重新验证并写 Manager Grant。直接添加 Manager 不创建工单。按 Skill 的 `editor-approval-policy` 允许有效 Team Space 成员读取，仅当前 Skill Owner 可修改，默认关闭；非成员、个人空间和已下线 Skill 拒绝。申请入口先由 Skill Repository 校验申请人与绑定，关闭时沿用人工待办，开启时在内部调用 WorkOrder AUTO（`approver_user_ids=[]`、`recipient_user_ids=[applicant_user_id]`；无人工审批人、仅申请人收结果）。AUTO 创建事务先调用 Skill-owned `admit_auto_skill_editor_request(session, ...)`：锁定绑定并复核资格、开关、已有 Grant 及 `PENDING/PROCESSING` 工单，成功后才插入工单；前置 `inspect_editor_request` 不跨事务持锁。完成事务再调用 `apply_auto_skill_editor_request(session, work_order_id, env)`：复核未下线 Skill、团队成员及绑定开关，仅写 Manager Grant；工单终态与申请人通知由 WorkOrder 在同一事务内完成。公开通用 events 路由允许 AUTO，但仍拒绝 Skill APPROVAL（MANUAL/AUTO）；Skill 申请必须走专用入口。
 
 发布链路读 `services/space_skill_publication_service.py`、`services/space_skill_publication_task.py`、`publication_contract.py` 及 Publication Repository：
@@ -216,7 +216,7 @@ Apply snapshot 包括 Bot Local 资产的全部持久 Set ID 引用映射；计�
                      已知失败 → FAILED；外部结果不确定 → RESULT_UNKNOWN
 ```
 
-`recovery.state/kind` 决定是否自动重试或允许恢复；使用同一 Attempt 的 retry API，不把不确定的 SC 提交当成安全重发。SC accepted 不等于发布成功；Canonical 精确版本可读并持久化 PUBLISHED 后才完成发布。Track Latest 的异步投影不阻塞这一步成功。
+`recovery.state/kind` 决定是否自动重试或允许恢复；使用同一 Attempt 的 retry API，不把不确定的 SC 提交当成安全重发。Center 受理之后继续轮询发布结果。安全检查失败映射为 `SC_SECURITY_CHECK_FAILED`，公开响应使用固定提示；普通列表为当前可编辑 Draft revision 提供 `draft_publication_error_code`。Canonical 精确版本可读并持久化 PUBLISHED 后才完成发布。Track Latest 的异步投影不阻塞这一步成功。
 
 DB 冻结/Attempt 创建与 `TaskQueueService.enqueue()` 当前不是一个跨模块事务。保留现有幂等重放和 ensure-task 恢复语义，不声称已具有 transactional outbox 或全局串行锁。
 

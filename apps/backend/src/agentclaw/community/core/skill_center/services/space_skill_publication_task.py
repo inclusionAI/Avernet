@@ -334,10 +334,19 @@ class SpaceSkillPublicationTaskHandler:
                 return Fail("Skill Center publication requires explicit recovery")
             return Reschedule(self._poll_seconds)
         if status.status is SkillCenterPublishState.FAILED:
+            error_code, error_message = {
+                "SECURITY_CHECK_FAILED": (
+                    "SC_SECURITY_CHECK_FAILED",
+                    "Skill Center security check failed. Fix the draft and submit it again.",
+                ),
+            }.get(
+                status.upstream_status,
+                ("SC_PUBLISH_REJECTED", "Skill Center rejected publication"),
+            )
             self._repository.mark_failed(
                 attempt_id=work.attempt.attempt_id,
-                error_code="SC_PUBLISH_REJECTED",
-                error_message="Skill Center rejected publication",
+                error_code=error_code,
+                error_message=error_message,
                 env=env,
             )
             return Complete()
