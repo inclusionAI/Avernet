@@ -228,6 +228,37 @@ def _is_no_active_devices_response(response: httpx.Response) -> bool:
     return isinstance(detail, dict) and detail.get("error") == "NO_ACTIVE_DEVICES"
 
 
+#: Marker that ``ant_baselib``'s httpx tracing hook puts on the exception it
+#: re-raises in place of the real transport error. The underlying
+#: ``ReadTimeout`` / ``ServerDisconnected`` message survives only in the
+#: exception chain, so log lines built from ``str(exc)`` alone are useless to
+#: whoever is paged for them.
+_HTTPX_SEND_HOOK_MARKER = "Error in httpx send hook"
+
+
+def _error_chain(exc: BaseException) -> str:
+    """Render *exc* together with the causes it was raised from.
+
+    Walks ``__cause__`` / ``__context__`` (bounded, cycle-safe) and joins the
+    messages, so a hook-wrapped transport failure reads as
+    ``Error in httpx send hook: The read operation timed out`` instead of the
+    opaque first line alone. Only exception messages are copied — never
+    responses, headers or credentials.
+    """
+    parts = [str(exc)]
+    seen = {id(exc)}
+    cause = exc.__cause__ or exc.__context__
+    while cause is not None and len(parts) < 5:
+        if id(cause) in seen:
+            break
+        seen.add(id(cause))
+        message = str(cause)
+        if message and message not in parts:
+            parts.append(message)
+        cause = cause.__cause__ or cause.__context__
+    return " | ".join(parts)
+
+
 @dataclass
 class BotWsConnectionInfoResponse:
     """BAAS WebSocket connection info.
@@ -1973,9 +2004,11 @@ class BaasService:  # pragma: no cover
         except Exception as e:
             logger.error(
                 f"[BaasService.get_publish_progress] "
-                f"Failed to get publish progress: {e}"
+                f"Failed to get publish progress: {_error_chain(e)}"
             )
-            raise BaasServiceError(f"Failed to get publish progress: {e}")
+            raise BaasServiceError(
+                f"Failed to get publish progress: {_error_chain(e)}"
+            )
 
     def get_ws_info(
         self,
@@ -2915,10 +2948,11 @@ class BaasService:  # pragma: no cover
             # resolve_container_provider) can fall back instead of leaking a raw
             # httpx error into the publish flow.
             logger.error(
-                f"[BaasService.list_devices_by_bot_uuid] Request error: {e}"
+                f"[BaasService.list_devices_by_bot_uuid] Request error: "
+                f"{_error_chain(e)}"
             )
             raise BaasServiceError(
-                f"Failed to list devices by bot_uuid: {e}"
+                f"Failed to list devices by bot_uuid: {_error_chain(e)}"
             )
 
     def restart_devices(
@@ -3926,9 +3960,11 @@ class BaasService:  # pragma: no cover
         except Exception as e:
             logger.error(
                 f"[BaasService.get_http_info] "
-                f"Failed to get http info: {e}"
+                f"Failed to get http info: {_error_chain(e)}"
             )
-            raise BaasServiceError(f"Failed to get http info: {e}")
+            raise BaasServiceError(
+                f"Failed to get http info: {_error_chain(e)}"
+            )
 
     def invoke_http(
         self,
