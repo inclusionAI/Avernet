@@ -1,0 +1,27 @@
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/IdentityConfigPanel.tsx
+  s_09501c0fa7e35d::t_85075718c1d4e4 27
+  s_09501c0fa7e35d::t_882a51951f85fb 131
+  s_09501c0fa7e35d::t_c6a9130065e217 44,49-50
+  s_09501c0fa7e35d::t_a2f2c7edd7777c 127,130
+  s_09501c0fa7e35d::t_00de312f3097db 7
+  s_09501c0fa7e35d::t_4b8c251e210b06 41-43,45-48,51-52
+apps/frontend-nextgen/test/components/BotWorkshop/IdentityConfigPanel.test.tsx
+  s_09501c0fa7e35d::t_465676112b40d0 80-101
+  s_09501c0fa7e35d::t_018f2cfceb59e2 49-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3b159770c48d81e8faf1ed32160c67bb523d0330",
+  "prompts": {},
+  "sessions": {
+    "s_09501c0fa7e35d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "b91d2d46-e3e6-40c5-a8a7-3cdefcf23d9c",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
