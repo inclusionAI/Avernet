@@ -30,16 +30,10 @@ impl WorkerTaskAdmission {
             .create_session
             .as_ref()
             .map(|definition| {
-                let head = input
+                let shard = input
                     .sid
-                    .0
-                    .split_once('.')
-                    .map(|(head, _)| head)
-                    .unwrap_or("");
-                let shard = head
-                    .strip_prefix('s')
-                    .and_then(|s| s.parse().ok())
-                    .ok_or_else(|| invalid("session_id_format"))?;
+                    .shard()
+                    .map_err(|_| invalid("session_id_format"))?;
                 let digest = bcs_dist_encoding::digest_json(&serde_json::json!({
                     "group": definition.group, "workflow": definition.workflow,
                     "participants": definition.participants, "limits": definition.limits,
@@ -47,7 +41,7 @@ impl WorkerTaskAdmission {
                 Ok(SessionSpec {
                     schema_version: 1,
                     sid: input.sid.clone(),
-                    shard: ShardId(shard),
+                    shard,
                     scope: scope.clone(),
                     kind: SessionKind::FsmGroup,
                     group: definition.group.clone(),
