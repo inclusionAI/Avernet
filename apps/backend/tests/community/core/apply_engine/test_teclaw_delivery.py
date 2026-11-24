@@ -259,3 +259,149 @@ def test_record_only_activation_passes_project_false_on_every_write() -> None:
     assert all(kw["project"] is False for _, kw in writes)
     reads = [kw for name, kw in inner.calls if name in ("list_installed_mcps", "set_supplied_capabilities")]
     assert all("project" not in kw for kw in reads)
+
+
+def _weather_report():
+    from dataclasses import replace
+    from agentclaw.community.core.apply_engine.capabilities import Category
+    from agentclaw.community.core.apply_engine.outcomes import CategoryResult, EntryOutcome, EntryResult
+    return replace(_report(), categories=(CategoryResult(Category.CAPABILITIES, entries=(
+        EntryResult(Category.CAPABILITIES, "mcp/weather", EntryOutcome.UNCHANGED),)),))
+
+
+def test_platform_apply_confirms_artifact_and_passport_before_receipting_mcp():
+    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
+    from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult, RuntimeProjectionStatus
+
+    ctx = make_context(engine_type="teclaw")
+    ctx.capability_state.manifest_mcp_candidates["mcp/weather"] = frozenset({"weather"})
+    class Redelivery:
+        async def __call__(self, _ctx):
+            raise AssertionError("manifest must use receipt path")
+        async def deliver_with_receipt(self, _ctx):
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=frozenset({"weather", "calendar"}))
+    async def passport(_ctx):
+        return RuntimeProjectionResult(status=RuntimeProjectionStatus.CONVERGED,
+            passport_updated=True, passport_mcp_codes=frozenset({"weather"}))
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=Redelivery(), passport=passport)
+    assert _run(strategy.finish(ctx, _weather_report())) is None
+    assert ctx.capability_state.delivered_mcp_codes == {"weather"}
+
+
+@pytest.mark.parametrize(("receipt", "expected"), [
+    (None, "not_bound"),
+    ({"success": True}, "unknown"),
+    ({"success": False, "message": "unavailable"}, "failed"),
+])
+def test_missing_or_legacy_receipt_never_confirms_a_server(receipt, expected):
+    redeliver, _, _ = _redeliver(bound=receipt is not None, result=receipt)
+    result = _run(redeliver.deliver_with_receipt(make_context(engine_type="teclaw")))
+    assert result.delivered_mcp_codes is None
+    assert result.status == expected
+
+
+def test_platform_passport_failure_does_not_confirm_artifact():
+    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
+    from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult
+
+    ctx = make_context(engine_type="teclaw")
+    ctx.capability_state.manifest_mcp_candidates["mcp/weather"] = frozenset({"weather"})
+    class Redelivery:
+        async def deliver_with_receipt(self, _ctx):
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=frozenset({"weather"}))
+    async def passport(_ctx):
+        return RuntimeProjectionResult.pending(code="PASSPORT", reason="unavailable")
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=Redelivery(), passport=passport)
+    assert "Passport" in _run(strategy.finish(ctx, _weather_report()))
+    assert not ctx.capability_state.delivered_mcp_codes
+
+
+def test_partial_report_can_confirm_delivered_mcp_despite_other_failure():
+    from dataclasses import replace
+    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
+    from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult, RuntimeProjectionStatus
+
+    ctx = make_context(engine_type="teclaw")
+    ctx.capability_state.manifest_mcp_candidates["mcp/weather"] = frozenset({"weather"})
+    class Redelivery:
+        async def deliver_with_receipt(self, _ctx):
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=frozenset({"weather"}))
+    async def passport(_ctx):
+        return RuntimeProjectionResult(status=RuntimeProjectionStatus.CONVERGED,
+            passport_updated=True, passport_mcp_codes=frozenset({"weather"}))
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=Redelivery(), passport=passport)
+    assert _run(strategy.finish(ctx, replace(_weather_report(), status=ApplyStatus.PARTIAL))) is None
+    assert ctx.capability_state.delivered_mcp_codes == {"weather"}
+
+@pytest.mark.parametrize("candidates", [{"mcp/weather": frozenset({"weather"})}, {"skill_sets/default": frozenset()}])
+def test_genome_platform_delivery_keeps_existing_path_without_passport(candidates):
+    from dataclasses import replace
+    from agentclaw.community.core.apply_engine.compiler import StateRef
+
+    calls = []
+    ctx = make_context(engine_type="teclaw")
+    ctx.capability_state.manifest_mcp_candidates.update(candidates)
+    class Redelivery:
+        async def __call__(self, _ctx):
+            calls.append("legacy")
+            return None
+        async def deliver_with_receipt(self, _ctx):
+            calls.append("receipt")
+            raise AssertionError("Genome must retain its delivery path")
+    async def passport(_ctx):
+        calls.append("passport")
+        raise RuntimeError("unavailable")
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=Redelivery(), passport=passport)
+    report = replace(_report(), state=StateRef("genome", "revision"))
+    assert _run(strategy.finish(ctx, report)) is None
+    assert calls == ["legacy"]
+
+
+@pytest.mark.parametrize("category", [
+    pytest.param("remove_last_mcp", id="remove-last-mcp"),
+    pytest.param("disable_group", id="disable-group"),
+    pytest.param("remove_default", id="remove-default"),
+])
+def test_platform_manifest_capability_changes_sync_passport_even_without_candidates(category):
+    from dataclasses import replace
+    from agentclaw.community.core.apply_engine.capabilities import Category
+    from agentclaw.community.core.apply_engine.outcomes import CategoryResult, EntryOutcome, EntryResult
+    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
+    from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult, RuntimeProjectionStatus
+
+    result = (CategoryResult(Category.CAPABILITIES, entries=(
+        EntryResult(Category.CAPABILITIES, "skill_sets/group", EntryOutcome.UPDATED),))
+        if category == "disable_group" else CategoryResult(Category.CAPABILITIES,
+            removals=("mcp/weather" if category == "remove_last_mcp" else "skill_sets/default",)))
+    report = replace(_report(), categories=(result,))
+    calls = []
+    class Redelivery:
+        async def deliver_with_receipt(self, _ctx):
+            calls.append("deliver")
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=frozenset())
+    async def passport(_ctx):
+        calls.append("passport")
+        return RuntimeProjectionResult(status=RuntimeProjectionStatus.CONVERGED, passport_updated=True,
+                                       passport_mcp_codes=frozenset())
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=Redelivery(), passport=passport)
+    assert _run(strategy.finish(make_context(engine_type="teclaw"), report)) is None
+    assert calls == ["deliver", "passport"]
+
+
+def test_failed_only_capability_does_not_trigger_passport():
+    from dataclasses import replace
+    from agentclaw.community.core.apply_engine.capabilities import Category
+    from agentclaw.community.core.apply_engine.outcomes import CategoryResult, EntryOutcome, EntryResult
+    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
+
+    ctx = make_context(engine_type="teclaw")
+    ctx.capability_state.manifest_mcp_candidates["mcp/weather"] = frozenset({"weather"})
+    report = replace(_report(), categories=(CategoryResult(Category.CAPABILITIES, aborted=True, entries=(
+        EntryResult(Category.CAPABILITIES, "mcp/weather", EntryOutcome.FAILED, reason="failed"),)),))
+    class Redelivery:
+        async def deliver_with_receipt(self, _ctx):
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=frozenset())
+    async def passport(_ctx):
+        raise AssertionError("failed write cannot justify a Passport update")
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=Redelivery(), passport=passport)
+    assert _run(strategy.finish(ctx, report)) is None

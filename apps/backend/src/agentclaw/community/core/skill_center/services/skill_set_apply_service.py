@@ -8,6 +8,7 @@ from agentclaw.community.core.skill_center.errors import (
     ApplyDesiredStateCommittedError,
     SkillSetControlPlaneConflictError,
 )
+from agentclaw.community.core.skill_center.mcp_apply_policy import is_manifest_mcp_install
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
 )
@@ -59,6 +60,7 @@ class SkillSetApplyService:
         default_change: DefaultExclusionChange,
         platform_default_codes: frozenset[str],
         project: bool,
+        retry_mcp_codes: frozenset[str] = frozenset(),
     ) -> SkillSetApplyResult:
         bot = self._bot(bot_id=scope.bot_id, owner_id=scope.owner_id, user_id=actor_id)
         if self._apply_scope(bot, scope.bot_id) != scope:
@@ -85,12 +87,13 @@ class SkillSetApplyService:
             )
         mcp_catalog_entries = {}
         for code in sorted(codes):
-            if code in explicit_codes:
-                self._require_mcp_permission(actor_id=actor_id, server_code=code)
-            else:
-                verdict = self._mcp_center.check_mcp_permission_detail(actor_id, code)
-                if not verdict.get("access_level"):
-                    raise ValueError("MCP permission service or catalogue returned incomplete detail")
+            if not is_manifest_mcp_install():
+                if code in explicit_codes:
+                    self._require_mcp_permission(actor_id=actor_id, server_code=code)
+                else:
+                    verdict = self._mcp_center.check_mcp_permission_detail(actor_id, code)
+                    if not verdict.get("access_level"):
+                        raise ValueError("MCP permission service or catalogue returned incomplete detail")
             detail = resolve_mcp_catalog_detail(self._mcp_center, code)
             mcp_catalog_entries[code] = mcp_catalog_entry(code, detail)
             require_mcp_delivery_eligibility(
@@ -102,7 +105,15 @@ class SkillSetApplyService:
                 server_code=code,
                 detail=detail,
             )
+        if not is_manifest_mcp_install():
+            retry_mcp_codes = frozenset()
         mutation_result = None
+        delivered_mcp_codes = frozenset()
+
+        def projected(receipt):
+            nonlocal delivered_mcp_codes
+            if receipt.passport_updated is True and receipt.passport_mcp_codes is not None:
+                delivered_mcp_codes = receipt.delivered_mcp_codes & receipt.passport_mcp_codes
 
         def mutation():
             return self._repository.replace_apply_skill_sets(
@@ -127,12 +138,14 @@ class SkillSetApplyService:
                 runtime_required=project,
                 scope_from_result=lambda mutation: ProjectionScope(
                     skills=True,
-                    mcp=bool(mutation.mcp_codes),
-                    claimed_mcp=mutation.mcp_codes,
+                    mcp=bool(mutation.mcp_codes or retry_mcp_codes),
+                    claimed_mcp=mutation.mcp_codes | retry_mcp_codes,
                     released_mcp=mutation.mcp_codes,
                 ),
                 mutation=mutation,
                 on_committed=committed,
+                on_projection=projected,
+                record_projection_when_unchanged=bool(retry_mcp_codes),
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:
@@ -149,4 +162,5 @@ class SkillSetApplyService:
             result["runtime_projection"],
             result["default_changed"],
             result["default_removed"],
+            delivered_mcp_codes,
         )

@@ -44,6 +44,9 @@ async def test_registered_worker_and_phase_deliver_one_prefixed_capability_repor
     platform,
 ):
     world, service = registered_world(_DOCUMENT, platform=platform)
+    if platform:
+        snapshot = world.snapshot()
+        assert snapshot.platform_default_codes - snapshot.installed_mcp_codes
     preview = await service.dry_run(**_who(world))
     capability = next(
         c for c in preview.categories if c.construct is Category.CAPABILITIES
@@ -201,3 +204,117 @@ async def test_registered_run_shares_local_fetch_and_public_preview_allowance(
     assert world.skills.get_by_git_path("center://weather") is None
     assert world.snapshot().installed_skill_ids == frozenset()
     assert fetch_budget.current_fetch_budget() is None
+
+@pytest.mark.asyncio
+async def test_device_creation_on_container_reports_denial_and_preview_never_queries():
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        RuntimeProjectionResult, RuntimeProjectionStatus,
+    )
+    from ._capabilities_world import CapabilityWorld
+    from .test_capability_full_replace_contract import _Runtime
+
+    class DeliveredRuntime(_Runtime):
+        async def apply_plan(self, *, scope, **kwargs):
+            self.scopes.append(scope)
+            return RuntimeProjectionResult(status=RuntimeProjectionStatus.CONVERGED,
+                delivered_mcp_codes=frozenset({"allowed", "denied"}), passport_updated=True,
+                passport_mcp_codes=frozenset({"allowed", "denied"}))
+
+    document = "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: allowed\n    - server_code: denied\n"
+    calls = []
+    def check(user, code, timeout):
+        calls.append((user, code))
+        return code != "denied"
+    world, service = registered_world(document, world=CapabilityWorld(runtime=DeliveredRuntime()),
+                                      server_permission_check=check)
+    who = {**_who(world), "permission_subject": "owner"}
+    preview = await service.dry_run(**_who(world))
+    assert preview.status is ApplyStatus.SUCCEEDED and calls == []
+    submitted_preview = await service.dry_run(**_who(world), submitted_document=document)
+    assert submitted_preview.status is ApplyStatus.SUCCEEDED and calls == []
+    await asyncio.to_thread(service.start_apply, **who, phase=ApplyPhase.ON_CONTAINER,
+                            trigger=CREATE_ON_CONTAINER)
+    report = service.last_apply(entity_id="entity-1", bot_id="bot-1")
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert {(user, code) for user, code in calls} == {("owner", "allowed"), ("owner", "denied")}
+    assert len(report.notes) == 1 and "denied" in report.notes[0]
+    assert world.snapshot().installed_mcp_codes == frozenset({"allowed", "denied"})
+    assert service.last_apply(entity_id="entity-1", bot_id="bot-1") == report
+    assert len(calls) == 2
+
+@pytest.mark.asyncio
+async def test_platform_removing_last_direct_mcp_replaces_passport_scope_after_real_write():
+    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
+    from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult, RuntimeProjectionStatus
+
+    document = "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: weather\n"
+    world, service = registered_world(document, platform=True)
+    from unittest.mock import MagicMock
+    no_defaults = MagicMock()
+    no_defaults.server_codes_for.return_value = frozenset()
+    world.management._platform_default_mcp_policy = no_defaults
+    world.activation._inner._platform_default_mcp_policy = no_defaults
+    strategy = service.delivery_for_engine("teclaw")
+    events = []
+    class Delivery:
+        async def deliver_with_receipt(self, ctx):
+            codes = world.snapshot().installed_mcp_codes
+            events.append(("artifact", codes))
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=codes)
+    async def passport(ctx):
+        codes = world.snapshot().installed_mcp_codes
+        events.append(("passport", codes))
+        return RuntimeProjectionResult(status=RuntimeProjectionStatus.CONVERGED, passport_updated=True,
+                                       passport_mcp_codes=codes)
+    strategy._redeliver = Delivery()
+    strategy._passport = passport
+    await asyncio.to_thread(service.start_apply, **_who(world), trigger="explicit")
+    assert world.snapshot().installed_mcp_codes == frozenset({"weather"})
+    events.clear()
+    service._capabilities._document = "schema_version: 1\nmanifest:\n  mcp: []\n"
+    await asyncio.to_thread(service.start_apply, **_who(world), trigger="explicit")
+    report = service.last_apply(entity_id="entity-1", bot_id="bot-1")
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert world.snapshot().installed_mcp_codes == frozenset()
+    assert events == [("artifact", frozenset()), ("passport", frozenset())]
+
+@pytest.mark.asyncio
+async def test_platform_committed_mcp_removal_still_updates_passport_if_audit_fails(monkeypatch):
+    from unittest.mock import MagicMock
+    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
+    from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult, RuntimeProjectionStatus
+
+    document = "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: weather\n"
+    world, service = registered_world(document, platform=True)
+    no_defaults = MagicMock()
+    no_defaults.server_codes_for.return_value = frozenset()
+    world.management._platform_default_mcp_policy = no_defaults
+    world.activation._inner._platform_default_mcp_policy = no_defaults
+    strategy = service.delivery_for_engine("teclaw")
+    events = []
+    class Delivery:
+        async def deliver_with_receipt(self, ctx):
+            codes = world.snapshot().installed_mcp_codes
+            events.append(("artifact", codes))
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=codes)
+    async def passport(ctx):
+        codes = world.snapshot().installed_mcp_codes
+        events.append(("passport", codes))
+        return RuntimeProjectionResult(status=RuntimeProjectionStatus.CONVERGED, passport_updated=True,
+                                       passport_mcp_codes=codes)
+    strategy._redeliver = Delivery()
+    strategy._passport = passport
+    await asyncio.to_thread(service.start_apply, **_who(world), trigger="explicit")
+    assert world.snapshot().installed_mcp_codes == frozenset({"weather"})
+    events.clear()
+    service._capabilities._document = "schema_version: 1\nmanifest:\n  mcp: []\n"
+    def fail_audit(**_kwargs):
+        raise RuntimeError("audit unavailable")
+    monkeypatch.setattr(world.activation._inner, "_audit", fail_audit)
+    await asyncio.to_thread(service.start_apply, **_who(world), trigger="explicit")
+    report = service.last_apply(entity_id="entity-1", bot_id="bot-1")
+    category = next(c for c in report.categories if c.construct is Category.CAPABILITIES)
+    assert report.status is ApplyStatus.PARTIAL
+    assert category.aborted and category.removals == ()
+    assert world.snapshot().installed_mcp_codes == frozenset()
+    assert events == [("artifact", frozenset()), ("passport", frozenset())]

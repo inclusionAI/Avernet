@@ -41,6 +41,7 @@ from agentclaw.community.core.skill_center.skill_reference_contract import (
 from agentclaw.community.core.skill_center.services.mcp_admission import (
     require_mcp_delivery_eligibility,
 )
+from agentclaw.community.core.skill_center.mcp_apply_policy import is_manifest_mcp_install
 from .capabilities_types import CapabilityPlan, SkillSet
 from .capabilities_skills import resolve_skill
 from .capabilities_resolve import resolve_supply
@@ -75,11 +76,12 @@ class CapabilitiesMaterialiser(Materialiser[DesiredCapabilities]):
         )
 
     def _validate_mcp(self, ctx, code, config):
-        verdict = self._auth.check_mcp_permission_detail(ctx.actor_id, code)
-        if not (verdict.get("has_permission") and verdict.get("access_level")):
-            raise ValueError(
-                "this tenant does not have permission to enable this MCP server"
-            )
+        if not is_manifest_mcp_install():
+            verdict = self._auth.check_mcp_permission_detail(ctx.actor_id, code)
+            if not (verdict.get("has_permission") and verdict.get("access_level")):
+                raise ValueError(
+                    "this tenant does not have permission to enable this MCP server"
+                )
         return self._validate_mcp_config(ctx, code, config)
 
     def _validate_mcp_config(self, ctx, code, config):
@@ -94,13 +96,15 @@ class CapabilitiesMaterialiser(Materialiser[DesiredCapabilities]):
         return validation
 
     def _validate_set_mcp(self, ctx, code, config, *, default=False):
-        if default:
+        if default and not is_manifest_mcp_install():
             verdict = self._auth.check_mcp_permission_detail(ctx.actor_id, code)
             if not verdict.get("access_level"):
                 raise ValueError("MCP permission service or catalogue returned incomplete detail")
             validation = self._validate_mcp_config(ctx, code, config)
-        else:
+        elif not default:
             validation = self._validate_mcp(ctx, code, config)
+        else:
+            validation = self._validate_mcp_config(ctx, code, config)
         require_mcp_delivery_eligibility(
             mcp_config=self._config,
             engine_type=ctx.engine_type,
