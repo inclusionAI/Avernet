@@ -1,0 +1,180 @@
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFilesFeature.test.tsx
+  s_5e0eab15b95f7c::t_186a170b3e6043 231-255
+  s_5e0eab15b95f7c::t_0c0bae0539961a 266
+  s_5e0eab15b95f7c::t_4d06c574f20e6e 289,291
+  s_5e0eab15b95f7c::t_6e4b4f75522042 324
+  s_5e0eab15b95f7c::t_7b939d9d83bd08 205-206
+  s_5e0eab15b95f7c::t_1484261d50f6fb 335
+  s_5e0eab15b95f7c::t_efeddfd639b6da 307-308,313
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileStages.test.tsx
+  s_5e0eab15b95f7c::t_adb9630a4fc1a5 62,67
+  s_5e0eab15b95f7c::t_02ac73634c4ee0 83-85
+  s_5e0eab15b95f7c::t_1d87b2ae63b6b1 43
+  s_5e0eab15b95f7c::t_67e8c57bc11203 57
+apps/frontend-nextgen/src/components/BotWorkshop/BotHealthCheckDrawer/components/EnvironmentPanel.tsx
+  s_da1cd7b8c2f009::t_7269581c9005f8 106
+  s_da1cd7b8c2f009::t_a05b1851f4689d 11,22-23,34-35
+apps/frontend-nextgen/src/pages/BotWorkshop/HealthCheck/index.tsx
+  s_da1cd7b8c2f009::t_336795175f72d2 7
+  s_da1cd7b8c2f009::t_bf5ab576435f60 132-133,137-144
+apps/frontend-nextgen/src/services/backendApi/apiBaseUrl.ts
+  s_1a2d54725ee9e9::t_36900045f531f5 1-20
+apps/frontend-nextgen/src/services/backendApi/httpClient.ts
+  s_1a2d54725ee9e9::t_7e8f20b4484116 180-182
+  s_1a2d54725ee9e9::t_a06e231c32597a 1
+apps/frontend-nextgen/src/services/botScheduledTasks/locks.ts
+  s_746210038dea65::t_1f100554705169 2,5,10,12,14
+apps/frontend-nextgen/src/services/botScheduledTasks/service.ts
+  s_746210038dea65::t_fb15459f903527 11
+  s_746210038dea65::t_68c23c67b3cb11 71-77
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFileUpload.ts
+  s_5e0eab15b95f7c::t_40c6ff76b0ad7e 29-30
+  s_5e0eab15b95f7c::t_bdff17a0815366 134
+  s_5e0eab15b95f7c::t_f449867be7156a 96-97
+apps/frontend-nextgen/src/components/BotWorkshop/BotHealthCheckDrawer/HealthCheckView.tsx
+  s_da1cd7b8c2f009::t_1477fd18fc49ea 13,24-25,35-36
+  s_da1cd7b8c2f009::t_a160f004855814 100-101
+apps/frontend-nextgen/test/services/botScheduledTasks/metadata.test.ts
+  s_746210038dea65::t_534dd945eb1b3b 28-29,31
+  s_746210038dea65::t_13552436a0888e 70,75
+  s_746210038dea65::t_a5850495aaedb8 3,7-8,16,32-33,39-41,46-53,58-60,65-67,72-73
+  s_746210038dea65::t_0eeebb16bf0ff8 71,74
+  s_746210038dea65::t_c59f3303ff39c7 1-2,4-6,9-15,17-26,34-38,42-45,54-57,61-64,68-69
+  s_746210038dea65::t_49875176da9fda 27,30
+apps/frontend-nextgen/src/services/botHealthCheck/botHealthCheckService.ts
+  s_da1cd7b8c2f009::t_bf52d9e6e2a9df 93-118
+  s_da1cd7b8c2f009::t_68c0a5595d4fb4 4,7
+apps/frontend-nextgen/src/services/backendApi/bots/botSessionFileController.ts
+  s_5e0eab15b95f7c::t_ce1d76fb990902 80-84
+apps/frontend-nextgen/test/pages/BotWorkshop/RoutineFormDialog.targetError.test.tsx
+  s_746210038dea65::t_8cebf53132694b 31
+  s_746210038dea65::t_46f7ceacaed5c6 1-30,32-72
+apps/frontend-nextgen/src/services/botScheduledTasks/metadata.ts
+  s_746210038dea65::t_53a3ea086c3368 21-22
+  s_746210038dea65::t_8f936135d88a20 39-41
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  s_5e0eab15b95f7c::t_9e5aa42d387f6f 99-102,110,120
+  s_5e0eab15b95f7c::t_a0ba25e9a0614c 216
+apps/frontend-nextgen/src/services/backendApi/harnessController.ts
+  s_da1cd7b8c2f009::t_ddb4a2dee8947a 138-203
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineFormDialog.tsx
+  s_746210038dea65::t_2885f118070ea9 176
+apps/frontend-nextgen/src/services/backendApi/privateChat/iamTokenController.ts
+  s_5e0eab15b95f7c::t_3e96cc6931acd9 17-19
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_5e0eab15b95f7c::t_1f6ee262bb9d87 232,247-252
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.tsx
+  s_5e0eab15b95f7c::t_42b49fcd19e5aa 29-30
+  s_5e0eab15b95f7c::t_526094cae44e90 68
+  s_5e0eab15b95f7c::t_7c7a354eb9154b 126-127
+apps/frontend-nextgen/src/hooks/useBotWorkshop.ts
+  s_746210038dea65::t_e8b5132340ca70 178-179
+  s_746210038dea65::t_5fe65afd044790 16
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/useScheduledTasks.ts
+  s_746210038dea65::t_1d504bca7cda9f 23-24
+  s_746210038dea65::t_523a4783287d62 160-164,169-170,175
+  s_746210038dea65::t_858fde97338797 143
+  s_746210038dea65::t_bb23b4de4b54b6 126-127
+  s_746210038dea65::t_04c3d45d20fdbf 153-154
+  s_746210038dea65::t_4ce6a8c94e3971 200
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays.tsx
+  s_5e0eab15b95f7c::t_07ef32c88be1ef 76
+  s_5e0eab15b95f7c::t_c0c8dd99ae9ee7 21-22
+  s_5e0eab15b95f7c::t_b94f6f368019fc 42
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFiles.ts
+  s_5e0eab15b95f7c::t_8ecf1c6eb5548c 78,88,98,116,128,145,163,171
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_5e0eab15b95f7c::t_13347a3f2db150 288,290-293
+apps/frontend-nextgen/test/services/botScheduledTasks/targets.test.ts
+  s_746210038dea65::t_e6d0e1667d315f 248-250
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  s_5e0eab15b95f7c::t_2d412ebe735ace 163-165
+  s_5e0eab15b95f7c::t_b886ca27db79a5 234-238,258-259,265,283-284,290,307-308,311-316,334-335,338-344
+  s_5e0eab15b95f7c::t_6b73f60580baa8 151-155
+  s_5e0eab15b95f7c::t_f426440b512df1 87-88,97
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_5e0eab15b95f7c::t_3e63239dacda13 140
+  s_5e0eab15b95f7c::t_911e2b2567e271 82
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilePreview.ts
+  s_5e0eab15b95f7c::t_ef427b81b49d6e 123
+  s_5e0eab15b95f7c::t_e2dc49b6296798 45-46
+  s_5e0eab15b95f7c::t_d54c0cc07f507a 79
+  s_5e0eab15b95f7c::t_b7d6a4fb08256b 96
+  s_5e0eab15b95f7c::t_df7dacdb0f02b4 56
+apps/frontend-nextgen/src/hooks/useBotHealthCheck.ts
+  s_da1cd7b8c2f009::t_5f322c62b5aeba 9,18-22,26-27,38-41,62-115,122-123,125,149-152
+  s_da1cd7b8c2f009::t_e9f566ebc4ffd7 1-7,12-17,35-37,153-199,201,203,213-215,221-223
+  s_da1cd7b8c2f009::t_9bb804b05fb184 23-25
+apps/frontend-nextgen/src/components/BotWorkshop/BotHealthCheckDrawer/components/PatchPreviewModal.tsx
+  s_da1cd7b8c2f009::t_9b1a2dedc7b923 20
+  s_da1cd7b8c2f009::t_fdea00fdeb4dc4 1-19,21-102
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/index.tsx
+  s_746210038dea65::t_1380d73b400eb4 100-101
+apps/frontend-nextgen/test/pages/BotWorkshop/ScheduledTasks/useScheduledTasks.lock.test.tsx
+  s_746210038dea65::t_42395b2dbda065 35
+  s_746210038dea65::t_67faa37ccfbda4 18
+  s_746210038dea65::t_513af9aed799d2 1-17,19-34,36-48,52-74
+  s_746210038dea65::t_6a0bd5cc41bfcd 49-51
+apps/frontend-nextgen/src/requestConfig.ts
+  s_1a2d54725ee9e9::t_af6edc6b2f18cb 137-139
+  s_1a2d54725ee9e9::t_5a15d60ba51d67 3
+apps/frontend-nextgen/test/components/BotWorkshop/OptimizationPanel.test.tsx
+  s_da1cd7b8c2f009::t_cf311b6e2231bf 4,6,28-37,62-93
+apps/frontend-nextgen/test/services/botHealthCheckService.test.ts
+  s_da1cd7b8c2f009::t_99df609a194931 314-364
+  s_da1cd7b8c2f009::t_d7fb47402d9df4 2-6,13-19
+  s_da1cd7b8c2f009::t_17b5d1d4f75321 20
+apps/frontend-nextgen/test/services/backendApi/apiBaseUrl.test.ts
+  s_1a2d54725ee9e9::t_8bc7a9b49b5a81 1-35
+apps/frontend-nextgen/test/hooks/useBotHealthCheck.test.tsx
+  s_da1cd7b8c2f009::t_66131ca019b303 119-120,128,132-136,139
+  s_da1cd7b8c2f009::t_5eb3b21b92c248 1-41,43-59,61-93,95-118,121-127,129-131,137-138,140-144,146-178
+  s_da1cd7b8c2f009::t_a3faefbe8dd8a5 42,60,94,145
+apps/frontend-nextgen/src/services/botScheduledTasks/types.ts
+  s_746210038dea65::t_662a9b8b3ecd43 13-14
+apps/frontend-nextgen/src/components/BotWorkshop/BotHealthCheckDrawer/components/OptimizationPanel.tsx
+  s_da1cd7b8c2f009::t_d4d5ad8d3893f4 87-88,91
+  s_da1cd7b8c2f009::t_1ea0db5c092b56 5,11-14,17
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_5e0eab15b95f7c::t_6ab8e8d3a86d0b 695-855
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bae38af03a2946666a9b4ed329c3fabb8ba9c368",
+  "prompts": {},
+  "sessions": {
+    "s_1a2d54725ee9e9": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1f2756d2-6003-46f2-9dfc-18acc1c75bce",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_5e0eab15b95f7c": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "44b19073-2adc-4fd7-9499-390aad0a5473",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_746210038dea65": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "375044a4-cf55-4cea-ad56-3a8e0ab080d0",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_da1cd7b8c2f009": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "62553517-42bc-476f-aaef-a88a53a083d4",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

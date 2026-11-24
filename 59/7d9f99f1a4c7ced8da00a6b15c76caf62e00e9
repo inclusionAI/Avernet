@@ -1,0 +1,40 @@
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_reconcile.py
+  s_3d36bb45bb2a35::t_179fe928dee537 6,22,44,77-84
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_be5a2e990e78da 45-49,103-115,129-140,150-152,237,274-289,310-319,324-325
+  s_3d36bb45bb2a35::t_179fe928dee537 254-269
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_release_evidence.py
+  s_3d36bb45bb2a35::t_be5a2e990e78da 1,5,8,19-27,33,35,52,56-57,59-61,65-67,69-72,74-75,77
+apps/backend/src/agentclaw/community/core/skill_center/services/_mutation_flow.py
+  s_3d36bb45bb2a35::t_179fe928dee537 21,223,290,330-337,342,350,365
+apps/backend/src/agentclaw/community/core/devices/repository/record.py
+  s_3d36bb45bb2a35::t_be5a2e990e78da 15-16,20
+  s_3d36bb45bb2a35::t_179fe928dee537 12
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_d04bb3540d4849 290-329
+  s_3d36bb45bb2a35::t_5e2b5d8dde98af 330-348
+apps/backend/src/agentclaw/community/core/devices/repository/models.py
+  s_3d36bb45bb2a35::t_be5a2e990e78da 45
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_be5a2e990e78da 437-439
+apps/backend/src/agentclaw/community/core/skill_center/services/recovering_bot_runtime_projector.py
+  s_3d36bb45bb2a35::t_179fe928dee537 85-92
+apps/backend/tests/community/core/skill_center/test_mutation_flow_timing.py
+  s_3d36bb45bb2a35::t_f714c6e3c69a3f 5,377-414
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "597d9f99f1a4c7ced8da00a6b15c76caf62e00e9",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/bcs/crates/bootstrap/bcs/tests/human_friend_group_creation.rs
+  s_257b4c26393128::t_2da6d3f061079a 42,71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f31c5c48d54f4b6c65266f53374982f13362196c",
+  "prompts": {},
+  "sessions": {
+    "s_257b4c26393128": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f292-a423-71b0-9d30-cfb5b4573a1e",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

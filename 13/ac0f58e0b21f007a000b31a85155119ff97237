@@ -1,0 +1,84 @@
+apps/frontend-nextgen/tsconfig.json
+  s_2a8abdc9af1170::t_e9918d4bc38fe0 22-27
+apps/frontend-nextgen/scripts/public-tests.list
+  s_2a8abdc9af1170::t_fb72023b5014db 62-72,74-107
+  s_2a8abdc9af1170::t_e8a4fe2749f45c 153-154
+  s_853dc2328e6e01::t_8c68a803d77a7b 208
+apps/frontend-nextgen/scripts/assemble-internal.sh
+  s_2a8abdc9af1170::t_c14b7a35466fe6 209-219
+apps/frontend-nextgen/jest.config.cjs
+  s_2a8abdc9af1170::t_1efe497abb8a3c 22-26
+apps/frontend-nextgen/src/internal/market/hooks/useAddToCapabilitySet.ts
+  s_30131f6595b5d5::t_4c66550f4db879 5,165,167-174,176-178
+apps/frontend-nextgen/test/internal/market/hooks/useAddToCapabilitySet.test.tsx
+  s_30131f6595b5d5::t_41775fea4e0be7 30,90-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "13ac0f58e0b21f007a000b31a85155119ff97237",
+  "prompts": {},
+  "humans": {
+    "h_3141242c39a938": {
+      "author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  },
+  "sessions": {
+    "s_2a8abdc9af1170": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "b7903c3f-dab3-4e7d-87b3-7d23f3d7a102",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_30131f6595b5d5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e7f9-9388-7702-95ad-bebd50450d5d",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    },
+    "s_5bb95fc7fe5a56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e348-86dd-7db3-95df-e78c098d4972",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    },
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    },
+    "s_853dc2328e6e01": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "baf3979c-b7e9-4f49-8731-da28a1b45f70",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    },
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

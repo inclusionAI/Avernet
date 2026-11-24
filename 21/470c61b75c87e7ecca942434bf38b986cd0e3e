@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/community/core/skill_center/errors.py
+  s_3d36bb45bb2a35::t_cea962e2a2da25 344
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_projection.py
+  s_3d36bb45bb2a35::t_cea962e2a2da25 156
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_sync.py
+  s_3d36bb45bb2a35::t_cea962e2a2da25 18,90-97,245,279-280,282-291,294,296-299,309,328-336,344
+apps/backend/tests/community/core/devices/test_teclaw_device_sync.py
+  s_3d36bb45bb2a35::t_8aff8344c2e298 438-458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "21470c61b75c87e7ecca942434bf38b986cd0e3e",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

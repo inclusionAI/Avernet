@@ -1,0 +1,47 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts.test.ts
+  s_913510881d8932::t_42691846713a07 94,102,104,112-113,141-144,147,149-150,152-155,157,160-165,167,173,185-192,200,202-205,214,218-228
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-workflow-types.test.ts
+  s_913510881d8932::t_42691846713a07 1-133
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-browser-reads.ts
+  s_913510881d8932::t_42691846713a07 1-129
+apps/evolverun/clawweb/docs/pack-scripts-browser-auth.md
+  s_913510881d8932::t_42691846713a07 8-56,133-135,140-141,145-146,149,263
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-browser-login.test.ts
+  s_913510881d8932::t_42691846713a07 44,70,84-90,100,175-200
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-browser-reads.test.ts
+  s_913510881d8932::t_42691846713a07 1-286
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-browser-auth.test.ts
+  s_913510881d8932::t_42691846713a07 21,25,28,42
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-browser-read-host.test.ts
+  s_913510881d8932::t_42691846713a07 1-139
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  s_913510881d8932::t_42691846713a07 73-74,550,552-561
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-draft-host.test.ts
+  s_913510881d8932::t_42691846713a07 67-68
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-persistence.test.ts
+  s_913510881d8932::t_42691846713a07 161,164-172
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-workflow-types.ts
+  s_913510881d8932::t_42691846713a07 1,4,6-10,16-17,20-22,25,32-37,40-54,67,71,75,80
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-draft-reader.ts
+  s_913510881d8932::t_42691846713a07 1-22
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/pack-scripts.ts
+  s_913510881d8932::t_42691846713a07 27,117,150,226,257-258,290,297-299
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-full-path.test.ts
+  s_913510881d8932::t_42691846713a07 38,79,81,99,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "875c2fca97dc823f1a90c9722099f0f7b18d685b",
+  "prompts": {},
+  "sessions": {
+    "s_913510881d8932": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e20f-c995-7ca1-9014-39cd3ea795ac",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apps/backend/docs/openapi-v1/engine-surface.md
+  s_f364df1c07a1e6::t_da1a89a1ec1082 131-135
+apps/backend/docs/openapi-v1/engine-surface.zh-CN.md
+  s_f364df1c07a1e6::t_da1a89a1ec1082 124-126
+apps/backend/src/agentclaw/community/core/runtime_binding/service.py
+  s_f364df1c07a1e6::t_4e54a559e72ec0 75-80,83-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "28f768e7b4b4c5f3f3244eb706fbfb2971abaf74",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+singlebox/verify/test_bcsfuse_module.sh
+  s_631958e8c65042::t_f5d5964d1615ba 24-29,37-42,71-75,79,86-87
+apps/bcsfuse/requirements.txt
+  s_631958e8c65042::t_115f3c806c3bfe 26-27
+apps/bcsfuse/README.md
+  s_631958e8c65042::t_115f3c806c3bfe 58
+  s_631958e8c65042::t_68ce7c9c27a0dd 49,54-55
+singlebox/modules/bcsfuse.sh
+  s_631958e8c65042::t_115f3c806c3bfe 41,53,85-89,95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3c615607108505d9c274a1137bc5d19c72d8c6ba",
+  "prompts": {},
+  "sessions": {
+    "s_631958e8c65042": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c5a3-a5f7-7983-a238-eaf55027c6ac",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
