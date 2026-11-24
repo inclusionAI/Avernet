@@ -89,6 +89,7 @@ def test_status_batch_projects_readiness_and_public_restart_without_loading_snap
                                         ('other-env', 'owner'), ('other-tenant', 'owner'), ('bot-0', 'wrong-owner')],
     )
     assert len(items) == 20
+    assert all(item['active_engine'] == 'aicoding' for item in items)
     assert all(item['is_ready'] for item in items)
     assert items[0]['ext']['aicoding']['restart']['warning']['code'] == 'backup_failed_continue'
     assert 'do-not-return' not in json.dumps(items)

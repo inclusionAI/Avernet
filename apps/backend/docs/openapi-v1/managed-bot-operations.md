@@ -20,6 +20,17 @@ authorization before issuing a restart. The stored template association, tenant,
 environment and current Owner remain checked on this side. Desktop and separately
 managed local runtimes are not supported. Published runtimes are read-only.
 
+Restart and batch status accept only Bots whose persisted `active_engine` is
+`claude_code` or `aicoding`. The reusable `EngineCheck` aspect is attached by
+`PublicAPIRoute`, independently of application admission and Owner checks.
+The application trust and stored template scope are checked before engine
+support. Other engines, including missing or unknown engine values, return
+HTTP 501 / `501000` / `Not supported for this engine` using `ErrorEnvelope`.
+A batch containing any resolved unsupported Bot is refused as a whole; missing
+or out-of-scope targets retain the existing omission behavior. The status
+handler reuses the aspect's request-cached batch result, so the check adds no
+queries to status polling. Discovery and snapshot reads are not engine-limited.
+
 ```yaml
 openapi:
   bot_operations:

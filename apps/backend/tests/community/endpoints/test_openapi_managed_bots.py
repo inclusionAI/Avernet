@@ -9,6 +9,7 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.repository.models import TemplateModel
 from agentclaw.community.di.openapi_bot_operations_config import OpenApiBotOperationsConfig
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
@@ -144,4 +145,83 @@ def managed_status_happy() -> None:
     expect=ExpectError(status=422),
 )
 def managed_status_empty_batch() -> None:
+    pass
+
+
+def _seed_openclaw(world: World) -> None:
+    _seed(world)
+    with world.get(DatabasePlugin).orm_session() as session:
+        session.query(BotModel).filter(BotModel.bot_id == 'managed-bot').update({'active_engine': 'openclaw'})
+
+
+def _seed_claude_code(world: World) -> None:
+    _seed(world)
+    with world.get(DatabasePlugin).orm_session() as session:
+        session.query(BotModel).filter(BotModel.bot_id == 'managed-bot').update({'active_engine': 'claude_code'})
+
+
+@endpoint_test(
+    method='POST', path='/openapi/v1/bots/restart-for-others', scenario='managed_restart_engine_refused',
+    seed=_seed_openclaw, input=CaseInput(headers=_headers(), json_body=_ADDRESS),
+    expect=ExpectError(status=501),
+)
+def managed_restart_engine_refused() -> None:
+    pass
+
+
+@endpoint_test(
+    method='POST', path='/openapi/v1/bots/status-for-others', scenario='managed_status_engine_refused',
+    seed=_seed_openclaw, input=CaseInput(headers=_headers(), json_body={
+        'template_key': 'coding', 'bots': [{'bot_id': 'managed-bot', 'owner_id': 'owner'}],
+    }),
+    expect=ExpectError(status=501),
+)
+def managed_status_engine_refused() -> None:
+    pass
+
+
+@endpoint_test(
+    method='POST', path='/openapi/v1/bots/restart-for-others', scenario='managed_restart_claude_code',
+    seed=_seed_claude_code, input=CaseInput(headers=_headers(), json_body=_ADDRESS),
+    expect=ExpectSuccess(json_contains={'code': 200000, 'data': {'bot_id': 'managed-bot', 'status': 'PENDING'}}),
+)
+def managed_restart_claude_code() -> None:
+    pass
+
+
+@endpoint_test(
+    method='POST', path='/openapi/v1/bots/status-for-others', scenario='managed_status_claude_code',
+    seed=_seed_claude_code, input=CaseInput(headers=_headers(), json_body={
+        'template_key': 'coding', 'bots': [{'bot_id': 'managed-bot', 'owner_id': 'owner'}],
+    }),
+    expect=ExpectSuccess(json_contains={'code': 200000, 'data': {'total': 1, 'items': [{
+        'bot_id': 'managed-bot', 'owner_id': 'owner',
+    }]}}),
+)
+def managed_status_claude_code() -> None:
+    pass
+
+
+def _seed_untrusted_application(world: World) -> None:
+    _seed(world)
+    world.injector.binder.bind(OpenApiBotOperationsConfig, to=OpenApiBotOperationsConfig())
+
+
+@endpoint_test(
+    method='POST', path='/openapi/v1/bots/restart-for-others', scenario='managed_restart_untrusted_app',
+    seed=_seed_untrusted_application, input=CaseInput(headers=_headers(), json_body=_ADDRESS),
+    expect=ExpectError(status=403),
+)
+def managed_restart_untrusted_app() -> None:
+    pass
+
+
+@endpoint_test(
+    method='POST', path='/openapi/v1/bots/status-for-others', scenario='managed_status_untrusted_app',
+    seed=_seed_untrusted_application, input=CaseInput(headers=_headers(), json_body={
+        'template_key': 'coding', 'bots': [{'bot_id': 'managed-bot', 'owner_id': 'owner'}],
+    }),
+    expect=ExpectError(status=403),
+)
+def managed_status_untrusted_app() -> None:
     pass

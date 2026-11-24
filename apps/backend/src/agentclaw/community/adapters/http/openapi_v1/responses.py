@@ -109,6 +109,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UserIdMismatchError,
     BotAccessCheckForbiddenError,
     BotOperationsForbiddenError,
+    EngineOperationUnsupportedError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_genome import (
@@ -445,6 +446,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     UserIdMismatchError: (403, "Forbidden"),
     BotAccessCheckForbiddenError: (403, "Forbidden"),
     BotOperationsForbiddenError: (403, "Forbidden"),
+    EngineOperationUnsupportedError: (501, 'Not supported for this engine'),
     BotAddressNotFoundError: (404, 'Not found'),
     ManagedBotInputError: (400, 'Invalid managed Bot request'),
     ManagedSnapshotConflictError: (409, 'Template snapshot changed'),

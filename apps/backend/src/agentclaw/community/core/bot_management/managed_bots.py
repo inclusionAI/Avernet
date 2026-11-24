@@ -100,6 +100,7 @@ class ManagedBotService(ManagedBotServiceProtocol):
         for bot in self.repository.statuses(template_key=template_key, targets=targets):
             item = {
                 'bot_id': bot['bot_id'], 'owner_id': bot['owner_id'], 'status': bot.get('status') or '',
+                'active_engine': bot.get('active_engine'),
                 'is_ready': is_bot_ready(bot),
             }
             ext = resolve_status_ext(bot, response_ext={}, public=True)

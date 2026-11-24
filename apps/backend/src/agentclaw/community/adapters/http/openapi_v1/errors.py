@@ -38,6 +38,10 @@ class BotOperationsForbiddenError(Exception):
     """The verified application is not approved for cross-Owner Bot operations."""
 
 
+class EngineOperationUnsupportedError(Exception):
+    """The addressed Bot's persisted engine is not supported by this operation (→ 501)."""
+
+
 class GrantNotResolvableError(Exception):
     """Raised when an application caller holds no grant for what it addressed (→ 404).
 
