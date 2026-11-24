@@ -170,7 +170,7 @@ const BotWorkshopDetailPage: React.FC = () => {
           >
             {panelLocked ? (
               <p className="border-b border-divider bg-muted px-6 py-3 text-sm text-muted-foreground">
-                预发验证中，配置已锁定；请在右侧对话区验证 Bot。
+                试运行验证中，配置已锁定；请在右侧对话区验证 Bot。
               </p>
             ) : null}
             <fieldset

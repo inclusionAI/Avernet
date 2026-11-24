@@ -6,20 +6,13 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } f
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
 import type { ServicePublication, ServicePublicationAction } from '@/domain/botEditor';
+import { serviceBotStageLabel } from '@/domain/botWorkshop';
+import { publicationActionLabel, publicationStatusLabel } from '@/hooks/useBotPublicationMenu';
 import { useServicePublications } from '@/hooks/useServicePublications';
 import type { BotDomain } from '@/services/botWorkshop';
 import { ArrowRight, ExternalLink, RefreshCw, RotateCw } from 'lucide-react';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
-
-const statusLabel: Record<ServicePublication['status'], string> = {
-  draft: '草稿',
-  deploying: '部署中',
-  prestable: '预发',
-  staging: '预发',
-  running: '运行中',
-  offline: '已下线',
-};
 
 export function ServicePublicationDrawer({
   bot,
@@ -50,12 +43,8 @@ export function ServicePublicationDrawer({
     return Promise.resolve();
   };
   const label: Record<ServicePublicationAction, string> = {
-    publish_staging: '发布预发',
-    publish_online: '发布上线',
+    ...publicationActionLabel,
     restart_publish: '重启发布',
-    cancel_staging: '取消预发',
-    offline: '下线',
-    retry: '重试',
     upgrade: '升级',
     delete: '删除草稿',
   };
@@ -85,14 +74,18 @@ export function ServicePublicationDrawer({
                   <Badge
                     tone={item.status === 'running' ? 'success' : item.status === 'deploying' ? 'warning' : 'neutral'}
                   >
-                    {statusLabel[item.status]}
+                    {publicationStatusLabel[item.status]}
                   </Badge>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {item.deployment ? (
                     <div className="rounded-lg border border-border p-3 text-xs">
                       <p className="m-0 font-medium">
-                        部署：{item.deployment.target} · {item.deployment.status === 'failed' ? '失败' : '进行中'}
+                        部署：{item.deployment.target === 'prestable' || item.deployment.target === 'staging'
+                          ? serviceBotStageLabel.verify
+                          : item.deployment.target === 'running' || item.deployment.target === 'online'
+                            ? serviceBotStageLabel.online
+                            : item.deployment.target} · {item.deployment.status === 'failed' ? '失败' : '进行中'}
                       </p>
                       {item.deployment.errorMessage ? (
                         <p className="m-0 mt-1 text-destructive">{item.deployment.errorMessage}</p>

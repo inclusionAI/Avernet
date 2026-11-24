@@ -5,7 +5,7 @@ import { BOT_COPY_FEATURE_ENABLED } from '@/hooks/useBotWorkshopCopyHost';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import React from 'react';
 import { BotStatusPublicationMenu } from './BotStatusPublicationMenu';
-import { lifecycleLabel } from './config';
+import { botLifecycleLabel } from './config';
 
 export interface BotStatusCellProps {
   bot: BotDomain;
@@ -80,7 +80,7 @@ const BotStatusCell: React.FC<BotStatusCellProps> = ({
       ? '已回收'
       : bot.serviceMode === 'service' && bot.lifecycle === 'failed'
       ? '部署失败'
-      : lifecycleLabel[bot.lifecycle]);
+      : botLifecycleLabel(bot));
   const statusDisplay = (
     <span className="inline-flex items-center gap-1.5">
       <span aria-hidden className={`size-2 shrink-0 rounded-full ${dotColor(bot.lifecycle)}`} />
