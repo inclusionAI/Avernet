@@ -1923,6 +1923,8 @@ tell from a real address until it fails. `GET /stat` replaces both the
 id-addressed single lookup and `check-name`: it answers existence against the
 workspace, the same authority the listing reads, so the two cannot disagree._
 
+`DELETE` resolves the target in the parent directory listing before changing its record or deleting its content. A missing target returns 404. If the provider lists the target without its type, the request returns 502 without deleting it.
+
 _Note: `Page` here is applied by the backend over a whole directory listing —
 the engine's `ListDirRequest` carries no page, limit or cursor. `page_size`
 bounds the response, not the device round trip, and a later page costs what the

@@ -595,6 +595,30 @@ class ResourceFileService(ResourceFilePort):
         )
         return await device_fs.exists(self._logical(path))
 
+    async def lookup_path_is_dir(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+        runtime_context: DeviceContext | None = None,
+    ) -> bool | None:
+        """Return the listed type, or None when the path is absent."""
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        entry = await self._find_directory_entry(device_fs, path)
+        if entry is None:
+            return None
+        is_dir = self._is_dir_flag(entry)
+        if is_dir is None:
+            raise ListingFailed("Workspace entry has no file type")
+        return is_dir
+
     async def create_directory(
         self,
         *,
@@ -625,6 +649,7 @@ class ResourceFileService(ResourceFilePort):
         path: str,
         runtime_context: DeviceContext | None = None,
         report_directory_failure: bool = False,
+        is_directory: bool | None = None,
     ) -> bool:
         """Delete a file or directory; returns False when nothing was deleted.
 
@@ -646,7 +671,9 @@ class ResourceFileService(ResourceFilePort):
             bot_id=bot_id, engine_type=engine_type,
         )
         logical = self._logical(path)
-        if await self._is_dir(device_fs, path):
+        if is_directory is None:
+            is_directory = await self._is_dir(device_fs, path)
+        if is_directory:
             deleted = await device_fs.delete_tree(logical)
             if not deleted and report_directory_failure:
                 raise DirectoryDeleteFailed()
@@ -768,17 +795,20 @@ class ResourceFileService(ResourceFilePort):
         projection pass. A listing failure answers "not a directory": the delete
         then takes the file branch, which is what it did unconditionally until now.
         """
-        parent, _, leaf = path.rpartition("/")
         try:
-            entries = await device_fs.list_dir(self._logical(parent))
+            named = await self._find_directory_entry(device_fs, path)
         except Exception as exc:
             logger.warning(
                 "[%s._is_dir] listing %r failed, assuming file: %s",
-                type(self).__name__, parent, exc,
+                type(self).__name__, path.rpartition("/")[0], exc,
             )
             return False
-        named = self._named_in(entries or (), leaf)
         return bool(self._is_dir_flag(named)) if named is not None else False
+
+    async def _find_directory_entry(self, device_fs: Any, path: str) -> dict[str, Any] | None:
+        parent, _, leaf = path.rpartition("/")
+        entries = await device_fs.list_dir(self._logical(parent))
+        return self._named_in(entries or (), leaf)
 
     @staticmethod
     def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:

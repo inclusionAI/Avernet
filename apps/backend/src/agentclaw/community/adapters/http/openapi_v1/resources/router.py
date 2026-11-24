@@ -77,6 +77,7 @@ from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyErro
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
+from agentclaw.community.core.ports.resource_file_port import ListingFailed
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
@@ -845,7 +846,14 @@ async def create_directory(
 @router.delete(
     "",
     response_model=Envelope[Deleted],
-    responses=_READ_ONLY_RESPONSE,
+    responses={
+        **_READ_ONLY_RESPONSE,
+        502: {
+            "model": ErrorEnvelope,
+            "description": "The storage provider could not classify or delete the target.",
+            **error_example(502, "Delete storage failed"),
+        },
+    },
 )
 @envelope_errors
 async def delete_file(
@@ -877,14 +885,18 @@ async def delete_file(
     entity_type, entity_id, engine_type = (
         coords.entity_type, coords.entity_id, coords.engine_type
     )
-    if not await file_svc.exists(
-        **(target or {}),
-        entity_type=entity_type,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        path=safe,
-    ):
+    try:
+        is_directory = await file_svc.lookup_path_is_dir(
+            **(target or {}),
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+        )
+    except ListingFailed as exc:
+        raise HTTPException(status_code=502, detail="Could not determine resource type") from exc
+    if is_directory is None:
         raise HTTPException(status_code=404, detail="Resource not found")
     # Record first, file second — the reverse order cannot recover. Deleting the
     # file first and then failing to drop the record leaves the manifest pointing
@@ -907,6 +919,7 @@ async def delete_file(
         bot_id=bot_id,
         engine_type=engine_type,
         path=safe,
+        is_directory=is_directory,
     ):
         raise HTTPException(status_code=502, detail="Delete storage failed")
     return deleted_envelope(request)

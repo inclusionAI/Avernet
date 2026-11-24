@@ -147,9 +147,10 @@ def _seed_happy_services(world) -> None:
         yield ("a.txt", b"hello world")
 
     async def exists(_self, *, path, **_kwargs) -> bool:
-        # ``upload`` must find its target free (fresh branch, no 409) while
-        # ``delete`` must find its target present (or it 404s).
         return path == _EXISTING_PATH
+
+    async def lookup_path_is_dir(_self, *, path, **_kwargs) -> bool | None:
+        return False if path == _EXISTING_PATH else None
 
     async def upload_file(_self, **kwargs):
         rel = kwargs["filename"]
@@ -173,6 +174,7 @@ def _seed_happy_services(world) -> None:
             "read_file": read_file,
             "iter_directory_files": iter_directory_files,
             "exists": exists,
+            "lookup_path_is_dir": lookup_path_is_dir,
             "upload_file": upload_file,
             "create_directory": create_directory,
             "delete": delete,
