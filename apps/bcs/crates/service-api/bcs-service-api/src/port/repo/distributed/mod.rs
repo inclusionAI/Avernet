@@ -4,6 +4,7 @@ pub mod common;
 pub mod dispatch;
 pub mod group_round;
 pub mod inbox;
+pub mod node_history;
 pub mod ownership;
 pub mod result;
 pub mod session;

@@ -164,6 +164,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 45, name: "message_activity_indexes" },
     SqliteMigration { version: 46, name: "configured_catalog_labels" },
     SqliteMigration { version: 47, name: "dist_immutable_objects" },
+    SqliteMigration { version: 48, name: "fsm_node_history" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -605,6 +606,20 @@ async fn apply_sqlite_migration_body(
             ))).await?;
             Ok(())
         }
+        // Node-isolated interaction history (plan T3): append-only history rows
+        // with hashed node identity plus immutable (round, node) input pins.
+        // Additive only: two CREATE TABLE IF NOT EXISTS statements and the
+        // covering scan index; no existing table is touched.
+        48 => {
+            let steps = bcs_db_api::split_sql_statements(include_str!(
+                "../../../../migrations/sqlite/048_fsm_node_history.sql"
+            ))
+            .into_iter()
+            .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql)))
+            .collect();
+            db.transaction(steps).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -714,6 +729,9 @@ fn sqlite_migration_checksum(migration: &SqliteMigration) -> String {
     if migration.version == 47 {
         hasher.update(include_bytes!("../../../../migrations/sqlite/047_dist_immutable_objects.sql"));
     }
+    if migration.version == 48 {
+        hasher.update(include_bytes!("../../../../migrations/sqlite/048_fsm_node_history.sql"));
+    }
     hex::encode(hasher.finalize())
 }
 
@@ -763,3 +781,7 @@ mod catalog_labels_tests;
 #[cfg(test)]
 #[path = "migrations/dist_archive_tests.rs"]
 mod dist_archive_tests;
+
+#[cfg(test)]
+#[path = "migrations/node_history_tests.rs"]
+mod node_history_tests;

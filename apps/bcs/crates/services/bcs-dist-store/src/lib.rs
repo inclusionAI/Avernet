@@ -23,6 +23,7 @@ pub mod evidence;
 pub mod identity;
 pub mod inbox;
 pub mod layout;
+pub mod node_history;
 pub mod task_feed;
 pub mod version;
 

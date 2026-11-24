@@ -57,19 +57,20 @@ fn mysql_v20_prefix_upgrade_reports_the_complete_pending_tail() -> Result<()> {
     let prefix = records.iter().filter(|record| record.version <= 20).cloned().collect();
     let before = build_mysql_migration_report("bcs".into(), plans.clone(), prefix, true)?;
     assert_eq!(before.current_version, Some(20));
-    assert_eq!(before.target_version, Some(49));
+    assert_eq!(before.target_version, Some(50));
     assert_eq!(before.pending_versions.iter().map(|plan| plan.version).collect::<Vec<_>>(),
-        (21..=49).collect::<Vec<_>>());
+        (21..=50).collect::<Vec<_>>());
 
     let after = build_mysql_migration_report("bcs".into(), plans, records, true)?;
     let report = format_mysql_apply_report(&after, &before.pending_versions);
-    assert!(report.contains("applied_versions=29\npending_versions=0"), "{report}");
+    assert!(report.contains("applied_versions=30\npending_versions=0"), "{report}");
     assert!(report.contains("- 044 actor_identity_no_pad checksum="), "{report}");
     assert!(report.contains("- 045 delivery_session_lookup checksum="), "{report}");
     assert!(report.contains("- 046 group_context_preset checksum="), "{report}");
     assert!(report.contains("- 047 message_activity_indexes checksum="), "{report}");
     assert!(report.contains("- 048 configured_catalog_labels checksum="), "{report}");
     assert!(report.contains("- 049 dist_immutable_objects checksum="), "{report}");
+    assert!(report.contains("- 050 fsm_node_history checksum="), "{report}");
     let repeated = format_mysql_apply_report(&after, &[]);
     assert!(repeated.contains("applied_versions=0\npending_versions=0"), "{repeated}");
     Ok(())
