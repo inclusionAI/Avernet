@@ -239,7 +239,6 @@ def main():
                 finally:
                     h.close(passed)
         report['status'] = 'passed'
-        print(json.dumps(report))
     except Exception as exc:
         report['error'] = str(exc)
         raise

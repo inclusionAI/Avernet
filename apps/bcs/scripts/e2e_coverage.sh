@@ -257,7 +257,7 @@ if [[ "$aggregate_only" -eq 0 ]]; then
   mkdir -p "$cov_dir"
   : > "$cli_coverage_log"
   export BCS_CLI_COVERAGE_LOG="$cli_coverage_log"
-  bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
+  BCS_E2E_WORKER_COVERAGE=1 bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
   if [[ "$shared_tests_only" -eq 1 ]]; then
     # The parent still has independent producers running. Do not stop the
     # shared stack, merge profiles, or delete any evidence in this phase.
@@ -266,7 +266,6 @@ if [[ "$aggregate_only" -eq 0 ]]; then
   # Standalone invocation retains the complete historical test inventory.
   bash "$bcs_dir/scripts/caller_e2e_coverage.sh" || e2e_status=$?
   bash "$bcs_dir/scripts/oauth_e2e_coverage.sh" || e2e_status=$?
-  bash "$bcs_dir/scripts/worker_e2e_coverage.sh" || e2e_status=$?
 else
   if [[ ! -f "$bcs_log" || ! -f "$cli_coverage_log" ]]; then
     echo "aggregate-only requires existing shared-story HTTP and CLI logs" >&2

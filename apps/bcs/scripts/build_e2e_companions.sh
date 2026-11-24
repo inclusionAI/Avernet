@@ -7,7 +7,7 @@ case "${1:-all}" in
   caller) bins=(--bin bcs-caller-e2e --bin bcs-a2a-grpc-peer) ;;
   oauth) bins=(--bin bcs-oauth-e2e) ;;
   worker) features=worker-runtime-e2e; bins=(--bin bcs-worker-e2e) ;;
-  all) features=test-utils,worker-runtime-e2e; bins=(--bin bcs-caller-e2e --bin bcs-oauth-e2e --bin bcs-a2a-grpc-peer --bin bcs-worker-e2e) ;;
+  all) bins=(--bin bcs-caller-e2e --bin bcs-oauth-e2e --bin bcs-a2a-grpc-peer) ;;
   *) echo "expected caller, oauth, worker or all" >&2; exit 2 ;;
 esac
 cd "$bcs_dir"

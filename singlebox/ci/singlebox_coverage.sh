@@ -84,7 +84,7 @@ wait_bcs_companions() {
   cat "$report_dir/bcs/companions.log"
   if [[ "$status" -ne 0 ]]; then
     local log
-    for log in companion-build caller oauth worker; do
+    for log in companion-build caller oauth; do
       [[ ! -f "$report_dir/bcs/$log.log" ]] || tail -n 100 "$report_dir/bcs/$log.log"
     done
   fi
@@ -585,7 +585,7 @@ run_bcs_e2e() {
     endpoint_coverage.txt \
     cli_command_coverage.txt \
     changed_line_coverage.json \
-    oauth_e2e.json worker_e2e.json; do
+    oauth_e2e.json; do
     if [[ -f "$bcs_coverage_dir/$artifact" ]]; then
       cp "$bcs_coverage_dir/$artifact" "$bcs_report_dir/$artifact"
     fi
@@ -745,7 +745,6 @@ bcs_system = {
     "artifacts": {
         "e2e_log": "bcs/e2e.log",
         "oauth_e2e": "bcs/oauth_e2e.json",
-        "worker_e2e": "bcs/worker_e2e.json",
         "cobertura": "bcs/cobertura.xml",
         "coverage_text": "bcs/coverage.txt",
         "summary": "bcs/summary.json",
@@ -851,7 +850,6 @@ verify_required_artifacts() {
     "$report_dir/bcs/companion-timings.json"
     "$report_dir/bcs/e2e.log"
     "$report_dir/bcs/oauth_e2e.json"
-    "$report_dir/bcs/worker_e2e.json"
     "$report_dir/bcs/cobertura.xml"
     "$report_dir/bcs/coverage.txt"
     "$report_dir/bcs/summary.json"

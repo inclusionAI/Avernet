@@ -119,6 +119,21 @@ story_provider_operator_manages_subbots() {
 
 E2E_TESTS_STORIES+=("story_provider_operator_manages_subbots")
 
+# Keep isolated Worker coverage in the BCS story phase, so both split and
+# standalone coverage runs finish this producer before aggregating profiles.
+if [[ "${BCS_E2E_WORKER_COVERAGE:-0}" == 1 ]]; then
+    story_gateway_worker_coverage() {
+        local result=0
+        PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s "$SCRIPT_DIR/../ci/tests" -p test_worker_e2e.py || result=$?
+        assert_eq "Worker coverage harness regressions" "$result" "0"
+        result=0
+        bash "$SCRIPT_DIR/../worker_e2e_coverage.sh" || result=$?
+        assert_eq "Gateway and Worker live-process coverage" "$result" "0"
+    }
+    E2E_TESTS_STORIES+=("story_gateway_worker_coverage")
+fi
+
 # ============================================================================
 # Collect All Tests (Bash 3.2 compatible — no associative arrays)
 # ============================================================================
