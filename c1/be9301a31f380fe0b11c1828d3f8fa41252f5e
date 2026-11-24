@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/error-log-format.test.ts
+  h_bb3ca6fb13c5df 8-9,17,26,32,56
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/internal-logger.test.ts
+  h_bb3ca6fb13c5df 141-142,154
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/protected-workflow-logging.test.ts
+  h_bb3ca6fb13c5df 48-49
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-ai-drafts.test.ts
+  h_bb3ca6fb13c5df 127,129-130,147
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-route-logging.test.ts
+  h_bb3ca6fb13c5df 60-61
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-http.test.ts
+  h_bb3ca6fb13c5df 44-45,105,120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c1be9301a31f380fe0b11c1828d3f8fa41252f5e",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

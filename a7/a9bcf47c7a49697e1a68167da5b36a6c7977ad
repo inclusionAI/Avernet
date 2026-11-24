@@ -1,0 +1,44 @@
+apps/backend/tests/community/core/task/context_collab/products/open_admission_support.py
+  h_059e888e5e4e82 1-38
+apps/backend/tests/community/core/task/context_collab/products/swarm_coding_support.py
+  h_059e888e5e4e82 1-104
+apps/backend/tests/community/core/task/context_collab/products/swarm_execution_support.py
+  h_059e888e5e4e82 1-127
+apps/backend/tests/community/core/task/context_collab/products/task_commission_e2e_support.py
+  h_059e888e5e4e82 1-736
+apps/backend/tests/community/core/task/context_collab/products/test_bbs_public_discussion_read.py
+  h_059e888e5e4e82 1-402
+apps/backend/tests/community/core/task/context_collab/products/test_bbs_public_discussion_write.py
+  h_059e888e5e4e82 1-448
+apps/backend/tests/community/core/task/context_collab/products/test_open_capability_admission.py
+  h_059e888e5e4e82 1-116
+apps/backend/tests/community/core/task/context_collab/products/test_open_swarm_enrollment.py
+  h_059e888e5e4e82 1-408
+apps/backend/tests/community/core/task/context_collab/products/test_products_layering.py
+  h_059e888e5e4e82 1-126
+apps/backend/tests/community/core/task/context_collab/products/test_swarm_workflow_end_to_end.py
+  h_059e888e5e4e82 1-136
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_a2a_ingress.py
+  h_059e888e5e4e82 1-372
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_admission_strategy.py
+  h_059e888e5e4e82 1-99
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_bot_runtime.py
+  h_059e888e5e4e82 1-334
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_discovery.py
+  h_059e888e5e4e82 1-213
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_dispatch_bridge.py
+  h_059e888e5e4e82 1-255
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 1-952
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a7a9bcf47c7a49697e1a68167da5b36a6c7977ad",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

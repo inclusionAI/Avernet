@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/apply_engine/test_registered_capability_delivery.py
+  s_b7f94a3bd241d6::t_e449214e6a9117 220-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c1515da66bad5b859b799e05fcca2eb33cf3e309",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

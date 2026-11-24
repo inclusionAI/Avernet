@@ -1,0 +1,110 @@
+apps/frontend-nextgen/test/shell/AppShellResponsive.test.tsx
+  s_f177da566a2257::t_2574879409e1c3 6
+  s_f177da566a2257::t_abc6467b4edbf1 160-175
+apps/frontend-nextgen/src/shell/AppShell.tsx
+  s_f177da566a2257::t_a3321755744ae2 17
+  s_f177da566a2257::t_c137dfddd29fcb 148-150,156
+apps/frontend-nextgen/src/shell/SidebarUserFooter.tsx
+  s_f177da566a2257::t_f8694774ffa676 1-42
+apps/frontend-nextgen/src/shell/AppSidebar.tsx
+  s_f177da566a2257::t_b5325ccf88e98a 111-112,121
+  s_f177da566a2257::t_cce34060c06b53 14
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/RenderScreenPanel.tsx
+  s_8902951668ae40::t_54599ca383a1cd 75
+  s_8902951668ae40::t_a95619c80be195 73-74
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  s_8902951668ae40::t_dde91625500313 20
+  s_8902951668ae40::t_617b7a1b6b41e8 95-98
+apps/frontend-nextgen/test/services/workspace/groupSpeakingLeaseService.test.ts
+  s_86ab1d867617ae::t_1d547606fc0df1 17
+  s_86ab1d867617ae::t_127ac87c6faee3 72-77
+apps/frontend-nextgen/src/stores/conversationStoreState.ts
+  s_c7a9efc2c32d8f::t_16b5ae1f362024 109
+  s_c7a9efc2c32d8f::t_d40dc3ce09db78 79-80
+apps/frontend-nextgen/test/services/collaborationSquare/publicBotMetadata.test.ts
+  s_c7a9efc2c32d8f::t_bd158ac857f174 79-84,87-105
+  s_c7a9efc2c32d8f::t_37bba154e0d698 277-286
+  s_c7a9efc2c32d8f::t_54cb949eeab700 85-86
+apps/frontend-nextgen/src/services/collaborationSquare/publicBotMetadata.ts
+  s_c7a9efc2c32d8f::t_f643b0da557292 112-113
+  s_c7a9efc2c32d8f::t_8d2b30bc9333c9 95-97
+  s_c7a9efc2c32d8f::t_5c4ecded46e57b 136,143,146,151
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  s_c7a9efc2c32d8f::t_df4e6fbacc6dd1 302-303
+  s_c7a9efc2c32d8f::t_faffdaf77b067a 166-171
+apps/frontend-nextgen/test/stores/conversationStore.test.ts
+  s_c7a9efc2c32d8f::t_ca8c6213c40e21 271-292
+apps/frontend-nextgen/src/hooks/useCollaborationSquareFriendActions.ts
+  s_c7a9efc2c32d8f::t_f5d70d24476f5d 16
+  s_c7a9efc2c32d8f::t_a9dc0227ba198f 203
+  s_c7a9efc2c32d8f::t_352ef3209785b2 153
+  s_c7a9efc2c32d8f::t_69d5c96dd67fbe 124-125
+  s_c7a9efc2c32d8f::t_c9def674da76cc 128-130
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.test.ts
+  s_c7a9efc2c32d8f::t_79d7ba65652028 274-307
+apps/frontend-nextgen/src/stores/conversationStore.ts
+  s_c7a9efc2c32d8f::t_ff6abb7b52b679 48-56
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiAdapter.ts
+  s_c7a9efc2c32d8f::t_6d39525de00e44 356-362
+engine/adapter/src/engine/community/core/adapters/openclaw/tests/test_session.py
+  s_fd1b8e677fa2d8::t_47aed95cfd6992 854-855
+  s_fd1b8e677fa2d8::t_7aaa2f2a66e959 786-808
+  s_fd1b8e677fa2d8::t_504a24a930ff47 20,24
+  s_fd1b8e677fa2d8::t_53c51f3dd547bb 772-785,809-853
+engine/adapter/src/engine/community/core/adapters/openclaw/session.py
+  s_fd1b8e677fa2d8::t_45e8f2e986453e 237-243
+  s_fd1b8e677fa2d8::t_5921b846d40ef7 123-125,127-130
+  s_fd1b8e677fa2d8::t_8ff8de942e89af 65-70
+  s_fd1b8e677fa2d8::t_0ccfab91ef99ac 531
+  s_fd1b8e677fa2d8::t_c6cd76dffc9479 424
+  s_fd1b8e677fa2d8::t_6c97188a125e0b 78-122,126,131-133
+  s_fd1b8e677fa2d8::t_3e34d662b34910 134-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aefaf2b004ce3eab4d225cbc0dad51d45f2c8039",
+  "prompts": {},
+  "sessions": {
+    "s_86ab1d867617ae": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "d2978a65-e0ab-42cc-8de8-e299a9412ef8",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_8902951668ae40": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "9acdbd23-ef45-408b-8781-46dfe2269efd",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_c7a9efc2c32d8f": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "29e660ef-cbc4-419c-9ffd-e2c5bf0bbd2b",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_f177da566a2257": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a3559f5d-e7de-4eac-a807-174c72c7eda8",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_fd1b8e677fa2d8": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "e7fbf75b-2d21-42d0-912d-1920e852afa4",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
