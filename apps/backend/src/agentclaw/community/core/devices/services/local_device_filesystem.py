@@ -23,7 +23,9 @@ calls (test_ctor_partial_params_falls_back_to_pathlib pins this).
 """
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 from pathlib import Path
 from typing import Any, Callable
 
@@ -97,6 +99,35 @@ class LocalDeviceFileSystem(DeviceFileSystem):
             return await client.post(url, json=json_body or {}, headers=headers)
 
     # ── Public API: dispatches to _baas_* or _pathlib_* per ctor mode ──
+
+    async def read_file_checked(self, file_path: str, *, enforce_download_limit: bool = False) -> bytes | None:
+        from agentclaw.community.core.devices.services.device_read_errors import raise_if_unavailable
+
+        mapped = self._path_mapper(file_path)
+        if self._is_baas_mode:
+            try:
+                return await self._baas_read_file(mapped)
+            except Exception as error:
+                raise_if_unavailable(error)
+                raise
+        return await self._pathlib_read_file_checked(mapped)
+
+    async def _pathlib_read_file_checked(self, mapped: str) -> bytes | None:
+        try:
+            if not stat.S_ISREG(os.stat(mapped).st_mode):
+                return None
+            fd = os.open(mapped, os.O_RDONLY | os.O_NONBLOCK)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    return None
+                with os.fdopen(fd, "rb") as file:
+                    fd = -1
+                    return file.read()
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+        except (FileNotFoundError, IsADirectoryError):
+            return None
 
     async def read_file(
         self,
