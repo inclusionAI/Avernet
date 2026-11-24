@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
 from injector import Injector, Module
@@ -22,6 +22,18 @@ from agentclaw.community.core.task.todos.template_management_protocol import (
 from agentclaw.community.core.task.todos.collaboration.in_process import (
     InProcessTodoCollaborationAdapter,
 )
+from agentclaw.community.core.task.todos.services.dima_source_client import (
+    DimaSourceClient,
+)
+from agentclaw.community.core.task.todos.services.todo_source_service import (
+    TodoSourceService,
+)
+from agentclaw.community.core.task.todos.source_client_protocol import (
+    TodoSourceClientProtocol,
+)
+from agentclaw.community.core.task.todos.source_service_protocol import (
+    TodoSourceServiceProtocol,
+)
 from agentclaw.community.di import todo_config
 from agentclaw.community.di.modules.task import todo_bindings
 from agentclaw.community.di.modules.task.todo_bindings import (
@@ -29,6 +41,9 @@ from agentclaw.community.di.modules.task.todo_bindings import (
 )
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_GENERAL
+from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
+from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 
 
 class _InstanceModule(Module):
@@ -159,3 +174,32 @@ def test_task_todo_bindings_resolve_template_repository_and_service():
 
     assert service._repository is repository
     assert service._space_access is not None
+
+
+def test_task_todo_bindings_resolve_source_client_and_service():
+    """Source import bindings survive alongside the Todo collaboration runtime."""
+    auth, center, http = object(), object(), object()
+    injector = Injector(
+        [
+            TaskTodoBindings(),
+            _InstanceModule(
+                {
+                    MCPAuthPlugin: auth,
+                    MCPCenterPlugin: center,
+                    Annotated[HttpClient, QUALIFIER_GENERAL]: http,
+                }
+            ),
+        ]
+    )
+
+    client = injector.get(TodoSourceClientProtocol)
+    service = injector.get(TodoSourceServiceProtocol)
+
+    assert isinstance(client, DimaSourceClient)
+    assert isinstance(service, TodoSourceService)
+    assert client is injector.get(TodoSourceClientProtocol)
+    assert service is injector.get(TodoSourceServiceProtocol)
+    assert client._auth is auth
+    assert client._center is center
+    assert client._http is http
+    assert service._client is client
