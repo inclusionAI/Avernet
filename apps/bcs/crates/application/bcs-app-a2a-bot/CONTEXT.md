@@ -85,7 +85,12 @@ Public Agent registration accepts BCN visibility (protected by default, or publi
 registration, Provider/ref ID recovery, Card read/update/refresh and Provider-name
 registration. It reuses the existing Provider-admin management use cases and
 translates their errors into safe ApplicationErrors, retaining machine codes.
-Raw upstream diagnostics are excluded. Card admission, ownership, authorization
+Messages describe each management failure category and include allowlisted validation
+reasons and schema field paths when available. Unknown diagnostics, submitted values,
+credentials and internal exception details are excluded; HTTP status, machine codes
+and the V1 envelope remain unchanged. Catalog label failures explain dictionary rules
+without echoing submitted keys/values. Internal errors remain non-diagnostic in public
+responses. Card admission, ownership, authorization
 and persistence remain in the existing management application. The facade adds
 no store calls, network implementation or cache, and has no Bot identity or
 chat-run dependency. Legacy chat/run handling is unchanged.

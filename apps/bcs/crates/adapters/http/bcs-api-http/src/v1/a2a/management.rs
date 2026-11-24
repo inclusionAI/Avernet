@@ -75,7 +75,7 @@ async fn execute(
     let bytes = axum::body::to_bytes(request_body, 2 * 1024 * 1024)
         .await
         .map_err(|_| {
-            ApplicationError::payload_too_large("request_too_large", "Request body exceeds limit")
+            ApplicationError::payload_too_large("request_too_large", "AgentCard management request body exceeds the 2 MiB size limit")
         })?;
     bcs_observability::business_warning::capture_payload(&bytes);
     if parts.method == axum::http::Method::GET {
@@ -223,7 +223,7 @@ pub async fn register_named(
         let (parts, request_body) = request.into_parts();
         let token = bearer(&parts.headers)?;
         let bytes = axum::body::to_bytes(request_body, 2 * 1024 * 1024).await
-            .map_err(|_|ApplicationError::payload_too_large("request_too_large", "Request body exceeds limit"))?;
+            .map_err(|_|ApplicationError::payload_too_large("request_too_large", "AgentCard management request body exceeds the 2 MiB size limit"))?;
         bcs_observability::business_warning::capture_payload(&bytes);
         if parts.uri.query().is_some() { return Err(ApplicationError::invalid("invalid_request", "Query is not allowed")); }
         let input: NamedRegistration = body(&parts.headers, &bytes)?;
