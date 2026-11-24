@@ -816,6 +816,15 @@ def test_clean_title_short_uuid_never_strips():
     assert _clean_title("app_ab", "session:ab:user:x") == "app_ab"
 
 
+def test_clean_title_strips_nonstandard_agent_profile_keys_via_identity():
+    # acceptance 场景（expert_chat test_caller_cron_sessions）的 key 形如
+    # ``agent:main:<profile>:acceptance_session_<hex>``：无 session/user 段，
+    # ``_session_label_suffix`` 对其回退整串 → update label 后缀 == 整 key；
+    # 出站按 identity（endsWith 完整 id）分支剥净，uuid 分支不参与。
+    key = "agent:main:ordinary:acceptance_session_d3043d2350bd"
+    assert _clean_title(f"Caller renamed_{key}", key) == "Caller renamed"
+
+
 @pytest.mark.asyncio
 async def test_create_returns_clean_title():
     # create 出站剥除：引擎 label 带后缀（关联令牌）可以保留在引擎里，
