@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import create_engine
@@ -316,31 +317,37 @@ class TestSliceLostResultlessReschedule:
     """A resultless FAILED slice_lost agent on an in-slice wait ref must
     trigger an immediate reschedule, not block to the slice deadline."""
 
-    def test_reschedules_immediately_and_counts_one_reclaim(self, db):
+    def test_reschedules_immediately_and_counts_one_reclaim(self, db, monkeypatch):
         env = _build_env(db, [], FakeFactory())
         run = _mk_run(goal="slice_lost reschedule")
         claim = _enqueue_and_claim(env, run)
         agent = _seed_slice_lost_agent(env, run, claim)
         env.handler._worker_id = WORKER
+        # Assert the immediate-reschedule branch directly. Real DB offloads
+        # can take >5s on a loaded xdist runner even without any runtime wait.
+        # Entering the completion-wait branch must fail, not just finish within
+        # an increased wall-clock allowance.
+        wait_for_completions = AsyncMock(
+            side_effect=AssertionError("slice_lost must reschedule without waiting"),
+        )
+        monkeypatch.setattr(env.handler._runtime, "wait_for_completions", wait_for_completions)
 
         async def main():
-            started = time.monotonic()
             sentinel = await env.handler._await_refs(
                 run.run_id, TENANT, ("sl1",), dm.WaitMode.ALL,
                 time.monotonic() + 5.0, None,
             )
-            elapsed = time.monotonic() - started
             assert isinstance(sentinel, dict)
             assert sentinel["_reschedule_slice_lost"]["agent_id"] == agent.agent_id
             bumped = await _bump(env, run, claim)
             await env.handler._release_claim(
                 run.run_id, TENANT, claim["claim_epoch"], "slice_lost resultless ref",
             )
-            return elapsed, bumped
+            return bumped
 
-        elapsed, bumped = asyncio.run(main())
+        bumped = asyncio.run(main())
 
-        assert elapsed < 5.0
+        wait_for_completions.assert_not_called()
         assert bumped == 1
         dispatch = _dispatch_row(db, run.run_id)
         assert dispatch["status"] == "READY"
