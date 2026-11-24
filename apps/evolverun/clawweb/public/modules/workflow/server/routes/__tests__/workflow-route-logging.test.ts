@@ -57,8 +57,8 @@ function lastFileLog() {
 }
 function persistenceFailureOrigin() {
   return Object.assign(new Error("database persistence failed"), {
-    token: "private-token-marker", cookies: ["private-cookie-marker"],
-    config: { headers: { Authorization: "private-auth-marker" } },
+    token: "<private-token-marker>", cookies: ["<private-cookie-marker>"],
+    config: { headers: { Authorization: "<private-auth-marker>" } },
   });
 }
 

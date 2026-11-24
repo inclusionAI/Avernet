@@ -138,8 +138,8 @@ describe("workflow API severity and exception diagnostics", () => {
   it("logs only the stack/message whitelist of extended HTTP errors, never their private metadata", async () => {
     const { apiLog } = await loadLogger();
     const exception = Object.assign(new Error("upstream failed"), {
-      config: { headers: { Authorization: "private-auth-marker", Cookie: "private-cookie-marker" } },
-      token: "private-token-marker", cookies: ["private-cookie-marker"],
+      config: { headers: { Authorization: "<private-auth-marker>", Cookie: "<private-cookie-marker>" } },
+      token: "<private-token-marker>", cookies: ["<private-cookie-marker>"],
     });
     apiLog("WRITE", "/runs/id", { status: 500, error: exception.message }, exception);
     expect(console.error).toHaveBeenCalledWith("[internal-api] WRITE /runs/id 500", exception.stack);
@@ -151,7 +151,7 @@ describe("workflow API severity and exception diagnostics", () => {
 
   it("hands off only the original message/stack/source through the optional response argument", async () => {
     const { apiLog } = await loadLogger();
-    const exception = Object.assign(new Error("write failed"), { config: { token: "private-token-marker" } });
+    const exception = Object.assign(new Error("write failed"), { config: { token: "<private-token-marker>" } });
     const response = { locals: { unrelated: "preserved" }, body: { success: false } };
     apiLog("WRITE", "/runs/id", { httpStatus: 500, error: "Fixed response message" }, exception, response);
     expect(response.locals).toEqual({ unrelated: "preserved", taskGuardApiDiagnostic: {

@@ -41,8 +41,8 @@ function readerRejecting(error: unknown): RunSubworkflowsReader {
 }
 function persistenceFailure() {
   return Object.assign(new Error('durable run read failed'), {
-    config: { headers: { Authorization: 'private-auth-marker', Cookie: 'private-cookie-marker' } },
-    token: 'private-token-marker', cookies: ['private-cookie-marker'],
+    config: { headers: { Authorization: '<private-auth-marker>', Cookie: '<private-cookie-marker>' } },
+    token: '<private-token-marker>', cookies: ['<private-cookie-marker>'],
     [Symbol.for('nodejs.util.inspect.custom')]() { throw new Error('must not inspect HTTP client metadata'); },
   });
 }
@@ -102,7 +102,7 @@ describe('actual runs read HTTP adapter logging', () => {
 
   it.each<FanoutReadErrorCode>(['unauthenticated', 'forbidden', 'not_found', 'invalid_query', 'identity_conflict', 'snapshot_changed'])(
     'does not inspect or log the raw domain %s error/stack', async code => {
-      const error = Object.assign(new FanoutReadError(code, 'private-domain-message'), { token: 'private-token-marker' });
+      const error = Object.assign(new FanoutReadError(code, '<private-domain-message>'), { token: '<private-token-marker>' });
       Object.defineProperty(error, 'stack', { get() { throw new Error('domain rejection stack must not be inspected'); } });
       const base = await listen({} as FlowRunRepository, readerRejecting(error));
       const response = await fetch(base);
@@ -117,7 +117,7 @@ describe('actual runs read HTTP adapter logging', () => {
 
   it.each([{ code: 'invalid_state', status: 500 }, { code: 'unavailable', status: 503 }] as const)(
     'hands off the actual domain system $status stack without altering its response', async ({ code, status }) => {
-      const error = Object.assign(new FanoutReadError(code, 'durable run state unavailable'), { config: { token: 'private-token-marker' } });
+      const error = Object.assign(new FanoutReadError(code, 'durable run state unavailable'), { config: { token: '<private-token-marker>' } });
       const base = await listen({} as FlowRunRepository, readerRejecting(error));
       const response = await fetch(base);
       expect(response.status).toBe(status);

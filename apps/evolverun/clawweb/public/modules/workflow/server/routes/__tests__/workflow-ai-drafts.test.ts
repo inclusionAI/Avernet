@@ -124,10 +124,10 @@ describe('Stateless workflow AI draft route security and browser contract', () =
     expect(f.execution.dispatch).toHaveBeenCalledOnce();
     expect(f.execution.poll).toHaveBeenCalledTimes(2);
   });
-  it.each(['TypeError', 'PRIVATE_SECRET_NAME'])('logs only fixed metadata on every channel for unexpected create failure named %s', async name => {
+  it.each(['TypeError', '<PRIVATE_SECRET_NAME>'])('logs only fixed metadata on every channel for unexpected create failure named %s', async name => {
     const logs = captureLogs(), f = await fixture();
-    const error = Object.assign(new Error('SQL PRIVATE_SECRET_MESSAGE prompt=PRIVATE_SECRET_PROMPT currentYaml=PRIVATE_SECRET_YAML'), {
-      config: { headers: { Authorization: 'PRIVATE_SECRET_TOKEN' } }, token: 'PRIVATE_SECRET_TOKEN',
+    const error = Object.assign(new Error('SQL <PRIVATE_SECRET_MESSAGE> prompt=<PRIVATE_SECRET_PROMPT> currentYaml=<PRIVATE_SECRET_YAML>'), {
+      config: { headers: { Authorization: '<PRIVATE_SECRET_TOKEN>' } }, token: '<PRIVATE_SECRET_TOKEN>',
     }); error.name = name;
     vi.spyOn(f.service, 'create').mockRejectedValue(error);
     const response = await f.post(''); expect(response.status).toBe(500);
@@ -144,7 +144,7 @@ describe('Stateless workflow AI draft route security and browser contract', () =
   });
   it.each(['FORBIDDEN', 'CAPABILITY_UNAVAILABLE'] as const)('keeps typed %s logs fixed without changing the response contract', async code => {
     const logs = captureLogs(), f = await fixture();
-    const error = new WorkflowAiDraftError(code, 'PRIVATE_SECRET_TOKEN prompt=PRIVATE_SECRET_YAML');
+    const error = new WorkflowAiDraftError(code, '<PRIVATE_SECRET_TOKEN> prompt=<PRIVATE_SECRET_YAML>');
     vi.spyOn(f.service, 'create').mockRejectedValue(error);
     const response = await f.post(''); expect(response.status).toBe(code === 'FORBIDDEN' ? 403 : 503);
     expect(await response.json()).toEqual({ code, error: error.message });

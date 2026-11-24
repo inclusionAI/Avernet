@@ -45,8 +45,8 @@ async function listen(router: Router) {
   return `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 }
 function privateError(status = 500) {
-  return Object.assign(new Error("PRIVATE_TOKEN_MARKER prompt=PRIVATE_PROMPT_MARKER currentYaml=PRIVATE_YAML_MARKER"), {
-    status, config: { headers: { Authorization: "PRIVATE_AUTH_MARKER" } }, token: "PRIVATE_TOKEN_MARKER",
+  return Object.assign(new Error("<PRIVATE_TOKEN_MARKER> prompt=<PRIVATE_PROMPT_MARKER> currentYaml=<PRIVATE_YAML_MARKER>"), {
+    status, config: { headers: { Authorization: "<PRIVATE_AUTH_MARKER>" } }, token: "<PRIVATE_TOKEN_MARKER>",
   });
 }
 function expectSafeObservation() {

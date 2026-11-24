@@ -5,8 +5,8 @@ import { apiErrorDiagnostic, captureApiError, captureSensitiveApiError, errorSta
 describe("safe exception console formatting", () => {
   it("preserves the original stack byte-for-byte without serializing HTTP client metadata", () => {
     const error = Object.assign(new Error("upstream unavailable"), {
-      config: { headers: { Authorization: "private-auth-marker", Cookie: "private-cookie-marker" } },
-      cookies: ["private-cookie-marker"], token: "private-token-marker",
+      config: { headers: { Authorization: "<private-auth-marker>", Cookie: "<private-cookie-marker>" } },
+      cookies: ["<private-cookie-marker>"], token: "<private-token-marker>",
     });
     const formatted = errorStack(error);
     expect(formatted).toBe(error.stack);
@@ -14,7 +14,7 @@ describe("safe exception console formatting", () => {
   });
 
   it("labels an Error without a stack as an observation rather than a caught stack", () => {
-    const error = Object.assign(new Error("message only"), { token: "private-token-marker" });
+    const error = Object.assign(new Error("message only"), { token: "<private-token-marker>" });
     delete error.stack;
     const formatted = errorStack(error);
     expect(formatted).toContain("Error: Workflow API failure observed: message only\n");
@@ -23,13 +23,13 @@ describe("safe exception console formatting", () => {
   });
 
   it("only reads stack/message on non-Error exceptions without inspecting or coercing extensions", () => {
-    const error = { stack: "original remote stack", message: "remote failure", token: "private-token-marker",
+    const error = { stack: "original remote stack", message: "remote failure", token: "<private-token-marker>",
       toString() { throw new Error("must not coerce HTTP metadata"); } };
     expect(errorStack(error)).toBe("original remote stack");
     const messageOnly = { message: "remote failure", get config() { throw new Error("must not inspect extensions"); },
       [Symbol.toPrimitive]() { throw new Error("must not coerce exception"); } };
     expect(errorStack(messageOnly)).toContain("Error: Workflow API failure observed: remote failure\n");
-    expect(errorStack({ token: "private-token-marker" })).toContain("Error: Workflow API failure observed: Unknown error (non-Error exception)\n");
+    expect(errorStack({ token: "<private-token-marker>" })).toContain("Error: Workflow API failure observed: Unknown error (non-Error exception)\n");
   });
 
   it.each([null, undefined, 42, true])("returns a fixed diagnostic for non-message exception %j", exception => {
@@ -53,7 +53,7 @@ describe("safe exception console formatting", () => {
 
 describe("logging-only HTTP diagnostic handoff", () => {
   it("retains the exact caught stack and only the three approved fields", () => {
-    const error = Object.assign(new Error("original message"), { config: { headers: { Authorization: "private-auth" } }, token: "private-token" });
+    const error = Object.assign(new Error("original message"), { config: { headers: { Authorization: "<private-auth>" } }, token: "<private-token>" });
     const res = { locals: { unrelated: "unchanged" } };
     expect(captureApiError(res, error)).toBe(error.stack);
     expect(res.locals).toEqual({ unrelated: "unchanged", taskGuardApiDiagnostic: {
