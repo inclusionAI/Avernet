@@ -289,6 +289,7 @@ def create_catalog_search_app(
         retrieval,
         authenticate,
         filter_fields=filter_fields,
+        index_identity=(repository.environment, updates.index_key),
         lifespan=lifespan,
         timeout_seconds=settings.request_timeout,
         max_inflight_requests=settings.max_inflight_requests,

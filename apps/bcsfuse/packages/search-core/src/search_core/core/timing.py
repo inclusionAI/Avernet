@@ -73,6 +73,7 @@ def request_timing(operation, trace_id):
         if fetch_details is not None:
             summary["card_fetch_details"] = fetch_details
         events.record_steps(operation, outcome, elapsed_ms, stages, summary, results)
+        summary.pop("detail", None)  # Request fields belong only in per-request logs.
         events.record(
             "search_timing",
             "request",

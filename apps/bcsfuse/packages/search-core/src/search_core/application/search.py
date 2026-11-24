@@ -24,6 +24,7 @@ from search_core.core.observation import (
     events,
     logger,
     request_budget,
+    search_load_test,
     search_transport,
 )
 from search_core.core.timing import request_timing, stage_timing
@@ -36,6 +37,20 @@ _sensitive_text = re.compile(
 
 def _log_text(value):
     return _sensitive_text.sub("[redacted]", value)[:256]
+
+
+def _log_filters(filters, allowed):
+    visible = {}
+    truncated = False
+    for key, values in filters.items():
+        if key not in allowed:
+            truncated = True
+            continue
+        logged = [_log_text(value) for value in values[:20]]
+        visible[key] = logged
+        if tuple(logged) != tuple(values[:20]) or len(values) > 20:
+            truncated = True
+    return visible, truncated
 
 
 @dataclass(frozen=True)
@@ -53,11 +68,13 @@ class CatalogSearchApplication:
         emergency: EmergencyControl | None = None,
         trace_id_provider: Callable[[], str] | None = None,
         empty_search_fallback=None,
+        index_identity: tuple[str, str] | None = None,
     ):
         if not math.isfinite(request_timeout) or request_timeout <= 0:
             raise ValueError("positive finite request timeout required")
         self._empty_search_fallback = empty_search_fallback
         self._trace_id_provider = trace_id_provider
+        self._index_identity = index_identity
         self._budget = request_timeout
         self._retrieval = retrieval
         self._filter_fields = filter_fields
@@ -71,7 +88,20 @@ class CatalogSearchApplication:
             request_budget(self._budget),
             request_timing(command.operation, trace_id) as timing,
         ):
+            detail = {}
+            logged_filters = None
             if logger.isEnabledFor(logging.INFO):
+                if self._index_identity is not None:
+                    detail["index_environment"], detail["index_key"] = (
+                        self._index_identity
+                    )
+                load_test = search_load_test.get()
+                if load_test is not None:
+                    detail["is_load_test"] = load_test
+                timing["detail"] = detail
+                logged_filters = _log_filters(
+                    command.filters, self._filter_fields | {"labels.visibility"}
+                )
                 events.record_progress(
                     "received",
                     trace_id,
@@ -79,11 +109,8 @@ class CatalogSearchApplication:
                     operation=command.operation,
                     query=_log_text(command.query),
                     limit=command.limit,
-                    filters={
-                        field: [_log_text(value) for value in values[:20]]
-                        for field, values in command.filters.items()
-                        if field in self._filter_fields
-                    },
+                    filters=logged_filters[0],
+                    **({"is_load_test": load_test} if load_test is not None else {}),
                     retrieval={
                         key: value
                         for key, value in getattr(command, "retrieval", {}).items()
@@ -113,6 +140,7 @@ class CatalogSearchApplication:
                         effective_limit=maximum,
                     )
                     command = replace(command, limit=maximum)
+                timing["effective_limit"] = command.limit
                 if snapshot is not None:
                     timing.update(
                         config_version=snapshot.version,
@@ -125,7 +153,9 @@ class CatalogSearchApplication:
             )
             with binding:
                 try:
-                    result = await self._validated_execute(command)
+                    result = await self._validated_execute(
+                        command, detail, logged_filters
+                    )
                 except Exception as error:
                     events.record(
                         "search_request",
@@ -167,7 +197,6 @@ class CatalogSearchApplication:
                     outcome=outcome,
                     result_count=len(result.items),
                     reasons=result.reasons,
-                    effective_limit=command.limit,
                 )
                 if logger.isEnabledFor(logging.INFO):
                     timing["results"] = [
@@ -200,7 +229,7 @@ class CatalogSearchApplication:
                     ),
                 )
 
-    async def _validated_execute(self, command):
+    async def _validated_execute(self, command, detail, logged_filters):
         with stage_timing("validation"):
             if command.scene != "default" or command.extensions:
                 raise UnsupportedSearchOption(
@@ -213,6 +242,10 @@ class CatalogSearchApplication:
                 raise UnsupportedSearchOption("unsupported catalog filter")
             if any(not values for values in command.filters.values()):
                 return SearchResult()
+        if logged_filters is not None:
+            detail["effective_filters"], detail["effective_filters_truncated"] = (
+                logged_filters
+            )
         return await self._execute(command)
 
     async def _execute(self, command):

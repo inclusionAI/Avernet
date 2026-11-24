@@ -29,6 +29,7 @@ def create_search_app(
     max_inflight_requests: int = DEFAULT_SEARCH.max_inflight_requests,
     emergency: EmergencyControl | None = None,
     trace_id_provider: Callable[[], str] | None = None,
+    index_identity: tuple[str, str] | None = None,
     request_model=SearchBody,
     result_mapper=None,
     response_model=ResultBody,
@@ -45,6 +46,7 @@ def create_search_app(
         emergency=emergency,
         trace_id_provider=trace_id_provider,
         empty_search_fallback=empty_search_fallback,
+        index_identity=index_identity,
     )
     app = FastAPI(title="Agent Search", lifespan=lifespan)
     admission = SearchAdmission(max_inflight_requests, emergency)
