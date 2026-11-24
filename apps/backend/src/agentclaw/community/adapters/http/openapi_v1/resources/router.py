@@ -71,6 +71,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     deleted as deleted_envelope,
     envelope,
     envelope_errors,
+    error_response,
     page as page_envelope,
 )
 from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
@@ -197,6 +198,10 @@ def _to_file_entry(entry: dict[str, Any]) -> FileEntry:
     )
 
 
+class _ListPathIsFile(Exception):
+    """A failed directory listing whose parent metadata identifies a file."""
+
+
 async def _list_dir_or_empty(
     file_svc: ResourceFileService,
     *,
@@ -228,10 +233,13 @@ async def _list_dir_or_empty(
             # can be reported as an invalid directory path.
             try:
                 is_directory = await file_svc.lookup_path_is_dir(**file_args)
-            except (ListingFailed, httpx.HTTPError):
-                is_directory = None
-            if is_directory is False:
-                raise HTTPException(status_code=400, detail="path must refer to a directory") from exc
+            except Exception:
+                # The extra probe is advisory. Preserve the original list
+                # failure even if the device becomes unavailable in between.
+                logger.debug("Resource list path could not be classified", exc_info=True)
+            else:
+                if is_directory is False:
+                    raise _ListPathIsFile from exc
         raise
     return listed or []
 
@@ -303,8 +311,9 @@ async def list_resources(
     removes the divergence the other direction — a record whose bytes are not
     where it claims can no longer be reported as a file that exists.
 
-    The path parameter selects the directory (empty = workspace root). A
-    confirmed file path returns 400. Listing is non-recursive.
+    The path parameter selects the directory (empty = workspace root).
+    Listing is non-recursive. A rejected listing returns 400 when the
+    provider's parent metadata identifies the supplied path as a file.
 
     Paging is applied by this server over the whole directory, because the
     engine's listing API takes no page, limit or cursor: `page_size` bounds the
@@ -326,15 +335,18 @@ async def list_resources(
         return JSONResponse(content=preview.model_dump(mode="json"))
 
     safe = _safe_path(path)
-    listed = await _list_dir_or_empty(
-        file_svc,
-        bot_id=bot_id,
-        owner_id=owner_id,
-        bot_repo=bot_repo,
-        path=safe,
-        target=target,
-        reject_file_path=True,
-    )
+    try:
+        listed = await _list_dir_or_empty(
+            file_svc,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_repo=bot_repo,
+            path=safe,
+            target=target,
+            reject_file_path=True,
+        )
+    except _ListPathIsFile:
+        return error_response(400, "path must refer to a directory", request)
     entries = [_to_file_entry(entry) for entry in listed]
     if type is not None:
         entries = [entry for entry in entries if entry.type == type]

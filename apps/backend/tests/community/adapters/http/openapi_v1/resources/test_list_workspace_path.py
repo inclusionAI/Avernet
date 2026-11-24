@@ -1,15 +1,16 @@
 """The directory-list route distinguishes confirmed files from device failures."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-from fastapi import HTTPException
 from starlette.requests import Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.adapters.http.openapi_v1.resources.router import list_resources
+from agentclaw.community.core.devices.services.device_context import DeviceOfflineError
 from agentclaw.community.core.ports.resource_file_port import ListingFailed
 
 
@@ -24,6 +25,7 @@ from agentclaw.community.core.ports.resource_file_port import ListingFailed
         ("notes", 400, True, "original_error"),
         ("missing", 400, None, "original_error"),
         ("notes", 400, ListingFailed("Parent unavailable"), "original_error"),
+        ("notes", 400, DeviceOfflineError("Device went offline"), "original_error"),
         ("", 400, None, "original_error"),
     ],
 )
@@ -63,10 +65,9 @@ async def test_list_classifies_file_only_after_a_bad_directory_response(
         )
 
     if expected == "bad_path":
-        with pytest.raises(HTTPException) as error:
-            await list_path()
-        assert error.value.status_code == 400
-        assert error.value.detail == "path must refer to a directory"
+        response = await list_path()
+        assert response.status_code == 400
+        assert json.loads(response.body)["message"] == "path must refer to a directory"
     elif expected == "page":
         response = await list_path()
         assert response.data.total == 0

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import time
 
+import httpx
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
@@ -355,5 +356,33 @@ endpoint_test(
     seed=_seed_offline_services,
     expect=ExpectError(
         status=502, json_contains={"code": 502000, "message": "Bot device is offline", "data": None}
+    ),
+)(lambda: None)
+
+
+def _seed_file_path_listing(world) -> None:
+    _seed_happy_services(world)
+
+    async def list_dir(_self, **_kwargs):
+        request = httpx.Request("POST", "http://device.test/api/file/list")
+        response = httpx.Response(400, request=request)
+        response.raise_for_status()
+
+    bind_overrides(world, ResourceFileService, {"list_dir": list_dir})
+
+
+endpoint_test(
+    method="GET",
+    path=_BASE_PATH,
+    scenario="reject_file_path_as_directory",
+    input=CaseInput(
+        path_params=_PATH_PARAMS,
+        query_params=_query(path=_EXISTING_PATH),
+        headers=_HEADERS,
+    ),
+    seed=_seed_file_path_listing,
+    expect=ExpectError(
+        status=400,
+        json_contains={"code": 400000, "message": "path must refer to a directory", "data": None},
     ),
 )(lambda: None)
