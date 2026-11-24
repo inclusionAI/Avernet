@@ -12,23 +12,30 @@ from agentclaw.community.adapters.http.openapi_v1.resources.router import delete
 from agentclaw.community.core.devices.services.baas_device_filesystem import (
     BaasDeviceFileSystem,
 )
+from agentclaw.community.core.devices.services.teclaw_device_filesystem import (
+    TeclawDeviceFileSystem,
+)
 from agentclaw.community.core.services.resource_file_service import ResourceFileService
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("entry", "listing_status", "status", "delete_route"),
+    ("entry", "listing_status", "status", "delete_route", "file_system"),
     [
-        ({"name": "sql", "is_dir": True}, 200, 200, "/api/file/rmtree"),
-        ({"name": "sql", "is_dir": False}, 200, 200, "/api/file/remove"),
-        ({"name": "sql.bak", "is_dir": True}, 200, 404, None),
-        (None, 404, 404, None),
-        (None, 500, 500, None),
-        ({"name": "sql"}, 200, 502, None),
+        ({"name": "sql", "is_dir": True}, 200, 200, "/api/file/rmtree", BaasDeviceFileSystem),
+        ({"name": "sql", "is_dir": False}, 200, 200, "/api/file/remove", BaasDeviceFileSystem),
+        ({"name": "sql.bak", "is_dir": True}, 200, 404, None, BaasDeviceFileSystem),
+        (None, 404, 404, None, BaasDeviceFileSystem),
+        (None, 500, 500, None, BaasDeviceFileSystem),
+        ({"name": "sql"}, 200, 502, None, BaasDeviceFileSystem),
+        ({"name": "sql", "is_dir": 2}, 200, 502, None, BaasDeviceFileSystem),
+        (None, 500, 502, None, TeclawDeviceFileSystem),
+        ({"name": "sql.bak", "is_dir": True}, 200, 404, None, TeclawDeviceFileSystem),
     ],
 )
-async def test_delete_uses_one_parent_listing(entry, listing_status, status, delete_route):
+async def test_delete_uses_one_parent_listing(entry, listing_status, status, delete_route, file_system):
     calls = []
+    list_route = "/api/v1/file/list" if file_system is TeclawDeviceFileSystem else "/api/file/list"
 
     def post(route, *, json):
         calls.append((route, json))
@@ -37,7 +44,7 @@ async def test_delete_uses_one_parent_listing(entry, listing_status, status, del
             return httpx.Response(
                 500, json={"detail": "Is a directory (os error 21)"}, request=request
             )
-        if route == "/api/file/list":
+        if route == list_route:
             return httpx.Response(
                 listing_status,
                 json={"data": {"files": [entry] if entry is not None else []}},
@@ -46,7 +53,7 @@ async def test_delete_uses_one_parent_listing(entry, listing_status, status, del
         assert route == delete_route
         return httpx.Response(200, request=request)
 
-    device_fs = BaasDeviceFileSystem(
+    device_fs = file_system(
         transport=SimpleNamespace(post=post), conn_info={}, path_mapper=lambda path: path
     )
     service = ResourceFileService(
@@ -70,7 +77,7 @@ async def test_delete_uses_one_parent_listing(entry, listing_status, status, del
             file_svc=service,
         )
 
-    expected = [("/api/file/list", {"dir_path": "workspace/scripts", "recursive": False})]
+    expected = [(list_route, {"dir_path": "workspace/scripts", "recursive": False})]
     if delete_route is not None:
         expected.append((delete_route, {"target_path": "workspace/scripts/sql"}))
         result = await delete()

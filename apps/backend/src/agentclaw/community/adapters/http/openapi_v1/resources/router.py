@@ -850,7 +850,7 @@ async def create_directory(
         **_READ_ONLY_RESPONSE,
         502: {
             "model": ErrorEnvelope,
-            "description": "The storage provider could not classify or delete the target.",
+            "description": "The storage provider could not resolve or delete the target.",
             **error_example(502, "Delete storage failed"),
         },
     },
@@ -895,7 +895,7 @@ async def delete_file(
             path=safe,
         )
     except ListingFailed as exc:
-        raise HTTPException(status_code=502, detail="Could not determine resource type") from exc
+        raise HTTPException(status_code=502, detail="Could not resolve resource path") from exc
     if is_directory is None:
         raise HTTPException(status_code=404, detail="Resource not found")
     # Record first, file second — the reverse order cannot recover. Deleting the

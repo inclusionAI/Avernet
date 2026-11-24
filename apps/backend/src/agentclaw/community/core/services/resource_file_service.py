@@ -49,6 +49,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.devices.services.device_filesystem import (
+    DeviceFileSystem,
     FileTooLargeError as DeviceFileTooLargeError,
 )
 from agentclaw.community.core.resources.service import (
@@ -611,13 +612,13 @@ class ResourceFileService(ResourceFilePort):
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
         )
-        entry = await self._find_directory_entry(device_fs, path)
+        entry = await self._find_child_entry(device_fs, path, require_known_result=True)
         if entry is None:
             return None
-        is_dir = self._is_dir_flag(entry)
-        if is_dir is None:
-            raise ListingFailed("Workspace entry has no file type")
-        return is_dir
+        is_dir = entry.get("is_dir")
+        if not isinstance(is_dir, (bool, int)) or is_dir not in (0, 1):
+            raise ListingFailed("Workspace entry has no valid file type")
+        return bool(is_dir)
 
     async def create_directory(
         self,
@@ -658,6 +659,9 @@ class ResourceFileService(ResourceFilePort):
         raises ``DirectoryDeleteFailed``. The default ResourceFilePort contract
         remains boolean for existing callers; a failed listing is not proof of
         absence and retains the existing file-branch behavior.
+
+        Pass ``is_directory`` when the target type was already verified by
+        ``lookup_path_is_dir``. Omit it to apply the legacy listing behavior.
 
         A directory needs ``delete_tree``: the engines route the two through
         separate operations (``/api/file/remove`` vs ``/api/file/rmtree``), and
@@ -796,7 +800,7 @@ class ResourceFileService(ResourceFilePort):
         then takes the file branch, which is what it did unconditionally until now.
         """
         try:
-            named = await self._find_directory_entry(device_fs, path)
+            named = await self._find_child_entry(device_fs, path)
         except Exception as exc:
             logger.warning(
                 "[%s._is_dir] listing %r failed, assuming file: %s",
@@ -805,10 +809,16 @@ class ResourceFileService(ResourceFilePort):
             return False
         return bool(self._is_dir_flag(named)) if named is not None else False
 
-    async def _find_directory_entry(self, device_fs: Any, path: str) -> dict[str, Any] | None:
+    async def _find_child_entry(
+        self, device_fs: DeviceFileSystem, path: str, *, require_known_result: bool = False,
+    ) -> dict[str, Any] | None:
         parent, _, leaf = path.rpartition("/")
         entries = await device_fs.list_dir(self._logical(parent))
-        return self._named_in(entries or (), leaf)
+        if entries is None:
+            if require_known_result and not device_fs.missing_directory_is_authoritative:
+                raise ListingFailed("Could not list the workspace parent directory")
+            return None
+        return self._named_in(entries, leaf)
 
     @staticmethod
     def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:
