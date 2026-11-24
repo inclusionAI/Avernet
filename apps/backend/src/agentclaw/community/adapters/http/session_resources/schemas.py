@@ -17,6 +17,7 @@ class UploadIntentRequest(BaseModel):
     engine_type: str
     target_entity_id: str | None = Field(default=None, max_length=128)
     binding_id: int | None = Field(default=None, ge=1)
+    device_uuid: str | None = Field(default=None, min_length=1, max_length=128)
     files: list[UploadIntentFile] = Field(min_length=1, max_length=20)
 
     @field_validator("target_entity_id")
