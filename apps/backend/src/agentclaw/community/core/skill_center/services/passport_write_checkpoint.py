@@ -1,4 +1,4 @@
-"""Carry the guarded projection's write check to the Passport RPC boundary."""
+"""Carry the projection's binding check to the Passport RPC boundary."""
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager

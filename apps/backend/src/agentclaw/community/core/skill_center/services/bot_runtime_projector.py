@@ -250,7 +250,6 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         self, plan: ResolvedCapabilityPlan, result: RuntimeProjectionResult,
     ) -> RuntimeProjectionResult:
         try:
-            # Keep the worker's delivery lease heartbeat live during Passport I/O.
             await asyncio.to_thread(self._apply_passport_projection, plan=plan)
         except Exception:
             logger.exception(

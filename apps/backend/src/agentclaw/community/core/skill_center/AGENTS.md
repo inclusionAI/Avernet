@@ -426,22 +426,23 @@ CommunityDatabase 的 operator-managed SQLite（`create_schema=false`）在启�
 ## Existing-Bot Manifest capability delivery
 
 The deferred Manifest path collects the domains changed by successful commits
-and closes once under the Bot's capability delivery lease. If synchronization
-fails, the Apply report preserves its result and any unresolved retirement
-candidates. An explicit Apply can send the current desired state again without
-a configuration diff. Retirement requires the same physical device, no current
-supply for the target, and an exact identity check by the Runtime.
+and sends one projection to the current Runtime. Concurrent projections may
+reach the Runtime out of commit order. If synchronization fails, the Apply
+report preserves its result and any unresolved retirement candidates. An
+explicit Apply can send the current desired state again with no configuration
+diff. Retirement requires the same physical device, no current supply for the
+target, and an exact identity check by the Runtime.
 
 Keep superseded mapping identities in retry evidence until Skill delivery
 converges. Only send retirement identities for names without current supply.
 With combined capability delivery enabled, an incomplete standalone delivery
 leaves unresolved Local identities and MCP release codes in the current
 binding's private metadata for the next projection of the affected domain.
-Record known standalone releases before attempting to acquire the delivery
-lease. If post-commit plan resolution fails, retain the Local candidates
-from the pre-mutation snapshot and check current supply before retiring them.
+Record known standalone releases before dispatch. If post-commit plan
+resolution fails, retain the Local candidates from the pre-mutation snapshot
+and check current supply before retiring them.
 A receipt can clear only the evidence read by its own delivery.
-Existing Desktop Skill recovery uses the same delivery lease and evidence.
+Existing Desktop Skill recovery uses the same binding checks and evidence.
 
 The edit lease protects package operations while a request is active. An
 unconfirmed package receipt remains `UNKNOWN`, and a later request can compete

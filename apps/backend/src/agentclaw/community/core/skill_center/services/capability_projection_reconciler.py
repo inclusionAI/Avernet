@@ -1,4 +1,4 @@
-"""Deliver committed capability state under the current Bot's delivery lease."""
+"""Deliver committed capability state to the current Bot Runtime."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import Protocol
 
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.devices.services.device_context import (
+    RuntimeBindingChangedError,
     RuntimeBindingTarget,
     expect_runtime_binding,
 )
@@ -36,11 +37,6 @@ from agentclaw.community.core.skills_pool.mapping_intent import retirement_reque
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.log import get_logger
 
-from .capability_delivery_guard import (
-    CapabilityDeliveryGuard,
-    CapabilityDeliveryLease,
-    CapabilityDeliveryUnavailable,
-)
 from .passport_write_checkpoint import passport_write_checkpoint
 from .capability_release_evidence import (
     CapabilityReleaseEvidence,
@@ -62,7 +58,6 @@ class _RuntimeProjector(BotRuntimeProjectorProtocol, Protocol):
 class _ApplyDelivery:
     projector: _RuntimeProjector
     reconciler: CapabilityProjectionReconciler
-    lease: CapabilityDeliveryLease
     intent: CapabilityProjectionIntent
     binding_before: RuntimeBindingTarget | None
     mappings_before: tuple[PoolSkillMapping, ...]
@@ -122,7 +117,7 @@ class _ApplyDelivery:
             candidates = retry.retired_mappings if retry is not None else ()
             retired = retirement_request(candidates, plan.projection.skill_mappings) if scope.skills else []
             result = await self.reconciler.deliver(
-                self.lease, binding,
+                binding,
                 partial(self.projector.apply_plan, plan=plan, retired_mappings=retired, scope=scope),
             )
             pending = unresolved_retirements(candidates, retired, result)
@@ -136,10 +131,9 @@ class _ApplyDelivery:
                 released_mcp=(releases & standalone.released_mcp) if scope.mcp else standalone.released_mcp,
             )
             if remaining != standalone:
-                await self.lease.verify()
                 await asyncio.to_thread(evidence.save, remaining)
-        except CapabilityDeliveryUnavailable:
-            return self.reconciler.delivery_busy(), retry
+        except RuntimeBindingChangedError:
+            return _binding_changed(), retry
         except Exception:
             logger.exception("Apply capability delivery failed bot_id=%s", bot_id)
             return RuntimeProjectionResult.pending(
@@ -179,13 +173,11 @@ class CapabilityProjectionReconciler:
         self,
         *,
         projector: _RuntimeProjector,
-        guard: CapabilityDeliveryGuard,
         bots: BotRepository,
         bindings: DeviceBindingRepository,
         defer_enabled: bool,
     ) -> None:
         self._projector = projector
-        self._guard = guard
         self._bots = bots
         self._bindings = bindings
         self.defer_enabled = defer_enabled
@@ -195,17 +187,16 @@ class CapabilityProjectionReconciler:
         self, *, bot_id: str, entity_id: str,
         retry: CapabilityProjectionRetry | None,
     ) -> AsyncIterator[DeferredCapabilityProjection]:
-        async with self._guard.hold(bot_id=bot_id, entity_id=entity_id) as lease:
-            binding = await asyncio.to_thread(self.current_binding, bot_id, entity_id)
-            previous = ()
-            if binding is not None:
-                previous = await self._projector.snapshot_skill_mappings(
-                    bot_id=bot_id, owner_id=binding.owner_id,
-                )
-            yield _ApplyDelivery(
-                self._projector, self, lease, CapabilityProjectionIntent(bot_id, entity_id),
-                binding, previous, retry,
+        binding = await asyncio.to_thread(self.current_binding, bot_id, entity_id)
+        previous = ()
+        if binding is not None:
+            previous = await self._projector.snapshot_skill_mappings(
+                bot_id=bot_id, owner_id=binding.owner_id,
             )
+        yield _ApplyDelivery(
+            self._projector, self, CapabilityProjectionIntent(bot_id, entity_id),
+            binding, previous, retry,
+        )
 
     async def project_competing_change(
         self,
@@ -219,7 +210,7 @@ class CapabilityProjectionReconciler:
         mcp_and_cli_only: bool = False,
         desktop_recovery: bool = False,
     ) -> RuntimeProjectionResult:
-        """Run standalone configuration and lifecycle delivery on the same lease."""
+        """Deliver standalone and lifecycle changes to the current Runtime."""
         if entity_id is None:
             bot = await asyncio.to_thread(self._bots.get_by_id_and_owner, bot_id, owner_id)
             if bot is None:
@@ -240,24 +231,19 @@ class CapabilityProjectionReconciler:
         if self.defer_enabled:
             recorded_binding = await self._remember_releases(bot_id, entity_id, retired_mappings, scope.released_mcp)
         try:
-            async with self._guard.hold(bot_id=bot_id, entity_id=entity_id) as lease:
-                if not self.defer_enabled:
-                    await lease.verify()
-                    return await self._await_delivery(legacy)
-                binding = await asyncio.to_thread(self.current_binding, bot_id, entity_id)
-                if binding is None:
-                    return _ApplyDelivery._not_ready()
-                if recorded_binding is not None and binding != recorded_binding:
-                    return RuntimeProjectionResult.pending(
-                        code="CAPABILITY_BINDING_CHANGED",
-                        reason="The Bot Runtime binding changed before synchronization.",
-                    )
-                return await self._deliver_standalone(
-                    lease, binding, scope, retired_mappings,
-                    mcp_and_cli_only=mcp_and_cli_only, desktop_recovery=desktop_recovery,
-                )
-        except CapabilityDeliveryUnavailable:
-            return self.delivery_busy()
+            if not self.defer_enabled:
+                return await self._await_delivery(legacy)
+            binding = await asyncio.to_thread(self.current_binding, bot_id, entity_id)
+            if binding is None:
+                return _ApplyDelivery._not_ready()
+            if recorded_binding is not None and binding != recorded_binding:
+                return _binding_changed()
+            return await self._deliver_standalone(
+                binding, scope, retired_mappings,
+                mcp_and_cli_only=mcp_and_cli_only, desktop_recovery=desktop_recovery,
+            )
+        except RuntimeBindingChangedError:
+            return _binding_changed()
 
     async def remember_release_candidates(
         self, *, bot_id: str, entity_id: str, codes: frozenset[str],
@@ -288,7 +274,7 @@ class CapabilityProjectionReconciler:
         return binding
 
     async def _deliver_standalone(
-        self, lease: CapabilityDeliveryLease, binding: RuntimeBindingTarget, scope: ProjectionScope,
+        self, binding: RuntimeBindingTarget, scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping], *, mcp_and_cli_only: bool, desktop_recovery: bool,
     ) -> RuntimeProjectionResult:
         evidence = self.release_evidence(binding)
@@ -324,7 +310,7 @@ class CapabilityProjectionReconciler:
             else:
                 attempted = retirement_request(candidates, plan.projection.skill_mappings)
                 operation = partial(self._projector.apply_plan, plan=plan, retired_mappings=attempted, scope=scope)
-            result = await self.deliver(lease, binding, operation)
+            result = await self.deliver(binding, operation)
             return result
         finally:
             retired = previous.retired_mappings
@@ -338,7 +324,6 @@ class CapabilityProjectionReconciler:
                 released = frozenset() if component_converged(result, "mcp") else scope.released_mcp
             remaining = replace(previous, retired_mappings=retired, released_mcp=released)
             if remaining != previous:
-                await lease.verify()
                 await asyncio.to_thread(evidence.save, remaining)
 
     def release_evidence(self, binding: RuntimeBindingTarget) -> CapabilityReleaseEvidence:
@@ -354,7 +339,7 @@ class CapabilityProjectionReconciler:
         return RuntimeBindingTarget(bot_id, str(bot["owner_id"]), entity_id, binding.id, binding.device_id)
 
     async def deliver(
-        self, lease: CapabilityDeliveryLease, binding: RuntimeBindingTarget,
+        self, binding: RuntimeBindingTarget,
         operation: Callable[[], Awaitable[RuntimeProjectionResult]],
     ) -> RuntimeProjectionResult:
         def verify_binding() -> bool:
@@ -362,15 +347,10 @@ class CapabilityProjectionReconciler:
 
         def verify_passport_write() -> None:
             if not verify_binding():
-                raise CapabilityDeliveryUnavailable()
-            lease.verify_from_worker()
+                raise RuntimeBindingChangedError("Bot Runtime binding changed before Passport write")
 
         if not await asyncio.to_thread(verify_binding):
-            return RuntimeProjectionResult.pending(
-                code="CAPABILITY_BINDING_CHANGED",
-                reason="The Bot Runtime binding changed before synchronization.",
-            )
-        await lease.verify()
+            return _binding_changed()
         with expect_runtime_binding(binding), passport_write_checkpoint(verify_passport_write):
             return await self._await_delivery(operation)
 
@@ -378,7 +358,7 @@ class CapabilityProjectionReconciler:
     async def _await_delivery(
         operation: Callable[[], Awaitable[RuntimeProjectionResult]],
     ) -> RuntimeProjectionResult:
-        # Let an active request finish under its lease even if the caller is cancelled.
+        # Keep observing a started delivery until it finishes, even if its caller is cancelled.
         delivery = asyncio.gather(operation(), return_exceptions=True)
         cancellation = None
         while not delivery.done():
@@ -393,9 +373,9 @@ class CapabilityProjectionReconciler:
             raise result
         return result
 
-    @staticmethod
-    def delivery_busy() -> RuntimeProjectionResult:
-        return RuntimeProjectionResult.pending(
-            code="CAPABILITY_DELIVERY_BUSY",
-            reason="Capability configuration is awaiting the shared Runtime delivery lease.",
-        )
+
+def _binding_changed() -> RuntimeProjectionResult:
+    return RuntimeProjectionResult.pending(
+        code="CAPABILITY_BINDING_CHANGED",
+        reason="The Bot Runtime binding changed before synchronization.",
+    )

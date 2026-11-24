@@ -1,8 +1,7 @@
-"""Apply closes committed capability changes under the shared delivery lease."""
+"""Apply closes committed capability changes for the bound Runtime."""
 
 import asyncio
 from types import SimpleNamespace
-from contextlib import asynccontextmanager
 
 import pytest
 
@@ -17,11 +16,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     RuntimeProjectionResult,
     RuntimeProjectionStatus,
 )
-from agentclaw.community.core.skill_center.services.capability_delivery_guard import CapabilityDeliveryGuard, CapabilityDeliveryUnavailable
 from agentclaw.community.core.skill_center.services.capability_projection_reconciler import CapabilityProjectionReconciler
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.local.cache import MemoryCachePlugin
 from tests.community.repository.skill_center.capability_desired_state_support import _Database
 
 
@@ -72,7 +69,7 @@ class _Projector:
 
 def _reconciler(projector, device):
     return CapabilityProjectionReconciler(
-        projector=projector, guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+        projector=projector,
         bots=device, bindings=device, defer_enabled=True,
     )
 
@@ -131,7 +128,7 @@ async def test_unchanged_apply_retries_only_safe_retirements(case):
 
 
 @pytest.mark.asyncio
-async def test_cancellation_keeps_the_lease_until_the_active_delivery_returns():
+async def test_cancelled_delivery_does_not_block_another_request():
     entered, release = asyncio.Event(), asyncio.Event()
 
     class BlockingProjector(_Projector):
@@ -151,20 +148,22 @@ async def test_cancellation_keeps_the_lease_until_the_active_delivery_returns():
             await apply.finish(initialize=True)
 
     first = asyncio.create_task(first_apply())
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=2)
     first.cancel()
     async def legacy():
-        pytest.fail("Deferred Apply must share the active delivery lease")
+        pytest.fail("Deferred Apply must use the resolved Runtime plan")
 
     standalone = asyncio.create_task(reconciler.project_competing_change(
         **ADDRESS, owner_id="owner", scope=ProjectionScope(skills=True), retired_mappings=(), legacy=legacy,
     ))
-    await asyncio.sleep(0.06)
-    assert not standalone.done()
-    release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await first
-    assert (await standalone).status is RuntimeProjectionStatus.CONVERGED
+    try:
+        result = await asyncio.wait_for(standalone, timeout=2)
+        assert result.status is RuntimeProjectionStatus.CONVERGED
+        assert not first.done()
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await first
     assert len(projector.calls) == 2
 
 
@@ -228,7 +227,7 @@ async def test_standalone_retirement_survives_failed_delivery(tmp_path, retry_wi
 
     def new_worker(projector):
         return CapabilityProjectionReconciler(
-            projector=projector, guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+            projector=projector,
             bots=bots, bindings=bindings, defer_enabled=True,
         )
     local = PoolSkillMapping(corpus="local", relative_path="local/removed", link_name="removed")
@@ -350,30 +349,30 @@ async def test_repeat_uninstall_uses_the_release_saved_before_dispatch():
 
 
 @pytest.mark.asyncio
-async def test_busy_delivery_preserves_committed_local_and_mcp_releases():
-    class UnavailableGuard:
-        @asynccontextmanager
-        async def hold(self, **kwargs):
-            raise CapabilityDeliveryUnavailable()
-            yield
-
+async def test_binding_change_before_dispatch_preserves_committed_local_and_mcp_releases():
     async def unused_legacy():
-        pytest.fail("Combined delivery must use the shared lease")
+        pytest.fail("Combined delivery must use the resolved Runtime plan")
 
     device = _Device()
-    projector = _Projector(RuntimeProjectionResult.converged())
-    unavailable = CapabilityProjectionReconciler(
-        projector=projector, guard=UnavailableGuard(), bots=device, bindings=device, defer_enabled=True,
-    )
+
+    class RebindingProjector(_Projector):
+        def resolve_plan(self, **kwargs):
+            device.device_id = "replacement"
+            return super().resolve_plan(**kwargs)
+
+    blocked = RebindingProjector()
+    reconciler = _reconciler(blocked, device)
     local = PoolSkillMapping(corpus="local", relative_path="removed", link_name="removed")
     releases = frozenset({"removed-mcp"})
-    result = await unavailable.project_competing_change(
+    result = await reconciler.project_competing_change(
         **ADDRESS, owner_id="owner", scope=ProjectionScope(skills=True, mcp=True, released_mcp=releases),
         retired_mappings=(local,), legacy=unused_legacy,
     )
-    assert result.issues[0].code == "CAPABILITY_DELIVERY_BUSY"
-    assert projector.calls == []
+    assert result.issues[0].code == "CAPABILITY_BINDING_CHANGED"
+    assert blocked.calls == []
 
+    device.device_id = "device"
+    projector = _Projector(RuntimeProjectionResult.converged())
     reconciler = _reconciler(projector, device)
     async with reconciler.deferred_apply(**ADDRESS, retry=None) as apply:
         result, _ = await apply.finish(initialize=True)

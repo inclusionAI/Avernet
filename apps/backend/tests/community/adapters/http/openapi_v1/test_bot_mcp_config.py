@@ -268,12 +268,10 @@ def test_effective_override_delivers_explicit_url_without_catalogue(mcp, tmp_pat
     from agentclaw.community.core.repository.implementations.bot.scoped_mcp_config import ScopedMCPConfigRepository
     from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
     from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult
-    from agentclaw.community.core.skill_center.services.capability_delivery_guard import CapabilityDeliveryGuard
     from agentclaw.community.core.skill_center.services.capability_projection_reconciler import CapabilityProjectionReconciler
     from agentclaw.community.core.skill_center.services.skill_set_projection import SkillSetRuntimeProjection
     from agentclaw.community.di.config import McpRuntimeCredentialsConfig
     from agentclaw.community.plugin_api.models import BotModel
-    from agentclaw.community.plugins.local.cache import MemoryCachePlugin
     from tests.community.core.mcp.services.test_sync_service import _make_plugin, _make_sync_service
     from tests.community.repository.skill_center.capability_desired_state_support import _Database
 
@@ -333,7 +331,7 @@ def test_effective_override_delivers_explicit_url_without_catalogue(mcp, tmp_pat
     mcp.service._config_service = config
     mcp.service._command_repo = ScopedMCPConfigRepository(db)
     mcp.service._capability_projection = CapabilityProjectionReconciler(
-        projector=Projector(), guard=CapabilityDeliveryGuard(MemoryCachePlugin()),
+        projector=Projector(),
         bots=bots, bindings=DeviceRepository(db), defer_enabled=True,
     )
     url = "https://example.invalid/custom"
