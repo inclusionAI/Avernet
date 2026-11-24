@@ -11,16 +11,18 @@ jest.mock('sonner', () => ({
   },
 }));
 
-import { notifyError, notifySuccess } from '@/components/ui/notify';
+import { notifyError, notifySuccess, notifyWarning } from '@/components/ui/notify';
 import { toast } from 'sonner';
 
 const mockedError = toast.error as unknown as jest.Mock;
 const mockedSuccess = toast.success as unknown as jest.Mock;
+const mockedWarning = toast.warning as unknown as jest.Mock;
 
 describe('notify helper', () => {
   beforeEach(() => {
     mockedError.mockClear();
     mockedSuccess.mockClear();
+    mockedWarning.mockClear();
   });
 
   it('notifyError 单行:以 message 为 toast.error 第一参,duration 6000', () => {
@@ -40,6 +42,12 @@ describe('notify helper', () => {
   it('notifyError 仅 title 无 requestId:description 仅 message', () => {
     notifyError('boom', { title: '操作失败' });
     expect(mockedError).toHaveBeenCalledWith('操作失败', { description: 'boom', duration: 6000 });
+  });
+
+  it('notifyWarning:duration 5000', () => {
+    notifyWarning('评测完成，但结果未通过');
+    expect(mockedWarning).toHaveBeenCalledTimes(1);
+    expect(mockedWarning).toHaveBeenCalledWith('评测完成，但结果未通过', { duration: 5000 });
   });
 
   it('notifySuccess:duration 4000', () => {
