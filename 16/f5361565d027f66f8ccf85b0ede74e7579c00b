@@ -1,0 +1,51 @@
+apps/backend/tests/community/core/bot_management/services/test_teclaw_provision_service.py
+  s_b7f94a3bd241d6::t_86a65b49e3ea8f 168,187-209
+  s_b7f94a3bd241d6::t_9fe0d104d28c67 13-14,178-179,183
+  s_b7f94a3bd241d6::t_4c93f702a710a0 169-177,180,182,184-186
+  s_b7f94a3bd241d6::t_2bef04804f6263 210-222
+  s_b7f94a3bd241d6::t_f733d98ed1b5f1 181
+apps/backend/src/agentclaw/community/core/apply_engine/run/creation_stage.py
+  s_b7f94a3bd241d6::t_5142090d8c6f48 1-22
+apps/backend/src/agentclaw/community/core/bot_config_manifest/create_job.py
+  s_b7f94a3bd241d6::t_276379a0b70f3e 57,525-535
+  s_b7f94a3bd241d6::t_78d8ec8e780f46 544,565,570,573-576,578-586,854
+  s_b7f94a3bd241d6::t_e549ab66366f88 577
+apps/backend/src/agentclaw/community/core/devices/repository/record.py
+  s_b7f94a3bd241d6::t_276379a0b70f3e 13,21-22
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/config_manifest_apply.py
+  s_b7f94a3bd241d6::t_5142090d8c6f48 71-76
+  s_b7f94a3bd241d6::t_f64eb51cf63712 70
+apps/backend/src/agentclaw/community/core/bot_management/provision_evidence.py
+  s_b7f94a3bd241d6::t_276379a0b70f3e 1-49
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  s_b7f94a3bd241d6::t_b08e16845c2e0b 89,315,323-325,475,482,759-767,961-962
+apps/backend/src/agentclaw/community/core/bot_management/services/teclaw_provision_service.py
+  s_b7f94a3bd241d6::t_276379a0b70f3e 40-41,247
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_ordering_teclaw.py
+  s_b7f94a3bd241d6::t_80e72ee659c330 254-268
+  s_b7f94a3bd241d6::t_b60883e69795f3 269-282
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/config_manifest_apply.py
+  s_b7f94a3bd241d6::t_b40f82a93f1454 140,157-158
+  s_b7f94a3bd241d6::t_5142090d8c6f48 201-211,213-215,220-227
+  s_b7f94a3bd241d6::t_e549ab66366f88 159-164,212,216-219
+apps/backend/src/agentclaw/community/core/apply_engine/run/service_protocol.py
+  s_b7f94a3bd241d6::t_b08e16845c2e0b 83-90
+apps/backend/tests/community/core/bot_config_manifest/creation/test_create_job.py
+  s_b7f94a3bd241d6::t_a7d8a93f104590 151-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "16f5361565d027f66f8ccf85b0ede74e7579c00b",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

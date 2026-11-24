@@ -1,0 +1,40 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/__init__.py
+  h_059e888e5e4e82 1
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/base.py
+  h_059e888e5e4e82 1-231
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/matching.py
+  h_059e888e5e4e82 1-37
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/plan.py
+  h_059e888e5e4e82 1-689
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/report.py
+  h_059e888e5e4e82 1-384
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/service.py
+  h_059e888e5e4e82 1-650
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/stage.py
+  h_059e888e5e4e82 1-636
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/workflow_guards.py
+  h_059e888e5e4e82 1-203
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_driver.py
+  h_059e888e5e4e82 1-451
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_execution_reads.py
+  h_059e888e5e4e82 1-239
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_execution_state.py
+  h_059e888e5e4e82 1-80
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_replanning.py
+  h_059e888e5e4e82 1-193
+apps/backend/src/agentclaw/community/core/task/context_collab/swarm_planning.py
+  h_059e888e5e4e82 1-49
+apps/backend/src/agentclaw/community/core/task/context_collab/workflow_planning.py
+  h_059e888e5e4e82 1-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7e070a867545bd5e7c2df9141d50444a7dd006ec",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

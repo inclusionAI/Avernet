@@ -1,0 +1,46 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/README.md
+  h_059e888e5e4e82 1-113
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/metrics.py
+  h_059e888e5e4e82 1-232
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/observation.py
+  h_059e888e5e4e82 5-6,14-18,23,60-64,154,157,159,161-183,185-188
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/persistence.py
+  h_059e888e5e4e82 1-157
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/service.py
+  h_059e888e5e4e82 1-227
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/service_api.py
+  h_059e888e5e4e82 1-114
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/telemetry.py
+  h_059e888e5e4e82 1-203
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/views.py
+  h_059e888e5e4e82 1-179
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_17_context_collab_telemetry.sql
+  h_059e888e5e4e82 1-21
+apps/backend/src/agentclaw/community/core/task/todos/README.md
+  h_059e888e5e4e82 56-64,229
+apps/backend/src/agentclaw/community/core/task/todos/collaboration/context_runtime.py
+  h_059e888e5e4e82 1-561
+apps/backend/src/agentclaw/community/core/task/todos/collaboration/in_process.py
+  h_059e888e5e4e82 5,26,29-31,57-59,61,67-69,91-96,118,143,152,166,223,227-260
+apps/backend/src/agentclaw/community/di/modules/task/todo_bindings.py
+  h_059e888e5e4e82 6,26-44,67-69,99-101,115-116,169-212,308-309,311-314
+apps/backend/src/agentclaw/community/di/modules/telemetry_module.py
+  h_059e888e5e4e82 1-36
+apps/backend/tests/community/core/task/context_collab/test_g3_telemetry.py
+  h_059e888e5e4e82 1-495
+apps/backend/tests/community/core/task/context_collab/test_reliability_observation.py
+  h_059e888e5e4e82 143-148,151-165,168-174,176-199,202-206,208-210
+apps/backend/tests/community/core/task/context_collab/test_todo_runtime_sql.py
+  h_059e888e5e4e82 1-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7002c3b5e6a6899e800669e9195f77a7094fdcde",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
