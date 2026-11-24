@@ -84,6 +84,7 @@ class SpaceSkillSummaryRecord(TypedDict):
     owner: SkillOwnerSummaryRecord
     latest_published_version: SkillVersionSummaryRecord | None
     draft: SkillDraftDetailRecord | None
+    draft_publication_error_code: str | None
     active_publication: PublicationAttemptSummaryRecord | None
     actor: SkillActorSummaryRecord
     gmt_created: datetime
