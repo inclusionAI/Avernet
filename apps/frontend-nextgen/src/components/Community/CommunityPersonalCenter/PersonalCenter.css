@@ -1,0 +1,16 @@
+.community-personal-tabs {
+  height: 32px;
+  padding: 2px;
+}
+
+.community-personal-tabs > button {
+  height: 28px;
+  padding-inline: 12px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.community-personal-tabs > button[aria-pressed='true'] {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}

@@ -1,91 +1,98 @@
 import { COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
 import { communityErrorMessage } from '@/domain/community/errors';
-import type { CommunityReply, CommunityReplyPage, CommunityTopic } from '@/domain/community/types';
+import type { CommunityReply, CommunityReplyPage } from '@/domain/community/types';
 import { communityService } from '@/services/community';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
-interface UseCommunityRepliesOptions {
-  selectedTopic: CommunityTopic | null;
-  setReplies: (replies: CommunityReply[]) => void;
+interface ReplyWindow {
+  firstReplyPage: number;
+  lastReplyPage: number;
+  replyTotal: number;
+  replyLoading: boolean;
+  replyError: string | null;
+  failedReplyPage: number | null;
 }
 
-export function useCommunityReplies({
-  selectedTopic,
-  setReplies,
-}: UseCommunityRepliesOptions) {
-  const [replyPage, setReplyPage] = useState(1);
-  const [replyTotal, setReplyTotal] = useState(0);
-  const [replyLoading, setReplyLoading] = useState(false);
-  const [replyError, setReplyError] = useState<string | null>(null);
+const initialWindow: ReplyWindow = {
+  firstReplyPage: 1,
+  lastReplyPage: 1,
+  replyTotal: 0,
+  replyLoading: false,
+  replyError: null,
+  failedReplyPage: null,
+};
+
+export function useCommunityReplies(setReplies: (replies: CommunityReply[]) => void) {
+  const [window, setWindow] = useState(initialWindow);
+  const pages = useRef(new Map<number, CommunityReply[]>());
+  const request = useRef({ generation: 0, inFlightPage: null as number | null });
 
   const resetReplies = useCallback(() => {
-    setReplyTotal(0);
-    setReplyPage(1);
-    setReplyError(null);
+    request.current = { generation: request.current.generation + 1, inFlightPage: null };
+    pages.current.clear();
+    setReplies([]);
+    setWindow(initialWindow);
+  }, [setReplies]);
+
+  const fetchReplyPage = useCallback(async (topicId: string, page: number): Promise<CommunityReplyPage | null> => {
+    if (request.current.inFlightPage === page) return null;
+    const generation = request.current.generation + 1;
+    request.current = { generation, inFlightPage: page };
+    setWindow((previous) => ({
+      ...previous,
+      ...(pages.current.size === 0 ? { firstReplyPage: page, lastReplyPage: page } : {}),
+      replyLoading: true,
+      replyError: null,
+      failedReplyPage: null,
+    }));
+    try {
+      const result = await communityService.listReplies(topicId, { page, pageSize: COMMUNITY_REPLY_PAGE_SIZE });
+      if (request.current.generation !== generation) return null;
+      pages.current.set(page, result.items);
+      const pageNumbers = [...pages.current.keys()].sort((a, b) => a - b);
+      const uniqueReplies = new Map<string, CommunityReply>();
+      for (const number of pageNumbers) {
+        for (const reply of pages.current.get(number) ?? []) uniqueReplies.set(reply.id, reply);
+      }
+      setReplies([...uniqueReplies.values()]);
+      setWindow({
+        firstReplyPage: pageNumbers[0],
+        lastReplyPage: pageNumbers[pageNumbers.length - 1],
+        replyTotal: result.total,
+        replyLoading: false,
+        replyError: null,
+        failedReplyPage: null,
+      });
+      return result;
+    } catch (error) {
+      if (request.current.generation === generation) {
+        setWindow((previous) => ({
+          ...previous,
+          replyLoading: false,
+          failedReplyPage: page,
+          replyError: communityErrorMessage(error, '回复加载失败'),
+        }));
+      }
+      return null;
+    } finally {
+      if (request.current.generation === generation) request.current.inFlightPage = null;
+    }
+  }, [setReplies]);
+
+  const findReplyPage = useCallback((postId: string) => {
+    for (const [page, replies] of pages.current) {
+      if (replies.some((reply) => reply.id === postId || reply.childReplies?.some((child) => child.id === postId))) {
+        return page;
+      }
+    }
+    return undefined;
   }, []);
 
-  const fetchReplies = useCallback(
-    async (topicId: string, page: number): Promise<CommunityReplyPage> => {
-      setReplyLoading(true);
-      setReplyError(null);
-      try {
-        const result = await communityService.listReplies(topicId, {
-          page,
-          pageSize: COMMUNITY_REPLY_PAGE_SIZE,
-        });
-        setReplies(result.items);
-        setReplyTotal(result.total);
-        setReplyPage(page);
-        return result;
-      } catch (error) {
-        setReplyError(communityErrorMessage(error, '回复加载失败'));
-        return { items: [], total: 0 };
-      } finally {
-        setReplyLoading(false);
-      }
-    },
-    [setReplies],
-  );
-
-  const openFirstReplyPage = useCallback(async (topicId: string) => {
-    setReplyTotal(0);
-    setReplyPage(1);
-    setReplyError(null);
-    return fetchReplies(topicId, 1);
-  }, [fetchReplies]);
-  const openReplyPage = useCallback(
-    async (topicId: string, page: number): Promise<CommunityReplyPage> => {
-      setReplyTotal(0);
-      setReplyPage(page);
-      setReplyError(null);
-      return fetchReplies(topicId, page);
-    },
-    [fetchReplies],
-  );
-
-
-  const goToReplyPage = useCallback(
-    async (page: number): Promise<CommunityReplyPage> => {
-      if (!selectedTopic) return { items: [], total: 0 };
-      return fetchReplies(selectedTopic.id, page);
-    },
-    [fetchReplies, selectedTopic],
-  );
-
-  const replyPageCount = Math.max(
-    1,
-    Math.ceil(Math.max(0, replyTotal) / COMMUNITY_REPLY_PAGE_SIZE),
-  );
-
   return {
+    ...window,
+    replyPageCount: Math.max(1, Math.ceil(window.replyTotal / COMMUNITY_REPLY_PAGE_SIZE)),
     resetReplies,
-    openFirstReplyPage,
-    openReplyPage,
-    goToReplyPage,
-    replyPage,
-    replyPageCount,
-    replyTotal,
-    replyLoading,
-    replyError,
+    fetchReplyPage,
+    findReplyPage,
   };
 }
