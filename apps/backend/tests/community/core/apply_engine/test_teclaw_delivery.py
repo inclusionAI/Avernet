@@ -405,3 +405,37 @@ def test_failed_only_capability_does_not_trigger_passport():
         raise AssertionError("failed write cannot justify a Passport update")
     strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=Redelivery(), passport=passport)
     assert _run(strategy.finish(ctx, report)) is None
+
+
+@pytest.mark.parametrize("status", ["unknown", "not_bound", "failed"])
+def test_empty_manifest_does_not_sync_passport_without_confirmed_delivery(status):
+    from dataclasses import replace
+    from agentclaw.community.core.apply_engine.capabilities import Category
+    from agentclaw.community.core.apply_engine.outcomes import CategoryResult
+    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
+
+    calls = []
+    class Redelivery:
+        async def deliver_with_receipt(self, _ctx):
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus(status))
+    async def passport(_ctx):
+        calls.append("passport")
+        raise AssertionError("no confirmed artifact")
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=Redelivery(), passport=passport)
+    report = replace(_report(), categories=(CategoryResult(Category.CAPABILITIES),))
+    _run(strategy.finish(make_context(engine_type="teclaw"), report))
+    assert calls == []
+
+
+def test_manifest_without_capability_declaration_does_not_sync_passport():
+    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
+
+    class Redelivery:
+        async def deliver_with_receipt(self, _ctx):
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=frozenset())
+
+    async def passport(_ctx):
+        raise AssertionError("undeclared capabilities must not trigger Passport synchronization")
+
+    strategy = TeclawPlatformDelivery(ports=lambda: _ports("store"), redeliver=Redelivery(), passport=passport)
+    assert _run(strategy.finish(make_context(engine_type="teclaw"), _report())) is None

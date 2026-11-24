@@ -570,9 +570,9 @@ class TeclawPlatformDelivery(_PhaseTableDelivery):
         receipt = await deliver(ctx)
         if receipt.status is not ManifestDeliveryStatus.CONFIRMED or receipt.delivered_mcp_codes is None:
             return receipt.note
-        capability_changed = any(
+        capability_applied = any(
             category.construct is Category.CAPABILITIES and (
-                category.confirmed_partial or bool(category.removals) or any(
+                not category.aborted or category.confirmed_partial or bool(category.removals) or any(
                     entry.outcome in (EntryOutcome.CREATED, EntryOutcome.UPDATED)
                     for entry in category.entries
                 )
@@ -584,7 +584,7 @@ class TeclawPlatformDelivery(_PhaseTableDelivery):
             and ctx.capability_state.manifest_mcp_candidates.get(entry.identity)
             for entry in report.entries
         )
-        if self._passport is None or not (capability_changed or successful_candidates):
+        if self._passport is None or not (capability_applied or successful_candidates):
             return None
         try:
             passport = await self._passport(ctx)
