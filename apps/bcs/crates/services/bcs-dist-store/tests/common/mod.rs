@@ -11,11 +11,10 @@
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_dist_store::inbox::Clock;
-use bcs_store_api::document::DocumentStorePlugin;
+use bcs_store_api::{document::DocumentStorePlugin, lease::*, zset::*};
 use bcs_store_api::json::*;
 use bcs_store_api::kv::KvStorePlugin;
 use bcs_store_api::stream::*;
-use bcs_store_api::zset::*;
 use bcs_store_api::*;
 use bcs_test_support::store_model::Model;
 use serde_json::Value;
@@ -239,12 +238,53 @@ impl DocumentStorePlugin for Recorder {
         expected: Version,
         value: &Value,
     ) -> StoreResult<WriteOutcome> {
+        // Pre-write stop point (used by strict-round admission vectors to
+        // hold a caller between its staged writes and a conditional write).
+        self.paused("before.document.replace", key).await;
         let result = run!(
             self.write("document.replace", key),
             self.model.replace_document(key, expected, value).await
         );
         self.paused("document.replace", key).await;
         result
+    }
+}
+
+
+#[async_trait]
+impl LeaseStorePlugin for Recorder {
+    async fn register_lease(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl: Duration,
+    ) -> StoreResult<LeaseRegistration> {
+        run!(
+            self.write("lease.register", key),
+            self.model.register_lease(key, value, ttl).await
+        )
+    }
+    async fn read_lease(&self, key: &str) -> StoreResult<LeaseState> {
+        self.read("lease.read", key);
+        self.model.read_lease(key).await
+    }
+    async fn update_lease(
+        &self,
+        key: &str,
+        expected: Version,
+        value: &[u8],
+        ttl: Option<Duration>,
+    ) -> StoreResult<LeaseWrite> {
+        run!(
+            self.write("lease.update", key),
+            self.model.update_lease(key, expected, value, ttl).await
+        )
+    }
+    async fn retire_lease(&self, key: &str) -> StoreResult<()> {
+        run!(
+            self.write("lease.retire", key),
+            self.model.retire_lease(key).await
+        )
     }
 }
 

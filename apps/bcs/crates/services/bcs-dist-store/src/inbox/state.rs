@@ -15,6 +15,10 @@ pub(super) struct AdmissionRecord {
     pub request: AdmitRequest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connector: Option<bcs_service_api::port::repo::distributed::inbox::ConnectorEventIdentity>,
+    /// Strict-group rounds stop before the Start feed entry until the
+    /// checkpoint license is granted; generic entries never carry this mark.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strict: Option<StrictRound>,
     pub created_at: TimestampMillis,
     pub position: Option<InboxPos>,
     pub decision: Option<Decision>,
@@ -22,6 +26,15 @@ pub(super) struct AdmissionRecord {
     pub append_attempts: u64,
     pub append_credits: u64,
     pub phase: Phase,
+}
+
+/// The strict round identity bound to one admission record. The Start feed
+/// entry and schedule activation are appended only when the checkpoint license
+/// matches this exact request id, round generation and Tid.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrictRound {
+    pub request_id: String,
+    pub generation: u64,
 }
 impl AdmissionRecord {
     pub fn start(&self) -> bool {
@@ -56,6 +69,10 @@ pub(super) struct Slot {
     pub generation: u64,
     pub start: bool,
     pub decision: Option<Decision>,
+    /// Set only for strict-group staged starts; generic entries are rejected
+    /// for sessions holding either a staged strict slot or a strict license.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strict: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct ClosedGate {

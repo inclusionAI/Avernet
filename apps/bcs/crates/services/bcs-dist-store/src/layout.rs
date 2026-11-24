@@ -272,6 +272,33 @@ impl KeyLayout {
         Ok(format!("{}:admission:{}", self.namespace_identity(), crate::identity::hex_of(&digest)))
     }
 
+    /// One durable strict-group request intent row, keyed by the trusted
+    /// request identity (scope, group, request_id) — never by the server
+    /// assigned Sid/Tid, so message-key retries always find the same row.
+    pub fn group_request(
+        &self,
+        scope: &bcs_dist_model::TaskScope,
+        group: &bcs_dist_model::GroupId,
+        request_id: &bcs_dist_model::RequestId,
+    ) -> Result<String, StoreError> {
+        segment(&scope.tenant.0)?;
+        segment(&scope.principal.0)?;
+        segment(&group.0)?;
+        segment(&request_id.0)?;
+        let digest = crate::identity::digest_fields(&[
+            b"group_request:v1",
+            scope.tenant.0.as_bytes(),
+            scope.principal.0.as_bytes(),
+            group.0.as_bytes(),
+            request_id.0.as_bytes(),
+        ]);
+        Ok(format!(
+            "{}:group-request:{}",
+            self.namespace_identity(),
+            crate::identity::hex_of(&digest)
+        ))
+    }
+
     /// Retained for source compatibility with old tests and migration tools.
     /// Production admission no longer creates or reads this shard-wide key.
     #[deprecated(note = "the MVP admission layout has no journal root")]

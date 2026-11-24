@@ -3,12 +3,20 @@ use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_service_api::{
     core::dist_admission::*,
-    port::repo::distributed::{common::StoreError, inbox::*},
+    port::repo::distributed::{
+        common::StoreError,
+        group_round::{GroupRoundRepo, GroupStartRequest},
+        inbox::*,
+    },
 };
 use std::sync::Arc;
 
 pub struct WorkerTaskAdmission {
     inbox: Arc<dyn InboxProducerPort>,
+    /// Strict-group rounds admit through the checkpoint-licensed repo; the
+    /// generic inbox entry stays the old-RPC-compatible path and never
+    /// installs rounds for a strict-claimed Session.
+    rounds: Option<Arc<dyn GroupRoundRepo>>,
     now: Arc<dyn Fn() -> TimestampMillis + Send + Sync>,
 }
 impl WorkerTaskAdmission {
@@ -16,7 +24,44 @@ impl WorkerTaskAdmission {
         inbox: Arc<dyn InboxProducerPort>,
         now: Arc<dyn Fn() -> TimestampMillis + Send + Sync>,
     ) -> Self {
-        Self { inbox, now }
+        Self {
+            inbox,
+            rounds: None,
+            now,
+        }
+    }
+
+    /// Canonical Worker-side strict-round admission entry: the only writer of
+    /// group round licenses (Gateways submit trusted scope and stable intent
+    /// here, they never write checkpoints).
+    pub fn with_rounds(
+        inbox: Arc<dyn InboxProducerPort>,
+        rounds: Arc<dyn GroupRoundRepo>,
+        now: Arc<dyn Fn() -> TimestampMillis + Send + Sync>,
+    ) -> Self {
+        Self {
+            inbox,
+            rounds: Some(rounds),
+            now,
+        }
+    }
+
+    /// One recoverable round per context. Authorization belongs to the
+    /// calling use case; the check here only pins the trusted caller scope.
+    pub async fn admit_group_round(
+        &self,
+        scope: &TaskScope,
+        request: &GroupStartRequest,
+    ) -> Result<Admission, StoreError> {
+        if request.input.key.scope != *scope {
+            return Err(StoreError::Invalid {
+                code: "group_scope_untrusted".into(),
+            });
+        }
+        let rounds = self.rounds.as_ref().ok_or_else(|| StoreError::Invalid {
+            code: "strict_rounds_unconfigured".into(),
+        })?;
+        rounds.admit(request).await
     }
 
     fn initialize(

@@ -20,6 +20,7 @@ pub mod command;
 pub mod dispatch;
 pub mod error;
 pub mod evidence;
+pub mod group_admission;
 pub mod identity;
 pub mod inbox;
 pub mod layout;

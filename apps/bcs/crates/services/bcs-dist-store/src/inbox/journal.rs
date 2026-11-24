@@ -15,11 +15,13 @@ impl StoreInboxProducer {
         request: AdmitRequest,
         generation: u64,
         connector: Option<bcs_service_api::port::repo::distributed::inbox::ConnectorEventIdentity>,
+        strict: Option<StrictRound>,
     ) -> Result<AdmissionRecord, StoreError> {
         let record = AdmissionRecord {
             schema_version: 1,
             generation,
             connector,
+            strict,
             request,
             created_at: self.inner.clock.now(),
             position: None,

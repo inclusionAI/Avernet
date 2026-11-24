@@ -18,7 +18,32 @@ pub(super) enum Progress {
     Changed,
     Retry,
     Done(AdmitOutcome),
+    /// Staged strict writes are durable repairs only: without the checkpoint
+    /// license no Start entry is appended and no schedule activation happens.
+    Staged,
     Full(OccupiedSlot),
+}
+impl StoreInboxProducer {
+    /// License gate for staged strict rounds: the Start feed entry is
+    /// delivered only when the checkpoint license names this exact request
+    /// id, round generation and Tid. One bounded document read.
+    pub(super) async fn round_licensed(&self, c: &AdmissionRecord) -> Result<bool, StoreError> {
+        let Some(strict) = &c.strict else {
+            return Ok(true);
+        };
+        let Some(license) = crate::group_admission::probe_strict_license(
+            &self.inner.documents,
+            &self.inner.layout,
+            c.sid(),
+        )
+        .await?
+        else {
+            return Ok(false);
+        };
+        Ok(license.request_id == strict.request_id
+            && license.generation.get() == strict.generation
+            && license.tid == c.request.input.tid)
+    }
 }
 impl StoreInboxProducer {
     pub(super) async fn progress(
@@ -29,7 +54,12 @@ impl StoreInboxProducer {
         new: bool,
     ) -> Result<Progress, StoreError> {
         if let Some(decision) = &c.decision {
-            self.release_slot(key, &c).await?;
+            // Strict round slots are session claim marks: they stay until
+            // the strict lifecycle (T4/T7) frees them, not until this record
+            // completes, so generic entries keep seeing the claim.
+            if c.strict.is_none() {
+                self.release_slot(key, &c).await?;
+            }
             return Ok(Progress::Done(self.outcome(&c, decision, new)));
         }
         match c.phase {
@@ -112,6 +142,11 @@ impl StoreInboxProducer {
                     }
                 }
                 c.phase = Phase::TaskReady;
+            }
+            Phase::TaskReady if c.strict.is_some() && !self.round_licensed(&c).await? => {
+                // The snapshot/index writes above are repairable scaffolding.
+                // Visibility and execution ride the checkpoint license alone.
+                return Ok(Progress::Staged);
             }
             Phase::TaskReady if c.position.is_some() => {
                 c.decision = Some(self.decide_slot(key, &c, Decision::Accepted).await?);

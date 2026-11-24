@@ -280,7 +280,12 @@ impl InboxProducerPort for StoreInboxProducer {
         Some(self.inner.scan_budget.profile())
     }
     async fn admit(&self, request: AdmitRequest) -> Result<AdmitOutcome, StoreError> {
-        self.admit_scoped(request, None).await
+        match self.admit_scoped(request, None, None).await? {
+            AdmissionResult::Outcome(outcome) => Ok(outcome),
+            // The generic entry never drives a strict record (marker check
+            // below); reaching staging here is an invariant break.
+            AdmissionResult::Staged => Err(unknown("strict_admission_staged")),
+        }
     }
     async fn admit_connector(
         &self,
@@ -293,31 +298,184 @@ impl InboxProducerPort for StoreInboxProducer {
                 code: "session_not_found".into(),
             })?
             .1;
-        self.admit_scoped(
-            AdmitRequest {
-                scope: spec.scope,
-                input: request.input,
-                create_session: None,
-                create_task: None,
-            },
-            Some(request.identity),
-        )
-        .await
+        match self
+            .admit_scoped(
+                AdmitRequest {
+                    scope: spec.scope,
+                    input: request.input,
+                    create_session: None,
+                    create_task: None,
+                },
+                Some(request.identity),
+                None,
+            )
+            .await?
+        {
+            AdmissionResult::Outcome(outcome) => Ok(outcome),
+            AdmissionResult::Staged => Err(unknown("strict_admission_staged")),
+        }
     }
     async fn append_stream(&self, request: AppendAgentEvent) -> Result<InboxPos, StoreError> {
         self.append_intermediate(request).await
     }
 }
 
+/// Terminal state of one admission visit: a public outcome, or a staged
+/// strict record waiting for its checkpoint license.
+pub(super) enum AdmissionResult {
+    Outcome(AdmitOutcome),
+    Staged,
+}
+
 impl StoreInboxProducer {
+    /// Same-message-key re-admission at a newer generation over a
+    /// decided-Rejected strict record (the forfeited claim of a duel
+    /// loser): the stale record is superseded wholesale by a fresh one and
+    /// the caller advances it as a new admission (stage-then-deliver under
+    /// the license gate). Live or undecided records are never superseded —
+    /// their entry-isolation rules stay exactly as they were. Returns true
+    /// when this call installed the fresh record.
+    pub async fn supersede_rejected_strict(
+        &self,
+        key: &str,
+        request: AdmitRequest,
+        connector: Option<ConnectorEventIdentity>,
+        round: &StrictRound,
+    ) -> Result<bool, StoreError> {
+        // The caller passes a prepared request: `prepare` already recomputed
+        // the durable business digest in place.
+        let op = request.input.input_id.0.clone();
+        let mut budget = EqBudget::new();
+        loop {
+            budget.attempt(&op).await?;
+            let Some((version, found)) = budget.io(&op, self.admission_record(key)).await?
+            else {
+                return Ok(false);
+            };
+            let supersedeable = found.strict.as_ref().is_some_and(|previous| {
+                found.decision.as_ref() == Some(&Decision::Rejected)
+                    && previous.request_id == round.request_id
+                    && round.generation > previous.generation
+            });
+            if !supersedeable {
+                return Ok(false);
+            }
+            let (_, schedule) = budget
+                .io(&op, self.schedule(&request.input.sid))
+                .await?;
+            let admission =
+                self.new_admission(request.clone(), schedule.generation, connector.clone(), Some(round.clone()))?;
+            if budget
+                .io(&op, self.save_version(key, Some(version), &admission, &op))
+                .await?
+                .is_some()
+            {
+                return Ok(true);
+            }
+            // CAS lost: re-read and re-classify; a competitor superseded it.
+        }
+    }
+
+    /// Zero-write fence for resumed generic entries: a session that became
+    /// strictly claimed (a staged strict slot, or a committed strict license)
+    /// never resumes a stranded generic admission record. Two bounded reads
+    /// in the worst case; decided records never reach this fence.
+    async fn fence_strict_claim(&self, sid: &Sid) -> Result<(), StoreError> {
+        let claimed = if self.schedule(sid).await?.1.slots.values().any(|slot| slot.strict) {
+            true
+        } else {
+            crate::group_admission::probe_strict_license(
+                &self.inner.documents,
+                &self.inner.layout,
+                sid,
+            )
+            .await?
+            .is_some()
+        };
+        if claimed {
+            return Err(StoreError::NotApplied {
+                code: "strict_claim_source".into(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Forfeit a CAS-losing strict round's staged claim. The record is fenced
+    /// with a durable rejection (it can never again resume into a Start feed
+    /// entry or decision) and its schedule slot is freed, so a duel loser
+    /// leaves no resident claim and never burns the per-session slot budget.
+    /// Idempotent; delivered or already-fenced records are left untouched.
+    pub async fn abandon_strict_start(
+        &self,
+        request: AdmitRequest,
+        round: StrictRound,
+    ) -> Result<(), StoreError> {
+        let key = self
+            .inner
+            .layout
+            .admission(&request.scope, &request.input.input_id)?;
+        let op = request.input.input_id.0.clone();
+        let mut budget = EqBudget::new();
+        loop {
+            budget.attempt(&op).await?;
+            let (v, mut record) = budget
+                .io(&op, self.admission_record(&key))
+                .await?
+                .ok_or_else(|| invalid("admission_missing"))?;
+            if record.decision.is_some() {
+                return Ok(());
+            }
+            // Identity is scoped by the admission key (scope + input id);
+            // sid/tid/round re-check the stored record against this round.
+            // The business digest is deliberately not compared here: `prepare`
+            // recomputes it from the stored wire, and the abandonment path
+            // passes the caller's digest-bearing request straight through.
+            let same = record.strict.as_ref() == Some(&round)
+                && record.request.input.sid == request.input.sid
+                && record.request.input.tid == request.input.tid;
+            if !same {
+                return Ok(());
+            }
+            record.decision = Some(Decision::Rejected);
+            let op2 = op.clone();
+            match budget.io(&op, self.save_version(&key, Some(v), &record, &op2)).await? {
+                Some(_) => {
+                    // Free the strict slot: decided records release cleanly
+                    // through the same schedule CAS path the Done flow uses.
+                    self.release_slot(&key, &record).await?;
+                    return Ok(());
+                }
+                None => continue,
+            }
+        }
+    }
+
+    /// Strict-group entry: stages the repairable pre-writes and, once the
+    /// checkpoint license covers this exact request id/generation/Tid,
+    /// delivers the Start feed entry exactly once. Never callable through
+    /// the generic (`InboxProducerPort::admit`) path.
+    pub async fn admit_strict_round(
+        &self,
+        request: AdmitRequest,
+        round: StrictRound,
+    ) -> Result<crate::group_admission::StrictOutcome, StoreError> {
+        match self.admit_scoped(request, None, Some(round)).await? {
+            AdmissionResult::Outcome(outcome) => {
+                Ok(crate::group_admission::StrictOutcome::Delivered(outcome))
+            }
+            AdmissionResult::Staged => Ok(crate::group_admission::StrictOutcome::Staged),
+        }
+    }
+
     async fn admit_scoped(
         &self,
         mut request: AdmitRequest,
         connector: Option<ConnectorEventIdentity>,
-    ) -> Result<AdmitOutcome, StoreError> {
+        strict: Option<StrictRound>,
+    ) -> Result<AdmissionResult, StoreError> {
         if let Err(error) = self.prepare(&mut request, connector.as_ref()).await {
             if matches!(&error, StoreError::Invalid { code } if code == "frozen_spec_conflict" || code == "frozen_task_conflict") {
-                return Ok(AdmitOutcome::ContentConflict);
+                return Ok(AdmissionResult::Outcome(AdmitOutcome::ContentConflict));
             }
             if matches!(&error, StoreError::NotApplied { code } if code != "session_not_found")
                 || matches!(&error, StoreError::OutcomeUnknown { .. })
@@ -331,12 +489,36 @@ impl StoreInboxProducer {
             .layout
             .admission(&request.scope, &request.input.input_id)?;
         let op = request.input.input_id.0.clone();
+        let sid = request.input.sid.clone();
         let digest = request.input.business_digest.clone();
+        // A forfeited (decided-Rejected) strict claim is superseded by the
+        // same message key at a newer generation: the loser's re-admission
+        // retargets its own durable record instead of wedging at the entry
+        // isolation (same rid, new round generation, old decision = Rejected).
+        if let Some(round) = &strict
+            && self
+                .supersede_rejected_strict(&key, request.clone(), connector.clone(), round)
+                .await?
+        {
+            return self.advance(&key, true).await.map_err(|_| unknown(&op));
+        }
         let existing = match self.admission_record(&key).await.map_err(|_| unknown(&op))? {
             Some((_, existing)) => existing,
             None => {
                 let (_, schedule) = self.schedule(&request.input.sid).await.map_err(|_| unknown(&op))?;
-                let admission = self.new_admission(request, schedule.generation, connector)?;
+                // Source isolation with zero extra reads: strict round slots
+                // stay in this schedule as session claim marks, so a generic
+                // (old JSON-RPC) admission is rejected here, before its
+                // record is written and before any physical write.
+                if strict.is_none()
+                    && schedule.slots.values().any(|slot| slot.strict)
+                {
+                    return Err(StoreError::NotApplied {
+                        code: "strict_claim_source".into(),
+                    });
+                }
+                let admission =
+                    self.new_admission(request, schedule.generation, connector.clone(), strict.clone())?;
                 if self.save(&key, None, &admission, &op).await? {
                     return self.advance(&key, true).await.map_err(|_| unknown(&op));
                 }
@@ -351,7 +533,26 @@ impl StoreInboxProducer {
             }
         };
         if existing.request.input.business_digest != digest {
-            return Ok(AdmitOutcome::ContentConflict);
+            return Ok(AdmissionResult::Outcome(AdmitOutcome::ContentConflict));
+        }
+        // Entry isolation: a strict record is repaired only by its own entry
+        // (same request id and generation); the generic entry never adopts
+        // one, and a strict entry never takes over a generic record.
+        match (&existing.strict, &strict) {
+            (Some(a), Some(b)) if a == b => {}
+            (Some(_), _) | (_, Some(_)) => {
+                return Err(StoreError::NotApplied {
+                    code: "strict_admission_entry".into(),
+                });
+            }
+            (None, None) => {}
+        }
+        // An undecided record resumes its phase machine here, including the
+        // Start stream append: a session strictly claimed since that record
+        // stranded must never resume it. Decided records only replay their
+        // terminal outcome and cannot produce new physical state.
+        if strict.is_none() && existing.decision.is_none() {
+            self.fence_strict_claim(&sid).await?;
         }
         self.advance(&key, false).await.map_err(|_| unknown(&op))
     }
