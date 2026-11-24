@@ -272,6 +272,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               showCreateHint={!isOthers}
               showInitiator={isOthers}
               allowActionsWithInitiator={allowCodingActionsWithInitiator}
+              showFullTitleTooltip={isAgentCoding}
             />
           )}
         </div>
