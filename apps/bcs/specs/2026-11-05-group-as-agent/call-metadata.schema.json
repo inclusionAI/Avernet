@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/call-metadata/v1.schema.json",
+  "title": "BCN A2A metadata Schema 草稿",
+  "description": "已明确的公开过程消息开关；来源和用户字段的命名、结构及凭据传递方式待联合设计。",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "includeProgress": {
+      "type": "boolean",
+      "default": false,
+      "description": "是否生成并保留可展示的过程消息，本轮首次受理时固定。"
+    }
+  },
+  "$comment": "候选发布位置与扩展规范见 spec.md §4.2；此草稿只定义 includeProgress，正式 Schema 在来源合同定稿后发布。additionalProperties 允许其他扩展字段，不为未定义字段指定语义。"
+}
