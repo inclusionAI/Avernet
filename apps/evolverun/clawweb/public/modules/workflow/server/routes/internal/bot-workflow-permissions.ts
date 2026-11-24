@@ -22,7 +22,7 @@ export function createInternalBotWorkflowPermissionsRouter(botPermRepo: BotWorkf
     apiLog("READ", "/bot-workflow-permissions/check", { botId, botOwnerId, workflowId, permission });
 
     if (!botPermRepo) {
-      apiLog("READ", "/bot-workflow-permissions/check", { botId, botOwnerId, workflowId, permission, status: 503, error: "Database not configured" });
+      apiLog("READ", "/bot-workflow-permissions/check", { botId, botOwnerId, workflowId, permission, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -47,7 +47,7 @@ export function createInternalBotWorkflowPermissionsRouter(botPermRepo: BotWorkf
       res.json({ allowed, hasRecords });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", "/bot-workflow-permissions/check", { botId, botOwnerId, workflowId, permission, status: 500, error: msg });
+      apiLog("READ", "/bot-workflow-permissions/check", { botId, botOwnerId, workflowId, permission, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "../error-log-format.js";
 import { FlowRunMarkerError, normalizeFlowRunMarkers } from '../../services/flow-run-markers.js';
 import { hasTrialFields, OrdinaryRequestError, type OrdinaryRequestAuth, type OrdinaryPrincipal } from '../../services/ordinary-run-request.js';
 import { RepairBatchError } from '../../contracts/repair-batch.js';
@@ -37,7 +38,7 @@ function scheduleTerminalObserver(
     void Promise.resolve()
       .then(() => observer(input))
       .catch((error) => {
-        console.warn(`[internal-runs] terminal observer failed for ${input.flowId}: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`[internal-runs] terminal observer failed for ${input.flowId}: ${error instanceof Error ? error.message : String(error)}`, errorStack(error));
       });
   });
 }
@@ -61,6 +62,7 @@ export function createInternalRunsRouter(
   };
   const respondError = (res: Response, error: unknown) => {
     const status = error instanceof OrdinaryRequestError ? error.status : 503;
+    console[status >= 500 ? "error" : "warn"]("[internal-runs] ordinary request failed:", status >= 500 ? captureApiError(res, error) : errorStack(error));
     res.status(status).json({ success: false, error: status === 400 ? "Bad Request" : status === 404 ? "Not Found"
       : status === 409 ? "Conflict" : "Service Unavailable" });
   };
@@ -107,10 +109,12 @@ export function createInternalRunsRouter(
     else apiLog("WRITE", "/runs", { flowId: req.body?.flow_id, workflowId: req.body?.workflow_id, runStatus: req.body?.status,
       stateJsonBytes: typeof req.body?.state_json === 'string' ? Buffer.byteLength(req.body.state_json) : 0 });
     if (!flowRunRepo) {
-      apiLog("WRITE", "/runs", { status: 503, error: "Database not configured" });
+      apiLog("WRITE", "/runs", { status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
+    // Logging-only cause retention for the readback error wrapped below; never a global first-write policy.
+    let parentReadbackLogException: { error: unknown } | undefined;
     try {
       let principal: OrdinaryPrincipal | null = null;
       if (ordinary) {
@@ -246,7 +250,9 @@ export function createInternalRunsRouter(
         let row;
         try {
           row = await flowRunRepo.findFullByFlowId(flow_id);
-        } catch {
+        } catch (error) {
+          parentReadbackLogException = { error };
+          console.error("[internal-runs] registered run readback failed:", captureApiError(res, error));
           // Registration is transactional and idempotent; an uncertain readback
           // must be retried by the caller, never reported as a generic 500.
           throw new ParentRelationError(503, 'Registered flow run could not be read back');
@@ -259,7 +265,7 @@ export function createInternalRunsRouter(
       const registered = await flowRunRepo.insertForRequest(req.body, run);
       const ok = registered !== null || await flowRunRepo.insert(run);
       if (!ok) {
-        apiLog("WRITE", "/runs", { status: 500, error: "Failed to insert flow run", flow_id, workflow_id });
+        apiLog("WRITE", "/runs", { status: 500, error: "Failed to insert flow run", flow_id, workflow_id }, undefined, res);
         res.status(500).json({ success: false, error: "Internal Server Error", message: "Failed to insert flow run" });
         return;
       }
@@ -271,10 +277,15 @@ export function createInternalRunsRouter(
         res.status(400).json({ success: false, error: 'Bad Request', message: error.message }); return;
       }
       if (ordinary) { respondError(res, error); return; }
-      if (error instanceof ParentRelationError) { res.status(error.status).json({ success: false, error: error.status === 409 ? 'Conflict' : error.status === 400 ? 'Bad Request' : 'Service Unavailable' }); return; }
+      if (error instanceof ParentRelationError) {
+        const logException = parentReadbackLogException ? parentReadbackLogException.error : error;
+        console[error.status >= 500 ? "error" : "warn"]("[internal-runs] parent registration failed:", error.status >= 500 ? captureApiError(res, logException) : errorStack(error));
+        if (parentReadbackLogException) apiLog("WRITE", "/runs", { status: error.status, error: error.message }, logException, res);
+        res.status(error.status).json({ success: false, error: error.status === 409 ? 'Conflict' : error.status === 400 ? 'Bad Request' : 'Service Unavailable' }); return;
+      }
       if (error instanceof RepairBatchError) { res.status(409).json({ success: false, error: error.message, code: error.code }); return; }
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/runs", { status: 500, error: "Run insert rejected" });
+      apiLog("WRITE", "/runs", { status: 500, error: "Run insert rejected" }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   });
@@ -286,7 +297,7 @@ export function createInternalRunsRouter(
     const flowId = String(req.params.flowId);
     apiLogBody("PUT", `/runs/${flowId}/completion`, { fields: Object.keys(req.body ?? {}) }, { flowId });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -339,7 +350,7 @@ export function createInternalRunsRouter(
       if (status === "failed") scheduleTerminalObserver(observers.onTerminal, { flowId, status });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -352,7 +363,7 @@ export function createInternalRunsRouter(
     const flowId = String(req.params.flowId);
     apiLogBody("PUT", `/runs/${flowId}/fail-if-running`, { fields: Object.keys(req.body ?? {}) }, { flowId });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/fail-if-running`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/fail-if-running`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -384,7 +395,7 @@ export function createInternalRunsRouter(
       if (claimed) scheduleTerminalObserver(observers.onTerminal, { flowId, status: "failed" });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/fail-if-running`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/fail-if-running`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -395,7 +406,7 @@ export function createInternalRunsRouter(
     const { field } = req.body as { field?: string };
     apiLog("PUT", `/runs/${flowId}/increment-node`, { flowId, field });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/increment-node`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/increment-node`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -416,7 +427,7 @@ export function createInternalRunsRouter(
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/increment-node`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/increment-node`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -427,7 +438,7 @@ export function createInternalRunsRouter(
     const { status, retry_epoch } = req.body as { status?: string; retry_epoch?: number };
     apiLog("PUT", `/runs/${flowId}/status`, { flowId, newStatus: status });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -453,7 +464,7 @@ export function createInternalRunsRouter(
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -464,7 +475,7 @@ export function createInternalRunsRouter(
     const { phase } = req.body as { phase?: string };
     apiLog("PUT", `/runs/${flowId}/phase`, { flowId, phase });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/phase`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/phase`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -485,7 +496,7 @@ export function createInternalRunsRouter(
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/phase`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/phase`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -496,7 +507,7 @@ export function createInternalRunsRouter(
     const { started_at } = req.body as { started_at?: number };
     apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, started_at });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -518,7 +529,7 @@ export function createInternalRunsRouter(
       res.json({ success: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -529,7 +540,7 @@ export function createInternalRunsRouter(
     const { node_count } = req.body as { node_count?: number };
     apiLog("PUT", `/runs/${flowId}/node-count`, { flowId, node_count });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/node-count`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/node-count`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -550,7 +561,7 @@ export function createInternalRunsRouter(
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/node-count`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/node-count`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -560,7 +571,7 @@ export function createInternalRunsRouter(
     const flowId = String(req.params.flowId);
     apiLogBody("PUT", `/runs/${flowId}/result-json`, { fields: Object.keys(req.body ?? {}) }, { flowId });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -599,7 +610,7 @@ export function createInternalRunsRouter(
       res.json({ success: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/result-json`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -609,7 +620,7 @@ export function createInternalRunsRouter(
     const flowId = String(req.params.flowId);
     apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -625,7 +636,7 @@ export function createInternalRunsRouter(
       res.json({ success: true, data: { flowId, resetNodes: result.resetCount } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -655,6 +666,7 @@ export function createInternalRunsRouter(
       res.json({ success: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      console.error("[internal/runs] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message });
     }
   }));
@@ -664,7 +676,7 @@ export function createInternalRunsRouter(
     const flowId = String(req.params.flowId);
     apiLogBody("PUT", `/runs/${flowId}/state`, { fields: Object.keys(req.body ?? {}) }, { flowId });
     if (!flowRunRepo) {
-      apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -693,11 +705,12 @@ export function createInternalRunsRouter(
       res.json({ success: true });
     } catch (error) {
       if (error instanceof FanoutStorageError) {
+        console[error.statusCode >= 500 ? "error" : "warn"]("[internal-runs] state persistence failed:", error.statusCode >= 500 ? captureApiError(res, error) : errorStack(error));
         res.status(error.statusCode).json({ success: false, error: "Conflict", message: error.message });
         return;
       }
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -707,7 +720,7 @@ export function createInternalRunsRouter(
     const flowId = String(req.params.flowId);
     apiLog("READ", `/runs/${flowId}/state`, { flowId });
     if (!flowRunRepo) {
-      apiLog("READ", `/runs/${flowId}/state`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("READ", `/runs/${flowId}/state`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -723,7 +736,7 @@ export function createInternalRunsRouter(
       res.json({ success: true, data: { state_json: stateJson } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", `/runs/${flowId}/state`, { flowId, status: 500, error: msg });
+      apiLog("READ", `/runs/${flowId}/state`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -733,7 +746,7 @@ export function createInternalRunsRouter(
     const flowId = String(req.params.flowId);
     apiLog("READ", `/runs/${flowId}`, { flowId });
     if (!flowRunRepo) {
-      apiLog("READ", `/runs/${flowId}`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("READ", `/runs/${flowId}`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -748,7 +761,7 @@ export function createInternalRunsRouter(
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", `/runs/${flowId}`, { flowId, status: 500, error: msg });
+      apiLog("READ", `/runs/${flowId}`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -781,7 +794,7 @@ export function createInternalRunsRouter(
     }
 
     if (!flowRunRepo) {
-      apiLog("READ", "/runs", { status: 503, error: "Database not configured" });
+      apiLog("READ", "/runs", { status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -791,7 +804,7 @@ export function createInternalRunsRouter(
       res.json({ success: true, data: rows, total: rows.length, limit, offset });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", "/runs", { status: 500, error: msg });
+      apiLog("READ", "/runs", { status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

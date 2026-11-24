@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "../error-log-format.js";
 /**
  * Internal API for deploy history management.
  *
@@ -57,7 +58,7 @@ export function createInternalDeployHistoryRouter(
         // Sync version to workflow_specs table
         if (workflowSpecRepo) {
           try { await workflowSpecRepo.updateVersion(b.workflowId, version); }
-          catch (err) { console.warn(`[deploy-history] updateVersion failed: ${err instanceof Error ? err.message : err}`); }
+          catch (err) { console.warn(`[deploy-history] updateVersion failed: ${err instanceof Error ? err.message : err}`, errorStack(err)); }
         }
         res.json({ success: true, version });
         return; // success
@@ -67,9 +68,10 @@ export function createInternalDeployHistoryRouter(
 
         if (isDuplicate) {
           // The tag's version is immutable; never silently write a different one.
-          console.error(`[deploy-history] Insert failed for ${b.workflowId}: ${msg}`);
+          console.warn(`[deploy-history] Insert failed for ${b.workflowId}: ${msg}`, errorStack(err));
           res.status(409).json({ error: "Conflict", message: msg });
         } else {
+          console.error(`[deploy-history] Insert failed for ${b.workflowId}: ${msg}`, captureApiError(res, err));
           res.status(500).json({ error: "Internal Server Error", message: msg });
         }
         return;

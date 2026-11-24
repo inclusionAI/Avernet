@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "../error-log-format.js";
 /** Internal fanout durability endpoints. Mounted under /api/internal/runs.
  *
  * GET/PUT /:flowId/fanouts/:nodeId
@@ -52,6 +53,7 @@ export function createInternalFanoutsRouter(
         const status = error instanceof FanoutStorageError ? error.statusCode : 500;
         const labels: Record<number, string> = { 400: 'Bad Request', 404: 'Not Found', 409: 'Conflict', 500: 'Internal Server Error', 503: 'Service Unavailable' };
         const code = error instanceof FanoutStorageError ? error.code : undefined;
+        console[status >= 500 ? "error" : "warn"]("[internal-fanouts] request failed:", status >= 500 ? captureApiError(res, error) : errorStack(error));
         res.status(status).json({ success: false, error: code ?? labels[status], ...(code ? { code } : {}),
           message: error instanceof FanoutStorageError ? error.message : 'Fanout persistence operation failed' });
       }

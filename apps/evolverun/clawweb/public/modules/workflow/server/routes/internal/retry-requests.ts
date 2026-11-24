@@ -16,7 +16,7 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
     apiLogBody("WRITE", "/retry-requests", req.body, {});
     if (!retryRequestRepo) {
-      apiLog("WRITE", "/retry-requests", { status: 503, error: "Database not configured" });
+      apiLog("WRITE", "/retry-requests", { status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -39,7 +39,7 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
       }
       const row = await retryRequestRepo.create({ requestId: request_id, flowId: flow_id, nodeId: node_id ?? null, reason: reason ?? null, requester: requester ?? null, options });
       if (!row) {
-        apiLog("WRITE", "/retry-requests", { status: 500, error: "create returned null" });
+        apiLog("WRITE", "/retry-requests", { status: 500, error: "create returned null" }, undefined, res);
         res.status(500).json({ success: false, error: "Internal Server Error", message: "Failed to create retry request" });
         return;
       }
@@ -47,7 +47,7 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/retry-requests", { status: 500, error: msg });
+      apiLog("WRITE", "/retry-requests", { status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -56,7 +56,7 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
   router.post("/claim", asyncHandler(async (req: Request, res: Response) => {
     apiLogBody("WRITE", "/retry-requests/claim", req.body, {});
     if (!retryRequestRepo) {
-      apiLog("WRITE", "/retry-requests/claim", { status: 503, error: "Database not configured" });
+      apiLog("WRITE", "/retry-requests/claim", { status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -77,7 +77,7 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
       res.json({ success: true, data: { claimed } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/retry-requests/claim", { status: 500, error: msg });
+      apiLog("WRITE", "/retry-requests/claim", { status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -87,7 +87,7 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
     const requestId = String(req.params.requestId);
     apiLogBody("WRITE", `/retry-requests/${requestId}/complete`, req.body, { requestId });
     if (!retryRequestRepo) {
-      apiLog("WRITE", `/retry-requests/${requestId}/complete`, { requestId, status: 503, error: "Database not configured" });
+      apiLog("WRITE", `/retry-requests/${requestId}/complete`, { requestId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -108,7 +108,7 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
       res.json({ success: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", `/retry-requests/${requestId}/complete`, { requestId, status: 500, error: msg });
+      apiLog("WRITE", `/retry-requests/${requestId}/complete`, { requestId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -118,7 +118,7 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
     const requestId = String(req.params.requestId);
     apiLog("WRITE", `/retry-requests/${requestId}/release`, { requestId });
     if (!retryRequestRepo) {
-      apiLog("WRITE", `/retry-requests/${requestId}/release`, { requestId, status: 503, error: "Database not configured" });
+      apiLog("WRITE", `/retry-requests/${requestId}/release`, { requestId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -133,7 +133,7 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
       res.json({ success: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", `/retry-requests/${requestId}/release`, { requestId, status: 500, error: msg });
+      apiLog("WRITE", `/retry-requests/${requestId}/release`, { requestId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

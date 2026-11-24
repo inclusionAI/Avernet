@@ -1,3 +1,4 @@
+import { captureApiError } from "../error-log-format.js";
 /**
  * Internal API routes for approval_cards — write operations for workflow runtime.
  *
@@ -46,7 +47,7 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
     apiLogBody("WRITE", "/approval-cards", req.body);
     if (!approvalCardRepo) {
-      apiLog("WRITE", "/approval-cards", { status: 503, error: "Database not configured" });
+      apiLog("WRITE", "/approval-cards", { status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -125,8 +126,8 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
       const msg = error instanceof Error ? error.message : String(error);
       const code = (error as any)?.code;
       const sqlMessage = (error as any)?.sqlMessage;
-      apiLog("WRITE", "/approval-cards", { httpStatus: 500, error: msg, code, sqlMessage });
-      console.error(`[approval-cards] insert failed: ${msg}`, { code, sqlMessage, flow_id, node_id, workflow_id });
+      apiLog("WRITE", "/approval-cards", { httpStatus: 500, error: msg, code, sqlMessage }, error, res);
+      console.error(`[approval-cards] insert failed: ${msg}`, { code, sqlMessage, flow_id, node_id, workflow_id }, captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg, code, detail: sqlMessage });
     }
   }));
@@ -158,6 +159,7 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
       res.json(body);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/approval-cards] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -179,6 +181,7 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
       res.json({ success: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/approval-cards] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

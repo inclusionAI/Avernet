@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "../error-log-format.js";
 import { Router } from "express";
 import { RunReadRepository } from "../../repositories/run-read-repository.js";
 
@@ -30,6 +31,7 @@ export function createInternalRunReadsRouter(repo: RunReadRepository): Router {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const status = message.includes("not found") ? 404 : /scope|cursor|limit must/.test(message) ? 400 : 500;
+        console[status >= 500 ? "error" : "warn"]("[internal-run-reads] query failed:", status >= 500 ? captureApiError(res, error) : errorStack(error));
         res.status(status).json({ success: false, message: status === 500 ? "Shared run query failed" : message });
       }
     });

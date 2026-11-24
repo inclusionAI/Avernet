@@ -1,3 +1,4 @@
+import { captureSensitiveApiError } from "./error-log-format.js";
 import { Router, type Request } from 'express';
 import { validPackGitId } from '../services/pack-git-prepared.js';
 
@@ -44,6 +45,7 @@ export function createEditorDraftCasRouter(deps: Dependencies): Router {
       const code = typeof failure?.code === 'string' ? failure.code : '';
       const status = allowedErrors.get(code);
       if (status !== undefined && failure?.status === status) { res.status(status).json({ code }); return; }
+      console.error("[editor-draft-cas] request failed:", captureSensitiveApiError(res));
       res.status(503).json({ code: 'SERVICE_UNAVAILABLE' });
     }
   });

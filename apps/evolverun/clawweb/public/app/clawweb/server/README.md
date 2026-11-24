@@ -33,3 +33,8 @@ SPA entrypoint. Missing file-like paths outside `/assets` also return no-store
 404s instead of HTML. Unknown `/api` routes return JSON 404s, including when the
 frontend directory is absent. Earlier API handlers retain precedence. The
 helper does not configure an external asset store or start business services.
+
+## Task Guard diagnostics
+
+See [Task Guard API logging](../../../modules/workflow/server/routes/README.md)
+for workflow API severity, exception stacks, and the non-Task-Guard boundary.

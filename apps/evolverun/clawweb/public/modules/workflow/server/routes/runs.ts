@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "./error-log-format.js";
 import { createRunBaasRouter, computeAvailableInterventions } from "./run-baas-routes.js";
 import type { RunSubworkflowsReader } from "../contracts/run-subworkflows.js";
 import { createRunReadRouter } from "../services/run-read-http.js";
@@ -203,6 +204,7 @@ export function createRunsRouter(
       res.json({ runs: runs.map(fixDurationMs), total, limit, offset, statusCounts });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -309,6 +311,7 @@ export function createRunsRouter(
       res.json({ workflows: page, total, limit, offset });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -332,6 +335,7 @@ export function createRunsRouter(
       res.json({ run: safeRun, nodes, availableInterventions });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -360,6 +364,7 @@ export function createRunsRouter(
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -377,6 +382,7 @@ export function createRunsRouter(
       res.json(events);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -437,7 +443,7 @@ export function createRunsRouter(
             console.log(`[runs] released flow-control for aborted flow ${flowId}: slots=${slotsReleased}, queue=${queueDeleted}`);
           }
         } catch (fcErr) {
-          console.warn(`[runs] failed to release flow-control for aborted flow ${flowId}:`, fcErr);
+          console.warn(`[runs] failed to release flow-control for aborted flow ${flowId}:`, errorStack(fcErr));
         }
       }
 
@@ -461,7 +467,7 @@ export function createRunsRouter(
             },
           });
         } catch (eventErr) {
-          console.warn(`[runs] failed to record abort event for ${flowId}:`, eventErr);
+          console.warn(`[runs] failed to record abort event for ${flowId}:`, errorStack(eventErr));
         }
       }
 
@@ -475,6 +481,7 @@ export function createRunsRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -564,16 +571,19 @@ export function createRunsRouter(
         });
       } catch (err) {
         if (controller.signal.aborted) {
+          console.error("[runs] request failed:", captureApiError(res, err));
           res.status(504).json({ error: "BaaS poll request timed out" });
           return;
         }
         const msg = err instanceof Error ? err.message : String(err);
+        console.error("[runs] request failed:", captureApiError(res, err));
         res.status(502).json({ error: `BaaS poll request failed: ${msg}` });
       } finally {
         clearTimeout(timeout);
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -612,7 +622,7 @@ export function createRunsRouter(
           }
         } catch (fcErr) {
           // Flow control cleanup is best-effort — don't block the delete
-          console.warn(`[runs] failed to release flow-control for flow ${flowId}:`, fcErr);
+          console.warn(`[runs] failed to release flow-control for flow ${flowId}:`, errorStack(fcErr));
         }
       }
 
@@ -629,6 +639,7 @@ export function createRunsRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -723,6 +734,7 @@ export function createRunsRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -830,6 +842,7 @@ export function createRunsRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -860,6 +873,7 @@ export function createRunsRouter(
       res.json({ success: true, data: steps, meta: { total: count, limit, offset } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -881,6 +895,7 @@ export function createRunsRouter(
       res.json({ success: true, data: steps });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));

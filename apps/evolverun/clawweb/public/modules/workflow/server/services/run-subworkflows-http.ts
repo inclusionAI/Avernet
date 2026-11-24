@@ -3,10 +3,14 @@ import type { Router, Request, Response } from 'express';
 import { asyncHandler } from '@avernet/clawweb-shared/server/middleware/async-handler';
 import { resolveWorkflowActorId } from '@avernet/clawweb-shared/server/services/workflow-access';
 import { FanoutReadError, type RunReadInspection, type RunSubworkflowsReader } from '../contracts/run-subworkflows.js';
+import { captureApiError } from '../routes/error-log-format.js';
 
 const statuses = { unauthenticated: 401, forbidden: 403, not_found: 404, invalid_query: 400,
   identity_conflict: 409, snapshot_changed: 409, invalid_state: 500, unavailable: 503 };
 export function sendRunReadError(res: Response, error: unknown): void {
+  if (error instanceof FanoutReadError && statuses[error.code] < 500) {
+    console.warn('[runs] read rejected:', { code: error.code });
+  } else console.error('[runs] read failed:', captureApiError(res, error));
   if (error instanceof FanoutReadError) res.status(statuses[error.code]).json({ error: error.code, message: error.message });
   else res.status(500).json({ error: 'read_failed', message: 'Unable to read persisted run data' });
 }
@@ -28,7 +32,8 @@ export function installFanoutReadHandlers(router: Router, reader: RunSubworkflow
       if (child === null) { next(); return; }
       if (child) { res.status(403).json({ error: 'Forbidden', message: 'Public writes to fanout child runs are temporarily unavailable' }); return; }
       next();
-    } catch {
+    } catch (error) {
+      console.error('[runs] write guard failed:', captureApiError(res, error));
       res.status(503).json({ error: 'Service Unavailable', message: 'Run state unavailable' });
     }
   });

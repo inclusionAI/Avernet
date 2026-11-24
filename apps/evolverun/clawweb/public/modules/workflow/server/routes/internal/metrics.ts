@@ -1,3 +1,4 @@
+import { captureApiError } from "../error-log-format.js";
 /**
  * Internal API routes for flow_metrics — write and aggregate operations for ClawMind.
  */
@@ -42,6 +43,7 @@ export function createInternalMetricsRouter(metricsRepo: FlowMetricsRepository |
       res.status(201).json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/metrics] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -62,6 +64,7 @@ export function createInternalMetricsRouter(metricsRepo: FlowMetricsRepository |
       res.json({ success: true, data: rows });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/metrics] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -84,6 +87,7 @@ export function createInternalMetricsRouter(metricsRepo: FlowMetricsRepository |
       res.json({ success: true, data: rows });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/metrics] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

@@ -1,3 +1,4 @@
+import { captureApiError } from "./error-log-format.js";
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { invalidateResolvedCache } from './internal/approval-cards.js'
 import { parseApprovalCardContent } from '../../shared/approval-display.js'
@@ -62,7 +63,7 @@ export function createApprovalWorkbenchRouter(store: ApprovalWorkbenchStore, res
         items:result.items.map(item=>({...item,createdAt:new Date(item.createdAt * 1000).toISOString(),approvalUrl:`${base}/approval/${item.cardId}`})) })
     } catch (error) {
       if (error instanceof ApprovalWorkbenchError) { res.status(error.code === 'FORBIDDEN' ? 403 : 400).json({code:error.code,message:error.message}); return }
-      console.error('[approval-workbench] query failed')
+      console.error('[approval-workbench] query failed', captureApiError(res, error))
       res.status(503).json({code:'UNAVAILABLE',message:'审批查询暂不可用'})
     }
   }
@@ -92,7 +93,7 @@ export function createApprovalWorkbenchRouter(store: ApprovalWorkbenchStore, res
         approverNames:ids(card.approver_names),approvalPolicy:card.approval_policy,approvedBy,rejectedBy,status:card.status,
         deliveryMode:card.delivery_mode,createdAt:card.created_at,resolvedAt:card.resolved_at,comment:card.comment,note,detail,
         runStatus, canAct:isApprover && latestCardId === id && activeApprovalRun(runStatus) && card.status==='pending' && !hasActor(approvedBy) && !hasActor(rejectedBy)})
-    } catch { res.status(503).json({message:'审批详情暂不可用'}) }
+    } catch (error) { console.error("[approval-workbench] request failed:", captureApiError(res, error)); res.status(503).json({message:'审批详情暂不可用'}) }
   })
   if (options.allowGet !== false) router.post('/workbench/:id/resolve', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store')
@@ -118,7 +119,7 @@ export function createApprovalWorkbenchRouter(store: ApprovalWorkbenchStore, res
       }
       invalidateResolvedCache()
       res.json({ ...result, action })
-    } catch { res.status(503).json({message:'审批结果未确认，请刷新后查看'}) }
+    } catch (error) { console.error("[approval-workbench] request failed:", captureApiError(res, error)); res.status(503).json({message:'审批结果未确认，请刷新后查看'}) }
   })
   return router
 }

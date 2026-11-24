@@ -1,3 +1,4 @@
+import { captureApiError } from "./error-log-format.js";
 /**
  * Facade Bindings API routes — CRUD for slash-command-to-workflow bindings.
  */
@@ -45,6 +46,7 @@ export function createFacadesRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[facades] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -71,6 +73,7 @@ export function createFacadesRouter(
       res.json(data);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[facades] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -105,6 +108,7 @@ export function createFacadesRouter(
       res.status(201).json(rowToApi(row));
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[facades] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -142,6 +146,7 @@ export function createFacadesRouter(
       res.json(rowToApi(row));
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[facades] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -169,6 +174,7 @@ export function createFacadesRouter(
       res.json({ affected: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[facades] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));

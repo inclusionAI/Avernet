@@ -1,3 +1,4 @@
+import { captureApiError } from "../error-log-format.js";
 import { Router, type Request } from 'express';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { parseRunLink, registerRunLink, type AuthorizeRunLink, type LinkPrincipal } from '../../services/flow-run-link-registration.js';
@@ -28,7 +29,8 @@ export function createInternalFlowRunLinksRouter(db: IDatabase, auth?: RunLinkAu
       const result = await registerRunLink(db, principal, link, auth.authorize);
       if (result !== 'ok') { res.status(404).json({ error: 'Not found' }); return; }
       res.status(204).end();
-    } catch {
+    } catch (error) {
+      console.error("[internal/flow-run-links] request failed:", captureApiError(res, error));
       res.status(503).json({ error: 'Unavailable' });
     }
   });

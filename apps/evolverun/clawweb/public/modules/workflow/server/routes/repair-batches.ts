@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "./error-log-format.js";
 import { projectTaskHistory } from '../services/repair-task-history.js';
 import type { createRepairTrialService } from '../services/repair-trial-service.js';
 import { Router, type Request, type Response } from 'express';
@@ -61,13 +62,14 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
         const status = error.code === 'INVALID_INPUT' ? 400 : error.code === 'PAYLOAD_TOO_LARGE' ? 413
           : error.code === 'CAPABILITY_UNAVAILABLE' ? 503
           : ['WORKFLOW_NOT_FOUND', 'TASK_NOT_FOUND', 'REVISION_NOT_FOUND', 'ITEM_NOT_FOUND'].includes(error.code) ? 404 : 409;
+        console[status >= 500 ? "error" : "warn"]("[workflow-repair] request rejected:", status >= 500 ? captureApiError(response, error) : errorStack(error));
         response.status(status).json({ error: error.message, code: error.code, ...error.details, requestId: response.getHeader('X-Repair-Request-Id') });
       } else {
         console.error('[workflow-repair] request failed', {
           method: request.method,
           path: request.path,
           requestId: response.getHeader('X-Repair-Request-Id'),
-          error,
+          error: captureApiError(response, error),
         });
         response.status(500).json({ error: 'Repair request failed', code: 'INTERNAL_ERROR', requestId: response.getHeader('X-Repair-Request-Id') });
       }
