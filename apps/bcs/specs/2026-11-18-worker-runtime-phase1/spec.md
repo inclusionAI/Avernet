@@ -283,7 +283,7 @@ Worker 只写 dispatch 意图，不直接调用 Agent，也不把远端恢复算
 
 因此，预检查后暂停不构成受理资格；规范选择后暂停有日志可修复，Inbox 已写未激活则必有可发现登记。关闭 gate 与激活共享同一 EQ 判定点，解除隔离推进代次，已经规范绑定旧代次或已确定拒绝的操作永不恢复为新业务。关键 Agent 回流和既有控制义务使用独立预算继续持久保存／激活，由终结器或监督消费，不调用坏 Runner，也不授权新 Task。
 
-对独立终结器将结束的任务，每个未结束 dispatch 都生成稳定身份的 `RequestCancel` effect（绑定终结操作、tid 和 did）。effect 必须先进入受 owner／业务 head 保护的 checkpoint 与 outbox，再携带原 `EffectSource` 调用 `DispatchControlPort::request_cancel`；不绕过提交直接取消。同一 effect 重放不重复创建取消意图，已确定终态则核对证据后收敛。dispatch 集合过大时，保存遍历进度并分批提交取消义务；本地终态前须确认全部必要取消意图已持久登记，但不等待远端取消完成。已提交意图结果未知继续按 §7.1 监督，不把 CancelIntent 当成远端 Canceled；Blocked 且无法验证提交／归属时不伪造新取消授权，既有义务继续保留。
+对独立终结器将结束的任务，每个未结束 dispatch 都生成稳定身份的 `RequestCancel` effect（绑定终结操作、tid 和 did）。effect 必须先进入受 owner／业务 head 保护的 checkpoint 与 outbox，再携带原 `EffectSource` 调用 `DispatchControlPort::request_cancel`；不绕过提交直接取消。同一 effect 重放不重复创建取消意图。Runner 已先取消同一 dispatch 时，后续终结器用不同请求 ID 确认同一待监督义务，保留最初的取消身份和远端观察结果。相同已确认请求 ID 携带不同内容仍是冲突；已确定终态则用持久证据收敛。dispatch 集合过大时，保存遍历进度并分批提交取消义务；本地终态前须确认全部必要取消意图已持久登记，但不等待远端取消完成。已提交意图结果未知继续按 §7.1 监督，不把 CancelIntent 当成远端 Canceled；Blocked 且无法验证提交／归属时不伪造新取消授权，既有义务继续保留。
 
 解除隔离要求受权控制请求、预期 owner／业务 head、隔离身份、已完成的收口证明与固定 request ID；重试幂等，状态已变化则拒绝。恢复步骤持久记录，gate 的开启核对同一隔离身份、owner fence 和封闭代次，并推进至新代次，不能复用旧代次；checkpoint 控制与 gate 均确认恢复前，普通 Worker 不推进新业务。并发的新隔离使旧恢复条件失效，不得只刷新版本重开。它不清除 outbox、远端义务或损坏证据；问题尚未修复时不得自动恢复。首批不提供批量修复控制台或自动修复策略。
 

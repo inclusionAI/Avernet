@@ -233,3 +233,61 @@ async fn accepted_operations_never_grant_another_network_send_permit() {
         IdempotentWrite::AlreadyApplied
     );
 }
+
+#[tokio::test]
+async fn later_cancels_share_one_obligation_without_losing_request_identity() {
+    let f = Fixture::new().await;
+    f.create().await;
+    let first = f.cancel_with(2, "runner", "retry attempt").await;
+    assert_eq!(
+        f.board.request_cancel(first.clone()).await.unwrap(),
+        ControlOutcome::Applied
+    );
+    let mut held = f.claim().await;
+    held.record_cancel(CancelObservation::OutcomeUnknown)
+        .await
+        .unwrap();
+    let task = f.cancel_with(3, "task", "user canceled task").await;
+    assert_eq!(
+        f.board.request_cancel(task.clone()).await.unwrap(),
+        ControlOutcome::Applied
+    );
+    let active = f.board.get(&first.did).await.unwrap().unwrap();
+    assert_eq!(active.view.control.cancel, Some(first.intent.clone()));
+    assert_eq!(active.view.execution.cancellation, CancelObservation::OutcomeUnknown);
+    assert_eq!(
+        f.board.request_cancel(f.cancel_with(4, "task", "changed").await).await.unwrap(),
+        ControlOutcome::ContentConflict
+    );
+    assert_eq!(
+        f.reopen().request_cancel(task).await.unwrap(),
+        ControlOutcome::AlreadyApplied
+    );
+
+    held.finish(FinalDispatchOutcome::Canceled, "remote-confirmed".into())
+        .await
+        .unwrap();
+    let late = f.cancel_with(5, "late", "terminal check").await;
+    assert_eq!(
+        f.board.request_cancel(late.clone()).await.unwrap(),
+        ControlOutcome::SupersededTerminal {
+            outcome: FinalDispatchOutcome::Canceled,
+            evidence: "remote-confirmed".into(),
+        }
+    );
+    assert_eq!(
+        f.board.request_cancel(f.cancel_with(6, "late", "changed").await).await.unwrap(),
+        ControlOutcome::ContentConflict
+    );
+    assert_eq!(
+        f.reopen().request_cancel(late).await.unwrap(),
+        ControlOutcome::SupersededTerminal {
+            outcome: FinalDispatchOutcome::Canceled,
+            evidence: "remote-confirmed".into(),
+        }
+    );
+    assert_eq!(
+        f.board.request_cancel(f.cancel_with(7, "runner", "changed").await).await.unwrap(),
+        ControlOutcome::ContentConflict
+    );
+}
