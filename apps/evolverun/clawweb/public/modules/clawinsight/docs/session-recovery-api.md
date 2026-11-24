@@ -313,9 +313,9 @@ Agent 通过已有 `runtime_inspect` 的 `engine_read` 查询 `GET /api/cron/run
 
 支持 `bootstrap.ownerHandoffProtocol=session-recovery-handoff/v1` 的服务，在 `kind=owner_handoff` 中接收独立 `handoff={"summary":"具体问题说明","instructions":"Owner处理事项"}`。两项都是非空、无凭据的 Markdown 文本，各最多 1024 个 UTF-8 字节；问题说明简洁呈现仍阻碍原任务的实际问题，处理事项保留全部必要缺项、权限对象和已核实入口。它们由同一次 Agent 判断提供，不增加独立模型调用，不包含通知呈现或互动控制信息。主 `summary` 继续保存完整调查、判断和依据。
 
-普通转交将 `handoff` 保存于终止事件并直接用于 Owner 通知；权限待办复用相同交接内容写入既有 `ownerRequest.summary/instructions`，完整报告保留在 waiting 事件。新协议中的 `owner_request` 仅标明 `{"reason":"permission"}`。旧结果仍可省略 `handoff`，权限待办仍接受原 `owner_request.instructions`；存在冲突的两份处理事项会被拒绝，避免发送含糊指引。新包只在收到协议声明时输出 `handoff`，先部署后端再更新自愈包。
+普通转交将 `handoff` 保存于终止事件。服务通过 `bootstrap.ownerHandoffReasons=["owner_material_needed"]` 声明可选业务原因；确需 Owner 补材料时填写 `handoff.reason="owner_material_needed"`，后端只对该类普通转交发送 Owner 通知，仍受现有通知开关约束。省略原因的旧结果及其他普通转交不发送 Owner 通知；不按正文关键词推测原因，也不补发历史任务。未知原因或同时提交材料原因与 `owner_request` 返回 422，不改变状态。权限待办复用相同交接内容写入既有 `ownerRequest.summary/instructions`，完整报告保留在 waiting 事件。新协议中的 `owner_request` 仅标明 `{"reason":"permission"}`。旧结果仍可省略 `handoff`，权限待办仍接受原 `owner_request.instructions`；存在冲突的两份处理事项会被拒绝，避免发送含糊指引。新包只在收到协议声明时输出 `handoff`，先部署后端再更新自愈包。
 
-交接内容不从 `effect` 拼接，不从自由 Markdown 标题中猜取，也不把调查报告的开头当作 Owner 事项。新交接文本完整发送；旧结果超长时明确指向任务详情中的完整说明或清单，不截断材料项、操作或 URL。Bot 和逻辑会话等定位字段沿用原任务身份。没有新增表、业务状态、应用配置或模板变量。
+交接内容不从 `effect` 拼接，不从自由 Markdown 标题中猜取，也不把调查报告的开头当作 Owner 事项。交接文本保留完整。补料通知由宿主提供原会话链接，追加在既有 `instructions` 中；合并后超过卡片 1KB 上限时明确指向任务详情中的完整清单并保留可容纳的原会话链接，不截断材料项、操作或 URL。旧结果超长时同样指向完整说明。Bot 和逻辑会话等定位字段沿用原任务身份。没有新增表、业务状态、应用配置或模板变量。
 
 ### 普通转交 Owner 自行处理（省略 owner_request）
 

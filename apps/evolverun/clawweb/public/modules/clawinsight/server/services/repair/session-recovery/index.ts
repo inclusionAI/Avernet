@@ -25,6 +25,7 @@ export function createSessionRecoveryRuntime(options: {
   db: IDatabase; repo: EvolveRepository; runtime: BotRuntime; targets: BotTargetResolver; ais: AisExecutor;
   publicBaseUrl: string; snapshotId: number; artifactStore: RecoveryArtifactStore;
   notificationSender?: RecoveryNotificationSender | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
+  resolveSessionUrl?: ConstructorParameters<typeof SessionRecoveryNotifier>[5];
   trajectory?: BotSessionTrajectoryReader; nasRoots: string[];
   observationMs?: number; leaseSeconds?: number; launchGraceSeconds?: number;
   resolveModelApiKey?: (reference: string) => Promise<string>;
@@ -48,7 +49,7 @@ export function createSessionRecoveryRuntime(options: {
     config: notificationConfig, botConfigurations, sender: new DingTalkWebhookSender(), publicBaseUrl: options.publicBaseUrl });
   const reporter = new HttpRecoveryResultReporter({ baseUrl: options.publicBaseUrl });
   let tasks: SessionRecoveryTaskService;
-  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl, notificationConfig, controlPlaneEnvironment, botConfigurations);
+  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl, notificationConfig, controlPlaneEnvironment, botConfigurations, options.resolveSessionUrl);
   const agent = new SessionRecoveryAgentService({ controlPlaneEnvironment, tasks: store, repo: options.repo,
     audit: new AgentToolCallRepository(options.db, "session_recovery"), ais: options.ais, runtime: options.runtime,
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,

@@ -31,7 +31,8 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
   constructor(private readonly sender: RecoveryNotificationSender | null | undefined,
     private readonly publicBaseUrl: string, private readonly config: RecoveryAppConfigStore,
     private readonly controlPlaneEnvironment?: AgentControlPlaneEnvironment,
-    private readonly botConfigurations?: BotDiagnosisRecoveryConfigStore) {}
+    private readonly botConfigurations?: BotDiagnosisRecoveryConfigStore,
+    private readonly resolveSessionUrl?: (input: { botId: string; ownerId: string; sessionKey: string }) => string | undefined) {}
 
   async notifyOwnerRequest({ task, updateOnly }: { task: RecoveryStoredTask; updateOnly: boolean }): Promise<boolean> {
     const prepared = await this.prepareOwnerCard(task).catch(() => undefined);
@@ -43,14 +44,14 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     const terminal = ["completed", "failed", "canceled"].includes(task.status);
     const canConfirm = !terminal && request.status === "pending";
     const cardParamMap = { task_id: task.taskId, request_id: request.requestId, control_plane: environment,
-      bot_id: cardText(task.request.target.bot_id), session_key: cardText(task.request.session_key), title: "请处理权限申请",
+      bot_id: cardText(task.request.target.bot_id), session_key: cardText(task.request.session_key), title: "请处理任务待办",
       summary: ownerCardText(request.summary, "当前任务需要处理权限申请，具体对象和操作请见下方。"),
       instructions: ownerCardText(request.instructions, "请打开任务详情，查看完整的权限对象、处理事项和入口。"), task_url: url.href,
       status: terminal ? task.status === "canceled" ? "任务已停止" : task.judgment?.effect === "recovered" ? "已核验恢复" : "本次处理已结束，详见任务"
         : request.status === "pending" ? "等待 Owner 处理" : task.status === "waiting_owner" ? "已收到反馈，后续修复方案待另行确认"
         : task.status === "waiting_effect" ? "已保存进度，等待继续核验" : "已收到处理反馈，正在核验",
       confirm_visible: "true", confirm_enabled: String(canConfirm), confirm_status: canConfirm ? "normal" : "disabled",
-      confirm_label: request.status === "confirmed" ? "已处理" : "已获取权限，继续任务" };
+      confirm_label: request.status === "confirmed" ? "已处理" : "已处理，继续任务" };
     const outTrackId = recoveryOwnerCardTrackId(task.taskId, environment);
     if (updateOnly) await this.sender.updateCard({ outTrackId, cardParamMap });
     else await this.sender.sendCard({ outTrackId, cardParamMap, recipientUserId: task.request.target.entity_id,
@@ -70,12 +71,22 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     return { request, environment, config, url };
   }
 
+  private handoffInstructions(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): string {
+    const instructions = input.handoff?.instructions ?? "请查看下方任务详情，按完整处理事项继续。";
+    const sessionUrl = input.handoff?.reason === "owner_material_needed" ? this.resolveSessionUrl?.(input) : undefined;
+    if (!sessionUrl) return instructions;
+    const entry = `\n\n[去原会话补材料](${sessionUrl})`;
+    const fallback = ownerCardText(`请查看任务详情中的完整补料清单。${entry}`, "请打开任务详情，查看完整补料清单及原会话入口。");
+    return ownerCardText(instructions + entry, fallback);
+  }
+
   async notify(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): Promise<boolean> {
     if (!(await recoveryNotifications(this.botConfigurations, { bot_id: input.botId, entity_id: input.ownerId,
       env: input.targetEnvironment, engine: 'OC' }, this.config, input.taskId)).owner) return false;
     if (!this.sender) throw new Error("Notification unavailable");
     const recovered = input.kind === "result" && input.effect === "recovered";
-    const title = input.kind === "plan" ? "会话自愈方案待确认" : recovered ? "会话自愈已恢复，有后续建议" : "会话自愈需要人工处理";
+    const materials = input.handoff?.reason === "owner_material_needed";
+    const title = input.kind === "plan" ? "会话自愈方案待确认" : recovered ? "会话自愈已恢复，有后续建议" : materials ? "请补充任务材料" : "会话自愈需要人工处理";
     const url = new URL("/insight", this.publicBaseUrl);
     url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", input.taskId);
     if (input.kind === "result") {
@@ -90,8 +101,8 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
         cardParamMap: { task_id: input.taskId, request_id: "", control_plane: environment,
           bot_id: cardText(input.botId), session_key: cardText(input.sessionKey), title,
           summary: input.handoff?.summary ?? ownerCardText(input.summary, "处理说明较长，请打开任务详情查看完整内容。"),
-          instructions: input.handoff?.instructions ?? "请查看下方任务详情，按完整处理事项继续。", task_url: url.href,
-          status: recovered ? "本次自愈已结束，后续建议可按需处理" : "本次自愈已结束，已转交 Owner",
+          instructions: this.handoffInstructions(input), task_url: url.href,
+          status: recovered ? "本次自愈已结束，后续建议可按需处理" : materials ? "请在原会话补充材料" : "本次自愈已结束，已转交 Owner",
           confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
       return true;
     }
@@ -167,7 +178,7 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
       section("需要 Owner 处理", request.instructions);
     }
     section("当前状态", sameRequest && task.status === "waiting_owner" && request.status === "pending"
-      ? "权限待办卡片已发送，等待 Owner 处理。获批后请在钉钉私聊卡片上点击「已获取权限，继续任务」。"
+      ? "权限待办卡片已发送，等待 Owner 处理。处理后请在钉钉私聊卡片上点击「已处理，继续任务」。"
       : "权限待办卡片已发送，最新处理进展见任务页。");
   } else if (kind === "plan") {
     const plan = event.payload.plan as RecoveryStoredTask["plan"];
