@@ -1,0 +1,43 @@
+apps/bcs/crates/external-clients/bcs-a2a-http/src/lib.rs
+  s_405f6041118eb1::t_c199e5213623c6 15
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  s_405f6041118eb1::t_4aaf0d4281a65d 213-220
+  s_405f6041118eb1::t_4845c9fc4ba200 221
+apps/bcs/crates/external-clients/bcs-a2a-http/src/subscribe.rs
+  s_405f6041118eb1::t_c199e5213623c6 64,69-76,79-81,101,118-119,129-142,144,149
+  s_405f6041118eb1::t_9ef6495761370e 77-78,82-97
+  s_405f6041118eb1::t_bd1e401b06c369 116
+apps/bcs/crates/external-clients/bcs-a2a-http/src/test_response.rs
+  s_405f6041118eb1::t_e35d627b8fd396 42-47,51-53,55-62,65-66,69-71,73-79,81-89,93-98,100,105-113,115-131,142,188,190-191
+  s_405f6041118eb1::t_9ef6495761370e 114
+  s_405f6041118eb1::t_99cf75cfa2d7a6 7-9,133-134,140
+  s_405f6041118eb1::t_689fa2846d11ab 12-31
+  s_405f6041118eb1::t_4845c9fc4ba200 1-6,10-11,32-41,48-50,54,63-64,67-68,72,80,90-92,99,101-104,132,135-139,141,143-187,189,192-193
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client/tests.rs
+  s_405f6041118eb1::t_10f645d25042f0 179,181-183,195,218-219,222,230-232,237
+  s_405f6041118eb1::t_99cf75cfa2d7a6 138-141,143,145-146,148-149,154-162,165,167,172,176-178,220,244,249
+  s_405f6041118eb1::t_8e7fe5f655f0b7 194,197
+  s_405f6041118eb1::t_4aaf0d4281a65d 144,147,163-164,166,168-171,173-175,184-193,196,198,233-236,239-243,245-248,250-257
+  s_405f6041118eb1::t_0fc2a361835921 142,150-153,221,238
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client.rs
+  s_405f6041118eb1::t_bd1e401b06c369 73
+  s_405f6041118eb1::t_c199e5213623c6 74-75,77,80-84
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs
+  s_405f6041118eb1::t_689fa2846d11ab 307,394-411
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cdb22a76b2f9268b13bbf0531da5d6cd9fd34f77",
+  "prompts": {},
+  "sessions": {
+    "s_405f6041118eb1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4a4-3df3-7910-8f9f-0ef7f4920a3e",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
