@@ -17,9 +17,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
-    ContextSpec,
-    CurrentSnapshot,
-    ProgressSnapshot,
+    ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -28,7 +26,7 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
     ContextCollabVersionConflict,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
+from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
     ContextStatusRecord,
     EventAppendedRecord,
 )
@@ -36,7 +34,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.executor import (
@@ -46,6 +44,19 @@ from agentclaw.community.core.task.context_collab.executor import (
 from tests.community.core.task.context_collab.executor_fakes import (
     RecordingContextCollabExecutor,
 )
+
+
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_payload,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+)
+from agentclaw.community.core.task.todos.collaboration.context_runtime import (
+    TodoContextRuntime,
+)
+from agentclaw.community.di.modules.context_collab_products import build_product_catalog
 
 
 class RecordingContextRepository:
@@ -67,29 +78,41 @@ class RecordingContextRepository:
             occurred_at=datetime(2026, 11, 11, tzinfo=timezone.utc),
         )
         self.collet = Collet(
-            collab_context_id="context_1",
-            actor_ref=principal,
-            context_spec=ContextSpec(
-                space=SpaceRef("7", "test"),
-                principal_ref=principal,
-                method_kind="Single",
-                executor_ref=executor,
-                objective="Run the Todo",
-                resource_refs=(ResourceRef("todo", "todo_1", None),),
-                product_kind="team_todo",
-                workflow_kind="team_todo_execution",
-                executor_owner_id="another_user",
-            ),
-            current_snapshot=CurrentSnapshot(
-                objective="Run the Todo",
-                status="created",
-                principal_ref=principal,
-                executor_ref=executor,
-                method_kind="Single",
-                progress=ProgressSnapshot(current_event_id="event_1"),
-            ),
-            current_event_id="event_1",
-            context_version=1,
+            collet_id="context_1",
+            initiator_ref=principal,
+            state=ColletState.CREATED,
+            scope=SpaceRef("7", "test"),
+            version=1,
+        )
+        self.task = Task(
+            task_id="task_1",
+            collet_ref="context_1",
+            objective="Run the Todo",
+            status="created",
+            version=1,
+            principal_ref=principal,
+            executor_refs=(executor,),
+            parent_task_ref=None,
+            completion_conditions=(),
+            created_event_ref="event_1",
+            last_event_ref="event_1",
+        )
+        self.facts = creation_payload(
+            method_kind="Single",
+            executor_ref=executor,
+            objective="Run the Todo",
+            resource_refs=(ResourceRef("todo", "todo_1", None),),
+            product_kind="team_todo",
+            workflow_kind="team_todo_execution",
+            executor_owner_id="another_user",
+        )
+        initial = replace(
+            initial, payload=self.facts, task_ref="task_1", task_version_after=1
+        )
+        self.service = ContextCollabService(
+            self,
+            InMemoryMethodStore(),
+            product_catalog=build_product_catalog(),
         )
         self.events = [initial]
 
@@ -97,14 +120,20 @@ class RecordingContextRepository:
         raise AssertionError("not used by the runtime contract")
 
     def get_current_status(self, collab_context_id: str):
-        if collab_context_id != self.collet.collab_context_id:
+        if collab_context_id != self.collet.collet_id:
             return None
-        return ContextStatusRecord(collet=self.collet, events=list(self.events))
+        return ContextStatusRecord(
+            collet=self.collet,
+            creation_facts=self.facts,
+            task=self.task,
+            tasks=(self.task,),
+            events=list(self.events),
+        )
 
     def append_event(self, collab_context_id: str, request):
-        assert collab_context_id == self.collet.collab_context_id
-        assert request.expected_version == self.collet.context_version
-        next_version = self.collet.context_version + 1
+        assert collab_context_id == self.collet.collet_id
+        assert request.expected_version == self.collet.version
+        next_version = self.collet.version + 1
         event = EventRecord(
             collab_context_id=collab_context_id,
             event_id=f"event_{next_version}",
@@ -117,14 +146,24 @@ class RecordingContextRepository:
             context_version_after=next_version,
             occurred_at=datetime(2026, 11, 11, tzinfo=timezone.utc),
         )
-        self.collet = replace(
-            self.collet,
-            current_snapshot=request.snapshot_updater(self.collet.current_snapshot),
-            current_event_id=event.event_id,
-            context_version=next_version,
-        )
+        if request.task_update is not None:
+            self.task = request.task_update.apply(
+                self.task,
+                event_id=event.event_id,
+                event_kind=event.event_kind,
+                payload=event.payload,
+            )
+            event = replace(
+                event, task_ref=self.task.task_id, task_version_after=self.task.version
+            )
+        self.collet = replace(self.collet, version=next_version)
         self.events.append(event)
-        return EventAppendedRecord(event=event, collet=self.collet)
+        return EventAppendedRecord(
+            event=event,
+            collet=self.collet,
+            creation_facts=self.facts,
+            task=self.task,
+        )
 
 
 class ConcurrentCompletionRepository(RecordingContextRepository):
@@ -199,7 +238,7 @@ class RecordingGroupRuntime:
 async def test_context_run_reaches_executor_and_persists_started_event():
     repository = RecordingContextRepository()
     runtime = RecordingContextCollabExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
 
     result = await service.run_context(
         "context_1",
@@ -230,7 +269,7 @@ async def test_context_run_reaches_executor_and_persists_started_event():
 async def test_local_runtime_exposes_running_status_after_start():
     repository = RecordingContextRepository()
     runtime = RecordingContextCollabExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
 
     await service.run_context(
         "context_1",
@@ -249,7 +288,7 @@ async def test_local_runtime_exposes_running_status_after_start():
 async def test_context_resume_uses_previous_session_and_persists_new_start():
     repository = RecordingContextRepository()
     runtime = RecordingContextCollabExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="todo")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test(
@@ -259,7 +298,7 @@ async def test_context_resume_uses_previous_session_and_persists_new_start():
         session_id="session_1",
     )
     await service.refresh_run("context_1", actor)
-    interaction = service.append_event(
+    interaction = repository.service.append_event(
         "context_1",
         EventAppendCommand(
             expected_version=3,
@@ -285,7 +324,7 @@ async def test_context_resume_uses_previous_session_and_persists_new_start():
     assert result.run_id == "run_2"
     assert result.session_id == "session_1"
     assert result.current_status == "in_progress"
-    assert repository.collet.current_snapshot.status == "in_progress"
+    assert repository.task.status == "in_progress"
     started = repository.events[-1]
     assert started.event_kind == "task.started"
     assert started.actor_ref == PrincipalRef("bot", "bot_1")
@@ -301,7 +340,7 @@ async def test_context_resume_uses_previous_session_and_persists_new_start():
 async def test_context_resume_rejects_reusing_the_previous_direct_run_id():
     repository = RecordingContextRepository()
     runtime = SameRunResumeExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="todo")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test(
@@ -311,7 +350,7 @@ async def test_context_resume_rejects_reusing_the_previous_direct_run_id():
         session_id="session_1",
     )
     await service.refresh_run("context_1", actor)
-    interaction = service.append_event(
+    interaction = repository.service.append_event(
         "context_1",
         EventAppendCommand(
             expected_version=3,
@@ -346,7 +385,7 @@ async def test_context_resume_rejects_reusing_the_previous_direct_run_id():
 async def test_refresh_keeps_non_terminal_runtime_in_progress(runtime_status: str):
     repository = RecordingContextRepository()
     runtime = RecordingContextCollabExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test("run_1", status=runtime_status)
@@ -362,7 +401,7 @@ async def test_refresh_keeps_non_terminal_runtime_in_progress(runtime_status: st
 async def test_refresh_completed_runtime_appends_once_and_is_idempotent():
     repository = RecordingContextRepository()
     runtime = RecordingContextCollabExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test(
@@ -398,7 +437,7 @@ async def test_refresh_failed_terminal_runtime_does_not_complete_context(
 ):
     repository = RecordingContextRepository()
     runtime = RecordingContextCollabExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test(
@@ -416,15 +455,9 @@ async def test_refresh_failed_terminal_runtime_does_not_complete_context(
 @pytest.mark.asyncio
 async def test_refresh_rejects_in_progress_context_without_runtime_handle():
     repository = RecordingContextRepository()
-    repository.collet = replace(
-        repository.collet,
-        current_snapshot=replace(
-            repository.collet.current_snapshot,
-            status="in_progress",
-        ),
-    )
+    repository.task = replace(repository.task, status="in_progress")
     runtime = RecordingContextCollabExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
 
     with pytest.raises(
         ContextCollabValidationError,
@@ -442,7 +475,7 @@ async def test_refresh_rejects_in_progress_context_without_runtime_handle():
 async def test_refresh_treats_concurrent_done_transition_as_idempotent_success():
     repository = ConcurrentCompletionRepository()
     runtime = RecordingContextCollabExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test("run_1", status="COMPLETED")
@@ -457,7 +490,7 @@ async def test_refresh_treats_concurrent_done_transition_as_idempotent_success()
 async def test_refresh_propagates_version_conflict_when_context_is_not_done():
     repository = StaleConflictRepository()
     runtime = RecordingContextCollabExecutor()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test("run_1", status="COMPLETED")
@@ -470,7 +503,7 @@ async def test_refresh_propagates_version_conflict_when_context_is_not_done():
 async def test_group_runtime_persists_real_handles_refreshes_and_resumes_same_session():
     repository = RecordingContextRepository()
     runtime = RecordingGroupRuntime()
-    service = ContextCollabService(repository=repository, executor=runtime)
+    service = TodoContextRuntime(repository.service, repository, runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="todo")
 
     started = await service.run_context("context_1", actor)
@@ -502,7 +535,7 @@ async def test_group_runtime_persists_real_handles_refreshes_and_resumes_same_se
         "completed_at": "2026-11-12T04:00:00Z",
     }
 
-    interaction = service.append_event(
+    interaction = repository.service.append_event(
         "context_1",
         EventAppendCommand(
             expected_version=3,

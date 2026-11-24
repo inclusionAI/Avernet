@@ -1,7 +1,7 @@
 """L4 领域对象纯构造单测(Task 3)。
 
-覆盖 ``TaskStatus`` 状态词汇表、``ContextSpec`` / ``CurrentSnapshot`` /
-``ProgressSnapshot`` 的 ``to_dict`` / ``from_dict`` round-trip 与校验拒绝、
+覆盖 ``TaskStatus`` 状态词汇表、普通 creation facts 的规范化与校验、
+``CurrentSnapshot`` / ``ProgressSnapshot`` 的 ``to_dict`` / ``from_dict`` round-trip 与校验拒绝、
 六个薄值对象(participants / activity / decision / message / artifact /
 query)的构造与序列化,以及 ``EventRecord`` 与 ACCS ``EventEnvelope``
 (spec §3.4.1)的双向适配。不触碰数据库,纯内存值对象。
@@ -12,9 +12,13 @@ import pkgutil
 from datetime import datetime
 
 import pytest
-
+from agentclaw.community.core.task.context_collab import l4_context_primitives
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
+    CurrentSnapshot,
+    ProgressSnapshot,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
@@ -22,8 +26,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 )
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     ResourceRef,
+    SpaceRef,
 )
-from agentclaw.community.core.task.context_collab import l4_context_primitives
 from agentclaw.community.core.task.context_collab.l4_context_primitives.activity import (
     Activity,
 )
@@ -33,9 +37,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
-    ContextSpec,
-    CurrentSnapshot,
-    ProgressSnapshot,
+    ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.decision import (
     Decision,
@@ -57,20 +59,23 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.query im
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
 )
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    decode_creation_facts,
+)
 
-SPEC_DICT = {
-    "space": {"space_id": "space_workspace_001", "environment": "prod"},
-    "principal_ref": {"principal_type": "human", "principal_id": "u_1001"},
-    "method_kind": "Open + Group",
-    "executor_ref": None,
+CREATION_FACTS = {
     "objective": "完成上下文协作协议评审",
     "resource_refs": [
         {"resource_type": "forum_topic", "resource_id": "topic_001", "revision": None},
         {"resource_type": "repo", "resource_id": "repo_001", "revision": "3"},
     ],
+    "method_kind": "Open + Group",
+    "executor_ref": None,
     "product_kind": "public_discussion",
     "workflow_kind": "forum_public_discussion",
+    "product_profile_ref": None,
 }
+
 
 SNAPSHOT_DICT = {
     "objective": "完成上下文协作协议评审",
@@ -114,64 +119,54 @@ def test_status_vocabulary_matches_api_examples():
     ]
 
 
-def test_context_spec_round_trip_with_none_executor_ref():
-    spec = ContextSpec.from_dict(SPEC_DICT)
-    assert spec.executor_ref is None
-    assert spec.method_kind == "Open + Group"
-    assert spec.resource_refs == (
-        ResourceRef(resource_type="forum_topic", resource_id="topic_001", revision=None),
-        ResourceRef(resource_type="repo", resource_id="repo_001", revision="3"),
-    )
-    assert isinstance(spec.resource_refs, tuple)
-    assert spec.executor_owner_id is None
-    dumped = spec.to_dict()
-    assert dumped == SPEC_DICT
-    assert ContextSpec.from_dict(dumped) == spec
+@pytest.mark.parametrize("composition", ["Open + Group", "Open + Single", "Open + Swarm"])
+def test_creation_facts_normalize_with_none_executor_ref(composition):
+    facts = decode_creation_facts({**CREATION_FACTS, "method_kind": composition})
+    assert facts["executor_ref"] is None
+    assert facts["method_kind"] == composition
+    assert facts["resource_refs"] == CREATION_FACTS["resource_refs"]
+    assert facts["product_profile_ref"] is None
+    assert decode_creation_facts(facts) == facts
 
 
-def test_context_spec_round_trip_preserves_executor_owner_id():
-    data = dict(SPEC_DICT)
-    data["executor_owner_id"] = "another_user"
-
-    spec = ContextSpec.from_dict(data)
-
-    assert spec.executor_owner_id == "another_user"
-    assert spec.to_dict() == data
-    assert ContextSpec.from_dict(spec.to_dict()) == spec
-
-
-def test_context_spec_rejects_empty_executor_owner_id():
-    with pytest.raises(ContextCollabValidationError, match="executor_owner_id"):
-        ContextSpec.from_dict({**SPEC_DICT, "executor_owner_id": ""})
-
-
-def test_context_spec_round_trip_with_executor_and_optional_profiles():
-    data = dict(SPEC_DICT)
+def test_creation_facts_normalize_with_executor_and_profile():
+    data = dict(CREATION_FACTS)
     data["executor_ref"] = {"agent_type": "bot", "agent_id": "bot_coding_001"}
     data["resource_refs"] = []
-    data["product_kind"] = None
-    data["workflow_kind"] = None
-    spec = ContextSpec.from_dict(data)
-    assert spec.executor_ref == AgentRef(agent_type="bot", agent_id="bot_coding_001")
-    assert spec.resource_refs == ()
-    assert spec.product_kind is None
-    assert spec.workflow_kind is None
-    assert ContextSpec.from_dict(spec.to_dict()) == spec
+    data["product_kind"] = "task_commission"
+    data["workflow_kind"] = "task_commission_goal"
+    data["product_profile_ref"] = {"profile_id": "task_commission", "version": 2}
+    facts = decode_creation_facts(data)
+    assert facts["executor_ref"] == data["executor_ref"]
+    assert facts["resource_refs"] == []
+    assert facts["product_profile_ref"] == data["product_profile_ref"]
+    assert decode_creation_facts(facts) == facts
 
 
 @pytest.mark.parametrize(
     "data",
     [
-        {**SPEC_DICT, "method_kind": "Swarm"},
-        {**SPEC_DICT, "method_kind": ""},
-        {**SPEC_DICT, "objective": ""},
-        {**SPEC_DICT, "space": {}},
-        {**SPEC_DICT, "resource_refs": "topic_001"},
+        {**CREATION_FACTS, "unknown": True},
+        {**CREATION_FACTS, "method_kind": "swarm"},
+        {**CREATION_FACTS, "method_kind": ""},
+        {**CREATION_FACTS, "method_kind": None},
+        {**CREATION_FACTS, "method_kind": "Swarm + Open"},
+        {**CREATION_FACTS, "objective": ""},
+        {**CREATION_FACTS, "resource_refs": "topic_001"},
+        {**CREATION_FACTS, "executor_ref": "bot_coding_001"},
+        {**CREATION_FACTS, "product_kind": ""},
     ],
 )
-def test_context_spec_rejects_invalid_fields(data):
+def test_creation_facts_reject_invalid_fields(data):
     with pytest.raises(ContextCollabValidationError):
-        ContextSpec.from_dict(data)
+        decode_creation_facts(data)
+
+
+def test_creation_facts_reject_mismatched_profile():
+    data = dict(CREATION_FACTS)
+    data["product_profile_ref"] = {"profile_id": "task_commission", "version": 1}
+    with pytest.raises(ContextCollabValidationError):
+        decode_creation_facts(data)
 
 
 def test_progress_snapshot_defaults_and_to_dict():
@@ -218,7 +213,7 @@ def test_current_snapshot_from_dict_rejects_unknown_status(bad):
 @pytest.mark.parametrize(
     "data",
     [
-        {**SNAPSHOT_DICT, "method_kind": "Swarm"},
+        {**SNAPSHOT_DICT, "method_kind": ""},
         {**SNAPSHOT_DICT, "objective": ""},
         {**SNAPSHOT_DICT, "progress": None},
     ],
@@ -237,19 +232,22 @@ def test_current_snapshot_accepts_unknown_executor_absence():
 
 
 def test_collet_holds_aggregate_state():
-    spec = ContextSpec.from_dict(SPEC_DICT)
-    snapshot = CurrentSnapshot.from_dict(SNAPSHOT_DICT)
+    initiator = PrincipalRef(principal_type="human", principal_id="u_1001")
+    scope = SpaceRef(space_id="space_workspace_001", environment="prod")
     collet = Collet(
-        collab_context_id="collet_todo_001",
-        actor_ref=None,
-        context_spec=spec,
-        current_snapshot=snapshot,
-        current_event_id="evt_004",
-        context_version=4,
+        collet_id="collet_todo_001",
+        initiator_ref=initiator,
+        state=ColletState.ACTIVE,
+        scope=scope,
+        version=4,
     )
-    assert collet.context_spec == spec
-    assert collet.current_snapshot == snapshot
-    assert collet.context_version == 4
+    # Collet 只持有 L4 身份、scope 和生命周期；creation facts 不挂在聚合根上。
+    assert collet.initiator_ref == initiator
+    assert collet.state is ColletState.ACTIVE
+    assert collet.scope == scope
+    assert not hasattr(collet, "current_event_id")
+    assert collet.version == 4
+    assert Collet.from_dict(collet.to_dict()) == collet
 
 
 def test_event_record_to_envelope_matches_acc_contract():
@@ -261,7 +259,10 @@ def test_event_record_to_envelope_matches_acc_contract():
     assert envelope.aggregate_ref == "collet_todo_001"
     assert envelope.aggregate_revision == 2
     assert envelope.causation_id == _record().parent_event
-    assert envelope.payload == {"message_kind": "user_interaction", "content": "补充一下上下文"}
+    assert envelope.payload == {
+        "message_kind": "user_interaction",
+        "content": "补充一下上下文",
+    }
 
 
 def test_event_record_from_envelope_reverse_constructor_round_trips():
@@ -329,7 +330,11 @@ def test_role_binding_round_trip():
 
 def test_activity_round_trip():
     activity = Activity.from_dict(
-        {"activity_id": "act_001", "activity_kind": "task.progress.updated", "status": "completed"}
+        {
+            "activity_id": "act_001",
+            "activity_kind": "task.progress.updated",
+            "status": "completed",
+        }
     )
     assert Activity.from_dict(activity.to_dict()) == activity
     with pytest.raises(ContextCollabValidationError):
@@ -349,7 +354,9 @@ def test_decision_round_trip():
     )
     assert Decision.from_dict(decision.to_dict()) == decision
     with pytest.raises(ContextCollabValidationError):
-        Decision.from_dict({"decision_id": "dec_001", "decision_kind": "", "decided_by": {}})
+        Decision.from_dict(
+            {"decision_id": "dec_001", "decision_kind": "", "decided_by": {}}
+        )
 
 
 def test_message_semantic_constants_and_round_trip():

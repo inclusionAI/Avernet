@@ -32,6 +32,14 @@ def test_registry_constants_pinned():
             "task.completed",
             "artifact.reported",
             "user_interaction.posted",
+            "swarm.step.requested",
+            "swarm.step.completed",
+            "swarm.step.dispatched",
+            "swarm.interaction.posted",
+            "swarm.interaction.decided",
+            "swarm.interaction.applied",
+            "swarm.clarification.requested",
+            "swarm.clarification.replied",
         }
     )
     assert ALLOWED_PRIMITIVE_TYPES == frozenset({"Message", "Task", "Activity"})
@@ -40,53 +48,135 @@ def test_registry_constants_pinned():
 
 def test_user_message_requires_inline_content():
     validate_event_body(
-        event_kind="user_interaction.posted", primitive_type="Message",
-        visibility="workspace", payload={"message_kind": "user_interaction", "content": "上下文做一下补充xxx"},
+        event_kind="user_interaction.posted",
+        primitive_type="Message",
+        visibility="workspace",
+        payload={"message_kind": "user_interaction", "content": "上下文做一下补充xxx"},
     )
 
 
-@pytest.mark.parametrize("payload", [
-    {"content_ref": "post_123"},                       # 出现 content_ref 即拒
-    {"message_kind": "user_interaction"},               # 缺 content
-    {"content": "   "},                                # 空 content
-])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"content_ref": "post_123"},  # 出现 content_ref 即拒
+        {"message_kind": "user_interaction"},  # 缺 content
+        {"content": "   "},  # 空 content
+    ],
+)
 def test_user_message_rejects_content_ref_or_missing_content(payload):
     with pytest.raises(ContextCollabValidationError):
-        validate_event_body(event_kind="user_interaction.posted", primitive_type="Message",
-                            visibility="workspace", payload=payload)
+        validate_event_body(
+            event_kind="user_interaction.posted",
+            primitive_type="Message",
+            visibility="workspace",
+            payload=payload,
+        )
 
 
 def test_user_message_requires_message_primitive():
     with pytest.raises(ContextCollabValidationError):
-        validate_event_body(event_kind="user_interaction.posted", primitive_type="Task",
-                            visibility="workspace", payload={"content": "hello"})
+        validate_event_body(
+            event_kind="user_interaction.posted",
+            primitive_type="Task",
+            visibility="workspace",
+            payload={"content": "hello"},
+        )
 
 
 def test_unregistered_event_kind_rejected():
     with pytest.raises(ContextCollabValidationError):
-        validate_event_body(event_kind="artifact.delivered", primitive_type="Activity",
-                            visibility="public", payload={})
+        validate_event_body(
+            event_kind="artifact.delivered",
+            primitive_type="Activity",
+            visibility="public",
+            payload={},
+        )
 
 
-@pytest.mark.parametrize("event_kind", sorted(
-    REGISTERED_EVENT_KINDS - {"user_interaction.posted"}
-))
+@pytest.mark.parametrize(
+    "event_kind",
+    sorted({kind for kind in REGISTERED_EVENT_KINDS if kind.startswith("task.")}),
+)
 def test_registered_task_kinds_pass(event_kind):
     validate_event_body(
-        event_kind=event_kind, primitive_type="Activity",
-        visibility="workspace", payload={},
+        event_kind=event_kind,
+        primitive_type="Activity",
+        visibility="workspace",
+        payload={},
     )
 
 
 @pytest.mark.parametrize("primitive_type", ["message", "Artifact", ""])
 def test_invalid_primitive_type_rejected(primitive_type):
     with pytest.raises(ContextCollabValidationError):
-        validate_event_body(event_kind="task.progress.updated", primitive_type=primitive_type,
-                            visibility="workspace", payload={})
+        validate_event_body(
+            event_kind="task.progress.updated",
+            primitive_type=primitive_type,
+            visibility="workspace",
+            payload={},
+        )
 
 
 @pytest.mark.parametrize("visibility", ["Public", "team", ""])
 def test_invalid_visibility_rejected(visibility):
     with pytest.raises(ContextCollabValidationError):
-        validate_event_body(event_kind="task.created", primitive_type="Task",
-                            visibility=visibility, payload={})
+        validate_event_body(
+            event_kind="task.created",
+            primitive_type="Task",
+            visibility=visibility,
+            payload={},
+        )
+
+
+@pytest.mark.parametrize(
+    "kind", sorted(k for k in REGISTERED_EVENT_KINDS if k.startswith("swarm."))
+)
+def test_execution_event_requires_authorized_service_and_workspace_message(kind):
+    payload = {
+        "binding_id": "binding",
+        "request_id": "request",
+        "stage_ref": "stage",
+        "session_ref": "session",
+        "content": "message",
+    }
+    validate_event_body(
+        event_kind=kind,
+        primitive_type="Message",
+        visibility="workspace",
+        payload=payload,
+        internal_execution=True,
+    )
+    for options in (
+        {"internal_execution": False},
+        {"visibility": "public"},
+        {"primitive_type": "Activity"},
+    ):
+        params = {
+            "event_kind": kind,
+            "primitive_type": "Message",
+            "visibility": "workspace",
+            "payload": payload,
+            "internal_execution": True,
+            **options,
+        }
+        with pytest.raises(ContextCollabValidationError):
+            validate_event_body(**params)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "swarm.interaction.posted",
+        "swarm.clarification.requested",
+        "swarm.clarification.replied",
+    ],
+)
+def test_execution_message_requires_exact_stage_session_and_content(kind):
+    with pytest.raises(ContextCollabValidationError, match="Stage/session/content"):
+        validate_event_body(
+            event_kind=kind,
+            primitive_type="Message",
+            visibility="workspace",
+            payload={"binding_id": "binding", "request_id": "request"},
+            internal_execution=True,
+        )

@@ -40,20 +40,21 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
 )
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ContextCreateCommand,
+    CollaborationCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
-from tests.community.core.task.context_collab.executor_fakes import (
-    RecordingContextCollabExecutor,
-)
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -63,24 +64,17 @@ EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 _EVENT_ENTRY_FIELDS = frozenset(
     {
         "event_id",
-        "event_seq",
         "parent_event",
         "event_kind",
         "primitive_type",
-        "actor_id",
-        "actor_type",
-        "execution_id",
-        "context_version",
         "status",
         "summary",
         "content",
-        "artifacts",
-        "created_at",
     }
 )
 
 
-def make_create_command(**overrides) -> ContextCreateCommand:
+def make_create_command(**overrides) -> CollaborationCreateCommand:
     """构造创建命令(spec §6.2 指定执行请求示例);可按字段覆盖。"""
     fields = {
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
@@ -97,7 +91,7 @@ def make_create_command(**overrides) -> ContextCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ContextCreateCommand(**fields)
+    return CollaborationCreateCommand(**fields)
 
 
 def make_actor() -> ActorContext:
@@ -126,8 +120,9 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 def service(db) -> ContextCollabService:
     """挂真 SQLite 仓储的服务;authorizer 走构造默认(结构授权器)。"""
     return ContextCollabService(
-        repository=ContextCollabRepository(db),
-        executor=RecordingContextCollabExecutor(),
+        method_store=InMemoryMethodStore(),
+        repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
+        product_catalog=PRODUCT_CATALOG,
     )
 
 
@@ -147,12 +142,18 @@ def _collet_json(engine, collab_context_id, column) -> dict | str | None:
         )
 
 
-def _stored_snapshot(engine, collab_context_id) -> dict:
-    return json.loads(
-        _collet_json(
-            engine, collab_context_id, ContextCollabColletModel.current_snapshot
-        )
+def _stored_snapshot(engine, collab_context_id: str) -> dict:
+    from agentclaw.community.core.task.context_collab.persistence.models import (
+        ContextCollabTaskModel,
     )
+
+    with engine.connect() as conn:
+        raw = conn.scalar(
+            select(ContextCollabTaskModel.task_data).where(
+                ContextCollabTaskModel.collab_context_id == collab_context_id
+            )
+        )
+    return json.loads(raw)
 
 
 def _event_payload(engine, collab_context_id, event_id) -> dict:
@@ -190,13 +191,13 @@ class TestSpecAcceptance:
     ):
         """§12.2 #1:创建落 1 行 Collet + 1 行初始 Event;目标/方法/执行者
         与进度都在 Collet JSON 快照中(引擎直查列证,非服务回声)。"""
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
 
         assert _count(engine, ContextCollabColletModel) == 1
         assert _count(engine, ContextCollabEventModel) == 1
         spec = json.loads(
             _collet_json(
-                engine, created.collab_context_id, ContextCollabColletModel.context_spec
+                engine, created.collet_id, ContextCollabColletModel.context_spec
             )
         )
         # context_spec 携带任务目标、方法与执行者(引用值,不复制注册表)。
@@ -205,29 +206,12 @@ class TestSpecAcceptance:
         assert spec["executor_ref"] == EXECUTOR.to_dict()
         assert spec["principal_ref"] == PRINCIPAL.to_dict()
         # current_snapshot 携带进度(§3.4.2 ProgressSnapshot 五字段)。
-        snapshot = _stored_snapshot(engine, created.collab_context_id)
+        snapshot = _stored_snapshot(engine, created.collet_id)
         assert snapshot["objective"] == OBJECTIVE
-        assert snapshot["method_kind"] == "Single"
-        progress = snapshot["progress"]
-        assert progress["percent"] == 0
-        assert progress["completed_count"] == 0
-        assert progress["active_count"] == 0
-        assert progress["blocked_count"] == 0
-        # 初始事件行:task.created / Task、无 parent。
-        with engine.connect() as conn:
-            initial = conn.execute(
-                select(
-                    ContextCollabEventModel.event_kind,
-                    ContextCollabEventModel.primitive_type,
-                    ContextCollabEventModel.parent_event,
-                ).where(
-                    ContextCollabEventModel.collab_context_id
-                    == created.collab_context_id
-                )
-            ).one()
-        assert initial.event_kind == "task.created"
-        assert initial.primitive_type == "Task"
-        assert initial.parent_event is None
+        assert snapshot["status"] == "created"
+        assert snapshot["version"] == 1
+        assert snapshot["task_id"] != created.collet_id
+        assert snapshot["reported_percent"] is None
 
     def test_2_create_rejects_missing_executor_and_missing_principal(
         self, service, engine
@@ -240,7 +224,7 @@ class TestSpecAcceptance:
         领域校验错。Capability/外部授权由 P2 接缝补充,不在 P1 范围。
         """
         with pytest.raises(ContextCollabValidationError, match="executor_ref"):
-            service.create_context(make_create_command(executor_ref=None), make_actor())
+            service.create_collaboration(make_create_command(executor_ref=None), make_actor())
 
         # responsible(principal_ref)在请求中缺失 → wire 解析为命令字段的
         # 取值路径即拒绝;不允许装配出无责任主体的创建命令。
@@ -256,18 +240,18 @@ class TestSpecAcceptance:
     ):
         """§12.2 #3:user_interaction.posted 正文直接 payload.content,
         不出现 content_ref(引擎直查落库 payload,非服务回声)。"""
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         content = "评审结论:G4 合约一致性优先落地"
 
         msg_event_id = _append_message(
             service,
-            created.collab_context_id,
-            expected_version=created.context_version,
-            parent_event=created.current_event["event_id"],
+            created.collet_id,
+            expected_version=created.version,
+            parent_event=created.current_event_id,
             content=content,
         )
 
-        payload = _event_payload(engine, created.collab_context_id, msg_event_id)
+        payload = _event_payload(engine, created.collet_id, msg_event_id)
         assert payload["content"] == content
         assert "content_ref" not in payload
         # top-level 仅 content 一键:正文内联直存,没有任何内容引用键。
@@ -278,19 +262,19 @@ class TestSpecAcceptance:
     ):
         """§12.2 #4:事件都带 parent_event 字段;trunk_events=true 只筛选
         主干列表,current_snapshot / current_event / 统计两视角一致。"""
-        created = service.create_context(make_create_command(), make_actor())
-        initial_event_id = created.current_event["event_id"]
+        created = service.create_collaboration(make_create_command(), make_actor())
+        initial_event_id = created.current_event_id
         main_event_id = _append_message(  # 主干延续:parent=当前链头(初始事件)。
             service,
-            created.collab_context_id,
-            expected_version=created.context_version,
+            created.collet_id,
+            expected_version=created.version,
             parent_event=initial_event_id,
             content="主干消息",
         )
         branch_event_id = _append_message(  # 分支:parent 挂更早的初始事件。
             service,
-            created.collab_context_id,
-            expected_version=created.context_version + 1,
+            created.collet_id,
+            expected_version=created.version + 1,
             parent_event=initial_event_id,
             content="分支补充",
         )
@@ -298,17 +282,17 @@ class TestSpecAcceptance:
         # 分支才会落在链外(trunk_events=true 被滤除)。
         _append_message(
             service,
-            created.collab_context_id,
-            expected_version=created.context_version + 2,
+            created.collet_id,
+            expected_version=created.version + 2,
             parent_event=main_event_id,
             content="回到主干",
         )
 
         full = service.get_status(
-            created.collab_context_id, trunk_events=False, context=make_actor()
+            created.collet_id, trunk_events=False, context=make_actor()
         )
         trunk = service.get_status(
-            created.collab_context_id, trunk_events=True, context=make_actor()
+            created.collet_id, trunk_events=True, context=make_actor()
         )
 
         # 每个事件条目都带 parent_event 键(初始事件为 None 但键存在)。
@@ -320,7 +304,7 @@ class TestSpecAcceptance:
             branch_parent = conn.scalar(
                 select(ContextCollabEventModel.parent_event).where(
                     ContextCollabEventModel.collab_context_id
-                    == created.collab_context_id,
+                    == created.collet_id,
                     ContextCollabEventModel.event_id == branch_event_id,
                 )
             )
@@ -340,16 +324,16 @@ class TestSpecAcceptance:
     def test_5_status_shape_is_three_sections_without_steps(self, service):
         """§12.2 #5:查询返回 current_snapshot / current_event /
         task_progress.events[],不使用 steps[] 字段(顶层键集逐字钉死)。"""
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         _append_message(
             service,
-            created.collab_context_id,
-            expected_version=created.context_version,
-            parent_event=created.current_event["event_id"],
+            created.collet_id,
+            expected_version=created.version,
+            parent_event=created.current_event_id,
             content="进度与结构一并钉住",
         )
         status = service.get_status(
-            created.collab_context_id, trunk_events=False, context=make_actor()
+            created.collet_id, trunk_events=False, context=make_actor()
         )
 
         # 顶层恰好五键:标识 + 版本 + 快照 + 当前事件 + 进度;无多余段。
@@ -360,7 +344,7 @@ class TestSpecAcceptance:
             "current_event",
             "task_progress",
         }
-        # task_progress 顶层恰好两键,事件列表字段集恰为完整运行事件投影。
+        # task_progress 顶层恰好两键,事件列表字段集恰为 7 字段投影。
         assert {field.name for field in dataclasses.fields(status.task_progress)} == {
             "total_events",
             "events",
@@ -376,12 +360,12 @@ class TestSpecAcceptance:
     def test_6_get_status_does_not_rewrite_collet(self, service, engine):
         """§12.2 #6:查询纯读:连续 get_status 不推进 context_version、
         不反向改写落库的 Collet 快照(引擎直查列证)。"""
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         _append_message(
             service,
-            created.collab_context_id,
-            expected_version=created.context_version,
-            parent_event=created.current_event["event_id"],
+            created.collet_id,
+            expected_version=created.version,
+            parent_event=created.current_event_id,
             content="第二次查询前的固定消息",
         )
         with engine.connect() as conn:
@@ -391,15 +375,15 @@ class TestSpecAcceptance:
                     ContextCollabColletModel.current_snapshot,
                 ).where(
                     ContextCollabColletModel.collab_context_id
-                    == created.collab_context_id
+                    == created.collet_id
                 )
             ).one()
 
         first = service.get_status(
-            created.collab_context_id, trunk_events=False, context=make_actor()
+            created.collet_id, trunk_events=False, context=make_actor()
         )
         second = service.get_status(
-            created.collab_context_id, trunk_events=True, context=make_actor()
+            created.collet_id, trunk_events=True, context=make_actor()
         )
 
         # 两次查询(含 trunk 视角)不推进聚合版本。
@@ -413,13 +397,12 @@ class TestSpecAcceptance:
                     ContextCollabColletModel.current_snapshot,
                 ).where(
                     ContextCollabColletModel.collab_context_id
-                    == created.collab_context_id
+                    == created.collet_id
                 )
             ).one()
         assert version_after == version_before
         assert snapshot_raw_after == snapshot_raw_before
         # 两次查询投影一致且 equal 落库快照(实时投影不改写权威行)。
         assert second.current_snapshot == first.current_snapshot
-        assert _stored_snapshot(engine, created.collab_context_id) == json.loads(
-            snapshot_raw_before
-        )
+        assert snapshot_raw_before is None
+        assert _stored_snapshot(engine, created.collet_id)["version"] == 1

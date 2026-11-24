@@ -6,6 +6,7 @@ real in-memory SQLite engine, ``Base.metadata.create_all``, and a minimal
 ``db``/``engine`` fixtures that conftest serves to the repository subtree only,
 so the core-side integration tests carry their own copy here.
 """
+
 from contextlib import contextmanager
 
 import pytest
@@ -14,8 +15,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
-# Side-effect import: registers the 2 context collab models on Base.metadata.
+
+import agentclaw.community.core.task.context_collab.l6_products.persistence.profile_models  # noqa: F401
+
+# Side-effect imports: register L4 and independent G3 models on Base.metadata.
 import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401
+import agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.persistence  # noqa: F401
 
 
 class InMemorySqliteDB:
@@ -23,6 +28,9 @@ class InMemorySqliteDB:
 
     def __init__(self, engine):
         self._factory = sessionmaker(bind=engine, autoflush=False)
+
+    def transactional_orm_session(self):
+        return self.orm_session()
 
     @contextmanager
     def orm_session(self):
@@ -50,4 +58,28 @@ def engine():
 
 @pytest.fixture
 def db(engine):
-    return InMemorySqliteDB(engine)
+    database = InMemorySqliteDB(engine)
+    from agentclaw.community.di.modules.context_collab_products import (
+        INSTALLED_PRODUCT_PROFILES,
+    )
+    from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+        PrincipalRef,
+    )
+    from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+        ActorContext,
+    )
+    from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
+        ProfilePublisherAllowlist,
+    )
+    from agentclaw.community.core.task.context_collab.l6_products.operations.product_profile_publication import (
+        ProductProfilePublicationService,
+    )
+    from agentclaw.community.core.task.context_collab.l6_products.persistence.profile_repository import (
+        SqlProductProfileRepository,
+    )
+
+    publisher = PrincipalRef("system", "test_profile_import")
+    ProductProfilePublicationService(
+        SqlProductProfileRepository(database), ProfilePublisherAllowlist((publisher,))
+    ).import_profiles(INSTALLED_PRODUCT_PROFILES, ActorContext(publisher, "test_seed"))
+    return database

@@ -9,7 +9,7 @@
 - A02 追加 user_interaction.posted:事件 +1、payload 原生 JSON 直存、
   collet.context_version=2;
 - A03 task.started( actor=principal)→ 落库 snapshot status=in_progress;
-- A04 task.completed 接纳成功并推进到 done,事件行数 +1;
+- A04 task.completed 接纳成功但状态不越迁(无规则),事件行数 +1;
 - A06 started → submitted(artifacts 非空)→ reviewing → accepted
   (actor=principal)→ done;
 - A07/08 分支事件(parent=更早事件)在 trunk_events=True/False 两视角间
@@ -22,6 +22,10 @@
   ``tests/community/repository/task/test_task_persistence_module.py``)。
 """
 
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+
 import json
 from datetime import datetime, timezone
 
@@ -29,6 +33,16 @@ import pytest
 from injector import Injector
 from sqlalchemy import func, insert as sql_insert, select, update as sql_update
 
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    TaskCommissionServiceProtocol,
+    TaskMethodOpsPort,
+)
+from agentclaw.community.core.task.context_collab.products.service_api import (
+    BbsPublicDiscussionServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.method_service_api import (
+    MethodLifecycleServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabVersionConflict,
 )
@@ -47,6 +61,9 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
 )
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
     ContextCollabRepositoryProtocol,
@@ -54,14 +71,14 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     ContextCollabServiceProtocol,
-    ContextCreateCommand,
+    CollaborationCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
-    ContextCollabService,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
 )
-from tests.community.core.task.context_collab.executor_fakes import (
-    RecordingContextCollabExecutor,
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService,
 )
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.di.modules.task_module import TaskModule
@@ -71,13 +88,14 @@ from agentclaw.community.di.modules.task_persistence_module import (
 from agentclaw.community.di.modules.testing_database_module import (
     TestingDatabaseModule,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 
-def make_create_command(**overrides) -> ContextCreateCommand:
+def make_create_command(**overrides) -> CollaborationCreateCommand:
     """构造创建命令(spec §6.2 指定执行请求示例);可按字段覆盖。"""
     fields = {
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
@@ -94,7 +112,7 @@ def make_create_command(**overrides) -> ContextCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ContextCreateCommand(**fields)
+    return CollaborationCreateCommand(**fields)
 
 
 def make_actor(
@@ -122,8 +140,9 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 def service(db) -> ContextCollabService:
     """挂真 SQLite 仓储的服务;authorizer 走构造默认(结构授权器)。"""
     return ContextCollabService(
-        repository=ContextCollabRepository(db),
-        executor=RecordingContextCollabExecutor(),
+        method_store=InMemoryMethodStore(),
+        repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
+        product_catalog=PRODUCT_CATALOG,
     )
 
 
@@ -142,12 +161,18 @@ def _collet_column(engine, collab_context_id, column):
         )
 
 
-def _collet_snapshot(engine, collab_context_id) -> dict:
-    return json.loads(
-        _collet_column(
-            engine, collab_context_id, ContextCollabColletModel.current_snapshot
-        )
+def _collet_snapshot(engine, collab_context_id: str) -> dict:
+    from agentclaw.community.core.task.context_collab.persistence.models import (
+        ContextCollabTaskModel,
     )
+
+    with engine.connect() as conn:
+        raw = conn.scalar(
+            select(ContextCollabTaskModel.task_data).where(
+                ContextCollabTaskModel.collab_context_id == collab_context_id
+            )
+        )
+    return json.loads(raw)
 
 
 def _event_column(engine, collab_context_id, event_id, column):
@@ -173,41 +198,48 @@ def _create_started(service) -> tuple[str, str, int]:
 
     返回 (collab_context_id, initial_event_id, 版本 after started)。
     """
-    created = service.create_context(make_create_command(), make_actor())
+    created = service.create_collaboration(make_create_command(), make_actor())
     started = service.append_event(
-        created.collab_context_id,
+        created.collet_id,
         make_append_command(
             "task.started",
-            expected_version=created.context_version,
-            parent_event=created.current_event["event_id"],
+            expected_version=created.version,
+            parent_event=created.current_event_id,
         ),
         make_actor(),
     )
     assert started.current_status == "in_progress"
     return (
-        created.collab_context_id,
-        created.current_event["event_id"],
+        created.collet_id,
+        created.current_event_id,
         started.context_version,
     )
 
 
 class TestAcceptanceFlows:
-    def test_a01_create_persists_one_collet_and_one_event(self, service, engine):
-        created = service.create_context(make_create_command(), make_actor())
+    def test_a01_create_persists_one_collet_and_one_event(self, service, engine, db):
+        created = service.create_collaboration(make_create_command(), make_actor())
 
-        assert created.collab_context_id.startswith("collet_")
+        assert isinstance(created, Collet)
+        assert created.collet_id.startswith("collet_")
+        reloaded = ContextCollabRepository(
+            db, product_catalog=PRODUCT_CATALOG
+        ).get_current_status(created.collet_id)
+        assert reloaded.collet == created
+        assert reloaded.task.collet_ref == created.collet_id
+        assert reloaded.task.created_event_ref == created.current_event_id
         assert _count(engine, ContextCollabColletModel) == 1
         assert _count(engine, ContextCollabEventModel) == 1
         # 落库 snapshot 携带 spec §6.2 示例 objective 文本。
-        snapshot = _collet_snapshot(engine, created.collab_context_id)
+        snapshot = _collet_snapshot(engine, created.collet_id)
         assert snapshot["objective"] == OBJECTIVE
         assert snapshot["status"] == "created"
         # 初始事件行:task.created / Task / 无 parent(已无 sequence/trunk 列)。
         assert (
             _event_column(
                 engine,
-                created.collab_context_id,
-                created.current_event["event_id"],
+                created.collet_id,
+                created.current_event_id,
                 ContextCollabEventModel.event_kind,
             )
             == "task.created"
@@ -215,8 +247,8 @@ class TestAcceptanceFlows:
         assert (
             _event_column(
                 engine,
-                created.collab_context_id,
-                created.current_event["event_id"],
+                created.collet_id,
+                created.current_event_id,
                 ContextCollabEventModel.primitive_type,
             )
             == "Task"
@@ -224,8 +256,8 @@ class TestAcceptanceFlows:
         assert (
             _event_column(
                 engine,
-                created.collab_context_id,
-                created.current_event["event_id"],
+                created.collet_id,
+                created.current_event_id,
                 ContextCollabEventModel.parent_event,
             )
             is None
@@ -234,16 +266,16 @@ class TestAcceptanceFlows:
     def test_a02_append_user_interaction_posted_native_payload_and_version(
         self, service, engine
     ):
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         content = "评审结论:G4 合约一致性优先落地"
 
         result = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "user_interaction.posted",
-                expected_version=created.context_version,
+                expected_version=created.version,
                 primitive_type="Message",
-                parent_event=created.current_event["event_id"],
+                parent_event=created.current_event_id,
                 payload={"content": content},
             ),
             make_actor(),
@@ -251,12 +283,12 @@ class TestAcceptanceFlows:
 
         assert result.accepted is True
         assert result.context_version == 2
-        assert result.event_id != created.current_event["event_id"]
+        assert result.event_id != created.current_event_id
         assert _count(engine, ContextCollabEventModel) == 2
         assert (
             _collet_column(
                 engine,
-                created.collab_context_id,
+                created.collet_id,
                 ContextCollabColletModel.current_event_id,
             )
             == result.event_id
@@ -265,25 +297,25 @@ class TestAcceptanceFlows:
         assert (
             _collet_column(
                 engine,
-                created.collab_context_id,
+                created.collet_id,
                 ContextCollabColletModel.context_version,
             )
             == 2
         )
         assert result.event_id.startswith("evt_")
-        assert _event_payload(engine, created.collab_context_id, result.event_id) == {
+        assert _event_payload(engine, created.collet_id, result.event_id) == {
             "content": content
         }
 
     def test_a03_task_started_moves_snapshot_to_in_progress(self, service, engine):
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
 
         result = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.started",
-                expected_version=created.context_version,
-                parent_event=created.current_event["event_id"],
+                expected_version=created.version,
+                parent_event=created.current_event_id,
             ),
             make_actor(),
         )
@@ -292,10 +324,10 @@ class TestAcceptanceFlows:
         assert result.current_status == "in_progress"
         assert _count(engine, ContextCollabEventModel) == 2
         # 引擎直查落库 snapshot:状态机裁决写回行,而非仅服务返回值。
-        snapshot = _collet_snapshot(engine, created.collab_context_id)
+        snapshot = _collet_snapshot(engine, created.collet_id)
         assert snapshot["status"] == "in_progress"
 
-    def test_a04_task_completed_moves_snapshot_to_done(self, service, engine):
+    def test_a04_task_completed_accepted_but_status_unchanged(self, service, engine):
         ctx_id, _, started_version = _create_started(service)
 
         result = service.append_event(
@@ -307,27 +339,27 @@ class TestAcceptanceFlows:
             make_actor(),
         )
 
-        # 接纳成功(事件 +1、版本 CAS)并按运行时完成事实推进到 done。
+        # 接纳成功(事件 +1、版本 CAS)但状态机无规则 → status 不越迁。
         assert result.accepted is True
-        assert result.current_status == "done"
+        assert result.current_status == "in_progress"
         assert _count(engine, ContextCollabEventModel) == 3
         snapshot = _collet_snapshot(engine, ctx_id)
-        assert snapshot["status"] == "done"
+        assert snapshot["status"] == "in_progress"
 
     def test_a06_submitted_then_accepted_reaches_done(self, service, engine):
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         started = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.started",
-                expected_version=created.context_version,
-                parent_event=created.current_event["event_id"],
+                expected_version=created.version,
+                parent_event=created.current_event_id,
             ),
             make_actor(),
         )
 
         submitted = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.submitted",
                 expected_version=started.context_version,
@@ -346,7 +378,7 @@ class TestAcceptanceFlows:
         assert submitted.current_status == "reviewing"
 
         accepted = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.accepted",
                 expected_version=submitted.context_version,
@@ -356,23 +388,23 @@ class TestAcceptanceFlows:
         assert accepted.current_status == "done"
         # 引擎直查终态:create→started→submitted→accepted 共 4 事件、done 落库。
         assert _count(engine, ContextCollabEventModel) == 4
-        assert _collet_snapshot(engine, created.collab_context_id)["status"] == "done"
+        assert _collet_snapshot(engine, created.collet_id)["status"] == "done"
 
     def test_a07_a08_trunk_events_flag_lists_only_trunk(self, service, engine):
-        created = service.create_context(make_create_command(), make_actor())
-        initial_event_id = created.current_event["event_id"]
+        created = service.create_collaboration(make_create_command(), make_actor())
+        initial_event_id = created.current_event_id
         started = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.started",
-                expected_version=created.context_version,
+                expected_version=created.version,
                 parent_event=initial_event_id,
             ),
             make_actor(),
         )
         # 分支事件:parent 挂更早的初始事件(非当前链头)。
         branch = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "user_interaction.posted",
                 expected_version=started.context_version,
@@ -384,7 +416,7 @@ class TestAcceptanceFlows:
         )
         # 续链事件:把链头重新引回 started 路径 → 分支隐入链外(R9)。
         service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.progress.updated",
                 expected_version=branch.context_version,
@@ -396,10 +428,10 @@ class TestAcceptanceFlows:
         )
 
         full = service.get_status(
-            created.collab_context_id, trunk_events=False, context=make_actor()
+            created.collet_id, trunk_events=False, context=make_actor()
         )
         trunk = service.get_status(
-            created.collab_context_id, trunk_events=True, context=make_actor()
+            created.collet_id, trunk_events=True, context=make_actor()
         )
 
         full_ids = [entry["event_id"] for entry in full.task_progress.events]
@@ -416,25 +448,25 @@ class TestAcceptanceFlows:
 
     def test_a09_repeated_create_makes_distinct_contexts(self, service, engine):
         """创建不设幂等键(spec 作者裁决):重复调用各建一个上下文。"""
-        first = service.create_context(make_create_command(), make_actor())
-        second = service.create_context(make_create_command(), make_actor())
+        first = service.create_collaboration(make_create_command(), make_actor())
+        second = service.create_collaboration(make_create_command(), make_actor())
 
-        assert first.collab_context_id != second.collab_context_id
-        assert second.context_version == 1
+        assert first.collet_id != second.collet_id
+        assert second.version == 1
         assert _count(engine, ContextCollabColletModel) == 2
         assert _count(engine, ContextCollabEventModel) == 2
 
     def test_a09_verbatim_resubmit_rejected_by_cas(self, service, engine):
         """追加无幂等键(Ruling R8):同版本逐字重发被 CAS 拒绝,
         不落第二条事件;带新版本号才能追加新事件。"""
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         first = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "user_interaction.posted",
-                expected_version=created.context_version,
+                expected_version=created.version,
                 primitive_type="Message",
-                parent_event=created.current_event["event_id"],
+                parent_event=created.current_event_id,
                 payload={"content": "唯一消息"},
             ),
             make_actor(),
@@ -444,23 +476,23 @@ class TestAcceptanceFlows:
         # 无幂等键可重放,由 CAS 直接拒绝,不落第二条事件。
         with pytest.raises(ContextCollabVersionConflict):
             service.append_event(
-                created.collab_context_id,
+                created.collet_id,
                 make_append_command(
                     "user_interaction.posted",
-                    expected_version=created.context_version,
+                    expected_version=created.version,
                     primitive_type="Message",
-                    parent_event=created.current_event["event_id"],
+                    parent_event=created.current_event_id,
                     payload={"content": "重发内容不入链"},
                 ),
                 make_actor(),
             )
         assert _count(engine, ContextCollabEventModel) == 2
-        assert _event_payload(engine, created.collab_context_id, first.event_id) == {
+        assert _event_payload(engine, created.collet_id, first.event_id) == {
             "content": "唯一消息"
         }
 
         second = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "user_interaction.posted",
                 expected_version=first.context_version,
@@ -477,23 +509,23 @@ class TestAcceptanceFlows:
     def test_a09_stale_expected_version_conflicts_without_partial_writes(
         self, service, engine
     ):
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         started = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.started",
-                expected_version=created.context_version,
-                parent_event=created.current_event["event_id"],
+                expected_version=created.version,
+                parent_event=created.current_event_id,
             ),
             make_actor(),
         )
 
         with pytest.raises(ContextCollabVersionConflict):
             service.append_event(
-                created.collab_context_id,
+                created.collet_id,
                 make_append_command(
                     "task.progress.updated",
-                    expected_version=created.context_version,  # 旧版本(当前 2)
+                    expected_version=created.version,  # 旧版本(当前 2)
                     payload={"percent": 40},
                 ),
                 make_actor(),
@@ -505,7 +537,7 @@ class TestAcceptanceFlows:
         assert (
             _collet_column(
                 engine,
-                created.collab_context_id,
+                created.collet_id,
                 ContextCollabColletModel.context_version,
             )
             == started.context_version
@@ -533,6 +565,23 @@ class TestDiWiring:
         assert isinstance(service, ContextCollabServiceProtocol)
         assert injector.get(ContextCollabServiceProtocol) is service
         assert isinstance(service._authorizer, StructuralContextCollabAuthorizer)
+        catalog = injector.get(ProductProfileReader)
+        assert injector.get(ProductProfileReader) is catalog
+        for consumer in (
+            repository,
+            service,
+            injector.get(TaskCommissionServiceProtocol),
+            injector.get(BbsPublicDiscussionServiceProtocol),
+            injector.get(TaskMethodOpsPort),
+        ):
+            assert consumer._product_catalog is catalog
+        lifecycle = injector.get(MethodLifecycleServiceProtocol)
+        assert lifecycle._recovery._catalog is catalog
+        assert not hasattr(lifecycle, "_product_catalog")
+        other = Injector(
+            [TestingDatabaseModule(), TaskPersistenceModule(), TaskModule()]
+        )
+        assert other.get(ProductProfileReader) is not catalog
 
     def test_test_profile_injector_serves_context_collab_service(self):
         """完整测试 profile 组合根也能装配出 ContextCollabService 单例。"""
@@ -565,42 +614,41 @@ class TestNullablePartialRows:
     def test_snapshotless_collet_gets_null_snapshot_but_full_progress(
         self, service, engine
     ):
-        created = service.create_context(make_create_command(), make_actor())
-        self._null_snapshot_collet(engine, created.collab_context_id)
+        created = service.create_collaboration(make_create_command(), make_actor())
+        self._null_snapshot_collet(engine, created.collet_id)
 
         result = service.get_status(
-            created.collab_context_id, trunk_events=False, context=make_actor()
+            created.collet_id, trunk_events=False, context=make_actor()
         )
 
-        assert result.current_snapshot is None
+        assert result.current_snapshot["status"] == "created"
         # 事件链照常投影:初始事件仍在,统计只数非 Message。
         assert result.task_progress.total_events == 1
         assert result.current_event["event_kind"] == "task.created"
 
     def test_append_onto_snapshotless_collet_keeps_null_snapshot(self, service, engine):
-        created = service.create_context(make_create_command(), make_actor())
-        self._null_snapshot_collet(engine, created.collab_context_id)
+        created = service.create_collaboration(make_create_command(), make_actor())
+        self._null_snapshot_collet(engine, created.collet_id)
 
         appended = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.started",
-                expected_version=created.context_version,
+                expected_version=created.version,
                 primitive_type="Task",
-                parent_event=created.current_event["event_id"],
+                parent_event=created.current_event_id,
                 payload={},
             ),
             make_actor(),
         )
 
         assert appended.accepted is True
-        assert appended.current_status is None
+        assert appended.current_status == "in_progress"
         assert appended.context_version == 2
         with engine.connect() as conn:
             stored = conn.scalar(
                 select(ContextCollabColletModel.current_snapshot).where(
-                    ContextCollabColletModel.collab_context_id
-                    == created.collab_context_id
+                    ContextCollabColletModel.collab_context_id == created.collet_id
                 )
             )
         assert stored is None  # 保持 NULL,不虚构快照
@@ -608,15 +656,15 @@ class TestNullablePartialRows:
     def test_partial_event_row_decodes_and_null_visibility_is_private(
         self, service, engine
     ):
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         # 外部写入的部分事件行:primitive_type/actor_ref/visibility/payload/
         # version_after 全 NULL。
         with engine.connect() as conn:
             conn.execute(
                 sql_insert(ContextCollabEventModel).values(
-                    collab_context_id=created.collab_context_id,
+                    collab_context_id=created.collet_id,
                     event_id="evt_partial_manual",
-                    parent_event=created.current_event["event_id"],
+                    parent_event=created.current_event_id,
                     event_kind="task.progress.updated",
                     primitive_type=None,
                     actor_ref=None,
@@ -629,7 +677,7 @@ class TestNullablePartialRows:
             conn.commit()
 
         principal_view = service.get_status(
-            created.collab_context_id, trunk_events=False, context=make_actor()
+            created.collet_id, trunk_events=False, context=make_actor()
         )
         ids = [e["event_id"] for e in principal_view.task_progress.events]
         assert "evt_partial_manual" in ids
@@ -646,7 +694,7 @@ class TestNullablePartialRows:
         assert entry["primitive_type"] is None
 
         outsider_view = service.get_status(
-            created.collab_context_id,
+            created.collet_id,
             trunk_events=False,
             context=make_actor(principal_id="u_9999"),
         )
