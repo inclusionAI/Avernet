@@ -1,12 +1,12 @@
 import { EvalFileInput } from '@/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput';
-import { RestartEvaluationPanel } from '@/components/BotWorkshop/ServiceBotEvaluation/RestartEvaluationPanel';
 import { EvaluationHistoryCard } from '@/components/BotWorkshop/ServiceBotEvaluation/EvaluationHistoryCard';
 import { EvaluationSubmissionCard } from '@/components/BotWorkshop/ServiceBotEvaluation/EvaluationSubmissionCard';
+import { RestartEvaluationPanel } from '@/components/BotWorkshop/ServiceBotEvaluation/RestartEvaluationPanel';
 import { evaluationStatusLabel } from '@/components/BotWorkshop/ServiceBotEvaluation/evaluationStatus';
 import { Badge } from '@/components/ui/Badge';
-import { Empty } from '@/components/ui/Empty';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Empty } from '@/components/ui/Empty';
 import { Segmented } from '@/components/ui/Segmented';
 import { Spin } from '@/components/ui/Spin';
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
@@ -194,6 +194,7 @@ const EvaluationPage: React.FC = () => {
                       enabled={!evaluation.loading}
                       canStart={Boolean(ownerPermission?.operable)}
                       onFinished={() => void evaluation.reload()}
+                      onViewHistory={() => setActiveTab('eval_history')}
                     />
                   ) : (
                     <EvaluationHistoryCard
