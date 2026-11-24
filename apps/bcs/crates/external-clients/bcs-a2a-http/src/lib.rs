@@ -5,7 +5,10 @@ pub mod jsonrpc;
 pub mod grpc_client;
 pub mod grpc_mesh;
 mod binding_client;
+/// Keeps "no connection was established" (= certainly not sent) in errors.
 mod transport_error;
+/// The distributed Connector's agent client (`DistAgentClientPort`); only with
+/// the `dist-agent` feature, which adds the `bcs-dist-model` dependency.
 #[cfg(feature = "dist-agent")]
 pub mod dist_agent;
 pub mod card;

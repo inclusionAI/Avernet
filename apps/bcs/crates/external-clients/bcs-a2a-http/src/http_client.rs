@@ -70,7 +70,9 @@ impl HttpClient {
         } else if self.require_identity {
             return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE));
         }
-        // Keeps whether a connection was established at all (see `transport_error`).
+        // Keeps whether a connection was established at all (see `transport_error`):
+        // a connect failure becomes `NOT_CONNECTED` (certainly not sent), any
+        // other failure the generic `connection_error` (outcome unknown).
         self.transport
             .execute_traced(request)
             .await

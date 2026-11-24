@@ -4,6 +4,21 @@
 //! A request that failed before a connection existed (DNS failure, connection
 //! refused, connect timeout) certainly did not reach the peer, so a caller may
 //! try again without risking a duplicate. Every other failure stays ambiguous.
+//!
+//! The distributed Connector's agent client (`dist_agent`) sorts a failed
+//! send into three kinds; this module supplies the evidence for the first:
+//! - `NotSent`: the error carries `NOT_CONNECTED`. The agent never saw the
+//!   request, so resending it is safe.
+//! - `Rejected`: the agent answered and refused the request itself (selected
+//!   HTTP statuses / gRPC codes from the `A2A HTTP <status>` and
+//!   `A2A gRPC <code>` markers, or JSON-RPC request-refusal codes). Nothing
+//!   was created; resending the same request would be refused again.
+//! - `OutcomeUnknown`: everything else, e.g. a timeout or a reset after the
+//!   connection was up, a 5xx, a broken stream. The peer may have received
+//!   the request and started work, so it must not be resent blindly.
+//!
+//! Losing this fact would turn every connect failure into `OutcomeUnknown`:
+//! safe, but a send that provably never left would then be left uncertain.
 
 /// Message of an error raised before any connection was established. Like the
 /// `A2A HTTP <status>` and `A2A gRPC <code>` markers, it is generated here and
@@ -11,7 +26,8 @@
 pub(crate) const NOT_CONNECTED: &str = "A2A connection not established";
 
 /// The error of a failed HTTP send: `NOT_CONNECTED` when no connection was
-/// established, otherwise the caller's generic message.
+/// established (reqwest's `is_connect`), otherwise the caller's generic
+/// message, which classifies as `OutcomeUnknown`.
 pub(crate) fn send_failure(error: &reqwest::Error, otherwise: &'static str) -> a2a::A2AError {
     a2a::A2AError::internal(if error.is_connect() { NOT_CONNECTED } else { otherwise })
 }

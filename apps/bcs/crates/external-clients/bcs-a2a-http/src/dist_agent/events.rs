@@ -1,21 +1,40 @@
 //! A2A stream responses → the Connector's remote events, and the payload of
-//! each event kind.
+//! each event kind. Used for the stream of a send, for `subscribe`, and (via
+//! `task_event`) for the snapshot a `query` returns.
 //!
 //! | A2A event | Kind | Payload |
 //! | --- | --- | --- |
 //! | artifact update | `Delta` | `artifact`, `append`, `last_chunk` |
-//! | working status with a tools-extension record | `Tool` | `tool` |
-//! | working status with another message | `Thinking` | `message` |
+//! | working / submitted status, or a message, with a new tools-extension record | `Tool` | `tool` |
+//! | working / submitted status, or a message, with any other message | `Thinking` | `message` |
 //! | a whole non-terminal task | `Snapshot` | `task` (history left out) |
 //! | working / submitted status without content | nothing | — |
-//! | `input-required` / `auth-required` | `InputRequired` / `AuthRequired` | `state`, `message` |
-//! | `completed`, or a direct message answer | `Final` | `state`, optional `message`, `artifacts` |
+//! | `input-required` / `auth-required` | `InputRequired` / `AuthRequired` | `state`, optional `message` |
+//! | `completed` | `Final` | `state`, optional `message`, `artifacts` (whole task only) |
 //! | `failed`, `canceled`, `rejected` | `Error` | `state`, `code`, optional `message` |
+//!
+//! Rows for a state apply to a status update and to a whole task alike. A
+//! direct message answer to a send (no task) never reaches this mapper as
+//! the first event: `send` turns it into `SendOutcome::Completed` with
+//! `{"state": "completed", "message": ...}`. A message later in a stream is
+//! mapped like a working status message.
 //!
 //! Objects under `message`, `artifact` and `task` are the SDK's own JSON.
 //! `state` and `code` are our words; remote free text appears only inside
 //! `message`. The interaction id of a question is a placeholder: the
 //! Connector's rules derive the real one.
+//!
+//! The `state` word is the remote A2A task state in our spelling
+//! (`completed`, `failed`, `canceled`, `rejected`, `input_required`,
+//! `auth_required`). The Connector reads it rather than the payload's other
+//! content: it is part of a key event's business digest (the digest covers
+//! identity and state, not the payload bytes, so a later holder that re-reads
+//! the task reports the same key event), and for an `Error` event it decides
+//! whether the call ends `Canceled` or `Failed`. Example `Error` payload:
+//!
+//! ```text
+//! {"state": "canceled", "code": "agent_canceled", "message": {...}}
+//! ```
 
 use a2a::{StreamResponse, Task, TaskState, TaskStatus as RemoteStatus};
 use bcs_dist_model::{AgentEventKind, InteractionId, Payload, RemoteTaskRef, TaskStatus};
@@ -24,18 +43,24 @@ use serde_json::{Value, json};
 
 /// Turns stream responses of one remote task into remote events.
 pub(super) struct Mapper {
+    /// Tool-record decoder; remembers the records already seen in this
+    /// stream, so a repeated record is recognised.
     tools: crate::tools::Tools,
 }
 
+/// Placeholder interaction id of a question; see the module doc.
 fn question() -> InteractionId {
     InteractionId(String::new())
 }
 
+/// The status message as JSON, if any.
 fn message_of(status: &RemoteStatus) -> Option<Value> {
     status.message.as_ref().and_then(|message| serde_json::to_value(message).ok())
 }
 
-/// Kind and payload a task state implies; `None` for a state without content.
+/// Kind and payload a task state implies; `None` for a state without content
+/// of its own (submitted, working, unspecified). `artifacts` is kept only for
+/// `completed`.
 fn state_event(state: &TaskState, message: Option<Value>, artifacts: Option<Value>) -> Option<(AgentEventKind, Value)> {
     let mut payload = json!({});
     if let Some(message) = message {
@@ -62,6 +87,10 @@ fn state_event(state: &TaskState, message: Option<Value>, artifacts: Option<Valu
 
 /// A whole task as an event: its state when that is terminal or a question,
 /// otherwise a snapshot.
+///
+/// The `Snapshot` fallback covers a task that is still submitted or working:
+/// there is no state event to report, so the task itself (without its
+/// message history) is the payload, as `{"task": {...}}`. `query` uses this payload as its snapshot.
 pub(super) fn task_event(task: &Task) -> (AgentEventKind, Value) {
     let artifacts = task.artifacts.as_ref().and_then(|a| serde_json::to_value(a).ok());
     state_event(&task.status.state, message_of(&task.status), artifacts).unwrap_or_else(|| {
@@ -87,6 +116,7 @@ pub(super) fn status_of(state: &TaskState) -> TaskStatus {
     }
 }
 
+/// The remote task reference; an empty context id is no context id.
 pub(super) fn remote_of(task_id: &str, context_id: &str) -> RemoteTaskRef {
     RemoteTaskRef {
         task_id: task_id.to_owned(),
@@ -95,6 +125,8 @@ pub(super) fn remote_of(task_id: &str, context_id: &str) -> RemoteTaskRef {
 }
 
 impl Mapper {
+    /// `tools_negotiated`: whether the tools extension was negotiated with
+    /// this agent; when not, tool records are dropped.
     pub fn new(tools_negotiated: bool) -> Self {
         Self {
             tools: crate::tools::Tools::new(tools_negotiated),
@@ -106,7 +138,8 @@ impl Mapper {
     pub fn map(&mut self, response: StreamResponse) -> Vec<RemoteEvent> {
         let event = |remote: RemoteTaskRef, (kind, payload): (AgentEventKind, Value)| RemoteEvent {
             remote,
-            // The SSE decoder exposes no event id or replay position.
+            // The bindings expose no event id or replay position, so events
+            // carry none and `subscribe` cannot resume from a position.
             event_id: None,
             cursor: None,
             kind,
@@ -152,6 +185,17 @@ impl Mapper {
 
     /// A message during work: tool records when it carries the negotiated
     /// tools extension, otherwise the agent thinking aloud.
+    ///
+    /// The tools extension (`crate::tools::EXTENSION`) is our own A2A
+    /// extension: an agent reports tool calls as data parts of a status
+    /// message whose metadata holds the extension URI as key with
+    /// `{"version": "1"}` as value (the marker). It is observation only.
+    /// - New records: one `Tool` event each, payload
+    ///   `{"tool": {"phase", "toolCallId", "name", "args" | "result" + "isError"}}`.
+    /// - A marked message with no new record (all repeats): no event.
+    /// - Malformed, conflicting, from a non-agent role, or not negotiated:
+    ///   dropped (debug log), never relayed.
+    /// - No marker: one `Thinking` event with the whole message.
     fn message_events(&mut self, message: &a2a::Message) -> Vec<(AgentEventKind, Value)> {
         let raw = serde_json::to_value(message).unwrap_or(Value::Null);
         let tool_message = raw.get("metadata").and_then(|m| m.get(crate::tools::EXTENSION)).is_some();

@@ -1,19 +1,67 @@
-//! The distributed Connector's agent client: `DistAgentClientPort` over the
-//! existing A2A bindings (REST, JSON-RPC, gRPC and custom bindings).
+//! The distributed Connector's agent client: the provider of
+//! `DistAgentClientPort` (the port the Connector's call actor uses to talk to
+//! a remote agent), built on the existing A2A bindings of this crate.
 //!
-//! It adds no retry. An interface resolved with the `Poll` update mode (the
-//! agent declares no streaming) is sent to with the unary operation and
-//! `returnImmediately`; every other interface with the streaming operation.
+//! Where it sits: a Worker writes a dispatch, a Connector claims it, and the
+//! Connector's actor for that call uses this client to start the remote task,
+//! send the human's replies to it, follow it (subscribe or query) and cancel
+//! it. This module only speaks A2A; every decision (when to send, whether a
+//! failed send may be repeated, what to report) is the Connector's.
+//!
+//! Bindings (the wire protocol an agent declares in its card), chosen by the
+//! resolved interface:
+//! - HTTP+JSON (`Rest`) and JSON-RPC: plain HTTP to the agent URL, through a
+//!   client checked by `OutboundUrlGuard` (see SSRF below).
+//! - gRPC: never dialed directly. Requests go to a local service-mesh sidecar
+//!   (MOSN), a proxy process running next to this one that routes calls to
+//!   other services by service name. `GrpcMeshConfig` gives the sidecar's
+//!   literal loopback address and explicit routes from an agent interface URL
+//!   to a mesh service; the agent URL itself is only a lookup key. No route,
+//!   or no `GrpcMeshConfig` at all, means the agent cannot be called.
+//! - Custom: a binding installed by a plugin in `bcs_a2a_binding_api`'s
+//!   process-wide registry, which picks the binding from the URL.
+//!
+//! SSRF (server-side request forgery): agent URLs come from outside (agent
+//! cards, registrations). Without a check, a URL could make this server call
+//! its own internal network. `OutboundUrlGuard` resolves the host, refuses
+//! addresses its policy forbids (loopback, and non-public ranges in strict
+//! mode), and the checked addresses are pinned into the HTTP client so DNS
+//! cannot change them between the check and the connection.
+//!
+//! Glossary:
+//! - send: one message to the agent, either the first one (`start`, creates the
+//!   remote task) or a human reply (`send_input`, continues the same remote
+//!   task, B12). The request id is the A2A message id.
+//! - first event: the first response the agent produces for a send. It decides
+//!   whether the agent accepted the message (see the table).
+//! - unary vs streaming: an interface resolved with the `Poll` update mode
+//!   (the agent declares no streaming) gets the unary `SendMessage` with
+//!   `returnImmediately`: one answer, then the Connector follows the task by
+//!   query or subscribe. Every other interface gets `SendStreamingMessage`:
+//!   the first event, then the rest of the stream as remote events.
+//!
+//! It adds no retry: a send, query, subscribe or cancel is attempted once and
+//! the outcome goes back to the Connector, which owns retry and backoff.
 //! A send has exactly one of these outcomes:
 //!
 //! | What happened | Outcome |
 //! | --- | --- |
 //! | target not resolvable, address refused by policy, client not buildable | `NotSent` |
 //! | no connection was established (DNS, refused, connect timeout) | `NotSent` |
+//! | the request cannot be expressed as an A2A message (see `build_message`) | `Rejected` |
 //! | HTTP 400/401/403/404/405/406/415/422, gRPC 3/5/7/12/16, or a JSON-RPC error on the initial response that says the request itself was refused (parse error, invalid request, method not found, invalid params, unsupported operation, content type / extension / version not supported) | `Rejected` |
 //! | first stream event (or the unary answer) carries a task | `Accepted` |
 //! | first stream event (or the unary answer) is the agent's direct message | `Completed` |
 //! | anything else once the request was handed to the transport | `OutcomeUnknown` |
+//!
+//! Why three failure kinds: `NotSent` is proof the agent never saw the
+//! request, so the Connector may send it again without risking a duplicate.
+//! `Rejected` is proof the agent refused the request as a whole and created
+//! nothing, so sending it again would only be refused again. `OutcomeUnknown`
+//! means the agent may or may not have started work; the Connector must not
+//! resend blindly and treats the send as uncertain. When in doubt this module
+//! answers `OutcomeUnknown`, the safe side. Whether no connection was
+//! established is kept by `crate::transport_error`.
 
 mod events;
 
@@ -37,9 +85,14 @@ use std::time::Duration;
 /// Where an agent is and how to authenticate to it.
 #[derive(Clone)]
 pub struct ResolvedAgent {
+    /// The selected interface: binding, URL, optional tenant and update mode
+    /// (`Poll` selects the unary send, see the module doc).
     pub interface: A2aInterface,
+    /// Token sent as `Authorization: Bearer <token>`; `None` sends none.
     pub bearer: Option<String>,
-    /// Negotiated extension URIs, sent as `a2a-extensions`.
+    /// Negotiated extension URIs, sent as `a2a-extensions`. When it contains
+    /// our tools extension (`crate::tools::EXTENSION`), tool records in the
+    /// agent's messages become `Tool` events (see `events`).
     pub extensions: Vec<String>,
 }
 
@@ -58,32 +111,48 @@ impl std::fmt::Debug for ResolvedAgent {
 ///
 /// Delayed (walkthrough §17): what resolves `CredentialRef` and what
 /// `BindingVersion` means are not settled, so no implementation ships here;
-/// the composition injects one.
+/// the composition injects one. Nothing outside this crate's tests builds an
+/// `A2aDistAgentClient` yet.
 #[async_trait]
 pub trait DistAgentResolver: Send + Sync {
     /// The error is a machine code, never a credential or a URL.
     async fn resolve(&self, target: &AgentBinding) -> Result<ResolvedAgent, String>;
 }
 
-/// Longest wait for the first event of a send, and of a custom binding call.
+/// Longest wait for the first event of a send (or for the unary answer). It is
+/// also the timeout handed to a custom binding's client. When it expires the
+/// request is already with the transport, so the send is `OutcomeUnknown`.
+/// Later events of a stream have no timeout here.
 const FIRST_EVENT_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// The `DistAgentClientPort` provider. Holds no per-call state: every
+/// operation resolves the target and builds a fresh binding client.
 pub struct A2aDistAgentClient {
     resolver: Arc<dyn DistAgentResolver>,
+    /// SSRF check for HTTP+JSON and JSON-RPC agent URLs.
     guard: OutboundUrlGuard,
+    /// The mesh sidecar and its routes; `None` makes every gRPC target fail
+    /// with `grpc_not_configured` (`NotSent`).
     grpc: Option<GrpcMeshConfig>,
 }
 
+/// The agent's responses as the bindings return them.
 type Responses = BoxStream<'static, Result<a2a::StreamResponse, A2AError>>;
 
-/// Why a send did not produce a task.
+/// Why a send did not produce a task. Each variant carries a machine code.
 enum SendFailure {
+    /// No connection was established: the agent never saw the request.
     NotSent(String),
+    /// The agent's initial answer refused the request itself.
     Rejected(String),
+    /// Anything else: the agent may have started work.
     Unknown(String),
 }
 
-/// A machine code for an error; never the peer's text.
+/// A machine code for an error; never the peer's text. The `A2A HTTP <status>`
+/// and `A2A gRPC <code>` messages are written by this crate's decoders, not
+/// copied from the peer, so they are safe to read: `http_<status>`,
+/// `grpc_<code>`, `a2a_<reason>` for a typed A2A error, else `transport`.
 fn code_of(error: &A2AError) -> String {
     if error.message == NOT_CONNECTED {
         return "not_connected".to_owned();
@@ -101,6 +170,10 @@ fn code_of(error: &A2AError) -> String {
 }
 
 /// Sorts a send error: provably not sent, a complete rejection, or unknown.
+/// Only for the error of the initial request (the send call itself, or the
+/// cancel call); an error that arrives later as a stream event is always
+/// unknown (see `send`). gRPC codes: 3 invalid argument, 5 not found,
+/// 7 permission denied, 12 unimplemented, 16 unauthenticated.
 fn classify(error: &A2AError) -> SendFailure {
     if error.message == NOT_CONNECTED {
         return SendFailure::NotSent(code_of(error));
@@ -122,7 +195,9 @@ fn classify(error: &A2AError) -> SendFailure {
     }
 }
 
-/// JSON-RPC and A2A codes that mean the request was not taken at all.
+/// JSON-RPC and A2A codes that mean the request was not taken at all
+/// (malformed, unknown method, bad parameters, or a version / extension /
+/// content type / operation the agent does not support).
 fn request_refused(code: i32) -> bool {
     use a2a::error_code::*;
     matches!(
@@ -139,6 +214,7 @@ fn request_refused(code: i32) -> bool {
 }
 
 impl A2aDistAgentClient {
+    /// `grpc`: pass `None` when the deployment has no mesh sidecar.
     pub fn new(resolver: Arc<dyn DistAgentResolver>, guard: OutboundUrlGuard, grpc: Option<GrpcMeshConfig>) -> Self {
         Self {
             resolver,
@@ -148,10 +224,19 @@ impl A2aDistAgentClient {
     }
 
     /// Builds the binding client of a target. An error means nothing was sent.
+    /// The `bool` says whether the tools extension was negotiated, i.e.
+    /// whether tool records in the agent's messages are decoded (`events`).
     async fn client(&self, target: &AgentBinding) -> Result<(BindingClient, bool), String> {
         self.client_and_mode(target).await.map(|(client, tools, _)| (client, tools))
     }
 
+    /// `client` plus the interface's update mode (`Poll` = unary send).
+    /// Resolves the target, then builds the client of its binding; the error
+    /// is a machine code (`custom_client_unavailable`, `grpc_not_configured`,
+    /// `grpc_route_unavailable`, `credential_invalid`, `extensions_invalid`,
+    /// `address_rejected`, or the resolver's own code). Building an HTTP or
+    /// gRPC client sends nothing to the agent: the gRPC channel connects
+    /// lazily on the first request, and the HTTP check only resolves DNS.
     async fn client_and_mode(&self, target: &AgentBinding) -> Result<(BindingClient, bool, A2aUpdateMode), String> {
         let agent = self.resolver.resolve(target).await?;
         let tools = agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION);
@@ -187,6 +272,8 @@ impl A2aDistAgentClient {
                         .map_err(|_| "extensions_invalid".to_owned())?;
                     headers.insert("a2a-extensions", value);
                 }
+                // SSRF check: resolve the host, refuse internal addresses,
+                // pin the checked addresses into the client.
                 let http = crate::card_fetch::guarded_client_with_headers(&self.guard, &interface.url, headers)
                     .await
                     .map_err(|_| "address_rejected".to_owned())?;
@@ -205,6 +292,12 @@ impl A2aDistAgentClient {
     }
 
     /// One send (start or continue-input); never repeated here.
+    ///
+    /// Steps: build the client (failure: `NotSent`), build the message
+    /// (failure: `Rejected`, see `build_message`), hand it to the transport,
+    /// wait up to `FIRST_EVENT_TIMEOUT` for the first event, then map that
+    /// event as in the module table. `remote` is `Some` for a reply: the
+    /// message then names the stored remote task.
     async fn send(
         &self,
         target: &AgentBinding,
@@ -243,6 +336,8 @@ impl A2aDistAgentClient {
             }
         };
         // The request is with the transport: from here nothing is "not sent".
+        // Every failure below is `OutcomeUnknown`; only the first event can
+        // show whether the agent accepted the message.
         let first = match tokio::time::timeout(FIRST_EVENT_TIMEOUT, responses.next()).await {
             Ok(Some(Ok(first))) => first,
             // An error as the first stream event: the agent answered 200 and
@@ -266,10 +361,14 @@ impl A2aDistAgentClient {
                 };
             }
         };
-        // A task that cannot be addressed later must not be recorded as accepted.
+        // A task, status update or artifact update: the agent accepted the
+        // message and the task id is the one to store. A task that cannot be
+        // addressed later must not be recorded as accepted.
         if remote.task_id.is_empty() {
             return SendOutcome::OutcomeUnknown { code: "invalid_agent_response".into() };
         }
+        // The first event is put back in front, so the caller reports it too.
+        // For a unary send the stream holds only that answer.
         let rest = futures::stream::once(async move { Ok(first) }).chain(responses).boxed();
         SendOutcome::Accepted {
             remote,
@@ -277,6 +376,7 @@ impl A2aDistAgentClient {
         }
     }
 
+    /// One `GetTask` read of a remote task.
     async fn task(&self, client: &BindingClient, task_id: &str) -> Result<a2a::Task, A2AError> {
         let request = serde_json::from_value(json!({ "id": task_id }))
             .map_err(|_| A2AError::invalid_params("task id"))?;
@@ -286,6 +386,20 @@ impl A2aDistAgentClient {
 
 /// The A2A message of a send: the request id is the message id, so a resend
 /// is recognisable by an agent that de-duplicates.
+///
+/// The payload must be inline: a payload stored by reference (`Payload::Ref`,
+/// a blob elsewhere) is not fetched by this adapter, so such a request can
+/// never be sent (`request_by_reference`). Accepted inline shapes, anything
+/// else is `request_invalid`:
+///
+/// ```text
+/// {"parts": [{"text": "hello"}]}    A2A parts, used as they are
+/// "hello"                            one text part
+/// ```
+///
+/// The context id is the request's, else the stored remote task's; a reply
+/// also names the remote task (`taskId`). `return_immediately` asks a unary
+/// send to answer at once with the task instead of waiting for its end.
 fn build_message(
     remote: Option<&RemoteTaskRef>,
     request: &StableSendRequest,
@@ -320,6 +434,8 @@ fn build_message(
 }
 
 /// Maps a response stream into remote events; a read failure carries a code only.
+/// `tools`: whether the tools extension was negotiated. One `Mapper` per
+/// stream, so repeated tool records are recognised within this stream only.
 fn remote_events(responses: Responses, tools: bool) -> RemoteEventStream {
     let mut mapper = Mapper::new(tools);
     responses
@@ -333,6 +449,8 @@ fn remote_events(responses: Responses, tools: bool) -> RemoteEventStream {
         .boxed()
 }
 
+/// The end of a call a terminal task state stands for; `None` while running
+/// or waiting for input. A `rejected` task counts as failed.
 fn finished(state: &a2a::TaskState) -> Option<FinalDispatchOutcome> {
     match state {
         a2a::TaskState::Completed => Some(FinalDispatchOutcome::Completed),
@@ -344,10 +462,13 @@ fn finished(state: &a2a::TaskState) -> Option<FinalDispatchOutcome> {
 
 #[async_trait]
 impl DistAgentClientPort for A2aDistAgentClient {
+    /// Sends the first message of a call; creates the remote task.
     async fn start(&self, target: &AgentBinding, request: StableSendRequest) -> SendOutcome {
         self.send(target, None, request).await
     }
 
+    /// Sends a human reply to the same remote task (B12). Classified exactly
+    /// like `start`; an `Accepted` answer may carry a new event stream.
     async fn send_input(
         &self,
         target: &AgentBinding,
@@ -357,6 +478,10 @@ impl DistAgentClientPort for A2aDistAgentClient {
         self.send(target, Some(remote), request).await
     }
 
+    /// Reads a remote task once. `NotFound` only for the typed A2A "task not
+    /// found" error (a bare HTTP 404 or gRPC 5 is `Unavailable`): a missing
+    /// task must be proven, not guessed. The snapshot is the payload of the
+    /// event the task's state stands for (see `events::task_event`).
     async fn query(&self, target: &AgentBinding, query: RemoteQuery) -> QueryOutcome {
         let remote = match query {
             // A2A has no lookup by message id.
@@ -382,13 +507,16 @@ impl DistAgentClientPort for A2aDistAgentClient {
         }
     }
 
+    /// Opens a new event stream for an existing remote task, e.g. after a
+    /// takeover or a resume. Events may repeat what was already reported.
     async fn subscribe(
         &self,
         target: &AgentBinding,
         remote: &RemoteTaskRef,
         _after: Option<ReplayToken>,
     ) -> Result<RemoteEventStream, AgentReadError> {
-        // The bindings expose no replay position, so `after` cannot be used.
+        // The bindings expose no replay position, so `after` cannot be used:
+        // the stream starts wherever the agent starts it.
         let (client, tools) = self.client(target).await.map_err(|code| AgentReadError { code })?;
         let request = serde_json::from_value(json!({ "id": remote.task_id }))
             .map_err(|_| AgentReadError { code: "task_id_invalid".into() })?;
@@ -399,6 +527,17 @@ impl DistAgentClientPort for A2aDistAgentClient {
         Ok(remote_events(responses, tools))
     }
 
+    /// Asks the agent to cancel a remote task. A2A cancel carries no message
+    /// id, so `_request_id` is unused. Outcomes:
+    /// - `ConfirmedCanceled`: the task is `canceled`.
+    /// - `AlreadyFinished`: it ended otherwise first.
+    /// - `RequestAccepted`: the agent took the request, the task still runs;
+    ///   not a confirmation.
+    /// - `Rejected`: refused (request-refusal codes, "not cancelable" while
+    ///   the task is still running, or a task id that cannot be expressed).
+    /// - `OutcomeUnknown`: anything else, including a client that could not be
+    ///   built or no connection: the port has no "not sent" for a cancel, and
+    ///   the Connector keeps an unknown cancel supervised.
     async fn cancel(&self, target: &AgentBinding, remote: &RemoteTaskRef, _request_id: RequestId) -> CancelOutcome {
         let unknown = |code: String| CancelOutcome::OutcomeUnknown { code };
         let client = match self.client(target).await {

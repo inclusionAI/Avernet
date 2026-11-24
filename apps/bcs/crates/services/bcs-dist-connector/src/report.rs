@@ -3,6 +3,32 @@
 //! Key events are admitted under their stable identity; intermediate events
 //! are appended. Both are retried with the same identity until they land or
 //! the holder is lost. A transport problem is never turned into an agent event.
+//!
+//! Glossary and consequences:
+//! - **Key event** (final, error, input-required, auth-required): admitted
+//!   with `admit_connector` under an input id `ae:<hash>` that has no holder
+//!   epoch and no seq (B8). A later holder that re-reports the same event gets
+//!   the same id, and the inbox answers with the same success (B11): this is
+//!   what makes "admit, then crash before finish" safe (B5).
+//! - **Intermediate event** (delta, thinking, tool, snapshot): appended with
+//!   `append_stream`, identified by `(did, holder_epoch, seq)` (B7, B9).
+//!   Retrying the same append repeats the same triple, and the Worker drops
+//!   the repeat.
+//! - **seq restarts at 1 per claim**: `Call::new` makes a fresh cursor for
+//!   the new holder epoch. So seq values repeat across generations and only
+//!   `(holder_epoch, seq)` orders events; and when a new holder re-reports
+//!   content the former holder already appended (a re-attach can repeat it),
+//!   the copies have different ids and both are kept (best effort, ordered per
+//!   epoch). Key events have no such duplicates.
+//! - **Not fenced by `disp`**: inbox appends and admissions are not checked
+//!   against the dispatch version. A former actor that has not yet noticed it
+//!   lost the call can still append; its events carry its old epoch. Between
+//!   retries this module re-reads `disp` (`still_holder`) so a lost holder
+//!   stops retrying.
+//! - **Blobs**: a payload above `max_inline_bytes` is stored as an immutable
+//!   blob keyed by its content hash and reported by reference. Identity and
+//!   digest are computed from the inline payload first, so where it ends up
+//!   stored does not change them.
 
 use crate::call::{Call, Flow, Stop, held_write};
 use bcs_dist_model::*;
@@ -17,6 +43,8 @@ use sha2::{Digest as _, Sha256};
 /// How an admission ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Admitted {
+    /// Landed (or was there already), or the session is quarantined: the
+    /// caller may go on, e.g. finish the call after a terminal event.
     Yes,
     /// Another content was admitted under the same identity. Cannot happen
     /// with the payload-free digest; treated as a bug, the call is not ended.
@@ -25,7 +53,9 @@ pub(crate) enum Admitted {
 
 impl Call {
     /// Reports one remote event and, when it is terminal, finishes the call
-    /// (terminal event first, then `finish`).
+    /// (terminal event first, then `finish`, B5). Also keeps `awaiting_input`
+    /// in step: a question sets it; any other event after a question means
+    /// the agent moved on, so the call is followed again.
     pub async fn on_event(
         &mut self,
         kind: AgentEventKind,
@@ -58,6 +88,8 @@ impl Call {
     }
 
     /// Normalizes one event with the rules and writes it to the inbox.
+    /// Returns only once the write landed; a lost holder stops the actor and
+    /// a permanent store error parks it (`Stop::Invalid`).
     pub async fn report(
         &mut self,
         kind: AgentEventKind,
@@ -86,6 +118,10 @@ impl Call {
         }
     }
 
+    /// Ends the dispatch in `disp` (phase `ended`) with `outcome` and an
+    /// evidence code saying why, then stops following the call. Called only
+    /// after the terminal event was admitted. Finishing twice with the same
+    /// outcome is harmless; another outcome already stored is only logged.
     pub async fn finish(&mut self, outcome: FinalDispatchOutcome, evidence: &str) -> Flow {
         let written = held_write!(self, "finish", self.held.finish(outcome, evidence.to_owned()));
         if written == IdempotentWrite::ContentConflict {
@@ -96,6 +132,8 @@ impl Call {
         Ok(())
     }
 
+    /// Admits a key event, retrying a temporary error with the same input id
+    /// until it lands. A content conflict marks the call `conflicted`.
     async fn admit(&mut self, request: ConnectorAdmission) -> Flow<Admitted> {
         let mut backoff = self.backoff();
         loop {
@@ -109,14 +147,16 @@ impl Call {
                     self.status.pending_effect.store(true, std::sync::atomic::Ordering::SeqCst);
                     return Ok(Admitted::Conflict);
                 }
+                // The session is quarantined: retrying cannot help, and the
+                // call is still allowed to end.
                 Ok(AdmitOutcome::Quarantined) => {
                     tracing::warn!(did = %self.did().0, "session quarantined; key event not delivered");
                     return Ok(Admitted::Yes);
                 }
-                // Every other answer is success. The answer for an input that
-                // was admitted earlier is deliberately not named: the merged
-                // contract drops that variant (decision 24), and a re-report
-                // by a later holder is the same success as the first one.
+                // Every other answer is success: `Accepted` and `Duplicate`
+                // (admitted earlier) are deliberately not told apart, because
+                // a re-report by a later holder is the same success as the
+                // first one (B11).
                 Ok(_) => return Ok(Admitted::Yes),
                 Err(error) if crate::call::permanent(&error) => {
                     tracing::error!(did = %self.did().0, ?error, "admission cannot succeed; the call stays held");
@@ -131,6 +171,8 @@ impl Call {
         }
     }
 
+    /// Appends an intermediate event, retrying a temporary error until it
+    /// lands.
     async fn append(&mut self, request: AppendAgentEvent) -> Flow {
         let mut backoff = self.backoff();
         loop {
@@ -150,7 +192,8 @@ impl Call {
         }
     }
 
-    /// Between retries: stop when another holder took the call.
+    /// Between retries: stop when another holder took the call. Any other
+    /// read error is ignored here; the retry loop goes on.
     async fn still_holder(&mut self) -> Flow {
         match self.held.refresh().await {
             Err(HolderError::Lost) => Err(Stop::Lost),
@@ -159,6 +202,14 @@ impl Call {
     }
 
     /// Moves a payload above the inline limit to blob storage.
+    ///
+    /// ```text
+    /// key:    bcn/agent-event/<did>/<sha256 hex of the JSON bytes>
+    /// digest: bcs_dist_encoding::blob_reference digest of the same bytes
+    /// value:  the JSON bytes; the event then carries Payload::Ref(reference)
+    /// ```
+    /// Writing the same content twice is `AlreadyApplied`, so retries and a
+    /// later holder's re-report are harmless.
     async fn offload(&mut self, payload: Payload) -> Flow<Payload> {
         let Payload::Inline(value) = &payload else {
             return Ok(payload);
@@ -199,7 +250,8 @@ impl Call {
         }
     }
 
-    /// Loads a payload the Worker stored by reference. `None` = it is gone.
+    /// Loads a payload the Worker stored by reference (a request or a
+    /// reply). `None` = it is gone, or its bytes are not valid JSON.
     pub async fn load(&mut self, payload: &Payload) -> Flow<Option<Payload>> {
         let Payload::Ref(reference) = payload else {
             return Ok(Some(payload.clone()));
@@ -224,7 +276,9 @@ impl Call {
         }
     }
 
-    /// A call that ends without the agent's own terminal event.
+    /// A call that ends without the agent's own terminal event: report an
+    /// error event `{"state": <state>, "code": <code>}` and finish once it is
+    /// admitted. The `state` word decides the outcome the rules see.
     pub async fn end_with_error(
         &mut self,
         state: &str,
