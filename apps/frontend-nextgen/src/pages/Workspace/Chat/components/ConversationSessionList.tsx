@@ -24,6 +24,8 @@ interface ConversationSessionListProps {
   emptyTitle?: string;
   showCreateHint?: boolean;
   showInitiator?: boolean;
+  /** Caller opt-in for the AgentCoding exception: initiator rows stay actionable. */
+  allowActionsWithInitiator?: boolean;
 }
 
 function ConversationSessionListContent(props: ConversationSessionListProps & {
@@ -41,6 +43,7 @@ function ConversationSessionListContent(props: ConversationSessionListProps & {
     emptyTitle = '还没有会话',
     showCreateHint = true,
     showInitiator = false,
+    allowActionsWithInitiator = false,
     initiatorFor,
   } = props;
   // 未加载 ≠ 空列表:无缓存、或首拉在途(loading 且尚无 items)都只给行骨架,
@@ -81,7 +84,7 @@ function ConversationSessionListContent(props: ConversationSessionListProps & {
               session={session}
               selected={selected}
               showInitiator={showInitiator}
-              readOnly={showInitiator}
+              readOnly={showInitiator && !allowActionsWithInitiator}
               initiator={initiatorFor?.(session.sessionId)}
               onSelect={() => {
                 Tracert.click(Points.workspaceChat.switchSession, { bot_id: session.botId });

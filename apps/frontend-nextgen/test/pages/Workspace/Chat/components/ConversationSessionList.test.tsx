@@ -3,6 +3,7 @@ import { ConversationSessionList } from '@/pages/Workspace/Chat/components/Conve
 import { firstPageOf } from '@/pages/Workspace/Chat/hooks/conversationSessionCache';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
+import type { ConversationSessionAction } from '@/services/workspace/conversationSessionActionService';
 
 it('shows row skeletons instead of the empty state while the first page is loading', () => {
   const { container } = render(
@@ -129,6 +130,56 @@ it('blocks pagination, favorites and additional menus while a session action is 
   // 平齐形态:收藏走常驻星标,pending 期间保持可见但禁用(防并发),菜单按钮同步禁用。
   expect(screen.getByRole('button', { name: '取消收藏' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '会话更多操作' })).toBeDisabled();
+});
+
+const initiatorSession = {
+  sessionId: 'bcs-cli:another-session',
+  botId: 'coding-bot',
+  title: '他人发起的会话',
+  messageCount: 1,
+  gmtCreate: '',
+  gmtModified: '',
+};
+
+it('keeps ordinary initiator rows read-only even when parent descriptions are advanced', () => {
+  render(
+    <ConversationSessionList
+      sessions={firstPageOf([initiatorSession], 1)}
+      selectedSessionId={null}
+      onSelectSession={jest.fn()}
+      onLoadMore={jest.fn()}
+      isFavoritePending={() => false}
+      showInitiator
+      showCreateHint={false}
+      actions={{
+        run: jest.fn<Promise<boolean>, [string, ConversationSessionAction]>().mockResolvedValue(true),
+        pending: false,
+      }}
+    />,
+  );
+  expect(screen.getByText('只读')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '会话更多操作' })).not.toBeInTheDocument();
+});
+
+it('allows the AgentCoding initiator-row exception to expose the more-actions menu', () => {
+  render(
+    <ConversationSessionList
+      sessions={firstPageOf([initiatorSession], 1)}
+      selectedSessionId={null}
+      onSelectSession={jest.fn()}
+      onLoadMore={jest.fn()}
+      isFavoritePending={() => false}
+      showInitiator
+      showCreateHint={false}
+      allowActionsWithInitiator
+      actions={{
+        run: jest.fn<Promise<boolean>, [string, ConversationSessionAction]>().mockResolvedValue(true),
+        pending: false,
+      }}
+    />,
+  );
+  expect(screen.getByRole('button', { name: '会话更多操作' })).toBeInTheDocument();
+  expect(screen.queryByText('只读')).not.toBeInTheDocument();
 });
 
 describe('ConversationSessionList replyingSessionId 透传（#2990 还原）', () => {

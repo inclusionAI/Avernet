@@ -232,7 +232,14 @@ and its [file ownership manifest](specs/2026-11-18-task-escort-readonly/ownershi
 ## Conversation session origins
 
 The conversation sidebar uses Backend `sessions?source=mine|others` for managed
-and collaborating Bots. Both sources render flat lists ordered by the loaded
+and collaborating Bots. AgentCoding Bots are the engine-specific exception:
+their mine/others/collab lists request the raw paginated sessions and classify
+each session in the frontend with the same ID rules as AgentCoding (member-task
+is `collab`, BCS-CLI is `others`, a missing creator is `mine`, and recognized
+other creators are `others`). This avoids applying the generic source backend's
+different compatibility rules to AgentCoding's synthetic IDs. Other engines
+continue to use Backend source windows.
+Both sources render flat lists ordered by the loaded
 sessions' modified time descending (creation time is the fallback). Later
 windows are merged, deduplicated by session ID and sorted again; this is not a
 global sort over sessions that have not been loaded.
