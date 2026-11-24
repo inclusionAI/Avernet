@@ -83,6 +83,35 @@ async fn concurrent_first_admits_reuse_the_record_that_wins_create_cas() {
 }
 
 #[tokio::test]
+async fn concurrent_admit_resumes_an_interrupted_creator_and_wakes_worker() {
+    let store = Arc::new(Recorder::default());
+    let inbox = Arc::new(producer(&store));
+    let losing = WorkerTaskAdmission::new(inbox.clone(), Arc::new(|| TimestampMillis(NOW)));
+    let winning = WorkerTaskAdmission::new(inbox.clone(), Arc::new(|| TimestampMillis(NOW)));
+    let before_create = store.pause_after("before.document.create", ":admission:", 1);
+    let losing = tokio::spawn(async move { losing.admit(&scope(), command()).await });
+    before_create.reached().await;
+    let after_create = store.pause_after("document.create", ":admission:", 1);
+    let winning = tokio::spawn(async move { winning.admit(&scope(), command()).await });
+    after_create.reached().await;
+    winning.abort();
+    assert!(winning.await.unwrap_err().is_cancelled());
+    before_create.resume();
+    let AdmitOutcome::Duplicate(receipt) = losing.await.unwrap().unwrap() else {
+        panic!("the retry must finish the existing admission");
+    };
+    let pending = inbox.enumerate_pending(
+        ShardId(42),
+        bcs_service_api::port::repo::distributed::common::PageRequest {
+            limit: std::num::NonZeroU32::new(1).unwrap(),
+            after: None,
+        },
+    ).await.unwrap();
+    assert_eq!(pending.items, vec![receipt.sid]);
+    assert_eq!(inbox_len(&store).await, 1);
+}
+
+#[tokio::test]
 async fn concurrent_changed_content_cannot_recover_as_a_duplicate() {
     let store = Arc::new(Recorder::default());
     let inbox = Arc::new(producer(&store));

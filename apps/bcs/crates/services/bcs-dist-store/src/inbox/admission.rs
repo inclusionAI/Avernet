@@ -7,15 +7,19 @@ use std::time::Duration;
 impl StoreInboxProducer {
     pub(super) async fn advance(&self, key: &str, new: bool) -> Result<AdmitOutcome, StoreError> {
         let mut budget = EqBudget::new();
+        let mut publish_hint = new;
         loop {
             budget.attempt(key).await?;
             let (v, c) = budget
                 .io(key, self.admission_record(key))
                 .await?
                 .ok_or_else(|| invalid("admission_missing"))?;
+            // A retry that helps finish an incomplete admission must make
+            // the Session discoverable even if the creator disconnected.
+            publish_hint |= c.decision.is_none();
             match budget.io(key, self.progress(v, c, key, new)).await? {
                 super::progress::Progress::Done(outcome) => {
-                    if new
+                    if publish_hint
                         && let AdmitOutcome::Accepted(receipt) | AdmitOutcome::Duplicate(receipt) =
                             &outcome
                     {
