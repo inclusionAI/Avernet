@@ -23,7 +23,9 @@ calls (test_ctor_partial_params_falls_back_to_pathlib pins this).
 """
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 from pathlib import Path
 from typing import Any, Callable
 
@@ -112,7 +114,18 @@ class LocalDeviceFileSystem(DeviceFileSystem):
 
     async def _pathlib_read_file_checked(self, mapped: str) -> bytes | None:
         try:
-            return Path(mapped).read_bytes()
+            if not stat.S_ISREG(os.stat(mapped).st_mode):
+                return None
+            fd = os.open(mapped, os.O_RDONLY | os.O_NONBLOCK)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    return None
+                with os.fdopen(fd, "rb") as file:
+                    fd = -1
+                    return file.read()
+            finally:
+                if fd >= 0:
+                    os.close(fd)
         except (FileNotFoundError, IsADirectoryError):
             return None
 

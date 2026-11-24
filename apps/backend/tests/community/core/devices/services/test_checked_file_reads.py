@@ -97,3 +97,40 @@ async def test_desktop_proxy_classifies_only_explicit_missing_device(code, expec
     with pytest.raises(expected):
         await fs.read_file_checked('file')
     client.close()
+
+
+@pytest.mark.asyncio
+async def test_checked_local_read_rejects_fifo_without_opening(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+
+    fifo = tmp_path / 'fifo'
+    os.mkfifo(fifo)
+    def forbidden_read(_self):
+        pytest.fail('must not open a FIFO')
+    monkeypatch.setattr(Path, 'read_bytes', forbidden_read)
+    assert await LocalDeviceFileSystem().read_file_checked(str(fifo)) is None
+
+
+@pytest.mark.asyncio
+async def test_checked_local_read_rechecks_open_file_after_replacement(tmp_path, monkeypatch):
+    import os
+    from agentclaw.community.core.devices.services import local_device_filesystem
+
+    regular = tmp_path / 'regular'
+    regular.write_bytes(b'ok')
+    fifo = tmp_path / 'fifo'
+    os.mkfifo(fifo)
+    real_open = os.open
+    monkeypatch.setattr(local_device_filesystem.os, 'open', lambda _path, flags: real_open(fifo, flags))
+    assert await LocalDeviceFileSystem().read_file_checked(str(regular)) is None
+
+
+@pytest.mark.asyncio
+async def test_checked_local_read_propagates_permission_error(tmp_path, monkeypatch):
+    from agentclaw.community.core.devices.services import local_device_filesystem
+    def denied(_path):
+        raise PermissionError('denied')
+    monkeypatch.setattr(local_device_filesystem.os, 'stat', denied)
+    with pytest.raises(PermissionError):
+        await LocalDeviceFileSystem().read_file_checked(str(tmp_path / 'x'))
