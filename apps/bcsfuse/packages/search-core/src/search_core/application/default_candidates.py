@@ -1,6 +1,7 @@
 """Emergency default IDs from Cards; no query models or retrieval index calls."""
 
 import asyncio
+from dataclasses import replace
 
 from search_core.api.errors import SearchUnavailable
 from search_core.api.models import SearchItem, SearchResult
@@ -82,9 +83,7 @@ class DefaultCandidates:
 
     async def retrieve(self, request):
         with stage_timing("default_candidates") as stage:
-            if any(
-                not v for v in request.filters.values()
-            ):
+            if any(not v for v in request.filters.values()):
                 ids = ()
             else:
                 ids = await self._ids(request, stage)
@@ -94,3 +93,47 @@ class DefaultCandidates:
             status="degraded",
             reasons=("default_candidates", "keyword_disabled", "vector_disabled"),
         )
+
+
+class FilteredIndexFallback:
+    """One bounded index page after final eligibility; enrich through the request's metadata cache."""
+
+    def __init__(self, read_ids, execution, catalog, snapshot):
+        self.read_ids = read_ids
+        self.execution = execution
+        self.catalog = catalog
+        self.snapshot = snapshot
+
+    async def __call__(self, request, original):
+        with stage_timing("filtered_default_candidates") as stage:
+            try:
+                ids = await self.execution.call(self.read_ids, request.filters, 5)
+            except Exception as error:
+                stage.update(outcome="unavailable", error_type=type(error).__name__)
+                return replace(
+                    original,
+                    status="degraded",
+                    reasons=(*original.reasons, "default_candidates_unavailable"),
+                )
+            candidates = tuple(
+                SearchItem(key, "", "", 0.0, "default")
+                for key in ids
+                if self.catalog.eligible(key, request.filters)
+            )
+            stage["candidate_count"] = len(candidates)
+            if not candidates:
+                return original
+            result = await self.snapshot().retrieval.enrich(
+                replace(original, items=candidates), allow_timeout_projection=False
+            )
+            for item in result.items:
+                if self.catalog.eligible(item.item_id, request.filters):
+                    stage["result_count"] = 1
+                    return replace(
+                        result,
+                        items=(item,),
+                        status="degraded",
+                        reasons=(*result.reasons, "default_candidates"),
+                    )
+            stage["result_count"] = 0
+            return replace(result, items=())
