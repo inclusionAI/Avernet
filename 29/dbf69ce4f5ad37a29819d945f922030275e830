@@ -1,0 +1,23 @@
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_20c3b110241190::t_b776f9c0a3b7b5 243,245-246
+apps/bcsfuse/packages/search-core/src/search_core/application/default_candidates.py
+  s_20c3b110241190::t_544a1106133e23 101-102,112-114,133-146
+apps/bcsfuse/packages/search-core/tests/test_filtered_index_fallback.py
+  s_20c3b110241190::t_cdbe05106ab534 18-22,25,67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "29dbf69ce4f5ad37a29819d945f922030275e830",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/__init__.py
+  h_059e888e5e4e82 1
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/group.py
+  h_059e888e5e4e82 1-496
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/initialization.py
+  h_059e888e5e4e82 1-212
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/lifecycle.py
+  h_059e888e5e4e82 1-624
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/runtime.py
+  h_059e888e5e4e82 1-27
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/single.py
+  h_059e888e5e4e82 1-351
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/single_group.py
+  h_059e888e5e4e82 1-17
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/single_group_base.py
+  h_059e888e5e4e82 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "90b8fe3aca30f14905b71f11792ce1b641e51ca6",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

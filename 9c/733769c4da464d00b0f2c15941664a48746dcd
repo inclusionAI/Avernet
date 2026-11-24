@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_9dea857d1bcaae::t_1ef804b65345f0 429-434,441-443,445
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_9dea857d1bcaae::t_22189d4ca5a014 1,14,120,135-136,190-194,196-199,213,234-246,277,313,342,350,353,361,376-381
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_release_evidence.py
+  s_9dea857d1bcaae::t_fedb67b99d45cc 7-10,59,76
+apps/backend/src/agentclaw/community/core/skill_center/services/passport_write_checkpoint.py
+  s_9dea857d1bcaae::t_f1c8ec2267cd78 1
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_mcp_config.py
+  s_9dea857d1bcaae::t_4dc50ec5e51e6d 334
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_9dea857d1bcaae::t_677de0323170d7 1,72,131,151,154,159-166,230,352,354,357-364,367,371-372,374-375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9c733769c4da464d00b0f2c15941664a48746dcd",
+  "prompts": {},
+  "sessions": {
+    "s_9dea857d1bcaae": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207dc-20be-7eb2-a41d-880e11b171ec",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
