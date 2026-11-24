@@ -191,7 +191,9 @@ class CatalogSearchApplication:
                     effective=EffectiveSearch(
                         limit=command.limit,
                         retrieval=(
-                            EffectiveRetrieval(**snapshot.policy.retrieval.model_dump())
+                            EffectiveRetrieval(
+                                **snapshot.policy.retrieval.pipeline_switches()
+                            )
                             if snapshot is not None
                             else None
                         ),
@@ -221,6 +223,10 @@ class CatalogSearchApplication:
             and not result.items
             and self._empty_search_fallback is not None
             and "default_candidates" not in result.reasons
+            and (
+                self._emergency is None
+                or self._emergency.snapshot().policy.retrieval.empty_result_fallback_enabled
+            )
         ):
             result = await self._empty_search_fallback(request, result)
         return replace(result, items=result.items[: command.limit])

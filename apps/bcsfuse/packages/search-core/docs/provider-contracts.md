@@ -243,6 +243,8 @@ A catalog host can opt into a bounded empty-search fallback on the active keywor
 collection. The reader scrolls one filtered page without vectors and returns
 distinct source IDs in point order. The application checks local eligibility,
 loads Cards using the active metadata policy, and returns at most one eligible
-Card. A successful fallback adds `default_candidates` and has no relevance
+Card. The server policy field `retrieval.empty_result_fallback_enabled` defaults
+to true. Set it to false to return the empty result without reading a fallback
+page. A successful fallback adds `default_candidates` and has no relevance
 score on the host wire contract. Recommendation and all-off paths retain their
 existing selection rules.

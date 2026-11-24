@@ -25,7 +25,6 @@ from search_core.application.default_candidates import (
 from search_core.application.emergency import (
     EmergencyControl,
     EmergencyPolicy,
-    RetrievalSwitches,
 )
 from search_core.bootstrap.http import create_search_app
 from search_core.catalog.updates import CardUpdates
@@ -229,7 +228,7 @@ def create_catalog_search_app(
                 retrieval,
                 result_cache,
                 caches,
-                namespace=tuple(policy.retrieval.model_dump().values()),
+                namespace=tuple(policy.retrieval.pipeline_switches().values()),
             )
         return metadata_factory(
             retrieval, repository, metadata_cache, caches, metadata_execution
@@ -240,7 +239,7 @@ def create_catalog_search_app(
         # request handling only selects a prebuilt pipeline, never creates clients.
         cache_views = caches.configure(policy.cache)
         variants = {}
-        limits = tuple(policy.retrieval.model_dump().values())
+        limits = tuple(policy.retrieval.pipeline_switches().values())
         for switches in product((False, True), repeat=3):
             keyword, vector, rerank = switches
             if any(value and not allowed for value, allowed in zip(switches, limits)):
@@ -249,10 +248,12 @@ def create_catalog_search_app(
                 continue
             variant_policy = policy.model_copy(
                 update={
-                    "retrieval": RetrievalSwitches(
-                        keyword_enabled=keyword,
-                        vector_enabled=vector,
-                        rerank_enabled=rerank,
+                    "retrieval": policy.retrieval.model_copy(
+                        update={
+                            "keyword_enabled": keyword,
+                            "vector_enabled": vector,
+                            "rerank_enabled": rerank,
+                        }
                     )
                 }
             )
