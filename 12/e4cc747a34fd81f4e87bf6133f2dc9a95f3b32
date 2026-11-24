@@ -1,0 +1,37 @@
+apps/backend/tests/community/repository/skill_center/test_space_skill_draft_repository.py
+  s_b4a410c26bfee0::t_b5e963df716054 22-24,274-277
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/space_skill_read.py
+  s_b4a410c26bfee0::t_45f28b1a08866b 56-64,122-136,138,279
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/spaces/schemas.py
+  s_b4a410c26bfee0::t_45f28b1a08866b 527-530
+apps/backend/src/agentclaw/community/core/skill_center/space_skill_query_service_protocol.py
+  s_b4a410c26bfee0::t_45f28b1a08866b 87
+apps/backend/src/agentclaw/community/core/repository/protocols/skill_center_types.py
+  s_b4a410c26bfee0::t_45f28b1a08866b 217
+apps/backend/src/agentclaw/community/core/skill_center/services/space_skill_query_service.py
+  s_b4a410c26bfee0::t_45f28b1a08866b 232
+apps/backend/src/agentclaw/community/core/skill_center/services/space_skill_publication_task.py
+  s_b4a410c26bfee0::t_45f28b1a08866b 337-345,348-349
+apps/backend/tests/community/core/skill_center/services/test_space_skill_publication_service.py
+  s_b4a410c26bfee0::t_e3897759cf3b51 5,18,23-25,27-31,184-229
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_b4a410c26bfee0::t_a8261036e13058 208,219
+apps/backend/tests/community/core/skill_center/services/test_space_skill_query_service.py
+  s_b4a410c26bfee0::t_ec0ddd71605a24 152,290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "12e4cc747a34fd81f4e87bf6133f2dc9a95f3b32",
+  "prompts": {},
+  "sessions": {
+    "s_b4a410c26bfee0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20d78-0d46-7682-840e-1bc8039aa13a",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
