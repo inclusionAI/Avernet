@@ -56,6 +56,7 @@ from tests.community.core.apply_engine._fakes import (
     FakeCredentials,
     FakeManifestContent,
     FakeMcpAuth,
+    FakeMcpConfigService,
     FakeResourceFileService,
     FakeSkillUploadService,
     FakeStartupScriptService,
@@ -83,8 +84,11 @@ _SCOPE = ManagedFileScope(entity_type="staff", entity_id=_ENTITY, bot_id=_BOT)
 
 
 class _Manifests:
+    def __init__(self, document=_DOCUMENT):
+        self.document = document
+
     def get(self, *, entity_id, bot_id):
-        return type("R", (), {"document": _DOCUMENT})()
+        return type("R", (), {"document": self.document})()
 
     def delete(self, *, entity_id, bot_id):
         return True
@@ -126,7 +130,9 @@ def world():
     return _Db(engine)
 
 
-def _build(db):
+def _build(db, *, server_permission_check=None, document=_DOCUMENT, activation=None, provision=None):
+    activation = activation or FakeActivationService()
+    manifests = _Manifests(document)
     scripts = FakeStartupScriptService()
     store = ManagedFilesStore(
         object_storage=FakeObjectStorage(), store_base=lambda: "teclaw/dev/bolt_data"
@@ -139,9 +145,9 @@ def _build(db):
     def platform_ports() -> MaterialiserPorts:
         return materialiser_ports(
             script_service=scripts,
-            activation_service=FakeActivationService(),
-            mcp_auth_service=FakeMcpAuth(),
-            mcp_config_service=object(),
+            activation_service=activation,
+            mcp_auth_service=FakeMcpAuth(denied={"denied"}),
+            mcp_config_service=FakeMcpConfigService(),
             identity_service=PlatformIdentity(store),
             upload_service=FakeSkillUploadService(),
             capability_reader=FakeCapabilityReader(),
@@ -155,10 +161,11 @@ def _build(db):
         )
 
     applies = ApplyRunService(
-        capabilities=_Manifests(),
+        server_permission_check=server_permission_check,
+        capabilities=manifests,
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
+        compilers=manifest_compilers(manifests=manifests, content=content, resolver=fetcher()),
         completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=bots,
@@ -175,7 +182,7 @@ def _build(db):
 
     seam = BotCreationManifestSeam(
         validate_creation_spec=validate_creation_source,
-        manifest_service=_Manifests(),
+        manifest_service=manifests,
         apply_service=applies,
         script_service_provider=lambda: scripts,
         start_job=lambda **_kwargs: None,
@@ -206,6 +213,8 @@ def _build(db):
     class _BotService:
         def provision_bot(self, bot_id, user_id, nick_name, **kw):
             order.append("provision")
+            if provision is not None:
+                provision(bots.record)
             # What the provisioner's compose would read: the platform's copy.
             seen_at_provision["identity"] = [r.rel_path for r in store.list(_SCOPE, category=CATEGORY_IDENTITY)]
             bots.record = {**bots.record, "binding_id": 9, "status": "ACTIVE"}
@@ -249,6 +258,91 @@ def test_the_record_then_the_phase_then_provisioning_in_that_order(world):
     assert report.status is ApplyStatus.SUCCEEDED
     # No post-container phase was ever started under this sequence.
     assert applies.delivery_for_engine("teclaw").needs_container() is False
+
+
+def test_platform_creation_finalizes_before_provision_without_permission_query(world, monkeypatch):
+    calls = []
+    async def unexpected_observation(*args):
+        calls.append(args)
+        return args[1]
+    monkeypatch.setattr(
+        "agentclaw.community.core.apply_engine.run.service.finish_permission_notes", unexpected_observation
+    )
+    handler, applies, _seam, order, seen, _store = _build(
+        world, server_permission_check=lambda *args: calls.append(args) or False
+    )
+    handler.handle(dict(_PAYLOAD))
+    handler.handle(dict(_PAYLOAD))
+    with avernet_tenant_scope(""):
+        report = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)
+        assert report.status is ApplyStatus.SUCCEEDED
+        assert report.notes == ()
+    assert order == ["record", "pre_container"]
+    _drive(handler)
+    with avernet_tenant_scope(""):
+        assert applies.get_apply(entity_id=_ENTITY, bot_id=_BOT, apply_id=report.apply_id) == report
+    assert seen["identity"] == ["identity/RULES.md"]
+    assert calls == []
+
+
+
+def test_platform_creation_mixed_mcp_artifact_is_delivered_without_permission_lookup(world):
+    from unittest.mock import MagicMock
+    from agentclaw.community.core.bot_management.services.teclaw_provision_service import TeclawProvisionService
+    from agentclaw.community.core.service_bot.services.deploy.teclaw_compose_producer import TeclawComposeProducer
+    from agentclaw.community.core.config_compose.models import McpComposeInput
+    from tests.community.core.config_compose.test_config_composer import _FakeCollector, _composer
+
+    activation = FakeActivationService()
+    calls = []
+    artifacts = []
+    document = "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: allowed\n    - server_code: denied\n"
+    def provision(bot):
+        class Collector(_FakeCollector):
+            def mcps(self, req):
+                return [McpComposeInput(mcp_data={
+                    "server_code": code, "run_mode": "REMOTE",
+                    "endpoints": [{"networkType": "INTERNET", "env": "PROD",
+                                   "transportProtocol": "STREAMABLE_HTTP", "url": "https://example.test/mcp"}],
+                }, endpoint_env="PROD") for code in sorted(activation.installed)]
+        producer = TeclawComposeProducer(_composer(Collector()), MagicMock(fetch=lambda bot: {}))
+        router, baas, binding, queue, bots = (MagicMock() for _ in range(5))
+        router.resolve.return_value = producer
+        baas.create_teclaw_bot.return_value = {"bot_uuid": "device", "publish_id": 1}
+        binding.insert_binding.return_value = 1
+        service = TeclawProvisionService(baas_service=baas, deploy_artifact_producer_router=router,
+            device_binding_repo=binding, task_queue_service=queue, bot_repository=bots, teclaw_template_uuid="test")
+        service.provision(bot=bot, owner_id=_ENTITY)
+        artifacts.append(baas.create_teclaw_bot.call_args.kwargs["config_artifact"])
+
+    handler, applies, _seam, order, _seen, _store = _build(world, document=document, activation=activation,
+        provision=provision, server_permission_check=lambda *args: calls.append(args) or args[1] != "denied")
+    payload = {**_PAYLOAD, "permission_subject": _ENTITY}
+    handler.handle(payload)
+    handler.handle(payload)
+    with avernet_tenant_scope(""):
+        report = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)
+        assert report.status is ApplyStatus.SUCCEEDED and report.notes == ()
+    assert order == ["record", "pre_container"]
+    handler.handle(payload)
+    assert activation.installed == {"allowed", "denied"}
+    assert {s["server_code"] for s in artifacts[0]["mcp"]["servers"]} == {"allowed", "denied"}
+    assert calls == []
+    with avernet_tenant_scope(""):
+        assert applies.get_apply(entity_id=_ENTITY, bot_id=_BOT, apply_id=report.apply_id) == report
+
+
+def test_late_worker_cannot_rewrite_finalized_report(world):
+    handler, applies, _seam, _order, _seen, _store = _build(world)
+    handler.handle(dict(_PAYLOAD))
+    handler.handle(dict(_PAYLOAD))
+    with avernet_tenant_scope(""):
+        before = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)
+        BotConfigManifestApplyRepository(world).finish(
+            env="dev", entity_id=_ENTITY, bot_id=_BOT, apply_id=before.apply_id,
+            status="FAILED", report='{"notes": ["late"]}',
+        )
+        assert applies.get_apply(entity_id=_ENTITY, bot_id=_BOT, apply_id=before.apply_id) == before
 
 
 def test_a_creation_that_ends_without_a_bot_purges_the_store(world, monkeypatch):
