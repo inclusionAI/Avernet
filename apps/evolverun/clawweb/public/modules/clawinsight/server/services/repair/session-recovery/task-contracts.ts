@@ -13,7 +13,7 @@ export const RECOVERY_COMPLETION_REASONS = ["user_continued", "target_unavailabl
 export type RecoveryCompletionReason = typeof RECOVERY_COMPLETION_REASONS[number];
 export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
 /** Owner-facing business handoff, separate from the full investigation report. */
-export type RecoveryOwnerHandoffContent = { summary: string; instructions: string };
+export type RecoveryOwnerHandoffContent = { summary: string; instructions: string; reason?: "owner_material_needed" };
 /** Owner processing receipt; neither environment approval nor proof of recovery. */
 export type RecoveryOwnerRequestInput = {
   reason: "permission";

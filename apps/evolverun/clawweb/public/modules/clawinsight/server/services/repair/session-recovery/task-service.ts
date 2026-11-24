@@ -534,8 +534,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase, ...(handoff ? { handoff } : {}) })] };
     }, finalSummary);
-    // Temporarily pause the one-way Owner handoff DM.
-    // await this.notify(task, "result", input.summary, handoff);
+    if (handoff?.reason === "owner_material_needed") await this.notify(task, "result", input.summary, handoff);
     await this.deps.agent.release(task);
     this.notifyGroup(await this.required(taskId), "result");
   }

@@ -60,7 +60,7 @@ it("sends a single permission notice to the configured Bot group from a confirme
   expect(delivery.text).toContain("Bot 无法读取评审文档。");
   expect(delivery.text).toContain("请申请评审文档的阅读权限。");
   expect(delivery.text).toContain("等待 Owner 处理");
-  expect(delivery.text).toContain("已获取权限，继续任务");
+  expect(delivery.text).toContain("已处理，继续任务");
   expect(delivery.text).toContain("recoveryTaskId=SR-notification");
 });
 

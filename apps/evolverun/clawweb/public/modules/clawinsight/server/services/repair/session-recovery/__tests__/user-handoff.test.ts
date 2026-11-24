@@ -535,6 +535,37 @@ it("retains the full handoff report and material requirements without sending a 
   expect(sender.sendCard).not.toHaveBeenCalled();
 });
 
+it("notifies missing-material handoffs once without creating a permission wait or resuming the Bot", async () => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "missing-materials"); task = await current(task.taskId);
+  expect((await agent.bootstrap(task)).ownerHandoffReasons).toEqual(["owner_material_needed"]);
+  const handoff = { reason: "owner_material_needed", summary: "活动评审缺少规则正文。", instructions: "请在原会话补充活动规则正文。" };
+  const report = { kind: "owner_handoff", phase: "assess", effect: "not_recovered", summary: "核实原任务缺少必要材料，仍需Owner补充。", handoff, evidence_ids: [read.evidenceId] };
+  const attempts = await Promise.allSettled([agent.report(task, report), agent.report(task, report)]);
+  expect(attempts.filter(item => item.status === "fulfilled")).toHaveLength(1);
+  const saved = await current(task.taskId);
+  expect(saved).toMatchObject({ status: "completed", completionReason: "owner_handoff", execution: { state: "ended" }, judgment: { effect: "not_recovered" } });
+  expect(saved.ownerRequest).toBeUndefined();
+  expect(saved.timeline.findLast(event => event.kind === "termination")).toMatchObject({ payload: { handoff } });
+  expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    outTrackId: `sr-owner-handoff:pre:${task.taskId}`, cardParamMap: expect.objectContaining({ title: "请补充任务材料", confirm_visible: "false" }),
+  }));
+  expect(sender.sendCard.mock.calls[0][0]).not.toHaveProperty("callbackRouteKey");
+  await expect(agent.report(saved, report)).rejects.toMatchObject({ status: 409 });
+  expect(sender.sendCard).toHaveBeenCalledOnce();
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it("rejects a material reason combined with permission feedback before sending a card", async () => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "mixed-owner-reason"); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "owner_handoff", phase: "assess", summary: "核实缺材料", evidence_ids: [read.evidenceId],
+    handoff: { reason: "owner_material_needed", summary: "缺少材料", instructions: "请补正文" }, owner_request: { reason: "permission" },
+  })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  expect(sender.sendCard).not.toHaveBeenCalled();
+});
+
 it("uses the same Owner brief for permission handling and preserves its full investigation in the waiting timeline", async () => {
   const sender = useNativeOwnerCards();
   let task = await create(); const read = await inspect(task, "permission-brief"); task = await current(task.taskId);
@@ -561,6 +592,7 @@ it("uses the same Owner brief for permission handling and preserves its full inv
 it.each([
   { summary: "问题已明确", instructions: "材".repeat(342) },
   { summary: "问题已明确" },
+  { summary: "问题已明确", instructions: "请补资料", reason: "permission" },
   { summary: "问题已明确", instructions: "请补资料", template_id: "not-a-business-field" },
 ])("rejects invalid handoff content before changing workflow or notifying: %j", async handoff => {
   const sender = useNativeOwnerCards();
