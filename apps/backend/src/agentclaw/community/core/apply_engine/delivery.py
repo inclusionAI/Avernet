@@ -77,11 +77,13 @@ from typing import (
 from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
 )
+from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryStatus
 from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
 from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
     BotConfigKindRegistry,
 )
 from agentclaw.community.core.apply_engine.context import ApplyContext
+from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult
 from agentclaw.community.core.content_store import ContentReader
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
@@ -116,6 +118,7 @@ from agentclaw.community.core.apply_engine.order import (
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyConstruct,
     ApplyReport,
+    EntryOutcome,
 )
 from agentclaw.community.core.apply_engine.capabilities import Section
 from agentclaw.community.core.apply_engine.delivery_mode import (
@@ -542,6 +545,7 @@ class TeclawPlatformDelivery(_PhaseTableDelivery):
         *,
         ports: LazyPorts,
         redeliver: Redeliver,
+        passport: Callable[[ApplyContext], Awaitable[RuntimeProjectionResult]] | None = None,
     ) -> None:
         self._ports = ports
         # Required, and it is the constructor that makes it so. The old shape
@@ -551,6 +555,7 @@ class TeclawPlatformDelivery(_PhaseTableDelivery):
         # loudly, in front of a bot. A strategy that cannot be built without
         # its own collaborators has no such state to refuse.
         self._redeliver = redeliver
+        self._passport = passport
 
     def needs_container(self) -> bool:
         return False
@@ -559,7 +564,38 @@ class TeclawPlatformDelivery(_PhaseTableDelivery):
         return self._ports()
 
     async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
-        return await self._redeliver(ctx)
+        deliver = getattr(self._redeliver, "deliver_with_receipt", None)
+        if not callable(deliver) or report.state.kind != "manifest":
+            return await self._redeliver(ctx)
+        receipt = await deliver(ctx)
+        if receipt.status is not ManifestDeliveryStatus.CONFIRMED or receipt.delivered_mcp_codes is None:
+            return receipt.note
+        capability_applied = any(
+            category.construct is Category.CAPABILITIES and (
+                not category.aborted or category.confirmed_partial or bool(category.removals) or any(
+                    entry.outcome in (EntryOutcome.CREATED, EntryOutcome.UPDATED)
+                    for entry in category.entries
+                )
+            )
+            for category in report.categories
+        )
+        successful_candidates = any(
+            entry.outcome in (EntryOutcome.CREATED, EntryOutcome.UPDATED, EntryOutcome.UNCHANGED)
+            and ctx.capability_state.manifest_mcp_candidates.get(entry.identity)
+            for entry in report.entries
+        )
+        if self._passport is None or not (capability_applied or successful_candidates):
+            return None
+        try:
+            passport = await self._passport(ctx)
+        except Exception:
+            return "MCP Passport synchronization could not be confirmed."
+        if passport.passport_updated is not True or passport.passport_mcp_codes is None:
+            return "MCP Passport synchronization could not be confirmed."
+        ctx.capability_state.delivered_mcp_codes.update(
+            receipt.delivered_mcp_codes & passport.passport_mcp_codes
+        )
+        return None
 
 
 class TeclawDeviceDelivery(_PhaseTableDelivery):
