@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
-from .admission_modes import AdmissionMode, AdmissionRule
+from .admission_modes import AdmissionMode
 
 
 def _restart_bot_dependency() -> Callable[..., Any]:
@@ -20,14 +20,12 @@ def _status_bot_dependency() -> Callable[..., Any]:
 
 _CODING_ENGINES = frozenset({'claude_code', 'aicoding'})
 
-MANAGED_BOT_ADMISSION: dict[tuple[str, str], AdmissionRule] = {
-    ('POST', '/openapi/v1/bots/restart-for-others'): AdmissionRule(
-        mode=AdmissionMode.ENGINE,
+MANAGED_BOT_ADMISSION = {
+    ('POST', '/openapi/v1/bots/restart-for-others'): AdmissionMode.ENGINE(
         engines=_CODING_ENGINES,
         bot_dependency=_restart_bot_dependency,
     ),
-    ('POST', '/openapi/v1/bots/status-for-others'): AdmissionRule(
-        mode=AdmissionMode.ENGINE,
+    ('POST', '/openapi/v1/bots/status-for-others'): AdmissionMode.ENGINE(
         engines=_CODING_ENGINES,
         bot_dependency=_status_bot_dependency,
     ),

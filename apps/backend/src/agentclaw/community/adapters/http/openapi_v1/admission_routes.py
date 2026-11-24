@@ -1,6 +1,6 @@
 """Public operation admission table; re-exported by admission."""
 
-from .admission_modes import AdmissionMode, AdmissionRule
+from .admission_modes import AdmissionMode, _EngineAdmission
 from .admission_account_routes import ACCOUNT_ADMISSION
 from .admission_genome_routes import GENOME_ADMISSION
 from .admission_managed_bot_routes import MANAGED_BOT_ADMISSION
@@ -27,7 +27,7 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: path matcher lives and a second implementation of "most specific" is exactly
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
-ADMISSION: dict[tuple[str, str], AdmissionMode | AdmissionRule] = {
+ADMISSION: dict[tuple[str, str], AdmissionMode | _EngineAdmission] = {
     ("PATCH", "/openapi/v1/bots/{bot_id}/caller-instances/{caller_user_id}/token-expiry"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"): AdmissionMode.OPEN,

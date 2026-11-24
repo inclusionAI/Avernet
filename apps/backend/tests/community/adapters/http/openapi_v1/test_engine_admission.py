@@ -1,3 +1,5 @@
+from dataclasses import FrozenInstanceError
+
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
@@ -70,36 +72,53 @@ def test_engine_mode_requires_configuration(monkeypatch, probe_router, probe):
 
 
 @pytest.mark.parametrize('mode', [AdmissionMode.OPEN, AdmissionMode.REFUSED])
-def test_engine_configuration_requires_engine_mode(monkeypatch, probe_router, probe, mode):
-    monkeypatch.setitem(ADMISSION, _OPERATION, admission_policy.AdmissionRule(
-        mode=mode, engines=frozenset({'aicoding'}), bot_dependency=coding_bot_dependency,
-    ))
-
+def test_engine_configuration_requires_engine_mode(mode):
     with pytest.raises(ValueError, match='AdmissionMode.ENGINE'):
-        probe_router.add_api_route(_PATH, probe, methods=['GET'])
+        mode(engines={'aicoding'}, bot_dependency=coding_bot_dependency)
 
 
-def test_engine_mode_requires_a_nonempty_allowlist(monkeypatch, probe_router, probe):
-    monkeypatch.setitem(ADMISSION, _OPERATION, admission_policy.AdmissionRule(
-        mode=AdmissionMode.ENGINE, bot_dependency=coding_bot_dependency,
-    ))
-
+def test_engine_mode_requires_a_nonempty_allowlist():
     with pytest.raises(ValueError, match='non-empty'):
-        probe_router.add_api_route(_PATH, probe, methods=['GET'])
+        AdmissionMode.ENGINE(engines=set(), bot_dependency=coding_bot_dependency)
 
 
-def test_engine_mode_requires_a_bot_dependency(monkeypatch, probe_router, probe):
-    monkeypatch.setitem(ADMISSION, _OPERATION, admission_policy.AdmissionRule(
-        mode=AdmissionMode.ENGINE, engines=frozenset({'aicoding'}),
-    ))
+def test_engine_mode_requires_a_bot_dependency():
+    with pytest.raises(TypeError, match='bot_dependency'):
+        AdmissionMode.ENGINE(engines={'aicoding'})
 
+
+def test_engine_mode_refuses_a_non_callable_bot_dependency():
     with pytest.raises(ValueError, match='Bot dependency'):
-        probe_router.add_api_route(_PATH, probe, methods=['GET'])
+        AdmissionMode.ENGINE(engines={'aicoding'}, bot_dependency=None)
+
+
+def test_engine_mode_requires_an_allowlist():
+    with pytest.raises(TypeError, match='engines'):
+        AdmissionMode.ENGINE(bot_dependency=coding_bot_dependency)
+
+
+def test_engine_parameters_are_immutable_and_isolated_per_operation():
+    engines = {'aicoding'}
+    coding_rule = AdmissionMode.ENGINE(
+        engines=engines, bot_dependency=coding_bot_dependency,
+    )
+    other_rule = AdmissionMode.ENGINE(
+        engines={'openclaw'}, bot_dependency=coding_bot_dependency,
+    )
+    engines.add('claude_code')
+
+    assert coding_rule.engines == frozenset({'aicoding'})
+    assert other_rule.engines == frozenset({'openclaw'})
+    assert coding_rule.mode is other_rule.mode is AdmissionMode.ENGINE
+    assert AdmissionMode.ENGINE.value == 'engine'
+    assert not hasattr(AdmissionMode.ENGINE, 'engines')
+    with pytest.raises(FrozenInstanceError):
+        coding_rule.engines = frozenset({'openclaw'})
 
 
 def test_engine_mode_requires_all_route_methods_to_agree(monkeypatch, probe_router, probe):
-    monkeypatch.setitem(ADMISSION, _OPERATION, admission_policy.AdmissionRule(
-        mode=AdmissionMode.ENGINE, engines=frozenset({'aicoding'}),
+    monkeypatch.setitem(ADMISSION, _OPERATION, AdmissionMode.ENGINE(
+        engines={'aicoding'},
         bot_dependency=coding_bot_dependency,
     ))
     monkeypatch.setitem(ADMISSION, ('POST', _PATH), AdmissionMode.OPEN)
@@ -112,8 +131,8 @@ def test_engine_mode_requires_all_route_methods_to_have_the_same_parameters(
     monkeypatch, probe_router, probe,
 ):
     for method, engine in [('GET', 'aicoding'), ('POST', 'claude_code')]:
-        monkeypatch.setitem(ADMISSION, (method, _PATH), admission_policy.AdmissionRule(
-            mode=AdmissionMode.ENGINE, engines=frozenset({engine}),
+        monkeypatch.setitem(ADMISSION, (method, _PATH), AdmissionMode.ENGINE(
+            engines={engine},
             bot_dependency=coding_bot_dependency,
         ))
         monkeypatch.setitem(AUTHORIZATION, (method, _PATH), AUTHORIZATION[_OPERATION])
@@ -129,8 +148,8 @@ def test_engine_mode_enforces_its_configured_engines(monkeypatch, probe_router, 
     async def targets():
         return bots
 
-    monkeypatch.setitem(ADMISSION, _OPERATION, admission_policy.AdmissionRule(
-        mode=AdmissionMode.ENGINE, engines=frozenset({engine}), bot_dependency=lambda: targets,
+    monkeypatch.setitem(ADMISSION, _OPERATION, AdmissionMode.ENGINE(
+        engines={engine}, bot_dependency=lambda: targets,
     ))
     probe_router.add_api_route(_PATH, probe, methods=['GET'])
     app = FastAPI()

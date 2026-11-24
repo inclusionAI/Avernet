@@ -991,9 +991,11 @@ keep in step and 43 hand-written ones had already accumulated. If you are
 adding an operation, this is the difference that will surprise you: **there is
 nothing to write on the route.**
 
-ENGINE admission also has a single policy declaration: an `AdmissionRule` in
-`ADMISSION` contains `mode=AdmissionMode.ENGINE`, `engines`, and a provider for
-the authorized Bot dependency. `PublicAPIRoute` invokes `admission.apply_admission`
+ENGINE admission also has a single policy declaration:
+`AdmissionMode.ENGINE(engines={...}, bot_dependency=...)` in `ADMISSION`.
+Its parameters are immutable and isolated per operation; the shared enum member
+is not modified. Other modes remain bare enum members and take no parameters.
+`PublicAPIRoute` invokes `admission.apply_admission`
 to attach that check without an engine decorator, and `require_principal` reads
 the same rule to decide application admission. The existing grant/user-mode
 dependencies and the independent `AUTHORIZATION` decision remain unchanged.

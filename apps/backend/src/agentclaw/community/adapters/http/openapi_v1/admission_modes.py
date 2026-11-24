@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Set
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -11,8 +11,8 @@ from typing import Any
 class AdmissionMode(StrEnum):
     """How an operation admits an application caller with no human on the wire.
 
-    ENGINE requires an AdmissionRule declaring its allowed engines and authorized
-    Bot dependency. It does not replace the operation's Owner or application checks.
+    ENGINE takes per-operation engines and an authorized Bot dependency through
+    ENGINE(...). It does not replace the operation's Owner or application checks.
     """
 
     GRANT_CHECKED_OWN_BOT = "grant-checked"
@@ -28,16 +28,30 @@ class AdmissionMode(StrEnum):
     OPEN = "open"
     REFUSED = "refused"
 
+    @property
+    def mode(self) -> AdmissionMode:
+        return self
+
+    def __call__(
+        self, *, engines: Set[str], bot_dependency: Callable[[], Callable[..., Any]],
+    ) -> _EngineAdmission:
+        if self is not AdmissionMode.ENGINE:
+            raise ValueError('Engine parameters require AdmissionMode.ENGINE')
+        allowed_engines = frozenset(engines)
+        if not allowed_engines:
+            raise ValueError('AdmissionMode.ENGINE requires a non-empty engine allowlist')
+        if not callable(bot_dependency):
+            raise ValueError('AdmissionMode.ENGINE requires an authorized Bot dependency')
+        return _EngineAdmission(engines=allowed_engines, bot_dependency=bot_dependency)
+
 
 @dataclass(frozen=True)
-class AdmissionRule:
-    """A mode and its parameters, declared together in the admission inventory.
+class _EngineAdmission:
+    """Immutable route parameters; never mutate the shared ENGINE enum member."""
 
-    ENGINE requires engines and a provider resolving the authorized Bot dependency
-    at route construction, after the inventory and its HTTP consumers are loaded.
-    Other modes do not take engine parameters.
-    """
+    engines: frozenset[str]
+    bot_dependency: Callable[[], Callable[..., Any]]
 
-    mode: AdmissionMode
-    engines: frozenset[str] = frozenset()
-    bot_dependency: Callable[[], Callable[..., Any]] | None = None
+    @property
+    def mode(self) -> AdmissionMode:
+        return AdmissionMode.ENGINE

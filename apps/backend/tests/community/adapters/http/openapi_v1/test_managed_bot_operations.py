@@ -311,15 +311,15 @@ def test_engine_gate_fails_closed_when_the_engine_field_is_missing(operations_cl
 
 def test_engine_gate_composes_with_the_existing_owner_aspect(monkeypatch):
     from agentclaw.community.adapters.http.openapi_v1.admission import (
-        ADMISSION, AdmissionMode, AdmissionRule,
+        ADMISSION, AdmissionMode,
     )
     from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
     async def targets():
         return [{'active_engine': 'aicoding'}]
 
-    monkeypatch.setitem(ADMISSION, ('GET', '/openapi/v1/bots/{bot_id}/status'), AdmissionRule(
-        mode=AdmissionMode.ENGINE, engines=frozenset({'aicoding'}), bot_dependency=lambda: targets,
+    monkeypatch.setitem(ADMISSION, ('GET', '/openapi/v1/bots/{bot_id}/status'), AdmissionMode.ENGINE(
+        engines={'aicoding'}, bot_dependency=lambda: targets,
     ))
 
     async def handler():
