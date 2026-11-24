@@ -10,6 +10,7 @@ from typing import Any
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
 )
+from agentclaw.community.core.task.todos.errors import TodoNotFoundError
 from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
@@ -164,6 +165,19 @@ class TodoScheduler(LifecycleBase):
                 break
             try:
                 await operation(todo)
+            except TodoNotFoundError as exc:
+                # The batch is a snapshot; the row can disappear between the
+                # list query and the per-Todo reload (concurrent cleanup, table
+                # migration, zone data switch). Skipping is safe — the next
+                # tick lists fresh state — and must not alarm as a failure.
+                # State-machine violations are raised as TodoStateConflictError
+                # and still take the error path below.
+                self._logger.info(
+                    "[todo][scheduler] todo=%s status=%s skipped: %s",
+                    todo.todo_id,
+                    todo.status.value,
+                    exc,
+                )
             except Exception as exc:  # noqa: BLE001 - isolate one Todo
                 errors += 1
                 self._logger.error(
