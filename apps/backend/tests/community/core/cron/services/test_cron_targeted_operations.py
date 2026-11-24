@@ -656,6 +656,66 @@ async def test_implicit_caller_read_keeps_boundary_logs_and_credentials_private(
 
 
 @pytest.mark.asyncio
+async def test_caller_read_timeout_is_classified_and_keeps_other_bots(monkeypatch):
+    from agentclaw.community.core.cron.services import cron_relay
+    from agentclaw.community.plugin_api.device_adapter_transport import (
+        DeviceAdapterTimeoutError,
+    )
+
+    log = MagicMock()
+    monkeypatch.setattr(cron_relay, "logger", log)
+    svc = service(caller=True, provider="local")
+    caller = dict(svc._bot_provider.get_bot.return_value)
+    personal = dict(caller, bot_id="personal", bot_type="personal", call_type="owner", binding_id=2)
+    svc._bot_provider.list_bots_by_owner_or_collaborator.return_value = {"items": [personal, caller]}
+    svc._device_provider.get_device.side_effect = lambda *, binding_id: {
+        "status": "ACTIVE", "device_provider": "local", "device_id": "sandbox"
+    }
+    svc._resolver.resolve_for_bot.return_value = SimpleNamespace(conn_info={"binding": 2})
+    svc._resolver.resolve_for_binding.side_effect = lambda binding, *args, **kwargs: SimpleNamespace(
+        conn_info={"binding": binding}
+    )
+
+    async def invoke(conn, *args, **kwargs):
+        if conn.get("binding") == 99:
+            raise DeviceAdapterTimeoutError("Adapter request timed out: GET /api/cron")
+        return {"success": True, "data": [{"id": "personal-job"}]}
+
+    svc._transport.invoke = AsyncMock(side_effect=invoke)
+
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id="all", authenticated_user_id="viewer",
+    )
+
+    # 超时的 Caller 实例按 cron_api_timeout 分类，其他 Bot 的结果照常返回。
+    assert [row["id"] for row in result["data"]] == ["personal-job"]
+    assert [f["reason"] for f in result["failed_targets"]] == ["cron_api_timeout"]
+    assert "no response within" in result["failed_targets"][0]["message"]
+    output = "\n".join(call.args[0] % call.args[1:] for call in log.mock_calls if call.args)
+    assert "[list_all_crons] Adapter request timed out" in output
+    log.error.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_caller_read_generic_failure_keeps_error_classification(monkeypatch):
+    # 非超时异常仍保持 ERROR 日志和 cron_api_failed 分类，不与超时混同。
+    from agentclaw.community.core.cron.services import cron_relay
+
+    log = MagicMock()
+    monkeypatch.setattr(cron_relay, "logger", log)
+    svc = service(caller=True, provider="local")
+    svc._transport.invoke = AsyncMock(side_effect=ValueError("adapter offline"))
+
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id="bot", authenticated_user_id="viewer",
+    )
+
+    assert result["data"] == []
+    assert result["failed_targets"][0]["reason"] == "cron_api_failed"
+    log.error.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_unsupported_caller_engine_is_not_resolved_or_queried():
     svc = service(caller=True)
     svc._bot_provider.get_bot.return_value["active_engine"] = "hermes"
