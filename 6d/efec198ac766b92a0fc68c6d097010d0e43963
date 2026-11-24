@@ -1,0 +1,37 @@
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_maintenance.rs
+  s_b033c54cc00da7::t_e5578c35edcca6 7-8,10,286-289,294-298,300,302-349,354-359
+  s_b033c54cc00da7::t_4409756d41d8e2 350-353
+  s_b033c54cc00da7::t_fe6d41dbe2ad91 9,290-293,299,301
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
+  s_b033c54cc00da7::t_4409756d41d8e2 317-319,323,325,369
+apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md
+  s_b033c54cc00da7::t_4409756d41d8e2 36-40
+apps/bcs/crates/services/bcs-dist-store/src/inbox/admission.rs
+  s_b033c54cc00da7::t_4fa7b9fad150ae 185,189,208,211,214
+apps/bcs/crates/services/bcs-dist-store/src/inbox/consumer.rs
+  s_b033c54cc00da7::t_ca509f68c9d358 249
+apps/bcs/crates/services/bcs-dist-store/src/inbox/producer.rs
+  s_b033c54cc00da7::t_2bccac2fa719c2 183-186
+apps/bcs/crates/services/bcs-dist-store/src/inbox/progress.rs
+  s_b033c54cc00da7::t_ea75e28bd5f173 53,111,117,121-140
+apps/bcs/crates/services/bcs-dist-store/src/inbox/state.rs
+  s_b033c54cc00da7::t_9b0389c91f3ab2 51
+apps/bcs/crates/services/bcs-dist-store/tests/admission_closure.rs
+  s_b033c54cc00da7::t_44ff28d8175ae1 426-469
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6defec198ac766b92a0fc68c6d097010d0e43963",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
