@@ -17,9 +17,12 @@ export type MutateBotRequest = BackendUnknownRecord;
  * `POST /openapi/v1/bots/copy` 请求体(后端 `BotCopyRequest` `extra="forbid"`)。
  * `request_detail` 承载未来 copy 参数(当前仅 `excludes`);**禁止**在顶层塞
  * `avatar_url`/`excludes` —— 后端会 422。
+ * `source_owner_id` 定位源 bot 行:`bot_id` 非全局唯一(共享 bot_id 如 `default`
+ * 每用户一行),后端按 `bot_id + owner_id + env` 精确定位,避免回取他行。
  */
 export interface BotCopyRequestBody {
   source_bot_id: string;
+  source_owner_id: string;
   bot_name: string;
   bot_desc?: string;
   request_detail?: { excludes?: string[]; [key: string]: unknown };
