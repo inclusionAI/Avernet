@@ -570,15 +570,21 @@ class TestBotKindEndToEnd:
             space_context=world.get(BusinessSpaceContextProtocol),
             baas_service=world.get(BaasService),
         )
-        # Keep the real RUNNING report visible until the swarm polls it.
-        # This makes the CI creation/apply overlap deterministic without sleeps.
+        # The same-slice case pins the live status contract: keep the real
+        # RUNNING report visible until the swarm polls it.  The cross-slice
+        # case instead owns durable resume; forcing that recovered slice to
+        # rendezvous with this background apply couples two independent CI
+        # schedulers and does not add coverage beyond the final report checks.
         polled_running = threading.Event()
         applies = world.get(ApplyRunServiceProtocol)
         compile_and_finish = applies._compile_apply_and_finish
         bot_status = platform.bot_status
 
         async def finish_after_poll(*args, **kwargs):
-            if kwargs["trigger"] == CREATE_ON_CONTAINER_TRIGGER:
+            if (
+                not defer_creation
+                and kwargs["trigger"] == CREATE_ON_CONTAINER_TRIGGER
+            ):
                 # Full-suite xdist workers can be CPU-starved long enough to
                 # miss the former 10s scheduling window.  Keep the handshake
                 # bounded below the test's outer 60s timeout while preserving
@@ -663,7 +669,10 @@ class TestBotKindEndToEnd:
             pump.stop_and_join()
 
         assert run is not None, "run row vanished"
-        assert polled_running.is_set(), "creation Apply was not observed in flight"
+        if not defer_creation:
+            assert polled_running.is_set(), (
+                "creation Apply was not observed in flight"
+            )
         assert run.status is dm.RunStatus.COMPLETED, {
             "run": run,
             "creation_reports": [

@@ -46,6 +46,12 @@ from agentclaw.community.core.task.todos.execution_protocol import (
 from agentclaw.community.core.task.todos.scheduler import TodoScheduler
 from agentclaw.community.core.task.todos.stage_outcome_protocol import TodoStageServiceProtocol
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
+from agentclaw.community.core.task.todos.source_client_protocol import (
+    TodoSourceClientProtocol,
+)
+from agentclaw.community.core.task.todos.source_service_protocol import (
+    TodoSourceServiceProtocol,
+)
 from agentclaw.community.core.task.todos.template_capability_protocol import (
     TodoTemplateCapabilityServiceProtocol,
 )
@@ -55,6 +61,9 @@ from agentclaw.community.core.task.todos.template_creation_protocol import (
 from agentclaw.community.core.task.todos.template_management_protocol import (
     TodoTemplateManagementServiceProtocol,
 )
+from agentclaw.community.core.task.todos.services.dima_source_client import (
+    DimaSourceClient,
+)
 from agentclaw.community.core.task.todos.services.todo_artifact_service import (
     TodoArtifactService,
 )
@@ -62,6 +71,9 @@ from agentclaw.community.core.task.todos.services.todo_execution_service import 
     TodoExecutionService,
 )
 from agentclaw.community.core.task.todos.services.todo_service import TodoService
+from agentclaw.community.core.task.todos.services.todo_source_service import (
+    TodoSourceService,
+)
 from agentclaw.community.core.task.todos.services.todo_stage_service import TodoStageService
 from agentclaw.community.core.task.todos.services.todo_template_capability_service import (
     TodoTemplateCapabilityService,
@@ -110,6 +122,16 @@ class TaskTodoBindings(Module):
         binder.bind(
             TodoTemplateCreationServiceProtocol,
             to=TodoTemplateCreationService,
+            scope=singleton,
+        )
+        binder.bind(
+            TodoSourceClientProtocol,
+            to=DimaSourceClient,
+            scope=singleton,
+        )
+        binder.bind(
+            TodoSourceServiceProtocol,
+            to=TodoSourceService,
             scope=singleton,
         )
         binder.bind(

@@ -22,6 +22,7 @@ MAX_ARTIFACT_NAME_LENGTH = 256
 MAX_ARTIFACT_URL_LENGTH = 2_048
 MAX_ACTOR_ID_LENGTH = 256
 MAX_ACTOR_NAME_LENGTH = 256
+MAX_INTERACTION_MENTIONS = 20
 
 
 class TodoStatus(StrEnum):
@@ -59,6 +60,18 @@ class AcceptanceVerdict(StrEnum):
 class TodoAcceptanceTargetKind(StrEnum):
     EVENT = "event"
     ARTIFACT = "artifact"
+
+
+class TodoInteractionMentionActorType(StrEnum):
+    BOT = "bot"
+
+
+@dataclass(frozen=True)
+class TodoInteractionMention:
+    """Structured product mention persisted in a Human interaction event."""
+
+    actor_type: TodoInteractionMentionActorType
+    actor_id: str
 
 
 @dataclass(frozen=True)

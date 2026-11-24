@@ -8,12 +8,14 @@ from datetime import datetime, timezone
 
 from injector import inject
 from sqlalchemy import asc, case, or_
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.repository.implementations.task.todos.models import (
     TodoAcceptanceModel,
     TodoArtifactModel,
     TodoExecutionModel,
     TodoModel,
+    TodoSourceBindingModel,
     TodoStageInstanceModel,
 )
 from agentclaw.community.core.repository.protocols.task.todos import (
@@ -21,6 +23,7 @@ from agentclaw.community.core.repository.protocols.task.todos import (
 )
 from agentclaw.community.core.task.todos.errors import (
     TodoNotFoundError,
+    TodoSourceAlreadyImportedError,
     TodoStateConflictError,
 )
 from agentclaw.community.core.task.todos.models import (
@@ -30,6 +33,7 @@ from agentclaw.community.core.task.todos.models import (
     TodoRecord,
     TodoStatus,
 )
+from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 from agentclaw.community.core.task.todos.stage_outcome_models import (
     TodoStageOutcome,
     TodoStageOutcomeKind,
@@ -72,6 +76,39 @@ class TodoRepository(TodoRepositoryProtocol):
         )
 
     @classmethod
+    def _source_binding_query(
+        cls,
+        db,
+        *,
+        space_id: int,
+        source_type: str,
+        source_item_id: str,
+    ):
+        return db.query(TodoSourceBindingModel).filter(
+            TodoSourceBindingModel.space_id == space_id,
+            TodoSourceBindingModel.source_type == source_type,
+            TodoSourceBindingModel.source_item_id == source_item_id,
+            TodoSourceBindingModel.env == get_current_env(),
+            TodoSourceBindingModel.avernet_tenant == get_current_avernet_tenant(),
+        )
+
+    def _find_source_todo_id(
+        self,
+        *,
+        space_id: int,
+        source_type: str,
+        source_item_id: str,
+    ) -> str | None:
+        with self._db.orm_session() as db:
+            row = self._source_binding_query(
+                db,
+                space_id=space_id,
+                source_type=source_type,
+                source_item_id=source_item_id,
+            ).one_or_none()
+            return None if row is None else str(row.todo_id)
+
+    @classmethod
     def _require_todo(cls, db, *, todo_id: str, lock: bool = False) -> TodoModel:
         query = cls._todo_query(db, todo_id=todo_id)
         row = (query.with_for_update() if lock else query).one_or_none()
@@ -85,35 +122,72 @@ class TodoRepository(TodoRepositoryProtocol):
         space_id: int,
         title: str,
         description: str,
-        bot_id: str,
-        bot_name: str,
+        bot_id: str | None,
+        bot_name: str | None,
         created_by: str,
+        source: TodoSourceInput | None = None,
     ) -> TodoRecord:
-        with self._transaction() as db:
-            row = TodoModel(
-                todo_id=f"todo_{uuid.uuid4().hex}",
+        if source is not None:
+            existing_todo_id = self._find_source_todo_id(
                 space_id=space_id,
-                title=title,
-                description=description,
-                template_id="",
-                template_version_id="",
-                template_name_snapshot="",
-                current_stage_instance_id=None,
-                pending_action_kind=None,
-                state_reason=None,
-                requested_action=None,
-                bot_id=bot_id,
-                bot_name=bot_name,
-                status=TodoStatus.NOT_STARTED.value,
-                collab_context_id=None,
-                created_by=created_by,
-                env=get_current_env(),
-                avernet_tenant=get_current_avernet_tenant(),
+                source_type=source.source_type,
+                source_item_id=source.item_id,
             )
-            db.add(row)
-            db.flush()
-            db.refresh(row)
-            return row.to_record()
+            if existing_todo_id is not None:
+                raise TodoSourceAlreadyImportedError(existing_todo_id)
+
+        todo_id = f"todo_{uuid.uuid4().hex}"
+        try:
+            with self._transaction() as db:
+                row = TodoModel(
+                    todo_id=todo_id,
+                    space_id=space_id,
+                    title=title,
+                    description=description,
+                    template_id="",
+                    template_version_id="",
+                    template_name_snapshot="",
+                    current_stage_instance_id=None,
+                    pending_action_kind=None,
+                    state_reason=None,
+                    requested_action=None,
+                    bot_id=bot_id,
+                    bot_name=bot_name,
+                    status=TodoStatus.NOT_STARTED.value,
+                    collab_context_id=None,
+                    created_by=created_by,
+                    env=get_current_env(),
+                    avernet_tenant=get_current_avernet_tenant(),
+                )
+                db.add(row)
+                if source is not None:
+                    db.add(
+                        TodoSourceBindingModel(
+                            todo_id=todo_id,
+                            space_id=space_id,
+                            source_type=source.source_type,
+                            source_container_id=source.container_id,
+                            source_item_id=source.item_id,
+                            source_url=source.url,
+                            source_updated_at=source.updated_at,
+                            imported_by=created_by,
+                            env=get_current_env(),
+                            avernet_tenant=get_current_avernet_tenant(),
+                        )
+                    )
+                db.flush()
+                db.refresh(row)
+                return row.to_record()
+        except IntegrityError as exc:
+            if source is not None:
+                existing_todo_id = self._find_source_todo_id(
+                    space_id=space_id,
+                    source_type=source.source_type,
+                    source_item_id=source.item_id,
+                )
+                if existing_todo_id is not None:
+                    raise TodoSourceAlreadyImportedError(existing_todo_id) from exc
+            raise
 
     def create_todo_with_stages(
         self,

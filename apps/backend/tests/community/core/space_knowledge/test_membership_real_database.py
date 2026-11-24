@@ -539,7 +539,10 @@ def test_first_activation_is_idempotent_across_real_processes(database, tmp_path
     ]
     try:
         for process in processes:
-            stdout, stderr = process.communicate(timeout=20)
+            # The worker's 10-second barrier and SQLite's own lock timeout
+            # detect real coordination failures. Leave enough outer-process
+            # budget for imports under a fully loaded xdist CI runner.
+            stdout, stderr = process.communicate(timeout=60)
             assert process.returncode == 0, stdout + stderr
     finally:
         for process in processes:

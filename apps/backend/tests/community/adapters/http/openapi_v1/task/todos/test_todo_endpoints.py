@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 from fastapi import Request, Response
+from pydantic import ValidationError as PydanticValidationError
 
 from agentclaw.community.adapters.http.openapi_v1.task.todos.router import (
     create_todo,
     create_todo_interaction,
+    get_dima_work_item_draft,
     get_todo,
+    list_dima_projects,
+    list_dima_work_items,
     list_todo_artifacts,
     list_todo_events,
     list_todo_interactions,
@@ -23,10 +28,20 @@ from agentclaw.community.adapters.http.openapi_v1.task.todos.schemas import (
     CreateTodoRequest,
     SubmitTodoAcceptanceRequest,
 )
+from agentclaw.community.adapters.http.openapi_v1.responses import mapped_error_response
 from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactDownload,
     TodoArtifactKind,
     TodoArtifactRecord,
+)
+from agentclaw.community.core.task.todos.source_models import (
+    TodoSourceDraft,
+    TodoSourceInput,
+    TodoSourceProject,
+    TodoSourceWorkItem,
+)
+from agentclaw.community.core.task.todos.errors import (
+    TodoSourceAlreadyImportedError,
 )
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
@@ -247,6 +262,54 @@ async def test_create_todo_returns_201_and_passes_body_fields():
 
 
 @pytest.mark.asyncio
+async def test_create_todo_maps_dima_source_identity():
+    service = _RecordedService()
+
+    await create_todo(
+        body=CreateTodoRequest(
+            space_id=42,
+            title="Prepare release notes",
+            description="Summarize the changes",
+            bot_id="bot_1",
+            source={
+                "type": "dima",
+                "container_id": "P1",
+                "item_id": "work_1",
+                "url": "https://dima.example/items/work_1",
+                "updated_at": "2026-11-20T12:00:00Z",
+            },
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/todos"),
+        response=Response(),
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        service=service,
+    )
+
+    assert service.calls[-1]["source"] == TodoSourceInput(
+        source_type="dima",
+        container_id="P1",
+        item_id="work_1",
+        url="https://dima.example/items/work_1",
+        updated_at="2026-11-20T12:00:00Z",
+    )
+
+
+def test_duplicate_source_error_exposes_existing_todo_id():
+    response = mapped_error_response(
+        TodoSourceAlreadyImportedError("todo_existing"),
+        _request("POST", "/openapi/v1/collaboration/tasks/todos"),
+    )
+
+    assert response is not None
+    assert response.status_code == 409
+    payload = json.loads(response.body)
+    assert payload["code"] == 409000
+    assert payload["message"] == "Dima work item already imported"
+    assert payload["data"] == {"existing_todo_id": "todo_existing"}
+
+
+@pytest.mark.asyncio
 async def test_get_and_run_use_authenticated_actor():
     service = _RecordedService()
 
@@ -286,7 +349,9 @@ async def test_events_and_interactions_project_b_event_records():
     )
     history = await list_todo_interactions(
         todo_id="todo_1",
-        request=_request("GET", "/openapi/v1/collaboration/tasks/todos/todo_1/interactions"),
+        request=_request(
+            "GET", "/openapi/v1/collaboration/tasks/todos/todo_1/interactions"
+        ),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
@@ -316,7 +381,9 @@ async def test_create_interaction_uses_message_only_and_returns_created_event():
     payload = await create_todo_interaction(
         todo_id="todo_1",
         body=CreateTodoInteractionRequest(message="Please include the rollback plan"),
-        request=_request("POST", "/openapi/v1/collaboration/tasks/todos/todo_1/interactions"),
+        request=_request(
+            "POST", "/openapi/v1/collaboration/tasks/todos/todo_1/interactions"
+        ),
         response=response,
         principal={"user_id": "human_1"},
         user_id="human_1",
@@ -336,8 +403,46 @@ async def test_create_interaction_uses_message_only_and_returns_created_event():
             "actor_id": "human_1",
             "author_name": None,
             "message": "Please include the rollback plan",
+            "reply_to_event_id": None,
+            "mentions": (),
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_interaction_maps_reply_and_structured_mentions():
+    service = _RecordedService()
+    response = Response()
+
+    await create_todo_interaction(
+        todo_id="todo_1",
+        body=CreateTodoInteractionRequest(
+            message="Please review this floor",
+            reply_to_event_id="event_2",
+            mentions=[{"actor_type": "bot", "actor_id": "bot_2"}],
+        ),
+        request=_request(
+            "POST", "/openapi/v1/collaboration/tasks/todos/todo_1/interactions"
+        ),
+        response=response,
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        service=service,
+    )
+
+    call = service.calls[0]
+    assert call["reply_to_event_id"] == "event_2"
+    assert len(call["mentions"]) == 1
+    assert call["mentions"][0].actor_type.value == "bot"
+    assert call["mentions"][0].actor_id == "bot_2"
+
+
+def test_create_interaction_rejects_non_bot_mention_actor():
+    with pytest.raises(PydanticValidationError):
+        CreateTodoInteractionRequest(
+            message="invalid",
+            mentions=[{"actor_type": "human", "actor_id": "human_2"}],
+        )
 
 
 @pytest.mark.asyncio
@@ -351,7 +456,9 @@ async def test_acceptance_returns_updated_todo_and_passes_verdict():
             verdict=AcceptanceVerdict.APPROVED,
             message="Looks good",
         ),
-        request=_request("POST", "/openapi/v1/collaboration/tasks/todos/todo_1/acceptance"),
+        request=_request(
+            "POST", "/openapi/v1/collaboration/tasks/todos/todo_1/acceptance"
+        ),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
@@ -387,7 +494,9 @@ async def test_rejection_forwards_full_message_and_stable_targets():
                 {"kind": "artifact", "id": "artifact_1", "floor": 3},
             ],
         ),
-        request=_request("POST", "/openapi/v1/collaboration/tasks/todos/todo_1/acceptance"),
+        request=_request(
+            "POST", "/openapi/v1/collaboration/tasks/todos/todo_1/acceptance"
+        ),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
@@ -398,7 +507,10 @@ async def test_rejection_forwards_full_message_and_stable_targets():
     assert call["op"] == "submit_acceptance"
     assert call["decision_id"] == "decision_reject_1"
     assert call["message"] == "Please correct the enterprise price"
-    assert [(target.kind.value, target.target_id, target.floor) for target in call["targets"]] == [
+    assert [
+        (target.kind.value, target.target_id, target.floor)
+        for target in call["targets"]
+    ] == [
         ("event", "event_2", 2),
         ("artifact", "artifact_1", 3),
     ]
@@ -449,7 +561,9 @@ async def test_list_artifacts_returns_public_content_without_storage_id():
 
     payload = await list_todo_artifacts(
         todo_id="todo_1",
-        request=_request("GET", "/openapi/v1/collaboration/tasks/todos/todo_1/artifacts"),
+        request=_request(
+            "GET", "/openapi/v1/collaboration/tasks/todos/todo_1/artifacts"
+        ),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
@@ -503,3 +617,116 @@ async def test_read_artifact_content_sets_preview_headers_and_passes_actor():
             "actor_id": "human_1",
         }
     ]
+
+
+def _source_request(path: str) -> Request:
+    request = Request(
+        scope={
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "https",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"user_id=human_1",
+            "headers": [
+                (b"cookie", b"IAM_TOKEN=iam-token"),
+                (b"x-source-test", b"present"),
+            ],
+            "server": ("example.test", 443),
+            "client": ("127.0.0.1", 1234),
+        }
+    )
+    request.state.trace_id = "trace-todo-source"
+    return request
+
+
+class _RecordedSourceService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def list_projects(self, **kwargs):
+        self.calls.append({"op": "list_projects", **kwargs})
+        return (TodoSourceProject(id="P1", name="Dima project"),)
+
+    def list_work_items(self, **kwargs):
+        self.calls.append({"op": "list_work_items", **kwargs})
+        return (
+            TodoSourceWorkItem(
+                id="2026112000000000001",
+                project_id="P1",
+                category="req",
+                title="Dima requirement",
+                status="处理中",
+                updated_at="2026-11-20T12:00:00Z",
+            ),
+        )
+
+    def load_work_item_draft(self, **kwargs):
+        self.calls.append({"op": "load_work_item_draft", **kwargs})
+        return TodoSourceDraft(
+            source_type="dima",
+            project_id="P1",
+            work_item_id="2026112000000000001",
+            category="req",
+            title="Dima requirement",
+            description="Imported description",
+            source_url="https://dima.example/items/1",
+            source_updated_at="2026-11-20T12:00:00Z",
+        )
+
+
+@pytest.mark.asyncio
+async def test_dima_source_routes_forward_verified_human_request_context():
+    service = _RecordedSourceService()
+    principal = {"user_id": "human_1"}
+
+    projects = await list_dima_projects(
+        request=_source_request(
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/projects"
+        ),
+        principal=principal,
+        user_id="human_1",
+        service=service,
+    )
+    items = await list_dima_work_items(
+        project_id="P1",
+        request=_source_request(
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/P1/work-items"
+        ),
+        principal=principal,
+        user_id="human_1",
+        query="requirement",
+        service=service,
+    )
+    draft = await get_dima_work_item_draft(
+        project_id="P1",
+        work_item_id="2026112000000000001",
+        request=_source_request(
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/P1/"
+            "work-items/2026112000000000001"
+        ),
+        principal=principal,
+        user_id="human_1",
+        service=service,
+    )
+
+    assert projects.data[0].model_dump() == {"id": "P1", "name": "Dima project"}
+    assert items.data[0].category == "req"
+    assert draft.data.title == "Dima requirement"
+    assert draft.data.description == "Imported description"
+    assert [call["op"] for call in service.calls] == [
+        "list_projects",
+        "list_work_items",
+        "load_work_item_draft",
+    ]
+    for call in service.calls:
+        assert call["actor_id"] == "human_1"
+        auth_request = call["auth_request"]
+        assert auth_request.cookies["IAM_TOKEN"] == "iam-token"
+        assert auth_request.headers["x-source-test"] == "present"
+        assert auth_request.verified_actor_user_id == "human_1"
+        assert auth_request.base_url == "https://example.test/"
+    assert service.calls[1]["project_id"] == "P1"
+    assert service.calls[1]["query"] == "requirement"
+    assert service.calls[2]["work_item_id"] == "2026112000000000001"

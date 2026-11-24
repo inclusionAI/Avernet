@@ -219,6 +219,18 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items/{work_item_id}",
+    ): AdmissionMode.REFUSED,
+    (
         "POST",
         "/openapi/v1/collaboration/tasks/todos/from-template",
     ): AdmissionMode.REFUSED,

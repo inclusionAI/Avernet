@@ -61,6 +61,17 @@ The Todo Events endpoint stays compact and event-centric: it returns normalized 
 
 The Interactions endpoint is actor/content-centric and richer: it includes the Human objective in `task.created`, Human messages and rejection instructions, selected rejection floors from the full payload, and `artifact.reported` payloads. The client resolves each artifact event by its stable `artifact_id`, displays complete text and complete file/link/code details at the event's exact position, and uses the reporting Bot as the actor. The Artifacts endpoint remains the complete persisted inventory and content source.
 
+An interaction may persist `reply_to_event_id` and structured `mentions` in the
+same `user_interaction.posted` event payload. The reply ID must identify a
+replyable event already visible in the same Context; the UI floor is derived
+presentation metadata and is never accepted as identity. Mentions currently
+support Bot actors only, and each mentioned Bot must satisfy the same live
+Bot/Space eligibility policy as Todo creation. Arbitrary `@text` has no
+authority without the structured Bot ID. Persisting a mention does not wake the
+mentioned Bot, create another run, or change orchestration: the existing Human
+interaction transition and scheduler resume continue to target the Todo's
+original executor. No interaction table or schema migration is introduced.
+
 New single-Bot Todo delivery calls the BaaS Open API directly with the exact
 `bot_id:owner_id` identity. It does not create a synthetic one-Bot BCS group and
 does not add the Todo creator as a group observer. Eligibility is determined by
@@ -81,6 +92,25 @@ point; the ordinary frontend neither edits Todos nor exposes manual Run.
 While a Todo is `pending_acceptance`, posting a normal Human interaction atomically claims A as `pending_acceptance -> in_progress`, then append-only records `user_interaction.posted` in B. Rejection uses the same resume mechanism after its B-first acceptance event and A-side state projection. Status refresh keeps A `in_progress` while B is still `done` and the latest Human-work event has not yet been followed by `task.started`. The scheduler then resumes B from that event and reuses the previous executor session.
 
 Resume retries are idempotent. Once B is `in_progress` or a later `task.started` exists, no additional resume is dispatched; the ContextCollab executor uses the triggering event ID as the BCS session-chat idempotency key. A delivery failure leaves the claimed Todo `in_progress` and fails closed rather than reopening the interactive state during uncertain delivery.
+
+## Imported source identity
+
+Imported Todos keep product-owned source metadata in
+`ac_todo_source_binding`; manually created Todos have no source binding. Dima
+imports use the stable work-item identity rather than editable title or
+description content. Within one `avernet_tenant`, runtime `env`, TeamClaw
+`space_id`, `source_type`, and `source_item_id`, only one Todo may exist. The
+Dima project ID is retained as `source_container_id` metadata but does not
+change that identity, so moving a work item between Dima projects cannot create
+a duplicate Todo in the same TeamClaw Space. The same source item may be
+imported independently into another TeamClaw Space.
+
+Todo and source binding are inserted in one database transaction. A friendly
+pre-check returns the existing Todo ID for ordinary retries, while the database
+unique constraint closes concurrent-import races; an import conflict returns
+`409` with `data.existing_todo_id`. This binding is an import snapshot only. It
+does not introduce automatic Dima synchronization, status write-back, or a
+periodic import job.
 
 ## Bot execution and artifact reporting contract
 
@@ -158,7 +188,7 @@ event.
 ## Context Boundary
 
 ```yaml
-purpose: Own persisted Todo lifecycle, automatic Context dispatch, runtime refresh, interactions, and acceptance.
+purpose: Own persisted Todo lifecycle, imported-source identity, automatic Context dispatch, runtime refresh, interactions, and acceptance.
 provides:
   - TodoServiceProtocol
   - TodoService
@@ -169,6 +199,9 @@ provides:
   - TodoPage
   - TodoEventRecord
   - TodoCollaborationPort
+  - TodoSourceServiceProtocol
+  - TodoSourceService
+  - TodoSourceInput
   - InProcessTodoCollaborationAdapter
 consumes:
   - TodoRepositoryProtocol
@@ -177,6 +210,10 @@ consumes:
   - CachePlugin
   - TodoCollaborationPort
   - TodoArtifactServiceProtocol
+  - TodoSourceClientProtocol
+  - MCPAuthPlugin
+  - MCPCenterPlugin
+  - HttpClient
 internal_dependencies:
   - agentclaw.community.core.errors
   - agentclaw.community.core.repository.protocols
@@ -190,8 +227,9 @@ internal_dependencies:
 
 ### Change impact
 
-Changes affect Todo create/read, automatic scheduling, the compensation Run
-endpoint, event and interaction projection, and acceptance. Repository state
+Changes affect Todo create/read, imported-source identity and duplicate
+prevention, automatic scheduling, the compensation Run endpoint, event and
+interaction projection, and acceptance. Repository state
 transitions are compare-and-set operations so duplicate schedulers or operator
 retries cannot move a Todo backwards. Context creation and Todo persistence are
 not one cross-store transaction; dispatch therefore resumes from an already

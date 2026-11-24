@@ -12,6 +12,7 @@ if TYPE_CHECKING:
         TodoRecord,
         TodoStatus,
     )
+    from agentclaw.community.core.task.todos.source_models import TodoSourceInput
     from agentclaw.community.core.task.todos.stage_models import (
         TodoParticipantBinding,
         TodoStageRecord,
@@ -32,6 +33,7 @@ class TodoRepositoryProtocol(Protocol):
         bot_id: str | None,
         bot_name: str | None,
         created_by: str,
+        source: TodoSourceInput | None = None,
     ) -> TodoRecord: ...
 
     @abstractmethod

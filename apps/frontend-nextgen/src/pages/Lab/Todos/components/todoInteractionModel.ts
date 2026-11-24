@@ -7,6 +7,13 @@ export type InteractionEntry =
 
 export type TargetEntry = Exclude<InteractionEntry, { kind: 'notice' }>;
 
+export interface InteractionReplyReference {
+  eventId: string;
+  floor: number;
+  label: string;
+  content: string;
+}
+
 export interface ArtifactPresentation {
   icon: 'file' | 'link' | 'code';
   title: string;
@@ -34,6 +41,10 @@ function payloadText(item: TodoEvent, key: 'content' | 'objective'): string {
 function payloadId(item: TodoEvent, key: string): string {
   const value = item.payload[key];
   return typeof value === 'string' ? value : '';
+}
+
+export function replyToEventId(item: TodoEvent): string | undefined {
+  return payloadId(item, 'reply_to_event_id') || undefined;
 }
 
 export function interactionContent(item: TodoEvent): string {
@@ -203,6 +214,38 @@ function previewText(value: string, maxLength = 60): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
   const characters = Array.from(normalized);
   return characters.length > maxLength ? `${characters.slice(0, maxLength).join('')}…` : normalized;
+}
+
+function replyContent(entry: TargetEntry): string {
+  if (entry.kind === 'message') return previewText(interactionContent(entry.event)) || '该互动未包含文本内容。';
+  if (entry.artifact.kind === 'text') return previewText(entry.artifact.content.text) || entry.artifact.artifactName;
+  const presentation = artifactPresentation(entry.artifact);
+  return previewText(`${presentation.title} · ${presentation.meta}`);
+}
+
+export function indexReplyReferences(
+  entries: InteractionEntry[],
+  botName: string,
+  humanName: string,
+): Map<string, InteractionReplyReference> {
+  const indexed = new Map<string, InteractionReplyReference>();
+  entries.forEach((entry, index) => {
+    if (entry.kind === 'notice') return;
+    const eventId = entry.kind === 'message' ? entry.event.eventId : entry.event?.eventId;
+    if (!eventId) return;
+    indexed.set(eventId, {
+      eventId,
+      floor: index + 1,
+      label:
+        entry.kind === 'artifact'
+          ? '产物'
+          : entry.event.actorType === 'bot'
+            ? botName
+            : humanName,
+      content: replyContent(entry),
+    });
+  });
+  return indexed;
 }
 
 export function rejectionQuote(

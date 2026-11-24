@@ -664,14 +664,15 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The ten versioned Todo template management operations are also Space-scoped
 # rather than Bot-addressed: none 159 -> 169. The five template-driven stage
 # lifecycle operations (create-from-template, stage listing, outcome, resume,
-# and cancel) also have no Bot dimension: none 169 -> 174. The standard
-# evaluation workflow adds seven Bot-path-addressed user-scoped operations under
+# and cancel) also have no Bot dimension: none 169 -> 174. The three Dima Todo
+# source reads have no Bot dimension: none 174 -> 177. The standard evaluation
+# workflow adds seven Bot-path-addressed user-scoped operations under
 # /bots/{bot_id}/eval: path 226 -> 233. Admin Caller expiry correction adds one
 # Bot-addressed operation: path 233 -> 234. Read-only Caller status adds one
 # Bot-path operation: path 234 -> 235. Bot MCP config read and update add two
 # Bot-path operations: path 235 -> 237. Dedicated recycle operation query
 # adds one OWNER-only Bot-path read: path 237 -> 238.
-_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 174}
+_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 177}
 
 
 def _schema() -> dict:
@@ -899,10 +900,11 @@ def test_the_pinned_number_of_operations_take_it():
     # operation: 318 -> 319. The ten versioned Todo template management
     # operations are Space-scoped and explicitly user-scoped: 319 -> 329.
     # The five template-driven stage lifecycle operations are also explicitly
-    # user-scoped: 329 -> 334. Bot MCP config read and update both name the
-    # acting user: 334 -> 336.
-    # Dedicated recycle operation query adds one OWNER-only read: 336 -> 337.
-    assert len(taking) == 337
+    # user-scoped: 329 -> 334. The three Dima Todo source reads are Human-scoped
+    # and explicitly user-scoped: 334 -> 337. Bot MCP config read and update
+    # both name the acting user: 337 -> 339. Dedicated recycle operation query
+    # adds one OWNER-only read: 339 -> 340.
+    assert len(taking) == 340
 
 
 def test_the_exempt_operations_take_none():

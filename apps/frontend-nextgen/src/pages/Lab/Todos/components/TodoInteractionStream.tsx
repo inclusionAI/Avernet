@@ -1,16 +1,18 @@
 import { Button } from '@/components/ui/Button';
 import type { TodoAcceptanceTarget, TodoArtifact } from '@/domain/todos/models';
 import { cn } from '@/utils/cn';
-import { Bot, Pause } from 'lucide-react';
+import { Bot, Pause, Reply } from 'lucide-react';
 import { TodoInteractionActorHeader } from './TodoInteractionActorHeader';
 import { TodoInteractionArtifactEntry } from './TodoInteractionArtifactEntry';
 import {
   formatInteractionTime,
   interactionContent,
+  replyToEventId,
   rejectionQuote,
   rejectionTargets,
   targetKey,
   type InteractionEntry,
+  type InteractionReplyReference,
   type TargetEntry,
 } from './todoInteractionModel';
 
@@ -45,6 +47,45 @@ function RejectionQuotes({
         );
       })}
     </div>
+  );
+}
+
+function ReplyQuote({ reference }: { reference?: InteractionReplyReference }) {
+  return (
+    <blockquote className="m-0 mt-3 rounded-r-lg border-l-2 border-primary/45 bg-muted/45 px-3 py-2">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <span className="text-primary">{reference ? `f${reference.floor}` : '原互动'}</span>
+        {reference ? <span aria-hidden>·</span> : null}
+        {reference ? <span>{reference.label}</span> : null}
+      </div>
+      <p className="m-0 mt-1 line-clamp-2 break-words text-xs leading-5 text-foreground/80">
+        {reference?.content ?? '原内容暂不可用'}
+      </p>
+    </blockquote>
+  );
+}
+
+function ReplyAction({
+  floor,
+  disabled,
+  onClick,
+}: {
+  floor: number;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className="mt-2 h-7 rounded-md px-2 text-xs text-muted-foreground"
+      aria-label={`回复 f${floor}`}
+      disabled={disabled}
+      onClick={onClick}
+      leftIcon={<Reply className="size-3.5" aria-hidden />}
+    >
+      回复
+    </Button>
   );
 }
 
@@ -98,7 +139,10 @@ interface TodoInteractionStreamProps {
   humanName: string;
   humanAvatarUrl?: string;
   busyArtifactId: string | null;
+  replyReferences: Map<string, InteractionReplyReference>;
+  replyEnabled: boolean;
   onToggleTarget: (target: TodoAcceptanceTarget) => void;
+  onReply: (target: InteractionReplyReference) => void;
   onOpenFile: (artifact: Extract<TodoArtifact, { kind: 'file' }>) => void;
 }
 
@@ -112,7 +156,10 @@ export function TodoInteractionStream({
   humanName,
   humanAvatarUrl,
   busyArtifactId,
+  replyReferences,
+  replyEnabled,
   onToggleTarget,
+  onReply,
   onOpenFile,
 }: TodoInteractionStreamProps) {
   if (entries.length === 0) {
@@ -136,6 +183,16 @@ export function TodoInteractionStream({
           id: entry.kind === 'message' ? entry.event.eventId : entry.artifact.artifactId,
           floor,
         };
+        const replyReference =
+          entry.kind === 'message'
+            ? replyReferences.get(entry.event.eventId)
+            : entry.event
+              ? replyReferences.get(entry.event.eventId)
+              : undefined;
+        const persistedReplyEventId = entry.kind === 'message' ? replyToEventId(entry.event) : undefined;
+        const persistedReplyReference = persistedReplyEventId
+          ? replyReferences.get(persistedReplyEventId)
+          : undefined;
         return (
           <li
             key={entry.id}
@@ -165,24 +222,43 @@ export function TodoInteractionStream({
                   <p className="m-0 mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
                     {interactionContent(entry.event)}
                   </p>
+                  {persistedReplyEventId ? <ReplyQuote reference={persistedReplyReference} /> : null}
                   <RejectionQuotes
                     targets={rejectionTargets(entry.event)}
                     entryByTarget={entryByTarget}
                     botName={botName}
                     humanName={humanName}
                   />
+                  {replyReference ? (
+                    <ReplyAction
+                      floor={floor}
+                      disabled={!replyEnabled}
+                      onClick={() => onReply(replyReference)}
+                    />
+                  ) : null}
                 </div>
               </article>
             ) : (
-              <TodoInteractionArtifactEntry
-                entry={entry}
-                botId={botId}
-                botName={botName}
-                humanName={humanName}
-                humanAvatarUrl={humanAvatarUrl}
-                busy={busyArtifactId === entry.artifact.artifactId}
-                onOpenFile={onOpenFile}
-              />
+              <div className="min-w-0">
+                <TodoInteractionArtifactEntry
+                  entry={entry}
+                  botId={botId}
+                  botName={botName}
+                  humanName={humanName}
+                  humanAvatarUrl={humanAvatarUrl}
+                  busy={busyArtifactId === entry.artifact.artifactId}
+                  onOpenFile={onOpenFile}
+                />
+                {replyReference ? (
+                  <div className="pl-[52px]">
+                    <ReplyAction
+                      floor={floor}
+                      disabled={!replyEnabled}
+                      onClick={() => onReply(replyReference)}
+                    />
+                  </div>
+                ) : null}
+              </div>
             )}
           </li>
         );

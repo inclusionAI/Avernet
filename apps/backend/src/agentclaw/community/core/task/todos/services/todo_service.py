@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Iterable
+from urllib.parse import urlsplit
 
 from injector import inject
 
@@ -34,6 +36,7 @@ from agentclaw.community.core.task.todos.models import (
     MAX_BOT_ID_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EVENT_ID_LENGTH,
+    MAX_INTERACTION_MENTIONS,
     MAX_MESSAGE_LENGTH,
     MAX_TITLE_LENGTH,
     MAX_TODO_ID_LENGTH,
@@ -42,12 +45,21 @@ from agentclaw.community.core.task.todos.models import (
     TodoAcceptanceTargetKind,
     TodoArtifactRecord as TodoEventArtifactRecord,
     TodoEventRecord,
+    TodoInteractionMention,
+    TodoInteractionMentionActorType,
     TodoPage,
     TodoRecord,
     TodoStatus,
 )
 from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
+from agentclaw.community.core.task.todos.source_models import (
+    MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
+    MAX_TODO_SOURCE_ITEM_ID_LENGTH,
+    MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
+    MAX_TODO_SOURCE_URL_LENGTH,
+    TodoSourceInput,
+)
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationEvent,
     TodoCollaborationEventRequest,
@@ -66,6 +78,9 @@ _INTERACTION_EVENT_TYPES = {
     _TASK_COMPLETED_EVENT,
     _TASK_REJECTED_EVENT,
     _ARTIFACT_REPORTED_EVENT,
+}
+_REPLYABLE_INTERACTION_EVENT_TYPES = _INTERACTION_EVENT_TYPES - {
+    _TASK_COMPLETED_EVENT,
 }
 
 
@@ -135,6 +150,7 @@ class TodoService(TodoServiceProtocol):
         title: str,
         description: str,
         bot_id: str,
+        source: TodoSourceInput | None = None,
         env: str | None = None,
     ) -> TodoRecord:
         normalized_space_id = self._space_id(space_id)
@@ -146,6 +162,7 @@ class TodoService(TodoServiceProtocol):
             description, "description", MAX_DESCRIPTION_LENGTH
         )
         normalized_bot_id = self._required_text(bot_id, "bot_id", MAX_BOT_ID_LENGTH)
+        normalized_source = self._source(source)
         space, _member = self._space_access.require_space_member(
             space_id=normalized_space_id,
             user_id=normalized_actor_id,
@@ -158,14 +175,17 @@ class TodoService(TodoServiceProtocol):
             bot_id=normalized_bot_id,
         )
         require_todo_bot_owner_id(bot)
-        return self._repository.create_todo(
-            space_id=normalized_space_id,
-            title=normalized_title,
-            description=normalized_description,
-            bot_id=normalized_bot_id,
-            bot_name=todo_bot_name(bot, normalized_bot_id),
-            created_by=normalized_actor_id,
-        )
+        create_args: dict[str, Any] = {
+            "space_id": normalized_space_id,
+            "title": normalized_title,
+            "description": normalized_description,
+            "bot_id": normalized_bot_id,
+            "bot_name": todo_bot_name(bot, normalized_bot_id),
+            "created_by": normalized_actor_id,
+        }
+        if normalized_source is not None:
+            create_args["source"] = normalized_source
+        return self._repository.create_todo(**create_args)
 
     async def start_todo(
         self, *, todo_id: str, actor_id: str, env: str | None = None
@@ -227,15 +247,21 @@ class TodoService(TodoServiceProtocol):
         actor_id: str,
         author_name: str | None,
         message: str,
+        reply_to_event_id: str | None = None,
+        mentions: tuple[TodoInteractionMention, ...] = (),
         env: str | None = None,
     ) -> TodoEventRecord:
-        todo, normalized_actor_id = self._load_todo(
+        todo, normalized_actor_id, space = self._load_todo_with_space(
             todo_id=todo_id, actor_id=actor_id, env=env
         )
         normalized_author_name = self._optional_text(
             author_name, "author_name", MAX_ACTOR_NAME_LENGTH
         )
         normalized_message = self._required_text(message, "message", MAX_MESSAGE_LENGTH)
+        normalized_reply_to_event_id = self._optional_text(
+            reply_to_event_id, "reply_to_event_id", MAX_EVENT_ID_LENGTH
+        )
+        normalized_mentions = self._interaction_mentions(mentions)
         if todo.status is not TodoStatus.PENDING_ACCEPTANCE:
             raise TodoStateConflictError("Interactions require pending acceptance")
         context_id = self._require_context(todo)
@@ -243,6 +269,18 @@ class TodoService(TodoServiceProtocol):
             collab_context_id=context_id,
             actor_id=normalized_actor_id,
         )
+        self._validate_interaction_reply(
+            context.events,
+            reply_to_event_id=normalized_reply_to_event_id,
+        )
+        for mention in normalized_mentions:
+            resolve_todo_bot(
+                bot_repository=self._bot_repository,
+                space=space,
+                actor_id=normalized_actor_id,
+                bot_id=mention.actor_id,
+            )
+
         # Claim the interaction synchronously before delivering it to B. This
         # closes the product-state window where a persisted Human event can
         # still be followed by another create-interaction request.
@@ -254,6 +292,16 @@ class TodoService(TodoServiceProtocol):
         payload: dict[str, Any] = {"content": normalized_message}
         if normalized_author_name is not None:
             payload["author_name"] = normalized_author_name
+        if normalized_reply_to_event_id is not None:
+            payload["reply_to_event_id"] = normalized_reply_to_event_id
+        if normalized_mentions:
+            payload["mentions"] = [
+                {
+                    "actor_type": mention.actor_type.value,
+                    "actor_id": mention.actor_id,
+                }
+                for mention in normalized_mentions
+            ]
         event = self._collaboration.append_event(
             collab_context_id=context_id,
             request=TodoCollaborationEventRequest(
@@ -393,13 +441,23 @@ class TodoService(TodoServiceProtocol):
     def _load_todo(
         self, *, todo_id: str, actor_id: str, env: str | None
     ) -> tuple[TodoRecord, str]:
+        todo, normalized_actor_id, _space = self._load_todo_with_space(
+            todo_id=todo_id,
+            actor_id=actor_id,
+            env=env,
+        )
+        return todo, normalized_actor_id
+
+    def _load_todo_with_space(
+        self, *, todo_id: str, actor_id: str, env: str | None
+    ) -> tuple[TodoRecord, str, SpaceRecord]:
         normalized_todo_id = self._required_text(todo_id, "todo_id", MAX_TODO_ID_LENGTH)
         normalized_actor_id = self._required_text(
             actor_id, "actor_id", MAX_ACTOR_ID_LENGTH
         )
         todo = self._repository.get_todo(todo_id=normalized_todo_id)
-        self._require_todo_space_member(todo, normalized_actor_id, env)
-        return todo, normalized_actor_id
+        space = self._require_todo_space_member(todo, normalized_actor_id, env)
+        return todo, normalized_actor_id, space
 
     def _require_context(self, todo: TodoRecord) -> str:
         if not todo.collab_context_id:
@@ -434,6 +492,54 @@ class TodoService(TodoServiceProtocol):
             created_at=event.created_at,
             payload=dict(event.payload),
         )
+
+    @classmethod
+    def _interaction_mentions(
+        cls,
+        mentions: tuple[TodoInteractionMention, ...],
+    ) -> tuple[TodoInteractionMention, ...]:
+        if not isinstance(mentions, tuple):
+            raise ValidationError("mentions must be a tuple")
+        if len(mentions) > MAX_INTERACTION_MENTIONS:
+            raise ValidationError("mentions exceeds the maximum count")
+
+        normalized: list[TodoInteractionMention] = []
+        seen: set[tuple[TodoInteractionMentionActorType, str]] = set()
+        for mention in mentions:
+            if not isinstance(mention, TodoInteractionMention):
+                raise ValidationError("mentions contains an invalid mention")
+            try:
+                actor_type = TodoInteractionMentionActorType(mention.actor_type)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("mention actor_type is invalid") from exc
+            actor_id = cls._required_text(
+                mention.actor_id,
+                "mention actor_id",
+                MAX_BOT_ID_LENGTH,
+            )
+            key = (actor_type, actor_id)
+            if key in seen:
+                raise ValidationError("mentions must be unique")
+            seen.add(key)
+            normalized.append(
+                TodoInteractionMention(actor_type=actor_type, actor_id=actor_id)
+            )
+        return tuple(normalized)
+
+    @staticmethod
+    def _validate_interaction_reply(
+        events: Iterable[TodoCollaborationEvent],
+        *,
+        reply_to_event_id: str | None,
+    ) -> None:
+        if reply_to_event_id is None:
+            return
+        if not any(
+            event.event_id == reply_to_event_id
+            and event.event_type in _REPLYABLE_INTERACTION_EVENT_TYPES
+            for event in events
+        ):
+            raise ValidationError("reply_to_event_id is not a visible interaction event")
 
     @classmethod
     def _acceptance_message(
@@ -667,3 +773,42 @@ class TodoService(TodoServiceProtocol):
             raise ValidationError("keyword must be a string")
         keyword = value.strip()
         return keyword or None
+
+    @classmethod
+    def _source(cls, value: TodoSourceInput | None) -> TodoSourceInput | None:
+        if value is None:
+            return None
+        if not isinstance(value, TodoSourceInput):
+            raise ValidationError("source must be a TodoSourceInput")
+        if value.source_type != "dima":
+            raise ValidationError("source type is invalid")
+        url = cls._optional_text(value.url, "source url", MAX_TODO_SOURCE_URL_LENGTH)
+        if url is not None:
+            parsed = urlsplit(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValidationError("source url is invalid")
+        updated_at = cls._optional_text(
+            value.updated_at,
+            "source updated_at",
+            MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
+        )
+        if updated_at is not None:
+            try:
+                datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValidationError("source updated_at is invalid") from exc
+        return TodoSourceInput(
+            source_type="dima",
+            container_id=cls._required_text(
+                value.container_id,
+                "source container_id",
+                MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
+            ),
+            item_id=cls._required_text(
+                value.item_id,
+                "source item_id",
+                MAX_TODO_SOURCE_ITEM_ID_LENGTH,
+            ),
+            url=url,
+            updated_at=updated_at,
+        )

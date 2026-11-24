@@ -1,5 +1,5 @@
 import { notifySuccess } from '@/components/ui/notify';
-import type { TodoStatus } from '@/domain/todos/models';
+import type { CreateTodoInput, TodoStatus } from '@/domain/todos/models';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { addTodo, loadTodos } from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
@@ -80,7 +80,7 @@ export function useTodos() {
   }, []);
 
   const create = useCallback(
-    async (input: { title: string; description: string; botId: string }) => {
+    async (input: Omit<CreateTodoInput, 'spaceId'>) => {
       if (currentSpaceId === undefined) {
         safeReportError(new Error('当前空间未就绪'), { title: '创建待办失败' });
         return null;
