@@ -88,6 +88,62 @@ def test_release_routes_teclaw_to_create_teclaw_bot():
 
 
 @pytest.mark.unit
+def test_release_routes_teclaw_without_default_tag_is_unchanged():
+    svc, baas = _svc("teclaw")
+    artifact = {**_ARTIFACT, "engine_ext": {"stage": "release"}}
+    svc.release(
+        _BOT, user_id="u1", migration_path="", publish_stage=PublishStage.ONLINE,
+        delivery=DeliveryArtifact(artifact),
+    )
+    assert (
+        baas.create_teclaw_bot.call_args.kwargs["config_artifact"] == artifact
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "default_tag,engine_stage",
+    [
+        ("eval", "eval"),
+        ("default", "eval-default"),
+    ],
+)
+def test_release_routes_teclaw_delivery_artifact_without_post_processing(default_tag, engine_stage):
+    svc, baas = _svc("teclaw")
+    # The eval flow is responsible for composing the final TeClaw stage at the
+    # delivery-composition seam. BotBuildService must hand it to BaaS unchanged.
+    artifact = {
+        **_ARTIFACT,
+        "engine_ext": {
+            "stage": engine_stage,
+            "default_tag": default_tag,
+            "bot_id": "keep-me",
+        },
+    }
+    svc.release(
+        _BOT, user_id="u1", migration_path="", publish_stage=PublishStage.EVAL,
+        delivery=DeliveryArtifact(artifact),
+        ext_info={"default_tag": default_tag},
+    )
+    assert baas.create_teclaw_bot.call_args.kwargs["config_artifact"] == artifact
+
+
+@pytest.mark.unit
+def test_upgrade_routes_teclaw_delivery_artifact_without_post_processing():
+    svc, baas = _svc("teclaw")
+    artifact = {
+        **_ARTIFACT,
+        "engine_ext": {"stage": "eval-default", "default_tag": "default"},
+    }
+    svc.upgrade(
+        "BOT-t", _BOT, user_id="u1", migration_path="",
+        publish_stage=PublishStage.EVAL, delivery=DeliveryArtifact(artifact),
+        ext_info={"default_tag": "default"},
+    )
+    assert baas.update_teclaw_bot.call_args.kwargs["config_artifact"] == artifact
+
+
+@pytest.mark.unit
 def test_release_routes_arca_to_create_bot_unchanged():
     svc, baas = _svc("baas")
     svc.release(
