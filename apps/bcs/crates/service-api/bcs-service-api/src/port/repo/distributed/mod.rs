@@ -2,6 +2,7 @@
 //! Providers must pass the reusable contract suite before serving traffic.
 pub mod common;
 pub mod dispatch;
+pub mod group_round;
 pub mod inbox;
 pub mod ownership;
 pub mod result;

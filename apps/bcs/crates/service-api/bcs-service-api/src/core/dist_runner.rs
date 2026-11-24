@@ -11,6 +11,11 @@ pub struct EvaluationContext<'a> {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RunnerInput {
+    /// Strict group source: identity, deadline and pinned history are explicit.
+    /// Existing Start retains its legacy meaning; consumers must opt in.
+    GroupStart {
+        input: RoundInput,
+    },
     Start {
         tid: Tid,
         payload: Payload,

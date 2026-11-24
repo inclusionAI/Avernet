@@ -52,6 +52,93 @@
 - [ ] 实现 `DistGroupDirectoryPort::{resolve,load_workflow}` 及发布写侧，Session 固定引用、活动/可恢复 context 的修订不回收；加载校验 scope 和 digest，缺失、旧格式或损坏时明确报错。测试 `publish_v2_restart_loads_pinned_v1`：发布 v1 → 创建 S → 发布 v2 → 清空进程缓存重启；S 继续用 v1 原绑定，新 context 用 v2；删掉/篡改 v1 不得回退 v2。
 - [ ] RED/GREEN：`cargo test -p bcs-dist-store --test conformance_workflow_revision`，按 R25 调真实目录 contract harness，并跑双方言迁移；W 未交付不装配 fixture 作为群目录。
 
+## 分阶段执行与放行门槛
+
+Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者不重复计算完成度。当前位于 **Stage 1，部分完成，D0 未冻结**。已有模型、正向原型和测试继续复用，不从零重写，也不把候选接口视作冻结合同。每次推进在 [validation.md](validation.md) 记录具体版本、命令、通过/失败/跳过项及证据层级。
+
+| Stage | 目标与任务映射 | 进入条件 | 退出条件 |
+| --- | --- | --- | --- |
+| **1：完成 T1，验证并冻结 D0** | S1.1～S1.5，见下文；对应 T1 及合同决策 | 当前即可继续 | 五项全部完成，冻结记录可追溯，无未裁决的协议缺口 |
+| **2：基础持久化与纯执行** | T2、T3、T4、T5、W；P 的 provider 交付并行推进 | Stage 1 完成 | 各任务实现及集中合同通过；双方言迁移、W 修订恢复通过；T2 provider GREEN 必须有 P |
+| **3：下游执行与 Worker 闭环** | T6、T7 | Stage 2 完成；配套联合版本可构建，P 能支持真实角色 | 完整结果交付、停止屏障、隔离核实、独立 Feed 和跨轮恢复通过；不是只有模型 GREEN |
+| **4：公开协议与访问边界** | T8 | Stage 3 完成后进行真实读写集成 | HTTP/Card/Get/List/SSE/cancel 合同与授权负测通过，旧 RPC 回归通过 |
+| **5：装配、跨进程故障与上线评估** | T9，复核 P/W 及各阶段交付 | Stage 2～4 通过，真实依赖和配置齐备 | Singlebox 独立进程故障矩阵与容量/恢复验收通过，验证记录明确可用范围；部署另行授权 |
+
+**并行规则：** Stage 1 未退出前，只继续合同与验证原型，不放行 T2/T7 的生产共享写入。Stage 1 退出后，Stage 2 的 T3/T5 可并行，T2/T4 先对齐联合合同，W 在 T5 校验后交付。T8 的纯协议/替身测试可在 Stage 2～3 预先开展，但其真实集成和 Stage 4 退出必须等待 Stage 3。P 的准备可提前进行，不能用准备工作或替身测试宣称 provider 已交付。
+
+### Stage 1：五项冻结工作包
+
+本阶段完成的是**可实施的合同和可执行的正向协议证据**，不是提前实现全部 T2～T9。模型/模拟接收端可以验证算法和故障切面，但必须指出与真实合同的映射；不能用测试中的布尔值替代未实现的外部效果。完整生产 provider 和跨进程部署验收留在后续阶段；会改变协议可行性的能力缺失不能推迟。
+
+#### S1.1 请求、受理与证明生命周期
+
+**归属：** T1；后续由 T2/T4/T7 实现生产存储。
+**主要位置：** `group_round.rs` 模型及 repo、集中 `group_round_repo_contract_tests`、`bcs-dist-store/tests/group_round_support/{reservation,lifecycle}.rs` 与对应测试。
+
+- [ ] 明确原请求、准备/废弃记录、Accepted、终态证明、冷证明与过期墓碑的物理 key、唯一写者和 CAS/转存边界；保持 checkpoint 为唯一执行权来源。
+- [ ] 在现有原型上完成“受理 → 完成 → 冷转存 → 读回确认 → checkpoint 压缩 → owner 交接 → 原请求重试 → 结果过期”的测试；未提交不可公开，过期不能重跑，旧写不能复活。
+- [ ] 补齐预留未决、同键竞争、失败释放、无活跃 owner 激活以及 Accepted 后无 hint 的自动发现；不手工注入已知 Sid 代替发现。回收前先证明旧提交已被栅栏阻断，不能直接删键或仅靠 TTL。
+- [ ] 对目录、请求记录、历史证明和单记录字节量给出有界方案；覆盖容量满时拒绝、恢复及回收，不把原型固定 16 项的上限作为生产持续运行证明。
+
+**退出证据：** 生命周期与全部写入窗口的 RED→GREEN，跨轮/接管/压缩后原请求仍恢复同一 Tid；以证据证明安全回收，或明确拒绝回收的容量限制。
+
+#### S1.2 公共列表快照与游标
+
+**归属：** T1；后续由 T4/T8 实现生产索引与协议。
+**主要位置：** `group_round_support/listing.rs`、列表合同/集中测试、`contract-decisions.md`。
+
+- [ ] 完善双重采集或等价覆盖屏障，证明包含查询开始前已提交的所有 Task；两个 Sid 并发提交与索引延迟时，不能返回遗漏数据的 total。
+- [ ] 用不可变 cut 实现可执行的分页原型：固定排序 `(status_updated_at DESC, tid ASC)`、筛选、total、行投影与页大小；后页不能重新读取实时状态。
+- [ ] 游标绑定 scope/group、筛选、cut、末键和有效期；覆盖跨主体、篡改、撤权、过期、版本清理，以及热转冷/新增/状态更新与翻页交错。
+- [ ] 给出快照保留、到期拒绝、最大扫描/批量读取成本；依赖不足时有界报错，不无限等索引追平。
+
+**退出证据：** 跨页不重复、不漏项、total 不变；权限或版本失效必须拒绝续页；模型测试和真实索引待实现部分分别说明。
+
+#### S1.3 完整编码预算与失败收尾
+
+**归属：** T1；后续由 T4/T6/T7/T8 落实各边界。
+**主要位置：** `RoundBudgetProfile`、test-support 的有界读取参考、投影/Feed 编码夹具和停止证据测试。
+
+- [ ] 确定默认/非默认投影、历史、分页、入站、内部事件/批与公开响应的 profile；候选值只有通过实际编码验证才冻结。
+- [ ] 同一组有序 Artifact/Parts 贯穿入站、内部 Feed 和公开 Get/SSE 编码，包含外壳、JSON 转义、历史、摘要引用和解引用；覆盖 B−1/B/B+1，不只验证裸字节读取。
+- [ ] 大产物引用在发布/重放完成前保持 pin，覆盖内容损坏、引用缺失和恢复；内部事件能写不等于公开帧能完整还原。
+- [ ] 超大中间结果产生有界业务失败，保留独立核验的停止事实；有兄弟 attempt 未停止时仍不得提交整轮终态。补齐已有 `oversized_intermediate_result_is_bounded_failure` 的完整屏障场景。
+
+**退出证据：** 成功提交的产物可以完整读回；超限不截断为成功、不走存储损坏隔离，也不因结果读取失败伪造停止。
+
+#### S1.4 联合版本与合同映射
+
+**归属：** T1 接口对齐；生产 Connector/Worker 改造仍属 T6/T7。
+**主要位置：** model、Service API、集中 harness、锁定依赖的 Connector report / Inbox / Worker / TaskFeed 合同；候选变更记录在合同决策中。
+
+- [ ] 固定可复现的联合版本或逐项最小适配清单，列出原型到真实合同的字段、调用和能力映射；不能只锁 Worker 而混用不兼容 Connector/Inbox。
+- [ ] 验证 `ConnectorAdmission/admit_connector`、typed `GroupStart`、终态/停止证据及两种 Feed 发布许可的消费者兼容性；未知事件 ID 不得靠伪造补齐。
+- [ ] 通过合同级夹具证明所选 CAS/所有权/原子范围可表达原型，不假设多键事务；对需要修改的正式合同更新集中测试和兼容性分析。
+- [ ] 明确剩余实际装配验证交给哪个 Stage/T 任务；若映射本身不成立，回到 S1.1～S1.3 修订，不能登记成后续普通实现事项后放行。
+
+**退出证据：** 版本/能力/消费者矩阵与可运行的合同兼容测试，无未解决的接口冲突。此门槛不要求全部真实 provider 和跨进程部署已经完成。
+
+#### S1.5 门禁、审查与 D0 冻结记录
+
+**归属：** T1 最终交付；消费 S1.1～S1.4 的证据。
+
+- [ ] 执行全部 T1 测试、受影响模块套件、`cargo check --workspace --all-targets`、API/R25 等适用门禁；确认执行了预期测试，不能把零测试、SKIP 或包装脚本 exit 0 算通过。
+- [ ] 修复或替换旧 API 检查器的不兼容调用，形成真实基线/工作树公共 API 差异及版本传播分析；不在脏工作区执行强制 checkout。接口导出本身不能替代差异门禁。
+- [ ] 完成最终审查和对应修复验证，逐项核对 S1.1～S1.4；全量测试失败、中止或未跑部分必须列出原因与影响，不能以受影响套件通过冒充全量通过。必需冻结检查 blocked 时保持 D0 未冻结。
+- [ ] 资源受限时保持 `-j 1` / 单测试线程、日志落盘和资源监测；触及保护阈值停止全量构建。共享缓存清理需明确授权，不通过盲目重跑消耗剩余磁盘。
+- [ ] 在 `contract-decisions.md` 记录冻结版本、参数、权限/撤权矩阵、协议与测试映射，在 `validation.md` 记录实际命令/结果/限制；只有所有必需项通过、重要审查问题闭环后，才将 D0 改为已冻结并放行 Stage 2。
+
+**提交与部署边界：** 阶段完成不自动授权 git commit、push、合并或部署；保留既有用户授权边界。D0 冻结是设计实施门槛，不是上线批准。
+
+### 后续 Stage 的具体交付
+
+- **Stage 2（T2/T3/T4/T5/W）：** 将 Stage 1 协议落到真实 repo、双方言持久化、冻结历史输入、工作流修订及纯 Runner。P 并行交付；缺 P 时可以完成明确标记的本地实现，但 T2 provider GREEN 和整个 Stage 2 退出均保持 blocked。不可把原型 fixture 当作 W 或生产存储。
+- **Stage 3（T6/T7）：** 接通真实下游、Connector/Inbox/Runner、结果归档、统一停止屏障、核实队列、Supervisor、独立 Feed 及目录回收。执行实际 A/B 双轮和各故障窗口；同时验证 Stage 1 的合同没有被实现弱化。
+- **Stage 4（T8）：** 将已验证能力映射到公开 HTTP+JSON/Card/SSE，完成来源隔离、当前授权、快照分页与旧 RPC 回归。仅在全部相应能力已实现时声明 Card，不因阶段编号扩大公开范围。
+- **Stage 5（T9）：** 使用真实 P/W 和独立进程验证死亡接管、provider 重启、停止未知、目录持续容量与 Feed 持续故障；记录未开放能力和告警/恢复方案。任何上线动作仍需单独授权。
+
+下文保留任务级文件、接口与测试细节；执行时同时遵守所属 Stage 的门槛。S1 工作包补全 T1 的冻结责任，不删除后续 T 任务的生产验收，也不要求同一测试结果重复执行来凑阶段完成度。
+
 ## 文件与实施顺序
 
 路径均相对 `apps/bcs/`；Cargo 命令在该目录执行。除标明的现有文件外，`新增` 文件和所列 `--test` 目标是**计划产物**。各任务先创建测试并运行得 RED，不能把“零项测试”当通过；每次 GREEN 后形成单独可审查提交，不混入全局格式化。
@@ -70,9 +157,11 @@
 
 ### T1：冻结跨进程合同，不先写 HTTP handler
 
+**执行状态：Stage 1 部分完成，D0 未冻结。** 已有 wire、正向协议原型、候选 repo/Runner 接口及审查修复证据见 [T1 验证记录](validation.md)。候选接口已进入工作树不代表已冻结；剩余工作按 S1.1～S1.5 收口。旧 `resolve_commit` 的反例只是基线能力探查，不是必须改变旧 API 的冻结门槛。模型通过不等于真实 provider/联合版本通过，Stage 1 退出前不放行 T2/T7。
+
 **文件：** 新增 `crates/contracts/bcs-dist-model/src/group_round.rs`、`crates/service-api/bcs-service-api/src/port/repo/distributed/group_round.rs`、`crates/test-support/bcs-test-support/src/contract/distributed/group_round.rs`、`crates/contracts/bcs-dist-model/tests/group_round_wire.rs`；修改各模块导出、`src/core/dist_runner.rs`（Service API）、相应 Cargo.toml 和 `Cargo.lock`。
 
-**接口草案：** `RoundKey { scope: TaskScope, group: GroupId, sid: Sid, tid: Tid, generation: u64 }`；`RoundInput { key, ordered_parts, workflow_ref, history_cut, execution_deadline }`；`Admission::{New, Replay, Busy, Conflict, Expired}`（New/Replay 带原身份和返回配置）；`TerminalProof` 绑定 RoundKey、受保护提交身份与结果/收尾证据。协议 DTO 不进模型；任何已有状态不能靠补默认 scope 或缺省 generation 自动升级。
+**接口草案（Stage 1 收口）：** `RoundKey { scope: TaskScope, group: GroupId, sid: Sid, tid: Tid, generation: NonZeroU64 }`（当前候选实现显式拒绝零代次）；`RoundInput { key, ordered_parts, workflow_ref, history_cut, execution_deadline }`；`Admission::{New, Replay, Busy, Conflict, Expired}`（New/Replay 带原身份和返回配置）；`TerminalProof` 绑定 RoundKey、受保护提交身份与结果/收尾证据。协议 DTO 不进模型；任何已有状态不能靠补默认 scope 或缺省 generation 自动升级。
 
 - [ ] 写 `frozen_identity_survives_reload` 和 `old_shape_cannot_guess_owner`，断言 `assert_eq!(reload(&input)?, input)`，旧格式缺 scope/generation 必须显式拒读。集中 harness 命名按 `<trait_snake>_contract_tests`。
 - [ ] RED：`cargo test -p bcs-dist-model --test group_round_wire`；预期缺类型或 wire 断言失败。
@@ -188,4 +277,4 @@
 
 ## 执行边界
 
-本文不批准 Runtime PR、协议默认值、数据迁移或部署。每个任务的命令和断言是**未来验收**；本次生成计划没有运行这些测试。T1 后 T3/T5 和 T8 的协议测试可并行；T2/T4 须先与在审分支协调，T7 和真实 E2E 不绕过依赖。
+本文不批准 Runtime PR、协议默认值上线、数据迁移执行或部署。任务中的未勾选命令和断言是**待完成验收**；已执行的阶段性证据以 `validation.md` 为准。本次重组只修改计划，不新增运行时验证结果。先完成 Stage 1 的 S1.1～S1.5 并冻结 D0，再按 Stage 2～5 推进；允许的并行仅限阶段表所列范围。T2/T4 须先与在审分支协调，T7 和真实 E2E 不绕过 P/W 或联合版本依赖。

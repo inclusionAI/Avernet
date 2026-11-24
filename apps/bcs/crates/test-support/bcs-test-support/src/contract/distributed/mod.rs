@@ -9,6 +9,7 @@
 
 pub mod admission;
 pub mod dispatch;
+pub mod group_round;
 pub mod inbox;
 pub mod output;
 pub mod runtime_safety;

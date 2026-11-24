@@ -23,6 +23,10 @@ uuid = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# hmac + hex are test-fixture-only: HMAC-SHA256 cursors for the S1.2 list
+# pagination prototype (production cursor signing/keys are T8, out of layer).
+hex.workspace = true
+hmac.workspace = true
 bcs-dist-connector-store.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 bcs-dist-projection = { workspace = true }

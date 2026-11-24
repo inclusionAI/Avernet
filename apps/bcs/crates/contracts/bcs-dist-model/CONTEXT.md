@@ -1,7 +1,25 @@
 # Distributed domain model
 
 Status: additive contract definitions, not an active runtime or deployed format.
-Crate version: `0.1.0`. This crate depends only on serde and serde_json.
+Crate version: `0.1.1`. This crate depends only on serde and serde_json.
+
+## T1 strict-group candidates (D0 not frozen)
+
+`group_round` adds opt-in round identity/input, original admission records and
+terminal-proof descriptors. Existing SessionSpec and persisted formats remain
+unchanged. Service API now has opt-in GroupStart/GroupRoundRepo candidates; see
+its distributed repository README for the 8.0.0 exhaustive-match compatibility boundary. No production
+provider writes the new records.
+Missing source/scope/generation and unsupported schema versions are rejected;
+generation starts at one. Proof descriptors grant no authority by themselves.
+The admitting store must validate ownership, referenced content and commit proof.
+
+The additive pre-1.0 patch release preserves existing wire shapes and requires
+workspace path consumers to rebuild. `group_round_wire` covers new serialization;
+`persistence_shape` remains the existing-format regression suite. The
+[T1 validation](../../../specs/2026-11-20-fsm-group-a2a-discussion/validation.md)
+records checkpoint prototype evidence and outstanding D0 blockers. Do not infer
+provider durability or a frozen Service API from these candidate records.
 
 ## Ownership and navigation
 
