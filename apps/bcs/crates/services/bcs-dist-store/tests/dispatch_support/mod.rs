@@ -115,10 +115,18 @@ impl Fixture {
         }
     }
     pub async fn cancel(&self, sequence: u64) -> CommittedCancelIntent {
+        self.cancel_with(sequence, "cancel", "user").await
+    }
+    pub async fn cancel_with(
+        &self,
+        sequence: u64,
+        id: &str,
+        reason: &str,
+    ) -> CommittedCancelIntent {
         let did = spec().did;
         let intent = CancelIntent {
-            request_id: RequestId("cancel".into()),
-            reason: Some("user".into()),
+            request_id: RequestId(id.into()),
+            reason: Some(reason.into()),
         };
         let sources = self
             .base

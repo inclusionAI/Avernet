@@ -219,17 +219,27 @@ fn apply_control(doc: &mut Document, intent: &Intent) -> Result<ReceiptResult, S
     match &intent.kind {
         EffectKind::CreateDispatch { .. } => Ok(ReceiptResult::Conflict),
         EffectKind::RequestCancel { intent: cancel, .. } => {
-            if let Some(old) = &doc.view.control.cancel {
-                return Ok(if old == cancel {
-                    ReceiptResult::Applied
-                } else {
-                    ReceiptResult::Conflict
-                });
+            // Distinct committed effects can share the same remote obligation.
+            // Keep each accepted request ID bound to its content even when it
+            // did not become the remote cancellation identity.
+            let changed_request = |old: &CancelIntent| {
+                old.request_id == cancel.request_id && old != cancel
+            };
+            if doc.view.control.cancel.as_ref().is_some_and(changed_request)
+                || doc.receipts.iter().any(|receipt| {
+                    receipt.result != ReceiptResult::Conflict
+                        && matches!(&receipt.intent.kind,
+                            EffectKind::RequestCancel { intent, .. } if changed_request(intent))
+                })
+            {
+                return Ok(ReceiptResult::Conflict);
             }
             if let Some(result) = superseded(doc) {
                 return Ok(result);
             }
-            doc.view.control.cancel = Some(cancel.clone());
+            if doc.view.control.cancel.is_none() {
+                doc.view.control.cancel = Some(cancel.clone());
+            }
             Ok(ReceiptResult::Applied)
         }
         EffectKind::PushInput { input, .. } => {

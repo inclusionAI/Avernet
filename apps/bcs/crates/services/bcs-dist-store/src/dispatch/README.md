@@ -46,7 +46,12 @@ A terminal dispatch retains its evidence and remains due until the Supervisor
 has submitted stable critical return evidence and calls `reschedule` with that
 exact revision. This clears due and returns `Ended`. An old revision returns
 `NeedsRecheck`; it cannot hide a new cancel/input obligation. A local Task ending
-does not by itself end a Dispatch or discard unresolved cancellation.
+does not by itself end a Dispatch or discard unresolved cancellation. Later
+authorized cancellations share the first intent and retain their own effect
+receipts; they do not replace the remote request or reset its observation.
+Changing the content of an already accepted cancellation ID is a conflict.
+A new request against a proven terminal dispatch records that outcome and
+evidence rather than creating another cancellation obligation.
 
 Claims require live membership for the claimant and `Dead` for takeover; Unknown
 is never eligibility. Resumption requires the exact prior holder and advances

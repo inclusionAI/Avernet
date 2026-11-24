@@ -53,7 +53,11 @@ pub trait DispatchControlPort: Send + Sync {
     /// Equal did with changed immutable content is a conflict, not successful NX.
     async fn create(&self, request: CreateCommittedDispatch)
     -> Result<IdempotentWrite, StoreError>;
-    /// Monotonic intent: replay cannot reset a later cancellation observation.
+    /// Monotonic intent: an authorized later request with a distinct ID shares
+    /// an existing cancellation obligation without replacing its identity or
+    /// resetting an observation. A retained successful request ID with different
+    /// content conflicts. A new request against proven terminal state returns
+    /// the terminal outcome and evidence; source/effect replay checks still apply.
     async fn request_cancel(
         &self,
         request: CommittedCancelIntent,
