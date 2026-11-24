@@ -8,6 +8,7 @@
   缺省,``list``/``dict`` 默认走 ``default_factory``,必填字段在前);
 - ``ActorContext`` 复用 ``service_api`` 既有定义(同一对象,不重定义)。
 """
+
 import dataclasses
 import inspect
 
@@ -170,6 +171,8 @@ COMMAND_FIELDS: dict[type, list[tuple[str, object]]] = {
     SwarmStageOutcomeCommand: [
         ("allocation_refs", []),
         ("reason", ""),
+        ("artifact_refs", ()),
+        ("output_bindings", ()),
     ],
     OpenOpportunityCommand: [
         ("collet_id", MISSING),
@@ -321,32 +324,20 @@ LIFECYCLE_SIGNATURES: dict[str, tuple] = {
 }
 
 GROUP_SIGNATURES: dict[str, tuple] = {
-    "select": _binding_ops(
-        "SingleSelectCommand", "ProfileOpAcceptedResult"
-    ),
-    "replace": _binding_ops(
-        "SingleReplaceCommand", "ProfileOpAcceptedResult"
-    ),
-    "release": _binding_ops(
-        "MethodStateChangeCommand", "ProfileOpAcceptedResult"
-    ),
+    "select": _binding_ops("SingleSelectCommand", "ProfileOpAcceptedResult"),
+    "replace": _binding_ops("SingleReplaceCommand", "ProfileOpAcceptedResult"),
+    "release": _binding_ops("MethodStateChangeCommand", "ProfileOpAcceptedResult"),
     "delegate": _binding_ops("SingleDelegateCommand", "CompositionEdgeResult"),
     "invite": _binding_ops("GroupMemberCommand", "ProfileOpAcceptedResult"),
     "add_member": _binding_ops("GroupMemberCommand", "ProfileOpAcceptedResult"),
-    "suspend_member": _binding_ops(
-        "GroupMemberCommand", "ProfileOpAcceptedResult"
-    ),
-    "resume_member": _binding_ops(
-        "GroupMemberCommand", "ProfileOpAcceptedResult"
-    ),
+    "suspend_member": _binding_ops("GroupMemberCommand", "ProfileOpAcceptedResult"),
+    "resume_member": _binding_ops("GroupMemberCommand", "ProfileOpAcceptedResult"),
     "leave": _binding_ops("GroupMemberCommand", "ProfileOpAcceptedResult"),
     "remove_member": _binding_ops("GroupMemberCommand", "ProfileOpAcceptedResult"),
     "replace_member": _binding_ops(
         "GroupReplaceMemberCommand", "ProfileOpAcceptedResult"
     ),
-    "change_role": _binding_ops(
-        "GroupChangeRoleCommand", "ProfileOpAcceptedResult"
-    ),
+    "change_role": _binding_ops("GroupChangeRoleCommand", "ProfileOpAcceptedResult"),
 }
 
 SWARM_SIGNATURES: dict[str, tuple] = {
@@ -381,8 +372,9 @@ SWARM_SIGNATURES: dict[str, tuple] = {
     "terminate_plan": _binding_ops(
         "SwarmPlanOpCommand", "ProfileOpAcceptedResult", ("swarm_plan_id", "str")
     ),
-    "allocate_stage": _binding_ops(
-        "SwarmAllocateCommand", "ProfileOpAcceptedResult"
+    "allocate_stage": _binding_ops("SwarmAllocateCommand", "ProfileOpAcceptedResult"),
+    "complete_plan": _binding_ops(
+        "SwarmPlanOpCommand", "ProfileOpAcceptedResult", ("swarm_plan_id", "str")
     ),
     "complete_stage": _binding_ops(
         "SwarmStageOutcomeCommand", "ProfileOpAcceptedResult", ("stage_ref", "str")
@@ -405,36 +397,39 @@ OPEN_SIGNATURES: dict[str, tuple] = {
         "ProfileOpAcceptedResult",
     ),
     "pause_opportunity": _binding_ops(
-        "OpenOpportunityOpCommand", "ProfileOpAcceptedResult",
+        "OpenOpportunityOpCommand",
+        "ProfileOpAcceptedResult",
         ("opportunity_ref", "str"),
     ),
     "reopen_opportunity": _binding_ops(
-        "OpenOpportunityOpCommand", "ProfileOpAcceptedResult",
+        "OpenOpportunityOpCommand",
+        "ProfileOpAcceptedResult",
         ("opportunity_ref", "str"),
     ),
     "close_opportunity": _binding_ops(
-        "OpenOpportunityOpCommand", "ProfileOpAcceptedResult",
+        "OpenOpportunityOpCommand",
+        "ProfileOpAcceptedResult",
         ("opportunity_ref", "str"),
     ),
     "submit_application": (
-        _params(("command", "OpenApplicationCommand")), "ProfileOpAcceptedResult"
+        _params(("command", "OpenApplicationCommand")),
+        "ProfileOpAcceptedResult",
     ),
-    "screen": (
-        _params(("command", "OpenScreenCommand")), "ProfileOpAcceptedResult"
-    ),
+    "screen": (_params(("command", "OpenScreenCommand")), "ProfileOpAcceptedResult"),
     "reject": _binding_ops(
-        "OpenDecisionOpCommand", "ProfileOpAcceptedResult",
+        "OpenDecisionOpCommand",
+        "ProfileOpAcceptedResult",
         ("application_ref", "str"),
     ),
     "withdraw": _binding_ops(
-        "OpenDecisionOpCommand", "ProfileOpAcceptedResult",
+        "OpenDecisionOpCommand",
+        "ProfileOpAcceptedResult",
         ("application_ref", "str"),
     ),
-    "admit": (
-        _params(("command", "OpenAdmitCommand")), "ProfileOpAcceptedResult"
-    ),
+    "admit": (_params(("command", "OpenAdmitCommand")), "ProfileOpAcceptedResult"),
     "revoke_admission": _binding_ops(
-        "OpenDecisionOpCommand", "ProfileOpAcceptedResult",
+        "OpenDecisionOpCommand",
+        "ProfileOpAcceptedResult",
         ("application_ref", "str"),
     ),
 }
@@ -482,9 +477,7 @@ def test_command_required_fields_enforced():
 
 def test_result_fields_required():
     """结果对象字段全必填,顺序入裁决。"""
-    for cls, names in sorted(
-        RESULT_FIELDS.items(), key=lambda item: item[0].__name__
-    ):
+    for cls, names in sorted(RESULT_FIELDS.items(), key=lambda item: item[0].__name__):
         assert [field.name for field in dataclasses.fields(cls)] == names
         for field in dataclasses.fields(cls):
             assert field.default is MISSING
@@ -498,6 +491,12 @@ def test_result_fields_required():
 )
 def test_protocol_methods_and_signatures(protocol, signatures):
     """协议方法名齐全,签名(参数名 + 注解 + 返回)逐字对齐裁决。"""
+    declared_methods = {
+        name
+        for name, value in vars(protocol).items()
+        if not name.startswith("_") and inspect.isfunction(value)
+    }
+    assert declared_methods == set(signatures)
     for method, (expected_params, returns) in signatures.items():
         signature = inspect.signature(getattr(protocol, method))
         params = [
@@ -506,9 +505,7 @@ def test_protocol_methods_and_signatures(protocol, signatures):
             if parameter.name != "self"
         ]
         assert params == expected_params, f"{protocol.__name__}.{method}"
-        assert signature.return_annotation == returns, (
-            f"{protocol.__name__}.{method}"
-        )
+        assert signature.return_annotation == returns, f"{protocol.__name__}.{method}"
 
 
 def _fake_service(method_names: list[str]):

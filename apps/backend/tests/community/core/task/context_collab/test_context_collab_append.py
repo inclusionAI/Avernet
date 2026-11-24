@@ -64,6 +64,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAppendCommand,
 )
 
+from tests.community.core.task.context_collab.creation_facts import creation_event_id
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -74,7 +75,7 @@ EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 def make_create_command(**overrides) -> CollaborationCreateCommand:
     """构造创建命令(spec §6.2 示例);与 Task 7 测试同形态,可按字段覆盖。"""
     fields = {
-        "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
+        "to_space": SpaceRef(space_id="space_workspace_001", environment="prod"),
         "principal_ref": PRINCIPAL,
         "product_kind": "team_todo",
         "workflow_kind": "team_todo_execution",
@@ -285,7 +286,7 @@ class TestAppendEventHappyPath:
     def test_user_interaction_message_accepted(self):
         """spec §6.3 指定执行请求示例:无规则事件不动 status,版本 +1。"""
         repo, service, created = _make_service()
-        initial_event_id = created.current_event_id
+        initial_event_id = creation_event_id(service, created, make_actor())
         command = make_append_command(
             "user_interaction.posted",
             expected_version=1,
@@ -309,7 +310,7 @@ class TestAppendEventHappyPath:
         assert result.context_version == 2
         assert result.current_status == "created"
 
-        # 服务传给仓储的请求语义(parent 透传,snapshot_updater 是纯函数)。
+        # 服务传给仓储的请求语义(parent 透传,Message 不携带 TaskUpdate)。
         request = repo.append_calls[0][1]
         assert isinstance(request, AppendEventRecordRequest)
         assert repo.append_calls[0][0] == created.collet_id
@@ -319,11 +320,16 @@ class TestAppendEventHappyPath:
         assert request.actor_ref == PRINCIPAL
         assert request.task_update is None
 
-        # 仓储真的执行了 snapshot_updater 并 CAS 推进版本。
+        # Message 只追加事件并 CAS 推进 Collet 版本,不修改 Task。
         collet = repo.collets[created.collet_id]
         assert collet.version == 2
         assert repo.tasks[created.collet_id].status == "created"
-        assert collet.current_event_id == result.event_id
+        assert not hasattr(collet, "current_event_id")
+        assert repo.events[created.collet_id][-1].event_id == result.event_id
+        status = service.get_status(
+            created.collet_id, trunk_events=False, context=make_actor()
+        )
+        assert status.current_event["event_id"] == result.event_id
         assert len(repo.events[created.collet_id]) == 2
 
 

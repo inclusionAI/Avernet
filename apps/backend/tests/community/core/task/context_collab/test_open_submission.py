@@ -91,7 +91,7 @@ def test_resolves_exact_opportunity_with_multiple_active_bindings_and_copies_evi
     command = application_command(
         capability_evidence_refs=["evidence://a", "evidence://b"]
     )
-    result = service.submit_application_by_skill(command=command)
+    result = service.submit_application(command=command)
     row = _row(store, binding)
     assert (result.collab_context_id, result.method_binding_id) == (COLLET_ID, binding)
     assert row.capability_evidence_refs == ("evidence://a", "evidence://b")
@@ -113,7 +113,7 @@ def test_bot_uuid_and_signed_owner_differ_from_publisher_and_preserve_withdraw(
     store, _, binding, service = published
     owner = PrincipalRef("human", "other_bot_owner")
     actor = ActorContext(PrincipalRef("bot", "bot_uuid.owner-qualified"), "a2a", owner)
-    service.submit_application_by_skill(
+    service.submit_application(
         application_command(
             actor_context=actor,
             applicant_agent_ref=actor.actor.principal_id,
@@ -156,7 +156,7 @@ def test_missing_or_inconsistent_identity_is_rejected_without_write(published, c
     else:
         actor = make_actor("")
     with pytest.raises(ContextCollabValidationError):
-        service.submit_application_by_skill(
+        service.submit_application(
             application_command(actor_context=actor, applicant_agent_ref=applicant)
         )
     assert store.list_applications(AXES, binding, COLLET_ID) == []
@@ -166,7 +166,7 @@ def test_missing_or_inconsistent_identity_is_rejected_without_write(published, c
 def test_invalid_opportunity_ref_rejected(published, ref):
     store, _, binding, service = published
     with pytest.raises(ContextCollabValidationError, match="opportunity_ref"):
-        service.submit_application_by_skill(application_command(opportunity_ref=ref))
+        service.submit_application(application_command(opportunity_ref=ref))
     assert _row(store, binding) is None
 
 
@@ -189,7 +189,7 @@ def test_ambiguous_ref_never_picks_first_or_active_candidate(
         AXES, replace(original, method_binding_id="mb_other", scope_ref=collet), collet
     )
     with pytest.raises(ContextCollabValidationError, match="ambiguous opportunity_ref"):
-        service.submit_application_by_skill(application_command())
+        service.submit_application(application_command())
     assert _row(store, binding) is None
     assert store.list_applications(AXES, "mb_other", collet) == []
 
@@ -209,8 +209,8 @@ def test_lookup_is_isolated_by_current_axes(published, axis):
         other, replace(opportunity, opportunity_id="foreign_only"), COLLET_ID
     )
     with pytest.raises(ContextCollabNotFoundError):
-        service.submit_application_by_skill(application_command(opportunity_ref="foreign_only"))
-    service.submit_application_by_skill(
+        service.submit_application(application_command(opportunity_ref="foreign_only"))
+    service.submit_application(
         application_command()
     )  # foreign duplicate is not ambiguous
     assert _row(store, binding) is not None
@@ -228,7 +228,7 @@ def test_resolved_binding_still_runs_structural_guards(published, invalid):
     )
     store.replace_binding(AXES, changed)
     with pytest.raises(ContextCollabValidationError):
-        service.submit_application_by_skill(application_command())
+        service.submit_application(application_command())
     assert _row(store, binding) is None
 
 
@@ -249,16 +249,16 @@ def test_storage_failures_propagate(published, operation):
 def test_idempotency_keeps_owner_and_evidence_as_request_shape(published):
     store, _, binding, service = published
     command = application_command()
-    first = service.submit_application_by_skill(command)
+    first = service.submit_application(command)
     row = _row(store, binding)
-    assert service.submit_application_by_skill(command).object_id == first.object_id
+    assert service.submit_application(command).object_id == first.object_id
     assert _row(store, binding) == row
     for changed in (
         replace(command, actor_context=make_actor("other_owner")),
         replace(command, capability_evidence_refs=["evidence://different"]),
     ):
         with pytest.raises(ContextCollabValidationError):
-            service.submit_application_by_skill(changed)
+            service.submit_application(changed)
         assert _row(store, binding) == row
 
 

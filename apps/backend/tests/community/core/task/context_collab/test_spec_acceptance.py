@@ -54,6 +54,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
+from tests.community.core.task.context_collab.creation_facts import creation_event_id
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -77,7 +78,7 @@ _EVENT_ENTRY_FIELDS = frozenset(
 def make_create_command(**overrides) -> CollaborationCreateCommand:
     """构造创建命令(spec §6.2 指定执行请求示例);可按字段覆盖。"""
     fields = {
-        "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
+        "to_space": SpaceRef(space_id="space_workspace_001", environment="prod"),
         "principal_ref": PRINCIPAL,
         "product_kind": "team_todo",
         "workflow_kind": "team_todo_execution",
@@ -133,7 +134,7 @@ def _count(engine, model) -> int:
 
 
 def _collet_json(engine, collab_context_id, column) -> dict | str | None:
-    """引擎直查 Collet 行的 JSON 列(context_spec / current_snapshot)。"""
+    """引擎直查 Collet 行的 JSON 列(creation_facts / current_snapshot)。"""
     with engine.connect() as conn:
         return conn.scalar(
             select(column).where(
@@ -189,25 +190,26 @@ class TestSpecAcceptance:
     def test_1_create_persists_one_collet_row_with_spec_and_progress(
         self, service, engine
     ):
-        """§12.2 #1:创建落 1 行 Collet + 1 行初始 Event;目标/方法/执行者
-        与进度都在 Collet JSON 快照中(引擎直查列证,非服务回声)。"""
+        """创建持久化 Collet、独立 Task 和初始 Event;方法选择是普通
+        creation_facts,Task 才持有责任主体和状态(引擎直查,非服务回声)。"""
         created = service.create_collaboration(make_create_command(), make_actor())
 
         assert _count(engine, ContextCollabColletModel) == 1
         assert _count(engine, ContextCollabEventModel) == 1
         spec = json.loads(
             _collet_json(
-                engine, created.collet_id, ContextCollabColletModel.context_spec
+                engine, created.collet_id, ContextCollabColletModel.creation_facts
             )
         )
-        # context_spec 携带任务目标、方法与执行者(引用值,不复制注册表)。
+        # creation_facts 保留目标、方法与执行者引用,不复制 Collet/Task 身份。
         assert spec["objective"] == OBJECTIVE
         assert spec["method_kind"] == "Single"
         assert spec["executor_ref"] == EXECUTOR.to_dict()
-        assert spec["principal_ref"] == PRINCIPAL.to_dict()
-        # current_snapshot 携带进度(§3.4.2 ProgressSnapshot 五字段)。
+        assert "principal_ref" not in spec
+        # 独立 Task 行持有身份、生命周期与版本;查询快照只读投影。
         snapshot = _stored_snapshot(engine, created.collet_id)
         assert snapshot["objective"] == OBJECTIVE
+        assert snapshot["principal_ref"] == PRINCIPAL.to_dict()
         assert snapshot["status"] == "created"
         assert snapshot["version"] == 1
         assert snapshot["task_id"] != created.collet_id
@@ -224,7 +226,9 @@ class TestSpecAcceptance:
         领域校验错。Capability/外部授权由 P2 接缝补充,不在 P1 范围。
         """
         with pytest.raises(ContextCollabValidationError, match="executor_ref"):
-            service.create_collaboration(make_create_command(executor_ref=None), make_actor())
+            service.create_collaboration(
+                make_create_command(executor_ref=None), make_actor()
+            )
 
         # responsible(principal_ref)在请求中缺失 → wire 解析为命令字段的
         # 取值路径即拒绝;不允许装配出无责任主体的创建命令。
@@ -247,7 +251,7 @@ class TestSpecAcceptance:
             service,
             created.collet_id,
             expected_version=created.version,
-            parent_event=created.current_event_id,
+            parent_event=creation_event_id(service, created, make_actor()),
             content=content,
         )
 
@@ -263,7 +267,7 @@ class TestSpecAcceptance:
         """§12.2 #4:事件都带 parent_event 字段;trunk_events=true 只筛选
         主干列表,current_snapshot / current_event / 统计两视角一致。"""
         created = service.create_collaboration(make_create_command(), make_actor())
-        initial_event_id = created.current_event_id
+        initial_event_id = creation_event_id(service, created, make_actor())
         main_event_id = _append_message(  # 主干延续:parent=当前链头(初始事件)。
             service,
             created.collet_id,
@@ -303,8 +307,7 @@ class TestSpecAcceptance:
         with engine.connect() as conn:
             branch_parent = conn.scalar(
                 select(ContextCollabEventModel.parent_event).where(
-                    ContextCollabEventModel.collab_context_id
-                    == created.collet_id,
+                    ContextCollabEventModel.collab_context_id == created.collet_id,
                     ContextCollabEventModel.event_id == branch_event_id,
                 )
             )
@@ -329,7 +332,7 @@ class TestSpecAcceptance:
             service,
             created.collet_id,
             expected_version=created.version,
-            parent_event=created.current_event_id,
+            parent_event=creation_event_id(service, created, make_actor()),
             content="进度与结构一并钉住",
         )
         status = service.get_status(
@@ -365,7 +368,7 @@ class TestSpecAcceptance:
             service,
             created.collet_id,
             expected_version=created.version,
-            parent_event=created.current_event_id,
+            parent_event=creation_event_id(service, created, make_actor()),
             content="第二次查询前的固定消息",
         )
         with engine.connect() as conn:
@@ -373,10 +376,7 @@ class TestSpecAcceptance:
                 select(
                     ContextCollabColletModel.context_version,
                     ContextCollabColletModel.current_snapshot,
-                ).where(
-                    ContextCollabColletModel.collab_context_id
-                    == created.collet_id
-                )
+                ).where(ContextCollabColletModel.collab_context_id == created.collet_id)
             ).one()
 
         first = service.get_status(
@@ -395,10 +395,7 @@ class TestSpecAcceptance:
                 select(
                     ContextCollabColletModel.context_version,
                     ContextCollabColletModel.current_snapshot,
-                ).where(
-                    ContextCollabColletModel.collab_context_id
-                    == created.collet_id
-                )
+                ).where(ContextCollabColletModel.collab_context_id == created.collet_id)
             ).one()
         assert version_after == version_before
         assert snapshot_raw_after == snapshot_raw_before

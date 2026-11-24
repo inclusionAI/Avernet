@@ -386,8 +386,8 @@ def test_explicit_deferred_roles_still_require_full_coverage(runtime, complete):
 def test_inactive_open_binding_blocks_previously_admitted_enrollment(runtime):
     admission = _application(runtime)
     binding = runtime.store.get_binding(runtime.axes, runtime.oid, runtime.cid)
-    runtime.store.update_binding(
-        runtime.axes, replace(binding, state=BindingState.SUSPENDED), runtime.cid
+    runtime.store.replace_binding(
+        runtime.axes, replace(binding, state=BindingState.SUSPENDED)
     )
     before = _record(runtime)
     with pytest.raises(ContextCollabValidationError, match="ACTIVE Open"):

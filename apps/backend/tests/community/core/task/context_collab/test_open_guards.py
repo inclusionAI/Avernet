@@ -54,15 +54,24 @@ class TestOpenGuards:
         bound = "mb_open_bound"
         store.insert_opportunity(
             AXES,
-            OpenOpportunity.from_dict(opportunity_dict(
-                opportunity_id="opp_x", method_binding_id=bound,
-            )),
+            OpenOpportunity.from_dict(
+                opportunity_dict(
+                    opportunity_id="opp_x",
+                    method_binding_id=bound,
+                )
+            ),
             COLLET_ID,
         )
         store.insert_application(
-            AXES, bound, ParticipationApplication.from_dict(application_dict(
-                application_id="app_x", opportunity_ref="opp_x",
-            )), COLLET_ID,
+            AXES,
+            bound,
+            ParticipationApplication.from_dict(
+                application_dict(
+                    application_id="app_x",
+                    opportunity_ref="opp_x",
+                )
+            ),
+            COLLET_ID,
         )
         callables = [
             lambda: service.publish_opportunity(opportunity_command()),
@@ -87,7 +96,7 @@ class TestOpenGuards:
                 OpenOpportunityOpCommand(),
                 make_actor(),
             ),
-            lambda: service.submit_application_by_skill(
+            lambda: service.submit_application(
                 application_command(opportunity_ref="opp_x", actor_context=make_actor())
             ),
             lambda: service.screen(
@@ -177,7 +186,7 @@ class TestOpenGuards:
                 OpenOpportunityOpCommand(),
                 stranger,
             )
-        service.submit_application_by_skill(
+        service.submit_application(
             application_command(opportunity_ref="opp_alpha", actor_context=make_actor())
         )
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
@@ -219,7 +228,7 @@ class TestOpenGuards:
                 make_actor(),
             )
         with pytest.raises(ContextCollabNotFoundError):
-            service.submit_application_by_skill(
+            service.submit_application(
                 application_command(
                     opportunity_ref="opp_none", actor_context=make_actor()
                 )

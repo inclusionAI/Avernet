@@ -38,9 +38,7 @@ def _pure_open():
     store, _, lifecycle, service = make_open_service()
     binding = active_open_binding(lifecycle)
     service.publish_opportunity(
-        opportunity_command(
-            participation_type=ParticipationType.COLLET_PARTICIPANT
-        ),
+        opportunity_command(participation_type=ParticipationType.COLLET_PARTICIPANT),
     )
     return store, service, binding
 
@@ -60,7 +58,7 @@ def _screen(service, binding, **application_overrides):
 
 def test_collet_participant_query_admit_replay_and_revoke():
     store, service, binding = _pure_open()
-    assert len(service.query_opportunities_by_skill(actor_context=make_actor())) == 1
+    assert len(service.query_opportunities(actor_context=make_actor())) == 1
     assert store.list_participant_bindings(AXES, binding, COLLET_ID) == []
     app = submitted_application(service, binding_id=binding)
     with pytest.raises(ContextCollabValidationError, match="does not accept event"):
@@ -80,7 +78,9 @@ def test_collet_participant_query_admit_replay_and_revoke():
         ),
     )
     command = OpenAdmitCommand(
-        application_ref=app, context=make_actor(), collect_id=COLLET_ID,
+        application_ref=app,
+        context=make_actor(),
+        collect_id=COLLET_ID,
         decision_id="dec_pure",
     )
     admitted = service.admit(command=command)
@@ -161,10 +161,17 @@ def test_participant_binding_store_isolation_and_idempotency():
         store.insert_participant_binding(AXES, "mb_1", participant, "another_collet")
 
 
-@pytest.mark.parametrize("change", [
-    {"scope_ref": ""}, {"participant_ref": ""}, {"participant_binding_id": ""},
-    {"role_binding_refs": [""]}, {"role_binding_refs": "role"}, {"unknown": True},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"scope_ref": ""},
+        {"participant_ref": ""},
+        {"participant_binding_id": ""},
+        {"role_binding_refs": [""]},
+        {"role_binding_refs": "role"},
+        {"unknown": True},
+    ],
+)
 def test_participant_binding_rejects_invalid_fields(change):
     data = ScopedParticipantBinding("pb_1", COLLET_ID, "agent_1").to_dict()
     with pytest.raises(ContextCollabValidationError):
@@ -198,21 +205,23 @@ def test_admission_replay_finishes_failed_state_write_without_duplicate(monkeypa
     store, service, binding = _pure_open()
     app = _screen(service, binding)
     command = OpenAdmitCommand(
-        application_ref=app, context=make_actor(), collect_id=COLLET_ID,
+        application_ref=app,
+        context=make_actor(),
+        collect_id=COLLET_ID,
         decision_id="dec_retry",
     )
     with monkeypatch.context() as patch:
+
         def fail(*args):
             raise RuntimeError("application storage unavailable")
+
         patch.setattr(store, "update_application_state", fail)
         with pytest.raises(RuntimeError, match="storage unavailable"):
             service.admit(command=command)
     assert store.get_application(AXES, app, binding, COLLET_ID).state is (
         ApplicationState.SCREENING
     )
-    assert service.admit(command=command).state == (
-        "ADMITTED"
-    )
+    assert service.admit(command=command).state == ("ADMITTED")
     assert len(store.list_participant_bindings(AXES, binding, COLLET_ID)) == 1
     assert len(store.list_decisions(AXES, binding, COLLET_ID)) == 1
 
@@ -221,12 +230,16 @@ def test_decision_replay_cannot_admit_a_different_application():
     store, service, binding = _pure_open()
     app = _screen(service, binding)
     command = OpenAdmitCommand(
-        application_ref=app, context=make_actor(), collect_id=COLLET_ID,
+        application_ref=app,
+        context=make_actor(),
+        collect_id=COLLET_ID,
         decision_id="dec_same",
     )
     service.admit(command=command)
     second = _screen(
-        service, binding, application_id="app_second",
+        service,
+        binding,
+        application_id="app_second",
         applicant_agent_ref="agent_second",
     )
     with pytest.raises(ContextCollabValidationError, match="another application"):

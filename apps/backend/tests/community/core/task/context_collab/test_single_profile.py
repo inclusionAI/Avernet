@@ -86,6 +86,8 @@ from agentclaw.community.core.task.context_collab.services.method_lifecycle_serv
 from tests.community.core.task.context_collab.creation_facts import creation_facts
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
+SPACE = SpaceRef(space_id="space_workspace_001", environment="prod")
+
 COLLET_ID = "collet_single_001"
 PRINCIPAL_ID = "u_1001"
 EXECUTOR_ID = "bot_coding_001"
@@ -102,7 +104,7 @@ def make_actor(principal_id: str = PRINCIPAL_ID) -> ActorContext:
 
 def _context_spec(*, method_kind: str = "Single") -> dict:
     return creation_facts(
-        space=SpaceRef(space_id="space_workspace_001", environment="prod"),
+        space=SPACE,
         principal_ref=PrincipalRef("human", PRINCIPAL_ID),
         method_kind=method_kind,
         executor_ref=AgentRef("bot", EXECUTOR_ID),
@@ -141,7 +143,7 @@ def _status_record(**overrides) -> ContextStatusRecord:
         collet_id=fields["collab_context_id"],
         initiator_ref=principal_ref,
         state=ColletState.ACTIVE,
-        scope=spec.space,
+        scope=SPACE,
         version=1,
     )
     return ContextStatusRecord(

@@ -34,7 +34,6 @@ from tests.community.core.task.context_collab.group_profile_support import (
     make_group_service,
     member_command,
 )
-from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 
 class TestGroupMemberLifecycle:
@@ -591,10 +590,12 @@ class TestCreatedContextProjection:
             store,
             AXES,
             COLLET_ID,
-            record.creation_facts,
-            make_actor(),
+            method_kind=record.creation_facts["method_kind"],
+            principal_ref=record.collet.initiator_ref,
+            executor_ref=record.task.executor_ref,
+            profile=None,
+            context=make_actor(),
             now=NOW,
-            catalog=PRODUCT_CATALOG,
         )
         assert "Group" in binding.method_names
         roster = store.get_roster(AXES, binding.method_binding_id, COLLET_ID)
@@ -618,10 +619,12 @@ class TestCreatedContextProjection:
             store,
             AXES,
             COLLET_ID,
-            record.creation_facts,
-            make_actor(),
+            method_kind=record.creation_facts["method_kind"],
+            principal_ref=record.collet.initiator_ref,
+            executor_ref=record.task.executor_ref,
+            profile=None,
+            context=make_actor(),
             now="2026-11-12T09:30:00+00:00",
-            catalog=PRODUCT_CATALOG,
         )
         assert again.method_binding_id == binding.method_binding_id
         assert (
@@ -638,10 +641,12 @@ class TestCreatedContextProjection:
             store,
             AXES,
             COLLET_ID,
-            record.creation_facts,
-            make_actor(),
+            method_kind=record.creation_facts["method_kind"],
+            principal_ref=record.collet.initiator_ref,
+            executor_ref=record.task.executor_ref,
+            profile=None,
+            context=make_actor(),
             now=NOW,
-            catalog=PRODUCT_CATALOG,
         )
         assert binding.method_names == ("Single",)
         assert store.get_roster(AXES, binding.method_binding_id, COLLET_ID) is None

@@ -68,7 +68,9 @@ def publication():
 def test_publish_command_shape_and_optional_delivery_context():
     for owner in (OpenMethodOpsServiceProtocol, OpenMethodService):
         assert tuple(inspect.signature(owner.publish_opportunity).parameters) == (
-            "self", "command", "context",
+            "self",
+            "command",
+            "context",
         )
         context = inspect.signature(owner.publish_opportunity).parameters["context"]
         assert context.kind is inspect.Parameter.KEYWORD_ONLY
@@ -78,8 +80,13 @@ def test_publish_command_shape_and_optional_delivery_context():
     assert field_names[:2] == ("collet_id", "participation_type")
     names = set(field_names)
     assert not names & {
-        "binding_id", "method_binding_id", "collab_context_id", "context",
-        "scope_ref", "opens_at", "actor_context",
+        "binding_id",
+        "method_binding_id",
+        "collab_context_id",
+        "context",
+        "scope_ref",
+        "opens_at",
+        "actor_context",
     }
     for required in ("collet_id", "participation_type"):
         kwargs = {name: getattr(command, name) for name in names - {required}}
@@ -100,7 +107,9 @@ def test_publish_preserves_participation_enum_and_string_wire_shape(
     store, _, binding, service = publication
     command = opportunity_command(participation_type=participation_type)
     result = service.publish_opportunity(command)
-    row = store.get_opportunity(AXES, result.object_id, binding.method_binding_id, COLLET_ID)
+    row = store.get_opportunity(
+        AXES, result.object_id, binding.method_binding_id, COLLET_ID
+    )
     assert row.participation_type is participation_type
     wire_value = row.to_dict()["participation_type"]
     assert type(wire_value) is str
@@ -125,14 +134,18 @@ def test_publish_resolves_unique_open_binding_and_preserves_audit(
     command = opportunity_command(reason="owner publication")
     result = service.publish_opportunity(command)
     assert result.method_binding_id == binding.method_binding_id
-    row = store.get_opportunity(AXES, result.object_id, result.method_binding_id, COLLET_ID)
+    row = store.get_opportunity(
+        AXES, result.object_id, result.method_binding_id, COLLET_ID
+    )
     initiator = repo.get_current_status(COLLET_ID).collet.initiator_ref
     assert row.transitioned_by == initiator.principal_id
     assert row.transition_reason == command.reason
     # Participation scope is deliberately not the binding's parent scope.
     assert row.scope_ref == command.collet_id != binding.parent_scope_ref
     assert service.publish_opportunity(command) == result
-    assert len(store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID)) == 1
+    assert (
+        len(store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID)) == 1
+    )
 
 
 @pytest.mark.parametrize("principal_type", ["human", "bot"])
@@ -143,9 +156,11 @@ def test_publication_derives_g1_and_audit_identity_from_collet_without_task(
     record = repo.get_current_status(COLLET_ID)
     initiator = PrincipalRef(principal_type, "persisted_initiator")
     repo._records[COLLET_ID] = replace(
-        record, collet=replace(record.collet, initiator_ref=initiator),
+        record,
+        collet=replace(record.collet, initiator_ref=initiator),
         creation_facts={**record.creation_facts, "executor_ref": None},
-        task=None, tasks=(),
+        task=None,
+        tasks=(),
     )
     authorizer = Mock(
         spec=MethodOpsAuthorizerProtocol, wraps=StructuralMethodOpsAuthorizer()
@@ -153,10 +168,16 @@ def test_publication_derives_g1_and_audit_identity_from_collet_without_task(
     service = OpenMethodService(store, authorizer, repo)
     result = service.publish_opportunity(opportunity_command())
     authorizer.check_open_op.assert_called_once_with(
-        "publish_opportunity", binding, ActorContext(initiator, "collet"),
-        application=None, principal_id=initiator.principal_id, executor_id=None,
+        "publish_opportunity",
+        binding,
+        ActorContext(initiator, "collet"),
+        application=None,
+        principal_id=initiator.principal_id,
+        executor_id=None,
     )
-    row = store.get_opportunity(AXES, result.object_id, binding.method_binding_id, COLLET_ID)
+    row = store.get_opportunity(
+        AXES, result.object_id, binding.method_binding_id, COLLET_ID
+    )
     assert row.transitioned_by == initiator.principal_id
 
 
@@ -192,13 +213,19 @@ def test_derived_collet_identity_still_passes_through_g1(publication):
 def test_multiple_active_open_bindings_fail_without_top_level_preference(publication):
     store, _, binding, service = publication
     top = replace(
-        binding, method_binding_id=top_level_binding_id(COLLET_ID), parent_scope_ref=None
+        binding,
+        method_binding_id=top_level_binding_id(COLLET_ID),
+        parent_scope_ref=None,
     )
     store.upsert_binding(AXES, top)
-    with pytest.raises(ContextCollabValidationError, match="exactly one ACTIVE.*found 2"):
+    with pytest.raises(
+        ContextCollabValidationError, match="exactly one ACTIVE.*found 2"
+    ):
         service.publish_opportunity(opportunity_command())
     for candidate in (binding, top):
-        assert store.list_opportunities(AXES, candidate.method_binding_id, COLLET_ID) == []
+        assert (
+            store.list_opportunities(AXES, candidate.method_binding_id, COLLET_ID) == []
+        )
 
 
 @pytest.mark.parametrize(
@@ -212,16 +239,23 @@ def test_inactive_open_and_active_non_open_bindings_do_not_compete(publication, 
     store.upsert_binding(
         AXES,
         replace(
-            binding, method_binding_id="group_only", method_kind="Group",
-            method_names=("Group",), profile_versions={"Group": "1"},
+            binding,
+            method_binding_id="group_only",
+            method_kind="Group",
+            method_names=("Group",),
+            profile_versions={"Group": "1"},
         ),
     )
     result = service.publish_opportunity(opportunity_command())
     assert result.method_binding_id == binding.method_binding_id
     store.replace_binding(AXES, replace(binding, state=state))
-    with pytest.raises(ContextCollabValidationError, match="exactly one ACTIVE.*found 0"):
+    with pytest.raises(
+        ContextCollabValidationError, match="exactly one ACTIVE.*found 0"
+    ):
         service.publish_opportunity(opportunity_command(opportunity_id="opp_no_active"))
-    assert len(store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID)) == 1
+    assert (
+        len(store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID)) == 1
+    )
 
 
 @pytest.mark.parametrize(
@@ -253,17 +287,19 @@ def test_delivery_actor_is_authorized_even_for_an_idempotent_replay(publication)
         if published:
             service.publish_opportunity(command)
         with pytest.raises(ContextCollabValidationError, match="stranger"):
-            service.publish_opportunity(
-                command, context=make_actor("stranger")
-            )
+            service.publish_opportunity(command, context=make_actor("stranger"))
         rows = store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID)
         assert len(rows) == int(published)
 
 
 @pytest.mark.parametrize("collet", ["", " ", "unknown_collet"])
-def test_missing_or_invalid_collet_does_not_fall_back_to_another_binding(publication, collet):
+def test_missing_or_invalid_collet_does_not_fall_back_to_another_binding(
+    publication, collet
+):
     store, _, binding, service = publication
-    error = ContextCollabNotFoundError if collet.strip() else ContextCollabValidationError
+    error = (
+        ContextCollabNotFoundError if collet.strip() else ContextCollabValidationError
+    )
     with pytest.raises(error):
         service.publish_opportunity(opportunity_command(collet_id=collet))
     assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == []
@@ -279,10 +315,18 @@ def test_publish_propagates_storage_write_failure(publication):
     assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == []
 
 
-@pytest.mark.parametrize("removed", [
-    "collab_context_id", "context", "scope_ref", "opens_at",
-    "binding_id", "method_binding_id", "actor_context",
-])
+@pytest.mark.parametrize(
+    "removed",
+    [
+        "collab_context_id",
+        "context",
+        "scope_ref",
+        "opens_at",
+        "binding_id",
+        "method_binding_id",
+        "actor_context",
+    ],
+)
 def test_publish_command_rejects_removed_parameters(removed):
     command = opportunity_command()
     kwargs = {field.name: getattr(command, field.name) for field in fields(command)}
@@ -295,13 +339,15 @@ def test_publish_opens_immediately_at_server_time_in_own_collet(publication):
     before = datetime.now(timezone.utc)
     result = service.publish_opportunity(opportunity_command())
     after = datetime.now(timezone.utc)
-    row = store.get_opportunity(AXES, result.object_id, binding.method_binding_id, COLLET_ID)
+    row = store.get_opportunity(
+        AXES, result.object_id, binding.method_binding_id, COLLET_ID
+    )
     opens_at = datetime.fromisoformat(row.opens_at)
     assert before <= opens_at <= after
     assert opens_at.utcoffset() == timedelta(0)
     assert row.transitioned_at == row.opens_at
     assert row.scope_ref == COLLET_ID
-    assert service.query_opportunities_by_skill(actor_context=make_actor()) == (row,)
+    assert service.query_opportunities(actor_context=make_actor()) == (row,)
 
 
 @pytest.mark.parametrize("transition", [None, "pause_opportunity", "close_opportunity"])
@@ -314,21 +360,31 @@ def test_publish_replay_keeps_first_timestamp_and_state_after_expiry(
     clock.now.return_value = first_time
     monkeypatch.setattr(open_base, "datetime", clock)
     monkeypatch.setattr(opportunity_ops, "datetime", clock)
-    command = opportunity_command(closes_at=(first_time + timedelta(hours=1)).isoformat())
+    command = opportunity_command(
+        closes_at=(first_time + timedelta(hours=1)).isoformat()
+    )
     first = service.publish_opportunity(command)
     if transition is not None:
         getattr(service, transition)(
-            COLLET_ID, binding.method_binding_id, first.object_id,
-            OpenOpportunityOpCommand(), make_actor(),
+            COLLET_ID,
+            binding.method_binding_id,
+            first.object_id,
+            OpenOpportunityOpCommand(),
+            make_actor(),
         )
-    row = store.get_opportunity(AXES, first.object_id, binding.method_binding_id, COLLET_ID)
+    row = store.get_opportunity(
+        AXES, first.object_id, binding.method_binding_id, COLLET_ID
+    )
     clock.now.return_value = first_time + timedelta(hours=2)
     replay = service.publish_opportunity(command)
     assert replay.object_id == first.object_id
     assert replay.state == row.state.value
     assert row.opens_at == first_time.isoformat()
-    assert store.get_opportunity(
-        AXES, first.object_id, binding.method_binding_id, COLLET_ID
-    ) is row
+    assert (
+        store.get_opportunity(
+            AXES, first.object_id, binding.method_binding_id, COLLET_ID
+        )
+        is row
+    )
     assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == [row]
-    assert service.query_opportunities_by_skill(actor_context=make_actor()) == ()
+    assert service.query_opportunities(actor_context=make_actor()) == ()

@@ -73,6 +73,8 @@ from agentclaw.community.core.task.context_collab.services.method_lifecycle_serv
 from tests.community.core.task.context_collab.creation_facts import creation_facts
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
+SPACE = SpaceRef(space_id="space_workspace_001", environment="prod")
+
 COLLET_ID = "collet_lifecycle_001"
 PRINCIPAL_ID = "u_1001"
 EXECUTOR_ID = "bot_coding_001"
@@ -87,7 +89,7 @@ def make_actor(principal_id: str = PRINCIPAL_ID) -> ActorContext:
 
 def _context_spec(*, method_kind: str = "Single") -> dict:
     return creation_facts(
-        space=SpaceRef(space_id="space_workspace_001", environment="prod"),
+        space=SPACE,
         principal_ref=PrincipalRef("human", PRINCIPAL_ID),
         method_kind=method_kind,
         executor_ref=AgentRef("bot", EXECUTOR_ID),
@@ -126,7 +128,7 @@ def _status_record(**overrides) -> ContextStatusRecord:
         collet_id=fields["collab_context_id"],
         initiator_ref=principal_ref,
         state=ColletState.ACTIVE,
-        scope=spec.space,
+        scope=SPACE,
         version=1,
     )
     return ContextStatusRecord(
@@ -528,10 +530,12 @@ class TestTerminateTopLevelGate:
             store,
             AXES,
             COLLET_ID,
-            record.creation_facts,
-            make_actor(),
+            method_kind=record.creation_facts["method_kind"],
+            principal_ref=record.collet.initiator_ref,
+            executor_ref=record.task.executor_ref,
+            profile=None,
+            context=make_actor(),
             now=NOW,
-            catalog=PRODUCT_CATALOG,
         )
         return store, repo, service
 
@@ -610,10 +614,12 @@ class TestTopLevelProjection:
             store,
             AXES,
             COLLET_ID,
-            record.creation_facts,
-            make_actor(),
+            method_kind=record.creation_facts["method_kind"],
+            principal_ref=record.collet.initiator_ref,
+            executor_ref=record.task.executor_ref,
+            profile=None,
+            context=make_actor(),
             now=NOW,
-            catalog=PRODUCT_CATALOG,
         )
         # spec §3.2 初始状态作者裁决:顶层投影直接 ACTIVE;§9.2 单向派生。
         assert binding.state is BindingState.ACTIVE
@@ -631,10 +637,12 @@ class TestTopLevelProjection:
             store,
             AXES,
             COLLET_ID,
-            record.creation_facts,
-            make_actor(),
+            method_kind=record.creation_facts["method_kind"],
+            principal_ref=record.collet.initiator_ref,
+            executor_ref=record.task.executor_ref,
+            profile=None,
+            context=make_actor(),
             now="2026-11-12T09:30:00+00:00",
-            catalog=PRODUCT_CATALOG,
         )
         assert again.method_binding_id == binding.method_binding_id
         assert len(store.list_bindings(AXES, COLLET_ID)) == 1
@@ -649,10 +657,12 @@ class TestTopLevelProjection:
             store,
             AXES,
             COLLET_ID,
-            record.creation_facts,
-            make_actor(),
+            method_kind=record.creation_facts["method_kind"],
+            principal_ref=record.collet.initiator_ref,
+            executor_ref=record.task.executor_ref,
+            profile=None,
+            context=make_actor(),
             now=NOW,
-            catalog=PRODUCT_CATALOG,
         )
         assert binding.method_names == ("Open", "Group")
         assert binding.profile_versions == {"Open": "0.2", "Group": "0.2"}
@@ -698,10 +708,12 @@ class TestSelfHeal:
             store,
             AXES,
             COLLET_ID,
-            record.creation_facts,
-            make_actor(),
+            method_kind=record.creation_facts["method_kind"],
+            principal_ref=record.collet.initiator_ref,
+            executor_ref=record.task.executor_ref,
+            profile=None,
+            context=make_actor(),
             now=NOW,
-            catalog=PRODUCT_CATALOG,
         )
         healed = ensure_top_level_binding(
             store, AXES, COLLET_ID, repo, make_actor(), now=NOW, catalog=PRODUCT_CATALOG

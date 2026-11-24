@@ -108,7 +108,7 @@ def _actor(principal: PrincipalRef) -> ActorContext:
 
 def _create_command(**overrides) -> CollaborationCreateCommand:
     fields = {
-        "space": SPACE,
+        "to_space": SPACE,
         "principal_ref": OWNER,
         "product_kind": "bbs_public_discussion",
         "workflow_kind": "bbs_public_discussion",

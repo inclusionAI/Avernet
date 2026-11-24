@@ -51,6 +51,8 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from tests.community.core.task.context_collab.creation_facts import creation_facts
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
+SPACE = SpaceRef(space_id="space_workspace_001", environment="prod")
+
 COLLET_ID = "collet_001"
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -58,13 +60,15 @@ EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 OCCURRED_AT = datetime(2026, 11, 10, 8, 30, 0, tzinfo=timezone.utc)
 
 
-def make_actor(principal_id: str = "u_1001") -> ActorContext:
-    return ActorContext(PrincipalRef("human", principal_id), source="api")
+def make_actor(
+    principal_id: str = "u_1001", *, principal_type: str = "human"
+) -> ActorContext:
+    return ActorContext(PrincipalRef(principal_type, principal_id), source="api")
 
 
 def _spec() -> dict:
     return creation_facts(
-        space=SpaceRef(space_id="space_workspace_001", environment="prod"),
+        space=SPACE,
         principal_ref=PRINCIPAL,
         method_kind="Single",
         executor_ref=EXECUTOR,
@@ -98,7 +102,7 @@ def _collet() -> Collet:
         collet_id=COLLET_ID,
         initiator_ref=PRINCIPAL,
         state=ColletState.ACTIVE,
-        scope=_spec().space,
+        scope=SPACE,
         version=4,
     )
 
@@ -516,14 +520,14 @@ class TestVisibilityFiltering:
         assert progress["active_count"] == 1
         assert progress["blocked_count"] == 0
         assert result.current_event is not None
-        assert result.current_event["event_id"] == "evt_004"
+        assert result.current_event["event_id"] == "evt_005"
 
     def test_executor_sees_public_and_workspace_events(self):
         _, service = _make_service()
         result = service.get_status(
             COLLET_ID,
             trunk_events=False,
-            context=make_actor(EXECUTOR.agent_id),
+            context=make_actor(EXECUTOR.agent_id, principal_type=EXECUTOR.agent_type),
         )
         assert [entry["event_id"] for entry in result.task_progress.events] == [
             "evt_001",
@@ -533,6 +537,18 @@ class TestVisibilityFiltering:
         ]
         # evt_002 可见但 Message 不计数;evt_003(private)不可见。
         assert result.current_snapshot["progress"]["completed_count"] == 0
+
+    def test_executor_id_with_wrong_principal_type_gets_only_public_events(self):
+        _, service = _make_service()
+        result = service.get_status(
+            COLLET_ID, trunk_events=False, context=make_actor(EXECUTOR.agent_id)
+        )
+        assert [entry["event_id"] for entry in result.task_progress.events] == [
+            "evt_001",
+            "evt_004",
+            "evt_005",
+        ]
+        assert result.task_progress.total_events == 3
 
     def test_filtered_event_percent_does_not_drive_percent(self):
         """不可见事件携带 percent 时不得驱动该 actor 的进度百分比。"""

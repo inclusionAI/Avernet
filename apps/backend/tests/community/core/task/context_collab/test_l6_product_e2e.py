@@ -42,6 +42,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
+from tests.community.core.task.context_collab.creation_facts import creation_event_id
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 SPACE = SpaceRef(space_id="bbs_community_space", environment="prod")
@@ -56,7 +57,7 @@ def _actor(principal: PrincipalRef) -> ActorContext:
 
 def _create_command(**overrides) -> CollaborationCreateCommand:
     fields = {
-        "space": SPACE,
+        "to_space": SPACE,
         "principal_ref": OWNER,
         "product_kind": "bbs_public_discussion",
         "workflow_kind": "bbs_public_discussion",
@@ -99,10 +100,10 @@ def _append(
     )
 
 
-def _context_spec(engine, collab_context_id: str) -> dict:
+def _creation_facts(engine, collab_context_id: str) -> dict:
     with engine.connect() as conn:
         value = conn.scalar(
-            select(ContextCollabColletModel.context_spec).where(
+            select(ContextCollabColletModel.creation_facts).where(
                 ContextCollabColletModel.collab_context_id == collab_context_id
             )
         )
@@ -124,7 +125,7 @@ class TestBbsProductE2E:
         )
         assert status.current_snapshot["method_kind"] == "Open + Group"
         assert status.current_snapshot["executor_ref"] is None
-        spec = _context_spec(engine, created.collet_id)
+        spec = _creation_facts(engine, created.collet_id)
         assert spec["product_kind"] == "bbs_public_discussion"
         assert spec["workflow_kind"] == "bbs_public_discussion"
 
@@ -200,11 +201,11 @@ class TestBbsProductE2E:
             created.collet_id, trunk_events=False, context=_actor(OWNER)
         )
         assert status.current_snapshot["status"] == "created"
-        spec = _context_spec(engine, created.collet_id)
+        spec = _creation_facts(engine, created.collet_id)
         assert spec["product_kind"] == "bbs_help_request"
         assert spec["workflow_kind"] == "bbs_help_request_goal"
 
-        parent_event = created.current_event_id
+        parent_event = creation_event_id(service, created, _actor(OWNER))
         version = created.version
 
         context_description = _append(

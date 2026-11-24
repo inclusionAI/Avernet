@@ -51,7 +51,9 @@ from agentclaw.community.core.task.context_collab.products.task_commission.profi
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     AssigneeAdmissionCommand,
 )
-from agentclaw.community.di.modules import task_commission_method_ops_adapter as adapter
+from agentclaw.community.di.modules.task import (
+    task_commission_method_ops_adapter as adapter,
+)
 from tests.community.core.task.context_collab.product_catalog import (
     PRODUCT_CATALOG,
     standard_task_workflow,
@@ -189,7 +191,9 @@ def test_explicit_profile_selection_pins_exact_version_and_never_migrates():
 def test_unsupported_publication_policy_rejected_before_execution(overrides):
     with pytest.raises(ContextCollabValidationError):
         replace(
-            TASK_COMMISSION_PROFILE.composition.require_policy("Open").publication.admission,
+            TASK_COMMISSION_PROFILE.composition.require_policy(
+                "Open"
+            ).publication.admission,
             **overrides,
         )
 
@@ -396,6 +400,8 @@ def test_open_single_is_an_explicit_successor_without_changing_v1():
     ],
 )
 def test_self_application_policy_rejects_incompatible_semantics(overrides):
-    policy = OPEN_SINGLE_COMMISSION_PROFILE.composition.require_policy("Open").publication.admission
+    policy = OPEN_SINGLE_COMMISSION_PROFILE.composition.require_policy(
+        "Open"
+    ).publication.admission
     with pytest.raises(ContextCollabValidationError):
         replace(policy, **overrides)

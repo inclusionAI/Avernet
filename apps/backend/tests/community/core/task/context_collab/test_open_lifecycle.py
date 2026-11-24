@@ -132,7 +132,7 @@ class TestOpenOpportunityLifecycle:
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
         service.publish_opportunity(opportunity_command())
-        submitted = service.submit_application_by_skill(
+        submitted = service.submit_application(
             application_command(
                 opportunity_ref="opp_alpha", actor_context=make_actor("u_stranger_001")
             )
@@ -145,7 +145,7 @@ class TestOpenOpportunityLifecycle:
         assert application.accountable_principal_ref == "u_stranger_001"
         assert application.transitioned_from == ""
         # 幂等重放:同 ID 同形态返回既有对象,不新增行。
-        replay = service.submit_application_by_skill(
+        replay = service.submit_application(
             application_command(
                 opportunity_ref="opp_alpha", actor_context=make_actor("u_stranger_001")
             )
@@ -161,7 +161,7 @@ class TestOpenOpportunityLifecycle:
         with pytest.raises(
             ContextCollabValidationError, match="before the window opens"
         ):
-            service.submit_application_by_skill(
+            service.submit_application(
                 application_command(
                     opportunity_ref="opp_future", actor_context=make_actor()
                 )
@@ -177,7 +177,7 @@ class TestOpenOpportunityLifecycle:
         with pytest.raises(
             ContextCollabValidationError, match="after the window closes"
         ):
-            service.submit_application_by_skill(
+            service.submit_application(
                 application_command(
                     opportunity_ref="opp_closed", actor_context=make_actor()
                 )
@@ -186,7 +186,7 @@ class TestOpenOpportunityLifecycle:
         service.publish_opportunity(
             opportunity_command(opportunity_id="opp_capped", capacity=1)
         )
-        service.submit_application_by_skill(
+        service.submit_application(
             application_command(
                 opportunity_ref="opp_capped",
                 actor_context=make_actor(),
@@ -195,7 +195,7 @@ class TestOpenOpportunityLifecycle:
             )
         )
         with pytest.raises(ContextCollabValidationError, match="capacity"):
-            service.submit_application_by_skill(
+            service.submit_application(
                 application_command(
                     opportunity_ref="opp_capped",
                     actor_context=make_actor(),
@@ -218,7 +218,7 @@ class TestOpenOpportunityLifecycle:
         with pytest.raises(
             ContextCollabValidationError, match="only be submitted while"
         ):
-            service.submit_application_by_skill(
+            service.submit_application(
                 application_command(
                     opportunity_ref="opp_alpha", actor_context=make_actor()
                 )
@@ -230,13 +230,13 @@ class TestOpenOpportunityLifecycle:
             OpenOpportunityOpCommand(),
             make_actor(),
         )
-        service.submit_application_by_skill(
+        service.submit_application(
             application_command(opportunity_ref="opp_alpha", actor_context=make_actor())
         )
         with pytest.raises(
             ContextCollabValidationError, match="non-terminal application"
         ):
-            service.submit_application_by_skill(
+            service.submit_application(
                 application_command(
                     opportunity_ref="opp_alpha",
                     actor_context=make_actor(),
@@ -250,7 +250,7 @@ class TestOpenApplicationLifecycle:
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
         service.publish_opportunity(opportunity_command())
-        service.submit_application_by_skill(
+        service.submit_application(
             application_command(opportunity_ref="opp_alpha", actor_context=make_actor())
         )
         screened = service.screen(
@@ -273,7 +273,7 @@ class TestOpenApplicationLifecycle:
         assert application.transitioned_from == "SCREENING"
         assert application.transition_reason == "不合条件"
         # reject_r1:未经评审直接拒。
-        service.submit_application_by_skill(
+        service.submit_application(
             application_command(
                 opportunity_ref="opp_alpha",
                 actor_context=make_actor(),
@@ -292,8 +292,10 @@ class TestOpenApplicationLifecycle:
         _, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
         service.publish_opportunity(opportunity_command())
-        service.submit_application_by_skill(
-            application_command(opportunity_ref="opp_alpha", actor_context=make_actor("u_member_001"))
+        service.submit_application(
+            application_command(
+                opportunity_ref="opp_alpha", actor_context=make_actor("u_member_001")
+            )
         )
         # 陌生人拒绝;owner(PRINCIPAL_ID ≠ u_member_001)也拒绝。
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
@@ -321,7 +323,7 @@ class TestOpenApplicationLifecycle:
         )
         assert withdrawn.state == "WITHDRAWN"
         # SCREENING 后机器无 withdraw 出边。
-        service.submit_application_by_skill(
+        service.submit_application(
             application_command(
                 opportunity_ref="opp_alpha",
                 actor_context=make_actor("u_member_001"),
@@ -525,9 +527,13 @@ class TestOpenApplicationLifecycle:
         assert len(store.list_decisions(AXES, binding, COLLET_ID)) == 1
         [decision] = store.list_decisions(AXES, binding, COLLET_ID)
         store.insert_decision(
-            AXES, binding,
-            replace(decision, admission_decision_id="dec_conflicting",
-                    admitted_scope_ref="scope://other"),
+            AXES,
+            binding,
+            replace(
+                decision,
+                admission_decision_id="dec_conflicting",
+                admitted_scope_ref="scope://other",
+            ),
             COLLET_ID,
         )
         with pytest.raises(ContextCollabValidationError, match="stored shape"):

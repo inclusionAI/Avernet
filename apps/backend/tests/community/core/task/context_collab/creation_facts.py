@@ -7,6 +7,15 @@ creation object in the protocol model.
 
 from __future__ import annotations
 
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
 )
@@ -54,10 +63,13 @@ def create_collet_request(
     completion_conditions: tuple[str, ...] = (),
 ):
     """Build the flat repository request from plain creation facts."""
-    from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import AgentRef
+    from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+        AgentRef,
+    )
     from agentclaw.community.core.task.context_collab.persistence.repository import (
         CreateColletRecordRequest,
     )
+
     raw_executor = facts.get("executor_ref")
     return CreateColletRecordRequest(
         space=space,
@@ -79,3 +91,20 @@ def create_collet_request(
         initial_event=initial_event,
         completion_conditions=completion_conditions,
     )
+
+
+def creation_event_id(
+    service: ContextServiceProtocol, created: Collet, context: ActorContext
+) -> str:
+    """Resolve the combined L6 flow's immutable Task creation evidence.
+
+    A Collet does not own an event-head pointer. Filter by the returned creation
+    revision so later appends cannot change the parent used by a test.
+    """
+    [event] = [
+        event
+        for event in service.get_events(created.collet_id, context=context)
+        if event.context_version_after == created.version
+        and event.event_kind == "task.created"
+    ]
+    return event.event_id

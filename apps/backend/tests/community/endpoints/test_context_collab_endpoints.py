@@ -11,6 +11,7 @@ Route prefix is asserted to be the spec §6.1 exact form — singular ``task``.
 """
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 # Side-effect import: registers the 2 context collab models on Base.metadata.
@@ -37,6 +38,9 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
+    EventRecord,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
@@ -516,10 +520,29 @@ def _seed_create_happy(world) -> None:
             version=1,
         )
 
+    def get_events(self, collet_id, *, context):
+        assert collet_id == "collet_case_001"
+        assert context.actor.principal_id == AUTHENTICATED_STAFF_ID
+        assert context.source == "api"
+        return [
+            EventRecord(
+                collab_context_id=collet_id,
+                event_id="evt_case_001",
+                parent_event=None,
+                event_kind="task.created",
+                primitive_type="Task",
+                actor_ref=context.actor,
+                visibility="public",
+                payload={},
+                context_version_after=1,
+                occurred_at=datetime.now(timezone.utc),
+            )
+        ]
+
     bind_overrides(
         world,
         ContextCollabServiceProtocol,
-        {"create_collaboration": create_collaboration},
+        {"create_collaboration": create_collaboration, "get_events": get_events},
     )
 
 
@@ -635,7 +658,17 @@ def _seed_get_error(world) -> None:
         status=200,
         json_contains={
             "code": 200000,
-            "data": {"collab_context_id": "collet_case_001", "context_version": 1},
+            "data": {
+                "collab_context_id": "collet_case_001",
+                "context_version": 1,
+                "current_snapshot": _CASE_SNAPSHOT,
+                "current_event": {
+                    "event_id": "evt_case_001",
+                    "parent_event": None,
+                    "event_kind": "task.created",
+                    "primitive_type": "Task",
+                },
+            },
         },
     ),
 )
