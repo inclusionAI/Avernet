@@ -24,7 +24,9 @@ Restart and batch status accept only Bots whose persisted `active_engine` is
 `claude_code` or `aicoding`. Both operations declare `AdmissionMode.ENGINE` in
 `ADMISSION`, rather than `OPEN`. Each operation uses `AdmissionMode.ENGINE(...)` with
 an engine allowlist and authorized Bot dependency provider, declared in
-`admission_managed_bot_routes.py` and composed into the shared inventory.
+`admission_routes.py` in the shared inventory. The route-specific Bot dependency
+providers remain in `admission_managed_bot_routes.py` to avoid importing the
+managed Bot router while the inventory is assembled.
 No engine decorator or handler metadata is required. `PublicAPIRoute` calls
 `admission.apply_admission` to attach the configured check; the application
 principal guard reads the same policy through `admission_for`.

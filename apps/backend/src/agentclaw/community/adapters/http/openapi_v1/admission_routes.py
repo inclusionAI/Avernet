@@ -3,7 +3,7 @@
 from .admission_modes import AdmissionMode, _EngineAdmission
 from .admission_account_routes import ACCOUNT_ADMISSION
 from .admission_genome_routes import GENOME_ADMISSION
-from .admission_managed_bot_routes import MANAGED_BOT_ADMISSION
+from .admission_managed_bot_routes import _restart_bot_dependency, _status_bot_dependency
 from .admission_task_routes import (
     TASK_BBS_ADMISSION,
     TASK_PUBLIC_ADMISSION,
@@ -83,7 +83,12 @@ ADMISSION: dict[tuple[str, str], AdmissionMode | _EngineAdmission] = {
     ("POST", "/openapi/v1/bots/metadata/queries"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/template-queries"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/template-config-for-others"): AdmissionMode.OPEN,
-    **MANAGED_BOT_ADMISSION,
+    ("POST", "/openapi/v1/bots/restart-for-others"): AdmissionMode.ENGINE(
+        engines=frozenset({'claude_code', 'aicoding'}), bot_dependency=_restart_bot_dependency,
+    ),
+    ("POST", "/openapi/v1/bots/status-for-others"): AdmissionMode.ENGINE(
+        engines=frozenset({'claude_code', 'aicoding'}), bot_dependency=_status_bot_dependency,
+    ),
     # Transitional app-only lookup; its handler enforces the configured app allowlist.
     ("GET", "/openapi/v1/bots/{bot_id}/access"): AdmissionMode.OPEN,
     # Non-user Bot overview; the gateway requires no user credential for it.
