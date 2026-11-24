@@ -24,6 +24,7 @@ import base64
 import re
 import time
 import uuid
+from urllib.parse import quote
 
 import httpx
 from agentclaw.community.core.service_bot.services.baas_api_response import (
@@ -1327,6 +1328,32 @@ class BaasService:  # pragma: no cover
                 f"Failed to destroy bot in BaaS: {e}"
             )
             raise BaasServiceError(f"Failed to destroy bot in BaaS: {e}")
+
+    def is_physical_device_destroyed(self, *, provider_device_id: str) -> bool:
+        """Read the pinned PaaS resource, including its template/tenant suffix.
+
+        Only typed DEVICE_NOT_FOUND from the physical provider proves absence.
+        A present (even stopped) resource or logical Bot deletion is not proof.
+        Authentication, routing, transport and untyped 404 failures propagate.
+        """
+        if not provider_device_id:
+            raise BaasServiceError("Physical device identity is required")
+        try:
+            self._get_bots_api(
+                path=f"/api/v1/paas/devices/{quote(provider_device_id, safe='')}/info",
+                action="physical_device_info", log_response=False,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                try:
+                    body = exc.response.json()
+                except ValueError:
+                    body = None
+                detail = body.get("detail") if isinstance(body, dict) else None
+                if isinstance(detail, dict) and detail.get("error_code") == "DEVICE_NOT_FOUND":
+                    return True
+            raise
+        return False
 
     def get_bot(
         self,
@@ -3382,6 +3409,65 @@ class BaasService:  # pragma: no cover
                 or detail.get("status") != "ACTIVE"):
             raise BaasOutboundTargetError("target_not_found")
         return detail.get("devices") or []
+
+    def list_runtime_devices(
+        self, binding: DeviceBindingRecord, *, device_uuid: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return all active targets of the current logical Bot record.
+
+        Unlike legacy token-target lookup, an omitted UUID enumerates every
+        current replica. An empty UUID is treated as omitted; nonempty UUID
+        selection must resolve exactly once.
+        """
+        started = time.monotonic()
+        if device_uuid == "":
+            logger.info("runtime_device_uuid_normalized binding_id=%s reason=empty", binding.id)
+            device_uuid = None
+        fields = {"binding_id": binding.id, "provider": binding.device_provider, "device_uuid": device_uuid}
+        logger.info("runtime_device_inventory_started fields=%s", fields)
+        try:
+            if str(binding.status).upper() != "ACTIVE":
+                raise BaasOutboundTargetError("binding_unavailable")
+            provider = binding.device_provider
+            if provider in ("baas", "teclaw"):
+                bot_uuid = binding.device_id
+                # COSEC: the logical identifier enters a fixed relative URL.
+                if not isinstance(bot_uuid, str) or not re.fullmatch(r"[A-Za-z0-9._~-]+", bot_uuid):
+                    raise BaasOutboundTargetError("invalid_target")
+                devices = [device for device in self._active_token_replica_devices(bot_uuid)
+                           if device.get("status") == "ACTIVE"]
+                if device_uuid is not None:
+                    devices = [device for device in devices if device.get("device_uuid") == device_uuid]
+            elif provider == "arca":
+                props = binding.device_props if isinstance(binding.device_props, dict) else {}
+                devices = [{"device_uuid": props.get("device_uuid"), "provider_device_id": props.get("sandbox_id")}]
+                if device_uuid is not None:
+                    devices = [device for device in devices if device.get("device_uuid") == device_uuid]
+            else:
+                raise BaasOutboundTargetError("unsupported_provider")
+            if not devices:
+                raise BaasOutboundTargetError("target_not_found")
+            if device_uuid is not None and len(devices) != 1:
+                raise BaasOutboundTargetError("target_ambiguous")
+            targets = []
+            for device in devices:
+                target = device.get("provider_device_id")
+                if not self._is_valid_paas_device_id(target):
+                    raise BaasOutboundTargetError("invalid_target")
+                if provider == "arca" and not target.startswith("ARCA-SANDBOX-"):
+                    raise BaasOutboundTargetError("invalid_target")
+                targets.append({"device_uuid": device.get("device_uuid"), "provider_device_id": target})
+        except Exception as exc:
+            logger.warning(
+                "runtime_device_inventory_failed fields=%s reason=%s error_type=%s duration_ms=%.1f",
+                fields, getattr(exc, "reason", "query_failed"), type(exc).__name__, (time.monotonic() - started) * 1000,
+            )
+            raise
+        logger.info(
+            "runtime_device_inventory_succeeded fields=%s targets=%s duration_ms=%.1f",
+            fields, targets, (time.monotonic() - started) * 1000,
+        )
+        return targets
 
     def resolve_token_outbound_device_id(
         self, binding: DeviceBindingRecord | None, *, device_uuid: str | None = None,

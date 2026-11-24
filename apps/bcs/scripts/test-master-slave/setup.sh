@@ -50,6 +50,7 @@ OPENCLAW_OPENAI_MODEL_ID="${OPENCLAW_OPENAI_MODEL_ID:-gpt-4.1-mini}"
 
 # ── Step 3: Write BCS config ─────────────────────────────────────────────
 
+cp "$PROJECT_ROOT/configs/catalog-labels.toml" "$CONFIG_DIR/catalog-labels.toml"
 cat > "$CONFIG_DIR/bcs-config.toml" <<EOF
 bind = "127.0.0.1"
 port = ${BCS_PORT}

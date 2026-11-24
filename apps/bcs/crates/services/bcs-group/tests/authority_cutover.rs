@@ -91,7 +91,7 @@ fn create_cmd(
     driver_bot_id: &str,
     participants: Vec<GroupCreateParticipantCommand>,
 ) -> GroupCreateCommand {
-    GroupCreateCommand {
+    GroupCreateCommand { catalog_labels:Default::default(),
         human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-under-test".to_string()),
@@ -154,18 +154,11 @@ async fn remove_member_owner_leg_follows_the_current_edge() {
         .await
         .expect("owner removes its own bot");
 
-    // Re-create the group for the handover leg.
-    legacy_service
-        .create_group(create_cmd(
-            Some("bot_a"),
-            "bot_a",
-            vec![
-                participant("bot_a", Some("driver")),
-                participant("bot_b", Some("consultant")),
-            ],
-        ))
-        .await
-        .expect("re-create group");
+    // Restore fixture membership for the handover leg without treating create
+    // as an unchecked update of an existing Group identity.
+    bcs_service_api::GroupCoreService::add_participant(fixture.group.as_ref(),"group-under-test",
+        bcs_service_api::Participant::bot("bot_b",bcs_service_api::ParticipantRole::Consultant))
+        .await.expect("restore fixture member");
     // The A→B handover: B owns bot_b now; A's leg
     // is fallback-free denied.
     grant_owner_edge(&fixture.bots, "bot_b", "bob").await;
@@ -253,7 +246,7 @@ async fn create_group_sponsorship_requires_current_edge() {
     // non-hidden Bot into a private Group with
     // no friendship anywhere.
     service
-        .create_group(GroupCreateCommand {
+        .create_group(GroupCreateCommand { catalog_labels:Default::default(),
             human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             group_id: Some("group-under-test".into()),
@@ -362,7 +355,7 @@ async fn public_group_rejects_non_public_controlled_bot() {
     // Group: rejected regardless of the CURRENT
     // control edge.
     let denied = service
-        .create_group(GroupCreateCommand {
+        .create_group(GroupCreateCommand { catalog_labels:Default::default(),
             human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             group_id: Some("group-public".into()),
@@ -399,7 +392,7 @@ async fn public_group_rejects_non_public_controlled_bot() {
     // The positive keeps working: the same
     // controlled Bot enters a non-public Group.
     service
-        .create_group(GroupCreateCommand {
+        .create_group(GroupCreateCommand { catalog_labels:Default::default(),
             human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             group_id: Some("group-private".into()),

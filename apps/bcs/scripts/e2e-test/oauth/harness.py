@@ -171,6 +171,7 @@ class Environment:
     @contextmanager
     def server(self, config, root, base, memory=False, *, process_env=None):
         path = root / 'bcs-config.json'
+        (root / "catalog-labels.toml").write_bytes((Path(__file__).resolve().parents[3] / "configs/catalog-labels.toml").read_bytes())
         path.write_text(json.dumps(config))
         with (root / 'server.log').open('w') as log:
             command = [self.binary, '-c', str(path)] + (['--memory'] if memory else [])

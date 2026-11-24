@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from tests.community.core.apply_engine._capability_facts import materialiser_ports
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -42,6 +43,14 @@ from agentclaw.community.core.apply_engine.run.service import (
 from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
     BotConfigManifestApplyLockRepository,
     BotConfigManifestApplyRepository,
+)
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionRetry,
+)
+from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    RuntimeProjectionResult,
+    RuntimeProjectionStatus,
 )
 
 from ._empty_cli_tools import EmptyCliTools
@@ -134,7 +143,7 @@ class _InlineQueue:
         return (None, True)
 
 
-def _world(*, bot, mode, platform_activation=None, redeliver=None):
+def _world(*, bot, mode, platform_activation=None, redeliver=None, capability_projection=None):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -191,6 +200,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
         completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(bot),
+        capability_projection=capability_projection,
         delivery_strategies=DeliveryStrategyFactory(
             family_of=family_from_engine_test(teclaw_engine_test),
             strategies={
@@ -220,6 +230,88 @@ def _apply(service, bot, phase):
         phase=phase,
     )
     return service.last_apply(entity_id=_ENTITY, bot_id=bot["bot_id"])
+
+
+class _CapabilityProjection:
+    defer_enabled = True
+
+    def __init__(self):
+        self.calls = []
+        self.previous = []
+        self.evidence = CapabilityProjectionRetry(
+            "device-7", (PoolSkillMapping(corpus="repo", relative_path="archived", link_name="archived"),),
+        )
+        self.result = RuntimeProjectionResult.pending(
+            code="RUNTIME_UNAVAILABLE", reason="Capability synchronization is pending"
+        )
+
+    @asynccontextmanager
+    async def deferred_apply(self, *, bot_id, entity_id, retry):
+        self.previous.append(retry)
+        @contextmanager
+        def write_scope():
+            self.calls.append(("write", bot_id))
+            yield
+
+        async def finish(*, initialize):
+            self.calls.append(("finish", bot_id, initialize))
+            return self.result, self.evidence if self.result.status is RuntimeProjectionStatus.PENDING else None
+
+        yield SimpleNamespace(write_scope=write_scope, finish=finish)
+
+
+@pytest.mark.parametrize(
+    ("bot", "mode"),
+    [
+        ({**_ARCA_BOT, "active_engine": "openclaw"}, TeclawDeliveryMode.PLATFORM),
+        (_TECLAW_BOT, TeclawDeliveryMode.DEVICE),
+    ],
+)
+def test_existing_device_manifest_preserves_each_manual_apply_result(bot, mode):
+    projection = _CapabilityProjection()
+    service, activation, _ = _world(bot=bot, mode=mode, capability_projection=projection)
+    accepted = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=bot["bot_id"],
+        bot=bot,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        state=MANIFEST_STATE,
+        trigger=triggers.EXPLICIT,
+    )
+
+    report = service.get_apply(
+        entity_id=_ENTITY, bot_id=bot["bot_id"], apply_id=accepted.apply_id
+    )
+    assert activation.installed == {"github"}
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert report.runtime_projection.status is RuntimeProjectionStatus.DEGRADED
+    assert report.runtime_projection.issues[0].suggested_action
+    assert projection.calls == [("write", bot["bot_id"]), ("finish", bot["bot_id"], True)]
+
+    projection.result = RuntimeProjectionResult.converged()
+    service.start_apply(
+        entity_id=_ENTITY, bot_id=bot["bot_id"], bot=bot, owner_id=_ENTITY,
+        actor_id=_ENTITY, state=MANIFEST_STATE, trigger=triggers.EXPLICIT,
+    )
+    report = service.last_apply(entity_id=_ENTITY, bot_id=bot["bot_id"])
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert report.runtime_projection.status is RuntimeProjectionStatus.CONVERGED
+    assert len(projection.calls) == 4
+    assert projection.previous == [None, projection.evidence]
+    original = service.get_apply(entity_id=_ENTITY, bot_id=bot["bot_id"], apply_id=accepted.apply_id)
+    assert original.runtime_projection.status is RuntimeProjectionStatus.DEGRADED
+
+
+def test_put_does_not_request_a_full_projection_without_a_change():
+    projection = _CapabilityProjection()
+    bot = {**_ARCA_BOT, "active_engine": "openclaw"}
+    service, _, _ = _world(bot=bot, mode=TeclawDeliveryMode.PLATFORM, capability_projection=projection)
+    service.start_apply(
+        entity_id=_ENTITY, bot_id=bot["bot_id"], bot=bot, owner_id=_ENTITY,
+        actor_id=_ENTITY, state=MANIFEST_STATE, trigger=triggers.PUT,
+    )
+    assert projection.calls[-1] == ("finish", bot["bot_id"], False)
 
 
 def test_the_service_selects_the_strategy_by_engine_alone() -> None:

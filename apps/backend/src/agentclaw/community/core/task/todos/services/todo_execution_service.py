@@ -24,6 +24,11 @@ from agentclaw.community.core.task.todos.errors import (
 from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
+from agentclaw.community.core.task.todos.stage_models import (
+    TodoStageRecord,
+    TodoStageStatus,
+)
+from agentclaw.community.core.task.todos.template_models import TodoStageKind
 from agentclaw.community.core.task.todos.models import (
     MAX_ACCEPTANCE_ID_LENGTH,
     MAX_ACCEPTANCE_TARGETS,
@@ -190,6 +195,8 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         """Create/bind/run one pending Todo, idempotently across schedulers."""
 
         todo = self._repository.get_todo(todo_id=todo_id)
+        if todo.template_id:
+            return await self._dispatch_template_stage(todo=todo, env=env)
         if todo.status is not TodoStatus.PENDING:
             return todo
 
@@ -351,6 +358,10 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         """Project a completed B Context into A's pending-acceptance state."""
 
         todo = self._repository.get_todo(todo_id=todo_id)
+        if todo.template_id:
+            if todo.status is not TodoStatus.IN_PROGRESS:
+                return todo
+            return await self._dispatch_template_stage(todo=todo)
         if todo.status is not TodoStatus.IN_PROGRESS:
             return todo
         if not todo.collab_context_id:
@@ -382,6 +393,136 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         raise TodoStateConflictError(
             f"Context refresh returned unexpected state {context.status}"
         )
+
+    async def _dispatch_template_stage(
+        self, *, todo: TodoRecord, env: str | None = None
+    ) -> TodoRecord:
+        """Dispatch the current Bot stage without regressing the Todo state."""
+        if not todo.current_stage_instance_id:
+            raise TodoStateConflictError("Templated Todo has no current stage")
+        stage = self._current_stage(todo=todo)
+        if stage.stage_kind != TodoStageKind.BOT.value:
+            return todo
+        if stage.status is TodoStageStatus.COMPLETED:
+            return todo
+        if todo.status not in {TodoStatus.NOT_STARTED, TodoStatus.IN_PROGRESS}:
+            return todo
+
+        if stage.status is TodoStageStatus.NOT_STARTED:
+            try:
+                stage = self._repository.transition_stage_status(
+                    todo_id=todo.todo_id,
+                    stage_instance_id=stage.stage_instance_id,
+                    expected_status=TodoStageStatus.NOT_STARTED,
+                    new_status=TodoStageStatus.IN_PROGRESS,
+                )
+            except TodoStateConflictError:
+                stage = self._current_stage(todo=todo)
+                if stage.status is not TodoStageStatus.IN_PROGRESS:
+                    raise
+
+        space, _member = self._space_access.require_space_member(
+            space_id=todo.space_id, user_id=todo.created_by, env=env
+        )
+        bot = resolve_todo_bot(
+            bot_repository=self._bot_repository,
+            catalog_metadata=self._catalog_metadata,
+            space=space,
+            actor_id=todo.created_by,
+            bot_id=stage.executor_subject_id,
+        )
+        owner_id = stage.owner_user_id
+        runner_path = self._todo_runner_skill_md_path(bot)
+        context = self._bound_template_context(
+            todo=todo, stage=stage, environment=space.env, owner_id=owner_id
+        )
+        if context.status == _CONTEXT_CREATED:
+            credential = self._artifacts.issue_execution(
+                todo_id=todo.todo_id,
+                executor_id=stage.executor_subject_id,
+                stage_instance_id=stage.stage_instance_id,
+            )
+            context = await self._collaboration.run_context(
+                collab_context_id=context.collab_context_id,
+                actor_id=todo.created_by,
+                todo_execution_id=credential.execution_id,
+                todo_execution_token=credential.token,
+                todo_runner_skill_md_path=runner_path,
+            )
+            if context.run_id:
+                self._artifacts.bind_run_id(
+                    execution_id=credential.execution_id, run_id=context.run_id
+                )
+            if context.status not in {_CONTEXT_IN_PROGRESS, _CONTEXT_DONE}:
+                raise TodoStateConflictError(
+                    "Todo stage Context remained in unexpected state after run: "
+                    f"{context.status}"
+                )
+
+        current = self._repository.get_todo(todo_id=todo.todo_id)
+        if current.status is TodoStatus.NOT_STARTED:
+            return self._transition_or_reload(
+                todo_id=todo.todo_id,
+                expected=TodoStatus.NOT_STARTED,
+                target=TodoStatus.IN_PROGRESS,
+            )
+        return current
+
+    def _current_stage(self, *, todo: TodoRecord) -> TodoStageRecord:
+        for stage in self._repository.list_stages(todo_id=todo.todo_id):
+            if stage.stage_instance_id == todo.current_stage_instance_id:
+                return stage
+        raise TodoNotFoundError(
+            f"Todo current stage {todo.current_stage_instance_id} was not found"
+        )
+
+    def _bound_template_context(
+        self,
+        *,
+        todo: TodoRecord,
+        stage: TodoStageRecord,
+        environment: str,
+        owner_id: str,
+    ) -> TodoCollaborationContext:
+        if todo.collab_context_id:
+            return self._collaboration.get_context(
+                collab_context_id=todo.collab_context_id,
+                actor_id=todo.created_by,
+            )
+        created = self._collaboration.create_context(
+            TodoCollaborationContextRequest(
+                space_id=str(todo.space_id),
+                environment=environment,
+                principal_id=todo.created_by,
+                product_kind="team_todo",
+                workflow_kind=stage.stage_key,
+                method_kind="Single",
+                executor_id=stage.executor_subject_id,
+                executor_owner_id=owner_id,
+                objective=(
+                    f"{todo.description or todo.title}\n\n"
+                    f"Current stage: {stage.stage_name}\n"
+                    f"Stage purpose: {stage.purpose}"
+                ),
+                todo_id=todo.todo_id,
+            )
+        )
+        try:
+            self._repository.bind_stage_context(
+                todo_id=todo.todo_id,
+                stage_instance_id=stage.stage_instance_id,
+                collab_context_id=created.collab_context_id,
+            )
+        except TodoStateConflictError:
+            winner = self._repository.get_todo(todo_id=todo.todo_id)
+            if not winner.collab_context_id:
+                raise
+            return self._collaboration.get_context(
+                collab_context_id=winner.collab_context_id,
+                actor_id=winner.created_by,
+            )
+        return created
+
 
     async def _bound_context(
         self,
@@ -470,7 +611,9 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
                     TodoStatus.COMPLETED,
                 },
                 TodoStatus.IN_PROGRESS: {
+                    TodoStatus.IN_PROGRESS,
                     TodoStatus.PENDING_ACCEPTANCE,
+                    TodoStatus.PENDING_ACTION,
                     TodoStatus.COMPLETED,
                 },
             }

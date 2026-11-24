@@ -21,10 +21,11 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
-from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver, ResolvedBotContext
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.detail_delivery import deliver_mcp_detail, resolve_detail_bot, resolve_detail_device
 from agentclaw.community.core.mcp.services.detail_fanout import (
+    deliver_mcp_detail_batch,
     fan_out_mcp_details,
     server_code_of,
 )
@@ -44,7 +45,7 @@ from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepos
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.log import get_logger
-from agentclaw.community.core.mcp.mcp_sync_service_protocol import MCPSyncServiceProtocol
+from agentclaw.community.core.mcp.mcp_sync_service_protocol import MCP_CONFIG_FANOUT_LIMIT, MCPSyncServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -56,7 +57,6 @@ logger = get_logger()
 
 _DESIRED_STATE_DETAIL_CONCURRENCY = 10
 _COLLECTED_DETAIL_CONCURRENCY = 5
-_USER_CONFIG_FANOUT_CONCURRENCY = 5
 
 
 @dataclass
@@ -274,6 +274,8 @@ class MCPSyncService(MCPSyncServiceProtocol):
         entity_id: Optional[str] = None,
         engine_type: Optional[str] = None,
         device_sync: DeviceSync | None = None,
+        config_target: ResolvedBotContext | None = None,
+        report_delivery_outcome: bool = False,
     ) -> dict[str, Any]:
         """把一批已备齐的 MCP 详情推送到**同一个** bot 的设备。
 
@@ -293,6 +295,8 @@ class MCPSyncService(MCPSyncServiceProtocol):
             bot_id: 目标 bot ID——列表内所有 MCP 共用。
             entity_id: Bot 稳定实体 ID；省略时先唯一解析历史 Owner/entity locator。
             engine_type: 引擎类型,默认 ``openclaw``。
+            report_delivery_outcome: 供持久投递记录使用。失败时附上
+                ``delivery_uncertain``，明确区分准备失败与投递结果未知。
 
         Returns:
             ``{"success": bool, "error": str}``,失败时 ``error`` 列出失败的
@@ -303,28 +307,49 @@ class MCPSyncService(MCPSyncServiceProtocol):
             # 无 MCP 可投递:不必解析设备。allow-list 的声明是 caller 的事。
             return {"success": True}
 
-        resource_bot = await asyncio.to_thread(
-            resolve_detail_bot, self.bot_repository, bot_id=bot_id,
-            entity_id=entity_id, legacy_owner_id=user_id,
-        )
-        resource_owner_id = resource_bot.entity_id
-        effective_engine_type = engine_type
-        if device_sync is None:
-            try:
-                ctx = await asyncio.to_thread(
-                    resolve_detail_device, self._resolver_provider(), resource_bot, entity_id or user_id,
-                )
-            except (DeviceNotBoundError, UnknownProviderError):
-                error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
-                logger.error("[MCPSyncService] %s", error)
-                return {"success": False, "error": error}
-            device_sync = self._device_sync_dispatcher_provider().dispatch(ctx)
-            effective_engine_type = effective_engine_type or ctx.conn_info.get(
-                "engine_type"
-            )
-        plugin = device_sync
+        def failed(error: str, *, delivery_uncertain: bool = False) -> dict[str, Any]:
+            result = {"success": False, "error": error}
+            if report_delivery_outcome:
+                result["delivery_uncertain"] = delivery_uncertain
+            return result
 
-        _successes, failures = await fan_out_mcp_details(
+        try:
+            resource_bot = await asyncio.to_thread(
+                resolve_detail_bot, self.bot_repository, bot_id=bot_id,
+                entity_id=entity_id, legacy_owner_id=user_id,
+            )
+            if config_target is not None and (
+                resource_bot.bot_pk != config_target.bot_pk
+                or resource_bot.current_owner_id != config_target.current_owner_id
+            ):
+                return failed("Bot address changed before MCP projection")
+            resource_owner_id = resource_bot.entity_id
+            effective_engine_type = engine_type
+            if device_sync is None:
+                try:
+                    ctx = await asyncio.to_thread(
+                        resolve_detail_device, self._resolver_provider(), resource_bot, entity_id or user_id,
+                    )
+                except (DeviceNotBoundError, UnknownProviderError):
+                    error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
+                    logger.error("[MCPSyncService] %s", error)
+                    return failed(error)
+                device_sync = self._device_sync_dispatcher_provider().dispatch(ctx)
+                effective_engine_type = effective_engine_type or ctx.conn_info.get(
+                    "engine_type"
+                )
+            plugin = device_sync
+
+        except Exception as exc:
+            if not report_delivery_outcome:
+                raise
+            logger.warning(
+                "[MCPSyncService] failed to prepare MCP detail batch: bot_id=%s, error=%s",
+                _bot, type(exc).__name__,
+            )
+            return failed("Bot or device could not be resolved before MCP projection")
+
+        outcome = await deliver_mcp_detail_batch(
             mcps=mcp_entries,
             push_one=lambda mcp: self._sync_mcp_detail(
                 plugin=plugin,
@@ -333,16 +358,18 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 bot_id=bot_id,
                 mcp_data=mcp,
                 engine_type=effective_engine_type,
+                scoped_config_projection=config_target is not None,
+                report_delivery_outcome=report_delivery_outcome,
             ),
             concurrency=_DESIRED_STATE_DETAIL_CONCURRENCY,
             bot_id=bot_id,
         )
 
-        if failures:
-            codes = [server_code_of(m) or "unknown" for m in failures]
+        if outcome.failures:
+            codes = [server_code_of(m) or "unknown" for m in outcome.failures]
             error = f"向 bot={_bot} 推送 MCP 配置失败: {', '.join(codes)}"
             logger.error("[MCPSyncService] %s", error)
-            return {"success": False, "error": error}
+            return failed(error, delivery_uncertain=outcome.delivery_uncertain)
 
         logger.info(
             "[MCPSyncService] desired state 详情推送完成: bot=%s, count=%s",
@@ -589,7 +616,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 "error": None,
             }
 
-        semaphore = asyncio.Semaphore(_USER_CONFIG_FANOUT_CONCURRENCY)
+        semaphore = asyncio.Semaphore(MCP_CONFIG_FANOUT_LIMIT)
 
         async def _sync_one(bot_id: str) -> dict[str, Any]:
             bot_owner_id = (target_bot_owners or {}).get(bot_id, user_id)
@@ -870,6 +897,8 @@ class MCPSyncService(MCPSyncServiceProtocol):
         endpoint_env: Optional[str] = None,
         transport_protocol: Optional[str] = None,
         engine_type: Optional[str] = None,
+        scoped_config_projection: bool = False,
+        report_delivery_outcome: bool = False,
     ) -> bool:
         """Delegate one payload to the shared delivery seam."""
         return await deliver_mcp_detail(
@@ -877,6 +906,8 @@ class MCPSyncService(MCPSyncServiceProtocol):
             resource_entity_id=resource_entity_id, bot_id=bot_id, mcp_data=mcp_data, api_key=api_key,
             custom_headers=custom_headers, endpoint_env=endpoint_env,
             transport_protocol=transport_protocol, engine_type=engine_type,
+            scoped_config_projection=scoped_config_projection,
+            report_delivery_outcome=report_delivery_outcome,
         )
 
     def _enrich_from_mcp_center(self, mcps: list[dict[str, Any]]) -> None:

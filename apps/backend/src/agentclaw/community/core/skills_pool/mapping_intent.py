@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 
 from agentclaw.community.kernel.skill_mapping_identity import mapping_source, source_tail
@@ -79,6 +80,19 @@ def retired_logical_skill_mappings(
         for mapping in previous
         if current_by_target.get(mapping.link_name) != mapping
     ]
+
+
+def retirement_request(
+    candidates: Sequence[PoolSkillMapping],
+    current: Sequence[PoolSkillMapping],
+) -> list[PoolSkillMapping]:
+    """Select one historical identity per unclaimed target for the Runtime contract."""
+    supplied = {mapping.link_name for mapping in current}
+    selected: dict[str, PoolSkillMapping] = {}
+    for mapping in candidates:
+        if mapping.link_name not in supplied:
+            selected.setdefault(mapping.link_name, mapping)
+    return list(selected.values())
 
 
 def merge_retired_logical_skill_mappings(

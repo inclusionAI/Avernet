@@ -34,6 +34,7 @@ import asyncio
 import dataclasses
 import json
 import uuid
+from contextlib import nullcontext
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -41,6 +42,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from agentclaw.community.core.apply_engine.compiler import (
     CompileRefused,
     DesiredStateCompiler,
+    LEGACY_STATE,
     StateCompilers,
     StateRef,
     SubmittedDocumentCompiler,
@@ -83,6 +85,13 @@ from agentclaw.community.core.apply_engine.run.termination import (
 )
 from agentclaw.community.core.apply_engine.run.report_codec import (
     report_from_payload,
+)
+from agentclaw.community.core.apply_engine.run.capability_projection import (
+    finish_capability_projection,
+    previous_projection_retry,
+)
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionReconcileProtocol,
 )
 from agentclaw.community.core.apply_engine.run.lock_reaper import (
     APPLY_LOCK_TTL_SECONDS,
@@ -158,6 +167,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
         delivery_strategies: DeliveryStrategyFactory,
         compilers: StateCompilers,
         completion_handlers: StateCompletionHandlers,
+        capability_projection: CapabilityProjectionReconcileProtocol | None = None,
     ) -> None:
         # Read for capabilities only (``_context``): what a document may be is
         # the Manifest compiler's question now, asked when it compiles.
@@ -192,6 +202,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
         # One subscriber per state kind, told when an apply of that kind ends
         # (``completion.py``). A kind with no row — the Manifest — is told nothing.
         self._completion = CompletionPublisher(completion_handlers)
+        self._capability_projection = capability_projection
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -465,7 +476,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
                         bot_id=ctx.bot_id,
                         apply_id=apply_id,
                         status=report.status.value,
-                        report=json.dumps(report.as_payload()),
+                        report=json.dumps(report.as_stored_payload()),
                     )
                     # Before the lock is released, so the producer's record is in place before the
                     # bot's next apply can start.
@@ -581,7 +592,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
                         bot_id=bot_id,
                         apply_id=apply_id,
                         status=report.status.value,
-                        report=json.dumps(report.as_payload()),
+                        report=json.dumps(report.as_stored_payload()),
                     )
                 else:
                     report = report_from_payload(
@@ -820,15 +831,29 @@ class ApplyRunService(ApplyRunServiceProtocol):
             # phase must not spend the fetch budget on skills it cannot deliver yet.
             only = None if phase is None else frozenset(step.construct for step in strategy.steps_for(phase))
             compiled = await compiler.compile(ctx, state, only=only)
-            report = await self._orchestrator(strategy).apply(
-                ctx,
-                compiled.state,
-                apply_id=apply_id,
-                trigger=trigger,
-                started_at=started_at,
-                phase=phase,
-                sources=compiled.sources,
-            )
+            projection = self._capability_projection
+            if (
+                projection is None or not projection.defer_enabled
+                or state.kind != LEGACY_STATE.kind or phase is not None
+                or not strategy.needs_container() or compiled.state.capabilities is None
+            ):
+                projection = None
+            deferred = projection.deferred_apply(
+                bot_id=ctx.bot_id, entity_id=ctx.entity_id,
+                retry=previous_projection_retry(self._applies, ctx),
+            ) if projection is not None else nullcontext()
+            async with deferred as delivery:
+                report = await self._orchestrator(strategy).apply(
+                    dataclasses.replace(ctx, capability_write_scope=delivery.write_scope if delivery else None),
+                    compiled.state,
+                    apply_id=apply_id,
+                    trigger=trigger,
+                    started_at=started_at,
+                    phase=phase,
+                    sources=compiled.sources,
+                )
+                if delivery is not None:
+                    report = await finish_capability_projection(delivery, report)
             report = dataclasses.replace(report, state=state)
             try:
                 note = await strategy.finish(ctx, report)
@@ -841,6 +866,8 @@ class ApplyRunService(ApplyRunServiceProtocol):
                 note = f"delivery could not be closed: {exc.__class__.__name__}"
             if note:
                 report = dataclasses.replace(report, notes=report.notes + (note,))
+            if projection is not None:
+                report = dataclasses.replace(report, finished_at=datetime.now())
             return report
 
     def _context(

@@ -16,7 +16,7 @@
     ) -> CreateGroup {
         CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 name: Some("Planning".into()),
                 context: None,

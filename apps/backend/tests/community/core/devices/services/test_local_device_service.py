@@ -881,11 +881,7 @@ def test_report_device_alive_backfills_adapter_port_with_binding_id(
     mock_baas.get_ws_info.assert_called_once_with(bind_id=42)
     repo.update_device_props.assert_called_once_with(
         binding_id=42,
-        props={
-            "bot_uuid": "bot-test-001",
-            "publish_id": "pub-001",
-            "adapter_port": 20003,
-        },
+        props={"adapter_port": 20003},
     )
 
 

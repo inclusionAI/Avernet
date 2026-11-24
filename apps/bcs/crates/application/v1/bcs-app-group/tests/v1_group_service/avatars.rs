@@ -164,7 +164,7 @@ async fn group_avatars_follow_current_profile() {
         .service
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-viewer", "staff-viewer", None, None),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                 name: Some("Viewer and Peer".into()),
                 context: None,
                 target_actor_id: "avatar-peer".into(),
@@ -709,7 +709,7 @@ async fn shared_participant_models_carry_avatars() {
         .service
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-manager", "staff-manager", None, None),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Shared models".into()),

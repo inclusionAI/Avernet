@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.core.repository.capability_desired_state_types import DesiredStateMutation
 from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 from injector import inject
@@ -150,15 +151,17 @@ class DirectActivationService(DirectActivationServiceProtocol):
         mutation_result = None
 
         def mutation():
-            nonlocal mutation_result
-            mutation_result = self._repository.claim_apply_skill(
+            return self._repository.claim_apply_skill(
                 bot_id=bot_id,
                 owner_id=resource_owner_id,
                 skill_id=str(skill["id"]),
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             )
-            return mutation_result
+
+        def committed(result: DesiredStateMutation) -> None:
+            nonlocal mutation_result
+            mutation_result = result
 
         try:
             result = await self._flow.apply(
@@ -167,6 +170,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 engine_type=bot_engine_type(bot),
                 runtime_required=project,
                 mutation=mutation,
+                on_committed=committed,
                 scope_from_result=skill_claim_scope,
             )
             self._log_manifest_source_transitions(
@@ -202,15 +206,17 @@ class DirectActivationService(DirectActivationServiceProtocol):
         mutation_result = None
 
         def mutation():
-            nonlocal mutation_result
-            mutation_result = self._repository.remove_apply_skill(
+            return self._repository.remove_apply_skill(
                 bot_id=bot_id,
                 owner_id=resource_owner_id,
                 skill_id=str(skill["id"]),
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             )
-            return mutation_result
+
+        def committed(result: DesiredStateMutation) -> None:
+            nonlocal mutation_result
+            mutation_result = result
 
         try:
             result = await self._flow.apply(
@@ -219,6 +225,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 engine_type=bot_engine_type(bot),
                 runtime_required=project,
                 mutation=mutation,
+                on_committed=committed,
                 scope_from_result=skill_release_scope,
             )
             self._log_manifest_source_transitions(
@@ -406,8 +413,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         mutation_result = None
 
         def mutation():
-            nonlocal mutation_result
-            mutation_result = self._repository.claim_apply_mcp(
+            return self._repository.claim_apply_mcp(
                 bot_id=bot_id,
                 owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
@@ -418,7 +424,10 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             )
-            return mutation_result
+
+        def committed(result: DesiredStateMutation) -> None:
+            nonlocal mutation_result
+            mutation_result = result
 
         try:
             result = await self._flow.apply(
@@ -427,6 +436,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 engine_type=bot_engine_type(bot),
                 runtime_required=project,
                 mutation=mutation,
+                on_committed=committed,
                 scope_from_result=mcp_claim_scope,
                 # Explicit config still reaches the claim to consume aliases.
                 # Only an effective supply/config delta requires MCP delivery.
@@ -463,8 +473,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         mutation_result = None
 
         def mutation():
-            nonlocal mutation_result
-            mutation_result = self._repository.remove_apply_mcp(
+            return self._repository.remove_apply_mcp(
                 bot_id=bot_id,
                 owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
@@ -474,7 +483,10 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             )
-            return mutation_result
+
+        def committed(result: DesiredStateMutation) -> None:
+            nonlocal mutation_result
+            mutation_result = result
 
         try:
             result = await self._flow.apply(
@@ -483,6 +495,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 engine_type=bot_engine_type(bot),
                 runtime_required=project,
                 mutation=mutation,
+                on_committed=committed,
                 scope_from_result=mcp_release_scope,
             )
             self._log_manifest_source_transitions(

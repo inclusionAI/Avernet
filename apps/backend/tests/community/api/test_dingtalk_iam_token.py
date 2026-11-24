@@ -87,7 +87,7 @@ def test_iam_schema_adds_only_source_selector():
     app = _app(_service())
     parameters = app.openapi()["paths"]["/api/v1/token/iam"]["get"]["parameters"]
     names = {item["name"] for item in parameters}
-    assert names == {"bot_id", "stage", "publish_id", "entity_id", "is_test_exchange", "session_key", "sessionKey", "token_type"}
+    assert names == {"bot_id", "stage", "publish_id", "entity_id", "is_test_exchange", "session_key", "sessionKey", "token_type", "f_user_id", "device_uuid"}
     assert not any(item.get("required") for item in parameters)
 
 

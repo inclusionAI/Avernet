@@ -223,7 +223,7 @@ async fn list_groups_filters_by_visibility() {
     service.create_group(cmd).await.unwrap();
 
     // Create a public group
-    let cmd2 = GroupCreateCommand {
+    let cmd2 = GroupCreateCommand { catalog_labels:Default::default(),
         human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("public-group".to_string()),

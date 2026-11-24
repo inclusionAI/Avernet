@@ -263,6 +263,8 @@ pub enum GroupDetail {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollaborationGroupDetail {
+    #[serde(default)]
+    pub catalog_labels: crate::types::catalog_labels::CatalogLabels,
     pub group_id: String,
     pub version: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -290,6 +292,8 @@ pub struct CollaborationGroupDetail {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DirectMessageGroupDetail {
+    #[serde(default)]
+    pub catalog_labels: crate::types::catalog_labels::CatalogLabels,
     pub group_id: String,
     pub version: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -374,6 +378,7 @@ pub struct CreateParticipant {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateCollaborationGroup {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     /// External Human-mention notification policy selected at creation.
     pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub name: Option<String>,
@@ -390,6 +395,7 @@ pub struct CreateCollaborationGroup {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateDirectMessageGroup {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     pub name: Option<String>,
     pub context: Option<String>,
     pub target_actor_id: String,
@@ -521,6 +527,7 @@ pub struct GetGroup {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GroupPatch {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     pub name: Option<String>,
     pub context: Option<String>,
     /// Outer `None` leaves the field unchanged; `Some(None)` restores the default.
@@ -534,7 +541,8 @@ pub struct GroupPatch {
 
 impl GroupPatch {
     pub fn is_empty(&self) -> bool {
-        self.name.is_none()
+        self.catalog_labels.is_none()
+            && self.name.is_none()
             && self.context.is_none()
             && self.opening_message.is_none()
             && self.visibility.is_none()

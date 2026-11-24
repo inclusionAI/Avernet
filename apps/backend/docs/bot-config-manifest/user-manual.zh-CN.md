@@ -1823,7 +1823,10 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `sources` | object[] | git 源的溯源，**每条声明一行**，见下。**「这批 bot 线上跑的到底是哪一版内容」看这里** |
 | `categories` | object[] | 每个参与 Apply 的类目一行，包括有效文档中缺省但支持的类目 |
 | `entries` | object[] | 每个**被声明的条目**一行，跨所有类目，见下 |
-| `notes` | string[] | 不属于任何条目的 apply 级说明。今天只有一处：teclaw 上「所有类目都写完了、最后整包 artifact 重投失败」记在这里，而不是让整次 apply 失败。ARCA 上恒为空 |
+| `notes` | string[] | Apply 级说明，包括 TeClaw 平台存储模式的 artifact 收尾反馈 |
+| `runtime_projection` | object，可能省略 | 已有 Bot 的能力同步结果，启用合并投影后独立于 `result` 返回。包括 `status`、按域的 `components` 和 `issues` |
+
+Apply 的写入终态以 `result` 为准。能力 Runtime 状态为 `CONVERGED` 时，报告所对应的配置版本已在当前绑定完成同步。`PENDING` 表示已提交配置尚待同步或确认，后台使用最新提交状态恢复同步。若设备可能仍在执行旧请求，后台等到写入目标确定发生变化后再投递。`DEGRADED` 提供需要处理的问题。`SKIPPED` 携带跳过原因，包含这次同步版本已被较新版本取代的情况。状态会在再次查询同一报告时更新。旧报告、预览和未走能力收尾的 Apply 可以省略该字段。
 
 `sources[]`：
 
@@ -1849,6 +1852,9 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `aborted` | bool | 这个类目没有收敛（至少一条声明的条目没能物化）。**单独看它并不保证「这块区域没被动过」**，要和下一个字段一起读 |
 | `partially_written` | bool | 失败发生在**写了一半的时候**，这块区域可能已经变了。`aborted` 为真而它为假 = 什么都没写、没有东西要回滚；它为真 = 再 apply 一次收敛 |
 | `removed` | string[] | 覆盖**删掉了什么**。它不在 `entries` 里，因为被删的东西根本没有对应的声明条目。Resources 的空目录用 `data/` 一类带尾斜杠的路径表示，dry-run 报预计移除，真实 Apply 在清理成功后报告确认移除的目录 |
+| `local_skill_packages` | object[]，可能省略 | 每个 Local Skill 包的发布与元数据回执。批次中止时仍返回已经派发的结果和未派发项 |
+
+包回执包含 `name`、已算出的 `content_digest`、`publication` 和 `metadata`。发布状态为 `PUBLISHED`、`FAILED`、`UNKNOWN` 或 `NOT_DISPATCHED`。元数据状态为 `COMMITTED`、`FAILED`、`UNKNOWN` 或 `NOT_ATTEMPTED`。包发布和 Direct 安装关系分别提交。批次失败后保留已发布的包，暂停后续能力写入，下一次有效 Apply 根据当时的状态重新规划。
 
 `entries[]`：
 

@@ -39,7 +39,7 @@ impl Management {
     }
 }
 fn card() -> ManagedA2aCard {
-    ManagedA2aCard {
+    ManagedA2aCard { catalog_labels:Default::default(),
         provider_bot_ref: "remote".into(),
         provider_name: "orders".into(),
         agent_name: "订单助手".into(),
@@ -83,7 +83,7 @@ impl A2aBotManagementService for Management {
         assert!(command.now_ms > 0);
         self.result()?;
         Ok(NamedA2aRegistration {
-            card: NamedA2aCard {
+            card: NamedA2aCard { catalog_labels:Default::default(),
                 provider_bot_ref: "remote".into(),
                 bot_id: "bot".into(),
                 provider_name: "orders".into(),

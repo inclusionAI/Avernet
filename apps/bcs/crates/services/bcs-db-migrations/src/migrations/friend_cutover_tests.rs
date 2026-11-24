@@ -18,7 +18,7 @@ async fn friend_cutover_does_not_import_legacy_requests_or_change_history() -> D
         "INSERT INTO permission_requests (request_id, env, from_id, to_id, request_kind, status, created_by) \
          VALUES ('new-request', 'dev', 'botA', 'botB', 'connect', 'pending', 'botA')"
     )).await?;
-    let history_sql = "SELECT version, name, checksum FROM bcs_schema_migrations ORDER BY version";
+    let history_sql = "SELECT version, name, checksum FROM bcs_schema_migrations WHERE version <= 45 ORDER BY version";
     let history = db.query(DbStatement::new(history_sql)).await?;
     for _ in 0..2 {
         run_sqlite_migrations(&db).await?;

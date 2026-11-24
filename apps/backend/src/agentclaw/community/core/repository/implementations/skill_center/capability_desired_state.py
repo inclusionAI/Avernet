@@ -7,9 +7,15 @@ would make a SkillSet only *eventually* atomic.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextvars import ContextVar
 
-from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import SkillBatchTransactions, lock_bot_capabilities
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import (
+    SkillBatchTransactions,
+    find_capability_bot,
+    lock_bot_capabilities,
+    verify_runtime_binding_for_write,
+)
 
 from injector import inject
 from sqlalchemy import and_, or_
@@ -69,12 +75,14 @@ from agentclaw.community.core.models.skill_installation_source import SkillInsta
 
 from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
     require_can_join_set,
 )
+
 
 
 from .apply_skill_set_commands import ApplySkillSetCommands
@@ -97,6 +105,29 @@ class CapabilityDesiredStateRepository(
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
         self._batch_session = ContextVar("skill_batch_session", default=None)
+
+    def commit_capability_mutation(
+        self, *, bot_id: str, entity_id: str,
+        mutation: Callable[[], DesiredStateMutation],
+        require_bot: bool,
+    ) -> DesiredStateMutation:
+        """Run a capability command under the Bot mutation fence."""
+        with self._db.transactional_orm_session() as session:
+            bot = find_capability_bot(
+                session, bot_id=bot_id, entity_id=entity_id, lock=True,
+            )
+            if bot is None:
+                if require_bot:
+                    raise SkillSetControlPlaneLockUnavailableError("Bot capability fence unavailable")
+                return mutation()
+            verify_runtime_binding_for_write(
+                session, bot_id=bot_id, entity_id=entity_id, locked_bot=bot,
+            )
+            token = self._batch_session.set(session)
+            try:
+                return mutation()
+            finally:
+                self._batch_session.reset(token)
 
     @staticmethod
     def normalize_mcp_config_address(session, *, bot_id: str, owner_id: str, env: str) -> None:
@@ -576,7 +607,7 @@ class CapabilityDesiredStateRepository(
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             row = self._set(
                 session,

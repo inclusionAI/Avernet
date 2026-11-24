@@ -15,6 +15,7 @@ from agentclaw.community.core.mcp.scoped_config_contract import (
 )
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
 from tests.community.factories.access import make_staff_user
+from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -206,4 +207,62 @@ def public_replace_error():
     seed=_seed_auth, expect=ExpectError(status=422),
 )
 def public_null_url_rules_error():
+    pass
+
+
+_BOT_CONFIG = "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"
+_BOT_ID = "scoped-mcp-bot"
+_BOT_CONFIG_INPUT = {
+    "path_params": {"bot_id": _BOT_ID, "server_code": _SERVER},
+    "query_params": {"user_id": _OWNER},
+    "headers": _PUBLIC_HEADERS,
+}
+
+
+def _seed_addressed_bot(world) -> None:
+    _seed_auth(world)
+    make_bot(world, bot_id=_BOT_ID, owner_id=_OWNER)
+
+
+@endpoint_test(
+    method="GET", path=_BOT_CONFIG, scenario="read_explicit_overrides",
+    input=CaseInput(**_BOT_CONFIG_INPUT), seed=_seed_addressed_bot,
+    expect=ExpectSuccess(status=200, json_contains={
+        "data": {"server_code": _SERVER, "headers": {}, "url": None}
+    }),
+)
+def bot_config_read():
+    pass
+
+
+@endpoint_test(
+    method="GET", path=_BOT_CONFIG, scenario="missing_addressed_bot",
+    input=CaseInput(**_BOT_CONFIG_INPUT), seed=_seed_auth,
+    expect=ExpectError(status=404),
+)
+def bot_config_read_missing():
+    pass
+
+
+@endpoint_test(
+    method="PUT", path=_BOT_CONFIG, scenario="persist_bot_overrides",
+    input=CaseInput(**_BOT_CONFIG_INPUT, json_body={
+        "headers": {"X-Region": "east"}, "url": "https://bot.example.invalid/mcp",
+    }),
+    seed=_seed_addressed_bot,
+    expect=ExpectSuccess(status=200, json_contains={"data": {
+        "headers": {"X-Region": "****"}, "url": "****",
+        "desired_state": {"changed": True, "status": "COMMITTED"},
+    }}),
+)
+def bot_config_write():
+    pass
+
+
+@endpoint_test(
+    method="PUT", path=_BOT_CONFIG, scenario="refuse_non_http_url",
+    input=CaseInput(**_BOT_CONFIG_INPUT, json_body={"url": "file:///tmp/mcp"}),
+    seed=_seed_addressed_bot, expect=ExpectError(status=400),
+)
+def bot_config_write_invalid_url():
     pass

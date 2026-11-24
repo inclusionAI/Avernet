@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.repository.capability_desired_state_types import DesiredStateMutation
 from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.skill_center.errors import (
     ApplyDesiredStateCommittedError,
@@ -104,8 +105,7 @@ class SkillSetApplyService:
         mutation_result = None
 
         def mutation():
-            nonlocal mutation_result
-            mutation_result = self._repository.replace_apply_skill_sets(
+            return self._repository.replace_apply_skill_sets(
                 scope=scope,
                 sets=sets,
                 remove_names=remove_names,
@@ -113,7 +113,10 @@ class SkillSetApplyService:
                 platform_default_codes=platform_default_codes,
                 mcp_catalog_entries=mcp_catalog_entries,
             )
-            return mutation_result
+
+        def committed(result: DesiredStateMutation) -> None:
+            nonlocal mutation_result
+            mutation_result = result
 
         try:
             result = await self._mutate(
@@ -129,6 +132,7 @@ class SkillSetApplyService:
                     released_mcp=mutation.mcp_codes,
                 ),
                 mutation=mutation,
+                on_committed=committed,
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:

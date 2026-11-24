@@ -798,6 +798,7 @@ fn bot_authority_unknown_action_fails_startup() {
     assert!(error.contains("unknown action"), "{error}");
     //_load via file
     let tmp = tempfile::TempDir::new().expect("temp config dir");
+    std::fs::write(tmp.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     std::fs::write(tmp.path().join("bcs-config.toml"), r#"
         bots_base_dir = "/bots"
         [[bot_authority.trusted_apps]]
@@ -866,6 +867,7 @@ fn bot_authority_tenant_and_shape_errors_fail_startup() {
     // reserved "absent" spelling is the only way to
     // match tenantless callers).
     let tmp = tempfile::TempDir::new().expect("temp config dir");
+    std::fs::write(tmp.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     std::fs::write(
         tmp.path().join("bcs-config.toml"),
         r#"
@@ -887,6 +889,7 @@ fn bot_authority_tenant_and_shape_errors_fail_startup() {
 
     // An unknown field is a load failure.
     let tmp = tempfile::TempDir::new().expect("temp config dir");
+    std::fs::write(tmp.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     std::fs::write(
         tmp.path().join("bcs-config.toml"),
         r#"
@@ -909,6 +912,7 @@ fn bot_authority_tenant_and_shape_errors_fail_startup() {
     // The legacy schema fails LOUDLY, never half-applied
     // (bot-authority simplification invariant).
     let tmp = tempfile::TempDir::new().expect("temp config dir");
+    std::fs::write(tmp.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     std::fs::write(
         tmp.path().join("bcs-config.toml"),
         r#"

@@ -115,6 +115,7 @@ provides:
   - ActivationPort
   - McpConfigWriteIntent
   - SkillPackageUploadPort
+  - RuntimeBindingTarget
   - IdentityFilePort
   - ResourceFilePort
   - SharedSkillPort  # and SharedSkillNotFound, SharedSkillAmbiguous; implemented by core.skill_center SkillQueryService

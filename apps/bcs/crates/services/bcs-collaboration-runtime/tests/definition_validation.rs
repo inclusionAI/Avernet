@@ -417,6 +417,51 @@ fn validates_collaboration_template_seed_definitions() {
 }
 
 #[test]
+fn validates_all_collaboration_template_seed_authoring_definitions() {
+    let template_ids = [
+        "write-and-review",
+        "parallel-expert-review",
+        "solution-and-risk-review",
+        "bot-human-bot-review",
+        "world-cup-preview-content-production",
+        "micro-merchant-event-orchestration",
+        "write-review-loop",
+        "research-writing-loops",
+        "nested-review-loops",
+        "single-bot-guided-answer",
+    ];
+    let mut validated = 0;
+    let mut failures = Vec::new();
+    for locale in ["zh-CN", "en-US"] {
+        for template_id in template_ids {
+            let file_name = format!("{locale}/{template_id}.yaml");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../seeds/collaboration-templates")
+                .join(&file_name);
+            let raw = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("seed yaml {file_name} should be readable: {error}"));
+            let outcome = validate_authoring(&raw, true);
+            if !outcome.valid || !outcome.errors.is_empty() {
+                let errors = outcome
+                    .errors
+                    .iter()
+                    .map(|error| format!("{} at {}", error.code, error.path))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                failures.push(format!("{file_name}: {errors}"));
+            }
+            validated += 1;
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "authoring validation failed for seed templates: {failures:?}"
+    );
+    assert_eq!(validated, 20);
+}
+
+#[test]
 fn default_collaboration_template_seed_documents_timeout_overrides() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../seeds/collaboration-templates/en-US/solution-and-risk-review.yaml");

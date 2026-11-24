@@ -38,6 +38,7 @@ class TodoExecutionRecord:
     executor_id: str
     created_at: datetime
     updated_at: datetime
+    stage_instance_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -162,6 +162,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 43, name: "delivery_session_lookup" },
     SqliteMigration { version: 44, name: "group_context_preset" },
     SqliteMigration { version: 45, name: "message_activity_indexes" },
+    SqliteMigration { version: 46, name: "configured_catalog_labels" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -590,6 +591,13 @@ async fn apply_sqlite_migration_body(
             db.transaction(steps).await?;
             Ok(())
         }
+        46 => {
+            let steps = bcs_db_api::split_sql_statements(include_str!(
+                "../../../../migrations/sqlite/046_configured_catalog_labels.sql"
+            )).into_iter().map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+            db.transaction(steps).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -737,3 +745,7 @@ mod group_card_tests;
 #[cfg(test)]
 #[path = "migrations/friend_cutover_tests.rs"]
 mod friend_cutover_tests;
+
+#[cfg(test)]
+#[path="migrations/catalog_labels_tests.rs"]
+mod catalog_labels_tests;

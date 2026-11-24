@@ -9,6 +9,7 @@ pub(crate) fn group_to_detail(group: DomainGroup) -> GroupDetailResult {
 pub(crate) fn group_to_detail_with_context(group: DomainGroup, context_injected: u64) -> GroupDetailResult {
     let message_count = group.messages.len();
     GroupDetailResult {
+        catalog_labels:Default::default(),
         group_id: group.id,
         label: group.label,
         status: group.status,
@@ -88,5 +89,14 @@ pub(crate) fn participant_role_to_wire(role: ParticipantRole) -> &'static str {
         ParticipantRole::Manager => "manager",
         ParticipantRole::Worker => "worker",
         ParticipantRole::Observer => "observer",
+    }
+}
+
+impl GroupManagement {
+    pub(super) async fn with_detail_catalog_labels(&self,mut detail:GroupDetailResult)->Result<GroupDetailResult,GroupUseCaseError> {
+        if detail.group_kind==GroupKind::Normal && matches!(detail.group_strategy,GroupStrategy::ManagerWorker|GroupStrategy::StateMachine) {
+            detail.catalog_labels=self.group.read_card_snapshot(&detail.group_id).await?.map(|snapshot|snapshot.catalog_labels).unwrap_or_default();
+        }
+        Ok(detail)
     }
 }

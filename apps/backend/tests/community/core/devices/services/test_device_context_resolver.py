@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import FrozenInstanceError
 from unittest.mock import MagicMock
 
@@ -84,6 +85,27 @@ def test_baas_bot_returns_provider_baas(resolver, fake_binding_repo, builders):
     ctx = resolver.resolve_for_bot("bot-2", "user-1")
     assert ctx.provider == "baas"
     builders["baas"].build.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("binding_id", [41, 42])
+async def test_projection_resolution_refuses_a_replaced_device_before_connecting(
+    resolver, fake_binding_repo, builders, binding_id,
+):
+    from agentclaw.community.core.devices.services.device_context import (
+        DeviceConnectionUnavailableError,
+        RuntimeBindingTarget,
+        expect_runtime_binding,
+    )
+
+    target = RuntimeBindingTarget("bot-1", "owner", "entity", 41, "device-old")
+    fake_binding_repo.get_active_by_bot_and_owner.return_value = _mock_binding(binding_id, "baas")
+    with expect_runtime_binding(target):
+        with pytest.raises(DeviceConnectionUnavailableError, match="binding changed"):
+            await asyncio.to_thread(resolver.resolve_for_bot, "bot-1", "owner")
+    builders["baas"].build.assert_not_called()
+
+    assert resolver.resolve_for_bot("bot-1", "owner").binding_id == binding_id
 
 
 def test_teclaw_bot_returns_provider_teclaw_not_translated_to_baas(

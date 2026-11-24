@@ -25,8 +25,8 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
 
 
 class _Database:
-    def __init__(self) -> None:
-        self.engine = create_engine("sqlite:///:memory:")
+    def __init__(self, database_url: str = "sqlite:///:memory:") -> None:
+        self.engine = create_engine(database_url)
         Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(bind=self.engine, expire_on_commit=False)
         # Persist synthetic identities so mutations use the real Bot fence.

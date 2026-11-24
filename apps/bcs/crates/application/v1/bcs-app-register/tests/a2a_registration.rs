@@ -47,7 +47,7 @@ async fn fixture() -> (RegistrationChain, RegisterServiceImpl, Arc<Fetcher>) {
 }
 
 fn command(owner:&str) -> RegisterBot {
-    RegisterBot {token:mint_v2_token(owner,"provider-a",REGISTER_SECRET),bot_name:"A2A Bot".into(),
+    RegisterBot { catalog_labels:Default::default(),token:mint_v2_token(owner,"provider-a",REGISTER_SECRET),bot_name:"A2A Bot".into(),
         mode:Some(ProviderRegistrationMode::Gateway),provider_bot_ref:Some("order".into()),webhook_url:None}
 }
 async fn count(chain:&RegistrationChain,table:&str) -> i64 {

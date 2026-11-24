@@ -37,6 +37,9 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionCompetitionProtocol,
+)
 from agentclaw.community.core.skill_center.center_content_distribution import (
     CenterContentDistribution,
 )
@@ -249,12 +252,14 @@ class SkillCenterGroup4Module(Module):
         projector: BotRuntimeProjector,
         distribution: CenterContentDistribution,
         layouts: SkillsPoolLayoutRepositoryProtocol,
+        delivery: CapabilityProjectionCompetitionProtocol,
     ) -> DesktopSkillRecoveryTaskHandler:
         return DesktopSkillRecoveryTaskHandler(
             bots=bots,
             projector=projector,
             distribution=distribution,
             layouts=layouts,
+            delivery=delivery,
         )
 
     @singleton

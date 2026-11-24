@@ -269,10 +269,7 @@ def _without_request_id(response) -> dict:
     body = dict(response.json())
     body.pop("request_id", None)
     return body
-
-
 # ── the published document ──────────────────────────────────────────────────
-
 #: The operations that take no ``user_id``, and why each one cannot.
 #:
 #: Pinned by address rather than counted, so adding another is a deliberate edit
@@ -450,14 +447,12 @@ _NO_USER_DIMENSION = {
         f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}",
     ),
 }
-
 # Read-only operations that accept a user_id as a caller-selected filter rather
 # than as the authenticated user's acting scope. They still require the query
 # parameter, but must not advertise the owner-mismatch 403.
 _USER_ID_FILTER_ONLY = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/list"),
 }
-
 #: Operations whose ``user_id`` is a directory filter, not the self-confirm
 #: seam. Same spelling, opposite contract: elsewhere ``user_id`` is *who this
 #: call acts for* and must be the caller (403 otherwise); here it is *whose
@@ -468,7 +463,6 @@ _USER_ID_FILTER_ONLY = {
 #: contract spelling). There is no whoami fall-back: the param names whose
 #: identity to return, and its absence is a 422.
 _DIRECTORY_USER_ID = {("get", f"{PUBLIC_API_PREFIX}/org/user")}
-
 # Operations that are user-scoped but deliberately non-delegable. They derive
 # the actor from the verified human principal and therefore publish no
 # caller-selectable ``user_id``. They may still document a domain-specific 403
@@ -490,12 +484,10 @@ _AUTHENTICATED_SELF = {
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/personal-center/activities",
     ),
 }
-
 #: Bot Logs is excluded for a different reason and must stay that way — see the
 #: "Naming the end user" note in ``openapi_v1/__init__.py``. Its own ``user_id``
 #: is a filter over other people's traces, not the caller's scope.
 _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
-
 #: What ``bot_id`` looks like, and must keep looking like: an address where it
 #: addresses a bot, a query parameter where it is one, and never a body field.
 #: This change deliberately moved none of them. ``none`` counts operations with
@@ -667,13 +659,19 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Team-space deletion adds one user-scoped operation with no Bot dimension:
 # none 156 -> 157. Owned-Bot grant reconciliation adds one authenticated-self
 # operation. Its optional body filter only narrows compensation; it is not a
-# path/query Bot resource address: none 157 -> 158. The standard evaluation
-# workflow adds seven Bot-path-addressed user-scoped operations under
-# /bots/{bot_id}/eval: path 226 -> 233.
-# Admin Caller expiry correction adds one Bot-addressed operation: 233 -> 234.
-_BOT_ID_PLACEMENT = {"path": 235, "query": 2, "none": 158}
-# Read-only Caller status adds one Bot-path operation: 234 -> 235.
-
+# path/query Bot resource address: none 157 -> 158. Todo template capability
+# discovery adds one user-scoped operation with no Bot dimension: none 158 -> 159.
+# The ten versioned Todo template management operations are also Space-scoped
+# rather than Bot-addressed: none 159 -> 169. The five template-driven stage
+# lifecycle operations (create-from-template, stage listing, outcome, resume,
+# and cancel) also have no Bot dimension: none 169 -> 174. The standard
+# evaluation workflow adds seven Bot-path-addressed user-scoped operations under
+# /bots/{bot_id}/eval: path 226 -> 233. Admin Caller expiry correction adds one
+# Bot-addressed operation: path 233 -> 234. Read-only Caller status adds one
+# Bot-path operation: path 234 -> 235. Bot MCP config read and update add two
+# Bot-path operations: path 235 -> 237. Dedicated recycle operation query
+# adds one OWNER-only Bot-path read: path 237 -> 238.
+_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 174}
 
 
 def _schema() -> dict:
@@ -897,7 +895,14 @@ def test_the_pinned_number_of_operations_take_it():
     # destroy, and result save: 309 -> 316.
     # Admin Caller expiry correction keeps the verified actor user_id: 316 -> 317.
     # Read-only Caller status adds one user-taking operation: 317 -> 318.
-    assert len(taking) == 318
+    # Todo template capability discovery adds one account-level user-scoped
+    # operation: 318 -> 319. The ten versioned Todo template management
+    # operations are Space-scoped and explicitly user-scoped: 319 -> 329.
+    # The five template-driven stage lifecycle operations are also explicitly
+    # user-scoped: 329 -> 334. Bot MCP config read and update both name the
+    # acting user: 334 -> 336.
+    # Dedicated recycle operation query adds one OWNER-only read: 336 -> 337.
+    assert len(taking) == 337
 
 
 def test_the_exempt_operations_take_none():

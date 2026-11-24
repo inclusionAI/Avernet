@@ -44,6 +44,9 @@ class _Repository:
         self.manifest_skill_remove_calls: list[dict] = []
         self.restore_calls: list[dict] = []
 
+    def commit_capability_mutation(self, *, mutation, **_kwargs):
+        return mutation()
+
     #: Dependencies the Skill under test declares, mirrored onto the mutation
     #: result the way the real repository fills it under the row lock.
     skill_mcp_codes: frozenset[str] = frozenset()

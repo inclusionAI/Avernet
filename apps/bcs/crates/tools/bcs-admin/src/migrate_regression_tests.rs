@@ -42,6 +42,9 @@ async fn coverage_sqlite_diagnostics_are_read_only_and_apply_clears_pending_vers
 fn coverage_migration_dialect_uses_config_and_rejects_unsupported_backends() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let config_file = dir.path().join("config.json");
+    // Config loading requires the policy alongside the temporary config file.
+    fs::copy(bcs_root().join("configs").join("catalog-labels.toml"),
+        dir.path().join("catalog-labels.toml"))?;
     let global = MigrateGlobalArgs { config_dir: None, config_file: Some(config_file.clone()) };
     let mut args = sqlite_args(Path::new("override.db")); args.sqlite_path = None;
     for (kind, expected) in [(DatabaseType::Sqlite, MigrationDialect::Sqlite), (DatabaseType::Mysql, MigrationDialect::Mysql)] {
@@ -110,6 +113,10 @@ async fn coverage_mysql_admin_apply_is_idempotent_and_refuses_changed_history() 
         let mut bcs = BcsConfig::default(); bcs.database.database_type = DatabaseType::Mysql;
         bcs.database.mysql = config;
         let config_file = dir.path().join("bcs-config.json"); fs::write(&config_file, serde_json::to_vec(&bcs)?)?;
+        // Config loading requires the catalog label policy file next to the
+        // config file; stage the repository dictionary into the sandbox.
+        fs::copy(bcs_root().join("configs").join("catalog-labels.toml"),
+            dir.path().join("catalog-labels.toml"))?;
         let global = MigrateGlobalArgs { config_dir: None, config_file: Some(config_file) };
         let mut args = MigrateArgs { dialect: Some(MigrationDialect::Mysql), migrations_dir: Some(migrations.clone()),
             sqlite_path: None, emit_sql: false, check_files: false, check_db: false, apply: true,

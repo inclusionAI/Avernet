@@ -1,0 +1,1118 @@
+{
+  "module": "todo",
+  "change_name": "2026-11-20-todo-template-stage-lifecycle",
+  "description": "Implement versioned Todo templates, Bot/Human stages, deterministic artifact gates, and the six-state Todo lifecycle.",
+  "bootstrap": {
+    "status": "ready",
+    "module": "todo",
+    "state_path": "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/pipeline/state.json",
+    "dima_status": "aligned",
+    "ledger_seeded": true,
+    "created_at": "2026-11-20T08:36:54.425724Z"
+  },
+  "dima_context": {
+    "work_item_id": "2026111900120789942",
+    "title": "【BBS-待办】生命周期状态变化，状态管理",
+    "url": "https://project.alipay.com/workItem?workItemId=2026111900120789942",
+    "binding_status": "aligned",
+    "alignment_status": "aligned",
+    "writeback_status": "succeeded",
+    "writeback_note": "Confirmed lifecycle, stage, recovery, authorization, compatibility, and migration decisions were written back before bootstrap.",
+    "related_work_items": [
+      {
+        "work_item_id": "2026111900120789898",
+        "title": "【BBS-待办】AIcoding场景产品profile定义",
+        "url": "https://project.alipay.com/workItem?workItemId=2026111900120789898",
+        "binding_status": "aligned",
+        "writeback_status": "succeeded"
+      }
+    ],
+    "artifact_alignment_status": "aligned",
+    "artifacts": [
+      "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/proposal.md",
+      "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/spec.md",
+      "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md",
+      "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/tasks.md"
+    ]
+  },
+  "preflight": {
+    "status": "ready",
+    "missing_tools": [],
+    "notes": [
+      "uv 0.12.5 available",
+      "Python 3.12.10 available",
+      "npm 11.7.0 available",
+      "git 2.39.5 available",
+      "Backend and frontend project manifests are present; no first-time dependency installation is required before Slice 1."
+    ]
+  },
+  "delivery_audit_report": null,
+  "current_phase": "implement",
+  "current_round": 0,
+  "current_tier": 0,
+  "difficulty": "medium",
+  "threadId": null,
+  "status": "in_progress",
+  "stuck_count": 0,
+  "retry_count": 0,
+  "started_at": "2026-11-20T08:36:54.425598Z",
+  "updated_at": "2026-11-20T12:32:55.652788Z",
+  "last_score": null,
+  "last_verdict": "pending",
+  "has_critical": false,
+  "config": {
+    "tier1": {
+      "max_rounds": 4,
+      "max_fix_attempts": 3,
+      "difficulty": "medium",
+      "checkpoint": false,
+      "allow_degraded_review_continuation": false,
+      "reviewer": {
+        "backend": "codex-cli",
+        "model": "gpt-5.5",
+        "reasoning_effort": "high"
+      }
+    },
+    "tier2": {
+      "coverage_threshold": 80,
+      "max_rounds": 2,
+      "checkpoint": false,
+      "test_command": "",
+      "lint_command": "",
+      "format_command": "",
+      "typecheck_command": ""
+    },
+    "acceptance_rework": {
+      "max_total_attempts": 6,
+      "max_attempts_per_ac": 3,
+      "max_same_failure_repeats": 2,
+      "max_no_progress_rounds": 2
+    }
+  },
+  "acceptance_ledger": {
+    "version": 1,
+    "items": [
+      {
+        "id": "AC-001",
+        "source": "user_explicit",
+        "requirement_ref": "REQ-1",
+        "title": "六状态 Todo 生命周期",
+        "statement": "Todo 资源只使用 not_started | in_progress | interrupted | pending_action | completed | cancelled；not_started 仅表示从未启动，Todo 一旦启动不得回退，Bot->Bot 阶段切换保持 in_progress。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#7-生命周期"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "unit + integration + e2e",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap."
+      },
+      {
+        "id": "AC-002",
+        "source": "user_explicit",
+        "requirement_ref": "REQ-2",
+        "title": "Bot/Human 阶段与待处理原因",
+        "statement": "模板阶段支持 stage_kind=bot|human；Human stage 激活或 Runtime/领域服务判定 Bot execution blocked 时 Todo 为 pending_action，并分别记录 planned_human_stage | blocked；Human->Bot 推进后为 in_progress。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#35-bot-阶段与-human-阶段"
+        ],
+        "implementation_refs": [
+          "apps/backend/src/agentclaw/community/core/task/todos/template_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_validation.py",
+          "apps/backend/tests/community/core/task/todos/test_template_definition.py"
+        ],
+        "verification": {
+          "method": "unit + integration + e2e",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap. Slice 1 implementation is bound; later slices still provide lifecycle/persistence/UI completion and final AC verification."
+      },
+      {
+        "id": "AC-003",
+        "source": "user_explicit",
+        "requirement_ref": "REQ-3",
+        "title": "不可变模板版本与参与角色绑定",
+        "statement": "模板拥有不可变 published version、参与角色 schema、有序阶段和可选门禁；Todo 创建时固定 template_version_id、补齐所有 required binding，并快照解析后的 executor/owner；后续模板修改不得影响已创建 Todo。",
+        "category": "data",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#3-领域模型"
+        ],
+        "implementation_refs": [
+          "apps/backend/src/agentclaw/community/core/task/todos/template_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_validation.py",
+          "apps/backend/tests/community/core/task/todos/test_template_definition.py"
+        ],
+        "verification": {
+          "method": "unit + repository + integration",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap. Slice 1 implementation is bound; later slices still provide lifecycle/persistence/UI completion and final AC verification."
+      },
+      {
+        "id": "AC-004",
+        "source": "user_explicit",
+        "requirement_ref": "REQ-4",
+        "title": "Human 阶段授权与幂等完成",
+        "statement": "只有当前 Human stage 绑定的 executor 能通过阶段 complete 命令推进；请求必须具备幂等键，重复请求不得重复推进，错误 actor、旧 stage 或迟到请求必须拒绝。",
+        "category": "permission",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#52-human-阶段完成命令"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "unit + contract + integration",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap."
+      },
+      {
+        "id": "AC-005",
+        "source": "user_explicit",
+        "requirement_ref": "REQ-5",
+        "title": "Execution 完成、恢复、中断与取消",
+        "statement": "Bot 通过现有产物接口和 /complete 提交 execution 完成内容；阶段状态由 Backend 根据 execution 结果和 Runtime 内部事件投影。failed 仅是 attempt 结果，自动恢复期间 Todo 保持 in_progress，恢复耗尽后才为 interrupted；当前阶段负责人或 Space Admin 可带原因 resume/cancel，completed/cancelled 默认不可恢复。Bot 不直接调用阶段 outcome 接口。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#53-执行状态与产品状态分离"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "unit + integration + concurrency",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap."
+      },
+      {
+        "id": "AC-006",
+        "source": "user_explicit",
+        "requirement_ref": "REQ-6",
+        "title": "确定性硬产物门禁",
+        "statement": "阶段可不配置门禁；若配置，只有 capability registry 支持的 artifact_type + artifact_state 可发布，并在阶段完成事务中校验。V1 支持 pull_request:created，要求当前阶段存在可信上报的规范化 PR 产物事实；未知门禁或缺失产物不得推进。",
+        "category": "api",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#6-完成门禁与产物"
+        ],
+        "implementation_refs": [
+          "apps/backend/src/agentclaw/community/core/task/todos/template_capabilities.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_validation.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_capability_service.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_router.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_template_capabilities.py",
+          "apps/backend/tests/community/core/task/todos/test_template_definition.py"
+        ],
+        "verification": {
+          "method": "unit + contract + integration",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap. Slice 1 implementation is bound; later slices still provide lifecycle/persistence/UI completion and final AC verification."
+      },
+      {
+        "id": "AC-007",
+        "source": "compliance_invariant",
+        "requirement_ref": "REQ-7",
+        "title": "隔离、事务与并发安全",
+        "statement": "模板、版本、Todo、阶段、execution 和 artifact 均按 tenant/env/space 隔离；创建 Todo、展开阶段、门禁校验和状态推进使用事务、行锁或 expected-status CAS；数据库写失败必须传播错误。",
+        "category": "security",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#9-持久化设计"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "repository + integration + concurrency",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap."
+      },
+      {
+        "id": "AC-008",
+        "source": "user_explicit",
+        "requirement_ref": "REQ-8",
+        "title": "前端模板与六状态工作台",
+        "statement": "Todo 模块提供模板管理、模板版本编辑/发布、模板化创建、动态角色绑定、六状态列表筛选和阶段化详情；planned Human、blocked、interrupted 和 cancel 显示不同动作；UI 使用现有语义 design token。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#11-前端信息架构"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "frontend test + typecheck + lint + e2e",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap."
+      },
+      {
+        "id": "AC-009",
+        "source": "risk_boundary",
+        "requirement_ref": "REQ-9",
+        "title": "兼容契约与文档一致性",
+        "statement": "新增阶段化 contract 的同时保留现有 /complete、/report、artifacts/object-file 兼容适配，固定调用方清单；OpenAPI/Plugin contract、conformance tests、Todo README 和前序规格的替代说明使用同一状态和术语。",
+        "category": "compatibility",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#105-兼容入口"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "contract + compatibility + conformance",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap."
+      },
+      {
+        "id": "AC-010",
+        "source": "user_explicit",
+        "requirement_ref": "REQ-10",
+        "title": "正式 schema 变更且不迁移历史数据",
+        "statement": "提供正式 DDL/版本变更，新增模板、版本、阶段实例和语义产物字段；不编写历史 Todo 语义迁移，发布说明明确旧数据清理、前滚和回滚顺序。",
+        "category": "data",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md#14-数据与兼容策略"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "migration-check + repository + manual review",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "none",
+        "notes": "Confirmed by the user discussion and aligned to both bound Dima work items before Phase 0 bootstrap."
+      }
+    ],
+    "decisions": [
+      {
+        "decision": "requirement_closure_confirmed",
+        "summary": "AC-001 through AC-010 are confirmed and blocking.",
+        "evidence": "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/spec.md"
+      },
+      {
+        "decision": "pre_implementation_decision_check",
+        "summary": "No unresolved human decision remains; the user explicitly requested implementation.",
+        "evidence": "user:那开始搞"
+      }
+    ],
+    "blockers": [
+      "AC-001",
+      "AC-002",
+      "AC-003",
+      "AC-004",
+      "AC-005",
+      "AC-006",
+      "AC-007",
+      "AC-008",
+      "AC-009",
+      "AC-010"
+    ],
+    "gate_results": [
+      {
+        "allowed": true,
+        "stage": "propose",
+        "requested_stage": "propose_entry",
+        "gate": "design_entry",
+        "blockers": [],
+        "checked_at": "2026-11-20T08:36:54.437518Z"
+      },
+      {
+        "allowed": true,
+        "stage": "design",
+        "requested_stage": "design_exit",
+        "gate": "design_exit",
+        "blockers": [],
+        "checked_at": "2026-11-20T08:36:54.445041Z"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "implement_entry",
+        "gate": "implementation_entry",
+        "blockers": [],
+        "checked_at": "2026-11-20T08:36:54.446464Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice_1_verification",
+        "gate": "slice_1_module_boundary_architecture_check",
+        "blockers": [
+          "agentclaw.community.api Context Boundary does not declare the new TodoTemplateCapabilityServiceProtocol dependency"
+        ],
+        "checked_at": "2026-11-20T09:04:12.731131Z"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "slice_1_verification",
+        "gate": "slice_1_module_boundary_architecture_check",
+        "blockers": [],
+        "checked_at": "2026-11-20T09:05:08.750371Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice_1_verification",
+        "gate": "slice_1_ruff_check",
+        "blockers": [
+          "ruff reports E402 at openapi_v1/__init__.py:485 while checking the whole modified assembly module"
+        ],
+        "checked_at": "2026-11-20T09:07:02.116318Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice_1_verification",
+        "gate": "slice_1_openapi_contract_check",
+        "blockers": [
+          "Todo template capability response schemas lack required OpenAPI descriptions",
+          "The user-scoped capability operation lacks required user_id query and documented 403 response",
+          "The static OpenAPI placement count changed without updating the checked contract baseline"
+        ],
+        "checked_at": "2026-11-20T09:12:54.874969Z"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "slice_1_verification",
+        "gate": "slice_1_openapi_contract_check",
+        "blockers": [],
+        "checked_at": "2026-11-20T09:17:30.096678Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice_1_combined_verification",
+        "gate": "slice_1_combined_pytest_command",
+        "blockers": [
+          "The combined Slice 1 command referenced a non-existent tests/community/api/test_service_api_conformance.py path."
+        ],
+        "checked_at": "2026-11-20T09:17:30.096678Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice_1_combined_verification",
+        "gate": "slice_1_regression_test",
+        "blockers": [
+          "The direct capability handler test omits the required user_id argument introduced by the explicit-user contract repair."
+        ],
+        "checked_at": "2026-11-20T09:19:01.825428Z"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "slice_1_verification",
+        "gate": "slice_1_regression_test",
+        "blockers": [],
+        "checked_at": "2026-11-20T09:22:12.052280Z"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "slice_1_verification",
+        "gate": "slice_1_ruff_check",
+        "blockers": [],
+        "checked_at": "2026-11-20T09:22:12.052280Z"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "slice_1_verification",
+        "gate": "slice_1_diff_and_file_size_check",
+        "blockers": [],
+        "checked_at": "2026-11-20T09:22:12.052280Z"
+      }
+    ],
+    "rework_attempts": [
+      {
+        "attempt": 1,
+        "trigger": "gate_failed",
+        "stage": "tdd",
+        "gate": "slice_1_template_definition_red_test",
+        "failed_ac_ids": [
+          "AC-002",
+          "AC-003",
+          "AC-006"
+        ],
+        "violated_stage": "implementation",
+        "blocker_snapshots": [
+          {
+            "ac_id": "AC-002",
+            "acceptance": {
+              "ac_id": "AC-002",
+              "title": "Bot/Human 阶段与待处理原因",
+              "statement": "模板阶段支持 stage_kind=bot|human；Human stage 激活或 Runtime/领域服务判定 Bot execution blocked 时 Todo 为 pending_action，并分别记录 planned_human_stage | blocked；Human->Bot 推进后为 in_progress。",
+              "source": "user_explicit",
+              "category": "behavior",
+              "blocking": true
+            },
+            "failed_stage": "tdd",
+            "violated_stage": "implementation",
+            "status": "designed",
+            "ai_claimed_done": false,
+            "actual_problem": "missing_implementation_binding"
+          },
+          {
+            "ac_id": "AC-003",
+            "acceptance": {
+              "ac_id": "AC-003",
+              "title": "不可变模板版本与参与角色绑定",
+              "statement": "模板拥有不可变 published version、参与角色 schema、有序阶段和可选门禁；Todo 创建时固定 template_version_id、补齐所有 required binding，并快照解析后的 executor/owner；后续模板修改不得影响已创建 Todo。",
+              "source": "user_explicit",
+              "category": "data",
+              "blocking": true
+            },
+            "failed_stage": "tdd",
+            "violated_stage": "implementation",
+            "status": "designed",
+            "ai_claimed_done": false,
+            "actual_problem": "missing_implementation_binding"
+          },
+          {
+            "ac_id": "AC-006",
+            "acceptance": {
+              "ac_id": "AC-006",
+              "title": "确定性硬产物门禁",
+              "statement": "阶段可不配置门禁；若配置，只有 capability registry 支持的 artifact_type + artifact_state 可发布，并在阶段完成事务中校验。V1 支持 pull_request:created，要求当前阶段存在可信上报的规范化 PR 产物事实；未知门禁或缺失产物不得推进。",
+              "source": "user_explicit",
+              "category": "api",
+              "blocking": true
+            },
+            "failed_stage": "tdd",
+            "violated_stage": "implementation",
+            "status": "designed",
+            "ai_claimed_done": false,
+            "actual_problem": "missing_implementation_binding"
+          }
+        ],
+        "failure_type": "missing_implementation_binding",
+        "failure_reason": "The Slice 1 domain tests cannot import the not-yet-implemented Todo template validation contract.",
+        "missing_evidence": [
+          "Todo template domain models and validator implementation",
+          "Passing Slice 1 focused domain tests"
+        ],
+        "auto_fixable": true,
+        "detected_by": "pytest red test",
+        "ai_claimed_done": false,
+        "actual_problem": "The TDD RED test confirms template participant/stage validation and hard artifact capability validation do not exist yet.",
+        "action": "return_to_implement",
+        "allowed_scope": "Implement only Slice 1 template domain models, capability registry, validator, capability Service API/DI seam, and capability HTTP endpoint needed by AC-002/003/006.",
+        "rework_plan": [
+          "Implement the transport-neutral template model and validation rules",
+          "Implement the single-source capability registry and capability service",
+          "Add the public capability endpoint and inventory rows",
+          "Rerun Slice 1 focused domain, HTTP, and inventory tests"
+        ],
+        "actions_taken": [
+          "Implemented transport-neutral Todo template participant, stage, gate, and definition models.",
+          "Implemented V1 template validation for schema version, participant keys, role references, stage ordering/kinds, Human ownership, and deterministic hard gates.",
+          "Added the TodoTemplateValidationError domain error and focused domain tests."
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/core/task/todos/errors.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_capabilities.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_validation.py",
+          "apps/backend/tests/community/core/task/todos/test_template_definition.py"
+        ],
+        "verification_evidence": [
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_template_definition.py => RED during collection: TodoTemplateValidationError is not implemented",
+          "command: combined Slice 1 focused regression set including test_template_definition.py => 355 passed"
+        ],
+        "before_blockers": [
+          "AC-002",
+          "AC-003",
+          "AC-006"
+        ],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "fixed",
+        "next_stage": "implementation"
+      },
+      {
+        "attempt": 2,
+        "trigger": "gate_failed",
+        "stage": "tdd",
+        "gate": "slice_1_template_capability_http_red_test",
+        "failed_ac_ids": [
+          "AC-002",
+          "AC-003",
+          "AC-006"
+        ],
+        "violated_stage": "implementation",
+        "blocker_snapshots": [
+          {
+            "ac_id": "AC-002",
+            "acceptance": {
+              "ac_id": "AC-002",
+              "title": "Bot/Human 阶段与待处理原因",
+              "statement": "模板阶段支持 stage_kind=bot|human；Human stage 激活或 Runtime/领域服务判定 Bot execution blocked 时 Todo 为 pending_action，并分别记录 planned_human_stage | blocked；Human->Bot 推进后为 in_progress。",
+              "source": "user_explicit",
+              "category": "behavior",
+              "blocking": true
+            },
+            "failed_stage": "tdd",
+            "violated_stage": "implementation",
+            "status": "designed",
+            "ai_claimed_done": false,
+            "actual_problem": "missing_implementation_binding"
+          },
+          {
+            "ac_id": "AC-003",
+            "acceptance": {
+              "ac_id": "AC-003",
+              "title": "不可变模板版本与参与角色绑定",
+              "statement": "模板拥有不可变 published version、参与角色 schema、有序阶段和可选门禁；Todo 创建时固定 template_version_id、补齐所有 required binding，并快照解析后的 executor/owner；后续模板修改不得影响已创建 Todo。",
+              "source": "user_explicit",
+              "category": "data",
+              "blocking": true
+            },
+            "failed_stage": "tdd",
+            "violated_stage": "implementation",
+            "status": "designed",
+            "ai_claimed_done": false,
+            "actual_problem": "missing_implementation_binding"
+          },
+          {
+            "ac_id": "AC-006",
+            "acceptance": {
+              "ac_id": "AC-006",
+              "title": "确定性硬产物门禁",
+              "statement": "阶段可不配置门禁；若配置，只有 capability registry 支持的 artifact_type + artifact_state 可发布，并在阶段完成事务中校验。V1 支持 pull_request:created，要求当前阶段存在可信上报的规范化 PR 产物事实；未知门禁或缺失产物不得推进。",
+              "source": "user_explicit",
+              "category": "api",
+              "blocking": true
+            },
+            "failed_stage": "tdd",
+            "violated_stage": "implementation",
+            "status": "designed",
+            "ai_claimed_done": false,
+            "actual_problem": "missing_implementation_binding"
+          }
+        ],
+        "failure_type": "missing_implementation_binding",
+        "failure_reason": "The Slice 1 HTTP tests cannot import the not-yet-implemented Todo template capability adapter.",
+        "missing_evidence": [
+          "Capability Service API and DI binding",
+          "Public capability endpoint and route inventory rows",
+          "Passing focused HTTP and inventory tests"
+        ],
+        "auto_fixable": true,
+        "detected_by": "pytest red test",
+        "ai_claimed_done": false,
+        "actual_problem": "The TDD RED test confirms callers cannot query the template schema, stage, participant-reference, artifact-gate, and V1 feature capabilities.",
+        "action": "return_to_implement",
+        "allowed_scope": "Implement only the Slice 1 capability protocol/service, HTTP schemas and sibling route, DI binding, router mount, and authorization/admission rows.",
+        "rework_plan": [
+          "Add the capability service protocol and implementation over the shared registry",
+          "Add response schemas and the sibling capability router",
+          "Register DI, mount, authorization, and admission entries",
+          "Rerun focused capability and inventory tests"
+        ],
+        "actions_taken": [
+          "Implemented the shared Todo template capability protocol and transport-neutral service.",
+          "Exposed the capability Service API protocol and registered the DI binding.",
+          "Added the sibling capability HTTP route, documented response schemas, explicit user identity seam, router mount, and authorization/admission inventory rows.",
+          "Added focused capability HTTP tests and repository-wide OpenAPI contract coverage."
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/core/task/todos/template_capability_protocol.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_capability_service.py",
+          "apps/backend/src/agentclaw/community/api/task/todo_template_capability_service.py",
+          "apps/backend/src/agentclaw/community/di/modules/task/todo_bindings.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_schemas.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_router.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_task_routes.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_template_capabilities.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py"
+        ],
+        "verification_evidence": [
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/adapters/http/openapi_v1/task/todos/test_template_capabilities.py => RED during collection: template_capability_router is not implemented",
+          "command: combined Slice 1 focused regression set including capability, authorization, admission, schema-doc, and explicit-user tests => 355 passed"
+        ],
+        "before_blockers": [
+          "AC-002",
+          "AC-003",
+          "AC-006"
+        ],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "fixed",
+        "next_stage": "implementation"
+      },
+      {
+        "attempt": 3,
+        "trigger": "verification_failed",
+        "stage": "slice_1_verification",
+        "gate": "slice_1_module_boundary_architecture_check",
+        "failed_ac_ids": [],
+        "violated_stage": "implementation",
+        "blocker_snapshots": [],
+        "failure_type": "quality_gate_failed",
+        "failure_reason": "The Backend module-boundary architecture gate rejects the new Service API import because agentclaw.community.api/README.md does not declare it.",
+        "missing_evidence": [
+          "Context Boundary declaration for TodoTemplateCapabilityServiceProtocol",
+          "Passing tests/community/architecture/test_module_boundaries.py evidence"
+        ],
+        "auto_fixable": true,
+        "detected_by": "pytest architecture gate",
+        "ai_claimed_done": false,
+        "actual_problem": "The new Service API re-export is structurally correct, but its declared Context Boundary has not been updated to cover agentclaw.community.core.task.todos.template_capability_protocol.",
+        "action": "return_to_verification",
+        "allowed_scope": "Only update the agentclaw.community.api Context Boundary metadata for the new Todo template capability Service API and rerun the failed architecture gate.",
+        "rework_plan": [
+          "Declare TodoTemplateCapabilityServiceProtocol in the API module provides list",
+          "Declare the template capability protocol import in internal_dependencies",
+          "Rerun the focused module-boundary architecture test"
+        ],
+        "actions_taken": [
+          "Added TodoTemplateCapabilityServiceProtocol to the agentclaw.community.api provided surface declaration.",
+          "Declared agentclaw.community.core.task.todos.template_capability_protocol in the API Context Boundary internal dependencies.",
+          "Reran the focused module-boundary architecture gate."
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/api/README.md"
+        ],
+        "verification_evidence": [
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/architecture/test_module_boundaries.py => 1 failed, 2 passed; undeclared agentclaw.community.core.task.todos.template_capability_protocol import",
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/architecture/test_module_boundaries.py => 3 passed"
+        ],
+        "before_blockers": [],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "fixed",
+        "next_stage": "implementation"
+      },
+      {
+        "attempt": 4,
+        "trigger": "verification_failed",
+        "stage": "slice_1_verification",
+        "gate": "slice_1_ruff_check",
+        "failed_ac_ids": [],
+        "violated_stage": "implementation",
+        "blocker_snapshots": [],
+        "failure_type": "quality_gate_failed",
+        "failure_reason": "The whole-file Ruff check reports E402 at openapi_v1/__init__.py:485, outside the Slice 1 changed import block.",
+        "missing_evidence": [
+          "Evidence whether the E402 finding exists at HEAD before this change",
+          "Passing Ruff checks for the Slice 1-owned new and modified Python surfaces"
+        ],
+        "auto_fixable": true,
+        "detected_by": "ruff check",
+        "ai_claimed_done": false,
+        "actual_problem": "The E402 lint error and formatter findings in the existing router assembly/inventory files are verified pre-existing in HEAD. New Slice 1 files still need formatting; unrelated baseline files must not be mass-formatted.",
+        "action": "return_to_verification",
+        "allowed_scope": "Do not refactor unrelated router assembly ordering or mass-format historically unformatted files. Format only newly added Slice 1 files, then rerun Ruff lint/format on those files and scoped lint on existing modified files.",
+        "rework_plan": [
+          "Format only newly added Slice 1 files reported by Ruff",
+          "Rerun Ruff lint and format checks for all newly added files",
+          "Rerun scoped Ruff lint for existing modified files while documenting verified baseline exceptions"
+        ],
+        "actions_taken": [
+          "Confirmed the router assembly E402 finding exists at HEAD and is outside the Slice 1 import block.",
+          "Confirmed the three existing assembly/inventory files already fail Ruff formatter at HEAD and did not mass-format them.",
+          "Formatted only new or directly test-owned Slice 1 files.",
+          "Ran scoped Ruff lint for all Slice 1 Python changes, excluding only the verified pre-existing E402 in openapi_v1/__init__.py."
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_router.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_schemas.py",
+          "apps/backend/src/agentclaw/community/api/task/todo_template_capability_service.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_capability_service.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_capabilities.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_capability_protocol.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_validation.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_template_capabilities.py",
+          "apps/backend/tests/community/core/task/todos/test_template_definition.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py"
+        ],
+        "verification_evidence": [
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache uv run --no-sync ruff check <Slice 1 files> => E402 at src/agentclaw/community/adapters/http/openapi_v1/__init__.py:485",
+          "command: git show HEAD:.../openapi_v1/__init__.py | ruff check --stdin-filename ... - => same pre-existing E402 at HEAD line 482",
+          "command: scoped ruff check excluding only verified baseline E402 => all checks passed; ruff format --check => 7 files reported for formatting",
+          "command: ruff format --check on HEAD copies of openapi_v1/__init__.py, admission_task_routes.py, and authorization_rules_task.py => all three already require formatting at HEAD",
+          "command: scoped ruff check for Slice 1 source/tests => All checks passed",
+          "command: ruff check --ignore E402 src/agentclaw/community/adapters/http/openapi_v1/__init__.py => All checks passed",
+          "command: ruff format --check for 11 Slice 1-owned new/test files => 11 files already formatted"
+        ],
+        "before_blockers": [],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "fixed",
+        "next_stage": "implementation"
+      },
+      {
+        "attempt": 5,
+        "trigger": "verification_failed",
+        "stage": "slice_1_verification",
+        "gate": "slice_1_openapi_contract_check",
+        "failed_ac_ids": [
+          "AC-006"
+        ],
+        "violated_stage": "implementation",
+        "blocker_snapshots": [
+          {
+            "ac_id": "AC-006",
+            "acceptance": {
+              "ac_id": "AC-006",
+              "title": "确定性硬产物门禁",
+              "statement": "阶段可不配置门禁；若配置，只有 capability registry 支持的 artifact_type + artifact_state 可发布，并在阶段完成事务中校验。V1 支持 pull_request:created，要求当前阶段存在可信上报的规范化 PR 产物事实；未知门禁或缺失产物不得推进。",
+              "source": "user_explicit",
+              "category": "api",
+              "blocking": true
+            },
+            "failed_stage": "slice_1_verification",
+            "violated_stage": "implementation",
+            "status": "designed",
+            "ai_claimed_done": false,
+            "actual_problem": "verification_failed"
+          }
+        ],
+        "failure_type": "verification_failed",
+        "failure_reason": "The focused OpenAPI documentation and explicit-user contract checks reject the new capability endpoint.",
+        "missing_evidence": [
+          "Described capability response schemas and fields",
+          "Required user_id query parameter and 403 response contract",
+          "Updated exact operation placement baseline",
+          "Passing schema-doc and explicit-user tests"
+        ],
+        "auto_fixable": true,
+        "detected_by": "pytest OpenAPI contract tests",
+        "ai_claimed_done": false,
+        "actual_problem": "The OpenAPI contract repair passed its focused checks, but the existing direct handler test still invoked the function without the newly required user_id parameter.",
+        "action": "return_to_implement_or_verification",
+        "allowed_scope": "Only repair the Todo template capability response documentation, explicit user_id/403 contract, and the exact OpenAPI operation-count baseline; do not change unrelated routes.",
+        "rework_plan": [
+          "Add schema and field descriptions to the new capability response models",
+          "Declare the endpoint user_id query parameter and standard error responses",
+          "Update the exact bot_id placement baseline for the one new non-bot operation",
+          "Rerun the two failed focused OpenAPI contract files and Slice 1 regression tests"
+        ],
+        "actions_taken": [
+          "Added missing schema and field descriptions to the new capability response models.",
+          "Added the explicit user_id identity seam and standard user-scoped error responses to the capability route.",
+          "Updated the exact non-Bot operation placement baseline from 157 to 158.",
+          "Updated the pinned user-taking operation count from 318 to 319 for the new capability route.",
+          "Updated the direct capability handler test to pass the required explicit user identity parameter."
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_router.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_schemas.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py"
+        ],
+        "verification_evidence": [
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/adapters/http/openapi_v1/test_schema_docs.py tests/community/adapters/http/openapi_v1/test_explicit_user_id.py => 4 failed, 27 passed",
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/adapters/http/openapi_v1/test_schema_docs.py tests/community/adapters/http/openapi_v1/test_explicit_user_id.py => 1 failed, 30 passed; the new user-scoped operation also requires the pinned user-taking count 318 -> 319",
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/adapters/http/openapi_v1/test_schema_docs.py tests/community/adapters/http/openapi_v1/test_explicit_user_id.py => 31 passed",
+          "command: corrected combined Slice 1 pytest set => 1 failed, 354 passed; the direct capability handler test was not updated to supply the newly required user_id seam",
+          "command: combined Slice 1 focused regression set after explicit-user test repair => 355 passed"
+        ],
+        "before_blockers": [
+          "AC-006"
+        ],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "fixed",
+        "next_stage": "implementation"
+      },
+      {
+        "attempt": 6,
+        "trigger": "evidence_invalid",
+        "stage": "slice_1_verification",
+        "gate": "slice_1_combined_pytest_command",
+        "failed_ac_ids": [],
+        "violated_stage": "implementation",
+        "blocker_snapshots": [],
+        "failure_type": "evidence_invalid",
+        "failure_reason": "The combined Slice 1 verification command used the wrong directory for test_service_api_conformance.py and pytest exited before collection.",
+        "missing_evidence": [
+          "A successfully collected combined Slice 1 regression run"
+        ],
+        "auto_fixable": true,
+        "detected_by": "pytest command validation",
+        "ai_claimed_done": false,
+        "actual_problem": "The test exists under tests/community/architecture, not tests/community/api; no product or test assertion failed.",
+        "action": "return_to_verification",
+        "allowed_scope": "Only correct the test path in the combined verification command and rerun it; do not change code based on this command error.",
+        "rework_plan": [
+          "Use tests/community/architecture/test_service_api_conformance.py",
+          "Rerun the complete Slice 1 focused regression set",
+          "Record the resulting evidence"
+        ],
+        "actions_taken": [
+          "Located test_service_api_conformance.py under tests/community/architecture.",
+          "Corrected the combined verification command without changing product code for the command-path error.",
+          "Reran the complete Slice 1 focused regression set."
+        ],
+        "changed_files": [],
+        "verification_evidence": [
+          "command: combined Slice 1 pytest set => exit 4, file or directory not found: tests/community/api/test_service_api_conformance.py",
+          "command: corrected combined Slice 1 pytest set => 355 passed"
+        ],
+        "before_blockers": [],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "fixed",
+        "next_stage": "implementation"
+      }
+    ],
+    "escalations": []
+  },
+  "tier1": {
+    "rounds": 0,
+    "result": "pending",
+    "verdict": "pending",
+    "blocking_findings": 0,
+    "findings": [],
+    "has_critical": false,
+    "latest_verdict": null,
+    "latest_summary": null,
+    "final_score": null,
+    "dimensions_final": null,
+    "review_evidence": null,
+    "history": []
+  },
+  "tier2": {
+    "rounds": 0,
+    "tests_passed": false,
+    "coverage": 0,
+    "lint_passed": false,
+    "result": "pending",
+    "verdict": "pending",
+    "history": []
+  },
+  "heal_loop": {
+    "active": false,
+    "tier1": {
+      "invocations": 0,
+      "total_issues_fixed": 0,
+      "total_iterations": 0,
+      "history": []
+    },
+    "tier2": {
+      "invocations": 0,
+      "total_issues_fixed": 0,
+      "total_iterations": 0,
+      "history": []
+    },
+    "config": {
+      "tier1_max_iterations": 4,
+      "tier2_max_iterations": 5,
+      "stuck_threshold_iterations": 2,
+      "sources": {
+        "cargo_test": {
+          "enabled": true
+        },
+        "cargo_clippy": {
+          "enabled": true
+        },
+        "cargo_fmt": {
+          "enabled": true
+        },
+        "arch_guard": {
+          "enabled": true
+        },
+        "pytest": {
+          "enabled": true
+        },
+        "ruff_check": {
+          "enabled": true
+        },
+        "ruff_format": {
+          "enabled": true
+        },
+        "mypy": {
+          "enabled": false
+        },
+        "app_logs": {
+          "enabled": false,
+          "mode": "local",
+          "start_command": "",
+          "smoke_test_command": "",
+          "stop_command": "",
+          "log_path": null,
+          "app_name": "",
+          "env": "",
+          "region_id": "",
+          "query": "ERROR",
+          "since": "1h",
+          "severity_gate": "MAJOR",
+          "ignore_patterns": []
+        }
+      }
+    }
+  },
+  "implement": {
+    "slices_total": 8,
+    "slices_completed": 2,
+    "current_slice": "slice-3-create-todo-from-template-and-expand-stages",
+    "tdd_cycles": [
+      {
+        "slice": "slice-1-template-definition-and-capabilities",
+        "covers_ac_ids": [
+          "AC-002",
+          "AC-003",
+          "AC-006"
+        ],
+        "red": true,
+        "green": true,
+        "refactor": true,
+        "implementation_refs": [
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_router.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_capability_service.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_capabilities.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_validation.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_template_capabilities.py",
+          "apps/backend/tests/community/core/task/todos/test_template_definition.py"
+        ],
+        "validation": [
+          "355 focused domain/HTTP/inventory/architecture/DI/OpenAPI tests passed",
+          "Scoped Ruff lint passed",
+          "Ruff format check passed for 11 Slice 1-owned files",
+          "Tracked diff and new-file whitespace checks passed",
+          "All modified source files are below 1,000 lines"
+        ],
+        "residual_risk": "Template persistence, publication immutability, lifecycle transitions, and UI remain for Slices 2-8."
+      },
+      {
+        "slice": "slice-2-publish-and-read-immutable-template-version",
+        "covers_ac_ids": [
+          "AC-003",
+          "AC-007",
+          "AC-010"
+        ],
+        "red": true,
+        "green": true,
+        "refactor": true,
+        "red_evidence": [
+          "command: cd apps/backend && UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_template_codec.py tests/community/core/task/todos/test_todo_template_service.py tests/community/repository/task/todos/test_todo_template_repository.py",
+          "expected collection RED: missing template_codec module, missing TodoTemplateStateConflictError, and missing todo_template_repository module"
+        ],
+        "implementation_refs": [
+          "apps/backend/src/agentclaw/community/core/task/todos/template_management_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_codec.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_management_protocol.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_service.py",
+          "apps/backend/src/agentclaw/community/core/repository/protocols/task/todo_templates.py",
+          "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/template_models.py",
+          "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_template_repository.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/sql/2026_11_20_todo_templates.sql",
+          "apps/backend/src/agentclaw/community/api/task/todo_template_service.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_schemas.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_router.py",
+          "apps/backend/src/agentclaw/community/di/modules/task/todo_bindings.py"
+        ],
+        "validation": [
+          "324 Slice 2 focused regression tests passed after exact user-facing operation inventory baselines were updated.",
+          "12 DI focused tests passed, including explicit Injector resolution of TodoTemplateRepositoryProtocol and TodoTemplateManagementServiceProtocol.",
+          "356 OpenAPI schema/architecture/DI gate tests passed after enum documentation and API layer re-export repairs.",
+          "Scoped Ruff lint passed for new and directly modified files; Ruff format passed for directly owned files.",
+          "git diff --check passed; all modified and new source files are below 1,000 lines."
+        ],
+        "residual_risk": "Todo creation from a published template, participant binding resolution, stage expansion, and initial lifecycle projection remain for Slice 3."
+      }
+    ],
+    "implementation_entry_gate": "passed",
+    "planned_red_policy": {
+      "slice": "slice-2-publish-and-read-immutable-template-version",
+      "decision": "Planned TDD RED proves missing Slice 2 behavior and is recorded in implement.tdd_cycles; it is not counted as acceptance rework unless an already-implemented behavior regresses.",
+      "covers_ac_ids": [
+        "AC-003",
+        "AC-007",
+        "AC-010"
+      ]
+    },
+    "pre_coding_gate": {
+      "completed": true,
+      "completed_at": "2026-11-20T10:29:36.728230Z",
+      "arch_status": "degraded",
+      "arch_degraded_reason": "Monorepo root language detection failed; vendored check-before-code bridge/backend signature mismatch.",
+      "rules_context": "docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/pipeline/rules-context.md",
+      "files_planned": [
+        "apps/backend/src/agentclaw/community/core/task/todos/template_management_models.py",
+        "apps/backend/src/agentclaw/community/core/task/todos/template_codec.py",
+        "apps/backend/src/agentclaw/community/core/task/todos/template_management_protocol.py",
+        "apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_service.py",
+        "apps/backend/src/agentclaw/community/core/repository/protocols/task/todo_templates.py",
+        "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/template_models.py",
+        "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_template_repository.py",
+        "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_router.py",
+        "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_schemas.py"
+      ],
+      "layer_assignments": {
+        "core/task/todos/template_*": "domain/application",
+        "core/repository/protocols/task/todo_templates.py": "repository-port",
+        "core/repository/implementations/task/todos/template_*": "persistence-adapter",
+        "api/task/todo_template_service.py": "service-api",
+        "adapters/http/openapi_v1/task/todos/template_*": "delivery-adapter",
+        "di/modules/task/todo_bindings.py": "composition-root"
+      },
+      "constitution_rules_checked": [
+        "contract-authority",
+        "dependency-direction",
+        "transport-agnostic-core",
+        "repository-separation",
+        "composition-root-selection",
+        "explicit-tenant-env-isolation",
+        "write-failure-propagation",
+        "contract-test-pairing",
+        "R-011",
+        "R-012"
+      ],
+      "test_plan": [
+        "codec canonicalization and strict decode",
+        "repository immutability/isolation/failure propagation",
+        "service Space Member/Admin authorization and archived-state rules",
+        "HTTP endpoints, explicit user_id, route precedence, schema descriptions, authorization/admission inventory"
+      ],
+      "design_confirmation": "Existing confirmed proposal/spec/design/tasks and the user instruction to begin implementation satisfy Gate 4."
+    }
+  }
+}

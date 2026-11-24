@@ -186,18 +186,20 @@ def test_friend_post_forwards_verbatim_jit_selectors_without_changing_caller(jit
     assert args["stage"] is CallerIdentityStage.ONLINE
     assert {"device_uuid", "caller_runtime_target"}.isdisjoint(args)
     context = jit_iam.pipeline.run.await_args.args[0]
-    assert (context.caller_runtime_target, context.device_uuid) == (target, " 副本/A:2 ")
+    assert (context.friend_user_id, context.device_uuid) == ("friend", " 副本/A:2 ")
+    assert not hasattr(context, "caller_runtime_target")
     assert (context.actor_user_id, context.user_list_entity_id) == ("friend", "entity-owner")
     jit_iam.auth.resolve_user_from_request.assert_not_awaited()
 
 
-@pytest.mark.parametrize("selector", [{"device_uuid": ""}, {"caller_runtime_target": "unexpected"}])
-def test_post_invalid_selector_only_skips_jit(jit_iam, selector):
+@pytest.mark.parametrize("selector", [{"device_uuid": ""}])
+def test_post_empty_uuid_is_omitted_without_changing_caller(jit_iam, selector):
     response = request(jit_iam.http, **selector)
     assert response.status_code == 200
     assert response.json()["data"]["iam_token"] == "test-token"
     jit_iam.caller.get_iam_token.assert_awaited_once()
-    jit_iam.pipeline.run.assert_not_awaited()
+    jit_iam.pipeline.run.assert_awaited_once()
+    assert jit_iam.pipeline.run.await_args.args[0].device_uuid is None
 
 
 @pytest.mark.parametrize("scoped", [True, False])
@@ -230,3 +232,23 @@ def test_post_uses_verified_principal_only_for_an_entity_scoped_jit_request(jit_
     else:
         jit_iam.pipeline.run.assert_not_awaited()
     jit_iam.auth.resolve_user_from_request.assert_not_awaited()
+
+
+def test_empty_friend_id_is_regular_iam_and_preserves_requested_stage(friend_iam):
+    response = friend_iam.client.post("/openapi/v1/bots/b1/iam-token", params={
+        "f_user_id": "", "stage": "verify", "entity_id": "entity-owner",
+    })
+    assert response.status_code == 200, response.json()
+    args = friend_iam.service.get_iam_token.await_args.kwargs
+    assert "friend_user_id" not in args
+    assert args["stage"] is CallerIdentityStage.VERIFY
+    friend_iam.expert.resolve_chat_stage.assert_not_called()
+    friend_iam.bot_addresses.resolve.assert_not_called()
+
+
+def test_iam_schema_removes_runtime_selector_and_preserves_device_and_friend_fields(friend_iam):
+    schema = friend_iam.client.app.openapi()
+    params = schema["paths"]["/openapi/v1/bots/{bot_id}/iam-token"]["post"]["parameters"]
+    names = {param["name"] for param in params}
+    assert "caller_runtime_target" not in names
+    assert {"f_user_id", "device_uuid", "stage"} <= names

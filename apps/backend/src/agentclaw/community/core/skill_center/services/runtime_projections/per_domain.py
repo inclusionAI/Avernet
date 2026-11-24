@@ -6,8 +6,10 @@ from collections.abc import Sequence
 
 from agentclaw.community.core.devices.services.device_context import (
     DeviceConnectionUnavailableError,
+    DeviceNotBoundError,
     DeviceOfflineError,
 )
+from agentclaw.community.core.skill_center.errors import McpProjectionNotDispatchedError
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
     ProjectionScope,
@@ -129,7 +131,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                             suggested_action="请启动或重新连接 Desktop 客户端。",
                         )
                     )
-            except DeviceConnectionUnavailableError:
+            except (DeviceConnectionUnavailableError, DeviceNotBoundError):
                 logger.warning(
                     "[PerDomainRuntimeProjection] transient device connection "
                     "failure bot_id=%s engine=%s",
@@ -153,6 +155,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                     RuntimeProjectionResult.pending(
                         code="SKILL_RUNTIME_UNAVAILABLE",
                         reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                        delivery_uncertain=True,
                     )
                 )
         else:
@@ -178,6 +181,16 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                     results.append(
                         await self._apply_mcp_projection(plan=plan, scope=scope)
                     )
+                except (
+                    DeviceNotBoundError, DeviceOfflineError, DeviceConnectionUnavailableError,
+                    McpProjectionNotDispatchedError,
+                ):
+                    results.append(
+                        RuntimeProjectionResult.pending(
+                            code="MCP_RUNTIME_UNAVAILABLE",
+                            reason="MCP 运行环境当前不可连接，能力状态已保存但尚未同步",
+                        )
+                    )
                 except Exception:
                     logger.exception(
                         "[PerDomainRuntimeProjection] MCP projection unavailable "
@@ -189,6 +202,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                         RuntimeProjectionResult.pending(
                             code="MCP_RUNTIME_UNAVAILABLE",
                             reason="MCP 运行环境当前不可连接，能力状态已保存但尚未同步",
+                            delivery_uncertain=True,
                         )
                     )
         else:
@@ -210,15 +224,11 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
         scope: ProjectionScope,
     ) -> RuntimeProjectionResult:
         codes = set(plan.projection.mcp_server_codes)
+        # Explicit retirements survive a full baseline, unless the final
+        # effective state still supplies the code.
+        released = scope.released_mcp - codes
         if scope.claim_all_mcp:
-            # The device-activated listener, and only it. A freshly active
-            # container holds no MCP configuration, so there is nothing to
-            # refresh against — the allow-list alone would whitelist every MCP
-            # with no endpoint or api_key behind it. The caller cannot name
-            # the codes itself: the projected set is only known here, after
-            # the plan resolves. Nothing is released on this path, so it can
-            # only ever add configuration.
-            claimed, released = frozenset(codes), frozenset()
+            claimed = frozenset(codes)
         else:
             # A guard, never a source. ``claimed`` cannot grow past what the
             # mutation declared, so a single-MCP add stays a single device
@@ -227,7 +237,6 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
             # Set claiming it.
             claimed = scope.claimed_mcp & codes
             claimed = claimed | (scope.updated_mcp & codes)
-            released = scope.released_mcp - codes
             if claimed != scope.claimed_mcp or released != scope.released_mcp:
                 logger.info(
                     "[PerDomainRuntimeProjection] MCP scope guarded against the "
@@ -247,6 +256,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
             return RuntimeProjectionResult.pending(
                 code="MCP_RUNTIME_UNAVAILABLE",
                 reason="MCP 运行环境当前不可连接，能力状态已保存但尚未同步",
+                delivery_uncertain=True,
             )
         return RuntimeProjectionResult.converged(
             components={"mcp": RuntimeProjectionStatus.CONVERGED}

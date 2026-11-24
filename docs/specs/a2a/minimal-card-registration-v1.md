@@ -55,10 +55,14 @@ All Bot/binding/owner/initial-manager-Human/manager-edge/profile/audit/Card writ
 stay in one transaction. No
 transaction spans network validation, and failed writes propagate as errors.
 
-## Three persisted Bot columns
+## Card columns and independent catalog metadata
 
-Only `agent_card`, nullable `agent_card_url` and `agent_card_revision` remain in
-bcs_bots. Existing id/gmt_create/gmt_modified remain generic Bot audit fields.
+`agent_card`, nullable `agent_card_url` and `agent_card_revision` remain in
+bcs_bots. Independent `catalog_labels` management metadata is added by the new
+MySQL 048 / SQLite 046 migrations; it is never copied into the raw Card.
+See [catalog label contract](../../../apps/bcs/docs/catalog-labels.md) for
+strict validation, Agent omission-clearing versus refresh preservation, typed
+Service API 7.0.0 changes and full Fuse payload semantics. Existing id/gmt_create/gmt_modified remain generic Bot audit fields.
 No separate A2A config table, selected-interface JSON, credential-reference JSON,
 last-validated/next-refresh/error columns or extra Card cache is introduced.
 The Bot gmt_modified can change for unrelated operations, so it is not a Card

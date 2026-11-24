@@ -248,6 +248,9 @@ from agentclaw.community.core.repository.implementations.bot.source_credential i
     SourceCredentialRepository,
 )
 
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionReconcileProtocol,
+)
 from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
     BotConfigManifestApplyLockRepository,
     BotConfigManifestApplyRepository,
@@ -758,20 +761,9 @@ class BotManagementModule(Module):
         delivery_strategies: DeliveryStrategyFactory,
         compilers: StateCompilers,
         completion_handlers: StateCompletionHandlers,
+        capability_projection: CapabilityProjectionReconcileProtocol,
     ) -> ApplyRunService:
-        """The apply lifecycle, over a delivery seam and a compiler map it does not assemble.
-
-        The ten lazy service providers this used to thread through — the write
-        targets every materialiser calls — are gone from here and from the
-        service: they were only ever the ARCA port bundle's ingredients, and a
-        bundle is a wiring decision. ``manifest_fetch_module`` builds both
-        bundles and both strategies beside the store one of them writes to, and
-        hands over the finished seam. The compilers are a map multibinding
-        the same way: ``manifest_fetch_module`` contributes the Manifest row
-        beside the fetch pipeline it compiles through, and a genome row comes
-        from the genome module. The completion subscribers are the same shape;
-        only the genome contributes one (the Manifest wants no notice).
-        """
+        """Assemble Apply from its delivery, compiler, and completion bindings."""
         return ApplyRunService(
             manifest_service,
             apply_repository,
@@ -781,6 +773,7 @@ class BotManagementModule(Module):
             delivery_strategies=delivery_strategies,
             compilers=compilers,
             completion_handlers=completion_handlers,
+            capability_projection=capability_projection,
         )
 
     @singleton

@@ -52,6 +52,7 @@ pub(crate) fn legacy_create_group_spec(
             .map(|topic| format!("DM: {topic}"))
             .or_else(|| req.label.clone());
         return Ok(CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            catalog_labels:req.catalog_labels.clone(),
             name,
             context: req.context.clone(),
             target_actor_id,
@@ -180,6 +181,7 @@ pub(crate) fn legacy_create_group_spec(
         .or_else(|| req.label.clone());
 
     Ok(CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+        catalog_labels:req.catalog_labels.clone(),
         human_mention_notify_mode: req.human_mention_notify_mode,
         name,
         context: req.context.clone(),

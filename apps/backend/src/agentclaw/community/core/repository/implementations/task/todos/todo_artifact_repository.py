@@ -55,6 +55,7 @@ class TodoArtifactRepository(TodoArtifactRepositoryProtocol):
         collab_context_id: str,
         token_hash: str,
         executor_id: str,
+        stage_instance_id: str | None = None,
     ) -> TodoExecutionRecord:
         with self._transaction() as db:
             todo = self._scope(db.query(TodoModel), TodoModel).filter(
@@ -78,6 +79,7 @@ class TodoArtifactRepository(TodoArtifactRepositoryProtocol):
                 token_hash=token_hash,
                 status=TodoExecutionStatus.ACTIVE.value,
                 executor_id=executor_id,
+                stage_instance_id=stage_instance_id,
                 env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
             )

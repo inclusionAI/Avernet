@@ -5,8 +5,17 @@ use super::*;
 impl GroupServiceImpl {
     pub(crate) async fn project_detail_with_state_machine(
         &self,
+        group: DomainGroup,
+        state_machine_override: Option<StateMachineConfiguration>,
+    ) -> Result<GroupDetail, ApplicationError> {
+        self.project_detail_with_labels(group, state_machine_override, None).await
+    }
+
+    pub(crate) async fn project_detail_with_labels(
+        &self,
         mut group: DomainGroup,
         state_machine_override: Option<StateMachineConfiguration>,
+        committed_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabels>,
     ) -> Result<GroupDetail, ApplicationError> {
         bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
         let mut participants = group
@@ -21,6 +30,9 @@ impl GroupServiceImpl {
             .avatar_map_for_ids(avatar::detail_bot_ids(&participants))
             .await?;
         avatar::apply_participant_avatars(&mut participants, &avatars);
+        let catalog_labels=if let Some(labels) = committed_labels { labels } else if group.group_kind==GroupKind::Normal && matches!(group.group_strategy,GroupStrategy::ManagerWorker|GroupStrategy::StateMachine) {
+            self.groups.read_card_snapshot(&group.id).await.map_err(map_service_error)?.map(|snapshot|snapshot.catalog_labels).unwrap_or_default()
+        } else {Default::default()};
         let common = DetailCommon {
             group_id: group.id.clone(),
             version: group.version,
@@ -43,6 +55,7 @@ impl GroupServiceImpl {
                 )));
             }
             return Ok(GroupDetail::DirectMessage(DirectMessageGroupDetail {
+                catalog_labels,
                 group_id: common.group_id,
                 version: common.version,
                 name: common.name,
@@ -84,6 +97,7 @@ impl GroupServiceImpl {
         let (driver_bot_owner, driver_bot_owner_name) =
             self.resolve_driver_bot_owner(&group.driver_bot).await;
         Ok(GroupDetail::Collaboration(CollaborationGroupDetail {
+            catalog_labels,
             group_id: common.group_id,
             version: common.version,
             name: common.name,

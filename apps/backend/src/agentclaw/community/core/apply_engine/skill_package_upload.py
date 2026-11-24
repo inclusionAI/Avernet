@@ -18,10 +18,12 @@ port and the skill row they record.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from agentclaw.community.core.ports.skill_package_upload_port import (
-    SkillPackageUploadPort,
+    BatchSkillPackageUploadPort,
+    LocalSkillPackageWriteResult,
 )
 from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
     LocalSkillUploadServiceProtocol,
@@ -31,7 +33,7 @@ from agentclaw.community.core.skill_center.local_skill_delete_service_protocol i
 )
 
 
-class DeviceSkillPackageUpload(SkillPackageUploadPort):
+class DeviceSkillPackageUpload(BatchSkillPackageUploadPort):
     """The ARCA upload road: package files onto the bot's device.
 
     The complete-package write looks like::
@@ -61,6 +63,14 @@ class DeviceSkillPackageUpload(SkillPackageUploadPort):
     ) -> dict[str, Any]:
         return await self._inner.upload_local_skill(
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id, package=package
+        )
+
+    async def upload_local_skill_batch(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        packages: Sequence[tuple[str, bytes]],
+    ) -> tuple[LocalSkillPackageWriteResult, ...]:
+        return await self._inner.upload_local_skill_batch(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id, packages=packages,
         )
 
     async def delete_local_skill(

@@ -268,3 +268,31 @@ def test_an_apply_may_not_claim_another_bots_local_package():
 
     with pytest.raises(SkillSetControlPlaneNotFoundError):
         repository.claim_apply_skill(skill_id=str(foreign.id), **_APPLY_SCOPE)
+
+
+def test_bot_operations_can_edit_an_apply_managed_mcp_and_next_apply_can_replace_it():
+    from agentclaw.community.core.repository.implementations.bot.scoped_mcp_config import (
+        ScopedMCPConfigRepository,
+    )
+    from agentclaw.community.plugin_api.models import BotModel
+
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.orm_session() as session:
+        bot_pk = session.query(BotModel).filter_by(bot_id="bot", entity_id="owner").one().id
+
+    scope = dict(server_code="mcp.free", platform_default_codes=frozenset(), **_APPLY_SCOPE)
+    manifest = {"headers": {"X-Region": "manifest"}, "url": "https://manifest.example.invalid/mcp"}
+    repository.claim_apply_mcp(**scope, config=manifest)
+    override, changed = ScopedMCPConfigRepository(db).patch_bot(
+        bot_pk=bot_pk, bot_id="bot", entity_id="owner", current_owner_id="owner",
+        server_code="mcp.free", patch={"headers": {"X-Region": "ops"}},
+    )
+    assert changed
+    assert override == {**manifest, "headers": {"X-Region": "ops"}}
+    with db.orm_session() as session:
+        assert [row.server_code for row in session.query(BotMCPInstallation)] == ["mcp.free"]
+        assert session.query(SkillSetMCPServer).count() == 0
+
+    repository.claim_apply_mcp(**scope, config=manifest)
+    assert repository.get_mcp_overrides(bot_id="bot", owner_id="owner") == {"mcp.free": manifest}

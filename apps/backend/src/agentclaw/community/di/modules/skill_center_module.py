@@ -58,9 +58,6 @@ from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.repository.implementations.skill_center.propagation_log import (
     SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository,
 )
-from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
-    CapabilityDesiredStateRepository,
-)
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
@@ -356,16 +353,6 @@ class SkillCenterModule(
         binder.bind(
             SkillEditorRequestRepositoryProtocol,
             to=SkillEditorRequestRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            CapabilityDesiredStateRepository,
-            to=CapabilityDesiredStateRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            CapabilityDesiredStateRepositoryProtocol,
-            to=CapabilityDesiredStateRepository,
             scope=singleton,
         )
         binder.bind(

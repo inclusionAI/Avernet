@@ -11,7 +11,7 @@ async fn create_uses_the_authenticated_human_as_originator() {
         .service
         .create(CreateGroup {
             caller: bot_principal("requester"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("Planning".into()),
@@ -173,7 +173,7 @@ async fn bot_caller_creates_reads_updates_and_deletes_group() {
         .update(UpdateGroup {
             caller: caller.clone(),
             group_id: group_id.clone(),
-            patch: GroupPatch {
+            patch: GroupPatch { catalog_labels:Default::default(),
                 name: Some("Bot managed".into()),
                 context: None,
                 opening_message: None,
@@ -231,7 +231,7 @@ async fn unrelated_bot_cannot_read_update_or_delete_group() {
         .update(UpdateGroup {
             caller: authenticated_bot_principal("outsider", "owner-2"),
             group_id: group_id.clone(),
-            patch: GroupPatch {
+            patch: GroupPatch { catalog_labels:Default::default(),
                 name: Some("forged".into()),
                 context: None,
                 opening_message: None,
