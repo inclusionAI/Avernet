@@ -11,14 +11,6 @@ jest.mock('@/services/backendApi/bots/privateBotSessionController');
 // auto-mock(不带 factory),避免在 hoisted factory 内引用 jest.fn() —— 与 @jest/globals 一起会触发 TDZ。
 // initialize()/request() 都会拉 IAM token,这里 stub 成固定值,避免打到真实 /api/v1/token/iam。
 jest.mock('@/services/backendApi/privateChat/iamTokenController');
-// Caller 判据探测(2026-11-19 判据运行时化):模块顶 mockGetCallerContext + factory 委托,
-// 避免 hoisted factory 内引用 jest.fn() 的 TDZ(与 @jest/globals 限制,同 feature 测试先例)。
-const mockGetCallerContext = jest.fn();
-jest.mock('@/services/botWorkshop/botEditorService', () => ({
-  botEditorService: {
-    getCallerContext: (...args: unknown[]) => mockGetCallerContext(...(args as [])),
-  },
-}));
 // SDK 包以 ESM 发布,jest+babel-node 不转译 node_modules——这里用 factory 闭包捕获 mockSdk
 // 变量(同 useGroupChat.test / groupChatProvider.test 约定)。真实集成由 fakeSdkProvider 注入。
 const mockSdk: any = {
@@ -56,8 +48,6 @@ beforeEach(() => {
   mockSdk.subscribeToConnectionStatus.mockReturnValue(jest.fn());
   // auto-mock 默认返回 undefined,补上默认 IAM token,供 initialize()/request() 消费。
   mockedGetIamToken.mockResolvedValue('iam-token');
-  // 判据探测默认 owner(非 caller):未显式声明探测场景的存量 IAM 断言保持无参形态。
-  mockGetCallerContext.mockResolvedValue({ botCallType: 'owner' });
 });
 
 afterEach(() => {
@@ -286,84 +276,6 @@ describe('botChatProvider', () => {
       sessionKey: 'sid-1',
       deviceUuid: 'device-a',
     });
-  });
-
-  // ── Caller 判据运行时化(2026-11-19 需求变更):新版目录接口不下发 call_type,
-  //    判据改探测 GET /caller-context(bot_call_type 聚合);取值与文件链同规则。──
-
-  it('Caller 模式管理 Bot:探测 bot_call_type=caller 时,初始化/重连刷新/发送前的 IAM 均带 caller_runtime_target=service', async () => {
-    mockedGetConnection.mockResolvedValue({
-      code: 200000,
-      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws?token=1' }] },
-      message: 'OK',
-      request_id: 'r',
-    });
-    mockGetCallerContext.mockResolvedValue({ botCallType: 'caller' });
-    // 静态判据回归点:目录 Bot 不带 callType(新版接口契约形态),经探测仍生效。
-    const p = createBotChatProvider({
-      bot: { ...bot },
-      userId: 'u',
-      sessionId: 'sid-1',
-    });
-    await p.connect();
-    const cfg = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0] as {
-      credentialProvider?: () => Promise<{ xIAMToken?: string }>;
-    };
-    await cfg.credentialProvider!();
-    mockSdk.isConnected = true;
-    await p.request({ content: 'hi', sessionId: 'sid-1' });
-
-    const callerContext = { sessionKey: 'sid-1', callerRuntimeTarget: 'service' as const };
-    expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
-    expect(mockedGetIamToken).toHaveBeenNthCalledWith(1, 'b', 'u', '2088', 'online', callerContext);
-    expect(mockedGetIamToken).toHaveBeenNthCalledWith(2, 'b', 'u', '2088', 'online', callerContext);
-    expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'online', callerContext);
-    // 单飞缓存:换签三次只探测一次(结果定格,失效面随 provider 重建刷新)。
-    expect(mockGetCallerContext).toHaveBeenCalledTimes(1);
-    // 404/失败零提示:探测请求层携带 suppressErrorNotification(不投默认错误 toast)。
-    expect(mockGetCallerContext).toHaveBeenCalledWith('b', '2088', { suppressErrorNotification: true });
-  });
-
-  it('好友 Caller Bot:探测 caller 时 IAM chatContext 带 caller_runtime_target=caller_instance 且与好友参数并存(三轮勘误还原)', async () => {
-    mockedGetConnection.mockResolvedValue({
-      code: 200000,
-      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
-      message: 'OK',
-      request_id: 'r',
-    });
-    mockGetCallerContext.mockResolvedValue({ botCallType: 'caller' });
-    // 好友服务 Bot 的 stage 契约为 online(withFriendBotRequestParams 仅服务 Bot 带 stage)。
-    const friendBot = { ...bot, isFriendBot: true };
-    const p = createBotChatProvider({ bot: friendBot, userId: 'u', sessionId: 'sid-1' });
-    await p.connect();
-
-    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'online', {
-      sessionKey: 'sid-1',
-      friendUserId: 'u',
-      ownerId: '2088',
-      callerRuntimeTarget: 'caller_instance',
-    });
-    // 三轮勘误:好友探测照旧发起;探测请求失败一律零提示(suppress 透传)。
-    expect(mockGetCallerContext).toHaveBeenCalledWith('b', '2088', { suppressErrorNotification: true });
-  });
-
-  it('探测结果非 caller(owner)与探测失败均不带 caller_runtime_target(静默降级)', async () => {
-    mockedGetConnection.mockResolvedValue({
-      code: 200000,
-      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
-      message: 'OK',
-      request_id: 'r',
-    });
-    mockGetCallerContext.mockResolvedValue({ botCallType: 'owner' });
-    const p = createBotChatProvider({ bot: { ...bot }, userId: 'u', sessionId: 'sid-1' });
-    await p.connect();
-    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'online', { sessionKey: 'sid-1' });
-
-    // 探测失败(如真好友视角受 Check(MEMBER) 管控 403):静默降级不带。
-    mockGetCallerContext.mockRejectedValueOnce(new Error('403'));
-    const p2 = createBotChatProvider({ bot: { ...bot }, userId: 'u', sessionId: 'sid-2' });
-    await p2.connect();
-    expect(mockedGetIamToken).toHaveBeenLastCalledWith('b', 'u', '2088', 'online', { sessionKey: 'sid-2' });
   });
 
   it('getChatUrl 对 human_ 前缀的 userId 只传工号(回归:连接接口不再带 human_ 前缀)', async () => {

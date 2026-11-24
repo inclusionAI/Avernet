@@ -71,7 +71,7 @@ export interface OwnedBotDto {
   disabled_actions?: Record<string, string>;
   space_id?: string | number;
   space_name?: string;
-  /** Caller 模式标记('caller'):IAM 换签需带 caller_runtime_target(openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  /** Caller 模式标记('caller'),遗留目录字段:新版目录接口不再下发,前端不再消费;保留仅为类型兼容。 */
   call_type?: string;
   /** 归属空间(2026-10-21 对齐线上实际返回的嵌套形态;bots 接口实测 space_id/name/kind)。 */
   space?: { space_id: string; name: string; kind: string } | null;
@@ -104,7 +104,7 @@ export interface BotMetadataDto {
   owner_name?: string;
   /** 服务 Bot 是否有可用的 online 发布；非服务 Bot 为 null。 */
   online_available?: boolean | null;
-  /** Caller 模式标记('caller'):IAM 换签需带 caller_runtime_target(openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  /** Caller 模式标记('caller'),遗留目录字段:新版目录接口不再下发,前端不再消费;保留仅为类型兼容。 */
   call_type?: string;
   status?: string;
 }
