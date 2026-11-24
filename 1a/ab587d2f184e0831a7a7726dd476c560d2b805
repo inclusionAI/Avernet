@@ -1,0 +1,27 @@
+apps/frontend-nextgen/src/services/workspace/groupChatProvider.ts
+  s_5cfa3f3cdf3cc2::t_e26bc6d7a177db 188-190
+apps/frontend-nextgen/src/services/workspace/groupSpeakingLeaseService.ts
+  s_5cfa3f3cdf3cc2::t_d5c94c429317f6 154-155,172-175,186,194-200
+  s_5cfa3f3cdf3cc2::t_22936a3c8aec85 33-38
+  s_5cfa3f3cdf3cc2::t_bfde20a5665858 201-202
+apps/frontend-nextgen/test/services/workspace/groupSpeakingLeaseService.test.ts
+  s_5cfa3f3cdf3cc2::t_0a60bcfd63a63f 37-41,44
+  s_5cfa3f3cdf3cc2::t_4c53b04c0726b5 307-370
+  s_5cfa3f3cdf3cc2::t_25f38f4892a877 371
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1aab587d2f184e0831a7a7726dd476c560d2b805",
+  "prompts": {},
+  "sessions": {
+    "s_5cfa3f3cdf3cc2": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "4a503214-00dd-4792-8587-55cdc98fb755",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

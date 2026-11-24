@@ -1,0 +1,84 @@
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFiles.ts
+  s_f364df1c07a1e6::t_17f10ed1998a96 45,60,70,94,139,164
+apps/backend/tests/community/endpoints/test_openapi_session_files.py
+  s_f364df1c07a1e6::t_84e68bd7688014 154,163,206
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_f364df1c07a1e6::t_3076488ef14c3d 437,440,467,470,473,476,482,485,491,494
+  s_f364df1c07a1e6::t_234e7c384508bb 443
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_f364df1c07a1e6::t_6a15fe27ccc244 803
+  s_f364df1c07a1e6::t_d4266f7dcb952e 566,572,692,738,794
+apps/backend/src/agentclaw/community/core/session_resources/engine_files.py
+  s_f364df1c07a1e6::t_a5f2d36178e1aa 20,59-63,65
+  s_f364df1c07a1e6::t_e166b12db4de87 215,217-219
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilePreview.ts
+  s_f364df1c07a1e6::t_17f10ed1998a96 54,119
+apps/backend/src/agentclaw/community/core/runtime_binding/README.md
+  s_f364df1c07a1e6::t_8a5ba60e7e8e5c 23,36-44
+apps/backend/src/agentclaw/community/core/session_resources/README.md
+  s_f364df1c07a1e6::t_8a5ba60e7e8e5c 45-51
+apps/backend/docs/openapi-v1/engine-surface.md
+  s_f364df1c07a1e6::t_8a5ba60e7e8e5c 131-137
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays.tsx
+  s_f364df1c07a1e6::t_17f10ed1998a96 40
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/file_access.py
+  s_f364df1c07a1e6::t_e166b12db4de87 30,69,73-75,85-86,109
+apps/backend/src/agentclaw/community/api/engine_session_files.py
+  s_f364df1c07a1e6::t_e166b12db4de87 15-17,32
+apps/backend/src/agentclaw/community/core/runtime_binding/service.py
+  s_f364df1c07a1e6::t_a5f2d36178e1aa 6,9,63-106
+apps/frontend-nextgen/src/services/backendApi/bots/botSessionFileController.ts
+  s_f364df1c07a1e6::t_17f10ed1998a96 83
+apps/backend/tests/community/core/runtime_binding/test_session_file_routing.py
+  s_f364df1c07a1e6::t_84e68bd7688014 32-33,52-53,72-73,76,85,88,98-100,102,104,114,117-120,122,124,129,131-132,137-164
+  s_f364df1c07a1e6::t_9c36d23f79ad8f 1-31,34-51,54-71,74-75,77-84,86-87,89-97,101,103,105-113,115-116,121,123,125-128,130,133-136
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/dependencies_session_files.py
+  s_f364df1c07a1e6::t_e166b12db4de87 5,7,22,65,69,75-76,122,124-126
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  s_f364df1c07a1e6::t_17f10ed1998a96 152-153,156,223,249,272,295,320
+apps/backend/tests/community/core/session_resources/test_creator_name.py
+  s_f364df1c07a1e6::t_84e68bd7688014 87,99
+apps/backend/docs/openapi-v1/engine-surface.zh-CN.md
+  s_f364df1c07a1e6::t_8a5ba60e7e8e5c 124-127
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_session_files.py
+  s_f364df1c07a1e6::t_84e68bd7688014 302,344-357,359,374,451-453,455-463,466,479,489,494,505-508,514-519,523-524,528,530,903-905,912,916-918,920-933,935-948,953-959,961-975
+  s_f364df1c07a1e6::t_8d00b48f266776 27,184,188,192,199,201,203-204
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileUpload.test.tsx
+  s_f364df1c07a1e6::t_05795c931ebb15 118-119
+  s_f364df1c07a1e6::t_1ed9f18459d7d5 115-117,120-126
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  s_f364df1c07a1e6::t_17f10ed1998a96 18,70
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFileUpload.ts
+  s_f364df1c07a1e6::t_17f10ed1998a96 130
+docs/session-files.md
+  s_f364df1c07a1e6::t_8a5ba60e7e8e5c 96-103
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileStages.test.tsx
+  s_f364df1c07a1e6::t_05795c931ebb15 33-36
+  s_f364df1c07a1e6::t_66ee5475566f24 37,41,45,58,63,68,81,86-87
+apps/backend/tests/community/core/session_resources/test_engine_files.py
+  s_f364df1c07a1e6::t_7d36ce0c137ce2 13,24,50,185,210,228,237,247,252,254-255,257-264,266-270
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  s_f364df1c07a1e6::t_57a0396b3b6d82 57
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  s_f364df1c07a1e6::t_a0f7d2acef26f6 57,73,199
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFilesFeature.test.tsx
+  s_f364df1c07a1e6::t_637adc4e814060 10,66,74,84,257-258,262-270
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_f364df1c07a1e6::t_efd68bf0339aff 335-339,343-349,351,353,585-587,590-594,597,599,602-606,620,633,642,659,670
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a9fa534f0db19b645e962129bf4dfcc81947883",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

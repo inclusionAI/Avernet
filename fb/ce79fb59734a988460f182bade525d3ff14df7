@@ -1,0 +1,57 @@
+apps/backend/src/agentclaw/community/core/task/task_harness/runtime_probe.py
+  s_b6f36ed162c9bd::t_ca6d6d3e91e17b 566-567,574
+  s_b6f36ed162c9bd::t_f9d52e1c5d74eb 618,621,623
+  s_b6f36ed162c9bd::t_3a21f6a0778577 140,315,604-608,625-632,638-643
+apps/backend/tests/community/core/task/task_runner/integration/test_bcs_http_adapter.py
+  s_b6f36ed162c9bd::t_f3a6caf9ba63e5 352-383
+docs/flows/session-runtime-observation.md
+  s_b6f36ed162c9bd::t_8dd5e1fc4ad306 5-7,55-82
+apps/backend/src/agentclaw/community/core/task/task_runner/client/ports.py
+  s_b6f36ed162c9bd::t_63ffcdff0c5069 141
+  s_b6f36ed162c9bd::t_12e1fceda9b12e 140,143-148
+apps/backend/src/agentclaw/community/core/task/README.md
+  s_b6f36ed162c9bd::t_cc408ff45529d7 259-265
+apps/backend/src/agentclaw/community/core/task/task_harness/relay_session_recovery.py
+  s_b6f36ed162c9bd::t_52978ff332338c 52,90-94,97-101,104-105,122
+  s_b6f36ed162c9bd::t_b19f2b2eac49b0 95-96
+apps/backend/tests/community/core/task/task_harness/test_group_delivery_recovery.py
+  s_b6f36ed162c9bd::t_e26e92b30aec63 48,82,104
+  s_b6f36ed162c9bd::t_b19f2b2eac49b0 30-31,41-47,199-274,284
+  s_b6f36ed162c9bd::t_6bf00a75fb1d95 277,280-281,285-311
+  s_b6f36ed162c9bd::t_8724e70d78c18d 1-29,32-40,49-77,79-81,83-103,105-198
+  s_b6f36ed162c9bd::t_cb8be850632dba 78
+  s_b6f36ed162c9bd::t_12a1391dcd48c4 275-276,278-279,282-283
+apps/backend/src/agentclaw/community/core/task/task_runner/client/bcs_http_adapter.py
+  s_b6f36ed162c9bd::t_63ffcdff0c5069 260-261,273-276
+  s_b6f36ed162c9bd::t_8502d0dca5f54e 259,290-305
+apps/backend/src/agentclaw/community/core/task/task_harness/group_delivery_probe.py
+  s_b6f36ed162c9bd::t_480ae904c4a78c 9,132
+  s_b6f36ed162c9bd::t_b19f2b2eac49b0 7,14,91-95,105,108-109
+  s_b6f36ed162c9bd::t_171beb3fe8cb0c 35-41,43-61,63-79,83,90,96,98-100
+  s_b6f36ed162c9bd::t_e7b888c06da464 42,62
+  s_b6f36ed162c9bd::t_8724e70d78c18d 104,106-107,110-112
+  s_b6f36ed162c9bd::t_52978ff332338c 1-6,8,10-13,15-34,80-82,84-89,97,101-103,113-131,133-139
+apps/backend/src/agentclaw/community/core/task/task_harness/relay_runtime_monitor.py
+  s_b6f36ed162c9bd::t_53ca47eb28547a 278
+  s_b6f36ed162c9bd::t_caf7c835c337d4 9,115-128,133-136,234,248,274,277
+  s_b6f36ed162c9bd::t_63ffcdff0c5069 41-42,129-132
+  s_b6f36ed162c9bd::t_f0fa23c0eba6b3 71-81
+  s_b6f36ed162c9bd::t_171beb3fe8cb0c 82-90,275-276
+  s_b6f36ed162c9bd::t_ca6d6d3e91e17b 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fbce79fb59734a988460f182bade525d3ff14df7",
+  "prompts": {},
+  "sessions": {
+    "s_b6f36ed162c9bd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1da46-fbad-7ba2-9c7e-ab42a36547d5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": null
+    }
+  }
+}

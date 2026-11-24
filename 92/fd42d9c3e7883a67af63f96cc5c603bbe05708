@@ -1,0 +1,100 @@
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/lib.rs
+  s_14f580f3a2c4d3::t_fc054f84ee8539 52-54
+  s_14f580f3a2c4d3::t_51e78d012f84fa 32-35,131-132
+  s_14f580f3a2c4d3::t_5c04ab91d04f3c 133
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/propagation.rs
+  s_14f580f3a2c4d3::t_daf53301b36317 1-18,23,25-86,88,97-98,104-109,156-168,170-173,182-187
+  s_bd63b08a84ff5c::t_75d4f6a038b9cf 20-22,89,92-94,169,177-179
+  s_bd63b08a84ff5c::t_0020238084268b 99-103,110-155
+  s_bd63b08a84ff5c::t_069909664fcb79 19,24,87,90-91,95-96,174-176,180-181
+apps/bcs/crates/external-clients/bcs-fuse-client/src/client.rs
+  s_bd63b08a84ff5c::t_75d4f6a038b9cf 117,134,156,168,188
+  s_bd63b08a84ff5c::t_a13b2011e61472 3,19,21,53-54,225,272
+apps/bcs/crates/adapters/http/bcs-http/Cargo.toml
+  s_14f580f3a2c4d3::t_51e78d012f84fa 58
+apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_client.rs
+  s_14f580f3a2c4d3::t_51e78d012f84fa 51-55
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  s_bd63b08a84ff5c::t_a8ebdfc86416d3 25-32
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/blocking.rs
+  s_bd63b08a84ff5c::t_d6ca656d760113 2,9-24
+  s_bd63b08a84ff5c::t_718a663513a47f 4
+  s_14f580f3a2c4d3::t_51e78d012f84fa 43-47
+  s_bd63b08a84ff5c::t_32f802f6e4ef48 25
+apps/bcs/crates/plugin-api/bcs-tracing-api/CONTEXT.md
+  s_14f580f3a2c4d3::t_3426299cb01506 61-62
+  s_14f580f3a2c4d3::t_fc054f84ee8539 81-83
+  s_bd63b08a84ff5c::t_6c0bac05d9e66c 53-56
+  s_14f580f3a2c4d3::t_ac8fce31d38468 60
+  s_14f580f3a2c4d3::t_ad484f692ef64c 3-4,37-43,46-52,57-59,66-72
+  s_bd63b08a84ff5c::t_c7c0c151f96447 73
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/lib.rs
+  s_bd63b08a84ff5c::t_d6ca656d760113 65-66
+apps/bcs/crates/services/bcs-message-flow/src/human_notify_tracing_tests.rs
+  s_14f580f3a2c4d3::t_a656e0768694b0 34
+apps/bcs/crates/auxiliary/bcs-network-tracing/CONTEXT.md
+  s_14f580f3a2c4d3::t_3426299cb01506 73-75
+  s_14f580f3a2c4d3::t_ad484f692ef64c 33-36,61-65,89-92
+  s_bd63b08a84ff5c::t_6c0bac05d9e66c 38-53,96-101
+  s_bd63b08a84ff5c::t_10ba729300e869 37
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/http_client.rs
+  s_bd63b08a84ff5c::t_718a663513a47f 4-5,12
+  s_14f580f3a2c4d3::t_51e78d012f84fa 97-101
+  s_bd63b08a84ff5c::t_d6ca656d760113 2,28-63
+  s_bd63b08a84ff5c::t_ab7995c1f631a3 64
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client.rs
+  s_bd63b08a84ff5c::t_6c0bac05d9e66c 1,7,10,21,41,48,62-63
+  s_bd63b08a84ff5c::t_ba31b4269149f0 66,70
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/network_tracing.rs
+  s_14f580f3a2c4d3::t_a656e0768694b0 38
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/default_headers.rs
+  s_bd63b08a84ff5c::t_d6ca656d760113 1-3,5-16,21-23,26-49
+  s_bd63b08a84ff5c::t_8a9a3fcaea4a5f 17-19
+apps/bcs/crates/external-clients/bcs-a2a-http/examples/harness_text.rs
+  s_bd63b08a84ff5c::t_75d4f6a038b9cf 25-26
+  s_bd63b08a84ff5c::t_f38d65b884c666 22
+apps/bcs/crates/adapters/http/bcs-http/tests/network_tracing_otel.rs
+  s_14f580f3a2c4d3::t_765a6a8cbe6064 6,58-65,86-87,105,107,311
+  s_14f580f3a2c4d3::t_1227b27887d5c2 225,373-437,443-445
+  s_14f580f3a2c4d3::t_ac8fce31d38468 227,438-440
+  s_14f580f3a2c4d3::t_41c76b1d97abf4 441-442
+  s_14f580f3a2c4d3::t_d8679ed24c2d06 152
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/conformance.rs
+  s_14f580f3a2c4d3::t_11cf7982ba72ef 20
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/http_clients.rs
+  s_14f580f3a2c4d3::t_6d0b1f772bc1fd 41
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/routes.rs
+  s_14f580f3a2c4d3::t_3bc0fdb7a244cc 17
+apps/bcs/crates/external-clients/bcs-a2a-http/src/card_fetch.rs
+  s_bd63b08a84ff5c::t_99d7332144c3bb 36,40,49,54-55,64
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client_json.rs
+  s_bd63b08a84ff5c::t_3aa7bb2b0775b4 11,15,17
+apps/bcs/crates/external-clients/bcs-a2a-http/src/subscribe.rs
+  s_bd63b08a84ff5c::t_e3277e78110c0e 50,53-54
+apps/bcs/crates/plugins/bcs-storage-baas/tests/tracing_scope.rs
+  s_14f580f3a2c4d3::t_37f267cc7229a7 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "92fd42d9c3e7883a67af63f96cc5c603bbe05708",
+  "prompts": {},
+  "sessions": {
+    "s_14f580f3a2c4d3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aae7-4cd8-74b0-8e22-27155a285494",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    },
+    "s_bd63b08a84ff5c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ab0e-eea1-7601-b5f0-d2ca7ef88eb0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+apps/bcsfuse/tr/README.md
+  s_9e428ec8192673::t_74c7e4580f5e1d 23-26
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/DiscoverResponse.java
+  s_9e428ec8192673::t_74c7e4580f5e1d 30-31,87-94
+apps/bcsfuse/internal/zbcsfuse_internal/generated/AgentDiscoverFacade.py
+  s_9e428ec8192673::t_74c7e4580f5e1d 553,571,573,585
+apps/bcsfuse/tr/java/pom.xml
+  s_9e428ec8192673::t_74c7e4580f5e1d 9
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_9e428ec8192673::t_74c7e4580f5e1d 75-76,79,160,196,216-217,228
+apps/bcsfuse/tr/rpc.proto
+  s_9e428ec8192673::t_74c7e4580f5e1d 3,55
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_9e428ec8192673::t_2834aa6dee3ec5 103-105
+apps/bcsfuse/docs/deployment/zbcsfuse-sre-tr-load-test.md
+  s_9e428ec8192673::t_aec885be4bbf18 172-174,186
+apps/bcsfuse/internal/bcsfuse_internal/config/alipay_search.py
+  s_9e428ec8192673::t_438c68bea82d3d 11-13
+apps/bcsfuse/tests/alipay/test_emergency.py
+  s_9e428ec8192673::t_2f5583f0b3d6bb 11-12,42-44,157-164,182-184,233-242
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_9e428ec8192673::t_1aa68ad27a9c1c 476-531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e0e3b4027c18ae10eb544f7b61044ff79b03a5c6",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

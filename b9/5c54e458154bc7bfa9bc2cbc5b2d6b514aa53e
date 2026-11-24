@@ -1,0 +1,40 @@
+apps/frontend/src/hooks/useResources.ts
+  s_68438866e3020f::t_e155b3c44d1e82 28-31,455-462,491-494,527-530
+  s_68438866e3020f::t_e0d2a9462b7c7e 27,531-534,584-587
+apps/frontend/src/hooks/useServiceResources.ts
+  s_68438866e3020f::t_e155b3c44d1e82 54-57,534-541,573-576,613-616
+  s_68438866e3020f::t_b28ecaa62d7c37 53,617-620,675-678
+apps/frontend/src/utils/vscodeRequestAdapter.ts
+  s_68438866e3020f::t_cf4528907bbef2 66-76,79-83,85-88
+  s_68438866e3020f::t_e993999bb4484d 28,55,61,77-78,89,113
+  s_68438866e3020f::t_095b414352fd6e 84
+  s_68438866e3020f::t_065adc3076564b 62-65
+apps/frontend/src/utils/resourceWriteError.ts
+  s_68438866e3020f::t_e155b3c44d1e82 12,16-17,30
+  s_68438866e3020f::t_cf4528907bbef2 18-20,22,24-28
+  s_68438866e3020f::t_33fcc0c284c7f2 1-11,13-15,21,23,29
+apps/frontend/src/components/aicoding/FileTree.tsx
+  s_68438866e3020f::t_e155b3c44d1e82 44-47,1645
+  s_68438866e3020f::t_ec5d731afda0de 43,1656-1658
+apps/frontend/src/utils/resourceWriteError.test.ts
+  s_68438866e3020f::t_e7d9fc73444ff8 44-47,49-51,80-81,83
+  s_68438866e3020f::t_6d70bba49d00e7 43,53-77,79
+  s_68438866e3020f::t_e26b66bf4f5626 84-86
+  s_68438866e3020f::t_23876dda2d1e34 1-42,48,52,78,82,87-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b95c54e458154bc7bfa9bc2cbc5b2d6b514aa53e",
+  "prompts": {},
+  "sessions": {
+    "s_68438866e3020f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-19d3-72f0-b004-25acfac2a3e5",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

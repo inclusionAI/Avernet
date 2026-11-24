@@ -1,0 +1,36 @@
+apps/backend/tests/community/core/apply_engine/test_manifest_mcp_install_admission.py
+  s_b7f94a3bd241d6::t_32da8604b1c898 7,15-17,47-64,66-78,80-85,87-99,101-103
+  s_b7f94a3bd241d6::t_1a66db4f58a92c 1-6,8-11,14,18-46
+  s_b7f94a3bd241d6::t_4a160328ab1879 12-13,65,79,86,100
+apps/backend/src/agentclaw/community/core/skill_center/services/direct_activation_service.py
+  s_b7f94a3bd241d6::t_b1678ab42383c4 51-52
+  s_b7f94a3bd241d6::t_d1721c249b9ae0 414-417
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_apply_service.py
+  s_b7f94a3bd241d6::t_d1721c249b9ae0 11,89-95
+apps/backend/src/agentclaw/community/core/bot_config_manifest/README.md
+  s_b7f94a3bd241d6::t_d544d4be8a9e45 501-503,590
+apps/backend/src/agentclaw/community/core/skill_center/mcp_apply_policy.py
+  s_b7f94a3bd241d6::t_d1721c249b9ae0 1-21
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities.py
+  s_b7f94a3bd241d6::t_d1721c249b9ae0 44,79-84,99,104,106-107
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  s_b7f94a3bd241d6::t_dc272761335862 732-742,852-861
+  s_b7f94a3bd241d6::t_d26600ab283b5a 96,129-130
+  s_b7f94a3bd241d6::t_e3e38a87230787 131-132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9608e9e1a119205e65b380ef1c3eac491c664884",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

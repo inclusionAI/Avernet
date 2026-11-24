@@ -1,0 +1,17 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6d37dcc4dd619c0a67673f70583f3aa8114f3ad2",
+  "prompts": {},
+  "sessions": {
+    "s_c980b83a9ffe7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e84e-8cc0-72b0-848b-eae19b4ed413",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

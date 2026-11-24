@@ -1,0 +1,19 @@
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_19c0e6699afcd7::t_7e6ddfbbbffa26 304-305,308-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd519b082b23fc5ef2961dc4499efba94795f33d",
+  "prompts": {},
+  "sessions": {
+    "s_19c0e6699afcd7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3be-3a1a-7b13-9090-e1745ea29304",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+apps/backend/src/agentclaw/community/core/mcp/services/detail_delivery.py
+  s_3d36bb45bb2a35::t_4c845f535ce5b8 13,174
+apps/backend/src/agentclaw/community/core/devices/services/runtime_write_checkpoint.py
+  s_3d36bb45bb2a35::t_4c845f535ce5b8 9,39-55
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_4c845f535ce5b8 434-437
+apps/backend/src/agentclaw/community/core/mcp/services/sync_service.py
+  s_3d36bb45bb2a35::t_4c845f535ce5b8 25,418,793
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_sync.py
+  s_3d36bb45bb2a35::t_4c845f535ce5b8 13-16,36
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_sync.py
+  s_3d36bb45bb2a35::t_4c845f535ce5b8 45-48,105
+apps/backend/src/agentclaw/community/core/devices/services/singlebox_device_sync.py
+  s_3d36bb45bb2a35::t_4c845f535ce5b8 18-21,27,43,83-84,94
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_projection.py
+  s_3d36bb45bb2a35::t_4c845f535ce5b8 7,75-77,142-143,398
+apps/backend/tests/community/core/skill_center/services/test_skill_center_uses_resolver.py
+  s_3d36bb45bb2a35::t_60743266fe2e40 88,124-130,137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3c9975910d1caea7ceb24166d3e9fd13497e6d94",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/__init__.py
+  h_059e888e5e4e82 1-8
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/collaboration_creation.py
+  h_059e888e5e4e82 1-175
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/collaboration_policy.py
+  h_059e888e5e4e82 1-117
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/contracts.py
+  h_059e888e5e4e82 1-188
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/method_bootstrap.py
+  h_059e888e5e4e82 1-270
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/method_lifecycle.py
+  h_059e888e5e4e82 1-46
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/open_enrollment.py
+  h_059e888e5e4e82 1-278
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/open_enrollment_policy.py
+  h_059e888e5e4e82 1-54
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/product_instantiation.py
+  h_059e888e5e4e82 1-235
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/product_profile.py
+  h_059e888e5e4e82 1-94
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/product_profile_publication.py
+  h_059e888e5e4e82 1-54
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/topology_projection.py
+  h_059e888e5e4e82 1-116
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/__init__.py
+  h_059e888e5e4e82 1
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/profile_models.py
+  h_059e888e5e4e82 1-51
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/profile_repository.py
+  h_059e888e5e4e82 1-211
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/records.py
+  h_059e888e5e4e82 1-236
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/repository.py
+  h_059e888e5e4e82 1-488
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_23_context_collab_product_profile.sql
+  h_059e888e5e4e82 1-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a44e3d5965e3cef0c1e348158065b93c0037335a",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

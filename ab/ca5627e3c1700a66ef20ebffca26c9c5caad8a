@@ -1,0 +1,33 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_owner/__init__.py
+  s_cecdc98e721f4b::t_257ac65c178c1b 1
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_owner/local_session_owner_reporting.py
+  s_cecdc98e721f4b::t_957d1b6e3e6ee0 1-303
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_owner/local_session_owner_run.py
+  s_cecdc98e721f4b::t_0927dd0112e19e 1-907
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_owner/remote_session_owner_adapter.py
+  s_cecdc98e721f4b::t_2de254d57ad8d9 1-139
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_owner/session_owner_case_run.py
+  s_cecdc98e721f4b::t_c36e8b2ae93748 1-136
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_owner/session_owner_contract.py
+  s_cecdc98e721f4b::t_c5d4d31efa5fc8 1-265
+apps/bcs/scripts/e2e-runner/tests/test_local_session_owner_run.py
+  s_cecdc98e721f4b::t_d5de9fa5443f0e 1-1231
+apps/bcs/scripts/e2e-runner/tests/test_session_owner_contract.py
+  s_cecdc98e721f4b::t_bfef1a2c638cfb 1-181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "abca5627e3c1700a66ef20ebffca26c9c5caad8a",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

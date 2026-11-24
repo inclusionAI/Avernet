@@ -1,0 +1,49 @@
+apps/backend/src/agentclaw/community/core/caller_identity/caller_credential_protocol.py
+  s_bb98e2f10840b6::t_eecdf3558e7218 97,99
+apps/backend/src/agentclaw/community/core/caller_identity/caller_identity_service_protocol.py
+  s_bb98e2f10840b6::t_eecdf3558e7218 132
+apps/backend/src/agentclaw/community/core/repository/protocols/chat.py
+  s_bb98e2f10840b6::t_eecdf3558e7218 257,263-265,273,279-280
+apps/backend/src/agentclaw/community/core/caller_identity/service.py
+  s_bb98e2f10840b6::t_eecdf3558e7218 618,649-650,652,657
+apps/backend/tests/community/repository/chat/test_caller_token_expiry.py
+  s_bb98e2f10840b6::t_c86a0faf06c586 470,586-685,691-692,694-702,715-717
+  s_bb98e2f10840b6::t_8e40c11a243b56 325,328,347-348,471-472,475-476,478,686-690,693,703-714,718-721
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_instance_service.py
+  s_bb98e2f10840b6::t_c86a0faf06c586 1666
+  s_bb98e2f10840b6::t_df04a07513504d 736,745-746,1728,1749,1751,1763-1767,1886
+apps/backend/specs/caller-force-runtime-refresh-20261117/001-spec-output.md
+  s_bb98e2f10840b6::t_677eafe0f70963 1-21
+apps/backend/src/agentclaw/community/core/caller_identity/protocols.py
+  s_bb98e2f10840b6::t_eecdf3558e7218 80,131
+apps/backend/tests/community/core/caller_identity/test_force_runtime_refresh_regression.py
+  s_bb98e2f10840b6::t_5c6431b3156172 1-168
+apps/backend/src/agentclaw/community/core/caller_identity/expiry_runtime_updater.py
+  s_bb98e2f10840b6::t_eecdf3558e7218 37,69,72
+apps/backend/src/agentclaw/community/core/repository/implementations/chat/expert_chat_instance.py
+  s_bb98e2f10840b6::t_eecdf3558e7218 266,271-293,325,348-350
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_bb98e2f10840b6::t_3e83fe2f3ca6df 175-186,189-195,231-232
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py
+  s_bb98e2f10840b6::t_fc21b876942156 428,784,798,800-804,819,822-823,828-829
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_bb98e2f10840b6::t_7d66392aff8e95 520-528
+apps/backend/src/agentclaw/community/core/repository/caller_token_refresh_types.py
+  s_bb98e2f10840b6::t_ae523dc775c771 12-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e204324867f48bc3d1ad64743848377a99fa4fc9",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,407 @@
+apps/bcs/Cargo.lock
+  s_b033c54cc00da7::t_00a3c2f38fddb8 686,690,692,1489-1499,1515,1518,1520,1538,1542,1544,1564,1622-1623,1626,1628-1629,1642
+apps/bcs/Cargo.toml
+  s_b033c54cc00da7::t_897b915e389097 11,347
+  s_f7d55f87099234::t_be0bf8745ffd43 11,347
+apps/bcs/README.md
+  s_b033c54cc00da7::t_356e1e47541c73 27,98-100
+  s_f7d55f87099234::t_666a8c9d545ddf 27,98-100
+  s_b033c54cc00da7::t_bfe588a8202920 19
+apps/bcs/crates/adapters/http/bcs-dist-gateway-http/Cargo.toml
+  s_b033c54cc00da7::t_368a9701737345 25,28,32
+  s_f7d55f87099234::t_c99b70fdc7983f 25
+  s_f7d55f87099234::t_a21c64f9b4d1df 28,32
+apps/bcs/crates/adapters/http/bcs-dist-gateway-http/src/content.rs
+  s_b033c54cc00da7::t_a61dae572d6dc5 3-4,21,57,61,66
+  s_f7d55f87099234::t_625624a957e79a 3-4,21,57,61,66
+apps/bcs/crates/adapters/http/bcs-dist-gateway-http/src/mapping.rs
+  s_b033c54cc00da7::t_418af67471c1e9 6,104,106-108,119
+  s_f7d55f87099234::t_7ce7a2e1f239e5 6
+  s_f7d55f87099234::t_625624a957e79a 104,106-108,119
+apps/bcs/crates/adapters/http/bcs-dist-gateway-http/tests/a2a.rs
+  s_b033c54cc00da7::t_deb2a50740b789 8,84,92-102,199,201,265-306,346,518
+  s_f7d55f87099234::t_a21c64f9b4d1df 8,84,92-96,100-102,199,201,346,518
+  s_f7d55f87099234::t_a80f507da3db42 97-99
+  s_f7d55f87099234::t_90fad13e26b72f 266-306
+  s_f7d55f87099234::t_b72f768e5bd3d7 265
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/CONTEXT.md
+  s_b033c54cc00da7::t_2c83fa20e9fcd0 1-9
+  s_f7d55f87099234::t_21d37ebbe874fa 1-9
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/Cargo.toml
+  s_b033c54cc00da7::t_391adc14b0ac0d 1-20
+  s_f7d55f87099234::t_be0bf8745ffd43 1-15,19-20
+  s_f7d55f87099234::t_200a42925bd9bc 16-18
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/README.md
+  s_b033c54cc00da7::t_042c9ad21c4626 1-45
+  s_f7d55f87099234::t_21d37ebbe874fa 1-45
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/src/lib.rs
+  s_b033c54cc00da7::t_3f91b80649f6a2 1-86
+  s_f7d55f87099234::t_be0bf8745ffd43 1
+  s_f7d55f87099234::t_c5f437ee8f7851 2-86
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/tests/conformance_output.rs
+  s_b033c54cc00da7::t_6a4d99d8d635ec 1-28
+  s_f7d55f87099234::t_200a42925bd9bc 1-28
+apps/bcs/crates/adapters/output/bcs-dist-a2a-output/tests/output.rs
+  s_b033c54cc00da7::t_e1f685a3023369 1-92
+  s_f7d55f87099234::t_be0bf8745ffd43 1-92
+apps/bcs/crates/application/bcs-app-dist-gateway/Cargo.toml
+  s_b033c54cc00da7::t_d993dbfa5fc20a 24-26
+  s_f7d55f87099234::t_c99b70fdc7983f 24-25
+  s_f7d55f87099234::t_6a0408aa217449 26
+apps/bcs/crates/application/bcs-app-dist-gateway/src/lib.rs
+  s_b033c54cc00da7::t_ce0e1353e01279 30,85
+  s_f7d55f87099234::t_4fab9c993cef80 30,85
+apps/bcs/crates/application/bcs-app-dist-gateway/src/submit.rs
+  s_b033c54cc00da7::t_01608e17ca19be 9,81,97,115-116,121,125,144,191
+  s_f7d55f87099234::t_4a3876ceb3d0b4 9,81,97,115-116,121,125,144,191
+apps/bcs/crates/application/bcs-app-dist-gateway/src/subscribe.rs
+  s_b033c54cc00da7::t_2d1bf34d19ca2a 18,103,105-107
+  s_f7d55f87099234::t_625624a957e79a 18,103,105-107
+apps/bcs/crates/application/bcs-app-dist-gateway/src/wait.rs
+  s_b033c54cc00da7::t_cdca2348217abd 14,25,27-30
+  s_f7d55f87099234::t_625624a957e79a 14,25,27-30
+apps/bcs/crates/application/bcs-app-dist-gateway/tests/gateway.rs
+  s_b033c54cc00da7::t_dfc25e51f2858c 90,187-190
+  s_f7d55f87099234::t_1ef796876095c0 90,187-190
+apps/bcs/crates/contracts/bcs-dist-model/CONTEXT.md
+  s_b033c54cc00da7::t_826e6ea4407964 47-48
+  s_f7d55f87099234::t_31659627b9347c 47-48
+apps/bcs/crates/contracts/bcs-dist-model/src/output.rs
+  s_b033c54cc00da7::t_4a2fbcaea55f12 58,104-105
+  s_f7d55f87099234::t_fa9ad635d29b66 58,104-105
+apps/bcs/crates/contracts/bcs-dist-model/tests/output_shape.rs
+  s_b033c54cc00da7::t_dba2887f497f61 32
+  s_f7d55f87099234::t_81dada2f1cd0a2 32
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_b033c54cc00da7::t_19d889c75cdefb 3-12,27-47,53-55,66-67,73-76
+  s_f7d55f87099234::t_505c0d64495aad 27-47,53-55,66-67,73-76
+  s_f7d55f87099234::t_dbe5b10679af9c 3-12
+apps/bcs/crates/service-api/bcs-service-api/src/application/dist_gateway.rs
+  s_b033c54cc00da7::t_328e1dd187d31b 6,58
+  s_f7d55f87099234::t_95af71d6667122 58
+  s_f7d55f87099234::t_7ce7a2e1f239e5 6
+apps/bcs/crates/service-api/bcs-service-api/src/core/dist_admission.rs
+  s_b033c54cc00da7::t_7df06b1751e034 1-27
+  s_f7d55f87099234::t_131ac4cf271c81 1-27
+apps/bcs/crates/service-api/bcs-service-api/src/core/dist_gateway.rs
+  s_b033c54cc00da7::t_7df917a26c61c9 4,6,39
+  s_f7d55f87099234::t_95af71d6667122 4,6,39
+apps/bcs/crates/service-api/bcs-service-api/src/core/dist_projection.rs
+  s_b033c54cc00da7::t_821c59f7837063 34,44,68
+  s_f7d55f87099234::t_b7082463df0dcd 34,44,68
+apps/bcs/crates/service-api/bcs-service-api/src/core/mod.rs
+  s_b033c54cc00da7::t_2e48a153152e15 45-46
+  s_f7d55f87099234::t_a236d655e5bfb5 45-46
+apps/bcs/crates/service-api/bcs-service-api/src/port/dist_output.rs
+  s_b033c54cc00da7::t_5b7567901a4c7a 1-64
+  s_f7d55f87099234::t_f3b38c33897d7d 10-13,44-63
+  s_f7d55f87099234::t_c5f437ee8f7851 1-9,14-43,64
+apps/bcs/crates/service-api/bcs-service-api/src/port/mod.rs
+  s_b033c54cc00da7::t_b4b0c4c47189c1 164
+  s_f7d55f87099234::t_c5f437ee8f7851 164
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/README.md
+  s_b033c54cc00da7::t_2523e43133a084 45-52,135,146,314-327
+  s_f7d55f87099234::t_666a8c9d545ddf 45-52
+  s_f7d55f87099234::t_505c0d64495aad 135,146,314-327
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/inbox.rs
+  s_b033c54cc00da7::t_d212cda4d61b23 33-39
+  s_f7d55f87099234::t_e9f1a489a07cf3 33-39
+apps/bcs/crates/services/bcs-dist-gateway-store/Cargo.toml
+  s_b033c54cc00da7::t_dd2002fb6d9ffa 22
+  s_f7d55f87099234::t_c99b70fdc7983f 22
+apps/bcs/crates/services/bcs-dist-gateway-store/src/task_reader.rs
+  s_b033c54cc00da7::t_ea03f297cafd3b 256-263,341
+  s_f7d55f87099234::t_a80f507da3db42 256-263
+  s_f7d55f87099234::t_46e589f0cfaba1 341
+apps/bcs/crates/services/bcs-dist-gateway-store/tests/common/mod.rs
+  s_b033c54cc00da7::t_b54a01570b36a4 65,68-69,94,96-98,118,278-280,314,393-394
+  s_f7d55f87099234::t_46e589f0cfaba1 65,68-69,94,96-98,118
+  s_f7d55f87099234::t_c99b70fdc7983f 278-280,393-394
+  s_f7d55f87099234::t_5748792e64f2da 314
+apps/bcs/crates/services/bcs-dist-gateway-store/tests/conformance_gateway_store.rs
+  s_b033c54cc00da7::t_d647b06fd3b099 51
+  s_f7d55f87099234::t_c99b70fdc7983f 51
+apps/bcs/crates/services/bcs-dist-gateway-store/tests/task_reader.rs
+  s_b033c54cc00da7::t_6b911df3545e59 74
+  s_f7d55f87099234::t_c99b70fdc7983f 74
+apps/bcs/crates/services/bcs-dist-gateway/Cargo.toml
+  s_b033c54cc00da7::t_3c00de832fd4d6 17-20
+  s_f7d55f87099234::t_78d5560d981ee4 17
+  s_f7d55f87099234::t_c99b70fdc7983f 18-19
+  s_f7d55f87099234::t_a21c64f9b4d1df 20
+apps/bcs/crates/services/bcs-dist-gateway/src/admission.rs
+  s_b033c54cc00da7::t_7e1e855f0eb8ef 16,26-27,40-43,50
+  s_f7d55f87099234::t_8d21438db04e53 16,26-27,40-43,50
+apps/bcs/crates/services/bcs-dist-gateway/src/lib.rs
+  s_b033c54cc00da7::t_b743f2ff5b1991 3-6,14-15,25-26,32-33,71,100-104
+  s_f7d55f87099234::t_95af71d6667122 14,25,32
+  s_f7d55f87099234::t_a80f507da3db42 15,26,33,71,100-104
+  s_f7d55f87099234::t_01e7943378035e 3-6
+apps/bcs/crates/services/bcs-dist-gateway/tests/conformance_core.rs
+  s_b033c54cc00da7::t_bb6cf75ef9f7ad 12,20,26-27,42,50,82,84-89,96,100,109,135,155,167,180,212,215-216,232-245,254-257,264,267-268,288-292
+  s_f7d55f87099234::t_5420cb1b977c8b 12,26-27,42,50,82,84-89,96,100,109,135,155,167,212,215-216,254-257,264,267-268,288-291
+  s_f7d55f87099234::t_6260c54af83fa7 20,180,232-242
+  s_f7d55f87099234::t_3bc7e93c2352ff 243-245,292
+apps/bcs/crates/services/bcs-dist-gateway/tests/conformance_output_reader.rs
+  s_b033c54cc00da7::t_5bb02d27566d70 1-45
+  s_f7d55f87099234::t_200a42925bd9bc 1-40,42-45
+  s_f7d55f87099234::t_c62b7d0b0cd3a6 41
+apps/bcs/crates/services/bcs-dist-projection/README.md
+  s_b033c54cc00da7::t_16ba68b8554764 16-17,29,37-43,45-51,58,60-67,73,78-79,83-84
+  s_f7d55f87099234::t_dc155c831a847f 16-17,29,37-43,45-51,58,60-67,73,78-79,83-84
+apps/bcs/crates/services/bcs-dist-projection/src/lib.rs
+  s_b033c54cc00da7::t_2b57f045b0e768 97,119,132,151,155-156,158,160,162
+  s_f7d55f87099234::t_8f1d17c1875d36 97,119,132,151,155-156,158,160,162
+apps/bcs/crates/services/bcs-dist-projection/src/limits.rs
+  s_b033c54cc00da7::t_371d0e94ab971b 12-13,77
+  s_f7d55f87099234::t_c47fc389466323 12-13,77
+apps/bcs/crates/services/bcs-dist-projection/tests/output_bytes.rs
+  s_b033c54cc00da7::t_499c8dabdccac0 1-81
+  s_f7d55f87099234::t_464fb17efc978c 1-81
+apps/bcs/crates/services/bcs-dist-projection/tests/projection.rs
+  s_b033c54cc00da7::t_4c2e0bfa2f3dfe 190,232,250-251,287,293,296
+  s_f7d55f87099234::t_63b5f563bc4ffc 190,232,250-251,287,293,296
+apps/bcs/crates/services/bcs-dist-store/src/archive/README.md
+  s_b033c54cc00da7::t_78f494b2604113 40-50,68,70-71,76
+  s_f7d55f87099234::t_7d0440af29aeb9 40-50,68,70-71,76
+apps/bcs/crates/services/bcs-dist-store/src/archive/mod.rs
+  s_b033c54cc00da7::t_df73885ac3c415 13,65-66,109
+  s_f7d55f87099234::t_df32582f58466a 13,65-66,109
+apps/bcs/crates/services/bcs-dist-store/src/archive/sql.rs
+  s_b033c54cc00da7::t_c0840b02ebd10e 12-13,28
+  s_f7d55f87099234::t_17161112a87a23 12-13,28
+apps/bcs/crates/services/bcs-dist-store/src/inbox/producer.rs
+  s_b033c54cc00da7::t_76218071acabbb 281-285
+  s_f7d55f87099234::t_2ccebbe08e38ba 281-285
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/README.md
+  s_b033c54cc00da7::t_cecaa310ee9a25 18,41-45,52
+  s_f7d55f87099234::t_b95154ca07a6e8 18,41-45,52
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/follow.rs
+  s_b033c54cc00da7::t_f0e3d44c254983 5-6,118-123,126,153
+  s_f7d55f87099234::t_81fed80f9c618a 5-6,118-123,126,153
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/publish.rs
+  s_b033c54cc00da7::t_f9f418d013debe 29,70
+  s_f7d55f87099234::t_6204597fd28741 29,70
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/reader.rs
+  s_b033c54cc00da7::t_1a3cca53210d5a 96,102
+  s_f7d55f87099234::t_904f7cd094fbc8 96,102
+apps/bcs/crates/services/bcs-dist-store/src/task_feed/storage.rs
+  s_b033c54cc00da7::t_4c3e8964747a5b 122,131-132,149
+  s_f7d55f87099234::t_aae316e02ae71b 122,131-132,149
+apps/bcs/crates/services/bcs-dist-store/tests/archive.rs
+  s_b033c54cc00da7::t_c2a66c0238c11b 5,212,248,250,261,265-266,292-305
+  s_f7d55f87099234::t_f5a010b5ecf4f1 5,212,248,250,261,265-266,292-305
+apps/bcs/crates/services/bcs-dist-store/tests/task_feed.rs
+  s_b033c54cc00da7::t_ea88edc7938c87 221,883,903-929
+  s_f7d55f87099234::t_1d6ef4ae87c750 221,883,903-929
+apps/bcs/crates/services/bcs-dist-worker/CONTEXT.md
+  s_b033c54cc00da7::t_5b85172722cd9e 3-4,7,11-12
+  s_f7d55f87099234::t_dbe5b10679af9c 3-4,7,11-12
+apps/bcs/crates/services/bcs-dist-worker/Cargo.toml
+  s_b033c54cc00da7::t_02d9eceee8cf3b 24-29
+  s_f7d55f87099234::t_70e55bf7b2bf69 24-29
+apps/bcs/crates/services/bcs-dist-worker/README.md
+  s_b033c54cc00da7::t_0b6e21afddf00b 3-42,188
+  s_f7d55f87099234::t_ef6a1bea0a7034 3-19
+  s_f7d55f87099234::t_f4f42499ac7541 41-42
+  s_f7d55f87099234::t_21d37ebbe874fa 188
+  s_f7d55f87099234::t_666a8c9d545ddf 20-40
+  s_b033c54cc00da7::t_74f7bb532a9bcb 95,162,175
+  s_b033c54cc00da7::t_bda80ae037e954 101,105-106
+apps/bcs/crates/services/bcs-dist-worker/src/admission.rs
+  s_b033c54cc00da7::t_3a393a55faf5bb 1-145
+  s_f7d55f87099234::t_cce59351bc6828 1-145
+apps/bcs/crates/services/bcs-dist-worker/src/lib.rs
+  s_b033c54cc00da7::t_c1a65a933d6a87 22-26
+  s_f7d55f87099234::t_f3b38c33897d7d 22-26
+apps/bcs/crates/services/bcs-dist-worker/src/output.rs
+  s_b033c54cc00da7::t_120d808a79d560 1-2,4-7,9-13,15-52,54-63,65-126
+  s_f7d55f87099234::t_5748792e64f2da 44-46
+  s_f7d55f87099234::t_f3b38c33897d7d 1-2,4-7,9-13,15-43,47-52,54-63,65-126
+apps/bcs/crates/services/bcs-dist-worker/src/processor/README.md
+  s_b033c54cc00da7::t_addc6c7395b638 25,28,71-73
+  s_f7d55f87099234::t_c7b823842576c4 25,28,71-73
+apps/bcs/crates/services/bcs-dist-worker/src/processor/decision.rs
+  s_b033c54cc00da7::t_30b48ae3994fe8 259
+  s_f7d55f87099234::t_e1e55fd8650292 259
+apps/bcs/crates/services/bcs-dist-worker/src/processor/prepare.rs
+  s_b033c54cc00da7::t_d8ae27cb1138f4 376,526
+  s_f7d55f87099234::t_a3592d00aa81f0 376,526
+apps/bcs/crates/services/bcs-dist-worker/src/processor/references.rs
+  s_b033c54cc00da7::t_49fa749c13da6b 17-29,33-35,44,51-53,169
+  s_f7d55f87099234::t_f7ed826d978d67 17-29,33-35,44,51-53,169
+apps/bcs/crates/services/bcs-dist-worker/src/processor/tests.rs
+  s_b033c54cc00da7::t_814d75af789207 107-110
+  s_f7d55f87099234::t_04c9f6932fe1dc 107-110
+apps/bcs/crates/services/bcs-dist-worker/src/processor/tests/reference_tests.rs
+  s_b033c54cc00da7::t_8db0a018f29d82 70-72,79,160,183-185
+  s_f7d55f87099234::t_03c37156a00345 70-72,79,160,183-185
+apps/bcs/crates/services/bcs-dist-worker/src/processor/thinking.rs
+  s_b033c54cc00da7::t_28e767cbd39c7c 68,83
+  s_f7d55f87099234::t_03fcfbdb1342a4 68,83
+apps/bcs/crates/services/bcs-dist-worker/src/processor/transitions.rs
+  s_b033c54cc00da7::t_46d80160a881f9 146-150
+  s_f7d55f87099234::t_76412ef1eaccdd 146-150
+apps/bcs/crates/services/bcs-dist-worker/tests/admission_replay.rs
+  s_b033c54cc00da7::t_a83cf7250562b3 1-246
+  s_f7d55f87099234::t_0a675e79da5e28 9-12,15-20,26-29,36-64,69-126,129-138,140-151,155,160-163,168-173,176-189,191,193-205,211-218,220-244
+  s_f7d55f87099234::t_e3ec03f63e6709 1-8,13-14,21-25,30-35,65-68,127-128,139,152-154,156-159,164-167,174-175,190,192,206-210,219,245-246
+apps/bcs/crates/services/bcs-dist-worker/tests/gateway_chain.rs
+  s_b033c54cc00da7::t_acbd107b1a1ef7 1-300
+  s_f7d55f87099234::t_cfa4476f7c131a 1-300
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_execution.rs
+  s_b033c54cc00da7::t_0be787372d4a03 73,139-148,152,158,163,170-173,175
+  s_f7d55f87099234::t_edfaf3492bb673 73,139-148,152,158,163,170-173,175
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_quota_lifecycle.rs
+  s_b033c54cc00da7::t_49159d604c4994 56-62,64,69
+  s_f7d55f87099234::t_c5b532a9821d23 56-62,64,69
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_resources.rs
+  s_b033c54cc00da7::t_3dd5cbae08f6bc 600,603
+  s_f7d55f87099234::t_0016c0f425dc54 600,603
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_thinking.rs
+  s_b033c54cc00da7::t_550dfde7c0ff75 164
+  s_f7d55f87099234::t_443e6ba1d0221d 164
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/admission.rs
+  s_b033c54cc00da7::t_ac99e714fcdcb3 1-39
+  s_f7d55f87099234::t_e3ec03f63e6709 1-33
+  s_f7d55f87099234::t_092275587c63d1 34-39
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/mod.rs
+  s_b033c54cc00da7::t_818a937a5f48b7 10,13
+  s_f7d55f87099234::t_200a42925bd9bc 13
+  s_f7d55f87099234::t_e3ec03f63e6709 10
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/output.rs
+  s_b033c54cc00da7::t_f5a58c961f9d59 1-62
+  s_f7d55f87099234::t_200a42925bd9bc 1-62
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/state.rs
+  s_b033c54cc00da7::t_11e58eac5743a6 29
+  s_f7d55f87099234::t_a9cfe29878f66f 29
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/services.rs
+  s_b033c54cc00da7::t_8fdde1b389d046 95-101
+  s_f7d55f87099234::t_e3ec03f63e6709 95-101
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/session_spec.rs
+  s_b033c54cc00da7::t_f30b6382fa91c7 25
+  s_f7d55f87099234::t_b18b4964632a08 25
+apps/bcs/scripts/ci/check-import-rules.sh
+  s_b033c54cc00da7::t_d226ba797ae0b9 42,45-53
+  s_f7d55f87099234::t_7ce7a2e1f239e5 42,45-53
+apps/bcs/scripts/ci/tests/import_scope_regression.sh
+  s_b033c54cc00da7::t_17d7030878abb1 45-50
+  s_f7d55f87099234::t_3a1b7a1fa68e35 45-50
+apps/bcs/specs/2026-11-17-gateway-a2a-inbound/plan.md
+  s_b033c54cc00da7::t_703aac715e049b 640-655
+  s_f7d55f87099234::t_ae04929cbf9362 640-655
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
+  s_b033c54cc00da7::t_6f721d853e2b41 2-6
+  s_f7d55f87099234::t_46bcda3a583254 2-6
+  s_b033c54cc00da7::t_bfe588a8202920 27-31
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
+  s_b033c54cc00da7::t_5edf0132dd5d5b 10-14,63,87,89-94,96-98,100-130,136-146,263,361,391
+  s_f7d55f87099234::t_9f92133ec42062 63,87,89-94,96-98,100-130,136-146,263,361,391
+  s_f7d55f87099234::t_8c1138f2ce9a60 10-14
+  s_b033c54cc00da7::t_bfe588a8202920 15-19
+apps/bcs/specs/2026-11-19-gateway-worker-admission/decisions.md
+  s_b033c54cc00da7::t_ae38231de6d470 1-534
+  s_f7d55f87099234::t_9f92133ec42062 1-534
+apps/bcs/specs/2026-11-19-gateway-worker-admission/plan.md
+  s_b033c54cc00da7::t_33f82fe57bc089 1-42
+  s_f7d55f87099234::t_68e3a7180fec09 1-42
+apps/bcs/specs/2026-11-19-gateway-worker-admission/verification.md
+  s_b033c54cc00da7::t_37219cd7230e48 1-95
+  s_f7d55f87099234::t_ef6a1bea0a7034 1-29,30-66
+  s_f7d55f87099234::t_816da51f12bf32 67-74,75-76,77-95
+apps/bcs/specs/README.md
+  s_b033c54cc00da7::t_94a11aa9669e78 55,58
+  s_f7d55f87099234::t_74fd9da9daf080 55,58
+  s_b033c54cc00da7::t_bfe588a8202920 11-12
+  s_b033c54cc00da7::t_13764625093d97 57
+apps/bcs/crates/services/bcs-dist-store/tests/building_blocks.rs
+  s_f7d55f87099234::t_37ed316f8531ed 35
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/inbox.rs
+  s_f7d55f87099234::t_9038a65db1ee41 16
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/inbox.rs
+  s_f7d55f87099234::t_bc8c55cb407c69 20
+apps/bcs/crates/test-support/bcs-test-support/tests/lease_contract_faults.rs
+  s_b033c54cc00da7::t_74f7bb532a9bcb 75,88,102
+  s_b033c54cc00da7::t_c8487997ec8c45 14
+apps/bcs/crates/test-support/bcs-test-support/tests/coordination_primitives.rs
+  s_b033c54cc00da7::t_1251aed2bb09fc 227-266
+apps/bcs/specs/2026-11-20-retained-membership-lease/spec.md
+  s_b033c54cc00da7::t_34d2f2aaf3dbae 1-75
+apps/bcs/crates/plugin-api/bcs-store-api/CONTEXT.md
+  s_b033c54cc00da7::t_bfe588a8202920 8
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/ownership.rs
+  s_b033c54cc00da7::t_bfe588a8202920 92-94,100-101
+apps/bcs/specs/2026-11-17-worker-coordination/spec.md
+  s_b033c54cc00da7::t_bfe588a8202920 9-13,158,161,167,170-172
+apps/bcs/specs/2026-11-20-retained-membership-lease/plan.md
+  s_b033c54cc00da7::t_bfe588a8202920 1-26,28-39
+  s_b033c54cc00da7::t_b17426784663b0 27,40-48
+apps/bcs/specs/2026-11-20-retained-membership-lease/verification.md
+  s_b033c54cc00da7::t_74f7bb532a9bcb 1-30
+apps/bcs/crates/services/bcs-dist-store/src/coordination/README.md
+  s_b033c54cc00da7::t_bfe588a8202920 5,23,32,87
+apps/bcs/crates/plugin-api/bcs-store-api/src/lease.rs
+  s_b033c54cc00da7::t_bfe588a8202920 50-52
+  s_b033c54cc00da7::t_013e17ee2d50f1 1,6-11,16-18,23-24,27-29,45-49,53-56,67-69,71-75,84-85
+apps/bcs/crates/plugin-api/bcs-store-api/README.md
+  s_b033c54cc00da7::t_bfe588a8202920 296,335-357
+  s_b033c54cc00da7::t_74f7bb532a9bcb 41
+apps/bcs/crates/test-support/bcs-test-support/src/store_model/coordination.rs
+  s_b033c54cc00da7::t_ccd25629e8f80f 110-111,114,122-123
+  s_b033c54cc00da7::t_379528f5d2132d 109
+apps/bcs/crates/plugin-api/bcs-store-api/src/common.rs
+  s_b033c54cc00da7::t_260fa3e05033a0 24-25
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/control.rs
+  s_b033c54cc00da7::t_ae8024d06a08f5 139
+apps/bcs/crates/services/bcs-dist-store/src/coordination/mod.rs
+  s_b033c54cc00da7::t_26ef706962ce4b 127-128
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/lease.rs
+  s_b033c54cc00da7::t_239d134a66ab8d 1,29,178-183
+apps/bcs/crates/external-clients/bcs-dist-worker-client/README.md
+  s_b033c54cc00da7::t_bda80ae037e954 4-6
+apps/bcs/crates/adapters/http/bcs-dist-worker-http/README.md
+  s_b033c54cc00da7::t_bda80ae037e954 5-8,10-14
+apps/bcs/crates/services/bcs-dist-worker/src/runtime.rs
+  s_b033c54cc00da7::t_bda80ae037e954 157-163,165-169,172-175,178-184,186
+  s_b033c54cc00da7::t_6fbb5ce921f6c8 154-156,164,170-171,176-177,185,230
+  s_b033c54cc00da7::t_e2dc14f5c18584 188-221
+  s_b033c54cc00da7::t_468132388806fd 357
+  s_b033c54cc00da7::t_e91ac04f6cd61f 187
+apps/bcs/crates/adapters/http/bcs-dist-worker-http/src/lib.rs
+  s_b033c54cc00da7::t_bda80ae037e954 1-4
+apps/bcs/crates/service-api/bcs-service-api/src/application/dist_runtime.rs
+  s_b033c54cc00da7::t_bda80ae037e954 10-11
+apps/bcs/crates/external-clients/bcs-dist-worker-client/src/lib.rs
+  s_b033c54cc00da7::t_bda80ae037e954 1-2,37
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_maintenance.rs
+  s_b033c54cc00da7::t_bda80ae037e954 159,161-164,168-171,174-184,186-187,190-209,211
+apps/bcs/crates/service-api/bcs-service-api/src/port/dist_runtime.rs
+  s_b033c54cc00da7::t_bda80ae037e954 13,44-46
+apps/bcs/crates/services/bcs-dist-worker/tests/lifecycle.rs
+  s_b033c54cc00da7::t_468132388806fd 27-29
+  s_b033c54cc00da7::t_8bfc16f51f3d3b 8,16,18-26,30-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "49ef29a92e34b9e131862998c9c90245c0b5edb4",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    },
+    "s_f7d55f87099234": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f335-3506-77d1-8f44-eac7ac19d7bc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

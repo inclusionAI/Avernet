@@ -1,0 +1,31 @@
+apps/proxy/tests/lua/test_a2a_cors.lua
+  s_c3ece772cfb1b0::t_071cf54287ce4c 1-43
+apps/proxy/conf/docker/nginx/lua/cors_middleware.lua
+  s_c3ece772cfb1b0::t_071cf54287ce4c 109-113
+apps/frontend-nextgen/scripts/public-tests.list
+  s_c3ece772cfb1b0::t_88a0e343885b90 62-64
+apps/frontend-nextgen/scripts/test-assemble-public-tests.sh
+  s_c3ece772cfb1b0::t_88a0e343885b90 38-53
+apps/baas/tests/unit/plugins/sandbox/arca/test_arca_sdk.py
+  s_c3ece772cfb1b0::t_4e71a26d5d8dcb 664-677
+apps/proxy/tests/test_a2a_cors.py
+  s_c3ece772cfb1b0::t_071cf54287ce4c 1-23
+apps/baas/src/secbaas/enterprise/plugins/sandbox/arca/_arca_sdk.py
+  s_c3ece772cfb1b0::t_802096d83597c0 309-315
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "da71f043620f311d470645f8bbd44b9c36bc01a1",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

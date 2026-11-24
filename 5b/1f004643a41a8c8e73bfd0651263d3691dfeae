@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/core/resources/yuque_resolve.py
+  s_f680af005a7087::t_5fcdf96d8e3b56 75-87,135-137,139-158,161-189,196-209
+apps/backend/tests/community/core/resources/test_yuque_resolve_transient.py
+  s_f680af005a7087::t_d3effecec391ca 1-14,16,19-105,107,109,111
+  s_f680af005a7087::t_5d246c79b0dc97 15,17-18,106,108,110,112-149,151-183
+  s_f680af005a7087::t_fe237a875bc292 150,184-200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5b1f004643a41a8c8e73bfd0651263d3691dfeae",
+  "prompts": {},
+  "sessions": {
+    "s_f680af005a7087": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a1e-e5db-77e1-8fc6-9865269b8503",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": null
+    }
+  }
+}

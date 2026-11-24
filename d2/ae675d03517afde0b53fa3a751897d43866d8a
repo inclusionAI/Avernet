@@ -1,0 +1,40 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/monitoring.ts
+  s_c5125da3cacb9c::t_674c554b44c118 102-111
+apps/evolverun/clawweb/public/modules/clawinsight/docs/bot-diagnosis-recovery-config.md
+  s_c5125da3cacb9c::t_674c554b44c118 82-89,93
+  s_c5125da3cacb9c::t_aabbf578fdf428 80-81
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-contracts.ts
+  s_c5125da3cacb9c::t_674c554b44c118 10-16,22-23,33-37,39-60,63
+  s_c5125da3cacb9c::t_aabbf578fdf428 38
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/__tests__/monitoring.test.ts
+  s_c5125da3cacb9c::t_aabbf578fdf428 368-409
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-browser-service.ts
+  s_c5125da3cacb9c::t_674c554b44c118 6,29-32,35-36,69-76
+  s_c5125da3cacb9c::t_aabbf578fdf428 33-34
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/directory-contracts.ts
+  s_c5125da3cacb9c::t_674c554b44c118 1,45,52-53
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-runtime.ts
+  s_c5125da3cacb9c::t_82bf6a10955791 73-74
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/bot-diagnosis-recovery-config-repository.ts
+  s_c5125da3cacb9c::t_674c554b44c118 3,41-47,54,60-62,64
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-service.ts
+  s_c5125da3cacb9c::t_674c554b44c118 2-16
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/bot-config-fixture.ts
+  s_c5125da3cacb9c::t_674c554b44c118 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d2ae675d03517afde0b53fa3a751897d43866d8a",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+apps/evolverun/clawweb/docs/session-recovery-aivision.md
+  s_c1c3b383e07265::t_8edb2bc9390696 14-15
+apps/evolverun/clawweb/internal/modules/tclog/server/services/__tests__/session-trajectory-reader.test.ts
+  s_c1c3b383e07265::t_5c00fde12c1c96 357
+  s_c1c3b383e07265::t_8740b23698239e 374
+  s_c1c3b383e07265::t_8edb2bc9390696 351-356,358-368,375
+  s_c1c3b383e07265::t_c9dbfce20d2b61 350
+apps/evolverun/clawweb/internal/modules/tclog/server/services/aivision-session-trajectory.ts
+  s_c1c3b383e07265::t_8edb2bc9390696 155-164,166-171,173-175,178-179,181
+  s_c1c3b383e07265::t_8740b23698239e 165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4e186087d59be5363e8f6c93ef744ecee6cbfbac",
+  "prompts": {},
+  "sessions": {
+    "s_c1c3b383e07265": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d465-5126-72c1-8669-c1bfa31d01dc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

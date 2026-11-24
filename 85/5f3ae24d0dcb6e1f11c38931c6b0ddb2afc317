@@ -1,0 +1,68 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-wf-save-tag-deploy.md
+  h_43af82e14600e4 56-95
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-unified-deploy-real.test.ts
+  h_43af82e14600e4 90-103
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-deploy-candidate.test.ts
+  h_43af82e14600e4 110-119
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-wf-tag.test.ts
+  h_43af82e14600e4 83-99
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-snapshot-release-git.test.ts
+  h_43af82e14600e4 92-100,102,104
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-unified-wf-save.test.ts
+  h_43af82e14600e4 79-119
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-candidate-save.ts
+  h_43af82e14600e4 56,261-263,266-269,278,294-302,319
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-snapshot.ts
+  h_43af82e14600e4 31,39,115-117,120-123,247-255
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-remote.ts
+  h_43af82e14600e4 37
+apps/evolverun/clawweb/public/modules/workflow/web/SNAPSHOT_CONTRACT.md
+  h_43af82e14600e4 7-15
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowDocument.test.tsx
+  h_43af82e14600e4 47,144,159-160
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowUnifiedSave.hook.test.tsx
+  h_43af82e14600e4 184,191-195,197
+apps/evolverun/clawweb/public/modules/workflow/web/api/autoHealWrites.ts
+  h_43af82e14600e4 292-294
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowBaselineComparison.tsx
+  h_43af82e14600e4 1-151
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowSnapshotReconciliation.tsx
+  h_43af82e14600e4 26,34,63-171,176-217,219-232
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowBaselineComparison.test.tsx
+  h_43af82e14600e4 1-101
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/firstDraftUnifiedSave.test.tsx
+  h_43af82e14600e4 88,93,133-160,162-163
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.moves.test.tsx
+  h_43af82e14600e4 107,109
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.noJournal.test.tsx
+  h_43af82e14600e4 324,419,425,455-546,550-556,559,561,564-565,570,573-574,580,582-583,586,589,600,602-608,611,614-616,619,628-629,884-894
+apps/evolverun/clawweb/public/modules/workflow/web/editor/usePackCanvasSession.ts
+  h_43af82e14600e4 1-2,14,16,29-49,58-59,82,87-88,175-189,192,334-338,345,399,533-534
+apps/evolverun/clawweb/public/modules/workflow/web/editor/workflowBaselineComparison.ts
+  h_43af82e14600e4 1-21
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  h_43af82e14600e4 1-2,5-6,35,84,347-367,443-444,455-456,564,566,607-609,628,816-818,825,831-835,983,985-986
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceComparison.test.tsx
+  h_43af82e14600e4 1,4,6,8-9,11-13,15-16,24,27-28,34-62,64-70,72-175,177-186,187,188,189,190-191,193-225,227-238,240-269
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceSaveDeploy.test.tsx
+  h_43af82e14600e4 1-308
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorNoJournal.test.tsx
+  h_43af82e14600e4 62,65-67
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorSaveDeploy.test.tsx
+  h_43af82e14600e4 321,413,417-436,438-445,447-461
+apps/evolverun/clawweb/public/modules/workflow/web/pages/editorErrorMessage.ts
+  h_43af82e14600e4 1-12
+apps/evolverun/clawweb/public/modules/workflow/web/pages/revalidateGitComparison.ts
+  h_43af82e14600e4 1-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "855f3ae24d0dcb6e1f11c38931c6b0ddb2afc317",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

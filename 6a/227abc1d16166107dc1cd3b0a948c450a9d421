@@ -1,0 +1,34 @@
+engine/adapter/src/engine/community/plugins/openclaw/token_pool.py
+  s_8691063f8c90c9::t_87179cbb6fd0e5 31,103
+engine/adapter/src/engine/community/openclaw/client/tests/test_chat_completion.py
+  s_8691063f8c90c9::t_deef2c005fb485 554-566
+  s_8691063f8c90c9::t_ba2d6d1ec3ef30 1-450
+  s_8691063f8c90c9::t_e8be6156b67980 451-553
+engine/adapter/src/engine/community/openclaw/client/chat_stream.py
+  s_8691063f8c90c9::t_699a7b00afcf29 1-799
+engine/adapter/src/engine/community/openclaw/client/README.md
+  s_8691063f8c90c9::t_64cb5acde4231a 22-68
+engine/adapter/src/engine/community/openclaw/client/gateway_client.py
+  s_8691063f8c90c9::t_cb36b64ccdbc0a 23,35,164,166-171,179-181,188-192
+engine/adapter/src/engine/community/openclaw/client/chat_serialization.py
+  s_8691063f8c90c9::t_deef2c005fb485 145-150
+  s_8691063f8c90c9::t_5aa92beb47bbf3 1-144,151-250
+engine/adapter/src/engine/community/openclaw/client/chat_dispatch.py
+  s_8691063f8c90c9::t_bbeadf955c75c7 1-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6a227abc1d16166107dc1cd3b0a948c450a9d421",
+  "prompts": {},
+  "sessions": {
+    "s_8691063f8c90c9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a06b23-a3d8-7810-9827-1591d3370feb",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

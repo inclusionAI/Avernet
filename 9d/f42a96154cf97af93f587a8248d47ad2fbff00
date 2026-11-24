@@ -1,0 +1,29 @@
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatComposer.test.tsx
+  s_502dbf3f3ce405::t_d5439113c47e07 3-5,7,9-41,43-60,62-63,65-68,72-79,82-83,85-93,95,97-100,104-107,109-114,118-119,122-134
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  s_502dbf3f3ce405::t_d5439113c47e07 15,18,20,37-54,97-106,261,275-276,279-283,296
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatComposer.tsx
+  s_502dbf3f3ce405::t_d5439113c47e07 4-7,10,13,16-19,24-42,44,49-52,58-62,67-74,76-90,92
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotCopyActionsCell.tsx
+  s_502dbf3f3ce405::t_3aab64f4d5f609 1-40
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotCopyDeleteAction.tsx
+  s_502dbf3f3ce405::t_3aab64f4d5f609 1-48
+apps/frontend-nextgen/src/hooks/useBotTableColumns.tsx
+  s_502dbf3f3ce405::t_3aab64f4d5f609 2,143-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9df42a96154cf97af93f587a8248d47ad2fbff00",
+  "prompts": {},
+  "sessions": {
+    "s_502dbf3f3ce405": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf38-d50b-74a2-af65-1d53dfb9cd45",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

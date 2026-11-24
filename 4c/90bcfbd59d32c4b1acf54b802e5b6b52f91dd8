@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/apply_engine/test_capability_confirmed_mutations.py
+  s_3d36bb45bb2a35::t_76196c3676a4c0 4-5,10,14,19-24,26-67
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_write.py
+  s_3d36bb45bb2a35::t_ddc4c8d0cd544f 149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4c90bcfbd59d32c4b1acf54b802e5b6b52f91dd8",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

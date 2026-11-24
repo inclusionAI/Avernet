@@ -1,0 +1,33 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_11_context_collab.sql
+  s_e0cb98366a65ad::t_a6010993f0a822 31
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/observation.py
+  s_e0cb98366a65ad::t_b0a104bf4af490 42
+apps/backend/tests/community/core/task/context_collab/test_service_real_repository.py
+  s_e0cb98366a65ad::t_9307bc3e69f50f 613-614,622,641-643,646
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  s_e0cb98366a65ad::t_b0a104bf4af490 345-348,366-369
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/spec.md
+  s_e0cb98366a65ad::t_074a16a7c06ec1 4,849,886
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/event_envelope.py
+  s_e0cb98366a65ad::t_a6010993f0a822 40-43
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/models.py
+  s_e0cb98366a65ad::t_a6010993f0a822 131-132,134-135
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/execution-ledger.md
+  s_e0cb98366a65ad::t_074a16a7c06ec1 156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "33756dc4918c764f9cce438321cc740f26bcb096",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

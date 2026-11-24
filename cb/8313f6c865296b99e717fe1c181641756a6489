@@ -1,0 +1,19 @@
+apps/backend/tests/community/endpoints/test_openapi_desktop_metadata.py
+  s_b91b6e19ba48f3::t_256d179855210e 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cb8313f6c865296b99e717fe1c181641756a6489",
+  "prompts": {},
+  "sessions": {
+    "s_b91b6e19ba48f3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20cce-53c8-79b1-b05a-322e3d81747a",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

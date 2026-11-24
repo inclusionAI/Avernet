@@ -1,0 +1,19 @@
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/remote.rs
+  s_5a886b46403e7c::t_8381898de1f7ab 383,389
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cfdb985d3ef26ed833f9738406c98411037ba7b3",
+  "prompts": {},
+  "sessions": {
+    "s_5a886b46403e7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfe7-6471-7a70-90de-e0018bca400d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

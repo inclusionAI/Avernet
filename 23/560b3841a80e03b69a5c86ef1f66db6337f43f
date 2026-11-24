@@ -1,0 +1,54 @@
+apps/backend/specs/baas-caller-status/009-pr-report.md
+  s_ccda8e611a6d06::t_4f13529cef1774 1-19,29-42
+  s_ccda8e611a6d06::t_9d5b0ed39c1a33 20-22,26-28
+  s_ccda8e611a6d06::t_3b85ac6d4ad472 43-45
+apps/backend/tests/community/endpoints/test_baas_caller_status.py
+  s_ccda8e611a6d06::t_1349ea309024b3 1-96
+apps/backend/tests/community/api/expert_chat/test_app_caller_status.py
+  s_ccda8e611a6d06::t_027950b831f011 10,17-18,56,183-193
+  s_ccda8e611a6d06::t_87f5c8b88882e9 81
+  s_ccda8e611a6d06::t_0035b5817d44f4 1-9,11-16,19-55,57-80,82-182,194
+apps/backend/specs/baas-caller-status/002-code-report.md
+  s_ccda8e611a6d06::t_200ce85adb6647 3,51
+  s_ccda8e611a6d06::t_e8fe661652fc64 1-2,4-50,52-60
+apps/backend/specs/baas-caller-status/003-review-report.md
+  s_ccda8e611a6d06::t_c9ab1d12aafde4 1-15,17-61
+  s_ccda8e611a6d06::t_486fe96f0a3468 16
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_ccda8e611a6d06::t_1349ea309024b3 134-157
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_ccda8e611a6d06::t_38d9b0e4b9e11e 176
+apps/backend/tests/community/acceptance/expert_chat/test_baas_caller_status.py
+  s_ccda8e611a6d06::t_87f5c8b88882e9 1-38,40-96
+  s_ccda8e611a6d06::t_33d220ee43927c 39
+apps/backend/specs/baas-caller-status/001-spec-output.md
+  s_ccda8e611a6d06::t_9b7dc04daeb612 1-95
+apps/backend/src/agentclaw/community/adapters/http/expert_chat/router.py
+  s_ccda8e611a6d06::t_f3ffc73d3b318b 27-29,31,686-732
+  s_ccda8e611a6d06::t_6ce4ddc7a9d2f8 733-734
+singlebox/ci/singlebox_coverage_modules.yaml
+  s_ccda8e611a6d06::t_1349ea309024b3 322
+apps/backend/tests/community/acceptance/expert_chat/test_caller_instance_status.py
+  s_ccda8e611a6d06::t_33d220ee43927c 42
+apps/backend/specs/baas-caller-status/003b-regression-report.md
+  s_ccda8e611a6d06::t_6d3c3423cd5bc5 1-50
+apps/backend/src/agentclaw/community/adapters/http/org/dependencies.py
+  s_ccda8e611a6d06::t_87f5c8b88882e9 36-37,78
+  s_ccda8e611a6d06::t_f3ffc73d3b318b 63-73,77,84,95,98-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23560b3841a80e03b69a5c86ef1f66db6337f43f",
+  "prompts": {},
+  "sessions": {
+    "s_ccda8e611a6d06": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda4-a056-7f61-ab7e-7505fc5c7282",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

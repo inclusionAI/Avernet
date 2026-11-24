@@ -1,0 +1,50 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/bot_mutation_fence.py
+  s_3d36bb45bb2a35::t_d1e826f8c0b13f 7-12,64-77
+  s_3d36bb45bb2a35::t_57e5ec2869b833 78-79
+apps/backend/src/agentclaw/community/core/apply_engine/README.md
+  s_3d36bb45bb2a35::t_d1e826f8c0b13f 201
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_02195e440d888e 26,247-255,257-266,883-886,888
+  s_3d36bb45bb2a35::t_d1e826f8c0b13f 469,471-472,502
+  s_3d36bb45bb2a35::t_278e427bfe39cb 267-268
+apps/backend/tests/community/core/skill_center/test_local_skill_delete_service.py
+  s_3d36bb45bb2a35::t_d2bd28aec78c10 534-551
+  s_3d36bb45bb2a35::t_02195e440d888e 223
+apps/backend/tests/community/core/skill_center/test_local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_02195e440d888e 685
+  s_3d36bb45bb2a35::t_d2bd28aec78c10 2722-2736,2738,2740
+  s_3d36bb45bb2a35::t_6f4c393bc07aaa 24,2737,2739
+apps/backend/src/agentclaw/community/core/ports/README.md
+  s_3d36bb45bb2a35::t_d1e826f8c0b13f 127-128
+apps/backend/src/agentclaw/community/core/ports/skill_package_upload_port.py
+  s_3d36bb45bb2a35::t_d1e826f8c0b13f 42-43,93-94
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/skill.py
+  s_3d36bb45bb2a35::t_d1e826f8c0b13f 678,680,966,1008
+  s_3d36bb45bb2a35::t_eee7c84f8c1b18 68
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_desired_state.py
+  s_3d36bb45bb2a35::t_d1e826f8c0b13f 17,133-135
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_write.py
+  s_3d36bb45bb2a35::t_d1e826f8c0b13f 6,15,92,159-160,358-359
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_delete_service.py
+  s_3d36bb45bb2a35::t_02195e440d888e 17-21,113,116-117,119-122,124-126,128-144,185,196
+apps/backend/docs/arch/generated/dependents.md
+  s_3d36bb45bb2a35::t_1c29c0d1204342 184,195
+apps/backend/tests/community/core/skill_center/test_local_skill_package_batch.py
+  s_3d36bb45bb2a35::t_3b42fb5d8b8fc8 226-227,247,249,314-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8fc9419d6a790f198c8bc446316f4b3cb07f14f5",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

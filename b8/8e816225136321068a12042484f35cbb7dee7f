@@ -1,0 +1,23 @@
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatComposer.test.tsx
+  s_502dbf3f3ce405::t_d5439113c47e07 3-5,7,9-41,43-60,62-63,65-68,72-79,82-83,85-93,95,97-100,104-107,109-114,118-119,122-134
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  s_502dbf3f3ce405::t_d5439113c47e07 15,18,20,37-54,97-106,261,275-276,279-283,296
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatComposer.tsx
+  s_502dbf3f3ce405::t_d5439113c47e07 4-7,10,13,16-19,24-42,44,49-52,58-62,67-74,76-90,92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b88e816225136321068a12042484f35cbb7dee7f",
+  "prompts": {},
+  "sessions": {
+    "s_502dbf3f3ce405": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf38-d50b-74a2-af65-1d53dfb9cd45",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

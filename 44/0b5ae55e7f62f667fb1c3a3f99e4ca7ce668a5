@@ -1,0 +1,36 @@
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessions.test.ts
+  s_fd1b8e677fa2d8::t_a32fc184f63801 116-119,121-126,131-132,134,136-139,143-145
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionTitleActions.ts
+  s_fd1b8e677fa2d8::t_b022ecdfc0ae5e 48-49,58
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionEdits.ts
+  s_fd1b8e677fa2d8::t_838516fd563ec8 42,50-51,59
+apps/frontend-nextgen/test/services/workspace/botSessionService.test.ts
+  s_fd1b8e677fa2d8::t_2ffb53e63a1c2d 5-11
+  s_fd1b8e677fa2d8::t_bb7cccbea4067a 648-728
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessionEdits.test.tsx
+  s_fd1b8e677fa2d8::t_c6f46b5237b9ab 110-129
+apps/frontend-nextgen/test/services/workspace/botSessionTitleService.test.ts
+  s_fd1b8e677fa2d8::t_8ba0f1dc1e5cb0 30-36
+apps/frontend-nextgen/src/services/workspace/botSessionTitleService.ts
+  s_fd1b8e677fa2d8::t_e378c81d3fe911 6-19,22-23,25-31
+  s_fd1b8e677fa2d8::t_dab6e5667be843 5
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_fd1b8e677fa2d8::t_6699ba3378b61a 213-218,221,225-235,246-269
+  s_fd1b8e677fa2d8::t_d6efa4bd825ba3 270-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "440b5ae55e7f62f667fb1c3a3f99e4ca7ce668a5",
+  "prompts": {},
+  "sessions": {
+    "s_fd1b8e677fa2d8": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "e7fbf75b-2d21-42d0-912d-1920e852afa4",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

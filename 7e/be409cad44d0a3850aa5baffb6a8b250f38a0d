@@ -1,0 +1,60 @@
+apps/frontend-nextgen/specs/2026-11-09-community-help-mock/spec.md
+  h_059e888e5e4e82 3,11-13,15-20,22-28,31-35,41-47,51-69,74,90,98-182
+apps/frontend-nextgen/src/components/Community/HelpCenter/HelpBoardDialog.tsx
+  h_059e888e5e4e82 5,18,31,36-39,41-48,82,97,109,114,120,123,126-127,129-141,143-187,193
+apps/frontend-nextgen/src/components/Community/HelpCenter/HelpBoardSources.tsx
+  h_059e888e5e4e82 1-86
+apps/frontend-nextgen/src/components/Community/HelpCenter/HelpTaskCard.tsx
+  h_059e888e5e4e82 2,6,73-75,82,87-88
+apps/frontend-nextgen/src/components/Community/HelpCenter/HelpTaskDialog.tsx
+  h_059e888e5e4e82 5,7,23-24,37-41,77
+apps/frontend-nextgen/src/components/Community/HelpCenter/HelpTaskList.tsx
+  h_059e888e5e4e82 1-105
+apps/frontend-nextgen/src/components/Community/HelpCenter/HelpTaskPanel.tsx
+  h_059e888e5e4e82 5,11,79-81,136
+apps/frontend-nextgen/src/components/Community/HelpCenter/HelpTaskSourceFields.tsx
+  h_059e888e5e4e82 1-103
+apps/frontend-nextgen/src/components/Community/HelpCenter/HelpTaskSourceInfo.tsx
+  h_059e888e5e4e82 1-11
+apps/frontend-nextgen/src/components/Community/HelpCenter/index.tsx
+  h_059e888e5e4e82 9,14,21,23-24,29,44,69,76,81-93,96,151-164,167-175,178
+apps/frontend-nextgen/src/domain/communityHelp/mock.ts
+  h_059e888e5e4e82 17-18,21-38,73-79,104
+apps/frontend-nextgen/src/domain/communityHelp/model.ts
+  h_059e888e5e4e82 1,10,61,67,70-73,91-97,101-105,111,116-119,122,131-135,192-194
+apps/frontend-nextgen/src/domain/communityHelp/sources.ts
+  h_059e888e5e4e82 1-31
+apps/frontend-nextgen/src/domain/communityHelp/types.ts
+  h_059e888e5e4e82 4,8,19-26,28,33,44-45,67,70
+apps/frontend-nextgen/src/hooks/useCommunityHelpMock.ts
+  h_059e888e5e4e82 3,57,66-69,71,75,78
+apps/frontend-nextgen/test/components/Community/CommunityHelpCenter.test.tsx
+  h_059e888e5e4e82 25-56,59,73,75-102,104-105,109,115,117-122,124,129,132,134-137,170,173,175,202-205,210
+apps/frontend-nextgen/test/components/Community/CommunityHelpOpenCollaboration.test.tsx
+  h_059e888e5e4e82 1-142
+apps/frontend-nextgen/test/components/Community/CommunityHelpSources.test.tsx
+  h_059e888e5e4e82 1-205
+apps/frontend-nextgen/test/components/Community/CommunityHelpTaskViews.test.tsx
+  h_059e888e5e4e82 1-186
+apps/frontend-nextgen/test/components/Community/CommunityPage.test.tsx
+  h_059e888e5e4e82 99
+apps/frontend-nextgen/test/domain/communityHelp/model.test.ts
+  h_059e888e5e4e82 11-12,16-22,28-41,43-45,62,65,80,120-153
+apps/frontend-nextgen/test/domain/communityHelp/sources.test.ts
+  h_059e888e5e4e82 1-134
+apps/frontend-nextgen/test/hooks/useCommunityHelpMock.test.tsx
+  h_059e888e5e4e82 35-44,47-56,58,61,64,71,75,79-80,89,102-103,120-127,130-139,143,149-150,154,161-168,175,187-251
+apps/frontend-nextgen/test/hooks/useCommunityHelpSources.test.tsx
+  h_059e888e5e4e82 1-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7ebe409cad44d0a3850aa5baffb6a8b250f38a0d",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

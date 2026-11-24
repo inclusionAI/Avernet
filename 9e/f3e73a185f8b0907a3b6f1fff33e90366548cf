@@ -1,0 +1,19 @@
+apps/backend/tests/community/adapters/http/bot_chat/test_otel_router.py
+  s_bab0b5497381c1::t_e87aed65f9bceb 154,204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9ef3e73a185f8b0907a3b6f1fff33e90366548cf",
+  "prompts": {},
+  "sessions": {
+    "s_bab0b5497381c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b153-4f8e-7c23-9e8e-161717326a76",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+devops/hook/install_git_hooks.sh
+  s_4efef845bd857d::t_fafc444a9c9eed 34-35
+.githooks/pre-commit
+  s_4efef845bd857d::t_fafc444a9c9eed 1-3
+devops/hook/pre_commit.sh
+  s_4efef845bd857d::t_fafc444a9c9eed 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "498822670bdecfb721a409c3981db67a33aae84b",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

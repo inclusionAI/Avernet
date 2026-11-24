@@ -1,0 +1,48 @@
+apps/backend/src/agentclaw/community/core/devices/services/device_context_resolver.py
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 107,167,243
+apps/backend/src/agentclaw/community/core/repository/protocols/skill_center.py
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 442,447-448
+apps/backend/src/agentclaw/community/core/skills_pool/edit_guard.py
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 256
+apps/backend/src/agentclaw/community/core/skill_center/sql/2026_11_22_local_skill_package_dispatch_postgresql.sql
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 11
+apps/backend/src/agentclaw/community/core/devices/services/device_context.py
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 45
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/local_skill_package_dispatch.py
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 9-11,24-40,42,45-46,50-51,54,59-61,66
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 439,883
+  s_3d36bb45bb2a35::t_bfa45492b79e07 431
+apps/backend/src/agentclaw/community/core/skill_center/sql/2026_11_22_local_skill_package_dispatch.sql
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 11
+apps/backend/src/agentclaw/community/core/skill_center/sql/2026_11_22_local_skill_package_dispatch_sqlite.sql
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 11
+apps/backend/src/agentclaw/community/core/models/local_skill_package_dispatch.py
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 22
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_delete_service.py
+  s_3d36bb45bb2a35::t_cb503ac8fb42d0 184
+apps/backend/tests/community/core/skill_center/test_local_skill_delete_service.py
+  s_3d36bb45bb2a35::t_1050b635c31b2b 223
+apps/backend/tests/community/core/skill_center/test_local_skill_package_batch.py
+  s_3d36bb45bb2a35::t_ab2f1e97f60e11 42,46-47,132,155-160,166-171
+apps/backend/tests/community/core/skill_center/test_local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_bd4d1bdf48a7f8 684
+apps/backend/tests/community/core/skills_pool/test_edit_guard.py
+  s_3d36bb45bb2a35::t_ec505365bbf2a5 145,148,151,166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "937f0cb8fe1b95faa26cde6b8a4d99ff079646f2",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

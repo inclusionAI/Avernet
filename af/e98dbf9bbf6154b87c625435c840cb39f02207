@@ -1,0 +1,20 @@
+apps/evolverun/clawweb/.aci.yml
+  h_5f06d4d8b4bdd5 2-3,19,32
+apps/evolverun/clawweb/scripts/ci/README.md
+  h_5f06d4d8b4bdd5 8-9
+apps/evolverun/clawweb/scripts/ci/tests/ci-ref-selection.test.mjs
+  h_5f06d4d8b4bdd5 112,116
+devops/pipeline/PRChecker.aci.yml
+  h_5f06d4d8b4bdd5 525-526,539
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "afe98dbf9bbf6154b87c625435c840cb39f02207",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

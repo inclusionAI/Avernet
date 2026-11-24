@@ -1,0 +1,39 @@
+apps/frontend-nextgen/test/services/workspace/botSkillService.test.ts
+  s_4b400329c6a7c2::t_6c0f8518e123e9 44,46
+apps/frontend-nextgen/src/hooks/useComposerSend.ts
+  s_4b400329c6a7c2::t_fff17d41e27ef5 6
+apps/frontend-nextgen/test/hooks/useTaskExecution.test.tsx
+  s_4b400329c6a7c2::t_63a18f0ae40cb2 186
+  s_4b400329c6a7c2::t_0b254f94cd5717 86
+apps/frontend-nextgen/test/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.test.tsx
+  s_4b400329c6a7c2::t_2878b7c93fcd51 87
+apps/frontend-nextgen/src/services/tasks/taskMapper.ts
+  s_4b400329c6a7c2::t_5ae95cc33eb071 123
+  s_4b400329c6a7c2::t_d453e74815772a 115
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.tsx
+  s_4b400329c6a7c2::t_1e46663de87b1e 68
+apps/frontend-nextgen/src/hooks/useTaskExecution.ts
+  s_4b400329c6a7c2::t_2e2ced942db2e9 47
+apps/frontend-nextgen/src/services/workspace/botSkillService.ts
+  s_4b400329c6a7c2::t_720a96c922f667 19,22
+  s_4b400329c6a7c2::t_c6456271d35996 85
+apps/frontend-nextgen/test/hooks/useComposerSend.test.ts
+  s_4b400329c6a7c2::t_d52dd23168092b 102
+  s_4b400329c6a7c2::t_2a3da437d10f2f 78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4a6a87400d75491cbb7dd5bbde4c8f8b049463b3",
+  "prompts": {},
+  "sessions": {
+    "s_4b400329c6a7c2": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "98a6cd13-fbb8-42cc-b35c-3b235f4a35b1",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

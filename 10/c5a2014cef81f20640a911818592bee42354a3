@@ -1,0 +1,26 @@
+apps/backend/specs/dingtalk-caller-token/002-code-report.md
+  s_5c173f6b8a3b51::t_ad36b13593fc50 20-25
+apps/backend/tests/corp/plugins/prod/test_caller_credential_facade.py
+  s_5c173f6b8a3b51::t_4f8f0b8f59a7ec 344-350,451,464,469,471,474,478-479,481-483
+  s_5c173f6b8a3b51::t_e8b1f66e1b01b3 494-508
+apps/backend/src/agentclaw/corp/plugins/prod/caller_credential.py
+  s_5c173f6b8a3b51::t_9003e0fdd394e3 118,131,138,151,155-161,173,189,201,213,221,243,334,352-357
+apps/backend/specs/dingtalk-caller-token/001-spec-output.md
+  s_5c173f6b8a3b51::t_ad36b13593fc50 1,3,5-8,10-11,13,16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "10c5a2014cef81f20640a911818592bee42354a3",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
