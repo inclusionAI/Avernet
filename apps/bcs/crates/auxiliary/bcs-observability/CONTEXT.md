@@ -80,3 +80,17 @@ independent. The public revision and internal path dependencies must move togeth
   correlation, run aliases and missing trace mappings remain intact.
 - `bash scripts/ci/check-observability-deps.sh` checks the normal/build dependency
   tree with all features for trace/metric implementations.
+
+## Explicit business warning snapshots
+
+`business_warning` is an opt-in, failure-only diagnostic scope, separate from
+argument-free operation observations. Delivery adapters supply the bounded
+original request body and parsed Provider token; applications report typed
+code/field/reason before their facade removes details. The first report wins
+within a request. The helper emits WARN to `bcs_business_warning`, with request
+and neutral trace/RPC log identities; it does not start spans or change results.
+Payload JSON is recursively credential-redacted, known token occurrences are
+removed, and output is capped at 64 KiB after redaction. Invalid JSON is omitted
+with an explicit marker rather than falling back to unsafe raw bytes. Token
+prefixes expose at most four characters, and short tokens are fully hidden.
+No automatic task inheritance or durable payload storage is introduced.

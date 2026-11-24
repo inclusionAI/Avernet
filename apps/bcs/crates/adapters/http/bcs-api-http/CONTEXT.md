@@ -173,3 +173,13 @@ than discarding it. Application enforces the configured issuer-user allowlist;
 being under `/api/v1` or passing the Cookie Origin check is not authorization.
 The request body remains count-only, and authorization denial maps to 403 with
 no authentication-source fallback.
+
+## A2A business-failure diagnostics
+
+A2A's transport boundary retains a request-local body snapshot under its existing
+2 MiB limit. Only failures produce `bcs_business_warning` records, through the
+neutral `bcs-observability` auxiliary API. Original field values (including unknown
+Card fields) are retained after credential redaction, not reconstructed from
+normalized application commands. Invalid JSON is explicitly omitted; successful
+requests emit no payload. The existing response envelope and admission behavior
+are unchanged. See `docs/observability/request-operation-logging.md` in BCS.
