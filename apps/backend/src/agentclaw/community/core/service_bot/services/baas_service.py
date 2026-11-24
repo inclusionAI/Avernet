@@ -34,6 +34,7 @@ from agentclaw.community.core.service_bot.services.baas_api_response import (
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasBotNotFoundError,
     BaasNoActiveDevicesError,
+    BaasNoDevicesFoundError,
     BaasServiceError,
     BaasTransientServiceError,
 )
@@ -2155,6 +2156,9 @@ class BaasService:  # pragma: no cover
                 raise BaasNoActiveDevicesError(
                     status_code=e.response.status_code
                 ) from e
+
+            if _is_no_devices_response(e.response):
+                raise BaasNoDevicesFoundError("BaaS API error: no devices found") from e
 
             location = e.response.headers.get("location")
             logger.warning(

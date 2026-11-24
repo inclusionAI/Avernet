@@ -24,7 +24,8 @@ from agentclaw.community.core.channel.models import ChannelRecord
 from agentclaw.community.di import Injected
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
-from agentclaw.community.core.devices.services.device_context import DeviceOfflineError, DeviceConnectionUnavailableError
+from agentclaw.community.core.devices.services.device_context import ConnInfoBuildError, DeviceOfflineError, DeviceConnectionUnavailableError
+from agentclaw.community.core.service_bot.baas_service_errors import BaasNoDevicesFoundError
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user as _get_current_user
 from agentclaw.community.log import get_logger
@@ -307,6 +308,10 @@ async def get_openclaw_configs(
         )
     except (DeviceOfflineError, DeviceConnectionUnavailableError) as e:
         raise HTTPException(status_code=503, detail="Device temporarily unavailable") from e
+    except ConnInfoBuildError as e:
+        if isinstance(e.__cause__, BaasNoDevicesFoundError):
+            raise HTTPException(status_code=503, detail="Device temporarily unavailable") from e
+        raise HTTPException(status_code=500, detail="生成配置失败") from e
     except FileNotFoundError as e:
         logger.exception(f"[get_openclaw_configs] FileNotFoundError: bot_id={bot_id}, owner_id={owner_id}, error={e}")
         raise HTTPException(status_code=500, detail=f"生成配置失败：openclaw.json不存在 - {e}") from e
@@ -315,7 +320,7 @@ async def get_openclaw_configs(
         raise HTTPException(status_code=400, detail=f"生成配置失败：Bot不存在 - {e}") from e
     except Exception as e:
         logger.exception(f"[get_openclaw_configs] Unexpected error: bot_id={bot_id}, owner_id={owner_id}, error={e}")
-        raise HTTPException(status_code=500, detail=f"生成配置失败：{e}") from e
+        raise HTTPException(status_code=500, detail="生成配置失败") from e
 
 
 @router.get("/{channel_id}", response_model=ChannelListResponse)

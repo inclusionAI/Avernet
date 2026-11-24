@@ -38,6 +38,7 @@ from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
 from agentclaw.community.core.config_compose.teclaw_paths import WORKSPACE_NS
+from agentclaw.community.core.service_bot.baas_service_errors import BaasNoDevicesFoundError
 from agentclaw.community.core.resources.service import InvalidResourcePathError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
@@ -294,11 +295,14 @@ class ResourceFileService(ResourceFilePort):
                 if checked:
                     raise
                 raise ValueError(f"Failed to get device info for publish_id={publish_id}") from None
+            except ConnInfoBuildError as error:
+                if checked and isinstance(error.__cause__, BaasNoDevicesFoundError):
+                    raise DeviceOfflineError("Device is offline") from error
+                raise ValueError(f"Failed to get device info for publish_id={publish_id}") from error
             except (
                 ValueError,  # non-numeric bind_id — was shielded by the old broad except
                 DeviceNotBoundError,
                 UnknownProviderError,
-                ConnInfoBuildError,
             ) as e:
                 logger.warning(
                     "[ResourceFileService] publish_id=%s bind_id=%s resolve failed: %s",
@@ -307,7 +311,12 @@ class ResourceFileService(ResourceFilePort):
                 raise ValueError(
                     f"Failed to get device info for publish_id={publish_id}"
                 ) from e
-        return self._resolver.resolve_for_bot(bot_id, entity_id, device_uuid=device_uuid)
+        try:
+            return self._resolver.resolve_for_bot(bot_id, entity_id, device_uuid=device_uuid)
+        except ConnInfoBuildError as error:
+            if checked and isinstance(error.__cause__, BaasNoDevicesFoundError):
+                raise DeviceOfflineError("Device is offline") from error
+            raise
 
     def _stage_bind_id(self, publish_id: str) -> int | None:
         """Stage ``bind_id`` from the publish record, selected by ``record.status``.
