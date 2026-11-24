@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from json import JSONDecodeError
 
+import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -883,6 +884,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ContextCollabVersionConflict: (409, "Context version conflict"),
     ContextCollabValidationError: (422, "Invalid context collab request"),
     ContextCollabParentEventError: (422, "Parent event not found"),
+    # A raw ``httpx.HTTPStatusError`` is an upstream HTTP call that failed with
+    # a non-2xx status no service translated — the identity/resources routes
+    # leak exactly this, surfacing upstream outages as 500 [Unhandled
+    # exception]. On the read paths this guards the failure is never the
+    # caller's fault, so it joins the fixed-message 502 upstream family;
+    # device-level 404s never arrive (every ``DeviceFileSystem`` provider
+    # returns ``None`` first — absence is empty content, not an error).
+    httpx.HTTPStatusError: (502, "Upstream service error"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A
 # small, explicit override table lets a category expose a stable actionable
