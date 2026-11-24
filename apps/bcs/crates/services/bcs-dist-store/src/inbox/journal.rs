@@ -2,13 +2,13 @@
 //!
 //! The provider uses one scoped admission document. It does not reserve a
 //! shard-wide journal sequence or materialize separate intent/canonical keys.
-use super::{StoreInboxProducer, state::*, storage::*};
+use super::{StoreInboxProducer, state::*};
 use bcs_dist_model::*;
 use bcs_service_api::port::repo::distributed::{common::StoreError, inbox::AdmitRequest};
 
 impl StoreInboxProducer {
     /// Build the immutable request envelope used by the admission document.
-    /// No storage write occurs here; until `create_if_absent` succeeds the
+    /// No storage write occurs here; until create CAS succeeds the
     /// caller makes no recovery promise and must retry the original InputId.
     pub(super) fn new_admission(
         &self,
@@ -43,32 +43,6 @@ impl StoreInboxProducer {
         _repair: bool,
         _op: &str,
     ) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    /// Create the single admission record if absent. A racing creator is
-    /// resolved by reading the existing record and comparing immutable content.
-    pub(super) async fn create_if_absent(
-        &self,
-        record: &AdmissionRecord,
-    ) -> Result<(), StoreError> {
-        self.validate_admission(record)?;
-        let key = self
-            .inner
-            .layout
-            .admission(&record.request.scope, &record.request.input.input_id)?;
-        if !self
-            .save(&key, None, record, &record.request.input.input_id.0)
-            .await?
-        {
-            let (_, stored) = self
-                .admission_record(&key)
-                .await?
-                .ok_or_else(|| unknown(&record.request.input.input_id.0))?;
-            if stored.request.input.business_digest != record.request.input.business_digest {
-                return Err(invalid("admission_content_conflict"));
-            }
-        }
         Ok(())
     }
 }

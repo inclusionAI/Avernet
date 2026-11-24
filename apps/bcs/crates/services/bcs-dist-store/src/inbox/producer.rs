@@ -327,19 +327,28 @@ impl StoreInboxProducer {
             .layout
             .admission(&request.scope, &request.input.input_id)?;
         let op = request.input.input_id.0.clone();
-        if let Some((_, existing)) = self
-            .admission_record(&key)
-            .await
-            .map_err(|_| unknown(&op))?
-        {
-            if existing.request.input.business_digest != request.input.business_digest {
-                return Ok(AdmitOutcome::ContentConflict);
+        let digest = request.input.business_digest.clone();
+        let existing = match self.admission_record(&key).await.map_err(|_| unknown(&op))? {
+            Some((_, existing)) => existing,
+            None => {
+                let (_, schedule) = self.schedule(&request.input.sid).await.map_err(|_| unknown(&op))?;
+                let admission = self.new_admission(request, schedule.generation, connector)?;
+                if self.save(&key, None, &admission, &op).await? {
+                    return self.advance(&key, true).await.map_err(|_| unknown(&op));
+                }
+                // Another writer won create CAS. Use the same outcome as if
+                // the first read had seen its record, so Worker can reconcile
+                // differing server-generated initialization with caller intent.
+                self.admission_record(&key)
+                    .await
+                    .map_err(|_| unknown(&op))?
+                    .ok_or_else(|| unknown(&op))?
+                    .1
             }
-            return self.advance(&key, false).await.map_err(|_| unknown(&op));
+        };
+        if existing.request.input.business_digest != digest {
+            return Ok(AdmitOutcome::ContentConflict);
         }
-        let (_, schedule) = self.schedule(&request.input.sid).await.map_err(|_| unknown(&op))?;
-        let admission = self.new_admission(request, schedule.generation, connector)?;
-        self.create_if_absent(&admission).await?;
-        self.advance(&key, true).await.map_err(|_| unknown(&op))
+        self.advance(&key, false).await.map_err(|_| unknown(&op))
     }
 }
