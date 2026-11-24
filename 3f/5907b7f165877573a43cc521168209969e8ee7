@@ -1,0 +1,46 @@
+apps/backend/specs/service-bot-release-audit/002-code-report.md
+  s_7c6be7001ef8fd::t_b79d88d7115d60 1-35
+  s_7c6be7001ef8fd::t_98dbbc7d257167 40-48
+  s_7c6be7001ef8fd::t_805efe168a0658 36-39
+apps/backend/src/agentclaw/community/plugins/community/service_bot_release_audit.py
+  s_7c6be7001ef8fd::t_ef7564bca273a9 40-41,45-47
+apps/backend/tests/community/core/service_bot/services/test_release_audit_delivery.py
+  s_7c6be7001ef8fd::t_6c5e22f0853fa1 36-83
+apps/backend/src/agentclaw/community/kernel/service_bot_release_audit.py
+  s_7c6be7001ef8fd::t_ef7564bca273a9 14,71
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_7c6be7001ef8fd::t_98dbbc7d257167 395-404
+  s_7c6be7001ef8fd::t_1f09cab27e20c0 51-54
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_7c6be7001ef8fd::t_adbe012113caea 394-395
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/bot_publish.py
+  s_7c6be7001ef8fd::t_0937bcebb7517c 102,478,510,554,589
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/release_audit.py
+  s_7c6be7001ef8fd::t_70e7074816e8ad 99-104,112-113
+apps/backend/src/agentclaw/community/plugin_api/README.md
+  s_7c6be7001ef8fd::t_facd7072710174 28
+apps/backend/src/agentclaw/community/plugins/local/README.md
+  s_7c6be7001ef8fd::t_ef38922f0a0eb5 18
+apps/backend/tests/community/plugins/test_service_bot_release_audit.py
+  s_7c6be7001ef8fd::t_f0ba693e7353b6 195-212
+apps/backend/tests/community/repository/publishing/test_bot_publish_unified.py
+  s_7c6be7001ef8fd::t_425399c7cb81aa 58
+apps/backend/tests/community/repository/publishing/test_release_audit_production.py
+  s_7c6be7001ef8fd::t_d2b18c48a98a2a 29-30,277-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3f5907b7f165877573a43cc521168209969e8ee7",
+  "prompts": {},
+  "sessions": {
+    "s_7c6be7001ef8fd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2d4-adef-74d1-8694-5ea4bddc1ac0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

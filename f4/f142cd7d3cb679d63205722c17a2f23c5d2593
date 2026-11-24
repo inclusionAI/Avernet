@@ -1,0 +1,41 @@
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/network_tracing.rs
+  s_b8bd53b858e9e7::t_cc077c8f71e7e3 38
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  s_cc6f48e2a8273e::t_76027ecf9a0c34 12-13,16-17
+apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_client.rs
+  s_b8bd53b858e9e7::t_4a9305189a2c62 37,42,61-66,73,83,89,96,105,109,111-141
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/grpc_tracing.rs
+  s_b8bd53b858e9e7::t_f103cdfba6cac4 43,64-65,67-69,80,93,120,158-159,194-238
+apps/bcs/crates/plugin-api/bcs-tracing-api/CONTEXT.md
+  s_b8bd53b858e9e7::t_b94403c11247db 3,23-26,45,163-184
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/lib.rs
+  s_b8bd53b858e9e7::t_b3b0eefada9e30 5-6,19-20,70-72,138-141,145-162,165-167,169,172,175-177,183-185
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/scope.rs
+  s_b8bd53b858e9e7::t_5ef5c44212dc96 1-42
+apps/bcs/crates/plugin-api/bcs-tracing-api/tests/rpc_scope.rs
+  s_b8bd53b858e9e7::t_8d55eb10266530 1-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f4f142cd7d3cb679d63205722c17a2f23c5d2593",
+  "prompts": {},
+  "sessions": {
+    "s_b8bd53b858e9e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e47d-1b63-7362-aaf7-7096b19afd9f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    },
+    "s_cc6f48e2a8273e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4b9-052c-73e1-aceb-b6b395cd56fe",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

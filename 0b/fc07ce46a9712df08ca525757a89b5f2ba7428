@@ -1,0 +1,28 @@
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_20c3b110241190::t_130b7d98e642b7 78
+  s_20c3b110241190::t_9f015765bc87fe 86,88-90
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_20c3b110241190::t_0bdfffa74cea83 59-92
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_20c3b110241190::t_9f015765bc87fe 259-263,265-266
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_20c3b110241190::t_9f015765bc87fe 26,174,180,183-190,194-195
+apps/bcsfuse/configs/zbcsfuse/application.yaml
+  s_20c3b110241190::t_9f015765bc87fe 52,55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0bfc07ce46a9712df08ca525757a89b5f2ba7428",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

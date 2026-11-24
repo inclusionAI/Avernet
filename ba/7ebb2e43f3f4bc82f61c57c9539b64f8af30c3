@@ -1,0 +1,108 @@
+apps/evolverun/clawweb/public/app/clawweb/server/README.md
+  h_bb3ca6fb13c5df 36-40
+apps/evolverun/clawweb/public/modules/workflow/server/routes/README.md
+  h_bb3ca6fb13c5df 1-54
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/error-log-format.test.ts
+  h_bb3ca6fb13c5df 1-76
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/internal-logger.test.ts
+  h_bb3ca6fb13c5df 22-23,37,43,45,52-53,56-219
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/protected-workflow-logging.test.ts
+  h_bb3ca6fb13c5df 1-142
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-ai-drafts.test.ts
+  h_bb3ca6fb13c5df 6-7,11-18,30-37,127-131,135-142,145-159
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-route-logging.test.ts
+  h_bb3ca6fb13c5df 1-230
+apps/evolverun/clawweb/public/modules/workflow/server/routes/aistudio-train.ts
+  h_bb3ca6fb13c5df 1,108
+apps/evolverun/clawweb/public/modules/workflow/server/routes/approval-workbench.ts
+  h_bb3ca6fb13c5df 1,66,96,122
+apps/evolverun/clawweb/public/modules/workflow/server/routes/auto-heal-run.ts
+  h_bb3ca6fb13c5df 1,61
+apps/evolverun/clawweb/public/modules/workflow/server/routes/auto-heal.ts
+  h_bb3ca6fb13c5df 1,72-73,137,165,195,213,237
+apps/evolverun/clawweb/public/modules/workflow/server/routes/dashboard.ts
+  h_bb3ca6fb13c5df 1,338
+apps/evolverun/clawweb/public/modules/workflow/server/routes/editor-draft-cas.ts
+  h_bb3ca6fb13c5df 1,48
+apps/evolverun/clawweb/public/modules/workflow/server/routes/error-log-format.ts
+  h_bb3ca6fb13c5df 1-36
+apps/evolverun/clawweb/public/modules/workflow/server/routes/facades.ts
+  h_bb3ca6fb13c5df 1,49,76,111,149,177
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal-logger.ts
+  h_bb3ca6fb13c5df 1,27-44,49,52-63,69,74-77,86
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/approval-cards.ts
+  h_bb3ca6fb13c5df 1,50,129-130,162,184
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/bot-workflow-permissions.ts
+  h_bb3ca6fb13c5df 25,50
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/deploy-history.ts
+  h_bb3ca6fb13c5df 1,61,71,74
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/events.ts
+  h_bb3ca6fb13c5df 1,24,68,76,86,105,150
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/facades.ts
+  h_bb3ca6fb13c5df 17,45,55,70,80,90
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/fanouts.ts
+  h_bb3ca6fb13c5df 1,56
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/flow-run-links.ts
+  h_bb3ca6fb13c5df 1,32-33
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/http-callback-logs.ts
+  h_bb3ca6fb13c5df 28,62,83,108
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/metrics.ts
+  h_bb3ca6fb13c5df 1,46,67,90
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/node-executions.ts
+  h_bb3ca6fb13c5df 17,95,103,116,170,181,226,239,268,278,297,308,323
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/node-step-traces.ts
+  h_bb3ca6fb13c5df 89,163,196,238,269,300
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/retry-requests.ts
+  h_bb3ca6fb13c5df 19,42,50,59,80,90,111,121,136
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/run-reads.ts
+  h_bb3ca6fb13c5df 1,34
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/run-requests.ts
+  h_bb3ca6fb13c5df 1,25
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  h_bb3ca6fb13c5df 1,41,65,112,116-117,253-255,268,280-285,288,300,353,366,398,409,430,441,467,478,499,510,532,543,564,574,613,623,639,669,679,708,713,723,739,749,764,797,807
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/scheduled-triggers.ts
+  h_bb3ca6fb13c5df 1,101,121,137,157,173,226,246
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/webhook-events.ts
+  h_bb3ca6fb13c5df 1,54,79,102,128
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/webhook-triggers.ts
+  h_bb3ca6fb13c5df 1,50,70,90,106,144,164
+apps/evolverun/clawweb/public/modules/workflow/server/routes/node-step-traces.ts
+  h_bb3ca6fb13c5df 1,79,118,146
+apps/evolverun/clawweb/public/modules/workflow/server/routes/repair-batches.ts
+  h_bb3ca6fb13c5df 1,65,72
+apps/evolverun/clawweb/public/modules/workflow/server/routes/run-baas-routes.ts
+  h_bb3ca6fb13c5df 1,78,151,260,285,298,416,428,494,517,529
+apps/evolverun/clawweb/public/modules/workflow/server/routes/run-workflow-snapshot.ts
+  h_bb3ca6fb13c5df 1,66
+apps/evolverun/clawweb/public/modules/workflow/server/routes/runs.ts
+  h_bb3ca6fb13c5df 1,207,314,338,367,385,446,470,484,574,579,586,625,642,737,845,876,898
+apps/evolverun/clawweb/public/modules/workflow/server/routes/subworkflow-observability.ts
+  h_bb3ca6fb13c5df 1,137,139
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflow-ai-drafts.ts
+  h_bb3ca6fb13c5df 1,6-11,57-61,71
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflow-clone.ts
+  h_bb3ca6fb13c5df 1,14,18
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflows-accessible.ts
+  h_bb3ca6fb13c5df 1,77
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflows-list.ts
+  h_bb3ca6fb13c5df 1,103,165
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflows.ts
+  h_bb3ca6fb13c5df 1,265,307,319,524,563,604,640,692,734,765,817,839,863,922,960,984
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-http.test.ts
+  h_bb3ca6fb13c5df 1-167
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-subworkflows-http.ts
+  h_bb3ca6fb13c5df 6,11-13,35-36
+apps/evolverun/clawweb/public/shared/server/services/file-log-format.ts
+  h_bb3ca6fb13c5df 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ba7ebb2e43f3f4bc82f61c57c9539b64f8af30c3",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+apps/bcsfuse/configs/zbcsfuse/application-prod.yaml
+  s_e604a7fd67b17c::t_5b72b320214de3 2-9,15-18
+apps/bcsfuse/tests/deployment/test_zbcsfuse_config.py
+  s_e604a7fd67b17c::t_3cddd74635728d 128-132,136
+  s_e604a7fd67b17c::t_117beb25d26d45 250-255,264-265,268-269,273-274,282-308
+  s_e604a7fd67b17c::t_2279ae358a1e5c 258-260,275-277
+apps/bcsfuse/configs/zbcsfuse/application-prepub.yaml
+  s_e604a7fd67b17c::t_5b72b320214de3 3-9,16-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "233cd24097d52615ec64bdd6a04688c62d87f4b4",
+  "prompts": {},
+  "sessions": {
+    "s_e604a7fd67b17c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17b1c-91e3-7641-b378-6138442786ee",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

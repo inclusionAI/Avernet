@@ -1,0 +1,20 @@
+engine/adapter/src/engine/community/plugins/openclaw/_mcp.py
+  s_8d4f79214897ed::t_464376104afc3f 6
+  s_8d4f79214897ed::t_41369b9419cda5 56-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b9503970a13b57bfbc76ff8c12c8c556ac5f12fe",
+  "prompts": {},
+  "sessions": {
+    "s_8d4f79214897ed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce7-37ff-7bd2-864e-b7af98926f6d",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

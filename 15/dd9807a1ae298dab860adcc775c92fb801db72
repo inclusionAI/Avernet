@@ -1,0 +1,26 @@
+apps/frontend-nextgen/src/pages/Workspace/GroupWorkspaceArea.tsx
+  h_5b2ec9c12c4d18 57
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatHeaderPanels.ts
+  h_5b2ec9c12c4d18 42-43,115
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupSessions.ts
+  h_5b2ec9c12c4d18 47,228
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupSessions.types.ts
+  h_5b2ec9c12c4d18 15-16
+apps/frontend-nextgen/src/pages/Workspace/hooks/useSessionMap.ts
+  h_5b2ec9c12c4d18 30-31,146,205
+apps/frontend-nextgen/src/pages/Workspace/hooks/useSessionMapRequests.ts
+  h_5b2ec9c12c4d18 246-249
+apps/frontend-nextgen/test/pages/Workspace/hooks/taskPanelSessionReadiness.test.ts
+  h_5b2ec9c12c4d18 1-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "15dd9807a1ae298dab860adcc775c92fb801db72",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

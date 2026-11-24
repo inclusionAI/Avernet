@@ -1,0 +1,83 @@
+apps/bcs/crates/services/bcs-dist-worker/README.md
+  s_a9c87caa3de52e::t_0056a8397aee71 84-99,116-118
+apps/bcs/crates/services/bcs-dist-worker/tests/drain_scheduling.rs
+  s_a9c87caa3de52e::t_1fa2944bf378be 1-12,14-19,21,23-32,34,38-45,47-114,116-160,162-164,169-172,174-180,182-201,203-208,220-221,225-227,229,236-237,239-240,259-270,272-279,281-295,297-313,322-346,354-357,359-374,380-384,386-395,397-405,407-415,417-424,467
+  s_a9c87caa3de52e::t_153c688fca3961 33
+  s_a9c87caa3de52e::t_e4180209c4b959 46,317-321,375-379
+  s_a9c87caa3de52e::t_4a6ce32383c45e 212,215,218,425-445,447-456
+  s_a9c87caa3de52e::t_e98b6f9233bbd8 161,165-168,228,230-233,235,241-254,256-258,314-316,347-353,457-466
+  s_a9c87caa3de52e::t_0056a8397aee71 358
+  s_a9c87caa3de52e::t_f815dcdbcac155 115
+  s_a9c87caa3de52e::t_b605d333c53f72 35-37
+  s_a9c87caa3de52e::t_f341c794a2dd92 13
+  s_a9c87caa3de52e::t_a3767f660a3f65 20
+  s_a9c87caa3de52e::t_b172028c52d3e0 22
+  s_a9c87caa3de52e::t_2edb5c53422e80 173
+  s_a9c87caa3de52e::t_cab8db81ed410b 181
+  s_a9c87caa3de52e::t_138c182c09b852 202
+  s_a9c87caa3de52e::t_8829361a27f225 209-211
+  s_a9c87caa3de52e::t_a50fb09372aa95 213-214
+  s_a9c87caa3de52e::t_f6b4eec338232d 216-217
+  s_a9c87caa3de52e::t_b4eb721d579e0a 219
+  s_a9c87caa3de52e::t_9512e55d57c842 222-224
+  s_a9c87caa3de52e::t_7ebe450d81a970 234
+  s_a9c87caa3de52e::t_4fcfc15a5f71f1 238
+  s_a9c87caa3de52e::t_0c017f8ac0ba1e 255
+  s_a9c87caa3de52e::t_38f3be2d23ca67 271
+  s_a9c87caa3de52e::t_cdf75acf2af565 280
+  s_a9c87caa3de52e::t_c96488b52ba48e 296
+  s_a9c87caa3de52e::t_9d4ed1f9c0dee3 385
+  s_a9c87caa3de52e::t_3a6c73403b00de 396
+  s_a9c87caa3de52e::t_1b8e6bc4fb7b74 406
+  s_a9c87caa3de52e::t_0a9477429a089c 416
+  s_a9c87caa3de52e::t_620129b406cc0e 446
+apps/bcs/specs/2026-11-17-worker-coordination/implementation.md
+  s_a9c87caa3de52e::t_0056a8397aee71 95,102-117,133-138
+  s_a9c87caa3de52e::t_a010fd182dfcbd 161-162
+  s_a9c87caa3de52e::t_60d63dd1986fbb 159,163,165-166
+apps/bcs/crates/services/bcs-dist-worker/tests/support/mod.rs
+  s_a9c87caa3de52e::t_5b39447e765385 170-172,180-183,226,275-276,286,292,376-378
+apps/bcs/crates/services/bcs-dist-worker/tests/review_regressions.rs
+  s_a9c87caa3de52e::t_8d353be1cdf8fc 238
+apps/bcs/crates/services/bcs-dist-worker/src/control.rs
+  s_a9c87caa3de52e::t_b75483bd4d8ebd 181-182
+  s_a9c87caa3de52e::t_11ff07c92b9150 138,145,183,186-189,338,355-357
+  s_a9c87caa3de52e::t_d01f6924305e15 69,298-306
+  s_a9c87caa3de52e::t_e0ec4ad3aa2595 184-185
+apps/bcs/crates/services/bcs-dist-worker/tests/handoff_confirmation.rs
+  s_a9c87caa3de52e::t_e4180209c4b959 70-72
+apps/bcs/crates/services/bcs-dist-worker/src/runtime.rs
+  s_a9c87caa3de52e::t_8d353be1cdf8fc 774,786-789
+  s_a9c87caa3de52e::t_d01f6924305e15 35,62,92,99,217,422,451-463,475-477,491,500-506,508-510,512
+  s_a9c87caa3de52e::t_11ff07c92b9150 88,98,101-104,216,470,486,799
+  s_a9c87caa3de52e::t_6fd107ccbf26d1 100
+  s_a9c87caa3de52e::t_91ac8def780de0 790
+apps/bcs/crates/services/bcs-dist-worker/src/recovery.rs
+  s_a9c87caa3de52e::t_d01f6924305e15 226-227,232,289,293,297-298,303,318-320
+  s_a9c87caa3de52e::t_288da5864f9ccf 246-248
+apps/bcs/crates/services/bcs-dist-worker/src/drain.rs
+  s_a9c87caa3de52e::t_404eb938dd39f1 147-151,159-163
+  s_a9c87caa3de52e::t_d01f6924305e15 48,116-123,152,164,249,312,330-333,410
+  s_a9c87caa3de52e::t_afd71a39d1ba8d 29
+  s_a9c87caa3de52e::t_e0ec4ad3aa2595 11-28,30-34,69,334
+  s_a9c87caa3de52e::t_11ff07c92b9150 153,165,201,204-207,248,256-260,366,411
+  s_a9c87caa3de52e::t_b6ac737b4d2560 87-88,231
+  s_a9c87caa3de52e::t_8d353be1cdf8fc 352
+  s_a9c87caa3de52e::t_e4180209c4b959 82-86,90,92-102,104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4b6ebe792791b38c7d4039b6a322ea441009aaee",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

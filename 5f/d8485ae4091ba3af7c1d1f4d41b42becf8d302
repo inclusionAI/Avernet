@@ -1,0 +1,14 @@
+src/ecb/ecb/interfaces/pattern_prediction/routers/blackboard_router.py
+  h_059e888e5e4e82 442,453
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5fd8485ae4091ba3af7c1d1f4d41b42becf8d302",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

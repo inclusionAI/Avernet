@@ -1,0 +1,40 @@
+apps/backend/specs/teclaw-caller-refresh/001-spec-output.md
+  s_8cab37de83b8f7::t_15cf5e1881679c 14-15
+  s_8cab37de83b8f7::t_c440c05cbdf45a 1-13,16-122
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  s_8cab37de83b8f7::t_f808f401149a54 10,132-138,223-280
+  s_8cab37de83b8f7::t_57558de6e72074 281-282
+apps/backend/src/agentclaw/community/di/modules/caller_identity_module.py
+  s_8cab37de83b8f7::t_f808f401149a54 43,143,145-148
+apps/backend/tests/community/core/caller_identity/test_session_validator.py
+  s_8cab37de83b8f7::t_f808f401149a54 14
+apps/backend/tests/community/core/caller_identity/test_shared_teclaw_iam.py
+  s_8cab37de83b8f7::t_d3771315d6bab0 14,16,26-30,69,80,87,108,128-347
+  s_8cab37de83b8f7::t_897f3012bfc0b0 1-13,15,17-25,31-68,70-79,81-86,88-107,109-127
+apps/backend/src/agentclaw/community/core/caller_identity/contracts.py
+  s_8cab37de83b8f7::t_f808f401149a54 127
+apps/backend/src/agentclaw/community/core/caller_identity/service.py
+  s_8cab37de83b8f7::t_f808f401149a54 581-585
+apps/backend/src/agentclaw/community/core/caller_identity/session_validator.py
+  s_8cab37de83b8f7::t_f808f401149a54 7,10-11,26,28,65-92
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_8cab37de83b8f7::t_20c798260806b0 16,38-40,54,57,60-88
+apps/backend/tests/community/core/caller_identity/test_service.py
+  s_8cab37de83b8f7::t_34f3f2d0bdee41 1424-1441
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8a224c679b6f35a434f9611d5e0adfed75cb7fa7",
+  "prompts": {},
+  "sessions": {
+    "s_8cab37de83b8f7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf04-e630-70f0-9238-ea404406fbff",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/skill_center/test_direct_activation_service.py
+  s_3d36bb45bb2a35::t_aa802d8fa095ff 47-49
+apps/backend/tests/community/core/skill_center/test_desktop_skill_recovery.py
+  s_3d36bb45bb2a35::t_aa802d8fa095ff 719-721
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eb93d813beb08ae550f63d859043b7331c71b28a",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

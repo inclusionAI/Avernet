@@ -1,0 +1,26 @@
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  s_b7f94a3bd241d6::t_d51ec8328ade56 95,872-873
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/config_manifest_apply.py
+  s_b7f94a3bd241d6::t_37c605735b9096 140,157-158
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_ordering_teclaw.py
+  s_b7f94a3bd241d6::t_27013a3870a9b7 255,257-262
+  s_b7f94a3bd241d6::t_6d4ccfb8f99a0b 281-293
+apps/backend/src/agentclaw/community/core/apply_engine/run/mcp_permission_notes.py
+  s_b7f94a3bd241d6::t_d51ec8328ade56 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "92542c8f191ac6dd058a5a2ef2260d04b548f127",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

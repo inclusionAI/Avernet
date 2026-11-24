@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_ordering_teclaw.py
+  s_b7f94a3bd241d6::t_d4765c933689a5 282-300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3a3111c21620594226933b6f3c00b92e24c28f9e",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

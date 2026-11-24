@@ -1,0 +1,19 @@
+submodules/avernet
+  s_44a6b2a40672a4::t_f890de1625a3aa 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "97d5f189701fb4a41783de7d70e61c5f79fb67ce",
+  "prompts": {},
+  "sessions": {
+    "s_44a6b2a40672a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a694-e92a-7412-8fe5-ee3adbe8bf6e",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

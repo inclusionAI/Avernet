@@ -1,0 +1,53 @@
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/budget.rs
+  s_b033c54cc00da7::t_74f0355919c458 5,33-39
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/inbox.rs
+  s_b033c54cc00da7::t_0acf3390705aa3 111-113,135-137
+apps/bcs/crates/services/bcs-dist-store/src/budget.rs
+  s_b033c54cc00da7::t_4329447ab01446 3-6,102-131,154-161
+apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md
+  s_b033c54cc00da7::t_edf4533ebb666c 38-42
+apps/bcs/crates/services/bcs-dist-store/src/inbox/closure.rs
+  s_b033c54cc00da7::t_388dd23b6c1491 121-125,132-133
+apps/bcs/crates/services/bcs-dist-store/src/inbox/closure/progress.rs
+  s_b033c54cc00da7::t_1ed015fa3eb098 2,56,98,103-127,130-135,320-382,387-389,391,394-414,417,419,421
+apps/bcs/crates/services/bcs-dist-store/src/inbox/consumer.rs
+  s_b033c54cc00da7::t_874be2996e3a3c 75-84,88,175-198,208
+apps/bcs/crates/services/bcs-dist-store/src/inbox/maintenance.rs
+  s_b033c54cc00da7::t_05c1f24b997063 11-13,34-35,37-41,50,66
+apps/bcs/crates/services/bcs-dist-store/src/inbox/scheduling.rs
+  s_b033c54cc00da7::t_7efb1fc18a2669 303
+apps/bcs/crates/services/bcs-dist-store/tests/admission_closure.rs
+  s_b033c54cc00da7::t_40cdb179c0fdad 18-28,366-398,412-413,415
+apps/bcs/crates/services/bcs-dist-store/tests/conformance_runtime_safety.rs
+  s_b033c54cc00da7::t_317e587fd321aa 14-15
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_maintenance.rs
+  s_b033c54cc00da7::t_7137bebcbdbc77 4-5,7-8,15-22,24,95,106,117,130,156-194
+apps/bcs/crates/services/bcs-dist-worker/README.md
+  s_b033c54cc00da7::t_a3044362fec127 117-119
+apps/bcs/crates/services/bcs-dist-worker/src/recovery.rs
+  s_b033c54cc00da7::t_51b5c9dbb5a9bf 9-13,34-36,38,49-50,52,58-68,74,78,80,93-111,159
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_resources.rs
+  s_b033c54cc00da7::t_74753622f46458 599-613
+apps/bcs/crates/services/bcs-dist-worker/tests/supervisor_support/mod.rs
+  s_b033c54cc00da7::t_5fea0942caacd5 45-55
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/runtime_safety.rs
+  s_b033c54cc00da7::t_c2e3affde20659 4,25-30
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/inbox.rs
+  s_b033c54cc00da7::t_839ce74cac58a2 84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fec2907d1bafe86d1f776eba8f071eecbb49fd2d",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

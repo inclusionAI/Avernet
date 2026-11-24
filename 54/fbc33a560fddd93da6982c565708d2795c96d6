@@ -1,0 +1,35 @@
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/kv.rs
+  s_2a51cb4a02f4d1::t_88247732ef0a43 52-89,182-195,202-207
+apps/bcs/crates/plugin-api/bcs-store-api/CONTEXT.md
+  s_2a51cb4a02f4d1::t_88247732ef0a43 27
+apps/bcs/crates/plugin-api/bcs-store-api/src/common.rs
+  s_2a51cb4a02f4d1::t_88247732ef0a43 22-24,43-44
+apps/bcs/crates/test-support/bcs-test-support/tests/conformance_store.rs
+  s_2a51cb4a02f4d1::t_88247732ef0a43 274-285
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/kv.rs
+  s_2a51cb4a02f4d1::t_88247732ef0a43 128,133,165,169
+apps/bcs/crates/plugin-api/bcs-store-api/src/kv.rs
+  s_2a51cb4a02f4d1::t_88247732ef0a43 25-27,55,57,91
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/mod.rs
+  s_2a51cb4a02f4d1::t_88247732ef0a43 19
+apps/bcs/crates/plugin-api/bcs-store-api/README.md
+  s_2a51cb4a02f4d1::t_88247732ef0a43 41-42,53-55,232-233,237,276-277
+apps/bcs/docs/plans/2026-11-16-bcs-store-api.md
+  s_2a51cb4a02f4d1::t_88247732ef0a43 140-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "54fbc33a560fddd93da6982c565708d2795c96d6",
+  "prompts": {},
+  "sessions": {
+    "s_2a51cb4a02f4d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e770-4d8b-74b0-ab62-f3442a6c7bd2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

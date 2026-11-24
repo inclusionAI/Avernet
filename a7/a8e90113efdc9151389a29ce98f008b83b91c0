@@ -1,0 +1,23 @@
+apps/frontend-nextgen/test/assets/TaskPanel/TaskProgress.test.tsx
+  s_785ac12e5de367::t_f44b9100b6eff6 10,70-101,118-131
+  s_785ac12e5de367::t_9d648a9e55f4d0 132
+apps/frontend-nextgen/test/assets/TaskPanel/commonUi.test.tsx
+  s_785ac12e5de367::t_938a61e52882d7 64-84
+  s_785ac12e5de367::t_a156fccc5270bf 85-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a7a8e90113efdc9151389a29ce98f008b83b91c0",
+  "prompts": {},
+  "sessions": {
+    "s_785ac12e5de367": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "09473ff1-a2db-4cd4-a9a5-e59dc77ed3e2",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

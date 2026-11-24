@@ -1,0 +1,63 @@
+apps/backend/tests/community/adapters/http/openapi_v1/test_authorization_inventory.py
+  s_ccda8e611a6d06::t_d2e5c4d5e54eb7 334-336
+apps/backend/specs/caller-instance-status/001-spec-output.md
+  s_ccda8e611a6d06::t_39353caeb505c7 117-129
+  s_ccda8e611a6d06::t_8db22d52bb3a2e 22,46,52-53,55,72-74
+  s_ccda8e611a6d06::t_db9942a28abcb6 1-21,23-45,47-51,54,56-71,75-97,101,103-116
+  s_ccda8e611a6d06::t_c5c81a7e8643f0 98-100,102
+apps/backend/specs/caller-instance-status/workflow-state.md
+  s_ccda8e611a6d06::t_02dac6e5bc19b5 1-10,12
+  s_ccda8e611a6d06::t_b4a3162f3ec4ae 11
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_ccda8e611a6d06::t_39353caeb505c7 1334-1335,1344,1371,1380-1386,1396-1401
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_caller_instance.py
+  s_ccda8e611a6d06::t_52d5b261c709dc 1-8
+apps/backend/specs/caller-instance-status/009-pr-report.md
+  s_ccda8e611a6d06::t_c577156f56b31a 1-33
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  s_ccda8e611a6d06::t_40fe0813d17ad9 288
+apps/backend/specs/caller-instance-status/003-review-report.md
+  s_ccda8e611a6d06::t_bbf963620730b7 1-41
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_ccda8e611a6d06::t_39353caeb505c7 84-105
+apps/backend/src/agentclaw/community/core/expert_chat/expert_chat_service_protocol.py
+  s_ccda8e611a6d06::t_869a33d7a7c1b9 17-27
+apps/backend/specs/caller-instance-status/003b-regression-report.md
+  s_ccda8e611a6d06::t_17f96f7f8a0ad3 1-40
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py
+  s_ccda8e611a6d06::t_39353caeb505c7 212
+  s_ccda8e611a6d06::t_4dd8495e3400dd 34,185-211,213-236
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_ccda8e611a6d06::t_1741dbd5a80d74 175-177
+apps/backend/tests/community/adapters/http/openapi_v1/test_caller_instance_status.py
+  s_ccda8e611a6d06::t_eb5ef0bc01c487 1-121
+apps/backend/specs/caller-instance-status/002-code-report.md
+  s_ccda8e611a6d06::t_65758ae3df3d34 35,51-60
+  s_ccda8e611a6d06::t_8368b4e6170449 1-34,36-50
+apps/backend/src/agentclaw/community/core/expert_chat/expert_chat_instance_service_protocol.py
+  s_ccda8e611a6d06::t_e4a9602de72248 18-30
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py
+  s_ccda8e611a6d06::t_c34a84f680e3fa 20-21,128-136,163-184
+  s_ccda8e611a6d06::t_f921b22d0817db 18-19,185-209
+apps/backend/tests/community/core/expert_chat/services/test_caller_instance_status.py
+  s_ccda8e611a6d06::t_39353caeb505c7 31,41,61-174
+  s_ccda8e611a6d06::t_bf7be271daf8dc 1-30,32-40,42-60
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py
+  s_ccda8e611a6d06::t_afafdc2909f10a 18,351-363
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4f04798557021b192c07ebaac35aacc5639efd03",
+  "prompts": {},
+  "sessions": {
+    "s_ccda8e611a6d06": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda4-a056-7f61-ab7e-7505fc5c7282",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

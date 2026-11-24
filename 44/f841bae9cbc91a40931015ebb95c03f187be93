@@ -1,0 +1,36 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/run-detail-contract.md
+  h_bb3ca6fb13c5df 1-61
+apps/evolverun/clawweb/public/modules/workflow/docs/run-list-contract.md
+  h_bb3ca6fb13c5df 52
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  h_bb3ca6fb13c5df 57-61,168-187,194-195,198,212,217,707-710,715,734,736-737,743
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/run-detail-runtime-metadata.test.ts
+  h_bb3ca6fb13c5df 1-207
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/run-session-scope.test.ts
+  h_bb3ca6fb13c5df 1-124
+apps/evolverun/clawweb/public/modules/workflow/server/routes/run-baas-routes.ts
+  h_bb3ca6fb13c5df 3,87-89,107,109-110,118,121-134,148
+apps/evolverun/clawweb/public/modules/workflow/server/routes/runs.ts
+  h_bb3ca6fb13c5df 79-83,96,99,102-103
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-read-fields.ts
+  h_bb3ca6fb13c5df 2-3,66-100
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-read-http.ts
+  h_bb3ca6fb13c5df 11,48,287-294
+apps/evolverun/clawweb/public/modules/workflow/shared/run-runtime-metadata.ts
+  h_bb3ca6fb13c5df 1-6
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunSummaryHeader.tsx
+  h_bb3ca6fb13c5df 6,9,191,193-195,231,233
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunSummaryHeader.test.tsx
+  h_bb3ca6fb13c5df 1-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "44f841bae9cbc91a40931015ebb95c03f187be93",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+apps/backend/tests/community/di/test_creation_report_recovery_wiring.py
+  s_b7f94a3bd241d6::t_dfe781c087438f 1-7
+apps/backend/src/agentclaw/community/core/bot_config_manifest/README.md
+  s_b7f94a3bd241d6::t_594485f8482260 624-625
+  s_b7f94a3bd241d6::t_9e55c02268f8b9 392-400
+apps/backend/docs/arch/generated/dependents.md
+  s_b7f94a3bd241d6::t_3e3757e2678dcf 258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f8f2b8aa6007d90c7b8fe0e1aecf3d9641b42149",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/RenderScreenPanel.tsx
+  s_8902951668ae40::t_54599ca383a1cd 75
+  s_8902951668ae40::t_a95619c80be195 73-74
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  s_8902951668ae40::t_dde91625500313 20
+  s_8902951668ae40::t_617b7a1b6b41e8 95-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23dc72fa022edefa8b1139b1487fa301e9c42362",
+  "prompts": {},
+  "sessions": {
+    "s_8902951668ae40": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "9acdbd23-ef45-408b-8781-46dfe2269efd",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

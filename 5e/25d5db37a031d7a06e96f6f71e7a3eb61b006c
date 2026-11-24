@@ -1,0 +1,28 @@
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/contracts.py
+  s_89ee1c722ef961::t_70b1d77c40307a 64
+apps/bcsfuse/docs/architecture/alipay-index-rebuild-minimal.md
+  s_89ee1c722ef961::t_b0d931d2edfcb4 54-57
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/index_builds.py
+  s_89ee1c722ef961::t_70b1d77c40307a 16
+apps/bcsfuse/docs/api/zbcsfuse-apitester.json
+  s_89ee1c722ef961::t_7206fc58156657 234,266
+apps/bcsfuse/tests/alipay/test_index_builds.py
+  s_89ee1c722ef961::t_d8e97fa73041e5 100-117,119-152
+  s_89ee1c722ef961::t_8296413bd2d555 118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5e25d5db37a031d7a06e96f6f71e7a3eb61b006c",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

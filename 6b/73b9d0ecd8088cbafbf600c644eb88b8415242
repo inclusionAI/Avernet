@@ -1,0 +1,19 @@
+singlebox/ci/tests/test_singlebox_companion_coverage.py
+  s_405f6041118eb1::t_39da9042df4281 167-168,186-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6b73b9d0ecd8088cbafbf600c644eb88b8415242",
+  "prompts": {},
+  "sessions": {
+    "s_405f6041118eb1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4a4-3df3-7910-8f9f-0ef7f4920a3e",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,70 @@
+apps/backend/src/agentclaw/community/core/skills_pool/edit_guard.py
+  s_3d36bb45bb2a35::t_79cfd5c2824d91 251,256-260,263-267
+  s_3d36bb45bb2a35::t_f5beb60fa071d6 6,28-29,61-63,86,93-95,101-105,132,157,164,202,207,211,214,230,239-240,243-250,252-255,261-262,268-270,273,276,281,284,287-290,292-294,299-304,306-307,310,313-314,316,318-319
+apps/backend/tests/community/plugins/community/test_cache.py
+  s_3d36bb45bb2a35::t_db58a7dff4ead6 126-140
+apps/backend/tests/community/endpoints/test_openapi_skill_delete.py
+  s_3d36bb45bb2a35::t_0950a6cec05ec2 100-102
+apps/backend/src/agentclaw/community/plugin_api/cache.py
+  s_3d36bb45bb2a35::t_f5beb60fa071d6 56
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_dispatch.py
+  s_3d36bb45bb2a35::t_8cb7c567bc7e7e 48,57-59,68
+  s_3d36bb45bb2a35::t_bb978a541875d5 49-50,88-89
+  s_3d36bb45bb2a35::t_b735819cdce3ec 1-2,4,6-11,13,16-23,26-28,30,32-47,51-56,60-66,80-85,90-107,110-115,119-125
+  s_3d36bb45bb2a35::t_6daed05dce8583 3,5,12,14-15,29,31,67,69-79,108-109
+  s_3d36bb45bb2a35::t_79cfd5c2824d91 24-25,86-87,116-118
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/local_skill_package_dispatch.py
+  s_3d36bb45bb2a35::t_3c7df5d3681e1a 10,13-16,21-24,32,34-35,46-52,56,58-65,67,69,78,80-82,84-86,95-111
+  s_3d36bb45bb2a35::t_d185a7e00423b8 112
+apps/backend/tests/community/core/skill_center/test_local_skill_delete_service.py
+  s_3d36bb45bb2a35::t_8cb7c567bc7e7e 68-75,190-191
+  s_3d36bb45bb2a35::t_a48ea5564374ff 192
+apps/backend/src/agentclaw/community/core/skill_center/factories.py
+  s_3d36bb45bb2a35::t_bb978a541875d5 193,197-198
+apps/backend/tests/community/core/skill_center/test_local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_bb978a541875d5 315,318-319
+  s_3d36bb45bb2a35::t_ccc1f48d674adf 60,2613
+  s_3d36bb45bb2a35::t_8cb7c567bc7e7e 93-95,710
+  s_3d36bb45bb2a35::t_1633ce7309dadf 760,768
+apps/backend/src/agentclaw/community/di/modules/skills_pool_module.py
+  s_3d36bb45bb2a35::t_f5beb60fa071d6 29-31,162-178
+apps/backend/src/agentclaw/community/core/repository/protocols/skill_center.py
+  s_3d36bb45bb2a35::t_3c7df5d3681e1a 443,452-456
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_6daed05dce8583 257-262,265-266,269,272-273,441-442,444-451,454-459,461-465,475-476,478-481,483-487,489-490,710-711,773
+  s_3d36bb45bb2a35::t_bb978a541875d5 101-104,270,339,357,361,466,639,655-656,676-679,692-693
+  s_3d36bb45bb2a35::t_8cb7c567bc7e7e 267,460
+  s_3d36bb45bb2a35::t_79cfd5c2824d91 469-473
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_delete_service.py
+  s_3d36bb45bb2a35::t_8cb7c567bc7e7e 33,113-114,118-120,127,131-135,141-142,193
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_package_runtime.py
+  s_3d36bb45bb2a35::t_6daed05dce8583 8,83,88-89
+apps/backend/tests/community/core/skills_pool/test_edit_guard.py
+  s_3d36bb45bb2a35::t_db58a7dff4ead6 350,354-355,383-398
+  s_3d36bb45bb2a35::t_9d8f99a1355b8a 19,34,39-42,53-59,347-349,351-353,356-382
+apps/backend/tests/community/core/skill_center/test_local_skill_package_batch.py
+  s_3d36bb45bb2a35::t_0950a6cec05ec2 13-16
+  s_3d36bb45bb2a35::t_fcd427341dcad0 354,356-357,361,363-365,378-410
+  s_3d36bb45bb2a35::t_3afae4c8ddac9d 352-353,355,358-360,362,366-377
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_db58a7dff4ead6 187,199-205
+  s_3d36bb45bb2a35::t_3e21a503ecd399 206
+apps/backend/tests/community/repository/skill_center/test_local_skill_package_dispatch.py
+  s_3d36bb45bb2a35::t_5c71eaabc870d6 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e42198b8aae546805eadcd8d3fbb7dafe69b349c",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

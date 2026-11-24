@@ -1,0 +1,28 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/open_slice.py
+  h_059e888e5e4e82 1-357
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_application_ops.py
+  h_059e888e5e4e82 1-540
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_method_service.py
+  h_059e888e5e4e82 1-40
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_method_service_base.py
+  h_059e888e5e4e82 1-205
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_opportunity_ops.py
+  h_059e888e5e4e82 1-449
+apps/backend/tests/community/core/task/context_collab/open_profile_support.py
+  h_059e888e5e4e82 1-362
+apps/backend/tests/community/core/task/context_collab/test_open_guards.py
+  h_059e888e5e4e82 1-208
+apps/backend/tests/community/core/task/context_collab/test_open_lifecycle.py
+  h_059e888e5e4e82 1-631
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cd8925228426c33bb3793e8ff00722044db310fc",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

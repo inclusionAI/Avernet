@@ -1,0 +1,21 @@
+apps/bcs/specs/README.md
+  s_19e1c67879702a::t_303aff03d5c059 15
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
+  s_19e1c67879702a::t_303aff03d5c059 1-238
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "836672db18bb3c3e13c8b49daa4316ed75b49fd1",
+  "prompts": {},
+  "sessions": {
+    "s_19e1c67879702a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea5f-2aaa-7150-98c8-e055d66f36a3",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

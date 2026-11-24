@@ -1,0 +1,21 @@
+apps/bcs/crates/bootstrap/bcs/src/http_adapter.rs
+  s_78b18aa6677fb5::t_dc714e45f9c59e 485
+apps/bcs/crates/services/bcs-fusion/src/core/fuse_backed_sync.rs
+  s_78b18aa6677fb5::t_36bafe083f7b49 16-19,22,95-96,105,126,147,159,167,189,201,206,228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9e7e7039436cda4fd537eb2ec251be58e4f937b4",
+  "prompts": {},
+  "sessions": {
+    "s_78b18aa6677fb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abc0-ecb1-78c0-8371-95c99b49b76e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

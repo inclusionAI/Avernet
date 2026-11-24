@@ -1,0 +1,158 @@
+apps/gateway/README.md
+  s_63343409a8a3ba::t_0c092847fa1376 78-81
+autocoding/skills/teamclaw-clarify/references/applications/tui/index.md
+  s_63343409a8a3ba::t_a0226e0f7f81c0 1,3,5,7
+apps/proxy/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_6308f63962cb67 1-9
+autocoding/skills/teamclaw-clarify/references/runtime-evidence.md
+  s_63343409a8a3ba::t_0c930d71e70cd0 22,24
+autocoding/skills/teamclaw-clarify/references/applications/evolverun/index.md
+  s_63343409a8a3ba::t_f2c349a83a1d31 1,3,5,7
+autocoding/skills/teamclaw-clarify/references/knowledge-sources.md
+  s_63343409a8a3ba::t_a2dd157a27f6bd 7,13-15
+  s_63343409a8a3ba::t_ee979f0e47310d 17
+apps/tui/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_6308f63962cb67 7-8
+  s_63343409a8a3ba::t_da57c0f9b85bc4 1-6,9
+autocoding/skills/teamclaw-clarify/references/investigation.md
+  s_63343409a8a3ba::t_a48708f2084df2 11
+apps/agentclawscs/README.md
+  s_63343409a8a3ba::t_fb4a0871a68974 48-51
+apps/mobile/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_563114f147a232 1-6,9
+  s_63343409a8a3ba::t_6308f63962cb67 7-8
+apps/mobile/README.md
+  s_63343409a8a3ba::t_433c88a6c9fdaa 302-305
+autocoding/skills/teamclaw-clarify/references/applications/bcsfuse/index.md
+  s_63343409a8a3ba::t_344015f1c9bd85 1,3,5,7
+apps/desktop/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_6308f63962cb67 7-8
+  s_63343409a8a3ba::t_4aeb1d8817d7c6 1-6,9
+autocoding/skills/teamclaw-clarify/references/applications/baas/index.md
+  s_63343409a8a3ba::t_c64fd36f8fd508 1,3,5,7,9
+apps/gateway-cli/README.md
+  s_63343409a8a3ba::t_dc400670ab0385 212-215
+autocoding/skills/teamclaw-workflow/SKILL.md
+  s_63343409a8a3ba::t_cb10a2ec900233 10-11
+apps/proxy/.gitignore
+  s_63343409a8a3ba::t_1f413a1a9cdc83 10-11
+autocoding/skills/teamclaw-implement/SKILL.md
+  s_63343409a8a3ba::t_cb10a2ec900233 9-10
+autocoding/skills/teamclaw-clarify/references/applications/frontend/index.md
+  s_63343409a8a3ba::t_6316f0f6f5c475 1,3,5,7
+apps/proxy/README.md
+  s_63343409a8a3ba::t_b6786a648ee360 39-42
+AGENTS.md
+  s_63343409a8a3ba::t_01a2640dbed2fc 26
+autocoding/skills/teamclaw-clarify/references/product-source.md
+  s_63343409a8a3ba::t_0cfd9ba07f36b1 6,10-12
+  s_63343409a8a3ba::t_c1d2875c68fd4e 3
+apps/frontend/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_7da2219ec82542 1-7
+autocoding/skills/teamclaw-clarify/references/applications/desktop/index.md
+  s_63343409a8a3ba::t_44f3482b7da0eb 1,3,5,7
+autocoding/skills/teamclaw-plan/references/knowledge-sources.md
+  s_63343409a8a3ba::t_82f3d81e4d501a 7,13-15
+  s_63343409a8a3ba::t_ee979f0e47310d 17
+apps/backend/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_1f413a1a9cdc83 8-9
+apps/ecb/README.md
+  s_63343409a8a3ba::t_8d46c4f892a6e1 386-389
+autocoding/skills/teamclaw-plan/references/project-context.md
+  s_63343409a8a3ba::t_e32dfbbac44f6c 7,9,11,30-31,42
+autocoding/skills/teamclaw-clarify/references/applications/agentclawscs/index.md
+  s_63343409a8a3ba::t_d1ac5c291c82b5 1,3,5,7
+docs/agents/knowledge-sources.md
+  s_98f154f911d970::t_56443adc0fb798 1-15
+  s_63343409a8a3ba::t_1f413a1a9cdc83 16-17
+autocoding/skills/teamclaw-clarify/references/applications/backend/cdo-investigation.md
+  s_63343409a8a3ba::t_1f413a1a9cdc83 25
+autocoding/skills/teamclaw-workflow/references/access-preflight.md
+  s_63343409a8a3ba::t_cb10a2ec900233 15
+apps/baas/docs/arch/README.md
+  s_63343409a8a3ba::t_6a2bc69f3c2d0f 9-10
+apps/ecb/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_6308f63962cb67 7-8
+  s_63343409a8a3ba::t_80801c8b6cdc9b 1-6,9
+autocoding/skills/teamclaw-clarify/references/deployment-context.md
+  s_63343409a8a3ba::t_cb10a2ec900233 13
+apps/gateway-cli/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_90d0eb1a201321 1-6,9
+  s_63343409a8a3ba::t_6308f63962cb67 7-8
+apps/agentclawscs/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_fb7d5db459bd8e 1-6,9
+  s_63343409a8a3ba::t_6308f63962cb67 7-8
+apps/backend/docs/diagnostics/bot-device-relations.md
+  s_63343409a8a3ba::t_8ebb5100fa65cd 1-27
+  s_63343409a8a3ba::t_d2502d3864747c 28-78
+apps/desktop/README.md
+  s_63343409a8a3ba::t_68a4a84afa64e7 779-782
+autocoding/skills/teamclaw-clarify/references/applications/bcs/index.md
+  s_63343409a8a3ba::t_66666fd10b14b5 1,3,5,7
+autocoding/skills/teamclaw-clarify/references/applications/backend/agentclaw-diagnostics.md
+  s_63343409a8a3ba::t_a48708f2084df2 9
+apps/evolverun/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_bfd2528907efe5 1-6,9
+  s_63343409a8a3ba::t_6308f63962cb67 7-8
+autocoding/skills/teamclaw-clarify/references/applications/proxy/index.md
+  s_63343409a8a3ba::t_38a9fa74d3c9fd 1,3,5,7
+autocoding/tests/test_clarify_routing.py
+  s_63343409a8a3ba::t_757648e813498d 45-72
+autocoding/skills/teamclaw-clarify/references/applications/ecb/index.md
+  s_63343409a8a3ba::t_412ea7585a2b65 1,3,5,7
+apps/frontend/README.md
+  s_63343409a8a3ba::t_b01770d0c92bc8 101-104
+docs/flows/application-routing.md
+  s_98f154f911d970::t_b5d7cd9c5f79bb 1-17,24-26
+  s_63343409a8a3ba::t_1c4fe6cbf620ea 18-23
+autocoding/skills/teamclaw-pr-debate/SKILL.md
+  s_63343409a8a3ba::t_cb10a2ec900233 10-11
+autocoding/skills/teamclaw-clarify/references/applications/mobile/index.md
+  s_63343409a8a3ba::t_2080e09a96de39 1,3,5,7
+autocoding/skills/teamclaw-clarify/references/applications/engine/index.md
+  s_63343409a8a3ba::t_8a130759cd0992 1,3,5,7
+docs/flows/README.md
+  s_63343409a8a3ba::t_01a2640dbed2fc 14-15
+apps/frontend-nextgen/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_19d918ea7bc011 1-6,9
+  s_63343409a8a3ba::t_6308f63962cb67 7-8
+apps/tui/README.md
+  s_63343409a8a3ba::t_960e3474f19acd 113-116
+autocoding/skills/teamclaw-clarify/references/applications/gateway/index.md
+  s_63343409a8a3ba::t_1db1111b8e72a7 1,3,5,7
+apps/gateway/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_7f21060386e1fc 1-6,9
+  s_63343409a8a3ba::t_6308f63962cb67 7-8
+autocoding/skills/teamclaw-clarify/references/applications/backend/index.md
+  s_63343409a8a3ba::t_5305aa6e085563 1,3,5,7,9
+CONTEXT-MAP.md
+  s_63343409a8a3ba::t_01a2640dbed2fc 20
+apps/backend/docs/diagnostics/README.md
+  s_63343409a8a3ba::t_8ebb5100fa65cd 18-19
+autocoding/skills/teamclaw-clarify/references/applications/gateway-cli/index.md
+  s_63343409a8a3ba::t_0474a116ec26f8 1,3,5,7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3b3cd495fe9aa5b95edb10a79804edccb6aea319",
+  "prompts": {},
+  "sessions": {
+    "s_63343409a8a3ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c486-2aab-7970-849a-649813792261",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": null
+    },
+    "s_98f154f911d970": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c11c-96ee-7040-8d8a-10da6bf18493",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

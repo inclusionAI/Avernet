@@ -1,0 +1,19 @@
+singlebox/ci/tests/test_check_secrets_references.py
+  s_12273d43a83942::t_5eb2cce920e209 176,219,226,230,235-236,241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "38ec8ec3be70888fe112221051427bdf690aec88",
+  "prompts": {},
+  "sessions": {
+    "s_12273d43a83942": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e9f6-c9ef-77f1-88ad-8a7ab3e27148",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

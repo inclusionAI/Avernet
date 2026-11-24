@@ -1,0 +1,24 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/README.md
+  h_059e888e5e4e82 25,141-142,156,165,170,194
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/report.py
+  h_059e888e5e4e82 52
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/swarm_driver.py
+  h_059e888e5e4e82 44,73,100,110,234
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 474,855,863,870,872,893
+apps/backend/src/agentclaw/community/di/modules/swarm_runtime.py
+  h_059e888e5e4e82 26,75
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py
+  h_059e888e5e4e82 38-39,41,168-170,174-175,183,186,191-192,201,205-207,215,291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4e3742d04556e21f17fb2ad72804316792618d8f",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

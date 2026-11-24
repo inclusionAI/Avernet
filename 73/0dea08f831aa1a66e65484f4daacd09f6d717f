@@ -1,0 +1,14 @@
+apps/frontend-nextgen/src/services/taskEscortParity/workflowAuthoringPersistence.ts
+  h_bb3ca6fb13c5df 29,31,36,58,63,125-126,135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "730dea08f831aa1a66e65484f4daacd09f6d717f",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+apps/bcsfuse/tests/alipay/test_v2_visibility_labels.py
+  s_9e428ec8192673::t_6f9a93c5bba102 74,262-263,282-283,293-296
+  s_9e428ec8192673::t_344faac3957281 1,225-226,260-261,264,267-268,280-281,284
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_9e428ec8192673::t_d8b778143cb517 116
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_9e428ec8192673::t_344faac3957281 46-49,102-103,109-111,236-244,256-257
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_9e428ec8192673::t_344faac3957281 34-49
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_9e428ec8192673::t_6f9a93c5bba102 535-538,548-556,565-574,586-593
+  s_9e428ec8192673::t_344faac3957281 595
+  s_9e428ec8192673::t_b150c960d60f86 532-534,539-547,557-564,575-585,594,596-597
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bdf828d76af375b15cee27082c768bd9ad4ab6ea",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-ai-draft-host.test.ts
+  s_913510881d8932::t_9a793fbb8cc8d9 22-24
+apps/evolverun/clawweb/internal/configs/application-default.yaml
+  s_913510881d8932::t_876c52af828772 220-221,227,232,288-290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "862120f7b53050a22679942dbc613fd56adcc63e",
+  "prompts": {},
+  "sessions": {
+    "s_913510881d8932": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e20f-c995-7ca1-9014-39cd3ea795ac",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

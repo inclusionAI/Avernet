@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  s_bb98e2f10840b6::t_f1f3cdcdf84b45 35-39
+apps/backend/tests/corp/plugins/prod/test_scheduled_caller.py
+  s_bb98e2f10840b6::t_3b93741f676bc4 88-137
+apps/backend/src/agentclaw/corp/plugins/prod/scheduled_caller.py
+  s_bb98e2f10840b6::t_4953bf0bff81ce 163,174-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0977b9de95b3da5419513b14473576a7105099f8",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

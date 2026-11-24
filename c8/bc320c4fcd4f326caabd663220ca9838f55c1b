@@ -1,0 +1,16 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  h_b601d8706f5d44 44,372
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_recovery_runner.py
+  h_b601d8706f5d44 901-903,913
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c8bc320c4fcd4f326caabd663220ca9838f55c1b",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

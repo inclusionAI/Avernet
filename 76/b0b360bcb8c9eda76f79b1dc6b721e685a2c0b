@@ -1,0 +1,60 @@
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/whole_artifact.py
+  s_b7f94a3bd241d6::t_9156850fef0ade 175-176,180-184
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_write.py
+  s_b7f94a3bd241d6::t_8bd5dfd8d90bd5 71-82,204,296-299
+apps/backend/src/agentclaw/community/core/apply_engine/outcomes.py
+  s_b7f94a3bd241d6::t_6101f1d6222f86 523-524,587-588
+apps/backend/src/agentclaw/community/core/apply_engine/context.py
+  s_b7f94a3bd241d6::t_8bd5dfd8d90bd5 32-33
+apps/backend/src/agentclaw/community/core/apply_engine/run/report_codec.py
+  s_b7f94a3bd241d6::t_6101f1d6222f86 121-123
+apps/backend/src/agentclaw/community/core/skill_center/services/_mutation_flow.py
+  s_b7f94a3bd241d6::t_fba6e96184949e 143,299-300
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_management_service.py
+  s_b7f94a3bd241d6::t_fba6e96184949e 47,516,540
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_apply_service.py
+  s_b7f94a3bd241d6::t_9c449ddfca20e1 106-111,142,159
+apps/backend/src/agentclaw/community/core/apply_engine/run/mcp_permission_notes.py
+  s_b7f94a3bd241d6::t_ca0a8f908c340e 24-87
+  s_b7f94a3bd241d6::t_c6367dfe949fad 8-15,92-116
+  s_b7f94a3bd241d6::t_19d2659c34696d 1-7,16-23,88-91
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/per_domain.py
+  s_b7f94a3bd241d6::t_9156850fef0ade 261-264
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  s_b7f94a3bd241d6::t_6101f1d6222f86 94,875-878
+  s_b7f94a3bd241d6::t_fb59b642a2a38d 93,95,174,210,874,879
+apps/backend/src/agentclaw/community/core/skill_center/runtime_projection_contract.py
+  s_b7f94a3bd241d6::t_9156850fef0ade 90-91,151,158,173
+apps/backend/src/agentclaw/community/di/modules/bot_management_module.py
+  s_b7f94a3bd241d6::t_fb59b642a2a38d 97,766,779
+apps/backend/tests/community/core/apply_engine/test_mcp_permission_notes.py
+  s_b7f94a3bd241d6::t_13d1bf6591915a 1-17
+  s_b7f94a3bd241d6::t_5ebaac32ad2a16 29,50-87
+  s_b7f94a3bd241d6::t_f136f749440939 88-97
+  s_b7f94a3bd241d6::t_970d3b395ce357 18-28,30-49
+apps/backend/tests/community/core/skill_center/test_mutation_flow_timing.py
+  s_b7f94a3bd241d6::t_9c449ddfca20e1 16,424,431
+  s_b7f94a3bd241d6::t_243c3218e7ccd6 418-423,425-430,432-436
+apps/backend/src/agentclaw/community/core/skill_center/skill_set_apply.py
+  s_b7f94a3bd241d6::t_9c449ddfca20e1 81
+apps/backend/src/agentclaw/community/core/skill_center/services/direct_activation_service.py
+  s_b7f94a3bd241d6::t_9c449ddfca20e1 414-419,446,466
+apps/backend/tests/community/core/skill_center/test_handoff_mcp_projection.py
+  s_b7f94a3bd241d6::t_f09a7d2490c6c8 80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "76b0b360bcb8c9eda76f79b1dc6b721e685a2c0b",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

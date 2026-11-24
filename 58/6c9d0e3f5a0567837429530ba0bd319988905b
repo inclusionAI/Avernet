@@ -1,0 +1,61 @@
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/stage.rs
+  s_875e3f9d4d0db3::t_27834d077d2294 5
+  s_875e3f9d4d0db3::t_22087b45c3aa3c 15-18
+  s_ec329e2b8ae9bc::t_ee3697fd3f6013 1-4,6-14,19-20,22-30
+  s_875e3f9d4d0db3::t_be4e818198c8fc 21
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/errors.rs
+  s_ec329e2b8ae9bc::t_9192011009f226 1-46
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/delegate.rs
+  s_875e3f9d4d0db3::t_0ce1a27b18a2a2 215-216,221-222
+  s_875e3f9d4d0db3::t_f2d248ef4d88b2 379-380
+  s_875e3f9d4d0db3::t_575d85be469ef9 400-401,403-407
+  s_875e3f9d4d0db3::t_989b304d39fa1b 514-520
+  s_875e3f9d4d0db3::t_86d87b5d36c934 325
+  s_875e3f9d4d0db3::t_4e126250bddb12 323,334
+  s_875e3f9d4d0db3::t_e810c2445bfb57 324
+  s_875e3f9d4d0db3::t_05cbdc9f8652b8 76-82
+  s_875e3f9d4d0db3::t_091280c96c8059 378,381-382
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline.rs
+  s_875e3f9d4d0db3::t_5258fbd37061e3 713
+  s_875e3f9d4d0db3::t_cfc5df14565588 711,722
+  s_875e3f9d4d0db3::t_e0d0278de74c77 783
+  s_875e3f9d4d0db3::t_98bca6c8fd1655 535-540,546-548
+  s_875e3f9d4d0db3::t_4bb6e4c083c6bb 857-866
+  s_875e3f9d4d0db3::t_7231b0f4857927 588-593,599-603,608
+  s_875e3f9d4d0db3::t_d2ee03d44374fd 672-678,681
+  s_ec329e2b8ae9bc::t_a717d9e895c5fc 256
+  s_875e3f9d4d0db3::t_0cc402740b545c 541,545
+  s_875e3f9d4d0db3::t_4039dffc449ee4 646,651,653-655,662-665
+  s_ec329e2b8ae9bc::t_595e7d5fc1ebd6 207-211
+  s_875e3f9d4d0db3::t_09b5346455bb62 983
+  s_875e3f9d4d0db3::t_983758cda74d43 712
+  s_875e3f9d4d0db3::t_7dc41ebdbf11af 774-782
+  s_ec329e2b8ae9bc::t_14cb4ebf7b7069 978-979,982
+  s_ec329e2b8ae9bc::t_705bf78db54778 329-336
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime/caller_delegate.rs
+  s_875e3f9d4d0db3::t_0915ec13695ed4 268-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "586c9d0e3f5a0567837429530ba0bd319988905b",
+  "prompts": {},
+  "sessions": {
+    "s_875e3f9d4d0db3": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "81193bbc-3d37-490a-a6c5-939434b5d738",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    },
+    "s_ec329e2b8ae9bc": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "134f343e-3d10-4322-a5b5-6382cbcc9062",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

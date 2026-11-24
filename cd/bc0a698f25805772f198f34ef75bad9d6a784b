@@ -1,0 +1,14 @@
+apps/backend/src/agentclaw/community/adapters/http/bot_public/risk_routes.py
+  h_9d7cfd405752f5 5,48,50-51,97,99-103,124,128-133,159,162-163,181,184,201,204,231,240-245,270,278-279,304,312,336,345,347-348
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cdbc0a698f25805772f198f34ef75bad9d6a784b",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

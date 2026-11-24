@@ -1,0 +1,19 @@
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/plan.md
+  s_e0cb98366a65ad::t_f83f7c1ea53113 456-459,501,568,570-572,574-575,586,963
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bd2d78d151aef54d45fa02630520af429d8ddd1b",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

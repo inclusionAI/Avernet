@@ -1,0 +1,28 @@
+apps/frontend-nextgen/test/shell/AppShellResponsive.test.tsx
+  s_f177da566a2257::t_2574879409e1c3 6
+  s_f177da566a2257::t_abc6467b4edbf1 160-175
+apps/frontend-nextgen/src/shell/AppShell.tsx
+  s_f177da566a2257::t_a3321755744ae2 17
+  s_f177da566a2257::t_c137dfddd29fcb 148-150,156
+apps/frontend-nextgen/src/shell/SidebarUserFooter.tsx
+  s_f177da566a2257::t_f8694774ffa676 1-42
+apps/frontend-nextgen/src/shell/AppSidebar.tsx
+  s_f177da566a2257::t_b5325ccf88e98a 111-112,121
+  s_f177da566a2257::t_cce34060c06b53 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d1e0c5f1ddb828f44504d32b98488fcd79d624d3",
+  "prompts": {},
+  "sessions": {
+    "s_f177da566a2257": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a3559f5d-e7de-4eac-a807-174c72c7eda8",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
