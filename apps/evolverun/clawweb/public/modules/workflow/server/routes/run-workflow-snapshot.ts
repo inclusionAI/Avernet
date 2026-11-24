@@ -1,3 +1,4 @@
+import { captureApiError } from "./error-log-format.js";
 import { Router } from 'express';
 import { parse as parseYaml } from 'yaml';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -62,7 +63,7 @@ export function createRunWorkflowSnapshotRouter(db: IDatabase, authorize: Repair
         res.json({ nodes: projectNodes(spec) });
       }
       catch { res.status(409).json({ error: 'Snapshot identity unavailable' }); }
-    } catch { res.status(503).json({ error: 'Snapshot unavailable' }); }
+    } catch (error) { console.error("[run-workflow-snapshot] request failed:", captureApiError(res, error)); res.status(503).json({ error: 'Snapshot unavailable' }); }
   });
   return router;
 }

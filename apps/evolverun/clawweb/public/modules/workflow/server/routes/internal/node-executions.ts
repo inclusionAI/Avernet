@@ -14,7 +14,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
     const { flow_id, node_id, status } = req.body as { flow_id?: string; node_id?: string; status?: string };
     apiLog("WRITE", "/node-executions", { flowId: flow_id, nodeId: node_id, status });
     if (!nodeExecRepo) {
-      apiLog("WRITE", "/node-executions", { flowId: flow_id, nodeId: node_id, status: 503, error: "Database not configured" });
+      apiLog("WRITE", "/node-executions", { flowId: flow_id, nodeId: node_id, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -92,7 +92,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
         completedAt: completed_at ?? null,
       });
       if (result < 0) {
-        apiLog("WRITE", "/node-executions", { flowId: flow_id, nodeId: node_id, status: 500, error: "Failed to insert node execution" });
+        apiLog("WRITE", "/node-executions", { flowId: flow_id, nodeId: node_id, status: 500, error: "Failed to insert node execution" }, undefined, res);
         res.status(500).json({ success: false, error: "Internal Server Error", message: "Failed to insert node execution" });
         return;
       }
@@ -100,7 +100,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
       res.status(201).json({ success: true, data: { insertId: result, affectedRows: 1 } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/node-executions", { flowId: flow_id, nodeId: node_id, status: 500, error: msg });
+      apiLog("WRITE", "/node-executions", { flowId: flow_id, nodeId: node_id, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -113,7 +113,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
     const { status } = req.body as { status?: string };
     apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/completion`, { flowId, nodeId, attempt, newStatus: status });
     if (!nodeExecRepo) {
-      apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/completion`, { flowId, nodeId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/completion`, { flowId, nodeId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -167,7 +167,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/completion`, { flowId, nodeId, status: 500, error: msg });
+      apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/completion`, { flowId, nodeId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -178,7 +178,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
     const { status } = req.body as { status?: string };
     apiLog("PUT", `/node-executions/${id}/completion`, { id, newStatus: status });
     if (!nodeExecRepo) {
-      apiLog("PUT", `/node-executions/${id}/completion`, { id, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/node-executions/${id}/completion`, { id, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -223,7 +223,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/node-executions/${id}/completion`, { id, status: 500, error: msg });
+      apiLog("PUT", `/node-executions/${id}/completion`, { id, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -236,7 +236,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
     const { message } = req.body as { message?: string };
     apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/progress`, { flowId, nodeId, attempt, message: message?.substring(0, 100) });
     if (!nodeExecRepo) {
-      apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/progress`, { flowId, nodeId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/progress`, { flowId, nodeId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -265,7 +265,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/progress`, { flowId, nodeId, status: 500, error: msg });
+      apiLog("PUT", `/node-executions/${flowId}/${nodeId}/${attempt}/progress`, { flowId, nodeId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -275,7 +275,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
     const flowId = req.query.flowId as string | undefined;
     apiLog("READ", "/node-executions", { flowId });
     if (!nodeExecRepo) {
-      apiLog("READ", "/node-executions", { flowId, status: 503, error: "Database not configured" });
+      apiLog("READ", "/node-executions", { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -294,7 +294,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
       res.json({ success: true, data: rows, total: rows.length, limit, offset });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", "/node-executions", { flowId, status: 500, error: msg });
+      apiLog("READ", "/node-executions", { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -305,7 +305,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
     const { flow_status } = req.body as { flow_status?: string };
     apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, flow_status });
     if (!nodeExecRepo) {
-      apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, status: 503, error: "Database not configured" });
+      apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -320,7 +320,7 @@ export function createInternalNodeExecutionsRouter(nodeExecRepo: NodeExecutionRe
       res.json({ success: true, data: { flowId, reconciled } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, status: 500, error: msg });
+      apiLog("PUT", `/node-executions/${flowId}/reconcile-stale-running`, { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

@@ -1,3 +1,4 @@
+import { captureApiError } from "./error-log-format.js";
 /**
  * Node Step Traces API routes — reads from node_step_traces table.
  *
@@ -75,6 +76,7 @@ export function createNodeStepTracesRouter(db: IDatabase): Router {
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[node-step-traces] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: msg });
     }
   }));
@@ -113,6 +115,7 @@ export function createNodeStepTracesRouter(db: IDatabase): Router {
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[node-step-traces] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: msg });
     }
   }));
@@ -140,6 +143,7 @@ export function createNodeStepTracesRouter(db: IDatabase): Router {
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[node-step-traces] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: msg });
     }
   }));

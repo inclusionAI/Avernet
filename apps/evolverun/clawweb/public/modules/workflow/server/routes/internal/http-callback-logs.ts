@@ -25,7 +25,7 @@ export function createInternalHttpCallbackLogsRouter(
     const body = req.body as Record<string, unknown>;
 
     if (!httpCallbackLogRepo) {
-      apiLog("WRITE", "/http-callback-logs", { status: 503, error: "Database not configured" });
+      apiLog("WRITE", "/http-callback-logs", { status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -59,7 +59,7 @@ export function createInternalHttpCallbackLogsRouter(
       res.status(201).json({ success: true, data: { insertId } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/http-callback-logs", { status: 500, error: msg });
+      apiLog("WRITE", "/http-callback-logs", { status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -80,7 +80,7 @@ export function createInternalHttpCallbackLogsRouter(
       res.json({ success: true, data: rows });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", "/http-callback-logs/flow/:flowId", { flowId, status: 500, error: msg });
+      apiLog("READ", "/http-callback-logs/flow/:flowId", { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -105,7 +105,7 @@ export function createInternalHttpCallbackLogsRouter(
       res.json({ success: true, data: { deleted } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("DELETE", "/http-callback-logs/cleanup", { olderThan, status: 500, error: msg });
+      apiLog("DELETE", "/http-callback-logs/cleanup", { olderThan, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

@@ -1,3 +1,4 @@
+import { captureApiError } from "../error-log-format.js";
 /**
  * Internal API routes for scheduled_triggers — full CRUD for ClawMind.
  */
@@ -97,6 +98,7 @@ export function createInternalScheduledTriggersRouter(repos: RouterDeps): Router
       res.status(201).json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/scheduled-triggers] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -116,6 +118,7 @@ export function createInternalScheduledTriggersRouter(repos: RouterDeps): Router
       res.json({ success: true, data: rows, total: rows.length, limit, offset });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/scheduled-triggers] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -131,6 +134,7 @@ export function createInternalScheduledTriggersRouter(repos: RouterDeps): Router
       res.json({ success: true, data: rows });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/scheduled-triggers] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -150,6 +154,7 @@ export function createInternalScheduledTriggersRouter(repos: RouterDeps): Router
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/scheduled-triggers] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -165,6 +170,7 @@ export function createInternalScheduledTriggersRouter(repos: RouterDeps): Router
       res.json({ success: true, data: rows });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/scheduled-triggers] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -217,6 +223,7 @@ export function createInternalScheduledTriggersRouter(repos: RouterDeps): Router
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/scheduled-triggers] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -236,6 +243,7 @@ export function createInternalScheduledTriggersRouter(repos: RouterDeps): Router
       res.json({ success: true, data: { affected: true } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[internal/scheduled-triggers] request failed:", captureApiError(res, error));
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

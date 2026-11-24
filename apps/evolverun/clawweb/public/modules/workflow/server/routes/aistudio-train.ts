@@ -1,3 +1,4 @@
+import { captureApiError } from "./error-log-format.js";
 import { Router, type Request, type Response } from 'express';
 import { isIdentity, isOwnerBotId, isPositiveInteger, safeDetailUrl, toWatchDto, MANUAL_POLL_COOLDOWN_SECONDS,
   type WatchRecord } from '../contracts/aistudio-train.js';
@@ -104,7 +105,7 @@ export function createAIStudioTrainRouter(deps: Dependencies): Router {
       // CAS prevents lost watcher updates; repository also atomically fences newer attempts.
       if (!await deps.store.requestManualPoll(watch.version,next)) { fail(res,409,'Watch changed; refresh before retrying'); return; }
       res.status(202).json({ok:true,resolved:false,watch:responseWatch(next)});
-    } catch { fail(res,503,'AIStudio watch service unavailable'); }
+    } catch (error) { console.error("[aistudio-train] request failed:", captureApiError(res, error)); fail(res,503,'AIStudio watch service unavailable'); }
   }
   router.get(path,(req,res) => handle(req,res,false));
   router.post(`${path}/poll-manual`,(req,res) => handle(req,res,true));

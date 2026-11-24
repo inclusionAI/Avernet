@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "./error-log-format.js";
 /** BaaS-backed run actions. Run reads and local control remain in their existing routers. */
 import { Router, type Request, type Response } from "express";
 import type { FlowRunRepository, RunOriginScope } from "../repositories/flow-run-repository.js";
@@ -74,6 +75,7 @@ export function createRunBaasRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[run-baas-routes] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -146,6 +148,7 @@ export function createRunBaasRouter(
       });
     } catch (error) {
       const msg = expectedScope ? "Failed to update session info" : (error instanceof Error ? error.message : String(error));
+      console.error("[run-baas-routes] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -254,7 +257,7 @@ export function createRunBaasRouter(
             originSessionId: result.sessionId,
           });
         } catch (updateErr) {
-          console.warn(`[runs] failed to persist session_id for ${flowId}:`, updateErr);
+          console.warn("[runs] failed to persist session_id for %s:", flowId, errorStack(updateErr));
         }
       }
 
@@ -279,7 +282,7 @@ export function createRunBaasRouter(
           });
         } catch (eventErr) {
           // Audit logging is best-effort, don't fail the intervention
-          console.warn(`[runs] failed to record intervention event for ${flowId}:`, eventErr);
+          console.warn("[runs] failed to record intervention event for %s:", flowId, errorStack(eventErr));
         }
       }
 
@@ -292,6 +295,7 @@ export function createRunBaasRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[run-baas-routes] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -409,7 +413,7 @@ export function createRunBaasRouter(
             },
           });
         } catch (eventErr) {
-          console.warn(`[runs] failed to record rerun event for ${flowId}:`, eventErr);
+          console.warn("[runs] failed to record rerun event for %s:", flowId, errorStack(eventErr));
         }
       }
 
@@ -421,6 +425,7 @@ export function createRunBaasRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[run-baas-routes] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -486,7 +491,7 @@ export function createRunBaasRouter(
             originSessionId: result.sessionId,
           });
         } catch (updateErr) {
-          console.warn(`[runs] failed to persist session_id for ${flowId}:`, updateErr);
+          console.warn("[runs] failed to persist session_id for %s:", flowId, errorStack(updateErr));
         }
       }
 
@@ -509,7 +514,7 @@ export function createRunBaasRouter(
             },
           });
         } catch (eventErr) {
-          console.warn(`[runs] failed to record chat event for ${flowId}:`, eventErr);
+          console.warn("[runs] failed to record chat event for %s:", flowId, errorStack(eventErr));
         }
       }
 
@@ -521,6 +526,7 @@ export function createRunBaasRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[run-baas-routes] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));

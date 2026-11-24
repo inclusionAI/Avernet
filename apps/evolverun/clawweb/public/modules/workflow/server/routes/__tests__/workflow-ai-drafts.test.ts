@@ -3,10 +3,19 @@ import express from 'express';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
+import { appendFileSync } from 'node:fs';
+import { formatHttpLog } from '@avernet/clawweb-shared/server/services/file-log-format';
 import { createWorkflowAiDraftService } from '../../services/workflow-ai-draft-service.js';
 import { createWorkflowAiDraftReceipts } from '../../services/workflow-ai-draft-receipts.js';
 import { createWorkflowAiDraftRouter } from '../workflow-ai-drafts.js';
-import { WorkflowAiDraftDispatchRejectedError } from '../../contracts/workflow-ai-draft.js';
+import { WorkflowAiDraftError, WorkflowAiDraftDispatchRejectedError } from '../../contracts/workflow-ai-draft.js';
+const files = vi.hoisted(() => ({ appendFileSync: vi.fn() }));
+vi.mock('node:fs', async importOriginal => ({ ...await importOriginal<typeof import('node:fs')>(), ...files }));
+const channels = ['log', 'info', 'warn', 'error', 'debug', 'trace', 'dir', 'dirxml', 'table'] as const;
+function captureLogs() {
+  files.appendFileSync.mockClear();
+  return channels.map(channel => vi.spyOn(console, channel).mockImplementation(() => {}));
+}
 const closing: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closing.splice(0).reverse()) await close(); vi.restoreAllMocks(); });
 const request = () => ({ requestId: randomUUID(), mode: 'modify' as const, prompt: 'Improve the workflow',
@@ -18,6 +27,14 @@ async function fixture(publicOrigin?: string, publicOrigins?: readonly string[])
   const receipts = createWorkflowAiDraftReceipts('synthetic-route-receipt-key');
   const service = createWorkflowAiDraftService({ execution, receipts, canEdit: async () => allowed });
   const app = express(); app.use(express.json({ limit: '1mb' }));
+  // Exercise the HTTP diagnostic-to-file formatter contract; the enterprise middleware has its own integration suite.
+  app.use((_req, res, next) => {
+    res.once('finish', () => {
+      const diagnostic = res.locals.taskGuardApiDiagnostic;
+      if (diagnostic) appendFileSync('/test/task-guard-http.log', formatHttpLog(new Date(), 'ERROR', 'http', diagnostic) + '\n');
+    });
+    next();
+  });
   app.use('/api/workflows', createWorkflowAiDraftRouter({ service, principal: async () => principal, publicOrigin, publicOrigins }));
   const server: Server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
   closing.push(() => new Promise((resolve, reject) => server.close(e => e ? reject(e) : resolve())));
@@ -107,16 +124,38 @@ describe('Stateless workflow AI draft route security and browser contract', () =
     expect(f.execution.dispatch).toHaveBeenCalledOnce();
     expect(f.execution.poll).toHaveBeenCalledTimes(2);
   });
-  it.each(['TypeError', 'PRIVATE_SECRET_NAME'])('logs only fixed metadata for unexpected create failure named %s', async name => {
-    const f = await fixture(), info = vi.spyOn(console, 'info').mockImplementation(() => {});
-    const error = new Error('SQL PRIVATE_SECRET_MESSAGE prompt=PRIVATE_SECRET_PROMPT'); error.name = name;
+  it.each(['TypeError', '<PRIVATE_SECRET_NAME>'])('logs only fixed metadata on every channel for unexpected create failure named %s', async name => {
+    const logs = captureLogs(), f = await fixture();
+    const error = Object.assign(new Error('SQL <PRIVATE_SECRET_MESSAGE> prompt=<PRIVATE_SECRET_PROMPT> currentYaml=<PRIVATE_SECRET_YAML>'), {
+      config: { headers: { Authorization: '<PRIVATE_SECRET_TOKEN>' } }, token: '<PRIVATE_SECRET_TOKEN>',
+    }); error.name = name;
     vi.spyOn(f.service, 'create').mockRejectedValue(error);
     const response = await f.post(''); expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ code: 'INTERNAL_ERROR', error: 'AI draft request failed' });
-    const logs = info.mock.calls.map(call => String(call[0])); expect(logs).toHaveLength(1);
-    expect(JSON.parse(logs[0].replace('[workflow-background] ', ''))).toMatchObject({ job: 'workflow_ai_draft_request', event: 'failed', operation: 'create', phase: 'service', errorCode: name === 'TypeError' ? name : 'INTERNAL_ERROR' });
-    expect(logs.join('')).not.toMatch(/PRIVATE_SECRET|prompt=|currentYaml|requestId|actorId|SQL/);
+    const info = vi.mocked(console.info).mock.calls.map(call => String(call[0])); expect(info).toHaveLength(1);
+    expect(JSON.parse(info[0].replace('[workflow-background] ', ''))).toMatchObject({ job: 'workflow_ai_draft_request', event: 'failed', operation: 'create', phase: 'service', errorCode: name === 'TypeError' ? name : 'INTERNAL_ERROR' });
+    expect(console.error).toHaveBeenCalledWith('[workflow-ai-drafts] request failed:', expect.objectContaining({ stackSource: 'observation', stack: expect.stringContaining('Workflow protected operation failure observed') }));
+    expect(files.appendFileSync).toHaveBeenCalledOnce();
+    const line = files.appendFileSync.mock.calls[0][1] as string;
+    expect(line).toContain(' ERROR [http] ');
+    expect(JSON.parse(line.slice(line.indexOf('{')))).toEqual({ message: 'Protected workflow operation failed', stack: expect.any(String), stackSource: 'observation' });
+    expect(JSON.stringify([...logs.map(log => log.mock.calls), files.appendFileSync.mock.calls])).not.toMatch(/PRIVATE_SECRET|prompt=|currentYaml|requestId|actorId|SQL|Authorization|config/);
     expect(f.execution.dispatch).not.toHaveBeenCalled();
+  });
+  it.each(['FORBIDDEN', 'CAPABILITY_UNAVAILABLE'] as const)('keeps typed %s logs fixed without changing the response contract', async code => {
+    const logs = captureLogs(), f = await fixture();
+    const error = new WorkflowAiDraftError(code, '<PRIVATE_SECRET_TOKEN> prompt=<PRIVATE_SECRET_YAML>');
+    vi.spyOn(f.service, 'create').mockRejectedValue(error);
+    const response = await f.post(''); expect(response.status).toBe(code === 'FORBIDDEN' ? 403 : 503);
+    expect(await response.json()).toEqual({ code, error: error.message });
+    if (code === 'FORBIDDEN') {
+      expect(console.warn).toHaveBeenCalledWith('[workflow-ai-drafts] request rejected:', { operation: 'create', phase: 'service', errorCode: code });
+      expect(console.error).not.toHaveBeenCalled();
+    } else {
+      expect(console.error).toHaveBeenCalledWith('[workflow-ai-drafts] request failed:', expect.objectContaining({ errorCode: code, stackSource: 'observation' }));
+      expect(files.appendFileSync).toHaveBeenCalledOnce();
+    }
+    expect(JSON.stringify([...logs.map(log => log.mock.calls), files.appendFileSync.mock.calls])).not.toMatch(/PRIVATE_SECRET|prompt=|currentYaml/);
   });
   it('never exposes raw provider credentials in errors', async () => {
     const f = await fixture(); f.execution.resolveTarget.mockRejectedValue(new Error('https://private/?token=SECRET'));

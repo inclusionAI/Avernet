@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "../error-log-format.js";
 import { Router } from 'express';
 import type { createRepairTrialService } from '../../services/repair-trial-service.js';
 /** Request read and startup feedback. Host mounts behind existing signature verification. */
@@ -21,6 +22,7 @@ export function createRunRequestsReadRouter(source: Pick<ReturnType<typeof creat
     catch (error) {
       const invalid = (error as { code?: string }).code === 'INVALID_INPUT';
       const conflict = (error as { code?: string }).code === 'STATE_CONFLICT';
+      console[invalid || conflict ? "warn" : "error"]("[internal-run-requests] failure report failed:", invalid || conflict ? errorStack(error) : captureApiError(res, error));
       res.status(invalid ? 400 : conflict ? 409 : 503).json({ error: invalid ? '试跑失败原因无效' : '试跑失败反馈未登记，请核对原请求' });
     }
   });

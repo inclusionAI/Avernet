@@ -1,3 +1,4 @@
+import { captureApiError, captureSensitiveApiError } from "./error-log-format.js";
 /**
  * AutoHeal API routes.
  *
@@ -68,7 +69,8 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
       const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
       if (!actor || actor === "unknown") { res.status(401).json({ code: "AUTHENTICATION_REQUIRED" }); return; }
       res.json({ autoHealUnifiedSave: typeof deps.resolveUnifiedSave === "function" ? "v1" : false });
-    } catch {
+    } catch (error) {
+      console.error("[auto-heal] request failed:", captureApiError(res, error));
       res.status(500).json({ code: "CAPABILITIES_UNAVAILABLE" });
     }
   }));
@@ -132,6 +134,7 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
         res.status(200).json(result);
       } catch (err) {
         const failure = err as { status?: number; code?: string; requestId?: string; branch?: string; commit?: string };
+        console[safeStatus(failure.status) >= 500 ? "error" : "warn"]("[auto-heal] request failed:", safeStatus(failure.status) >= 500 ? { stack: captureSensitiveApiError(res), stackSource: "observation" } : { errorCode: "PROTECTED_WORKFLOW_REJECTED" });
         res.status(safeStatus(failure.status)).json({ error: "Save could not be completed", code: failure.code ?? "SAVE_FAILED",
           requestId: failure.requestId, branch: failure.branch, commit: failure.commit });
       }
@@ -159,6 +162,7 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
       res.status(result.outcome === "confirmed" ? 200 : 409).json(result);
     } catch (error) {
       const failure = error as { status?: number; code?: string };
+      console[safeStatus(failure.status) >= 500 ? "error" : "warn"]("[auto-heal] request failed:", safeStatus(failure.status) >= 500 ? { stack: captureSensitiveApiError(res), stackSource: "observation" } : { errorCode: "PROTECTED_WORKFLOW_REJECTED" });
       res.status(safeStatus(failure.status)).json({ code: failure.code ?? "UNIFIED_SAVE_FAILED" });
     }
   }));
@@ -188,6 +192,7 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
       res.status(200).json(result);
     } catch (err) {
       const failure = err as { status?: number; code?: string; requestId?: string; branch?: string; commit?: string };
+      console[safeStatus(failure.status) >= 500 ? "error" : "warn"]("[auto-heal] request failed:", safeStatus(failure.status) >= 500 ? { stack: captureSensitiveApiError(res), stackSource: "observation" } : { errorCode: "PROTECTED_WORKFLOW_REJECTED" });
       res.status(safeStatus(failure.status)).json({ error: "Save could not be completed", code: failure.code ?? "SAVE_FAILED",
         requestId: failure.requestId, branch: failure.branch, commit: failure.commit });
     }
@@ -205,6 +210,7 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
       res.json(await service.editorDeploymentState(req.query.workflowId, actor));
     } catch (error) {
       const failure = error as { status?: number; code?: string };
+      console[safeStatus(failure.status) >= 500 ? "error" : "warn"]("[auto-heal] request failed:", safeStatus(failure.status) >= 500 ? { stack: captureSensitiveApiError(res), stackSource: "observation" } : { errorCode: "PROTECTED_WORKFLOW_REJECTED" });
       res.status(safeStatus(failure.status)).json({ code: failure.code ?? "DEPLOYMENT_STATE_UNAVAILABLE" });
     }
   }));
@@ -228,6 +234,7 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
       const branch = typeof e.branch === "string" && /^wf\/[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(e.branch) && !e.branch.includes("..") ? e.branch : undefined;
       const commit = typeof e.commit === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(e.commit) ? e.commit : undefined;
       const tagName = typeof e.tagName === "string" && /^deploy\/[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\/#\d+$/.test(e.tagName) && !e.tagName.includes("..") ? e.tagName : undefined;
+      console[safeStatus(e.status) >= 500 ? "error" : "warn"]("[auto-heal] request failed:", safeStatus(e.status) >= 500 ? { stack: captureSensitiveApiError(res), stackSource: "observation" } : { errorCode: "PROTECTED_WORKFLOW_REJECTED" });
       res.status(safeStatus(e.status)).json({ error: "Deployment could not be completed", code: e.code ?? "DEPLOYMENT_FAILED", requestId: e.requestId, branch, commit, tagName });
     }
   });

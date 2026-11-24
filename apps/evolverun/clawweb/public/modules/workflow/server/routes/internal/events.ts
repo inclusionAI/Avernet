@@ -1,3 +1,4 @@
+import { captureApiError } from "../error-log-format.js";
 /**
  * Internal API routes for flow_events — write and read operations for ClawMind.
  */
@@ -20,7 +21,7 @@ export function createInternalEventsRouter(eventRepo: FlowEventRepository | null
     const { event_id, flow_id, event_type } = req.body as { event_id?: string; flow_id?: string; event_type?: string };
     apiLog("WRITE", "/events", { eventId: event_id, flowId: flow_id, eventType: event_type });
     if (!eventRepo) {
-      apiLog("WRITE", "/events", { eventId: event_id, flowId: flow_id, status: 503, error: "Database not configured" });
+      apiLog("WRITE", "/events", { eventId: event_id, flowId: flow_id, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -64,7 +65,7 @@ export function createInternalEventsRouter(eventRepo: FlowEventRepository | null
         error: error_text ?? null,
       });
       if (ok !== true) {
-        apiLog("WRITE", "/events", { eventId: event_id, flowId: flow_id, eventType: event_type, status: 503, error: "Event persistence not confirmed" });
+        apiLog("WRITE", "/events", { eventId: event_id, flowId: flow_id, eventType: event_type, status: 503, error: "Event persistence not confirmed" }, undefined, res);
         res.status(503).json({ success: false, error: "Service Unavailable", message: "Event persistence not confirmed" });
         return;
       }
@@ -72,7 +73,7 @@ export function createInternalEventsRouter(eventRepo: FlowEventRepository | null
       res.status(201).json({ success: true, data: { inserted: ok } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/events", { eventId: event_id, flowId: flow_id, status: 500, error: msg });
+      apiLog("WRITE", "/events", { eventId: event_id, flowId: flow_id, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -82,7 +83,7 @@ export function createInternalEventsRouter(eventRepo: FlowEventRepository | null
     const flowId = req.query.flowId as string | undefined;
     apiLog("READ", "/events", { flowId });
     if (!eventRepo) {
-      apiLog("READ", "/events", { flowId, status: 503, error: "Database not configured" });
+      apiLog("READ", "/events", { flowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -101,7 +102,7 @@ export function createInternalEventsRouter(eventRepo: FlowEventRepository | null
       res.json({ success: true, data: rows, total: rows.length, limit, offset });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", "/events", { flowId, status: 500, error: msg });
+      apiLog("READ", "/events", { flowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -146,7 +147,7 @@ export function createInternalAIStudioTrainManualAuditRouter(deps: {
       }
       if (await deps.repository.insertAIStudioTrainManualAudit(event) !== true) { fail(503,'AIStudio audit persistence unconfirmed'); return; }
       res.status(201).json({success:true,data:{inserted:true}});
-    } catch { fail(503,'AIStudio audit service unavailable'); }
+    } catch (error) { console.error("[internal/events] request failed:", captureApiError(res, error)); fail(503,'AIStudio audit service unavailable'); }
   });
   return router;
 }

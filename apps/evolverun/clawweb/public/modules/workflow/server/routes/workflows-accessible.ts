@@ -1,3 +1,4 @@
+import { captureApiError } from "./error-log-format.js";
 /**
  * GET /api/workflows/accessible
  *
@@ -73,7 +74,7 @@ export function createAccessibleWorkflowsRouter(deps: {
         deps.workflowSpecRepo.countAccessible({ userId, botId }),
       ]);
     } catch (err) {
-      console.error("[workflows-accessible] DB error:", err);
+      console.error("[workflows-accessible] DB error:", captureApiError(res, err));
       return res.status(500).json({
         error: "Internal Server Error",
         code: "INTERNAL_ERROR",

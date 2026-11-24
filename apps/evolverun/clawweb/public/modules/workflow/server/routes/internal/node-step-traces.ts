@@ -86,7 +86,7 @@ export function createInternalNodeStepTracesRouter(
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       const partialInserted = (error as Error & { inserted?: number })?.inserted ?? 0;
-      apiLog("WRITE", "/node-step-traces/batch", { error: msg, partialInserted, status: 500 });
+      apiLog("WRITE", "/node-step-traces/batch", { error: msg, partialInserted, status: 500 }, error, res);
       res.status(500).json({
         success: false,
         error: "Internal Server Error",
@@ -160,7 +160,7 @@ export function createInternalNodeStepTracesRouter(
       res.status(201).json({ success: true, data: { inserted } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/node-step-traces", { error: msg, status: 500 });
+      apiLog("WRITE", "/node-step-traces", { error: msg, status: 500 }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -193,7 +193,7 @@ export function createInternalNodeStepTracesRouter(
       res.json({ success: true, data: rows });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", "/node-step-traces", { flowId, nodeId, error: msg, status: 500 });
+      apiLog("READ", "/node-step-traces", { flowId, nodeId, error: msg, status: 500 }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -235,7 +235,7 @@ export function createInternalNodeStepTracesRouter(
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", "/node-step-traces/by-seq", { error: msg, status: 500 });
+      apiLog("READ", "/node-step-traces/by-seq", { error: msg, status: 500 }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -266,7 +266,7 @@ export function createInternalNodeStepTracesRouter(
       res.json({ success: true, data: rows });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("READ", "/node-step-traces/summary", { flowId, error: msg, status: 500 });
+      apiLog("READ", "/node-step-traces/summary", { flowId, error: msg, status: 500 }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -297,7 +297,7 @@ export function createInternalNodeStepTracesRouter(
       res.json({ success: true, data: { deleted } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/node-step-traces/delete", { error: msg, status: 500 });
+      apiLog("WRITE", "/node-step-traces/delete", { error: msg, status: 500 }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
