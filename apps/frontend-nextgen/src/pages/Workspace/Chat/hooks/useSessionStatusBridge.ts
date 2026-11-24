@@ -1,29 +1,23 @@
 import { createSessionStatusReceiver } from '@/domain/conversation/sessionStatusReceiver';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useSessionStatusStore } from '@/stores/sessionStatusStore';
+import { knownSessionIds } from './conversationSessionStatusKnownIds';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 
 let subscriptionSequence = 0;
-function knownSessionIds(botId: string): Set<string> {
-  const state = useConversationStore.getState();
-  const managed = state.sessionsByBotId[botId];
-  return new Set(
-    [
-      ...(managed?.sessions.items ?? []),
-      ...Object.values(managed?.friendGroups ?? {}).flatMap((group) => group.sessions.items),
-      ...(state.friendBotSessionsByBotId[botId]?.items ?? []),
-    ].map((session) => session.sessionId),
-  );
-}
-
 /** Caller supplies the real runtime identity, never sidebar expansion or session selection. */
-export function useSessionStatusBridge(viewBotId: string | undefined, realBotId: string, runtimeIdentity: string) {
+export function useSessionStatusBridge(
+  viewBotId: string | undefined,
+  realBotId: string,
+  runtimeIdentity: string,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   const instance = useConversationStore((state) => (viewBotId ? state.instanceSelectionByBotId[viewBotId] : undefined));
   const latest = useRef<object>();
   const bridge = useMemo(() => {
     const contextId = `session-status-${++subscriptionSequence}`;
     const receiver = createSessionStatusReceiver(contextId, realBotId, (event) => {
-      if (!viewBotId) return;
+      if (!enabled || !viewBotId) return;
       const store = useSessionStatusStore.getState();
       if (event.type === 'reset') {
         store.patch(
@@ -48,17 +42,17 @@ export function useSessionStatusBridge(viewBotId: string | undefined, realBotId:
       contextId,
       receiver,
       receive: (event: unknown) => {
-        if (latest.current === result) receiver.receive(event);
+        if (enabled && latest.current === result) receiver.receive(event);
       },
     };
     return result;
-  }, [viewBotId, realBotId, runtimeIdentity, instance]);
+  }, [enabled, viewBotId, realBotId, runtimeIdentity, instance]);
   latest.current = bridge;
   const commitSessionStatuses = useCallback(() => {
     useSessionStatusStore.getState().commit(bridge.contextId);
   }, [bridge.contextId]);
   useLayoutEffect(() => {
-    if (!viewBotId) return undefined;
+    if (!enabled || !viewBotId) return undefined;
     useSessionStatusStore.getState().begin(bridge.contextId, viewBotId);
     bridge.receiver.activate();
     const unsubscribe = useConversationStore.subscribe(() => {
@@ -69,7 +63,7 @@ export function useSessionStatusBridge(viewBotId: string | undefined, realBotId:
       unsubscribe();
       useSessionStatusStore.getState().end(bridge.contextId);
     };
-  }, [bridge, viewBotId]);
+  }, [bridge, enabled, viewBotId]);
   return {
     sessionStatusContextId: bridge.contextId,
     onSessionStatusEvent: bridge.receive,
