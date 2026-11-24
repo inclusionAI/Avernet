@@ -10,6 +10,7 @@ from threading import Lock
 from uuid import uuid4
 
 search_transport = ContextVar("search_transport", default="")
+search_load_test: ContextVar[bool | None] = ContextVar("search_load_test", default=None)
 _deadline = ContextVar("search_deadline", default=float("inf"))
 _request_id = ContextVar("search_request_id", default="")
 logger = logging.getLogger("search_core.events")
@@ -91,6 +92,12 @@ class EventSummaries:
             "result_cache": stages.get("result_cache_read", {}).get("cache", "skipped"),
             "stage_ms": {name: stage["elapsed_ms"] for name, stage in stages.items()},
         }
+        record.update(summary.get("detail", {}))
+        for key in ("effective_limit", "config_version"):
+            if key in summary:
+                record[key] = summary[key]
+        if "retrieval" in summary:
+            record["effective_retrieval"] = summary["retrieval"]
         if "card_fetch_details" in summary:
             record["card_fetch_details"] = summary["card_fetch_details"]
         record["results"] = results
