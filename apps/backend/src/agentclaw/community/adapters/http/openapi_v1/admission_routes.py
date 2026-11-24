@@ -1,8 +1,9 @@
 """Public operation admission table; re-exported by admission."""
 
-from .admission_modes import AdmissionMode
+from .admission_modes import AdmissionMode, AdmissionRule
 from .admission_account_routes import ACCOUNT_ADMISSION
 from .admission_genome_routes import GENOME_ADMISSION
+from .admission_managed_bot_routes import MANAGED_BOT_ADMISSION
 from .admission_task_routes import (
     TASK_BBS_ADMISSION,
     TASK_PUBLIC_ADMISSION,
@@ -26,7 +27,7 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: path matcher lives and a second implementation of "most specific" is exactly
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
-ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+ADMISSION: dict[tuple[str, str], AdmissionMode | AdmissionRule] = {
     ("PATCH", "/openapi/v1/bots/{bot_id}/caller-instances/{caller_user_id}/token-expiry"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"): AdmissionMode.OPEN,
@@ -82,8 +83,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/metadata/queries"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/template-queries"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/template-config-for-others"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/bots/restart-for-others"): AdmissionMode.ENGINE,
-    ("POST", "/openapi/v1/bots/status-for-others"): AdmissionMode.ENGINE,
+    **MANAGED_BOT_ADMISSION,
     # Transitional app-only lookup; its handler enforces the configured app allowlist.
     ("GET", "/openapi/v1/bots/{bot_id}/access"): AdmissionMode.OPEN,
     # Non-user Bot overview; the gateway requires no user credential for it.

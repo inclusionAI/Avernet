@@ -22,12 +22,15 @@ managed local runtimes are not supported. Published runtimes are read-only.
 
 Restart and batch status accept only Bots whose persisted `active_engine` is
 `claude_code` or `aicoding`. Both operations declare `AdmissionMode.ENGINE` in
-`ADMISSION`, rather than `OPEN`. Each ENGINE operation configures its allowed
-engines and authorized, request-cached Bot reader through `EngineCheck`.
-`PublicAPIRoute` attaches the mode's gate independently of Owner checks.
-ENGINE without configuration or with an empty engine allowlist fails startup;
-an `EngineCheck` on a non-ENGINE operation also fails startup. Other operations'
-admission and authorization policies remain unchanged.
+`ADMISSION`, rather than `OPEN`. Each operation has one `AdmissionRule` containing
+its mode, engine allowlist and authorized Bot dependency provider, declared in
+`admission_managed_bot_routes.py` and composed into the shared inventory.
+No engine decorator or handler metadata is required. `PublicAPIRoute` calls
+`admission.apply_admission` to attach the configured check; the application
+principal guard reads the same policy through `admission_for`.
+ENGINE without a non-empty allowlist or Bot dependency fails startup, as do
+engine parameters on another mode or different rules across one route's methods.
+Other operations' admission and authorization policies remain unchanged.
 The application trust and stored template scope are checked before engine
 support. Other engines, including missing or unknown engine values, return
 HTTP 501 / `501000` / `Not supported for this engine` using `ErrorEnvelope`.
