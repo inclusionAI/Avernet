@@ -2143,7 +2143,7 @@ class BaasService:  # pragma: no cover
             # intermittent redirects by bot/tenant/target device — the data
             # needed to tell a partial-instance/routing fault apart from a
             # blanket auth requirement.
-            if _is_no_active_devices_response(e.response) or _is_no_devices_response(e.response):
+            if _is_no_active_devices_response(e.response):
                 logger.info(
                     "[BaasService.get_ws_info_by_bot_uuid] no active device: "
                     "status=%s bot_uuid=%s tenant=%s device_affinity=%s",

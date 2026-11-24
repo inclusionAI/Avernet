@@ -84,3 +84,16 @@ def test_publish_context_propagates_offline_only_for_checked_read():
         service._resolve_ctx(bot_id='b', entity_id='u', publish_id='p', checked=True)
     with pytest.raises(ValueError):
         service._resolve_ctx(bot_id='b', entity_id='u', publish_id='p')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('code, expected', [('NO_DEVICES_FOUND', DeviceOfflineError), ('BOT_NOT_FOUND', httpx.HTTPStatusError)])
+async def test_desktop_proxy_classifies_only_explicit_missing_device(code, expected):
+    from agentclaw.community.core.devices.services.baas_invoke_transport import DesktopBaasInvokeTransport
+
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(404, json={'detail': {'error': code}}, request=request)))
+    transport = DesktopBaasInvokeTransport(baas_base_url='http://baas.test', tenant='test', bot_uuid='bot', engine_port=1, headers={}, client=client)
+    fs = BaasDeviceFileSystem(transport=transport, conn_info={}, path_mapper=lambda path: path)
+    with pytest.raises(expected):
+        await fs.read_file_checked('file')
+    client.close()

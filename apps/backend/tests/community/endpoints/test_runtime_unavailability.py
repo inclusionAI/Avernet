@@ -21,3 +21,29 @@ def test_file_offline(app_with_testing_modules, world, action):
     with TestClient(app_with_testing_modules, raise_server_exceptions=False) as client:
         r = client.get('/api/resources/files/'+action, params={'path':'data/report.csv','bot_id':_BOT,'owner_id':_OWNER}, headers={'x-user-id':_OWNER})
     assert r.status_code == 503
+
+
+@pytest.mark.parametrize('action', ['preview', 'download'])
+def test_teclaw_http_info_offline_reaches_legacy_route(app_with_testing_modules, world, action):
+    from typing import Annotated
+    import httpx
+    from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_BAAS
+    from tests.community.endpoints.test_resources_teclaw_reads import _seed_teclaw_bot, _OWNER
+    from tests.community.framework.endpoint_helpers import http_envelope_response
+
+    _seed_teclaw_bot(world, bot_id='bot_offline_http')
+    client = world.get(Annotated[HttpClient, QUALIFIER_BAAS])
+
+    def respond(path, **kwargs):
+        if path.endswith('/ws-info'):
+            return http_envelope_response({
+                'ws_url': 'ws://localhost/ws', 'http_url': 'http://engine/read',
+                'token': 'test-token', 'target': 'BOT-read-1', 'expires_at': 0,
+            })
+        return httpx.Response(404, json={'detail': {'error': 'NO_ACTIVE_DEVICES'}}, request=httpx.Request('GET', 'http://baas.test/http-info'))
+
+    client.set_override('get', respond)
+    with TestClient(app_with_testing_modules, raise_server_exceptions=False) as http:
+        response = http.get('/api/resources/files/' + action, params={'path': 'data/x', 'bot_id': 'bot_offline_http'}, headers={'x-user-id': _OWNER})
+    assert response.status_code == 503
+    assert response.json()['detail'] == 'Device temporarily unavailable'
