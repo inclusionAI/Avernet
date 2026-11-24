@@ -114,7 +114,9 @@ orphan registrations; a bounded prefix cannot hide every newer member forever.
 Foreign-owner liveness is memoized once per distinct instance per tick.
 Local session and incoming-handoff capacities reject further admission rather
 than growing without bound. A scan page is retained until its entries have been
-visited; it is not replaced by a mutable offset. Startup validates the configured
+visited; it is not replaced by a mutable offset. The Store may return smaller
+pages using the remaining scan quota. If it defers the page before reading, the
+Worker keeps the cursor and retries on a later tick. Startup validates the configured
 session limit against the store's advertised local capacity (if supplied).
 
 Recovery prepares a frozen initial checkpoint before issuing an acquisition.

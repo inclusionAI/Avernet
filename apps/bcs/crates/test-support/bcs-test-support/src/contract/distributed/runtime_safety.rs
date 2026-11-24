@@ -1,6 +1,7 @@
 //! Reusable phase-one resource/control assertions against actual providers.
 use super::ContractResult;
 use bcs_dist_model::*;
+use std::num::NonZeroU32;
 use bcs_service_api::{
     application::dist_runtime::DistWorkerIsolationService,
     core::dist_projection::OutputProjectionCoreService,
@@ -21,6 +22,12 @@ pub fn scan_budget_port_contract_tests(port: &dyn ScanBudgetPort) {
     assert!(port.try_io().is_none());
     drop(permits);
     assert!(port.try_io().is_some());
+
+    let burst = NonZeroU32::new(profile.burst).expect("positive burst");
+    let available = NonZeroU32::new(profile.burst / 2).expect("positive per-class capacity");
+    assert_eq!(port.claim_log_page(ScanClass::Discovery, burst).expect("log reservation"), Some(available));
+    assert!(port.claim(ScanClass::Discovery, 0, available.get()).expect("session reservation"));
+    assert!(port.claim(ScanClass::Dispatch, profile.burst / 4, 0).expect("separate class reservation"));
 }
 /// Fixture contains one healthy retained input; calls must complete a fixed cut.
 pub async fn admission_maintenance_port_contract_tests(

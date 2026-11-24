@@ -30,9 +30,6 @@ pub async fn inbox_consumer_port_contract_tests(
             shard,
             PageRequest {
                 after: None,
-                // The shared scan governor gives each class its own quarter
-                // plus the shared quarter, so one class may claim at most 64
-                // items from the default 128-item aggregate burst.
                 limit: NonZeroU32::new(64).expect("positive page bound"),
             },
         )

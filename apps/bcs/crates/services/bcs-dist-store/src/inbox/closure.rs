@@ -118,12 +118,19 @@ struct Pending {
     phase: Materialize,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct InboxScan {
+    through: Option<InboxPos>,
+    cut: Option<InboxPos>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Progress {
     closure: AdmissionClosure,
     cursor: u64,
     pending: Option<Pending>,
     checkpoint_tasks: Vec<Tid>,
     checkpoint_cursor: usize,
+    #[serde(default)]
+    inbox: Option<InboxScan>,
     terminal_tasks: u64,
     evidence_digest: Digest,
 }

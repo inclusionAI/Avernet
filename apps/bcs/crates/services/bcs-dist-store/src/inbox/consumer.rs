@@ -72,16 +72,20 @@ impl StoreInboxProducer {
             .map(|p| self.cursor(sid, p).map(Bound::Excluded))
             .transpose()?
             .unwrap_or(Bound::Unbounded);
+        self.read_inputs(sid, start, Bound::Unbounded, limit, false).await
+    }
+    pub(super) async fn read_inputs(
+        &self,
+        sid: &Sid,
+        start: Bound<StreamId>,
+        end: Bound<StreamId>,
+        limit: NonZeroU32,
+        reverse: bool,
+    ) -> Result<Vec<StreamEntry>, StoreError> {
         let _permit = self.io_permit().await?;
         Ok(tokio::time::timeout(
             Duration::from_secs(2),
-            self.inner.stream.range(
-                &self.inner.layout.inbox(sid)?,
-                start,
-                Bound::Unbounded,
-                limit,
-                false,
-            ),
+            self.inner.stream.range(&self.inner.layout.inbox(sid)?, start, end, limit, reverse),
         )
         .await
         .map_err(|_| unknown("inbox_read"))?
@@ -168,6 +172,30 @@ impl StoreInboxProducer {
             .map_err(|_| unknown(&input.input_id.0))?;
         Ok(self.position(&r.sid, id))
     }
+    pub(super) async fn admission_for_input(
+        &self,
+        sid: &Sid,
+        input: &InputEnvelope,
+        key: &[u8],
+    ) -> Result<Option<AdmissionRecord>, StoreError> {
+        let key = std::str::from_utf8(key).map_err(|_| invalid("admission_key"))?;
+        if !key.starts_with(&format!(
+            "{}:admission:",
+            self.inner.layout.namespace_identity()
+        )) {
+            return Err(invalid("admission_namespace"));
+        }
+        let Some((_, c)) = self.admission_record(key).await? else {
+            return Ok(None);
+        };
+        if c.sid() != sid
+            || c.request.input.input_id != input.input_id
+            || c.request.input.business_digest != input.business_digest
+        {
+            return Err(invalid("admission_input_mismatch"));
+        }
+        Ok(Some(c))
+    }
     /// None: unresolved admission position, stop only this session. Some(None):
     /// durable duplicate/rejection, advance coverage without invoking the Runner.
     async fn classify(
@@ -177,22 +205,9 @@ impl StoreInboxProducer {
     ) -> Result<Option<Option<InputEnvelope>>, StoreError> {
         let input = decode_inbox_entry(sid, &row.fields)?;
         if let Some(key) = row.fields.get("admission") {
-            let key = std::str::from_utf8(key).map_err(|_| invalid("admission_key"))?;
-            if !key.starts_with(&format!(
-                "{}:admission:",
-                self.inner.layout.namespace_identity()
-            )) {
-                return Err(invalid("admission_namespace"));
-            }
-            let Some((_, c)) = self.admission_record(key).await? else {
+            let Some(c) = self.admission_for_input(sid, &input, key).await? else {
                 return Ok(None);
             };
-            if c.sid() != sid
-                || c.request.input.input_id != input.input_id
-                || c.request.input.business_digest != input.business_digest
-            {
-                return Err(invalid("admission_input_mismatch"));
-            }
             match c.decision {
                 None => Ok(None),
                 Some(Decision::Rejected) => Ok(Some(None)),

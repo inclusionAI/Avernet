@@ -108,6 +108,9 @@ pub trait ShardFeedPort: Send {
     ) -> Result<FeedBatch, StoreError>;
 }
 
+/// A pending page was not read; retry from the same cursor when resources free up.
+pub const PENDING_SCAN_DEFERRED: &str = "pending_scan_deferred";
+
 #[async_trait]
 pub trait InboxConsumerPort: Send + Sync {
     fn reader_resources(&self) -> Option<InboxReaderResources> {
@@ -129,6 +132,9 @@ pub trait InboxConsumerPort: Send + Sync {
     ) -> Result<(), StoreError>;
     async fn trim_committed(&self, proof: &CommitReceipt) -> Result<(), StoreError>;
     /// Includes future deadlines. Takeover must activate these sessions, not just seal.
+    /// `limit` is an upper bound: budgets may reduce the page size. Follow `next`
+    /// even if fewer items were returned. `NotApplied` with `PENDING_SCAN_DEFERRED`
+    /// means no page was read and `after` must be retried.
     async fn enumerate_pending(
         &self,
         shard: ShardId,

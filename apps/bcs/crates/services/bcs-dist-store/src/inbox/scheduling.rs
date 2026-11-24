@@ -300,7 +300,7 @@ impl AdmissionControlPort for StoreInboxProducer {
         }
         // There is no shard-wide admission journal in the MVP.  Admission
         // documents are repaired by the caller's InputId retry; closure work
-        // covers the session checkpoint and the current schedule slots.
+        // covers the Session checkpoint, current schedule slots and Inbox.
         Ok(Page { items: Vec::new(), next: None })
     }
 

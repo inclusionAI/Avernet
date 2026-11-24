@@ -15,9 +15,17 @@ async fn closure_cannot_complete_before_actual_archive_and_terminal_publication_
     let f = Fixture::new().await;
     assert!(matches!(f.admit("first").await, AdmitOutcome::Accepted(_)));
     let closure = f.isolate("isolate").await;
-    // The MVP has no shard-wide admission journal to enumerate.  A closure
-    // therefore starts with no admission obligations and may complete from the
-    // session checkpoint alone.
+    let mut obligation = None;
+    for _ in 0..16 {
+        let work = f.control.advance_closure(&f.owner, &closure).await.unwrap();
+        assert!(work.certificate.is_none());
+        if work.obligation.is_some() {
+            obligation = work.obligation;
+            break;
+        }
+    }
+    assert_eq!(obligation.unwrap().request.input.input_id, InputId("first".into()));
+    f.terminal(&Tid(TID.into()), "isolate").await;
     let mut certificate = None;
     for _ in 0..16 {
         let work = f.control.advance_closure(&f.owner, &closure).await.unwrap();
@@ -355,7 +363,39 @@ async fn isolation_commit_cannot_rewrite_a_frozen_terminal_result() {
 }
 
 #[tokio::test]
-async fn creator_paused_before_initial_task_is_completed_after_closure_and_resume() {
+async fn closure_preserves_acceptance_when_producer_loses_the_slot_cas_reply() {
+    let f = Fixture::new().await;
+    // Admission writes the schedule once to register, and again to accept.
+    // Drop the caller after the second CAS, before the admission doc catches up.
+    let pause = f.storage.pause_after(
+        "document.replace",
+        &f.layout.schedule(&f.owner.sid).unwrap(),
+        2,
+    );
+    let producer = f.inbox.clone();
+    let caller = tokio::spawn(async move { producer.admit(request("accepted")).await });
+    pause.reached().await;
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+
+    let closure = f.isolate("isolate").await;
+    let mut obligation = None;
+    for _ in 0..8 {
+        let work = f.control.advance_closure(&f.owner, &closure).await.unwrap();
+        assert!(work.certificate.is_none());
+        if work.obligation.is_some() {
+            obligation = work.obligation;
+            break;
+        }
+    }
+    assert_eq!(obligation.unwrap().request.input.input_id, InputId("accepted".into()));
+    f.terminal(&Tid(TID.into()), "isolate").await;
+    resume(&f, &closure, "resume").await;
+    assert!(matches!(f.admit("accepted").await, AdmitOutcome::Duplicate(_)));
+}
+
+#[tokio::test]
+async fn closure_does_not_finalize_a_creator_paused_before_acceptance() {
     use bcs_service_api::port::repo::distributed::task_feed::TaskReaderPort;
     let f = std::sync::Arc::new(Fixture::new().await);
     let pause = f.storage.pause_after(
@@ -369,15 +409,10 @@ async fn creator_paused_before_initial_task_is_completed_after_closure_and_resum
     });
     pause.reached().await;
     let closure = f.isolate("isolate").await;
-    // The admission document is not guaranteed to exist until the caller's
-    // admission CAS succeeds, so closure does not manufacture a journal
-    // obligation for this paused pre-create request.
-    for _ in 0..4 {
-        assert!(f.control.advance_closure(&f.owner, &closure).await.unwrap().obligation.is_none());
-    }
+    // A registered Start that never reached Accepted cannot hold closure open.
+    assert_eq!(complete(&f, &closure).await.terminal_tasks, 0);
     pause.resume();
-    let result = creator.await.unwrap();
-    assert!(matches!(result, AdmitOutcome::Accepted(_) | AdmitOutcome::Quarantined));
+    assert!(matches!(creator.await.unwrap(), AdmitOutcome::Quarantined));
     let task = f
         .feed
         .load_snapshot(&scope(), &Tid(TID.into()))

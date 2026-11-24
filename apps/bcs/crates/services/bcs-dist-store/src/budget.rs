@@ -1,6 +1,9 @@
 //! One injected governor for every scanner using a Worker's storage pool.
 use bcs_service_api::port::repo::distributed::{budget::*, common::StoreError};
-use std::sync::{Arc, Mutex};
+use std::{
+    num::NonZeroU32,
+    sync::{Arc, Mutex, MutexGuard},
+};
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore},
     time::Instant,
@@ -96,11 +99,36 @@ impl ScanBudgetPort for SharedScanBudget {
         if logs > self.profile.burst || sessions > self.profile.burst {
             return Ok(false);
         }
-        let class = match class {
-            ScanClass::Repair => 0,
-            ScanClass::Discovery => 1,
-            ScanClass::Dispatch => 2,
-        };
+        let class = bucket_for(class);
+        let mut tokens = self.refill()?;
+        let logs = u64::from(logs) * UNIT;
+        let sessions = u64::from(sessions) * UNIT;
+        if tokens.logs[class] + tokens.logs[3] < logs
+            || tokens.sessions[class] + tokens.sessions[3] < sessions
+        {
+            return Ok(false);
+        }
+        take(&mut tokens.logs, class, logs);
+        take(&mut tokens.sessions, class, sessions);
+        Ok(true)
+    }
+    fn claim_log_page(
+        &self,
+        class: ScanClass,
+        limit: NonZeroU32,
+    ) -> Result<Option<NonZeroU32>, StoreError> {
+        let class = bucket_for(class);
+        let mut tokens = self.refill()?;
+        let rows = ((tokens.logs[class] + tokens.logs[3]) / UNIT) as u32;
+        let grant = NonZeroU32::new(limit.get().min(rows));
+        if let Some(grant) = grant {
+            take(&mut tokens.logs, class, u64::from(grant.get()) * UNIT);
+        }
+        Ok(grant)
+    }
+}
+impl SharedScanBudget {
+    fn refill(&self) -> Result<MutexGuard<'_, Tokens>, StoreError> {
         let mut tokens = self.tokens.lock().map_err(|_| StoreError::Invalid {
             code: "scan_budget_poisoned".into(),
         })?;
@@ -123,16 +151,14 @@ impl ScanBudgetPort for SharedScanBudget {
                 )
                 .min(capacity);
         }
-        let logs = u64::from(logs) * UNIT;
-        let sessions = u64::from(sessions) * UNIT;
-        if tokens.logs[class] + tokens.logs[3] < logs
-            || tokens.sessions[class] + tokens.sessions[3] < sessions
-        {
-            return Ok(false);
-        }
-        take(&mut tokens.logs, class, logs);
-        take(&mut tokens.sessions, class, sessions);
-        Ok(true)
+        Ok(tokens)
+    }
+}
+fn bucket_for(class: ScanClass) -> usize {
+    match class {
+        ScanClass::Repair => 0,
+        ScanClass::Discovery => 1,
+        ScanClass::Dispatch => 2,
     }
 }
 fn take(buckets: &mut [u64; 4], class: usize, amount: u64) {
