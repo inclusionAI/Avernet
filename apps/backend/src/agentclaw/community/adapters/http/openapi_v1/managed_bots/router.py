@@ -13,7 +13,6 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_access import EngineCheck
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotOperationsForbiddenError,
 )
@@ -47,7 +46,6 @@ from .schemas import (
 )
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
-_CODING_ENGINES = frozenset({'claude_code', 'aicoding'})
 
 
 def _trust(principal: Principal, config: OpenApiBotOperationsConfig) -> None:
@@ -145,7 +143,6 @@ async def get_template_snapshot(
     response_model=Envelope[ManagedBotStatus],
     summary='Accept a managed draft Bot restart',
 )
-@EngineCheck(engines=_CODING_ENGINES, bots=restart_engine_targets)
 @envelope_errors
 async def restart_for_others(
     body: ManagedBotRestart,
@@ -189,7 +186,6 @@ async def restart_for_others(
     response_model=Envelope[Page[ManagedBotStatus]],
     summary='Read managed draft restart progress in a batch',
 )
-@EngineCheck(engines=_CODING_ENGINES, bots=status_engine_targets)
 @envelope_errors
 async def status_for_others(
     request: Request,

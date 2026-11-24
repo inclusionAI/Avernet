@@ -983,13 +983,21 @@ else** — `openapi_v1/authorization.py`. A handler declares nothing. The router
 class reads the row and attaches what it calls for.
 
 This is a deliberate **reversal** of the convention its neighbour
-`admission.py` follows, where a route also names its own dependency and
+`admission.py`'s existing grant/user modes follow, where a route also names its own dependency and
 `test_admission_inventory.py` holds the two in step. That redundancy is
 valuable: a mislabelled table entry still refuses at the route. It was traded
 for a single source, because two declarations for one fact is two things to
 keep in step and 43 hand-written ones had already accumulated. If you are
 adding an operation, this is the difference that will surprise you: **there is
 nothing to write on the route.**
+
+ENGINE admission also has a single policy declaration: an `AdmissionRule` in
+`ADMISSION` contains `mode=AdmissionMode.ENGINE`, `engines`, and a provider for
+the authorized Bot dependency. `PublicAPIRoute` invokes `admission.apply_admission`
+to attach that check without an engine decorator, and `require_principal` reads
+the same rule to decide application admission. The existing grant/user-mode
+dependencies and the independent `AUTHORIZATION` decision remain unchanged.
+See [Managed Bot operations](managed-bot-operations.md) for the configured routes.
 
 What replaces the lost redundancy is that omission is not survivable:
 
