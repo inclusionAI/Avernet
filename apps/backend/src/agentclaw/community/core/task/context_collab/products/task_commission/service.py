@@ -46,6 +46,11 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 from agentclaw.community.core.task.context_collab.l6_products.topology import (
     product_execution_binding_ref,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
+    InteractionCommand,
+    StepCommand,
+    SwarmExecutionControl,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     _now,
     current_axes,
@@ -146,7 +151,7 @@ class _AdvanceIntent:
 
 
 class TaskCommissionService:
-    """任务代办编排:发布、Bot Query/Apply、Work 六动作与读视图。"""
+    """任务代办用例与 binding-scoped Swarm 执行控制的统一 Service API。"""
 
     @inject
     def __init__(
@@ -162,8 +167,10 @@ class TaskCommissionService:
         dispatch_port: "TaskDispatchPort" = None,
         *,
         product_catalog: ProductProfileReader,
+        swarm_execution: SwarmExecutionControl,
     ) -> None:
         self._product_catalog = product_catalog
+        self._swarm_execution = swarm_execution
         self._repo = collab_repo
         self._authorizer = authorizer
         self._method_store = method_store
@@ -742,3 +749,28 @@ class TaskCommissionService:
             if isinstance(content, str):
                 return content
         return ""
+
+    # Swarm execution remains owned by L5. Do not apply commission-only product
+    # filtering here: the existing HTTP resources address an exact Swarm binding.
+    def step_swarm(
+        self,
+        collet_id: str,
+        binding_id: str,
+        command: StepCommand,
+        context: ActorContext,
+    ) -> dict:
+        return self._swarm_execution.step(collet_id, binding_id, command, context)
+
+    def get_swarm_stages(
+        self, collet_id: str, binding_id: str, context: ActorContext
+    ) -> dict:
+        return self._swarm_execution.stages(collet_id, binding_id, context)
+
+    def interact_swarm(
+        self,
+        collet_id: str,
+        binding_id: str,
+        command: InteractionCommand,
+        context: ActorContext,
+    ) -> dict:
+        return self._swarm_execution.interact(collet_id, binding_id, command, context)

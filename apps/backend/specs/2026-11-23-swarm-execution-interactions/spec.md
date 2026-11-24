@@ -58,3 +58,25 @@ journals and explicit limitations. New API, HTTP, DI and MethodStore contracts
 are additive to existing operations; Stage context refs and planning interaction
 facts are additive. External MethodStore implementations need the local guard
 and atomic execution-revision CAS. No SQL migration/new table is required.
+
+
+## Service entry consolidation (2026-11-24)
+
+At the user's request, the public entrypoint is consolidated into the existing
+`TaskCommissionServiceProtocol`, re-exported by `api/task/task_commission_service.py`.
+It provides `step_swarm`, `get_swarm_stages` and `interact_swarm`. Both independent
+`swarm_execution_service.py` files are removed. The existing L5 Swarm operations
+module retains execution control behind the internal `SwarmExecutionControl`
+contract; the product facade delegates rather than copying orchestration logic.
+This supersedes the separate public Service API/re-export from the initial
+implementation without changing HTTP paths, DTOs, permissions or Event semantics.
+
+The Swarm controls remain binding-scoped and support authored profiles with
+non-commission product IDs. Existing commission-only product checks remain on
+publish/detail/Work operations, not on Swarm control methods. Direct Python
+consumers must migrate their import/method names, and direct product-service
+assemblers must explicitly supply the L5 execution-control dependency. No SQL
+migration, installed-profile change or execution-recovery capability is added.
+
+See the [owning contract](../../src/agentclaw/community/core/task/context_collab/l5_methods/SWARM-EXECUTION.md)
+and the dated follow-up in [delivery](delivery.md) for implementation and verification.

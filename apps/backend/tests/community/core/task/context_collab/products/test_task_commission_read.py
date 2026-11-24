@@ -9,6 +9,7 @@
 - 外 profile 404、未知 collet 404。
 """
 
+from unittest.mock import Mock
 from datetime import datetime
 
 import pytest
@@ -40,6 +41,9 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextStatusRecord,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
+    SwarmExecutionControl,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
     TaskCommissionService,
@@ -119,6 +123,7 @@ class TestReadCases:
             authorizer=StructuralContextCollabAuthorizer(),
             method_store=store,
             method_ops_port=_method_port(write_fake, store),
+            swarm_execution=Mock(spec=SwarmExecutionControl),
             product_catalog=PRODUCT_CATALOG,
         )
         return service, write_fake

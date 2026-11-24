@@ -9,6 +9,7 @@
 - DI 全链:TaskDispatchPort 解析为 A2aTaskDispatch 且共享 mock singleton。
 """
 
+from unittest.mock import Mock
 import pytest
 
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
@@ -17,6 +18,9 @@ from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delive
 from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
     A2aTaskDispatch,
     LOCAL_ISSUER,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
+    SwarmExecutionControl,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
     TaskCommissionService,
@@ -77,6 +81,7 @@ def _service_with_bridge():
         method_store=store,
         method_ops_port=_method_port(repo, store),
         dispatch_port=A2aTaskDispatch(a2a_delivery=mock),
+        swarm_execution=Mock(spec=SwarmExecutionControl),
         product_catalog=PRODUCT_CATALOG,
     )
     return service, mock
@@ -178,6 +183,7 @@ class TestDispatchFailurePropagation:
             method_store=store,
             method_ops_port=_method_port(repo, store),
             dispatch_port=A2aTaskDispatch(a2a_delivery=_RejectingDelivery()),
+            swarm_execution=Mock(spec=SwarmExecutionControl),
             product_catalog=PRODUCT_CATALOG,
         )
         with pytest.raises(ContextCollabValidationError, match="dispatch"):
@@ -202,6 +208,7 @@ class TestEnvelopeIdentityChainAsserted:
             method_store=store,
             method_ops_port=_method_port(repo, store),
             dispatch_port=A2aTaskDispatch(a2a_delivery=mock),
+            swarm_execution=Mock(spec=SwarmExecutionControl),
             product_catalog=PRODUCT_CATALOG,
         )
         created = _publish(service)

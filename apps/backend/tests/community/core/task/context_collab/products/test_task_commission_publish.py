@@ -53,6 +53,9 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
     CreateColletRecordRequest,
     EventAppendedRecord,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
+    SwarmExecutionControl,
+)
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
     TaskCommissionService,
 )
@@ -233,6 +236,7 @@ def _service(repo: _FakeRepo | None = None, store: InMemoryMethodStore | None = 
         authorizer=StructuralContextCollabAuthorizer(),
         method_store=store,
         method_ops_port=_method_port(repo, store),
+        swarm_execution=Mock(spec=SwarmExecutionControl),
         product_catalog=PRODUCT_CATALOG,
     )
     return service, repo, store

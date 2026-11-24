@@ -1,13 +1,15 @@
 # Bounded Swarm execution and Stage conversations
 
-Owner: context_collab L5. The inbound contract is
-[`SwarmExecutionServiceProtocol`](swarm_execution_contracts.py), re-exported by
-[`api/swarm_execution_service.py`](../../../../api/swarm_execution_service.py).
-[Execution](swarm_execution_service.py), [reads](swarm_execution_reads.py),
+Owner: context_collab L5 execution semantics. The inbound contract is the
+existing [`TaskCommissionServiceProtocol`](../products/task_commission/service_api.py),
+re-exported by [`api/task/task_commission_service.py`](../../../../api/task/task_commission_service.py).
+The [product facade](../products/task_commission/service.py) delegates to the
+internal [`SwarmExecutionControl`](swarm_execution_contracts.py) capability.
+[Execution operations](operations/swarm/service.py), [reads](swarm_execution_reads.py),
 [revision construction](swarm_replanning.py) and
 [HTTP delivery](../../../../adapters/http/task/context_collab_swarm_execution.py)
-are separate. This evolves the earlier Driver-only scope; it does not change
-immutable ProductProfile publication or add an execution scheduler.
+remain separate responsibilities. No independent Swarm Service API is published.
+This does not change immutable ProductProfile publication or add a scheduler.
 
 ## Service API and HTTP
 
@@ -19,9 +21,16 @@ The HTTP base path is:
 
 | HTTP | Service method | Meaning |
 | --- | --- | --- |
-| `POST /step` | `step` | Plan/dispatch at most one new Stage; never drain the internal queue. |
-| `GET /stages` | `stages` | Current graph, Stage inputs/responsibilities/outputs/status, sessions and execution history. |
-| `POST /interactions` | `interact` | Human message or clarification reply to an exact Stage/session. |
+| `POST /step` | `step_swarm` | Plan/dispatch at most one new Stage; never drain the internal queue. |
+| `GET /stages` | `get_swarm_stages` | Current graph, Stage inputs/responsibilities/outputs/status, sessions and execution history. |
+| `POST /interactions` | `interact_swarm` | Human message or clarification reply to an exact Stage/session. |
+
+These methods address an exact Collet/Swarm binding, regardless of its product
+profile ID. Commission publish/detail/Work methods keep their existing product
+checks; those filters must not narrow the Swarm routes to `task_commission`.
+In-process consumers migrate to the task-commission Protocol and these three
+method names. The former independent Swarm Service API/re-export is removed;
+HTTP paths, request/result shapes and authorization semantics are unchanged.
 
 All routes use authenticated human identity, the existing `Envelope` and domain
 error mapping: stale versions/replay conflicts → 409; missing Stage/binding →
@@ -134,7 +143,7 @@ cannot forge `execution_revision` metadata.
 
 ## Agent clarification and human reply
 
-A trusted worker calls the **same transport-free Service API** with
+A trusted worker calls **`TaskCommissionServiceProtocol.interact_swarm`** with
 `kind=clarification_request`, its authenticated Agent `ActorContext`, current
 revision, Stage/session and nonempty question. Only the exact live allocated
 Agent (type and ID), current participation, active binding and unexpired lease
@@ -183,7 +192,8 @@ binding, or external notification delivery. SQL history with missing managed
 Method state remains fail-closed. An outstanding accepted decision that conflicts
 with an out-of-band Method mutation is rejected, not silently overwritten.
 
-Propagation: new Service API/re-export/router/DI; additive Stage context refs,
+Propagation: existing task-commission Service API/re-export, Swarm router and
+DI; internal L5 execution-control capability; additive Stage context refs,
 planning interaction facts and reserved coordination Event kinds; MethodStore
 implementations must supply the guard and atomic revision commit. HTTP clients
 can opt in without changing old routes. Worker hosts must bind the evidence and

@@ -27,13 +27,17 @@ provides:
   - SwarmMethodOpsServiceProtocol
   - stage_role_candidates
   - SwarmDriver
+  - SwarmExecutionControl
+  - SwarmExecutionOperations
 consumes:
   - MethodStoreProtocol
   - CollaborationReader
+  - EventWriter
   - ContextServiceProtocol
   - TopLevelBindingRecovery
   - SwarmPlanningService
   - StageExecutionService
+  - SwarmInteractionPlanner
 internal_dependencies:
   - agentclaw.community.core.task.context_collab.errors
   - agentclaw.community.core.task.context_collab.l2_agent_network
@@ -55,6 +59,11 @@ Method contracts affect generic Method services, L6 composition/validation,
 product definitions, product services and DI authorization/admission adapters.
 Preserve pinned versions and runtime authority; changing Python ownership alone
 does not migrate ProductInstances, alter stored facts or authorize participation.
+
+The [bounded execution controls](SWARM-EXECUTION.md) are an internal L5 capability
+assembled in the existing Swarm operations module. The existing task-commission
+Service API exposes the three caller-facing methods; L5 has no dependency on
+that product implementation and does not publish another execution Service API.
 
 ## Base methods and product compositions
 

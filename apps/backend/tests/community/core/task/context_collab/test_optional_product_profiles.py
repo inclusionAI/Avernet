@@ -1,5 +1,6 @@
 """Workflow omission keeps shared Task enforcement, exact selection and recovery."""
 
+from unittest.mock import Mock
 import json
 from dataclasses import replace
 
@@ -61,6 +62,9 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
+    SwarmExecutionControl,
+)
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
     TaskCommissionService,
 )
@@ -77,7 +81,9 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     ensure_top_level_binding,
 )
-from tests.community.core.task.context_collab.product_catalog import standard_task_workflow
+from tests.community.core.task.context_collab.product_catalog import (
+    standard_task_workflow,
+)
 
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
@@ -127,7 +133,12 @@ def runtime(db, request):
         catalog,
     )
     product = TaskCommissionService(
-        repo, authorizer, store, port, product_catalog=catalog
+        repo,
+        authorizer,
+        store,
+        port,
+        swarm_execution=Mock(spec=SwarmExecutionControl),
+        product_catalog=catalog,
     )
     return profile, catalog, repo, store, generic, product
 

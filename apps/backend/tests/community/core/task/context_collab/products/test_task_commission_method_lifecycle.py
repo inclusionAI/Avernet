@@ -19,6 +19,7 @@ ActorContext,非 owner 拿不到方法面入口(G1 check_create 先挡);
 该守卫的覆盖住在 test_open_profile.py / test_method_authorization.py。
 """
 
+from unittest.mock import Mock
 import pytest
 
 from agentclaw.community.core.task.context_collab.errors import (
@@ -40,6 +41,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
+    SwarmExecutionControl,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
     TaskCommissionService,
@@ -135,6 +139,7 @@ def _service(repo=None, store=None, method_port=None, dispatch_port=None):
             method_port if method_port is not None else _real_method_port(repo, store)
         ),
         dispatch_port=dispatch,
+        swarm_execution=Mock(spec=SwarmExecutionControl),
         product_catalog=PRODUCT_CATALOG,
     )
     return service, repo, store, dispatch

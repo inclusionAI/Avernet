@@ -121,3 +121,86 @@ replies. Persistent notifications are exposed through polling/Event reads.
 - The new registered-case module is 171 lines and passes default Ruff checks;
   the feature commit passes the repository's local Python SAST gate.
 - Full Backend CI/coverage and remote runtime integration remain unverified.
+
+
+## API entry consolidation (2026-11-24)
+
+Baseline for this follow-up: `922207fb0ef4f09e84e4f2d7ba8429a2d86e5718`.
+The follow-up is in the working tree; no new commit, push, merge or deployment is
+claimed. It supersedes the initial separate public execution Service API above.
+
+### Changes
+
+- Remove both `api/swarm_execution_service.py` and
+  `l5_methods/swarm_execution_service.py`; add no source files.
+- Extend the existing `TaskCommissionServiceProtocol` with `step_swarm`,
+  `get_swarm_stages` and `interact_swarm`; all three HTTP routes inject it.
+- Retain L5 execution control as `SwarmExecutionOperations` in the existing
+  `l5_methods/operations/swarm/service.py`, consumed through the internal
+  `SwarmExecutionControl` contract. The relocated class's method bodies match
+  the original AST, including request/decision journaling and replay handling.
+- Delegate from the product facade rather than copying orchestration, adding
+  product-tag restrictions or changing HTTP paths/DTOs, permissions, Event
+  semantics, profile selection or SQL schemas.
+- Require the L5 capability explicitly in direct product-service construction;
+  alias the API Protocol to the concrete task-commission singleton in DI.
+- Migrate real service/HTTP tests and the conformance registry to the existing
+  API. Failure/race tests inject planner/EventWriter dependencies rather than
+  mutating service internals; three added cases check delegation and error
+  propagation through the product facade.
+- Update the [execution contract](../../src/agentclaw/community/core/task/context_collab/l5_methods/SWARM-EXECUTION.md),
+  [product ownership](../../src/agentclaw/community/core/task/context_collab/products/task_commission/README.md),
+  L5/domain/API navigation and the [spec follow-up](spec.md#service-entry-consolidation-2026-11-24).
+
+### Executed verification
+
+Commands run from `apps/backend` with `DEPLOY_PROFILE=test uv run --no-sync`:
+
+- Before editing, execution/revision, product compatibility, product suites,
+  commission/Swarm HTTP and Task DI tests: **371 passed, 1 failed**. The failure
+  is `test_inactive_open_binding_blocks_previously_admitted_enrollment`.
+- After consolidation, execution API + Swarm HTTP + Service API conformance:
+  **262 passed**.
+- Final combined affected regression, workflow, Event schema, full architecture
+  and HTTP fast gates: **987 passed, 2 failed** using:
+
+```bash
+pytest -q \
+  tests/community/core/task/context_collab/test_swarm_execution_api.py \
+  tests/community/core/task/context_collab/test_swarm_execution_revisions.py \
+  tests/community/core/task/context_collab/test_l6_runtime_contract.py \
+  tests/community/core/task/context_collab/test_optional_product_profiles.py \
+  tests/community/core/task/context_collab/products \
+  tests/community/core/task/context_collab/test_swarm_workflow*.py \
+  tests/community/core/task/context_collab/test_event_schema.py \
+  tests/community/endpoints/test_swarm_execution_endpoints.py \
+  tests/community/endpoints/test_task_commission_a2a_endpoints.py \
+  tests/community/di/test_task_module.py \
+  tests/community/di/modules/test_swarm_runtime.py \
+  tests/community/architecture \
+  tests/community/framework/test_coverage_gate.py \
+  tests/community/adapters/http/openapi_v1/test_explicit_user_id.py \
+  tests/community/adapters/http/openapi_v1/test_schema_docs.py \
+  tests/community/core/bot_config_surface/test_no_handler_only_checks.py
+```
+
+The final failing node IDs match exactly the pre-edit product baseline plus the
+recorded post-rebase HTTP fast-gate baseline: the Open enrollment failure above
+and `test_endpoint_coverage_against_baseline`. The latter reports the exact same
+**38 existing uncovered Method routes**, with no added/removed rendered gaps.
+The suite is not fully green; these failures remain unresolved and are not waived.
+
+Additional runs/checks:
+
+- Registered endpoint runner (`test_endpoint_runner.py -k swarm_execution`):
+  **6 passed** against real task-commission facade/L5 services and SQL.
+- Endpoint no-mock safeguards: **23 passed**.
+- Default Ruff and severe `E9,F63,F7,F82` checks pass for all changed Python files.
+- Every changed Python file is within 1,000 lines; `git diff --check` passes.
+- No old execution-Service API imports remain in tracked repository consumers.
+
+These local runs do not establish full Backend CI/coverage, enterprise consumer,
+production database or live Agent/runtime compatibility. Direct Python consumers
+must migrate the removed import and method names; HTTP clients are unchanged.
+The existing process-local MethodStore and external-side-effect limitations in
+the owning execution contract remain unchanged.

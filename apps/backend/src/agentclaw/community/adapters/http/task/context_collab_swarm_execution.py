@@ -13,8 +13,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from agentclaw.community.api.swarm_execution_service import (
-    SwarmExecutionServiceProtocol,
+from agentclaw.community.api.task.task_commission_service import (
+    TaskCommissionServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
@@ -58,10 +58,10 @@ async def step_swarm(
     body: StepRequest,
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
-    service: SwarmExecutionServiceProtocol = Injected(SwarmExecutionServiceProtocol),  # noqa: B008
+    service: TaskCommissionServiceProtocol = Injected(TaskCommissionServiceProtocol),  # noqa: B008
 ) -> Envelope[dict]:
     return envelope(
-        service.step(
+        service.step_swarm(
             collab_context_id,
             binding_id,
             StepCommand(**body.model_dump()),
@@ -78,11 +78,11 @@ async def get_swarm_stages(
     binding_id: str,
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
-    service: SwarmExecutionServiceProtocol = Injected(SwarmExecutionServiceProtocol),  # noqa: B008
+    service: TaskCommissionServiceProtocol = Injected(TaskCommissionServiceProtocol),  # noqa: B008
 ) -> Envelope[dict]:
     return envelope(
         await asyncio.to_thread(
-            service.stages, collab_context_id, binding_id, _actor(user)
+            service.get_swarm_stages, collab_context_id, binding_id, _actor(user)
         ),
         request,
     )
@@ -96,11 +96,11 @@ async def interact_swarm(
     body: InteractionRequest,
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
-    service: SwarmExecutionServiceProtocol = Injected(SwarmExecutionServiceProtocol),  # noqa: B008
+    service: TaskCommissionServiceProtocol = Injected(TaskCommissionServiceProtocol),  # noqa: B008
 ) -> Envelope[dict]:
     return envelope(
         await asyncio.to_thread(
-            service.interact,
+            service.interact_swarm,
             collab_context_id,
             binding_id,
             InteractionCommand(**body.model_dump()),

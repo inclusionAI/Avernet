@@ -43,7 +43,7 @@ class SwarmRuntimeResolver(Protocol):
 class StageExecutionService(Protocol):
     """Dispatch worker; worker must actively report through StageReportProtocol.
 
-    A worker may request clarification via SwarmExecutionServiceProtocol using
+    A worker may request clarification via TaskCommissionServiceProtocol.interact_swarm using
     its authenticated ActorContext, return from dispatch, poll its scoped Stage
     session for the reply, then report. Reply never triggers a second execute().
     execute() must return promptly; it must not join a cross-thread report while

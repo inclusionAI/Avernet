@@ -4,7 +4,7 @@ Keep versioned admission, shared G1 enforcement and outbound delivery together;
 repository, catalog and L5 services remain shared TaskModule dependencies.
 """
 
-from injector import Binder, Module, singleton
+from injector import Binder, Module, provider, singleton
 
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     ContextCollabAuthorizerProtocol,
@@ -42,7 +42,7 @@ class TaskCommissionModule(Module):
             scope=singleton,
         )
         binder.bind(
-            TaskCommissionServiceProtocol,
+            TaskCommissionService,
             to=TaskCommissionService,
             scope=singleton,
         )
@@ -54,3 +54,9 @@ class TaskCommissionModule(Module):
         # Local outbound delivery is still mock, not live Bot execution.
         binder.bind(A2aDeliveryPort, to=MockA2aDelivery, scope=singleton)
         binder.bind(TaskDispatchPort, to=A2aTaskDispatch, scope=singleton)
+
+    @provider
+    def service_api(
+        self, service: TaskCommissionService
+    ) -> TaskCommissionServiceProtocol:
+        return service

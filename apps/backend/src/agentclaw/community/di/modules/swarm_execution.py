@@ -1,4 +1,4 @@
-"""Composition root for bounded Swarm execution and replaceable feedback planner."""
+"""Internal L5 execution controls and replaceable feedback planner bindings."""
 
 from injector import AssistedBuilder, Binder, Module, inject, provider, singleton
 
@@ -8,11 +8,11 @@ from agentclaw.community.core.task.context_collab.l5_methods.swarm_driver import
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
     ConservativeInteractionPlanner,
     SwarmDriverFactory,
-    SwarmExecutionServiceProtocol,
+    SwarmExecutionControl,
     SwarmInteractionPlanner,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_service import (
-    SwarmExecutionService,
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.service import (
+    SwarmExecutionOperations,
 )
 
 
@@ -31,10 +31,12 @@ class SwarmExecutionModule(Module):
         binder.bind(
             SwarmInteractionPlanner, to=ConservativeInteractionPlanner, scope=singleton
         )
-        binder.bind(SwarmExecutionService, to=SwarmExecutionService, scope=singleton)
+        binder.bind(
+            SwarmExecutionOperations, to=SwarmExecutionOperations, scope=singleton
+        )
 
     @provider
-    def service_api(
-        self, service: SwarmExecutionService
-    ) -> SwarmExecutionServiceProtocol:
+    def execution_control(
+        self, service: SwarmExecutionOperations
+    ) -> SwarmExecutionControl:
         return service

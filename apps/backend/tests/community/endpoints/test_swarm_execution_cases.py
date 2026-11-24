@@ -2,8 +2,8 @@
 
 from injector import InstanceProvider
 
-from agentclaw.community.api.swarm_execution_service import (
-    SwarmExecutionServiceProtocol,
+from agentclaw.community.api.task.task_commission_service import (
+    TaskCommissionServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
     ProductProfilePublicationAuthorizer,
@@ -107,13 +107,13 @@ def _register_case(method, suffix, happy):
 
     def seed(world):
         collet_id, binding_id = _seed_workflow(world)
-        service = world.get(SwarmExecutionServiceProtocol)
-        graph = service.stages(collet_id, binding_id, OWNER)
+        service = world.get(TaskCommissionServiceProtocol)
+        graph = service.get_swarm_stages(collet_id, binding_id, OWNER)
         if suffix == "interactions":
-            service.step(
+            service.step_swarm(
                 collet_id, binding_id, StepCommand("prepare", graph["version"]), OWNER
             )
-            graph = service.stages(collet_id, binding_id, OWNER)
+            graph = service.get_swarm_stages(collet_id, binding_id, OWNER)
             stage = graph["stages"][0]
             body.update(
                 stage_ref=stage["stage_id"],
@@ -140,7 +140,7 @@ def _register_case(method, suffix, happy):
             assert not worker.calls
         else:
             assert data["mode"] == "ignore" and len(worker.calls) == 1
-            graph = world.get(SwarmExecutionServiceProtocol).stages(
+            graph = world.get(TaskCommissionServiceProtocol).get_swarm_stages(
                 params["collab_context_id"], params["binding_id"], OWNER
             )
             assert graph["stages"][0]["messages"][0]["content"] == _MESSAGE

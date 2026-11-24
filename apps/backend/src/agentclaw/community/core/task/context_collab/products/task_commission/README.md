@@ -22,7 +22,7 @@ existing public user creation DTO.
 
 - [Service contract](service_api.py): publish, list/detail, Bot opportunity
   Query/Apply, review of an existing L5 application, six Work actions and
-  `report_execution` for inbound Bot reports.
+  `report_execution` for inbound Bot reports, plus binding-scoped Swarm execution controls.
   The API layer re-exports only `TaskCommissionServiceProtocol`.
 - [Service](service.py): exact @2 selection publishes an opportunity without
   applying for the Bot. The DI adapter reviews the Bot's application and calls
@@ -46,6 +46,25 @@ migration. Previously accepted owner-reported progress is now rejected. Existing
 stored events are not rewritten. Owner review/cancellation remains governed by
 G1 and machine guards; start/progress/submit require the executor. The Bot ingress
 permits only those three executor actions.
+
+## Swarm execution controls
+
+The existing `TaskCommissionServiceProtocol` also exposes `step_swarm`,
+`get_swarm_stages` and `interact_swarm` for the existing Swarm HTTP resources and
+trusted worker clarification. The facade delegates to the injected L5
+`SwarmExecutionControl` capability; implementations live in
+[`l5_methods/operations/swarm/service.py`](../../l5_methods/operations/swarm/service.py).
+There is no separate Swarm execution Service API/re-export or execution-service
+file. See the [execution contract](../../l5_methods/SWARM-EXECUTION.md) for the
+unchanged HTTP paths, replay/version fences, graph reads and human interactions.
+
+These controls require an authorized, exact Swarm binding, not a
+`task_commission` product profile ID. Authored Swarm products remain supported;
+commission-only publish/detail/Work validation is not reused as a Swarm gate.
+Installed commission versions, defaults, admission and acceptance are unchanged.
+The constructor requires the L5 capability explicitly; direct assemblers must
+supply it, and DI aliases the Protocol to the same concrete service singleton.
+This changes the in-process API/import surface, not HTTP or database schemas.
 
 ## L5 Method policy selection
 

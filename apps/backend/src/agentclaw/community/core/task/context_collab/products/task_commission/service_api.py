@@ -5,6 +5,8 @@
 ``reject_task``/``cancel_task`` = Work 族六动作;``detail_task``/
 ``list_tasks`` = Query.project/search(用户 HTTP 后置)。
 ``report_execution`` 是 Bot 入站执行报告合同,复用 Work 动作及 G1/G4/CAS。
+``step_swarm``/``get_swarm_stages``/``interact_swarm`` 提供 binding-scoped
+Swarm 执行控制,不要求 Collet 使用 task_commission 产品标签。
 
 `T | None` 表示合法可省略的备注、进度报告字段与孤儿 ``body``。
 """
@@ -24,6 +26,11 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
+)
+
+from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
+    InteractionCommand,
+    StepCommand,
 )
 
 if TYPE_CHECKING:  # 读视图(T3)落地面,协议签名先钉,运行时不求值。
@@ -303,3 +310,29 @@ class TaskCommissionServiceProtocol(Protocol):
     def list_tasks(self) -> "list[TaskCommissionSummaryView]": ...
 
     def detail_task(self, collab_context_id: str) -> "TaskCommissionDetailView": ...
+
+    def step_swarm(
+        self,
+        collet_id: str,
+        binding_id: str,
+        command: StepCommand,
+        context: ActorContext,
+    ) -> dict:
+        """Advance at most one Stage with request replay and Collet revision fences."""
+        ...
+
+    def get_swarm_stages(
+        self, collet_id: str, binding_id: str, context: ActorContext
+    ) -> dict:
+        """Read the authorized graph/sessions for this Swarm binding, regardless of product tag."""
+        ...
+
+    def interact_swarm(
+        self,
+        collet_id: str,
+        binding_id: str,
+        command: InteractionCommand,
+        context: ActorContext,
+    ) -> dict:
+        """Post feedback or worker clarification/reply through the L5 control capability."""
+        ...

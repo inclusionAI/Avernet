@@ -1,4 +1,4 @@
-"""Inbound Swarm execution Service API and outbound interaction planning contract.
+"""Internal L5 execution control and outbound interaction planning contracts.
 
 No transport, L6 or runtime-session dependency. A session is the exact Stage's
 Event-backed conversation. Decisions propose changes, never grant authority.
@@ -128,8 +128,10 @@ class ConservativeInteractionPlanner:
 
 
 @runtime_checkable
-class SwarmExecutionServiceProtocol(Protocol):
-    """Caller -> core. Mutations require exact revision and stable request ID.
+class SwarmExecutionControl(Protocol):
+    """Internal L5 capability consumed by the task-commission Service API.
+
+    Mutations require exact revision and stable request ID.
 
     Replay returns the original result after current authorization. Each step
     dispatches at most one new Stage; async work returns running, not success.

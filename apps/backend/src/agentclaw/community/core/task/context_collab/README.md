@@ -6,8 +6,9 @@ It implements bounded local contracts, not full ACCS conformance.
 
 The [Swarm execution API](l5_methods/SWARM-EXECUTION.md) provides one-Stage
 steps, complete graph/session projection, planner-adjudicated human feedback and
-worker clarification/reply. It reuses Event persistence; Method runtime state
-remains process-local.
+worker clarification/reply through the existing task-commission Service API.
+Its internal L5 control capability reuses Event persistence; Method runtime
+state remains process-local.
 
 ## Context Boundary
 
