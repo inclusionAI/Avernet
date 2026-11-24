@@ -19,7 +19,7 @@ Implementations:
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
 
@@ -43,6 +43,15 @@ class SandboxRuntimeUnavailableError(Exception):
 
 class SandboxFileReadError(Exception):
     """A sandbox file read failed for a reason other than file absence."""
+
+
+@runtime_checkable
+class CheckedSandboxFileClient(Protocol):
+    """Optional strict file I/O; failures must not be reported as absence."""
+
+    async def list_files_checked(self, *, sandbox_id: str, path: str) -> list[dict[str, Any]]: ...
+
+    async def read_file_checked(self, *, sandbox_id: str, path: str) -> bytes | None: ...
 
 
 class SandboxRuntimeClient(Plugin, Protocol):
