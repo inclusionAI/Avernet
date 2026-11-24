@@ -993,6 +993,62 @@ async def test_refresh_fails_closed_for_inconsistent_context_state():
 
 
 @pytest.mark.asyncio
+async def test_refresh_fails_closed_when_in_progress_context_missing():
+    service, _, _, _, collaboration = _service(
+        todo=_todo(status=TodoStatus.IN_PROGRESS, collab_context_id=None),
+    )
+
+    with pytest.raises(
+        TodoStateConflictError, match="In-progress Todo collaboration Context"
+    ):
+        await service.refresh_in_progress(todo_id="todo_1")
+
+    assert collaboration.refresh_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_fails_closed_when_pending_acceptance_context_missing():
+    service, _, _, _, collaboration = _service(
+        todo=_todo(status=TodoStatus.PENDING_ACCEPTANCE, collab_context_id=None),
+    )
+
+    with pytest.raises(
+        TodoStateConflictError, match="Pending-acceptance Todo collaboration Context"
+    ):
+        await service.reconcile_pending_acceptance(todo_id="todo_1")
+
+    assert collaboration.refresh_calls == []
+
+
+@pytest.mark.asyncio
+async def test_resume_fails_closed_when_interacting_context_missing():
+    service, _, _, _, collaboration = _service(
+        todo=_todo(status=TodoStatus.IN_PROGRESS, collab_context_id=None),
+    )
+
+    with pytest.raises(
+        TodoStateConflictError, match="Interacting Todo collaboration Context"
+    ):
+        await service.resume_claimed_interaction(todo_id="todo_1")
+
+    assert collaboration.refresh_calls == []
+
+
+@pytest.mark.asyncio
+async def test_mark_pending_acceptance_fails_closed_when_context_missing():
+    service, _, _, _, _ = _service(
+        todo=_todo(status=TodoStatus.IN_PROGRESS, collab_context_id=None),
+    )
+
+    with pytest.raises(
+        TodoStateConflictError, match="Completed Todo collaboration Context"
+    ):
+        service._mark_pending_acceptance(
+            _todo(status=TodoStatus.IN_PROGRESS, collab_context_id=None)
+        )
+
+
+@pytest.mark.asyncio
 async def test_dispatch_accepts_concurrent_forward_transition_past_in_progress():
     service, repository, _, _, _ = _service()
     repository.transition_conflict_status = TodoStatus.PENDING_ACCEPTANCE
