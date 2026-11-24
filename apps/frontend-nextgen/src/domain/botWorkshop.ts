@@ -6,6 +6,11 @@ export type BotDeployment = 'local' | 'cloud';
 export type BotServiceMode = 'non-service' | 'service';
 export type BotLifecycle = 'draft' | 'deploying' | 'prestable' | 'running' | 'offline' | 'failed' | 'unknown';
 export type BotRuntimeStage = 'draft' | 'verify' | 'online';
+export const serviceBotStageLabel: Record<BotRuntimeStage, string> = {
+  draft: '草稿',
+  verify: '试运行',
+  online: '正式运行',
+};
 export type BotCompleteness = 'complete' | 'partial';
 
 export interface BotLock {
@@ -331,8 +336,8 @@ export type BotPublishRestartStage = 'prestable' | 'online';
 
 /** 重启发布阶段 → 用户可读环境名。 */
 export const restartPublishStageLabel: Record<BotPublishRestartStage, string> = {
-  prestable: '预发',
-  online: '线上',
+  prestable: serviceBotStageLabel.verify,
+  online: serviceBotStageLabel.online,
 };
 
 /**
