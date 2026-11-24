@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import type { LocalBotAuthorizationRequest } from '@/domain/botWorkshop';
 import { restartPublishStageOf } from '@/domain/botWorkshop';
 import {
@@ -348,13 +349,21 @@ export const botWorkshopService = {
     }
     // AgentCoding 的 Bot 管理页重启等价于用户确认后执行模板重载。沿用 open-claw
     // 的既有 wire 契约传字符串 'true'；其他引擎保持无 body 重启，不受影响。
-    const target = bot.runtime.isAgentCodingBot
-      ? {
-          userId: userId ?? '',
-          ownerId: bot.ownerId,
-          extraConfigs: { confirmed_template_update: 'true' },
-        }
-      : undefined;
+    let target: Parameters<typeof restartBot>[1];
+    if (bot.runtime.isAgentCodingBot) {
+      const prepared =
+        (await getCapabilities().prepareCodingBotRestart?.({ botId: bot.id, ownerId: bot.ownerId, userId })) ?? {};
+      const extraConfigs = { ...prepared, confirmed_template_update: 'true' };
+      // OpenAPI restart has no request-body contract and silently drops
+      // `extra_configs`; a Configured snapshot needs the legacy management route.
+      if (prepared.template_config) {
+        const submit = getCapabilities().submitCodingBotRestart;
+        if (!submit) throw new Error('当前部署不支持 Coding Bot 模板重启');
+        const response = await submit({ botId: bot.id, ownerId: bot.ownerId, userId, extraConfigs });
+        return (response.data ?? undefined) as unknown as BotRestartResponse | undefined;
+      }
+      target = { userId: userId ?? '', ownerId: bot.ownerId, extraConfigs };
+    }
     const response = await restartBot(bot.id, target);
     // restart 接口返回已落库的 Bot 记录：同步引擎（openclaw）此时已是 PENDING，
     // coding 引擎携带 ext.aicoding.restart journal，由前端据此启动重启追踪。

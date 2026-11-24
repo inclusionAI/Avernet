@@ -94,6 +94,45 @@ it('routes Coding Bot favorite mutations through the embedded bridge', async () 
   expect(useConversationStore.getState().sessionsByBotId[view.bot.botId].sessions.items[0].favorite).toBe(true);
 });
 
+it.each(['others', 'collab'] as const)(
+  'AgentCoding %s favorites go through the Coding host and patch the active origin cache',
+  async (origin) => {
+    const runSessionAction = jest.fn().mockResolvedValue({ ok: true, favorite: true });
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => null, runSessionAction },
+      }),
+    });
+    const codingView: ConversationBotView = {
+      ...view,
+      bot: { ...view.bot, engine: 'claude_code', isAgentCodingBot: true },
+    };
+    const store = useConversationStore.getState();
+    store.setManagedBotOrigin(view.bot.botId, origin, { supportsScopesOutsideMine: true });
+    store.setManagedBotCache(
+      view.bot.botId,
+      managedViewOf(view.bot.botId, 'all', undefined, firstPageOf([{ ...session, favorite: false }], 1), origin),
+    );
+    const { result } = renderFavorites(codingView);
+
+    await act(async () => {
+      await result.current.toggleFavorite(view.bot.botId, 'managed', 's1');
+    });
+
+    expect(runSessionAction).toHaveBeenCalledWith({
+      botId: 'b',
+      userId: 'user',
+      ownerId: 'owner',
+      action: { type: 'favorite', sessionId: 's1', favorite: true },
+    });
+    expect(toggle).not.toHaveBeenCalled();
+    const after = useConversationStore.getState().sessionsByBotId[view.bot.botId];
+    expect(after.origin).toBe(origin);
+    expect(after.sessions.items[0].favorite).toBe(true);
+  },
+);
+
 it('supports friend Bot sessions with their friend identity', async () => {
   const friend: ConversationBotView = { ...view, section: 'friend', bot: { ...view.bot, isFriendBot: true } };
   useConversationStore.getState().setFriendBotSessions(view.bot.botId, firstPageOf([session], 1));

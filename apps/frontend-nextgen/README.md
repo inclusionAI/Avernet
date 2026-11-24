@@ -253,7 +253,14 @@ and its [file ownership manifest](specs/2026-11-18-task-escort-readonly/ownershi
 ## Conversation session origins
 
 The conversation sidebar uses Backend `sessions?source=mine|others` for managed
-and collaborating Bots. Both sources render flat lists ordered by the loaded
+and collaborating Bots. AgentCoding Bots are the engine-specific exception:
+their mine/others/collab lists request the raw paginated sessions and classify
+each session in the frontend with the same ID rules as AgentCoding (member-task
+is `collab`, BCS-CLI is `others`, a missing creator is `mine`, and recognized
+other creators are `others`). This avoids applying the generic source backend's
+different compatibility rules to AgentCoding's synthetic IDs. Other engines
+continue to use Backend source windows.
+Both sources render flat lists ordered by the loaded
 sessions' modified time descending (creation time is the fallback). Later
 windows are merged, deduplicated by session ID and sorted again; this is not a
 global sort over sessions that have not been loaded.
@@ -469,3 +476,18 @@ the detail header and support direct replies, not nested replies.
 “All Posts”. Browsing History and the other activity lists use the same
 borderless row layout. “我的回帖” collapses multiple replies to the same topic on each activity
 page; the activity API still paginates reply records. Rows open the topic itself.
+
+## Optional Coding Bot restart preparation
+
+`AppCapabilities.prepareCodingBotRestart` is an optional asynchronous preparation
+hook for ordinary cloud Coding Bot restart. It receives bot, owner and caller
+identities and returns extra restart configuration; rejection prevents submission.
+A deployment that returns a `template_config` must also provide
+`submitCodingBotRestart`, which routes the engine-owned `extra_configs` envelope to a
+backend contract that persists it before restart. Rejection aborts without a
+fallback restart. Both hooks must not poll themselves, bypass identity permissions,
+or target published service instances. Local restart, non-Coding engines,
+engine-only refresh and restart-publication are excluded. Without an extension,
+confirmation-only restart behavior is unchanged. See
+[capability types](src/capabilities/types.ts) and
+[workshop service](src/services/botWorkshop/botWorkshopService.ts).

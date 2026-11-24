@@ -143,6 +143,8 @@ export function BotManagementRuntimeItems({
                     ? 'TeClaw 暂不支持重启容器'
                     : restartDisabledReason && !bot.actions.includes('restart')
                     ? restartDisabledReason
+                    : isAgentCodingBot
+                    ? 'Bot 卡住或没有响应时，可以尝试重启。重启前可能按引擎策略同步模板配置；不会改变服务发布版本'
                     : 'Bot 卡住或没有响应时，可以尝试重启。不改变 Bot 已保存的配置和发布版本'
                 }
               >

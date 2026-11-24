@@ -1,4 +1,4 @@
-import type { HumanIdentity } from '@/capabilities';
+import type { CodingBotConversationHostProps, HumanIdentity } from '@/capabilities';
 import { getCapabilities } from '@/capabilities';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { Button, Empty } from '@/components/ui';
@@ -20,6 +20,8 @@ const IDLE_PUBLISH_RESOLUTION: ServicePublishResolution = { phase: 'idle' };
 function useOnlineServicePublishResolution(bot: ChatBotView, enabled: boolean) {
   const [resolution, setResolution] = useState<ServicePublishResolution>(IDLE_PUBLISH_RESOLUTION);
   const requestRef = useRef(0);
+  const key = JSON.stringify([bot.realBotId, bot.ownerId, bot.runtimeStage, enabled]);
+  const [resolvedKey, setResolvedKey] = useState(key);
   const [retryNonce, setRetryNonce] = useState(0);
 
   const retry = useCallback(() => setRetryNonce((current) => current + 1), []);
@@ -35,6 +37,7 @@ function useOnlineServicePublishResolution(bot: ChatBotView, enabled: boolean) {
 
     const seq = requestRef.current + 1;
     requestRef.current = seq;
+    setResolvedKey(key);
     setResolution({ phase: 'loading' });
     void resolveServiceBotPublishSelection({
       botId: bot.realBotId,
@@ -52,16 +55,19 @@ function useOnlineServicePublishResolution(bot: ChatBotView, enabled: boolean) {
           });
         }
       });
-  }, [bot.botType, bot.ownerId, bot.realBotId, bot.runtimeStage, required, retryNonce]);
+    return () => { requestRef.current += 1; };
+  }, [key, bot.botType, bot.ownerId, bot.realBotId, bot.runtimeStage, required, retryNonce]);
 
-  return { resolution, retry };
+  return { resolution: resolvedKey === key ? resolution : IDLE_PUBLISH_RESOLUTION, retry };
 }
 
 export function CodingBotStageBoundary({
+  workspaceActive = true,
   bot,
   session,
   human,
 }: {
+  workspaceActive?: boolean;
   bot: ChatBotView;
   session?: BotChatSessionView | null;
   human: HumanIdentity | null;
@@ -70,7 +76,7 @@ export function CodingBotStageBoundary({
   const Stage = host.value?.Stage;
   const identityReady = human !== null;
   const hostReady = Stage !== undefined;
-  const { resolution, retry } = useOnlineServicePublishResolution(bot, hostReady && identityReady);
+  const { resolution, retry } = useOnlineServicePublishResolution(bot, hostReady && identityReady && workspaceActive);
   const requiresServicePublish = bot.botType === 'service' && bot.runtimeStage === 'online';
 
   const renderBoundary = (title: string, description: string) => (
@@ -85,46 +91,43 @@ export function CodingBotStageBoundary({
     </section>
   );
 
+  const ready = workspaceActive && identityReady && hostReady &&
+    (!requiresServicePublish || resolution.phase === 'ready');
+  const nextProps: CodingBotConversationHostProps | null = ready && human ? {
+    conversationBotId: bot.botId, botId: bot.realBotId, sessionId: session?.sessionId,
+    ownerId: bot.ownerId, userId: human.userId, nickName: human.displayName,
+    ...(requiresServicePublish && resolution.phase === 'ready' ? resolution.selection : {}),
+    mode: 'embed',
+  } : null;
+  const nextKey = nextProps ? JSON.stringify(nextProps) : null;
+  const [retained, setRetained] = useState<{ key: string; props: CodingBotConversationHostProps } | null>(null);
+  if (nextProps && nextKey && nextKey !== retained?.key) setRetained({ key: nextKey, props: nextProps });
+  const stageProps = nextProps ?? retained?.props;
+  const canRetain = host.value?.supportsWorkspaceSuspension === true;
+  let notice = null;
   if (human === null) {
-    return renderBoundary('登录身份加载中', '正在确认当前登录人；身份就绪后会自动打开 Coding Bot 对话。');
-  }
-
-  if (!Stage) {
-    return renderBoundary('Coding Bot 对话暂不可用', '当前部署未配置 Coding Bot 对话组件，请联系管理员开通后重试。');
-  }
-
-  if (resolution.phase === 'loading' || (requiresServicePublish && resolution.phase === 'idle')) {
-    return renderBootSkeleton();
-  }
-
-  if (resolution.phase === 'error') {
-    return (
+    notice = renderBoundary('登录身份加载中', '正在确认当前登录人；身份就绪后会自动打开 Coding Bot 对话。');
+  } else if (!Stage) {
+    notice = renderBoundary('Coding Bot 对话暂不可用', '当前部署未配置 Coding Bot 对话组件，请联系管理员开通后重试。');
+  } else if (requiresServicePublish && resolution.phase === 'error') {
+    notice = (
       <section className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-background px-6 py-10">
-        <Empty
-          className="w-full max-w-xl"
-          title="服务运行环境解析失败"
-          description={resolution.error || '无法解析该服务 Coding Bot 的正式运行发布信息。'}
-          action={<Button onClick={retry}>重新加载</Button>}
-        />
+        <Empty className="w-full max-w-xl" title="服务运行环境解析失败" description={resolution.error}
+          action={<Button onClick={retry}>重新加载</Button>} />
       </section>
     );
+  } else if (!ready && workspaceActive) {
+    notice = renderBootSkeleton();
   }
-
-  const publishSelectionProps =
-    resolution.phase === 'ready' ? { ...resolution.selection } : {};
-
   return (
-    <section className="flex min-h-0 min-w-0 flex-1" data-coding-bot-stage="true">
-      <Stage
-        conversationBotId={bot.botId}
-        botId={bot.realBotId}
-        sessionId={session?.sessionId}
-        ownerId={bot.ownerId}
-        userId={human.userId}
-        nickName={human.displayName}
-        {...publishSelectionProps}
-        mode="embed"
-      />
-    </section>
+    <>
+      {Stage && human && stageProps && stageProps.userId === human.userId && (ready || canRetain) && (
+        <section className="flex min-h-0 min-w-0 flex-1" data-coding-bot-stage="true"
+          style={ready ? undefined : { display: 'none' }} aria-hidden={!ready}>
+          <Stage {...stageProps} workspaceActive={ready} />
+        </section>
+      )}
+      {workspaceActive ? notice : null}
+    </>
   );
 }

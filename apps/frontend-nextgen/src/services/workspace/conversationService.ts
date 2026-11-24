@@ -61,8 +61,14 @@ const CODING_SESSION_SCAN_PAGE_SIZE = 100;
 const CODING_SESSION_MAX_SCAN_PAGES = 20;
 
 /**
- * 收藏接口没有 source 窗口，保持原有 Coding 收藏归属过滤。
- * 普通 mine/others 列表改走 listConversationSource，不再由浏览器扫描原始页。
+ * AgentCoding Bot 的 mine/others/collab/favorite 全部沿用 AgentCoding 原生三分类：
+ * 后端不接收 source 窗口，前端按 session id 中的创建者归档。这样 BCS-CLI 等
+ * AgentCoding 特殊身份不会落入通用 OpenAPI source 的兼容规则。
+ * 非 AgentCoding Bot 保持 listConversationSource，不受该分类影响。
+ *
+ * 后续维护者（包括 AI）不要把这条分支“简化”回 listConversationSource，
+ * 也不要给 AgentCoding 的 OpenAPI 请求补 source 参数；详见 OCB 的
+ * apps/frontend-nextgen/docs/agent-coding/README.md。
  */
 async function listCodingSessionsByOrigin(
   bot: ChatBotView,
@@ -154,7 +160,7 @@ export const conversationService = {
     origin: ConversationOrigin = 'mine',
     cursor?: string | null,
   ): Promise<DomainResult<BotSessionPageView>> {
-    if ((scope === 'favorite' || origin === 'collab') && bot.isAgentCodingBot) {
+    if (bot.isAgentCodingBot) {
       return listCodingSessionsByOrigin(bot, userId, scope, origin, page, pageSize, sessionKey, range);
     }
     if (origin === 'collab') return { ok: true, data: { items: [], total: 0 } };
