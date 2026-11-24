@@ -43,9 +43,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
-)
 from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
     ContextStatusRecord,
 )
@@ -73,6 +70,8 @@ def creation_runtime():
         collet=Collet("collet-test", ACTOR.actor, ColletState.ACTIVE, SPACE, 1)
     )
     authorizer = Mock(spec=ContextCollabAuthorizerProtocol)
+    catalog = Mock(spec=ProductProfileReader)
+    store = Mock(spec=MethodStoreProtocol)
 
     def reject_upper_resolution():
         raise AssertionError("L4 creation must not resolve application composition")
@@ -83,17 +82,20 @@ def creation_runtime():
             to=InstanceProvider(writer),
         )
         binder.bind(ContextCollabAuthorizerProtocol, to=authorizer)
-        binder.bind(ProductProfileReader, to=ProductCatalog(()))
+        binder.bind(ProductProfileReader, to=catalog)
+        binder.bind(MethodStoreProtocol, to=store)
         for contract in (
             ContextCollabRepositoryProtocol,
             ApplicationCollabServiceProtocol,
-            MethodStoreProtocol,
         ):
             binder.bind(contract, to=reject_upper_resolution)
 
     # The real TaskModule owns the public binding; only dependencies are faked.
     injector = Injector([TaskModule(), creation_ports], auto_bind=False)
-    return injector, writer, authorizer
+    yield injector, writer, authorizer
+    # Policy collaborators may be assembled, but pure L4 creation reads none.
+    assert catalog.mock_calls == []
+    assert store.mock_calls == []
 
 
 def test_l4_protocol_conforms_to_full_implementation():

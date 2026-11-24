@@ -76,7 +76,7 @@ def _seed(world):
             participation_type=ParticipationType.COLLET_PARTICIPANT,
         )
     )
-    service.submit_application_by_skill(
+    service.submit_application(
         OpenApplicationCommand(
             opportunity_ref=opportunity.object_id,
             actor_context=context,

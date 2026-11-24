@@ -802,7 +802,11 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
             "verify_bot_principal_token",
             "验证签名 Bot 身份,不记录凭证",
         ),
-        (commission_a2a, "_execute", "A2A HTTP 入站转换命令并调用产品服务"),
+        (
+            commission_a2a,
+            "_execute_commission_operation",
+            "A2A HTTP 入站转换命令并调用产品服务",
+        ),
         (
             commission_service_module,
             "prepare_product_profile",

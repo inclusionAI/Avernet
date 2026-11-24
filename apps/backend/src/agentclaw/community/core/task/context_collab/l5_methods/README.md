@@ -65,6 +65,11 @@ assembled in the existing Swarm operations module. The existing task-commission
 Service API exposes the three caller-facing methods; L5 has no dependency on
 that product implementation and does not publish another execution Service API.
 
+Public DI binds `StageExecutionService` to a fail-closed unavailable capability
+until a host explicitly replaces it with its worker adapter. The service graph
+can resolve without a worker, but dispatch raises a domain validation error and
+completion acceptance returns false; this is not simulated successful execution.
+
 ## Base methods and product compositions
 
 `MethodKind` contains exactly four base methods: `Single`, `Group`, `Swarm`

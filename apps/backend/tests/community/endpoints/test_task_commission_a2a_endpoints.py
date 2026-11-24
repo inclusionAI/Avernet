@@ -5,15 +5,46 @@ import secrets
 
 import jwt
 
-from agentclaw.community.api.task.task_commission_service import TaskCommissionServiceProtocol
-from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import ActorContext
-from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import PrincipalRef
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import SpaceRef
-from agentclaw.community.core.task.context_collab.products.task_commission.service_api import PublishTaskCommand
+from agentclaw.community.api.task.task_commission_service import (
+    TaskCommissionServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    SpaceRef,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    PublishTaskCommand,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
+    ProductProfilePublicationAuthorizer,
+    ProfilePublisherAllowlist,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profile_publication import (
+    ProductProfilePublicationServiceProtocol,
+)
+from agentclaw.community.di.modules.task.context_collab_products import (
+    import_installed_product_profiles,
+)
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
-from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
-from tests.community.factories.task_commission import BOT_ID, OWNER, commission_report_request
-from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
+from agentclaw.community.utils.gateway_principal_config import (
+    init_principal_verifier_config,
+)
+from tests.community.factories.task_commission import (
+    BOT_ID,
+    OWNER,
+    commission_report_request,
+)
+from tests.community.framework import (
+    CaseInput,
+    ExpectError,
+    ExpectSuccess,
+    endpoint_test,
+)
 
 _HEADERS: dict[str, str] = {}
 _BODY: dict = {}
@@ -31,23 +62,48 @@ def _seed_report(world) -> None:
             return Secret()
 
     init_principal_verifier_config(Resolver(), "test-key", strict=False)
+    publisher = ActorContext(PrincipalRef("human", "test-profile-publisher"), "api")
+    world.injector.binder.bind(
+        ProductProfilePublicationAuthorizer,
+        to=ProfilePublisherAllowlist((publisher.actor,)),
+    )
+    import_installed_product_profiles(
+        world.get(ProductProfilePublicationServiceProtocol), publisher
+    )
     service = world.get(TaskCommissionServiceProtocol)
     created = service.publish_task(
         PublishTaskCommand(
-            title="委托报告", body="整理调查结论", space=SpaceRef("space_1", "test"),
+            title="委托报告",
+            body="整理调查结论",
+            space=SpaceRef("space_1", "test"),
             assignee_agent_id=BOT_ID,
         ),
         ActorContext(PrincipalRef("human", "u_publisher"), source="api"),
     )
     now = datetime.now(timezone.utc)
-    signed = jwt.encode({
-        "iss": "gateway", "aud": "backend", "iat": now,
-        "exp": now + timedelta(minutes=1),
-        "principals": [{"type": "bot", "tenant": DEFAULT_AVERNET_TENANT, "bot": {
-            "bot_uuid": BOT_ID, "owner_id": OWNER, "app_id": 1,
-            "agent_code": "writer", "tenant": DEFAULT_AVERNET_TENANT,
-        }}],
-    }, key, algorithm="HS256")
+    signed = jwt.encode(
+        {
+            "iss": "gateway",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + timedelta(minutes=1),
+            "principals": [
+                {
+                    "type": "bot",
+                    "tenant": DEFAULT_AVERNET_TENANT,
+                    "bot": {
+                        "bot_uuid": BOT_ID,
+                        "owner_id": OWNER,
+                        "app_id": 1,
+                        "agent_code": "writer",
+                        "tenant": DEFAULT_AVERNET_TENANT,
+                    },
+                }
+            ],
+        },
+        key,
+        algorithm="HS256",
+    )
     _HEADERS.clear()
     _HEADERS["X-Avernet-Principal"] = signed
     _BODY.clear()
@@ -64,11 +120,21 @@ def _assert_started(response, world) -> None:
 
 
 @endpoint_test(
-    method="POST", path="/a2a/task-commission", scenario="designated_bot_starts_task",
-    seed=_seed_report, input=CaseInput(headers=_HEADERS, json_body=_BODY),
-    expect=ExpectSuccess(status=200, json_contains={"result": {"parts": [
-        {"kind": "data", "data": {"status": "SUCCEEDED"}},
-    ]}}),
+    method="POST",
+    path="/a2a/task-commission",
+    scenario="designated_bot_starts_task",
+    seed=_seed_report,
+    input=CaseInput(headers=_HEADERS, json_body=_BODY),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "result": {
+                "parts": [
+                    {"kind": "data", "data": {"status": "SUCCEEDED"}},
+                ]
+            }
+        },
+    ),
     extra_assertions=(_assert_started,),
 )
 def designated_bot_starts_task():
@@ -76,7 +142,9 @@ def designated_bot_starts_task():
 
 
 @endpoint_test(
-    method="POST", path="/a2a/task-commission", scenario="unauthenticated",
+    method="POST",
+    path="/a2a/task-commission",
+    scenario="unauthenticated",
     input=CaseInput(json_body={}),
     expect=ExpectError(status=401, json_contains={"detail": "Unauthorized"}),
 )

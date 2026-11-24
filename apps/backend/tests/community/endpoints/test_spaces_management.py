@@ -27,7 +27,7 @@ def _seed_team(world):
             member_user_ids=["100002"],
         )
     )
-    assert result.to_space.id == 1
+    assert result.space.id == 1
 
 
 def _seed_empty_team(world):

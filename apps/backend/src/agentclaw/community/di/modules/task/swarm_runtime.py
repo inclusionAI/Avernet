@@ -47,10 +47,14 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     ContextCollabRepositoryProtocol,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.unavailable_execution import (
+    UnavailableStageExecutionService,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.report import (
     SwarmStageReportService,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_driver_contracts import (
+    StageExecutionService,
     SwarmRuntimeResolver,
     SwarmRuntimeConfiguration,
 )
@@ -204,9 +208,14 @@ class ProductSwarmRuntimeResolver:
 
 class SwarmRuntimeModule(Module):
     def configure(self, binder: Binder) -> None:
-        from agentclaw.community.di.modules.task.swarm_execution import SwarmExecutionModule
+        from agentclaw.community.di.modules.task.swarm_execution import (
+            SwarmExecutionModule,
+        )
 
         binder.install(SwarmExecutionModule())
+        binder.bind(
+            StageExecutionService, to=UnavailableStageExecutionService, scope=singleton
+        )
         binder.bind(
             SwarmArtifactEvidenceValidator,
             to=UnavailableSwarmArtifactValidator,

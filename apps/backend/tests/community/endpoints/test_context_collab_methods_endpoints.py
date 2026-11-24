@@ -12,9 +12,8 @@ core/task/context_collab 的服务单测覆盖。
 - 每资源族 1 happy:lifecycle(bind/activate/inspect)、Group(invite/
   members)、Swarm(declare/submit/validate/adopt)、Open(publish/
   submit application);
-- RF #1:顶层裸值 method_kind(裸 Group/Swarm)经 HTTP 创建
-  context 即拒(422 映射)——``create /context_collab`` 是 §6.1 面,
-  这里验证的是裸值不能经嵌套 bind 顶替顶层之外,顶层入口的拒;
+- 顶层 Group 被拒;Swarm 是合法顶层方法。未固定版本的 legacy
+  创建保留选择事实,不隐式校验或安装 ProductProfile;
 - 1 个 409 映射:group change-role 携带陈旧 roster revision →
   ``ContextCollabVersionConflict`` → 409 envelope;
 - 错误语义:unknown binding → 404 而非 500。
@@ -46,6 +45,9 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
     MethodOpsAuthorizerProtocol,
     StructuralMethodOpsAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    CollaborationReader,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.lifecycle import (
     MethodLifecycleService,
@@ -79,7 +81,7 @@ from agentclaw.community.core.task.context_collab.l6_products.operations.method_
     ProductMethodBindingRecovery,
 )
 from fastapi.testclient import TestClient
-from injector import Injector
+from injector import Injector, InstanceProvider
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -139,6 +141,7 @@ def client_world():
         recovery=ProductMethodBindingRecovery(store, repo, PRODUCT_CATALOG),
     )
     services = {
+        CollaborationReader: repo,
         ContextCollabServiceProtocol: ContextCollabService(
             repository=repo,
             method_store=store,
@@ -182,7 +185,7 @@ def client_world():
     app.dependency_overrides[get_current_user] = authenticated_user
     injector = Injector(auto_bind=False)
     for binding, impl in services.items():
-        injector.binder.bind(binding, to=impl)
+        injector.binder.bind(binding, to=InstanceProvider(impl))
     attach_injector(app, injector)
     with TestClient(app) as client:
         yield client
@@ -453,20 +456,34 @@ class TestMethodBindingsDelivery:
         assert result.json()["detail"][0]["loc"] == ["body", field]
         assert result.json()["detail"][0]["type"] == "extra_forbidden"
 
-    def test_bare_top_level_method_kind_rejected_through_http(self, client_world):
-        """裸 Group/Swarm 不能替代产品声明的顶层组合;Open 是代办合法组合。"""
-        client = client_world
-        for method_kind in ("Group", "Swarm"):
-            rejected = client.post(
-                f"{PREFIX}/context_collab", json=create_body(method_kind)
-            )
-            assert rejected.status_code == 422, rejected.text
+    def test_bare_group_rejected_through_http(self, client_world):
+        rejected = client_world.post(
+            f"{PREFIX}/context_collab", json=create_body("Group")
+        )
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["code"] == 422000
 
-    def test_incompatible_product_composition_maps_422(self, client_world):
+    def test_swarm_is_a_valid_top_level_method(self, client_world):
+        created = client_world.post(
+            f"{PREFIX}/context_collab", json=create_body("Swarm")
+        )
+        assert created.status_code == 200, created.text
+        assert created.json()["data"]["current_snapshot"]["method_kind"] == "Swarm"
+
+    def test_unversioned_creation_preserves_selection_without_installing_product(
+        self, client_world
+    ):
         body = create_body("Single")
         body["method_kind"] = "Open + Group"
-        rejected = client_world.post(f"{PREFIX}/context_collab", json=body)
-        assert rejected.status_code == 422, rejected.text
+        created = client_world.post(f"{PREFIX}/context_collab", json=body)
+        assert created.status_code == 200, created.text
+        data = created.json()["data"]
+        assert data["current_snapshot"]["method_kind"] == "Open + Group"
+        reader = client_world.app.state.injector.get(CollaborationReader)
+        record = reader.get_current_status(data["collab_context_id"])
+        assert record.product_instance is None
+        assert record.creation_facts["product_kind"] == body["product_kind"]
+        assert record.creation_facts["workflow_kind"] == body["workflow_kind"]
 
     def test_open_commission_is_a_valid_top_level_composition(self, client_world):
         created = client_world.post(

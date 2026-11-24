@@ -66,7 +66,7 @@ def _rpc_error(request_id: str | int | None, code: int, message: str) -> JSONRes
     )
 
 
-def _execute(
+def _execute_commission_operation(
     operation: AccsOperationEnvelope,
     bot: GatewayBot,
     service: TaskCommissionServiceProtocol,
@@ -164,7 +164,9 @@ async def receive_executor_report(
         operation = AccsOperationEnvelope.from_dict(params.message.parts[0].data)
     except (ValidationError, ContextCollabValidationError, TypeError, AttributeError):
         return _rpc_error(rpc_id, -32602, "Invalid params")
-    result, data = await run_in_threadpool(_execute, operation, bot, service)
+    result, data = await run_in_threadpool(
+        _execute_commission_operation, operation, bot, service
+    )
     parts = [{"kind": "data", "data": result.to_dict()}]
     if data is not None:
         parts.append({"kind": "data", "data": data})

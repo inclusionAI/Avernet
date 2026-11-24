@@ -285,14 +285,22 @@ def test_g4_uses_task_ignores_retired_snapshot_and_counts_work_items(
     assert writes == []
 
 
-@pytest.mark.parametrize("wrong_identity", [False, True])
-def test_task_cas_conflict_does_not_write_any_table(repository, db, wrong_identity):
+@pytest.mark.parametrize(
+    "wrong_identity,error,match",
+    [
+        (False, ContextCollabVersionConflict, "Task revision or identity changed"),
+        (True, ContextCollabValidationError, "cannot update a missing Task"),
+    ],
+)
+def test_task_cas_conflict_does_not_write_any_table(
+    repository, db, wrong_identity, error, match
+):
     created = _create(repository)
     before = _storage(db)
     update = TaskUpdate(
         "another-task" if wrong_identity else created.task.task_id, 2, "in_progress"
     )
-    with pytest.raises(ContextCollabVersionConflict):
+    with pytest.raises(error, match=match):
         _work(repository, created.collet.collet_id, update=update)
     assert _storage(db) == before
 
