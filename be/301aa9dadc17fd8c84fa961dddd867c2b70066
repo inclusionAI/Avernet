@@ -1,0 +1,71 @@
+apps/backend/src/agentclaw/community/core/skill_center/runtime_projection_contract.py
+  s_b7f94a3bd241d6::t_4dc8581ebcf31a 90
+apps/backend/src/agentclaw/community/core/apply_engine/run/mcp_permission_notes.py
+  s_b7f94a3bd241d6::t_9a744b7fb4169f 132-134
+apps/backend/tests/community/core/apply_engine/test_teclaw_delivery.py
+  s_b7f94a3bd241d6::t_62c55af85ad07c 262-264,266-268,270-273,275-280
+  s_b7f94a3bd241d6::t_ad3cfa127bd97b 269
+  s_b7f94a3bd241d6::t_1acc4a156ba210 265,274,283-286,288,292,296,303,313,320
+  s_b7f94a3bd241d6::t_d24f6c0b2bf55e 281-282,287,289-291,293-295,297-302,304-308
+  s_b7f94a3bd241d6::t_4ec3ae5626a67c 309-312,314-319,321-326
+apps/backend/tests/community/core/apply_engine/test_apply_service_uses_strategy.py
+  s_b7f94a3bd241d6::t_ae985230013efb 644,648
+  s_b7f94a3bd241d6::t_b2c3240ecf5bb4 146,188,204
+  s_b7f94a3bd241d6::t_267300ea4dc6d1 640-643,645-647,649-667
+apps/backend/src/agentclaw/community/core/ports/README.md
+  s_b7f94a3bd241d6::t_778a468d754fec 117-118
+  s_b7f94a3bd241d6::t_5fd140e66f4a7d 51-52
+apps/backend/src/agentclaw/community/core/skill_center/services/direct_activation_service.py
+  s_b7f94a3bd241d6::t_9a744b7fb4169f 425-426
+apps/backend/src/agentclaw/community/core/apply_engine/redeliver.py
+  s_b7f94a3bd241d6::t_305a5cb28ac698 102-106,108-113,115-119,121
+  s_b7f94a3bd241d6::t_a3c8e471cba672 23,107,114,120
+  s_b7f94a3bd241d6::t_25bc4e30a5babc 122
+apps/backend/src/agentclaw/community/core/apply_engine/README.md
+  s_b7f94a3bd241d6::t_5fd140e66f4a7d 80-84
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_apply_service.py
+  s_b7f94a3bd241d6::t_9a744b7fb4169f 115-116
+apps/backend/tests/community/core/skill_center/test_handoff_mcp_projection.py
+  s_b7f94a3bd241d6::t_e6851ea1101757 81
+apps/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py
+  s_b7f94a3bd241d6::t_fd9312bde3fcdc 590
+  s_b7f94a3bd241d6::t_4dc8581ebcf31a 255,267,665
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_sync.py
+  s_b7f94a3bd241d6::t_c8dc88759f0d6b 181-199,204,253,327
+  s_b7f94a3bd241d6::t_7e5c64ad9befe0 328-331
+  s_b7f94a3bd241d6::t_a3c8e471cba672 47,200-203
+  s_b7f94a3bd241d6::t_e20fdd275fb439 332
+apps/backend/src/agentclaw/community/core/apply_engine/delivery.py
+  s_b7f94a3bd241d6::t_a3c8e471cba672 80,570
+  s_b7f94a3bd241d6::t_5697090b9a42a1 86,547
+  s_b7f94a3bd241d6::t_c997487b63bd4a 572
+  s_b7f94a3bd241d6::t_305a5cb28ac698 557,566-569,571,573-583
+apps/backend/tests/community/core/devices/test_teclaw_device_sync.py
+  s_b7f94a3bd241d6::t_306bb3afefcd28 459-473
+  s_b7f94a3bd241d6::t_441aa6d64b97e0 474-481
+apps/backend/src/agentclaw/community/core/ports/manifest_delivery.py
+  s_b7f94a3bd241d6::t_322a7bd711aeb6 1-2,4-5,13-14,16-18
+  s_b7f94a3bd241d6::t_a3c8e471cba672 3,6-12,15
+apps/backend/src/agentclaw/community/di/modules/apply_engine_module.py
+  s_b7f94a3bd241d6::t_c997487b63bd4a 365,374-384
+apps/backend/tests/community/core/apply_engine/test_mcp_permission_notes.py
+  s_b7f94a3bd241d6::t_7178807b186c2f 80
+apps/backend/src/agentclaw/community/core/devices/README.md
+  s_b7f94a3bd241d6::t_5fd140e66f4a7d 50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "be301aa9dadc17fd8c84fa961dddd867c2b70066",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
