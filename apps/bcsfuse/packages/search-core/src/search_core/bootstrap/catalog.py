@@ -340,26 +340,28 @@ def create_catalog_search_app(
                 )
                 result.ready = False
                 result.detail = "catalog index unavailable"
-        if include_counts:
-            if not isinstance(index, IndexStatistics):
+        # Statistics-capable indexes must fail readiness on local point loss,
+        # even when the caller does not request count diagnostics in the body.
+        if not isinstance(index, IndexStatistics):
+            if include_counts:
                 response.status_code = 501
                 result.ready = False
                 result.detail = "index statistics unsupported"
-            else:
-                try:
-                    counts = await calls["probe"].call(
-                        index.point_counts, updates.index_key
-                    )
+        elif result.ready or include_counts:
+            try:
+                counts = await calls["probe"].call(index.point_counts, updates.index_key)
+                if include_counts:
                     result.index_counts = IndexCounts(**counts)
-                except Exception as error:  # noqa: BLE001 - preserve identity on optional count failures
-                    events.record(
-                        "search_readiness",
-                        "counts",
-                        "unavailable",
-                        error_type=type(error).__name__,
-                    )
+                if not updates.index_counts_ready(counts):
                     result.ready = False
-                    result.detail = "index count unavailable"
+                    result.detail = "catalog index coverage incomplete"
+            except Exception as error:  # noqa: BLE001 - fail closed on unavailable storage
+                events.record(
+                    "search_readiness", "counts", "unavailable",
+                    error_type=type(error).__name__,
+                )
+                result.ready = False
+                result.detail = "index count unavailable"
         if not result.ready and response.status_code != 501:
             response.status_code = 503
         return result

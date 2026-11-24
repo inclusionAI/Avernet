@@ -1,20 +1,19 @@
 """Real SQLite/Qdrant Local acceptance, with no internal application imports."""
 
-from tests.qdrant_support import server_options, server_connection
-
 import importlib.util
 import time
 
 from fastapi.testclient import TestClient
+from tests.qdrant_support import server_connection, server_options
 
 
 def local_factory():
     assert importlib.util.find_spec("search_core.bootstrap"), (
         "public standalone startup is required"
     )
-    from search_core.bootstrap.local import create_local_app
-
     from functools import partial
+
+    from search_core.bootstrap.local import create_local_app
 
     return partial(create_local_app, connection=server_connection())
 
@@ -184,7 +183,9 @@ def test_business_converter_multi_doc_update_and_restore_without_models(tmp_path
             index.close()
 
 
-def test_readiness_does_not_depend_on_optional_counts(tmp_path, monkeypatch):
+def test_readiness_fails_closed_when_index_counts_are_unavailable(
+    tmp_path, monkeypatch
+):
     from search_core.providers.qdrant_index import QdrantRetrievalIndex
 
     def unavailable(self, index_key=""):
@@ -200,7 +201,7 @@ def test_readiness_does_not_depend_on_optional_counts(tmp_path, monkeypatch):
             "/api/v2/agent-cards/demo", json={"card": {"name": "invoice"}}
         )
         applied(client, saved.json()["card_version"])
-        assert client.get("/ready").status_code == 200
+        assert client.get("/ready").status_code == 503
         result = client.get("/ready?include_counts=true")
         assert result.status_code == 503
         body = result.json()
@@ -234,10 +235,34 @@ def test_ready_counts_report_actual_mismatched_payloads_without_new_endpoint(tmp
             ]
         )
         result = client.get("/ready?include_counts=true")
-        assert result.status_code == 200, result.text
+        assert result.status_code == 503, result.text
+        assert result.json()["ready"] is False
         assert result.json()["index_key"] == app.state.index_key
         for kind in ("vector", "keyword"):
             assert result.json()["index_counts"][f"{kind}_points"] == 3
             assert result.json()["index_counts"][f"{kind}_matching_points"] == 1
             assert result.json()["index_counts"][f"{kind}_mismatched_points"] == 2
         assert "index_counts" not in client.get("/ready").json()
+
+
+def test_lost_points_are_not_ready_even_without_counts_parameter(tmp_path):
+    app = local_factory()(tmp_path, poll_seconds=300)
+    with TestClient(
+        app, client=("127.0.0.1", 50000), base_url="http://127.0.0.1"
+    ) as client:
+        saved = client.put(
+            "/api/v2/agent-cards/demo", json={"card": {"name": "invoice"}}
+        )
+        assert saved.status_code == 202
+        updates = app.state.catalog_updates
+        updates.run_once()
+        assert client.get("/ready").status_code == 200
+        updates.index.delete(["demo"])
+        for path in ("/ready", "/ready?include_counts=true"):
+            response = client.get(path)
+            assert response.status_code == 503, response.text
+            assert not response.json()["ready"]
+        updates._reconcile_deadline = 0
+        updates.run_once()
+        assert client.get("/ready").status_code == 200
+        assert search(client, "invoice")["items"][0]["id"] == "demo"

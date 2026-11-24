@@ -167,8 +167,16 @@ versions or other replicas. Errors propagate; unavailable storage is never zero.
 The counts are observations, not a distributed snapshot or source Card count.
 Existing `RetrievalIndex` implementations do not have to provide this capability.
 
-The catalog HTTP composition requests it only for `/ready?include_counts=true`,
-passing the effective instance index key through its bounded probe executor. Default readiness checks remain unchanged.
+The catalog HTTP composition checks statistics-capable indexes on ordinary
+`/ready` requests too, through the bounded probe executor with the effective index
+key. Both branch counts must equal the number of locally restored live durable
+Docs, and mismatched-key counts must be zero. Unavailable counts or cardinality
+drift return 503; `include_counts=true` only controls count diagnostics in the
+response. Indexes without this optional capability retain their query readiness
+checks (and return 501 when counts are explicitly requested). Counts detect
+missing/extra points, not equal-cardinality content corruption. These observations
+are not an atomic snapshot across external writers; concurrent local application
+may conservatively produce transient not-ready observations.
 Provider conformance is exercised by `tests/test_qdrant_modes.py`; HTTP behavior
 and normal readiness under count failures by `tests/test_public_catalog.py`.
 
@@ -192,7 +200,12 @@ local index application succeeds. Restart discovers durable Cards from zero.
 Full Card and Doc version checks default to 10 minutes, with stable instance-ID
 hash offsets across the entire period. Startup restoration runs immediately.
 Checks are serialized, read at most 1000 version records per SQL page and pause
-10 ms between pages; full vectors are fetched only for stale groups. Failed
+10 ms between pages; full vectors are fetched only for stale groups in healthy rounds. For an index
+with statistics support, cardinality drift triggers replay of all durable Doc
+groups, including deletion tombstones, even if in-memory versions are current.
+Replay reuses saved artifacts, not models; stale local IDs are removed when the
+index supports ID enumeration. Failed repairs remain retryable and not ready.
+This is cardinality repair, not arbitrary corruption detection. Failed
 checks retry on the next ordinary poll. Each completed check schedules the next
 future slot, never catches up missed slots. A DRM period change takes effect
 without creating another worker. Late transactions behind a timestamp cursor

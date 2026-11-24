@@ -35,6 +35,7 @@ from search_core.core.preparation_lease import PreparationLease
 from search_core.core.source_rebuild import rebuild_source
 from search_core.plugin_api.card_documents import CardDocumentConverter
 from search_core.plugin_api.embedding import EmbeddingProvider
+from search_core.plugin_api.retrieval import IndexStatistics
 
 logger = logging.getLogger(__name__)
 CONVERSION_VERSION = "default-card-v1"
@@ -311,9 +312,24 @@ class CardUpdates(CardManagementService):
             "qdrant": inspect_index(self.index, agent_id, fields),
         }
 
-    def _apply_documents(self, documents):
+    def index_counts_ready(self, counts):
+        """Compare actual branch cardinality with locally restored durable Docs.
+
+        This detects loss/extra points, not arbitrary equal-cardinality content
+        corruption. Pending Card preparation does not make an empty catalog fail.
+        """
+        expected = sum(len(ids) for ids in self._source_docs.values())
+        return all(
+            counts[f"{kind}_points"] == expected
+            and counts[f"{kind}_matching_points"] == expected
+            and counts[f"{kind}_mismatched_points"] == 0
+            for kind in ("vector", "keyword")
+        )
+
+    def _apply_documents(self, documents, *, force=False):
         documents = [
-            d for d in documents if self._document_versions.get(d.id, 0) < d.version
+            d for d in documents
+            if force or self._document_versions.get(d.id, 0) < d.version
         ]
         if not documents:
             return
@@ -461,8 +477,12 @@ class CardUpdates(CardManagementService):
             self._reconcile_interval = interval
         if monotonic() < self._reconcile_deadline:
             return
-        # Only lightweight version metadata is scanned; full artifacts are read
-        # solely for stale versions. The round is serialized by run_once's lock.
+        # Healthy rounds read only version metadata. Cardinality drift triggers
+        # durable artifact replay even when in-memory versions have not changed.
+        # No model calls are needed; failed repairs retry at the next poll.
+        repair = isinstance(self.index, IndexStatistics) and not self.index_counts_ready(
+            self.index.point_counts(self.index_key)
+        )
         after = ""
         while True:
             rows = self.repository.page(after, 1000)
@@ -475,10 +495,19 @@ class CardUpdates(CardManagementService):
         for page in self.documents.iter_version_batches(1000):
             scanned += len(page)
             changed += sum(
-                self._document_versions.get(d.id, 0) < d.version for d in page
+                repair or self._document_versions.get(d.id, 0) < d.version for d in page
             )
-            self._apply_documents(page)
+            self._apply_documents(page, force=repair)
             sleep(0.01)
+        if repair:
+            ids = getattr(self.index, "get_vector_ids", None)
+            if ids is not None:
+                expected = set().union(*self._source_docs.values())
+                stale = set(ids()) - expected
+                if stale:
+                    self.index.delete(sorted(stale))
+            if not self.index_counts_ready(self.index.point_counts(self.index_key)):
+                raise RuntimeError("local index coverage repair incomplete")
         self._schedule_reconcile()
         events.record(
             "search_index_sync",
