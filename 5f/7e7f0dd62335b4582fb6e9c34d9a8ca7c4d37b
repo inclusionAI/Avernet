@@ -1,0 +1,121 @@
+apps/agentclawscs/docker/utils/rotate-bcs-logs.sh
+  s_b8bd53b858e9e7::t_2bd6dd19a1120d 71
+apps/agentclawscs/docker/utils/test-rotate-bcs-logs.sh
+  s_b8bd53b858e9e7::t_a414b199dc91f1 53,63,67,72,92,247,256
+apps/bcs-internal/Cargo.lock
+  s_b8bd53b858e9e7::t_3cc24a7ef45e16 895,1608-1615,2353,2357,2362,2444,2493,2587,2599,2603-2604,2614,2654,2656,2658-2660,2666,2669,2671
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_b8bd53b858e9e7::t_38792325c75de5 89-91,125-126,146-154,190,205,207-215,368-377
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  s_b8bd53b858e9e7::t_3bfd0fbd4a6f75 200,284,296-297,330,407,438,453-455,457,498-499,584-588,616-619,623-626,631,922,1676,1697-1726,1757-1762,1786-1797,2397
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/port.rs
+  s_b8bd53b858e9e7::t_f6d9fc50f1bf93 43,60,68-72,95-97,102,124-127
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/Cargo.toml
+  s_b8bd53b858e9e7::t_c3173e1532cc7a 10
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/consumer.rs
+  s_b8bd53b858e9e7::t_0b0a5b1d0bc534 164-167,176-179,187,271-275,290-291,293,295
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/context.rs
+  s_b8bd53b858e9e7::t_273ae59aed11bb 93-94,108,113
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/lib.rs
+  s_b8bd53b858e9e7::t_b61079fb84bb09 10,14
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/logging.rs
+  s_b8bd53b858e9e7::t_125f02e3dd67ec 123-124,158-159,214-223,254,266-268,334,382-386,395-402
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/observability.rs
+  s_b8bd53b858e9e7::t_2b20ab3520131e 1-66
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/provider/mod.rs
+  s_b8bd53b858e9e7::t_c1239cd97feb7c 179,229,249-255,307-322,334-343,354,356-359,364,385,433,439,442,450-457,473,499,513,566,576,635,677-678
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/registry.rs
+  s_b8bd53b858e9e7::t_50b6982befad7a 227-229
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/tasks.rs
+  s_b8bd53b858e9e7::t_b1a175d8789daa 1-70
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/triple_pojo/channel.rs
+  s_b8bd53b858e9e7::t_27ed78642ec14e 370,392,412,416,461,465-467,490,529-538,541,557-566,570-571,589,605,618,626,628,730,773,819,846-855,877,896-903
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/triple_pojo_channel.rs
+  s_b8bd53b858e9e7::t_9f949959a92a6a 287,616,845-872
+apps/bcs-internal/crates/plugins/bcs-sofa-services/Cargo.toml
+  s_b8bd53b858e9e7::t_015960b65e52ee 10
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa.rs
+  s_b8bd53b858e9e7::t_d94b2f520f4085 102,154,162-164,166,171,173,180,196-207,211-214,221-226,229-231,239,607-610
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa_stream_tests.rs
+  s_b8bd53b858e9e7::t_e9dce2ed9f9b7a 1-80
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  s_b8bd53b858e9e7::t_35fa10b523bae9 34-36,41-42,129,188,235,259,313,379-384,386,447,451-452,454,471-473,489-526
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/agentbase_remote_chat/provider.rs
+  s_b8bd53b858e9e7::t_e2067bd76d06b5 54,67,71-75,308,353-355,564,762,1035,1041,1055-1068
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/ucs_render/application.rs
+  s_b8bd53b858e9e7::t_1d2029aff05d51 27
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/Cargo.toml
+  s_b8bd53b858e9e7::t_0c0e9a074d38c3 10,13-19
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/identity.rs
+  s_b8bd53b858e9e7::t_d7ec7f55ab0aa4 1-29
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/lib.rs
+  s_b8bd53b858e9e7::t_6597e138dcc908 3,32,38,41-52,57-58,67-77,89,98-108,110-111,114,126,130-131,136-144,160,200-203,213-214,218-247
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/sink.rs
+  s_b8bd53b858e9e7::t_3a7e4fa348b6ed 30,63,145,148
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/client_versions.rs
+  s_b8bd53b858e9e7::t_d4fbac92248287 17-25,44-45,56
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/rpc_bridge.rs
+  s_b8bd53b858e9e7::t_273c7f520b6842 1-156
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/rpc_business_log.rs
+  s_b8bd53b858e9e7::t_649a263475c980 1-66
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/rpc_wire.rs
+  s_b8bd53b858e9e7::t_7ee46741fd371d 1-249
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/trace_chain.rs
+  s_b8bd53b858e9e7::t_8e61e2dd8b2f49 491,642-644
+apps/bcs-internal/docs/overlay/governance/sofa-rpc-boundary.md
+  s_b8bd53b858e9e7::t_96d24613673ff6 116-125
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  s_b8bd53b858e9e7::t_f9e29ff252dafc 334-359
+apps/bcs-internal/docs/sofa-tracer.md
+  s_b8bd53b858e9e7::t_4f7eeb65cddc0e 31-32,35,42,114,125-128,203,239,258,415-450
+apps/bcs-internal/specs/README.md
+  s_b8bd53b858e9e7::t_51bf1cf723a4ea 9-12
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/.gitignore
+  s_b8bd53b858e9e7::t_fd0dce7a1b80df 1-3
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/.openspec.yaml
+  s_b8bd53b858e9e7::t_5adc99885b5c95 1-2
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/README.md
+  s_b8bd53b858e9e7::t_ba03106c26596b 1-49
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/design.md
+  s_b8bd53b858e9e7::t_15a03325c0defd 1-159
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/evidence.md
+  s_b8bd53b858e9e7::t_750ae542efbcd1 1-85
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/implementation.md
+  s_b8bd53b858e9e7::t_a857d2d3319932 1-105
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/proposal.md
+  s_b8bd53b858e9e7::t_ddc4ffa3dee1df 1-33
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/source-fingerprint.json
+  s_b8bd53b858e9e7::t_0e0b436a3a6a4b 1-56
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/specs/rpc-network-context/spec.md
+  s_b8bd53b858e9e7::t_68a81cbab17bdc 1-76
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/specs/sofa-rpc-observation/spec.md
+  s_b8bd53b858e9e7::t_9b853a8028a04c 1-72
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/tasks.md
+  s_b8bd53b858e9e7::t_ebb08f27814b7d 1-61
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/verification.md
+  s_b8bd53b858e9e7::t_d43cf7a259215d 1-55
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_b8bd53b858e9e7::t_8f26bbae8f04e2 3,25-29,236-238,241-246
+apps/bcs-internal/third_party/tracer-rust/README.md
+  s_b8bd53b858e9e7::t_a030050d3930a9 27-29
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/tracer/mod.rs
+  s_b8bd53b858e9e7::t_d7a2d3658761d4 456-461,463,486
+submodules/avernet
+  s_b8bd53b858e9e7::t_1b051ca3c4994b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5f7e7f0dd62335b4582fb6e9c34d9a8ca7c4d37b",
+  "prompts": {},
+  "sessions": {
+    "s_b8bd53b858e9e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e47d-1b63-7362-aaf7-7096b19afd9f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

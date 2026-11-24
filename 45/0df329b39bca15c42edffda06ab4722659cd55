@@ -1,0 +1,45 @@
+apps/bcs/Cargo.lock
+  s_fc73a782e73675::t_c0d759b1d6735d 1921
+apps/bcs/crates/adapters/http/bcs-http/Cargo.toml
+  s_fc73a782e73675::t_dd7fd7b408be8b 37
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/create/labels.rs
+  s_fc73a782e73675::t_02144098ce66ee 1-31
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/create/mod.rs
+  s_fc73a782e73675::t_f0a0fc9cd0a00a 6,20,22-25
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/legacy_group_event_subscription_contract.rs
+  s_fc73a782e73675::t_082b11bc896bd0 348-404
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_fc73a782e73675::t_a7b61c7f569faa 105-110
+apps/bcs/crates/application/bcs-app-a2a-bot/src/management.rs
+  s_fc73a782e73675::t_242a6cc5ffc532 26,37-41,174,181,199-204
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/provider_name_updates.rs
+  s_fc73a782e73675::t_96e059a35ff03f 1-81
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management.rs
+  s_fc73a782e73675::t_947ad8f198ff4a 319-321
+apps/bcs/docs/catalog-labels.md
+  s_fc73a782e73675::t_c9995c27aac7ee 47-62
+apps/bcs/specs/2026-11-19-configured-catalog-labels/design.md
+  s_fc73a782e73675::t_9ef0e5ce8ad078 62-69
+apps/bcs/specs/2026-11-19-configured-catalog-labels/validation.md
+  s_fc73a782e73675::t_2bdf1eedd776f2 318-386
+apps/gateway/configs/schemas/bcn.openapi.json
+  s_fc73a782e73675::t_70b81ad374dd4a 1
+apps/gateway/tests/unit/scripts/test_bcn_catalog_labels.py
+  s_fc73a782e73675::t_cd990068e876ef 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "450df329b39bca15c42edffda06ab4722659cd55",
+  "prompts": {},
+  "sessions": {
+    "s_fc73a782e73675": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f47e-75e4-72b0-a716-aea1ec929edb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/session-recovery-runtime.test.ts
+  s_c5125da3cacb9c::t_408dadc924f914 1,74-78,95-99,134-138
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/monitoring-runtime.test.ts
+  s_c5125da3cacb9c::t_408dadc924f914 1-3,101-115,118,121,140-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3904db047c6ab692af451edc7468d8c3b94cc104",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

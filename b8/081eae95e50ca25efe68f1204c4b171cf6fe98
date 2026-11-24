@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/token_exchange/test_actor_identity.py
+  s_fc1557df5d7924::t_89f9c14f6240ed 298-322
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b8081eae95e50ca25efe68f1204c4b171cf6fe98",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

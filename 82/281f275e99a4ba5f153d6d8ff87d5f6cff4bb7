@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/devices/services/device_filesystem_resolver.py
+  s_3d36bb45bb2a35::t_82353e86cd2aa9 23-30,163-166,198-215,249-252
+apps/backend/tests/community/plugins/prod/test_device_filesystem_dispatcher.py
+  s_3d36bb45bb2a35::t_850f6148134acd 12-13,194-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "82281f275e99a4ba5f153d6d8ff87d5f6cff4bb7",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

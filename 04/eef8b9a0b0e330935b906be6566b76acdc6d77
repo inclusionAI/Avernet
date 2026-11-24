@@ -1,0 +1,28 @@
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_projection.py
+  s_3d36bb45bb2a35::t_41435710061b61 11,84-85
+apps/backend/src/agentclaw/community/core/devices/services/device_context_resolver.py
+  s_3d36bb45bb2a35::t_41435710061b61 28,84-86,144-146,190-192
+apps/backend/tests/community/core/devices/services/test_device_context_resolver.py
+  s_3d36bb45bb2a35::t_4837b9fc706fd4 1,90-108
+  s_3d36bb45bb2a35::t_6b5f8a472e191a 109-110
+apps/backend/src/agentclaw/community/core/devices/services/device_context.py
+  s_3d36bb45bb2a35::t_41435710061b61 8-10,72-113
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_41435710061b61 11-14,213-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "04eef8b9a0b0e330935b906be6566b76acdc6d77",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

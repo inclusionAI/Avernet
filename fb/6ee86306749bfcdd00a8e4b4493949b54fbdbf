@@ -1,0 +1,25 @@
+apps/frontend-nextgen/src/domain/botHealthCheck.ts
+  s_cf55038a305cb3::t_e4f1d35c761bc8 76-81
+apps/frontend-nextgen/src/services/botHealthCheck/botHealthCheckService.ts
+  s_cf55038a305cb3::t_fdf8133326b806 2-7
+  s_cf55038a305cb3::t_6d379298dd0941 99-100,110-119
+apps/frontend-nextgen/src/hooks/useBotHealthCheck.ts
+  s_cf55038a305cb3::t_1490bf828027e7 15
+  s_cf55038a305cb3::t_36dba7e8feafcd 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fb6ee86306749bfcdd00a8e4b4493949b54fbdbf",
+  "prompts": {},
+  "sessions": {
+    "s_cf55038a305cb3": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "3f4bedf8-2bd7-4776-9d3a-70464c8979ae",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

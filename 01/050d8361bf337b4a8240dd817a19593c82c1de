@@ -1,0 +1,31 @@
+apps/frontend-nextgen/src/services/botScheduledTasks/metadata.ts
+  s_7aff7f1d24cd0a::t_74adb612b74637 39-42
+apps/frontend-nextgen/test/services/botScheduledTasks/metadata.test.ts
+  s_7aff7f1d24cd0a::t_7710dcab118012 7-9
+  s_7aff7f1d24cd0a::t_562fb4bec05ad3 53,55-57
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineFormDialog.tsx
+  s_7aff7f1d24cd0a::t_d990307a902ab5 181-185
+apps/frontend-nextgen/test/services/botScheduledTasks/targets.test.ts
+  s_7aff7f1d24cd0a::t_7ad395f47e0cc6 313,315-322
+apps/frontend-nextgen/test/pages/BotWorkshop/RoutineFormDialog.targetError.test.tsx
+  s_7aff7f1d24cd0a::t_0d263e0cbb4f71 7-9
+  s_7aff7f1d24cd0a::t_77ff0951e1ffe7 48,53-54
+apps/frontend-nextgen/src/services/botScheduledTasks/types.ts
+  s_7aff7f1d24cd0a::t_39008b7f343d13 186-188,191,193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "01050d8361bf337b4a8240dd817a19593c82c1de",
+  "prompts": {},
+  "sessions": {
+    "s_7aff7f1d24cd0a": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "f1e7c3d2-ac49-41bb-913b-e6ce18354fea",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

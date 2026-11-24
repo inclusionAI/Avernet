@@ -1,0 +1,30 @@
+apps/bcs-internal/README.md
+  s_d2bf2069ff97fe::t_554c92d9c3edfa 91,98-102
+apps/bcs-internal/crates/plugins/bcs-provider-headers-dingtalk/tests/wire.rs
+  s_d2bf2069ff97fe::t_554c92d9c3edfa 14
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/lib.rs
+  s_d2bf2069ff97fe::t_554c92d9c3edfa 232,918,949-951
+apps/bcs-internal/crates/plugins/bcs-provider-headers-dingtalk/src/lib.rs
+  s_d2bf2069ff97fe::t_554c92d9c3edfa 13-14,33,55-56,62
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/README.md
+  s_d2bf2069ff97fe::t_554c92d9c3edfa 75-82
+  s_d2bf2069ff97fe::t_8740e5fcdcfdf6 83-84
+apps/bcs-internal/crates/plugins/bcs-provider-headers-dingtalk/README.md
+  s_d2bf2069ff97fe::t_554c92d9c3edfa 7,19-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cce2f7e447937ed3575856023279887dcb8f063b",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

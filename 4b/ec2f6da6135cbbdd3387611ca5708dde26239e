@@ -1,0 +1,27 @@
+apps/evolverun/clawweb/docs/workflow-overview-analytics.md
+  s_85976bab9c700d::t_395fd7c65abbf4 75-109
+  s_85976bab9c700d::t_e32a4988ddec67 1-74
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-browser-analytics.test.ts
+  s_85976bab9c700d::t_179a89ac299510 1-8,10-80,82-90,92-168,170-223
+  s_85976bab9c700d::t_4edea2018ee6cc 9,81,91,169
+apps/evolverun/clawweb/docs/pack-scripts-browser-auth.md
+  s_85976bab9c700d::t_e32a4988ddec67 44-45
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-browser-reads.ts
+  s_85976bab9c700d::t_2167e3ff564f11 71-72,74,83-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4bec2f6da6135cbbdd3387611ca5708dde26239e",
+  "prompts": {},
+  "sessions": {
+    "s_85976bab9c700d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e37d-9fb9-7890-9945-a04d3e863f19",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

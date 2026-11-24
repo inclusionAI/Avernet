@@ -1,0 +1,20 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/mapping.rs
+  h_fa66fe7c023b4b 301
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/provider_registration.rs
+  h_fa66fe7c023b4b 3-8,52-54,73,78,81,88-91,123-151
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  h_fa66fe7c023b4b 248-251,725,733,764-771,773-814,839-840,861
+submodules/avernet
+  h_fa66fe7c023b4b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2a62ad0e9c03386ebc5f24aae9569b834332efd9",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
