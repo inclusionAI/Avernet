@@ -1,6 +1,6 @@
 # FSM 群 A2A：D0 合同决策（2026-11-24）
 
-状态：**五项设计方向已选定，物理协议待验证，D0 未冻结**。本文细化[讨论稿](spec.md)，验证工作归入[实施计划](plan.md)的 T1～T9。以下记录和字段是设计，不是 `dev` 已交付的 API。[#4245 固定版本的受理说明](https://github.com/inclusionAI/Avernet/blob/c7187edcc99354f017f2e1a9bfcb3d6e88c15b96/apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md)区分 input 文档、schedule、checkpoint 和 Inbox；现行 input 级 CAS 本身不能裁决不同 input 争用同一 Sid。
+状态：**S1.1～S1.5 全部完成，D0 已冻结（放行 Stage 2 开工；T2 的 provider GREEN 仍阻塞于外部 P；非上线批准）**。本文细化[讨论稿](spec.md)，验证工作归入[实施计划](plan.md)的 T1～T9，门禁证据见[验证记录](validation.md)。以下记录和字段是设计，不是 `dev` 已交付的 API。[#4245 固定版本的受理说明](https://github.com/inclusionAI/Avernet/blob/c7187edcc99354f017f2e1a9bfcb3d6e88c15b96/apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md)区分 input 文档、schedule、checkpoint 和 Inbox；现行 input 级 CAS 本身不能裁决不同 input 争用同一 Sid。
 
 ## 1. 受理：在 `ckpt:<sid>` 上安装一轮，而非另加 Session 锁
 
@@ -105,3 +105,58 @@ List 首页取得按授权群过滤、按 Tid 唯一的版本化快照，行、t
 **超大中间结果完整屏障：** attempt 级派发/停止事实文档（`sink/stopped:<tid>#<attempt>`，身份 = encode(key)+attempt，独立持久化、身份核验、拒绝静默覆盖）；统一停止屏障要求每个已派发 attempt 都有核验过的停止事实（未记 attempt 的旧式整轮派发仍核对整轮 `stopped:<tid>`）。失败收尾经同一屏障提交有界、稳定 ID 的失败事件（无 artifact 事件），失败记录只含有界 reason（≤1 KiB），超限字节既不是停止证明也不进入产物；结果读取失败不伪造停止；兄弟未停阻止整轮终态（下一轮受理保持 Busy）；失败记录经正常证明路径读回，不落入损坏隔离；超限结果的所有下游派发被拒、交付效果为空。几 KB 候选最终产物不能豁免大中间结果（正向向量钉）。
 
 这些仍是模型级证据：#4245 task_feed 的真实 append/publish 实现与引用转存归 T4/T7，Worker IO 限长与入站解引用归 T6/T7，公开 HTTP/SSE 协议与游标密钥归 T8。
+
+### S1.4 联合版本固定与合同映射矩阵（尚非生产冻结）
+
+本节记录 S1.4 把 S1.1～S1.3 原型合同映射到 **dev 已合入的真实 #4245 联合版本**的字段/调用/能力级结果。plan 原文按在审 `c7187edcc9` 静态核对；#4245 实际已于 2026-11-24 09:01:25Z 合入，按"实际合入版本不同须重验并记录 commit/能力矩阵"条款以工作树实物重验。核对命令与输出见 [验证记录](validation.md) 的 S1.4 节。
+
+**联合版本 pin：** `origin/dev` 取 `d806668442`；#4245（PR 标题 `feat(bcs): connect Gateway to recoverable Worker runtime`，head `6defec198ac`）的 dev 合入提交为 `64a7afe3c64f88792d7f44b5f695da2ad0d865ae`。受影响合同面（model `input.rs`/`task.rs`、Service API `session.rs`/`inbox.rs`/`task_feed.rs`/`result.rs`/`dist_runner.rs`、`bcs-dist-store` 的 `coordination/`、`inbox/{producer,validation}.rs`、`task_feed/{storage,append,publish}.rs`、`archive/`、`evidence.rs`、`bcs-dist-worker` 的 `admission.rs`、`processor/{prepare,transitions,effects}.rs`、`bcs-dist-connector` 的 `report.rs`/`rules.rs` + `bcs-dist-encoding::connector`）均在工作树实证存在并参与下述可运行测试。预算常量已等值核对（入站 8 MiB、Feed 事件 128 KiB/批 256 KiB，S1.3 已钉，不重测）。
+
+**原型 → 真实合同映射（版本 = dev `64a7afe3c6`）：**
+
+| 原型概念 | 真实合同的字段/调用 | 能力判定与缺口归属 |
+| --- | --- | --- |
+| 受理 CAS（同代次安装 generation/Tid/原请求引用/Accepted 许可+调度义务，§1） | `SessionStorePort::commit` 对 `ckpt:<sid>` 的精确 `commit_seq` CAS + owner fence；同一次 CAS 安装终态许可所需全部内容（`CommittedBatch` outbox 随终态提交固定）。请求预留/发现目录 = 独立单文档 CAS（`create/replace_document`），受理裁决不依赖多键事务 | **可表达**（联合测试实证）。争用输家分类：异提交 id 同 head → `CommitSeqConflict`；同 id 异内容 → `ContentConflict`（且回包语义），二者都不是 Busy 也不是成功。生产 `GroupRoundRepo::admit` 落到该原语之上属 **T2**；注意 dev 通用 Inbox `admit` 是 input 级 CAS，不裁决同 Sid 争用，不得代位 |
+| owner 栅栏与交接（旧写者迟到写、seal 后继者） | `acquire` seal、`commit` 对非 checkpoint owner 返回 `Fenced`；可交接续扫。**Seal 发生在 acquire，不在退租** | **可表达**（联合测试实证 Fenced） |
+| `TerminalProof`（绑定 RoundKey、提交身份、状态、result/closure 证据） | `TaskFinalization{operation_id, record, terminal_event_id, terminal_published}` + `FinalTaskRecord`（`archive/mod.rs` SQL 行，内容寻址 BlobRef，provenance=completion_identity）+ 终态事件 `OutputBody::Terminal{status,result_ref}`。`commit_id/commit_seq` ← `CommitReceipt`/`EffectSource.commit`；status ← `TerminalStatus` | `result_ref` 通道可表达并已读回验证；**`closure_ref`（每派发 attempt 的停止闭合证据）在 #4245 无按 Task 转存物化**——派发面证据在 Inbox closure/dispatch 目录，按 Tid 冷转存归 **T4/T7** |
+| 冷证明读回（压缩/推进后仍按 Tid 可读） | 真实跨 head 通道 = 效果 `Completion` 文档 + `AppendOutcome::Compacted(CompletionCertificate)` + `result:` SQL 行的 provenance 字段 + `TaskSnapshot` 文档（publish 后权威）。`restore/get_final` 不读当前 head | 原型 `cold:<tid>`+checkpoint cold index 的生产对应物按 Task 物化归 **T4/T7**；已应用证据的可读性在联合测试验证 |
+| 两种 Feed 发布许可（AppendEvents / PublishSnapshot 各自持久许可，§3.3） | 一个 `CommittedBatch` 内 `EffectKind::AppendEvents{previous,events}` + `PublishSnapshot{snapshot}` 两个 Effect，各自 `Completion` 文档；`task_feed/publish.rs` 先验 append（`snapshot_append_incomplete` 拒绝先 publish），append 校验 `previous == completed_head`。许可随终态 CAS 一次固定；身份摘要 = `EffectId/previous/snapshot.source_commit/snapshot_event_id` | **可表达**（append→publish 顺序、幂等 AlreadyApplied、丢回包读回均实证）。**缺口**：已应用效果凭 Completion 跨 head 重放（owner 无关），**从未应用的许可在 head 推进后经 `EffectVerifier` 拒绝（head-scoped）**——联合测试显式断言该边界；严格群来源的跨 checkpoint 成对首次写许可归 **T7**（与 plan T7"改 task_feed/{append,publish}.rs"一致）。对比：`save_final` 自带跨 head 保留证据（provenance 行），task_feed append/publish 无此合同 |
+| `ConnectorAdmission/admit_connector`（无远端事件 ID 的稳定终态身份） | 身份 = `bcs-dist-encoding::connector::key_input_id(did, KeyEvent)+key_digest(did, key, state)`；`KeyEvent::{Final,Error,InputRequired(n),AuthRequired(n)}`；`remote_event_id` **不进身份/摘要**（validation.rs 仅要求与 playload state 相符）。GetTask 完成结果可凭 `remote_event_id: None` 如实报达真实 Inbox | **可表达且已实证**（Accepted；换 holder/异字节的重复报告 → `Duplicate` 只应用一次；同 key 异 state → `ContentConflict`）。dev 通用 `admit()` 对临界事件要求远端 ID（`critical_agent_input_id`），无 ID 报告不得走该入口——原型"不得伪造 ID"的约束由合同直接满足 |
+| typed `RunnerInput::GroupStart`（Service API 8.0.0） | 生产 Worker 输入面是 `InputBody`（Inbox 信封），`GroupStart` 目前**无生产消费者**；在树全部 `RunnerInput` 消费者（processor prepare/risk、test-runner、test-support harness、worker 测试）均为非穷尽（if-let/let-else/catch-all），无一处需加臂；`cargo check --workspace --all-targets` 通过。`risk.rs` 把 `RunnerInput` 序列化进 attempt 摘要 | 生产 `GroupStart`→prepare/decision 接入归 **T5/T6/T7**；序列化为外部 tagged 新 variant，旧读者解到新变体显式报错（当前无跨进程读者，P 依赖由 T9 首次引入时验证） |
+| Worker 受理/终态两段（AwaitingResult → Done） | `WorkerTaskAdmission` + `transitions::archive_confirmed`：前批效果完成（`next_checkpoint` 拒绝未完成 outbox）后才能提交 Done+双许可；`preserve_frozen_results` 在真实合同层执行"B 推进不得覆盖 A 证明"（Done 任务的 finalization/身份不得变更） | §3.1"归档先写"在合并合同的实际形态 = Done 许可安装前 SaveResult 必须已完成且 publish 重新对账归档；未见弱化。严格群来源适配归 **T6/T7** |
+
+**能力矩阵（provider 需求，P 依赖）：** 表达所选原子范围只需文档精确版本 CAS（`DocumentCas`：create/replace/patch）+ Stream 单调 append + ZSet + `RetainedLease`（model 测试体已提供，生产 provider 交付归 P/T2/T9）。缺位不降级为 Gateway 先查后写（§1 兜底条款仍然生效）。
+
+**结论：** 无未解决的接口冲突；两处已记录缺口（closure_ref 按 Task 物化、从未应用 Feed 许可跨 head）已指派 T4/T7，映射本身成立，不需要回改 S1.1～S1.3。剩余装配验证逐项：T2（P）——生产 `group_admission.rs` GroupRoundRepo、真实 provider GREEN；T4——`fsm_task_artifacts.sql` 双方言迁移、closure/冷证明按 Tid 转存、Blob pin/release、公共索引与游标物化；T6（P：ByRequest adapter）——Connector 严格 `CallAuthority`/SendProof、GetTask 完整产物校验→`admit_connector(Final)` 全链、request-id 反查扩展；T7（P：跨进程故障）——processor 接 GroupStart、统一停止屏障、task_feed 成对首次写许可、dispatch 目录回收+稳定游标、核实交接、Supervisor 装配；T9（P）——Singlebox 独立进程故障矩阵与容量验收。
+
+### S1.5 D0 冻结记录（Stage 1 收口）
+
+本节把 S1.5 门禁后的冻结事实固化为单一登记点。D0 冻结是**设计实施门槛**，不是上线批准；放行范围 = Stage 2（T2/T3/T4/T5/W）开工，其中 **T2 的 provider GREEN 与整个 Stage 2 退出仍 blocked 于外部 P**。全部命令/结果/限制台账见 [验证记录 S1.5 节](validation.md)。
+
+**冻结版本 pin：**
+
+| 面 | 冻结版本 / ref |
+| --- | --- |
+| `bcs-service-api` | **8.0.0**（7.1.0→8.0.0；+289 清单项、0 删除：`RunnerInput::GroupStart` + `port::repo::distributed::group_round`；树内消费者全部非穷尽，workspace all-targets check 绿；入树消费者审计见 S1.4） |
+| `bcs-dist-model` | **0.1.1**（0.1.0→0.1.1；+753 清单项、0 删除；旧格式 wire 回归 5 项真实通过） |
+| 联合版本基线 | #4245 dev 合入为 rebase 式提交序列，tip/mergeCommit `64a7afe3c64f88792d7f44b5f695da2ad0d865ae`；`origin/dev` 基线 `d806668442`（矩阵见 S1.4 节） |
+| 门禁工具链（仅记录，不改 CI 默认） | cargo-public-api **0.52.0**（CARGO_INSTALL_ROOT=<repo>/.superpowers/tools）+ nightly-**2025-11-30**（rustdoc JSON 配套） |
+
+**冻结参数（`RoundBudgetProfile::v1()`，service-api 8.0.0）：** 入站 8 MiB（与 `PHASE_ONE_MAX_INPUT_PAYLOAD_BYTES` 等值钉）、公开单帧 8 MiB、Feed 单事件 128 KiB、Feed 批 256 KiB、分页最多 100 行、签名游标有效期 300_000 ms（300 秒）；历史投影默认 0 条、非默认 ≤100 且计入公开帧预算（`validate_projection` 拒绝 0 行或超界，编不下则拒绝投影不截断）。S1.1 有界方案的 16/16/16/128 KiB 是**测试原型构造参数，不随 D0 转正为生产容量**。
+
+**明确未冻结（如实登记）：** 有界失败收尾的 failure-reason ≤1 KiB 值——S1.3 已验证“超限字节既不是停止证明也不进产物”的语义，但 1 KiB 这个数本身未冻；T6/T7 接入时按实际错误面定值并回填本表。
+
+**权限/撤权矩阵（`GroupRoundGrants::allows`，随 §5 冻结）：** New = `published && invoke`；Replay / Read / Subscribe = `read`；Cancel = `read && cancel`。撤权生效点沿用 §5/S1.2：首页与每次续页都重验当前 ACL，订阅在撤权通知时关闭，旧 cut/旧游标不能绕过撤权；下游 start/resend/continue 与 query/cancel 继续使用独立节点委托，不从入口 read 推导。
+
+**协议↔测试映射（原型级证明物；生产验收仍归 T 任务）：**
+
+| 协议决策 | 测试证明物（本仓库实际存在并运行绿） |
+| --- | --- |
+| §1 受理 CAS / owner 栅栏 / 定义目录 | `bcs-dist-store/tests/group_round_protocol`、`group_round_races`、`group_round_support/{lifecycle,reservation,retention}`、`bcs-service-api/tests/group_round_contract`、真实关节 `bcs-dist-store/tests/group_round_joint_mapping`（Fenced/CommitSeqConflict/ContentConflict 实证） |
+| §2 按消息定位、首次依据判等 | `group_round_protocol`（replay 向量）、`bcs-service-api/tests/group_round_vectors`、`group_round_contract` |
+| §3 归档先写、Completed 单次提交、双 Feed 许可 | `group_round_retention`、`group_round_feed`、`group_round_joint_mapping`（append→publish、AlreadyApplied、丢回包读回） |
+| §4 停止事实两分、有界失败（IO 面归 T6/T7） | `group_round_encoding`（超限屏障、digest 引用 pin）、`group_round_support/encoding` |
+| §5 快照 List + 签名游标 + 三层预算 | `group_round_cursor`、`group_round_support/{pagination,listing}`、`group_round_encoding`（B−1/B/B+1 真编码）、`group_round_support/encoding`、wire `bcs-dist-model/tests/group_round_wire` |
+| 集中合同 harness | `bcs-test-support/src/contract/distributed/group_round.rs`（`group_round_repo_contract_tests`）+ `bcs-dist-store/tests/conformance_group_round.rs` |
+
+**D0 冻结依据与边界：** S1.1～S1.4 逐项证据 + S1.5 全部门禁台账（受影响 729 绿、workspace check 绿、真实 API 差异门禁绿、全工作区 9616/3/74 且 3 项为预告的 host 基线红、R25 红 100% 为 dev 预存在且本分支唯一新增 trait 合规）。两个已指派合同缝（closure_ref 按 Task 物化 → T4/T7；未应用 Feed 许可跨 head → T7）与 deferred minors 不阻塞 D0，属 Stage 2+ 装配范围；R25.3 因基础设施中止的记录与等价证据见验证记录。真实 provider、跨进程恢复、生产默认值上线仍按 plan 归 T2/T9 等任务与单独授权。

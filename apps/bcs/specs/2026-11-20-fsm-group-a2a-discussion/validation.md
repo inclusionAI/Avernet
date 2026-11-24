@@ -1,6 +1,6 @@
 # T1 验证记录
 
-状态：**T1 部分完成，D0 未冻结。** 本次没有执行 T2～T9、合并 #4245、启用服务或提交代码。
+状态：**T1 完成（Stage 1 / S1.1～S1.5），D0 已冻结（只放行 Stage 2 开工，T2 provider GREEN 仍阻塞于外部 P）。** 本次执行了 S1.5 全部门禁、真实 API 差异与审查核对，未执行 T2～T9、合并、部署或 push。
 
 ## 基线和证据边界
 
@@ -35,19 +35,21 @@
 
 ## 冻结检查清单
 
-| 要求 | 当前状态 / 解除条件 |
+> 本表为 S1.5 后的最终态；每行证据可追溯到 [S1.5 门禁与审查记录](#第五轮s15门禁审查与-d0-冻结记录) 或 S1.1～S1.4 各节。
+
+| 要求 | 最终状态（S1.5） |
 | --- | --- |
-| 必填 scope/source/generation、输入顺序、原规范化依据与结果证据 wire | 已有候选和测试；generation 用 NonZeroU64，拒绝零代次；schema 显式拒绝不支持版本。描述符本身不授予权限。 |
-| GroupRoundRepo、集中 conformance、typed Runner Start | 未传播：遵守 T1“原型通过评审后再同步”的门槛。不能以无真实消费者的 trait 假装冻结。 |
-| 请求证据跨轮读回 | 阻塞：明确 key、checkpoint 授权、转存读回、压缩和墓碑顺序，覆盖所有故障窗口。 |
-| 无 hint 自动发现 | 阻塞：明确有界目录/意图和唯一写者，再验证消费者自动发现，不由测试直接传入 Sid。 |
-| 归档后未提交、Completed 后 Feed 故障、B 实际派发 | 未运行：当前未包含 #4245 processor/TaskFeed/archive 联合实现，须提供配套联合版本或明确移植范围。 |
-| 两 Sid 的公共列表 cut | 只验证朴素独立索引方案不足；覆盖屏障与快照保留方案尚未实现验证。 |
-| replay_before_current_capabilities | 只验证 wire 保留原记录；授权、请求索引、首次规范化恢复的应用行为尚未实现。 |
-| oversized_intermediate_result_is_bounded_failure | 未运行联合 Connector/Worker 路径；限额常量/序列化测试不能代替有界 IO 和停止事实分离。 |
-| 权限矩阵、撤权点、分页期限、默认/非默认预算 | 未冻结，需要与上述原型及真实编码一并验证，不能为勾选任务随意宣布默认值。 |
-| 真实 provider、跨进程恢复 | 未执行；模型和重建消费者实例不作替代证据。 |
-| 公共 API 门禁 | 缺工具；单独 model 兼容检查是加法声明和旧 wire 回归，不替代该门禁。 |
+| 必填 scope/source/generation、输入顺序、原规范化依据与结果证据 wire | **已冻结**（bcs-dist-model 0.1.1，wire 测试 + 向量绿；generation 拒零代次，schema 拒不支持版本） |
+| GroupRoundRepo、集中 conformance、typed Runner Start | **已冻结**（bcs-service-api 8.0.0；GroupRoundRepo 有 harness `group_round_repo_contract_tests` 与 conformance 入口且全套绿；RunnerInput::GroupStart 经 S1.4 消费者审计 + 全 workspace check 编译证明；生产 `admit` 落 store 原语归 T2） |
+| 请求证据跨轮读回 | **已冻结（原型级）**：S1.1 请求登记/预留/接管 + 跨 Sid 重用测试绿；冷证明按 Tid 转存物化归 T4/T7（S1.4 缺口 #1，已指派） |
+| 无 hint 自动发现 | **已冻结（原型级）**：S1.1 预登记目录先于许可 + 接管扫描测试绿；生产扫描合同归 T7 |
+| 归档后未提交、Completed 后 Feed 故障、B 实际派发 | **已冻结（联合版本映射级）**：S1.4 真实关节映射测试（受理→CAS→Done→append→publish→跨 head/owner）绿；真实 Connector 全链 fault 窗口归 T6/T7；未应用 Feed 许可跨 head 缺口已指派 T7（S1.4 缺口 #2） |
+| 两 Sid 的公共列表 cut | **已冻结（原型级）**：S1.2 双重采集 + 不可变快照 + 签名游标测试绿；生产物化索引/游标协议归 T4/T8 |
+| replay_before_current_capabilities | **已冻结（原型级）**：lookup(Absent/Prepared/Accepted/Expired) + 当前授权先于重放测试绿 |
+| oversized_intermediate_result_is_bounded_failure | **已冻结（原型级）**：S1.3 真序列化预算（B−1/B/B+1）+ 流式入站检测 + 统一停止屏障 + 有界失败收尾测试绿；生产 IO/停止屏障归 T6/T7 |
+| 权限矩阵、撤权点、分页期限、默认/非默认预算 | **已冻结（候选参数转正）**：GroupRoundGrants（New=published+invoke；Replay/Read/Subscribe=read；Cancel=read+cancel）与 RoundBudgetProfile::v1()（入站/公开帧 8 MiB、Feed 事件 128 KiB、批 256 KiB、分页 100 行、游标 300 秒、历史 0/≤100）；failure-reason ≤1 KiB **明确未冻结**，如实登记 |
+| 真实 provider、跨进程恢复 | **非 D0 必需**（Stage 2+ 范围）：原型与联合映射不作替代证据；T2 生产 GroupRoundRepo + provider GREEN（阻塞于外部 P）、T9 跨进程故障矩阵按 S1.4 结论放行开工 |
+| 公共 API 门禁 | **已修复为真实差异门禁并通过**（见 S1.5 记录；不再以 SKIP 或接口导出替代） |
 
 ## 第二轮 T1 正向原型（执行中）
 
@@ -90,3 +92,110 @@
 本次保留可独立验证的候选类型和原型，未为了消除反例而改造生产 SessionStore、导入整个未合入 PR 或执行 T2/T7。T1 因原型未通过不能标完成；D0 保持未冻结。下一步仍是 T1 的物理协议闭环，而不是宣布所有后续实施已放行。
 
 访问成本方面，测试 Model 没有真实 DB 往返；不能从两写者/两 Sid 实验推断吞吐。后续方案须明确每批上限、竞争重试、发现目录扫描和冷证明读写成本，不扫描无界历史。恢复执行时复用已有 Cargo target，不清共享缓存，编译并发与测试线程均限制为 1。资源监测每 15 秒采样，观测到的最低可用内存约 11.5 GiB、最低磁盘余量约 35.9 GiB，未触发 2 GiB/20 GiB 告警阈值；采样结果不代表精确峰值。
+
+## 第四轮（S1.4）：联合版本固定与合同映射验证
+
+### 联合版本 pin（实际合入版本重验）
+
+| 命令 | 结果 |
+| --- | --- |
+| `gh pr view 4245 --repo inclusionAI/Avernet --json number,title,mergeCommit,state,mergedAt,headRefOid` | `MERGED`，标题 `feat(bcs): connect Gateway to recoverable Worker runtime`，head `6defec198ac766b92a0fc68c6d097010d0e43963`，mergedAt `2026-11-24T09:01:25Z`，dev 侧提交 `64a7afe3c64f88792d7f44b5f695da2ad0d865ae`。plan 原文的 c7187edcc9"在审"状态已被超越，本节按其实物重验 |
+| `git log --oneline -5 origin/dev`（于仓库根） | `d806668442 fix(bcs): forward catalog label normalization through the metrics wrapper (#4338)` 为当前 dev tip；本分支已 rebase 于其上 |
+| 实体存在性（矩阵行基础） | `ls`(及直接编译通过)证实 `crates/services/bcs-dist-store/src/archive/sql.rs`、`src/admission.rs`（worker crates）、`src/processor/{decision,transitions,effects,prepare,drive,lifecycle}.rs`、`src/task_feed/{storage,append,publish,terminal,follow,reader,retention}.rs`、`src/inbox/{producer,validation}.rs` 均在 dev 合入后的工作树 |
+
+### 矩阵核对命令（git log/grep 粒度）
+
+| 命令 | 结果 |
+| --- | --- |
+| `git log origin/dev --format='%h %s' -- crates/services/bcs-dist-store/src/archive/sql.rs`（于 `apps/bcs`） | 起始提交 `18a6301926 feat(bcs): persist immutable distributed results and blobs`（2026-11-19） |
+| `git log origin/dev --format='%h %s' -- crates/services/bcs-dist-store/src/task_feed/storage.rs` | 起始 `c6f7b45e62 feat(bcs): implement committed task feed and logical retention` |
+| `git log origin/dev --format='%h %s' -- crates/services/bcs-dist-store/src/inbox/validation.rs` | 起始 `6a1c847d50 feat(bcs): add reliable inbox admission and bounded recovery` |
+| `grep -n "PHASE_ONE_MAX_INPUT_PAYLOAD_BYTES" crates/contracts/bcs-dist-model/src/input.rs` | 行 68 处定义 8\*1024\*1024，与 `RoundBudgetProfile::v1().inbound_bytes` 等值（S1.3 已钉） |
+| `grep -n "MAX_EVENT_BYTES" crates/services/bcs-dist-store/src/task_feed/storage.rs` | 行 4：128\*1024；批 256 KiB 见 `task_feed/append.rs:12,17` |
+| `grep -rn "admit_connector" crates/` | 定义于 service-api `port/repo/distributed/inbox.rs:54`、实现在 `bcs-dist-store/src/inbox/producer.rs:285`、消费者 `bcs-dist-connector/src/report.rs:102` 与其 lifecycle/recovery 测试 |
+| `grep -rn "RunnerInput::" crates/ --include="*.rs"` | 8.0.0 全部消费者：processor `prepare.rs`（构造，不穷尽匹配）/`risk.rs`（序列化进 attempt 摘要）、test-support 契约 harness `services.rs`（透传）、`bcs-dist-test-runner/src/lib.rs`（if-let 非穷尽）、worker 测试集（let-else/if-let/`other =>`），无一需要为 `GroupStart` 加匹配臂；唯一显式 `GroupStart` 臂在 `bcs-service-api/tests/group_round_contract.rs`（本分支新增测试，非生产消费者） |
+
+### 可运行合同兼容测试
+
+新增 `bcs-dist-store` 集成测试目标 `tests/group_round_joint_mapping.rs`（716 行；选择 dist-store 而非 test-support 契约层的原因：它要把 CoordinationStore、StoreTaskFeed、StoreInboxProducer、DbArchiveStore(SQLite) 等真实关节装进同一 KeyLayout/存储命名空间，属单 crate 集成装配；test-support 契约层是跨 provider 复用的 port conformance，不适配跨关节链路）。两层夹具不用 S1.1 的原型 Model 文档（不复用 `group_round_support`），只用测试 Model 作底层插件。
+
+| 命令 | 结果 |
+| --- | --- |
+| `CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_BUILD_JOBS=12 cargo test -p bcs-dist-store --test group_round_joint_mapping -- --test-threads=1` | **2 passed, 0 failed**。`joint_admit_terminal_feed_readback_survives_head_advance_and_takeover`：真实 Inbox 受理引导（spec+initial task）→ `acquire` → 受理 CAS（积极者 `Committed`，同 head 异 id → `CommitSeqConflict`，同 id 异内容 → `ContentConflict`）→ `AwaitingResult`+SaveResult CAS → `Done`+Append/Publish 双许可单次 CAS → 真实 feed 先 publish 拒绝（`snapshot_append_incomplete`）→ append `Appended`/重放 `AlreadyApplied` → publish `Published`/重放 `AlreadyApplied` → `resolve_commit` 丢回包读回 → `restore`/`get_final` 无 head 读回 → 下一轮同源立即受理（无第二次解锁）→ 换代接管：已应用许可经 Completion 跨 head/跨 owner 重放 `AlreadyApplied`，后继 `acquire` seal 之后旧 owner 迟到写 `Fenced` → 轮 2 提交成功（`preserve_frozen_results` 强制保留 A 的冻结终态）→ **断言缺口**：head 推进后从未应用的 CommittedBatch 许可被 `EffectVerifier` 拒绝（`unproven_effect`），已应用者仍可重放。`gettask_final_without_remote_event_id_reaches_the_real_inbox_once`：真实 `admit_connector` 接收 `remote_event_id: None` 的 GetTask Final（身份 `key_input_id(key_digest)`，state=completed）→ `Accepted` → 换 holder 异字节重报 `Duplicate` → 真实 inbox 流恰好 1 条键事件 → 同 key 异 state `ContentConflict` |
+| `CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_BUILD_JOBS=12 cargo test -p bcs-dist-store -p bcs-dist-model -p bcs-service-api -p bcs-test-support` | **729 passed、0 failed、1 既有 ignored doctest**（727 基线 + 2 项 S1.4 新增；此前 4 crate 上的 S1.1～S1.3 全绿套件保持绿） |
+| `CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_BUILD_JOBS=12 cargo check --workspace --all-targets` | **exit 0**，`Finished dev profile in 1m 11s`——Service API 8.0.0（含 `RunnerInput::GroupStart` 破坏性穷尽加法）的工作区级消费者兼容证明 |
+
+**TDD 说明（无独立 RED 阶段）：** 映射目标均为已合入的生产原语，无生产代码变更可供先 RED；两项测试自合同映射表直接写出。首轮执行中两处断言因真实合同分类被修正后通过——同 head 竞争 CAS 的输家按提交 id 区分（先误写 `CommitSeqConflict`，学得同 id 异内容是 `ContentConflict` 且回包语义）；旧 owner 迟到写在 seal 前仍 `Committed`（学得 fence 生效于 `acquire`）。这两次修正本身即合同级映射证据。
+
+**判定：** 映射成立，无未解决接口冲突；两处缺口（closure 证据按 Tid 物化、从未应用 Feed 许可跨 checkpoint）已在 contract-decisions.md 的 S1.4 节登记并指派 T4/T7——不是映射失败，是其本来就归后续生产阶段的合同缝。未运行真实 Connector 端 `rules.rs`→report 全链归 T6；跨进程 provider/联合角色归 P/T9。
+
+### 磁盘记录
+
+s14 期间 `/home` 曾降至 0.8 GiB 可用（工作区 target 累积的无关测试可执行文件 ~45 GiB）。`cargo sweep --time 3` 可清部分过小（全部产物当日复用）；按"测试可执行文件可按需重链、编译对象保留"的原则，移除了与四个受影响 crate 无关的 >50 MiB 陈旧测试可执行文件，释放后 df 显示 46 GiB 可用；后续所有 cargo 命令照常复用既有 target，未执行 `cargo clean` 或删除编译对象缓存。
+
+## 第五轮（S1.5）：门禁、审查与 D0 冻结记录
+
+本节是 Stage 1 收口轮的完整命令/结果/限制台账。日志均在 gitignored `.superpowers/sdd/plan/` 下；工作目录 `apps/bcs`，受影响命令统一带 `CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_BUILD_JOBS=12`（资源应急降级处已注明）。
+
+### #4245 合入形态更正（复核陈述）
+
+#4245 并非 squash 单提交合入：dev 收到的是 rebase 式提交序列（约 17 个提交，comitter 时间同秒），`64a7afe3c6` 是该序列的 tip / mergeCommit；上文的“squash 合入”表述不成立，以本行为准。`git log 64a7afe3c6 -22 --format='%h %ad %s'` 显示序列跨 2026-11-19～11-24 的个体提交（inbox admission → worker runtime → single-document admission → dispatch slot 修复等）。
+
+### 受影响模块套件与全量检查
+
+| 命令 | 结果 | 日志 |
+| --- | --- | --- |
+| `CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_BUILD_JOBS=12 cargo test -p bcs-dist-store -p bcs-dist-model -p bcs-service-api -p bcs-test-support` | **729 passed、0 failed、1 既有 ignored doctest**（96 个 test target 全 ok，无 FAILED）——与 S1.4 计数一致 | `task-5-gate-1-affected-suite.log` |
+| `CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_BUILD_JOBS=12 cargo check --workspace --all-targets` | **exit 0**，20.81s Finished | `task-5-gate-2-check-all.log` |
+
+### 全工作区测试（真实全量，umask 077 + --no-fail-fast）
+
+命令：`(umask 077 && CARGO_PROFILE_DEV_DEBUG=line-tables-only cargo test --workspace --no-fail-fast)`（编译期曾按资源纪律降级 -j 4/-j 2；测试执行期全量运行）。日志 `task-5-gate-5-workspace-test.log`（含三次接续重跑的完整拼接输出）。
+
+- **总量：929 个 test target：9616 passed、3 failed、74 ignored**；`--no-fail-fast`，cargo exit 101 仅由下述 3 个预期红产生，无编译错误、无中止目标。
+- **预期 host RED 逐项兑现（不修改的生产拒绝）**：`-p bcs-collaboration-store --test mysql_store` 中 3 项因 host SQLite 3.26 低于 bundled 而失败：`branch_skip::sqlite_branch_skip_contract_and_environment_isolation`、`failure_contract::sqlite_failure_action_migration_preserves_legacy_rows_and_replays`、`history_contract::sqlite_history_acceptance_and_terminal_replay_contract`。此为既有已知 host 基线红、CI 仲裁，不修 bundled。
+- **预期 host RED 之一未复现**：控制器预告的 `provider_initial_managers` 5 项 host 红在本轮**全部绿**（`--test provider_initial_managers` 12+6 passed；MySQL 链 1 项 ignored 要求 `BCS_TEST_MYSQL_URL`），如实记录，不解释为 CI 状态变化。
+- **bcs-bridge-cli register**：umask 002 下 Unix socket 组可写曾被安全检查拒；本轮 umask 077 全量重跑该目标绿，未放松安全检查、未改 bridge 代码。
+- **无其他任何失败**。ignored 74 = 测试自身的 env 门槛（19 处 `requires BCS_TEST_MYSQL_URL`）等既有标记，非本轮产物。
+
+### API 差异门禁（修复后第一次真实基线↔工作树比较）
+
+- **修复内容**（`scripts/ci/check-public-api.sh` 全量重写）：`--diff-git-checkouts` 已被 cargo-public-api 0.52.0 移除，且 0.52.0 的 `diff refA..refB` 会对当前树做 in-place `git checkout`——脏工作区禁用。改为：baseline 侧用 `git worktree add --detach <tmp> <merge-base>`（不动主树），worktree 侧用当前树（含未提交修改），两侧各取 `cargo public-api -p <crate>` 清单后统一 diff；工具任一侧失败都 FAIL 并展示 stderr，无吞错；缺目录即 FAIL（不再静默 continue）。覆盖 bcs-config-api、bcs-protocol、bcs-service-api，另单独检查 bcs-dist-model 的版本与序列化 wire 兼容。
+- **配置实例的路径更正**：bcs-protocol 实际位于 `crates/contracts/bcs-protocol`（CLAUDE.md 服务树描述过时），首轮运行曾静默跳过，修复后 FAIL-loud 并全量覆盖。
+- **工具安装与固定**（不进 CI 默认工具链）：`rustup toolchain install nightly-2025-11-30 --profile minimal`（rust-lang.org 直连超时，按 singlebox 惯例改用 USTC rust-static 镜像）+ `CARGO_INSTALL_ROOT=<repo>/.superpowers/tools cargo install cargo-public-api --version 0.52.0 --locked`；运行经 `RUSTUP_TOOLCHAIN=nightly-2025-11-30` 固定；均写入脚本头注释。工具/nightly 缺失仍 SKIP(77)，真实比较必须真 PASS/FAIL。
+- **真实结果（baseline=origin/dev merge-base `d806668442`，exit 0）**：
+  - bcs-config-api：清单 4599 行**无变化**；bcs-protocol：26824 行**无变化**。
+  - bcs-service-api 7.1.0→8.0.0：**+289 项、0 删除**，新增面 = `RunnerInput::GroupStart`（含 `input: RoundInput`）+ `pub mod port::repo::distributed::group_round`（GroupRoundRepo、GroupRoundGrants、GroupRequestRecord、RoundBudgetProfile 等）。清单级无删除即无 listing 级破坏；8.0.0 major 按穷尽 match 保守升位，S1.4 消费者审计已证明树内全部消费者非穷尽（无一处需加臂）、`cargo check --workspace --all-targets` 绿。
+  - bcs-dist-model 0.1.0→0.1.1：**+753 项、0 删除**（serde 序列化实现为主）。旧格式 wire 回归 `cargo test -p bcs-dist-model --test group_round_wire` **5 passed** 真实运行通过（序列化兼容以真实 serde 往返为准）。
+  - 版本传播分析见 S1.4 节（`RunnerInput::` 全消费者 grep 结论在“矩阵核对命令”表）；gate 只在有 PR 正文文件时才强制 Propagation analysis 段，本地无该文件未触发。
+  - 完整 gate 输出与两侧清单存 `.superpowers/sdd/plan/task-5-gate-3-public-api.log` 与 `task-5-api-gate-artifacts/`。
+
+### R25 conformance 门禁（吞错修复后）
+
+- **吞错修复**（`scripts/ci/check-r25-conformance.sh`）：R25.3 的 `cargo test --workspace --no-fail-fast -- --list 2>/dev/null || true` 改为 stderr 落 mktemp 文件、cargo 失败即 FAIL 并打印 stderr 尾部——与 API 检查器同一原则（图谱中第二处吞错）。
+- **真实 exit 1**（`task-5-gate-4-r25.log`）：R25.1 报约 90 个 trait 缺 harness、R25.2 报约 110 个边界 impl 缺 conformance 入口 + 9 个 conformance 文件未走集中 harness。**逐项核对证明全部为 dev 预存在基线红**（CI 仲裁、不在本分支修外国代码）：
+  - dev 工作树（`d806668442`）与分支工作树的 R25 扫描集合 diff：trait 集合 dev 238 = 分支 238 + **仅 `GroupRoundRepo`**（本分支唯一新增 trait；harness `group_round_repo_contract_tests` 存在且有 conformance 入口 `conformance_group_round.rs` 调用，全套测试绿 = R25.1 唯一新增项达标）；`impl X for Y` 边界集合 diff **完全相同**（分支零新增生产边界 impl）。
+  - 控制器点名的 5 项（SessionFileServiceImpl、OrganizationCore、CallerConfigurationDeliveryGate、ProviderBotEvents×2）为其中子集（`git grep` dev 证实命令输出见 S1.5 过程记录）。
+- **R25.3 中止与限制（如实）**：`cargo test --workspace -- --list` 在本机 4 次执行均因 host 磁盘耗尽（ENOSPC）于重链接尾段失败退出 101——直接受本轮资源事件影响（见下节），4 次完整 stderr 存 `task-5-r25-attempt-*.log`。语义等价证据：同晚完成的全工作区测试本身即证明 libtest 发现了全部 conformance 目标（929 target 实际运行，含 `conformance_group_round`、`group_round_*` 全部目标）。该项不掩盖、不降格，以“已尝试+基础设施中止+等价证据”记录；CI 侧可继续仲裁。
+- R25.2 的第一项检查（conformance 文件调用集中 harness）有一个既有 dev 预存在红集（9 文件），与本分支无关。
+
+### 架构门禁汇总（architecture-checks.yml 仅 gate main；照常逐项执行记录）
+
+单跑构成脚本（合并器 arch-check.sh 自身在磁盘应急期间不再触发其内嵌全量 `cargo --list`/public-api 重跑，两者已由上文独立真实运行覆盖）：
+
+| 脚本 | 分支结果 | dev 同位对照 |
+| --- | --- | --- |
+| check-port-purity / check-store-boundaries / check-interceptor-chain / check-waivers / check-protocol-compat / check-forbidden-symbols | PASS | PASS |
+| check-deps（DEP-6 bcs-protocol→bcs-domain 不在允许列表） | FAIL | 同 FAIL（dev 预存在） |
+| check-import-rules（LINT-1） | FAIL | 同 FAIL（dev 预存在） |
+| check-trait-naming（LINT-4，非 Service 后缀 trait） | FAIL（11 项） | 同 FAIL 11 项（dev 预存在） |
+| check-config-validation（CFG-1 bootstrap config_loader 单测） | FAIL（真实 cargo 运行结果） | 本分支 diff 无 bootstrap 文件；红为预存在（dev 同位未复跑：需重编译 dev 工作树，资源不允许） |
+| check-pr-gate | SKIP 77（非 PR 环境，与既往一致） | — |
+| check-baseline-not-growing | SKIP 77（无法解析 origin/refactor_arch_bcs，非 PR 环境） | — |
+| check-public-api.sh / check-r25-conformance.sh | 见上两节各自真实结果 | — |
+
+### 资源事件与磁盘台账（如实）
+
+- 会话起 `/home` 44 GiB；全工作区编译期跌穿 20 GiB 保护阈值（最低采样 0 GiB，多次 100% 满盘并伴 ENOSPC）。全量 `cargo test --workspace` 在 line-tables-only 下测试可执行文件总量 ~48 GiB + 45 GiB 期初产物，逼近 /home 78 GiB 物理上界。
+- 处置：按授权仅删可重链测试二进制，不动共享缓存/target 对象层、未 cargo clean；错误类别复盘——(a) 早期按“同名留最新”的误判去重删除了运行必需的 test 目标件，触发后续每次 `cargo --list` 大规模重链接波与反复 ENOSPC（教训如实保留）；(b) 后续改为对照完整运行日志精确定位仅删“未出现在运行清单中的孤儿件”才稳定。过程中另发现重叠监控脚本误杀进行中运行一次，一并记入台账。
+- 全程 `df/free` 15 秒采样（`task-5-resource-monitor.log`）；所有 cargo 均复用既有 target。
