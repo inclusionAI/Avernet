@@ -110,6 +110,12 @@ class BotCopyRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
     source_bot_id: str = Field(..., description="源 bot 的 bot_id(仅 openclaw)")
+    source_owner_id: str = Field(
+        ...,
+        description="源 bot 的 owner_id。bot_id 非全局唯一(共享 bot_id 如 "
+        "`default` 每用户一行),后端按 bot_id + owner_id + env 精确定位源行,"
+        "避免回取他行导致 owner 错配 403。",
+    )
     bot_name: str = Field(..., description="dst bot 显示名")
     bot_desc: Optional[str] = Field(default=None, description="dst bot 描述")
     request_detail: Optional[dict[str, Any]] = Field(
@@ -425,7 +431,12 @@ def submit_copy(
     apply + provision. ``creation.py`` / ``create_job`` are untouched.
     """
     del owner_name
-    source = bot_repo.get_by_id(body.source_bot_id)
+    # bot_id 非全局唯一(共享 bot_id 如 `default` 每用户一行):裸 get_by_id 的
+    # .first() 会回取环境内任一 live 行,owner_id 错配 → 误判 no-edit-permission 403。
+    # 按 bot_id + source_owner_id + env 精确定位源行(BotRepository.get_by_id_and_owner,
+    # 自带 is_delete/env 过滤)。source_owner_id 由前端从listing 的源 bot owner 透传,
+    # 是源 bot 的真实 owner(非调用者),故非 owner 的 edit 协作者复制也能命中正确源行。
+    source = bot_repo.get_by_id_and_owner(body.source_bot_id, body.source_owner_id)
     if source is None:
         raise HTTPException(
             status_code=409, detail=f"source bot {body.source_bot_id} not found"

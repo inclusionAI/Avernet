@@ -131,7 +131,11 @@ def _call(body_over, source_over, mocks=None):
         bot_service,
         skill_set_service,
     ) = mocks
-    body_kwargs = {"source_bot_id": _SOURCE_BOT_ID, "bot_name": "copied"}
+    body_kwargs = {
+        "source_bot_id": _SOURCE_BOT_ID,
+        "source_owner_id": source_over.get("owner_id", _OWNER) if source_over else _OWNER,
+        "bot_name": "copied",
+    }
     body_kwargs.update(body_over)
     resp = submit_copy(
         body=BotCopyRequest(**body_kwargs),
@@ -153,7 +157,7 @@ def _call(body_over, source_over, mocks=None):
 def test_submit_copy_oss_noop_persists_manifest_and_hands_off():
     mocks = _mocks(script_body="echo hello")
     bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {"token": "tok_1"}
 
     resp, _ = _call({}, {}, mocks=mocks)
@@ -191,7 +195,7 @@ def test_submit_copy_carries_caller_excludes_into_the_manifest_entry():
     # truth. An empty document omits them entirely — the empty branch.
     mocks = _mocks()
     bot_repo, bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
 
     body, _ = _call(
         {"request_detail": {"excludes": ["secrets/", "large/tmp"]}},
@@ -213,7 +217,7 @@ def test_submit_copy_an_empty_excludes_list_is_omitted_from_the_manifest():
     # of the serializer), so the compiler never sees an empty list.
     mocks = _mocks()
     bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
 
     _call({"request_detail": {"excludes": []}}, {}, mocks=mocks)
     document = manifest_seam.persist.call_args.kwargs["document"]
@@ -241,7 +245,7 @@ def test_submit_copy_serializes_source_render_screens_into_bot_config():
         source_render_screens=[_record("lib-a", "https://cdn/a.js"), _record("lib-b", "https://cdn/b.js")],
     )
     bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, render_screen_service, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
 
     resp, _ = _call({}, {}, mocks=mocks)
     assert resp.type == "success"
@@ -266,7 +270,7 @@ def test_submit_copy_a_screenless_source_emits_task_nav_but_omits_render_screen(
     # source (always-emit — clawweb clone handles a grant-less source itself).
     mocks = _mocks(source_render_screens=[])
     bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
 
     _call({}, {}, mocks=mocks)
     document = manifest_seam.persist.call_args.kwargs["document"]
@@ -281,7 +285,7 @@ def test_submit_copy_always_emits_task_nav_referencing_the_source_bot():
     # converge from the source regardless of what else the source carries.
     mocks = _mocks(source_render_screens=[])
     bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
 
     _call({}, {}, mocks=mocks)
     document = manifest_seam.persist.call_args.kwargs["document"]
@@ -294,7 +298,7 @@ def test_submit_copy_always_emits_task_nav_referencing_the_source_bot():
 def test_submit_copy_internal_pending_returns_auth_required_with_iframe():
     mocks = _mocks()
     bot_repo, _, _, _, passport, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {"iframe_url": "https://auth/iframe", "redirect_url": ""}
 
     resp, _ = _call({}, {}, mocks=mocks)
@@ -306,7 +310,7 @@ def test_submit_copy_internal_pending_returns_auth_required_with_iframe():
 def test_submit_copy_rejects_teclaw_source_before_side_effects():
     mocks = _mocks()
     bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot(active_engine="teclaw")
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(active_engine="teclaw")
 
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
@@ -326,7 +330,7 @@ def test_submit_copy_rejects_over_quota_before_passport_or_manifest_side_effects
     # detail poll would chase into a 60s timeout.
     mocks = _mocks()
     bot_repo, bot_copy_repo, _bot_script_service, manifest_seam, passport, _, _, bot_service, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
     bot_service.check_create_bot_preflight.side_effect = BotQuotaExceededError(
         _quota_snapshot()
     )
@@ -344,7 +348,7 @@ def test_submit_copy_rejects_over_quota_before_passport_or_manifest_side_effects
 def test_submit_copy_rejects_source_not_found():
     mocks = _mocks()
     bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = None
+    bot_repo.get_by_id_and_owner.return_value = None
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
     assert exc_info.value.status_code == 409
@@ -355,7 +359,7 @@ def test_submit_copy_rejects_source_not_found():
 def test_submit_copy_rejects_non_copyable_lifecycle():
     mocks = _mocks()
     bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot(status="FAILED")
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(status="FAILED")
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
     assert exc_info.value.status_code == 409
@@ -365,11 +369,41 @@ def test_submit_copy_rejects_non_copyable_lifecycle():
 def test_submit_copy_rejects_no_edit_permission_non_owner():
     mocks = _mocks()
     bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot(owner_id="other_owner", actions=["view"])
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(owner_id="other_owner", actions=["view"])
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
     assert exc_info.value.status_code == 403
     bot_copy_repo.insert.assert_not_called()
+
+
+def test_submit_copy_locates_source_by_owner_for_shared_bot_id():
+    # Regression:共享 bot_id(如 `default`,每用户一行)下,裸 get_by_id 的 .first()
+    # 回取环境内任一 live 行 → owner_id 错配 → 误 403。submit_copy 现按
+    # bot_id + source_owner_id 精确定位调用者自己的源行,owner==调用者 → 成功复制。
+    mocks = _mocks()
+    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _ = mocks
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()  # owner_id == _OWNER == 调用者
+    resp, _ = _call({}, {}, mocks=mocks)
+    assert resp.type == "success"
+    # 关键:源定位用的是 (bot_id, source_owner_id) 复合键,不是裸 bot_id。
+    assert bot_repo.get_by_id_and_owner.call_args.args == (_SOURCE_BOT_ID, _OWNER)
+    bot_repo.get_by_id.assert_not_called()
+
+
+def test_submit_copy_collaborator_copy_hits_real_owners_source_row():
+    # 非 owner 的 edit 协作者复制:source_owner_id 是源的**真实 owner**(非调用者),
+    # get_by_id_and_owner 按 (bot_id, 真实 owner) 命中源行;权限校验 source.owner_id
+    # != 调用者 but "edit" in actions → 放行复制(保留协作者复制能力)。
+    mocks = _mocks()
+    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _ = mocks
+    real_owner = "source_owner_user"
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(
+        owner_id=real_owner, actions=["edit", "chat"]
+    )
+    # source_over 携带源真实 owner → _call 用它作 source_owner_id
+    resp, _ = _call({}, {"owner_id": real_owner}, mocks=mocks)
+    assert resp.type == "success"
+    assert bot_repo.get_by_id_and_owner.call_args.args == (_SOURCE_BOT_ID, real_owner)
 
 
 def test_submit_copy_passport_no_token_no_url_is_500_after_persist():
@@ -378,7 +412,7 @@ def test_submit_copy_passport_no_token_no_url_is_500_after_persist():
     # but no create_job hand-off happens.
     mocks = _mocks()
     bot_repo, _, _, manifest_seam, passport, _, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {}
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
@@ -406,12 +440,14 @@ def test_copy_bot_handler_returns_envelope_with_result():
     # `return envelope(result, request)` path the ASGI adapter answers with.
     mocks = _mocks()
     bot_repo, bot_copy_repo, _, manifest_seam, passport, space_context, render_screen_service, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {"token": "tok_1"}
 
     result = asyncio.run(
         copy_bot(
-            body=BotCopyRequest(source_bot_id=_SOURCE_BOT_ID, bot_name="copied"),
+            body=BotCopyRequest(
+                source_bot_id=_SOURCE_BOT_ID, source_owner_id=_OWNER, bot_name="copied"
+            ),
             request=_request(),
             owner_id=_OWNER,
             owner_name="owner",
@@ -437,7 +473,7 @@ def test_retry_copy_bot_handler_returns_envelope_with_result():
     # Handler-level: covers retry_copy_bot's `del caller` + `return envelope(...)`.
     mocks = _mocks()
     bot_repo, bot_copy_repo, _, manifest_seam, _, space_context, _, _, _ = mocks
-    bot_repo.get_by_id.return_value = _source_bot(status="ACTIVE")
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(status="ACTIVE")
     bot_copy_repo.get_by_dst_bot_id.return_value = MagicMock(
         operation_id="op_1",
         source_bot_id=_SOURCE_BOT_ID,
