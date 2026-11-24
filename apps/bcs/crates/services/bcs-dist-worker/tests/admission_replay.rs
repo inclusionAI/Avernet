@@ -65,25 +65,20 @@ async fn retry_reuses_initial_request_after_time_and_definition_change() {
 }
 
 #[tokio::test]
-async fn both_missing_lookups_still_recover_one_canonical_request() {
+async fn concurrent_first_admits_reuse_the_record_that_wins_create_cas() {
     let store = Arc::new(Recorder::default());
     let inbox = Arc::new(producer(&store));
-    let barrier = Arc::new(tokio::sync::Barrier::new(2));
-    let raced = Arc::new(RacingInbox {
-        inner: inbox,
-        barrier,
-    });
-    let one = WorkerTaskAdmission::new(raced.clone(), Arc::new(|| TimestampMillis(1)));
-    let two = WorkerTaskAdmission::new(raced, Arc::new(|| TimestampMillis(2)));
-    let scope = scope();
-    let (a, b) = tokio::join!(one.admit(&scope, command()), two.admit(&scope, command()));
-    fn receipt(outcome: AdmitOutcome) -> AdmissionReceipt {
-        match outcome {
-            AdmitOutcome::Accepted(r) | AdmitOutcome::Duplicate(r) => r,
-            o => panic!("{o:?}"),
-        }
-    }
-    assert_eq!(receipt(a.unwrap()), receipt(b.unwrap()));
+    let losing = WorkerTaskAdmission::new(inbox.clone(), Arc::new(|| TimestampMillis(1)));
+    let winning = WorkerTaskAdmission::new(inbox, Arc::new(|| TimestampMillis(2)));
+    let pause = store.pause_after("before.document.create", ":admission:", 1);
+    let losing = tokio::spawn(async move { losing.admit(&scope(), command()).await });
+    pause.reached().await;
+    let winner = winning.admit(&scope(), command()).await;
+    pause.resume();
+    let AdmitOutcome::Accepted(receipt) = winner.unwrap() else {
+        panic!("the winning create must accept the request");
+    };
+    assert_eq!(losing.await.unwrap(), Ok(AdmitOutcome::Duplicate(receipt)));
     assert_eq!(inbox_len(&store).await, 1);
 }
 

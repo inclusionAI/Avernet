@@ -37,6 +37,10 @@ def run(h, checks):
                             'parts': [{'data': {'mode': 'append', 'bytes': size}}]},
                 'configuration': {'returnImmediately': True}}
 
+    def submitted_task(reply):
+        assert 'result' in reply, f'expected successful Gateway submission: {reply}'
+        return reply['result']['task']['id']
+
     def current(tid):
         return result('GetTask', {'id': tid})['result']
 
@@ -49,8 +53,8 @@ def run(h, checks):
     time.sleep(0.01)  # distinct wall-clock initialization on a naive retry
     with ThreadPoolExecutor(max_workers=2) as pool:
         copies = list(pool.map(lambda _: result('SendMessage', request), range(2)))
-    tid = copies[0]['result']['task']['id']
-    assert copies[1]['result']['task']['id'] == tid
+    tid = submitted_task(copies[0])
+    assert submitted_task(copies[1]) == tid
     assert 'error' in result('SendMessage', params(identity, 70001))
     h.until(lambda: current(tid)['status']['state'] == 'TASK_STATE_COMPLETED',
             'Gateway-created task failed to finish')
@@ -65,8 +69,8 @@ def run(h, checks):
     race = params(message_id('race'))
     with ThreadPoolExecutor(max_workers=2) as pool:
         copies = list(pool.map(lambda _: result('SendMessage', race), range(2)))
-    race_tid = copies[0]['result']['task']['id']
-    assert copies[1]['result']['task']['id'] == race_tid
+    race_tid = submitted_task(copies[0])
+    assert submitted_task(copies[1]) == race_tid
     h.until(lambda: current(race_tid)['status']['state'] == 'TASK_STATE_COMPLETED',
             'concurrent Gateway task failed to finish')
     assert h.call('tick')['runner_calls'] == before + 2
