@@ -13,6 +13,9 @@ import httpx
 import pytest
 
 from agentclaw.community.core.service_bot.services import baas_service as baas_module
+from agentclaw.community.core.service_bot.services.publish_flow.baas_publish_ops_mixin import (
+    BaasPublishOpsMixin,
+)
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
@@ -133,3 +136,43 @@ def test_get_publish_progress_does_not_retry_non_transport_error(monkeypatch):
 
     assert len(http.calls) == 1
     assert sleeps == []
+
+
+def test_get_publish_progress_exhausts_retries_with_diagnosable_error(monkeypatch):
+    """After the last retry the error names the attempt count and real cause."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(baas_module.time, "sleep", sleeps.append)
+    http = _FlakyHttp(
+        [httpx.ReadTimeout("The read operation timed out") for _ in range(4)]
+    )
+
+    with pytest.raises(BaasServiceError) as exc_info:
+        _service_with_http(http).get_publish_progress(publish_id=97872)
+
+    message = str(exc_info.value)
+    assert "Failed after 4 attempts" in message
+    assert "The read operation timed out" in message
+    assert len(http.calls) == 4
+    assert sleeps == [1.0, 2.0, 4.0]
+
+
+def test_publish_ops_mixin_propagates_exhausted_error_for_poll_task():
+    """advance_publish_progress catches any Exception and returns a result, so
+    the durable poll task keeps ticking; the mixin must not swallow or rename
+    the diagnosable error before that handler sees it."""
+
+    class _Ops(BaasPublishOpsMixin):
+        pass
+
+    ops = _Ops()
+    ops._baas_service = MagicMock()
+    ops._baas_service.get_publish_progress.side_effect = BaasServiceError(
+        "Failed after 4 attempts: Error in httpx send hook: "
+        "The read operation timed out"
+    )
+
+    with pytest.raises(BaasServiceError) as exc_info:
+        ops.get_baas_publish_progress(baas_publish_id=97872)
+
+    assert "Failed after 4 attempts" in str(exc_info.value)
+    assert "The read operation timed out" in str(exc_info.value)
