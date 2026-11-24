@@ -98,6 +98,8 @@ class DefaultCandidates:
 class FilteredIndexFallback:
     """One bounded index page after final eligibility; enrich through the request's metadata cache."""
 
+    PAGE_SIZE = 5
+
     def __init__(self, read_ids, execution, catalog, snapshot):
         self.read_ids = read_ids
         self.execution = execution
@@ -107,7 +109,9 @@ class FilteredIndexFallback:
     async def __call__(self, request, original):
         with stage_timing("filtered_default_candidates") as stage:
             try:
-                ids = await self.execution.call(self.read_ids, request.filters, 5)
+                ids = await self.execution.call(
+                    self.read_ids, request.filters, self.PAGE_SIZE
+                )
             except Exception as error:
                 stage.update(outcome="unavailable", error_type=type(error).__name__)
                 return replace(
@@ -126,14 +130,17 @@ class FilteredIndexFallback:
             result = await self.snapshot().retrieval.enrich(
                 replace(original, items=candidates), allow_timeout_projection=False
             )
-            for item in result.items:
-                if self.catalog.eligible(item.item_id, request.filters):
-                    stage["result_count"] = 1
-                    return replace(
-                        result,
-                        items=(item,),
-                        status="degraded",
-                        reasons=(*result.reasons, "default_candidates"),
-                    )
-            stage["result_count"] = 0
-            return replace(result, items=())
+            items = tuple(
+                item
+                for item in result.items
+                if self.catalog.eligible(item.item_id, request.filters)
+            )[: min(request.limit, self.PAGE_SIZE)]
+            stage["result_count"] = len(items)
+            if not items:
+                return replace(result, items=())
+            return replace(
+                result,
+                items=items,
+                status="degraded",
+                reasons=(*result.reasons, "default_candidates"),
+            )

@@ -240,10 +240,10 @@ also cover Worker/Profile defaults, isolated named builds, model/dimension selec
 and restart/rollback without changing the original generation.
 
 A catalog host can opt into a bounded empty-search fallback on the active keyword
-collection. The reader scrolls one filtered page without vectors and returns
+collection. The reader scrolls one filtered page of up to five points without vectors and returns
 distinct source IDs in point order. The application checks local eligibility,
-loads Cards using the active metadata policy, and returns at most one eligible
-Card. The server policy field `retrieval.empty_result_fallback_enabled` defaults
+loads Cards using the active metadata policy, and returns eligible Cards in page order up to the
+smaller of the requested limit and five. It does not fetch another page. The server policy field `retrieval.empty_result_fallback_enabled` defaults
 to true. Set it to false to return the empty result without reading a fallback
 page. A successful fallback adds `default_candidates` and has no relevance
 score on the host wire contract. Recommendation and all-off paths retain their
