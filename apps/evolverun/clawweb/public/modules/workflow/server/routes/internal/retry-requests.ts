@@ -4,7 +4,7 @@
  * instance holding the flow's TaskFlow state executes and completes it.
  */
 import { Router, type Request, type Response } from "express";
-import { FlowRetryRequestRepository } from "../../repositories/flow-retry-request-repository.js";
+import { FlowRetryRequestRepository, RetryRequestCancelledError } from "../../repositories/flow-retry-request-repository.js";
 import { apiLog, apiLogBody } from "../internal-logger.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 
@@ -46,6 +46,11 @@ export function createInternalRetryRequestsRouter(retryRequestRepo: FlowRetryReq
       apiLog("WRITE", "/retry-requests", { status: 200, requestId: row.request_id, flowId: row.flow_id, deduped: row.request_id !== request_id });
       res.json({ success: true, data: row });
     } catch (error) {
+      if (error instanceof RetryRequestCancelledError) {
+        apiLog("WRITE", "/retry-requests", { status: 409, error: error.message });
+        res.status(409).json({ success: false, error: "Conflict", message: error.message });
+        return;
+      }
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("WRITE", "/retry-requests", { status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });

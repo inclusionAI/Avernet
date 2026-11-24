@@ -456,8 +456,10 @@ export function createInternalRunsRouter(
 
       const row = await flowRunRepo.updateStatus(flowId, status, retry_epoch);
       if (!row) {
-        apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 404 });
-        res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
+        const existing = await flowRunRepo.findStatusByFlowId(flowId);
+        const cancelled = existing && ['cancelled', 'canceled'].includes(existing.status);
+        apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: cancelled ? 409 : 404 });
+        res.status(cancelled ? 409 : 404).json({ success: false, error: cancelled ? "Conflict" : "Not Found", message: cancelled ? `Flow run "${flowId}" is cancelled` : `Flow run "${flowId}" not found` });
         return;
       }
       apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 200, newStatus: status });
@@ -630,6 +632,11 @@ export function createInternalRunsRouter(
       if (result.status === 'not_found') {
         apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 404 });
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
+        return;
+      }
+      if (result.status === 'conflict') {
+        apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 409 });
+        res.status(409).json({ success: false, error: "Conflict", message: `Flow run "${flowId}" is cancelled` });
         return;
       }
       apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 200, resetNodes: result.resetCount });
