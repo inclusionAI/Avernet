@@ -37,6 +37,9 @@ def test_running_creation_apply_remains_provisioning_until_it_settles(
     assert platform.bot_status("b1", owner_id="owner-1") == BotState.PROVISIONING.value
 
     report.status = ApplyStatus.SUCCEEDED
+    if trigger == CREATE_PRE_CONTAINER_TRIGGER:
+        assert platform.bot_status("b1", owner_id="owner-1") == BotState.PROVISIONING.value
+        seam.jobs["b1"] = _job(TaskStatus.SUCCEEDED)
     expected = BotState.READY if bot_status == "ACTIVE" else BotState.PROVISIONING
     assert platform.bot_status("b1", owner_id="owner-1") == expected.value
 

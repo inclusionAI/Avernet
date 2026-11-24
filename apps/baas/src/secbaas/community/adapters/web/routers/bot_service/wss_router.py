@@ -50,6 +50,11 @@ class BotWsConnectionInfoResponse(BaseModel):
             "fall back to their legacy transport."
         ),
     )
+    a2a_auth: str = Field(
+        default="",
+        description="A2A transport authentication: empty for direct HTTP; "
+        "proxypass uses token as X-PROXYPASS-TOKEN until expires_at.",
+    )
 
 
 class BotWsConnectionErrorResponse(BaseModel):
@@ -164,6 +169,7 @@ async def get_bot_ws_connection_info(
                 expires_at=conn_info.expires_at,
                 device_id=conn_info.device_id,
                 a2a_base_url=conn_info.a2a_base_url,
+                a2a_auth=conn_info.a2a_auth,
             )
         )
 
