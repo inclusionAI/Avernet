@@ -1,10 +1,15 @@
 use super::{StoreInboxProducer, storage::*};
 use crate::{codec::encode_json, identity::digest_json, layout::KeyLayout};
 use bcs_dist_model::*;
+use bcs_service_api::port::repo::distributed::inbox::ConnectorEventIdentity;
 use bcs_service_api::port::repo::distributed::{common::StoreError, inbox::AdmitRequest};
 
 impl StoreInboxProducer {
-    pub(super) async fn prepare(&self, r: &mut AdmitRequest) -> Result<(), StoreError> {
+    pub(super) async fn prepare(
+        &self,
+        r: &mut AdmitRequest,
+        connector: Option<&ConnectorEventIdentity>,
+    ) -> Result<(), StoreError> {
         encoded_size(r, self.inner.config.max_input_bytes)
             .map_err(|_| invalid("input_byte_budget"))?;
         let i = &r.input;
@@ -35,13 +40,15 @@ impl StoreInboxProducer {
             if !event.did.0.starts_with(&format!("{}.", i.tid.0)) {
                 return Err(invalid("dispatch_task_mismatch"));
             }
-            let remote = event
-                .remote_event_id
-                .as_ref()
-                .filter(|id| !id.is_empty() && id.len() <= 256)
-                .ok_or_else(|| invalid("critical_event_identity"))?;
-            if i.input_id != crate::identity::critical_agent_input_id(&event.did, remote) {
-                return Err(invalid("critical_input_id_mismatch"));
+            if connector.is_none() {
+                let remote = event
+                    .remote_event_id
+                    .as_ref()
+                    .filter(|id| !id.is_empty() && id.len() <= 256)
+                    .ok_or_else(|| invalid("critical_event_identity"))?;
+                if i.input_id != crate::identity::critical_agent_input_id(&event.did, remote) {
+                    return Err(invalid("critical_input_id_mismatch"));
+                }
             }
         }
         if let Some(s) = &r.create_session
@@ -120,7 +127,7 @@ impl StoreInboxProducer {
                 return Err(invalid("initial_snapshot_not_empty"));
             }
         }
-        r.input.business_digest = request_digest(r)?;
+        r.input.business_digest = request_digest(r, connector)?;
         let mut fields = crate::codec::encode_inbox_entry(&r.input)?;
         fields.insert(
             "admission".into(),
@@ -149,7 +156,44 @@ pub(super) fn critical(kind: &AgentEventKind) -> bool {
     )
 }
 
-pub(super) fn request_digest(r: &AdmitRequest) -> Result<Digest, StoreError> {
+pub(super) fn request_digest(
+    r: &AdmitRequest,
+    connector: Option<&ConnectorEventIdentity>,
+) -> Result<Digest, StoreError> {
+    if let Some(id) = connector {
+        use bcs_dist_encoding::connector::{self, KeyEvent};
+        let InputBody::Agent { event } = &r.input.body else {
+            return Err(invalid("connector_input_body"));
+        };
+        let key = match (&event.kind, id.round) {
+            (AgentEventKind::Final, None) => KeyEvent::Final,
+            (AgentEventKind::Error, None) => KeyEvent::Error,
+            (AgentEventKind::InputRequired { interaction }, Some(n))
+                if n > 0
+                    && *interaction
+                        == connector::interaction_id(&event.did, KeyEvent::InputRequired(n)) =>
+            {
+                KeyEvent::InputRequired(n)
+            }
+            (AgentEventKind::AuthRequired { interaction }, Some(n))
+                if n > 0
+                    && *interaction
+                        == connector::interaction_id(&event.did, KeyEvent::AuthRequired(n)) =>
+            {
+                KeyEvent::AuthRequired(n)
+            }
+            _ => return Err(invalid("connector_event_identity")),
+        };
+        if r.input.input_id != connector::key_input_id(&event.did, key) || id.state.len() > 256 {
+            return Err(invalid("connector_input_identity"));
+        }
+        if let Payload::Inline(value) = &event.payload
+            && value.get("state").and_then(|v| v.as_str()).unwrap_or("") != id.state
+        {
+            return Err(invalid("connector_event_state"));
+        }
+        return Ok(connector::key_digest(&event.did, key, &id.state));
+    }
     let mut identity = encode_json(r)?;
     identity["input"]
         .as_object_mut()

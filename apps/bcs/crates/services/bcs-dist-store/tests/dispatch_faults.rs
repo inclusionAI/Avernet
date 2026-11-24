@@ -48,7 +48,7 @@ async fn receipt_recheck_covers_outbox_advance_after_initial_absent_read() {
         .remove(0);
     let request = CreateCommittedDispatch { source, spec };
     let pause = f.base.storage.pause_after(
-        "document.read",
+        "json.get",
         &f.base.layout.disp(&request.spec.did).unwrap(),
         1,
     );
@@ -115,21 +115,31 @@ async fn cancel_unknown_then_lost_write_replay_keeps_receipt_after_terminal() {
 async fn command_ack_retries_are_scoped_and_do_not_exhaust_the_feed() {
     let f = Fixture::new().await;
     f.create().await;
-    let mut feed = f.board.notifications(spec().pool, me()).await.unwrap();
+    let mut feed = f.queue.notifications(spec().pool, me()).await.unwrap();
     for _ in 0..130 {
         f.board.notify(&spec().pool, &spec().did).await.unwrap();
         let delivery = feed
-            .receive(NonZeroU32::MIN, Duration::ZERO)
+            .receive(NonZeroU32::MIN, Duration::from_millis(50))
             .await
             .unwrap()
             .remove(0);
         feed.ack(&delivery).await.unwrap();
         feed.ack(&delivery).await.unwrap();
     }
-    let mut other = f.board.notifications(spec().pool, me()).await.unwrap();
+    let mut other = f
+        .queue
+        .notifications(
+            spec().pool,
+            Instance {
+                incarnation: "two".into(),
+                ..me()
+            },
+        )
+        .await
+        .unwrap();
     f.board.notify(&spec().pool, &spec().did).await.unwrap();
     let delivery = feed
-        .receive(NonZeroU32::MIN, Duration::ZERO)
+        .receive(NonZeroU32::MIN, Duration::from_millis(50))
         .await
         .unwrap()
         .remove(0);
@@ -265,33 +275,37 @@ async fn scan_persists_partial_phase_progress_at_thirty_ms_per_document_io() {
 }
 
 #[tokio::test]
-async fn duplicate_notifications_are_merged_until_one_ack_covers_every_id() {
+async fn duplicate_notifications_each_ack_their_physical_id() {
     use bcs_store_api::stream::StreamStorePlugin;
     let f = Fixture::new().await;
     f.create().await;
-    let mut feed = f.board.notifications(spec().pool, me()).await.unwrap();
+    let mut feed = f.queue.notifications(spec().pool, me()).await.unwrap();
     for _ in 0..3 {
         f.board.notify(&spec().pool, &spec().did).await.unwrap();
     }
     let first = feed
-        .receive(NonZeroU32::new(128).unwrap(), Duration::ZERO)
+        .receive(NonZeroU32::new(128).unwrap(), Duration::from_millis(50))
         .await
         .unwrap();
-    assert_eq!(first.len(), 1);
-    f.board.notify(&spec().pool, &spec().did).await.unwrap();
-    assert!(
-        feed.receive(NonZeroU32::new(128).unwrap(), Duration::ZERO)
-            .await
-            .unwrap()
-            .is_empty()
+    assert_eq!(first.len(), 3);
+    assert!(first.iter().all(|delivery| delivery.did == spec().did));
+    assert_eq!(
+        first
+            .iter()
+            .map(|delivery| &delivery.opaque)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
     );
-    feed.ack(&first[0]).await.unwrap();
+    for delivery in &first {
+        feed.ack(delivery).await.unwrap();
+    }
     let remaining = f
         .base
         .storage
         .claim_idle(
             &f.base.layout.command(&spec().pool, 0).unwrap(),
-            "dispatch-v1",
+            bcs_dist_store::command::GROUP,
             "probe",
             Duration::ZERO,
             None,
@@ -306,12 +320,15 @@ async fn duplicate_notifications_are_merged_until_one_ack_covers_every_id() {
 async fn pending_redelivery_does_not_spawn_a_second_local_delivery() {
     let f = Fixture::new().await;
     f.create().await;
-    let mut feed = f.board.notifications(spec().pool, me()).await.unwrap();
+    let mut feed = f.queue.notifications(spec().pool, me()).await.unwrap();
     f.board.notify(&spec().pool, &spec().did).await.unwrap();
-    let original = feed.receive(NonZeroU32::MIN, Duration::ZERO).await.unwrap();
+    let original = feed
+        .receive(NonZeroU32::MIN, Duration::from_millis(50))
+        .await
+        .unwrap();
     f.base.storage.model.advance(Duration::from_secs(31));
     assert!(
-        feed.receive(NonZeroU32::MIN, Duration::ZERO)
+        feed.receive(NonZeroU32::MIN, Duration::from_millis(50))
             .await
             .unwrap()
             .is_empty()
@@ -508,9 +525,9 @@ async fn lost_or_trimmed_command_hints_do_not_remove_independent_recovery() {
         )
         .await
         .unwrap();
-    let mut feed = f.reopen().notifications(spec().pool, me()).await.unwrap();
+    let mut feed = f.queue.notifications(spec().pool, me()).await.unwrap();
     assert!(
-        feed.receive(NonZeroU32::MIN, Duration::ZERO)
+        feed.receive(NonZeroU32::MIN, Duration::from_millis(50))
             .await
             .unwrap()
             .is_empty()
@@ -701,7 +718,7 @@ async fn canceling_after_an_item_is_staged_keeps_it_for_the_next_poll() {
     let pause =
         f.base
             .storage
-            .pause_after("document.read", &f.base.layout.disp(&second).unwrap(), 1);
+            .pause_after("json.get", &f.base.layout.disp(&second).unwrap(), 1);
     {
         let scan = f.board.scan_due(ShardId(42), TimestampMillis(1), page());
         tokio::pin!(scan);
@@ -728,7 +745,7 @@ async fn a_new_provider_resumes_the_durable_selected_dispatch_after_cancellation
     let f = Fixture::new().await;
     f.create().await;
     let pause = f.base.storage.pause_after(
-        "document.read",
+        "json.get",
         &f.base.layout.disp(&spec().did).unwrap(),
         1,
     );

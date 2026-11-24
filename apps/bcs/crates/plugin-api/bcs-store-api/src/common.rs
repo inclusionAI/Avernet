@@ -21,6 +21,9 @@ pub enum StoreCapability {
     /// Persistent create/read/projection/exact-version replacement and patch. No TTL,
     /// deletion, retained history after external deletion, or Newer is implied.
     DocumentCas,
+    /// Persistent top-level objects: get_json, create with Absent/Replace, and
+    /// live Version/Newer Merge with Preserve. No delete, expiry or arbitrary Set.
+    PersistentJsonMerge,
     /// CAS-confirmed membership termination retained for 30 days; GC TTL is separate.
     RetainedLease,
     Kv,

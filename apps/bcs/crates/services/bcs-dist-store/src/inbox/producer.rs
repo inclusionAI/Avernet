@@ -275,8 +275,43 @@ impl InboxProducerPort for StoreInboxProducer {
     ) -> Option<bcs_service_api::port::repo::distributed::budget::ScanBudgetProfile> {
         Some(self.inner.scan_budget.profile())
     }
-    async fn admit(&self, mut request: AdmitRequest) -> Result<AdmitOutcome, StoreError> {
-        if let Err(error) = self.prepare(&mut request).await {
+    async fn admit(&self, request: AdmitRequest) -> Result<AdmitOutcome, StoreError> {
+        self.admit_scoped(request, None).await
+    }
+    async fn admit_connector(
+        &self,
+        request: ConnectorAdmission,
+    ) -> Result<AdmitOutcome, StoreError> {
+        let spec = self
+            .load::<SessionSpec>(&self.inner.layout.spec(&request.input.sid)?)
+            .await?
+            .ok_or_else(|| StoreError::NotApplied {
+                code: "session_not_found".into(),
+            })?
+            .1;
+        self.admit_scoped(
+            AdmitRequest {
+                scope: spec.scope,
+                input: request.input,
+                create_session: None,
+                create_task: None,
+            },
+            Some(request.identity),
+        )
+        .await
+    }
+    async fn append_stream(&self, request: AppendAgentEvent) -> Result<InboxPos, StoreError> {
+        self.append_intermediate(request).await
+    }
+}
+
+impl StoreInboxProducer {
+    async fn admit_scoped(
+        &self,
+        mut request: AdmitRequest,
+        connector: Option<ConnectorEventIdentity>,
+    ) -> Result<AdmitOutcome, StoreError> {
+        if let Err(error) = self.prepare(&mut request, connector.as_ref()).await {
             if matches!(&error, StoreError::Invalid { code } if code == "frozen_spec_conflict" || code == "frozen_task_conflict") {
                 return Ok(AdmitOutcome::ContentConflict);
             }
@@ -303,11 +338,8 @@ impl InboxProducerPort for StoreInboxProducer {
             return self.advance(&key, false).await.map_err(|_| unknown(&op));
         }
         let (_, schedule) = self.schedule(&request.input.sid).await.map_err(|_| unknown(&op))?;
-        let admission = self.new_admission(request, schedule.generation)?;
+        let admission = self.new_admission(request, schedule.generation, connector)?;
         self.create_if_absent(&admission).await?;
         self.advance(&key, true).await.map_err(|_| unknown(&op))
-    }
-    async fn append_stream(&self, request: AppendAgentEvent) -> Result<InboxPos, StoreError> {
-        self.append_intermediate(request).await
     }
 }

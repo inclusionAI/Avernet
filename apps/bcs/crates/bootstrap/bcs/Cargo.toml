@@ -35,7 +35,7 @@ test = false
 
 [features]
 default = ["prometheus-metrics"]
-worker-runtime-e2e = ["dep:bcs-dist-model", "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-worker", "dep:bcs-app-dist-runtime", "dep:bcs-store-api", "dep:bcs-dist-test-runner", "dep:bcs-app-dist-gateway", "dep:bcs-dist-gateway", "dep:bcs-dist-gateway-http", "dep:bcs-dist-a2a-output"]
+worker-runtime-e2e = ["dep:bcs-dist-connector-store", "dep:bcs-dist-model", "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-worker", "dep:bcs-app-dist-runtime", "dep:bcs-store-api", "dep:bcs-dist-test-runner", "dep:bcs-app-dist-gateway", "dep:bcs-dist-gateway", "dep:bcs-dist-gateway-http", "dep:bcs-dist-a2a-output"]
 metrics = ["prometheus-metrics"]
 a2a-http-e2e = []
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
@@ -47,6 +47,7 @@ bcs-app-dist-gateway = { workspace = true, optional = true }
 bcs-dist-gateway = { workspace = true, optional = true }
 bcs-dist-gateway-http = { workspace = true, optional = true }
 bcs-dist-a2a-output = { workspace = true, optional = true }
+bcs-dist-connector-store = { workspace = true, optional = true }
 bcs-dist-store = { workspace = true, optional = true }
 bcs-dist-projection = { workspace = true, optional = true }
 bcs-dist-worker = { workspace = true, optional = true }

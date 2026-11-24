@@ -54,6 +54,24 @@ fn edit(value: &mut Value, e: &JsonEdit) -> StoreResult<()> {
     }
     Ok(())
 }
+fn merge(target: &mut Value, patch: Value) {
+    if let Value::Object(fields) = patch {
+        if !target.is_object() {
+            *target = Value::Object(Default::default());
+        }
+        if let Value::Object(map) = target {
+            for (key, value) in fields {
+                if value.is_null() {
+                    map.remove(&key);
+                } else {
+                    merge(map.entry(key).or_insert(Value::Null), value);
+                }
+            }
+        }
+    } else {
+        *target = patch;
+    }
+}
 #[async_trait]
 impl JsonStorePlugin for Model {
     async fn get_json(&self, key: &str) -> StoreResult<Option<Versioned<Value>>> {
@@ -121,6 +139,12 @@ impl JsonStorePlugin for Model {
         let expires = expiry(s.json.get(key).and_then(|x| x.expires), e, self.time())?;
         let next = match m {
             JsonMutation::Replace(value) => Some(value),
+            JsonMutation::Merge(patch) => {
+                let mut value = s.json[key].value.clone();
+                if !value.is_object() { return Err(invalid("merge requires an object")); }
+                merge(&mut value, Value::Object(patch));
+                Some(value)
+            }
             JsonMutation::Delete => None,
             JsonMutation::Patch(edits) => {
                 let mut value = s.json[key].value.clone();

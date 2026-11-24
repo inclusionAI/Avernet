@@ -1,6 +1,11 @@
 //! Test rig of the engine: the real store providers and admission on the
 //! in-memory store model, a test-only Worker, and a scripted agent.
-#![allow(dead_code, clippy::unwrap_used, clippy::expect_used, reason = "test support")]
+#![allow(
+    dead_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test support"
+)]
 
 #[path = "../../../bcs-dist-connector-store/tests/common/mod.rs"]
 pub mod store;
@@ -304,8 +309,30 @@ pub struct Rig {
 }
 
 impl Rig {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let store = Arc::new(Recorder::default());
+        // A real dispatch always refers to an admitted Session and Task.
+        use bcs_store_api::document::DocumentStorePlugin;
+        let dispatch = dispatch_spec(&did());
+        let mut spec = bcs_dist_test_runner::specification(dispatch.sid.clone());
+        spec.shard = bcs_dist_store::layout::KeyLayout::shard_of(&spec.sid).unwrap();
+        let task = bcs_dist_test_runner::metadata(&spec, dispatch.tid);
+        store
+            .model
+            .create_document(
+                &layout().spec(&spec.sid).unwrap(),
+                &serde_json::to_value(&spec).unwrap(),
+            )
+            .await
+            .unwrap();
+        store
+            .model
+            .create_document(
+                &layout().task(&task.tid).unwrap(),
+                &serde_json::to_value(&task).unwrap(),
+            )
+            .await
+            .unwrap();
         let mut config = ConnectorConfig::new(instance("conn-03"), pool());
         config.poll_interval = Duration::from_millis(25);
         config.receive_timeout = Duration::from_millis(30);
@@ -334,6 +361,8 @@ impl Rig {
     pub fn inbox(&self) -> Arc<StoreInboxProducer> {
         Arc::new(
             StoreInboxProducer::new(
+                Arc::new(bcs_dist_store::budget::SharedScanBudget::new(Default::default()).unwrap()),
+                Arc::new(bcs_dist_projection::OutputProjectionService),
                 self.store.clone(),
                 self.store.clone(),
                 self.store.clone(),

@@ -366,7 +366,7 @@ impl Harness {
             .unwrap();
         match self
             .f
-            .dispatch
+            .queue
             .claim(DispatchClaimRequest {
                 did: self.did.clone(),
                 me,

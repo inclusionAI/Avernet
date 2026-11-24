@@ -2,7 +2,12 @@
 //! call and can lose, fail or reject the n-th write (same pattern as the
 //! wrapper in `bcs-dist-store/tests/common`), plus a test-only Worker side of
 //! the dispatch document and fixtures.
-#![allow(dead_code, clippy::unwrap_used, clippy::expect_used, reason = "test support")]
+#![allow(
+    dead_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test support"
+)]
 
 use async_trait::async_trait;
 use bcs_dist_model::*;
@@ -165,8 +170,10 @@ macro_rules! run {
     }};
 }
 
-
 impl StorePlugin for Recorder {
+    fn pool_observation(&self) -> Option<StorePoolObservation> {
+        self.model.pool_observation()
+    }
     fn supports(&self, capability: StoreCapability) -> bool {
         *self.deny.lock().unwrap() != Some(capability) && self.model.supports(capability)
     }

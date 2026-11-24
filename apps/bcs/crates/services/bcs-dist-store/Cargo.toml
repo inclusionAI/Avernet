@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+sha2.workspace = true
 bcs-dist-encoding.workspace = true
 async-trait = { workspace = true }
 bcs-dist-model = { workspace = true }
@@ -22,6 +23,7 @@ uuid = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+bcs-dist-connector-store.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 bcs-dist-projection = { workspace = true }
 bcs-test-support = { workspace = true }

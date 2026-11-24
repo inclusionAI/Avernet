@@ -21,7 +21,7 @@ async fn accepted_call(rig: &Rig) -> (Running, EventTx) {
 
 #[tokio::test]
 async fn a_reply_continues_the_same_call_on_the_same_remote_task() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (_running, events) = accepted_call(&rig).await;
     events.send(input_required()).unwrap();
     drop(events); // the agent's stream ends at the question
@@ -59,7 +59,7 @@ async fn a_reply_continues_the_same_call_on_the_same_remote_task() {
 
 #[tokio::test]
 async fn a_second_question_round_gets_a_new_identity() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (_running, events) = accepted_call(&rig).await;
     events.send(input_required()).unwrap();
     until("first question", || async { rig.kinds().await.len() == 1 }).await;
@@ -74,7 +74,7 @@ async fn a_second_question_round_gets_a_new_identity() {
 
 #[tokio::test]
 async fn an_input_with_an_unknown_outcome_is_not_confirmed_or_resent() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (running, _events) = accepted_call(&rig).await;
     rig.agent.on_input(Reply::Unknown);
     rig.worker.push(pending(1)).await;
@@ -90,7 +90,7 @@ async fn an_input_with_an_unknown_outcome_is_not_confirmed_or_resent() {
 
 #[tokio::test]
 async fn an_idempotent_input_is_resent_until_accepted() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let mut spec = dispatch_spec(&did());
     spec.capabilities.idempotent_input = true;
     let events = rig.agent.start_stream();
@@ -116,7 +116,7 @@ async fn an_idempotent_input_is_resent_until_accepted() {
 
 #[tokio::test]
 async fn a_rejected_input_is_not_confirmed_and_blocks_later_ones() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (running, _events) = accepted_call(&rig).await;
     rig.agent.on_input(Reply::Rejected("http_422"));
     rig.worker.push(pending(1)).await;
@@ -129,7 +129,7 @@ async fn a_rejected_input_is_not_confirmed_and_blocks_later_ones() {
 
 #[tokio::test]
 async fn a_new_holder_does_not_resend_an_input_the_former_holder_may_have_sent() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.worker.create().await;
     let mut old = acquire(&queue(&rig.store), &instance("conn-01")).await;
     old.begin_send(start_op()).await.unwrap();
@@ -149,7 +149,7 @@ async fn a_new_holder_does_not_resend_an_input_the_former_holder_may_have_sent()
 
 #[tokio::test]
 async fn a_cancel_is_carried_out_and_confirmed() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (running, _events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::ConfirmedCanceled);
     rig.worker.cancel().await;
@@ -168,7 +168,7 @@ async fn a_cancel_is_carried_out_and_confirmed() {
 
 #[tokio::test]
 async fn an_accepted_cancel_is_not_a_canceled_call() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (running, events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::RequestAccepted);
     rig.worker.cancel().await;
@@ -188,7 +188,7 @@ async fn an_accepted_cancel_is_not_a_canceled_call() {
 
 #[tokio::test]
 async fn a_cancel_with_an_unknown_outcome_is_tried_again() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (running, _events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::OutcomeUnknown { code: "timeout".into() });
     rig.agent.on_cancel(CancelOutcome::ConfirmedCanceled);
@@ -203,7 +203,7 @@ async fn a_cancel_with_an_unknown_outcome_is_tried_again() {
 
 #[tokio::test]
 async fn a_cancel_the_agent_cannot_carry_out_is_recorded_as_refused() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let mut spec = dispatch_spec(&did());
     spec.capabilities.cancel = false;
     let events = rig.agent.start_stream();
@@ -225,7 +225,7 @@ async fn a_cancel_the_agent_cannot_carry_out_is_recorded_as_refused() {
 
 #[tokio::test]
 async fn a_cancel_of_a_finished_task_reports_the_agents_own_result() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (_running, _events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::AlreadyFinished(FinalDispatchOutcome::Completed));
     // The first read of the finished task fails; the call must wait for its
@@ -249,7 +249,7 @@ async fn a_cancel_of_a_finished_task_reports_the_agents_own_result() {
 
 #[tokio::test]
 async fn a_finished_task_that_is_gone_ends_on_the_cancel_answer() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (_running, _events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::AlreadyFinished(FinalDispatchOutcome::Completed));
     // The agent dropped the finished task: asking again cannot help.
@@ -264,7 +264,7 @@ async fn a_finished_task_that_is_gone_ends_on_the_cancel_answer() {
 
 #[tokio::test]
 async fn a_finished_task_whose_read_lags_is_read_a_bounded_number_of_times() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (_running, _events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::AlreadyFinished(FinalDispatchOutcome::Failed));
     // The task read never catches up with the cancel answer.
@@ -280,7 +280,7 @@ async fn a_finished_task_whose_read_lags_is_read_a_bounded_number_of_times() {
 
 #[tokio::test]
 async fn a_canceled_task_read_with_a_stored_snapshot_ends_as_canceled() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (_running, _events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::AlreadyFinished(FinalDispatchOutcome::Canceled));
     // The snapshot is stored by reference: it carries no state word.
@@ -303,7 +303,7 @@ async fn a_canceled_task_read_with_a_stored_snapshot_ends_as_canceled() {
 
 #[tokio::test]
 async fn a_cancel_before_anything_was_sent_ends_the_call_without_the_agent() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create().await;
     rig.worker.cancel().await;
     rig.worker.notify().await;
@@ -318,7 +318,7 @@ async fn a_cancel_before_anything_was_sent_ends_the_call_without_the_agent() {
 
 #[tokio::test]
 async fn a_cancel_that_arrives_while_the_start_is_on_the_wire_is_carried_out_at_once() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.config.poll_interval = std::time::Duration::from_secs(30); // no poll will help
     let release = rig.agent.gate_start();
     let _events = rig.agent.start_stream();
@@ -339,7 +339,7 @@ async fn a_cancel_that_arrives_while_the_start_is_on_the_wire_is_carried_out_at_
 
 #[tokio::test]
 async fn a_renotification_makes_the_holder_look_at_once() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.config.poll_interval = std::time::Duration::from_secs(30); // polling alone would be too slow
     let (_running, _events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::ConfirmedCanceled);
@@ -352,7 +352,7 @@ async fn a_renotification_makes_the_holder_look_at_once() {
 async fn a_waiting_call_notices_when_the_agent_moves_on_without_a_reply() {
     // auth-required: the user signs in out of band, the agent resumes and
     // completes. No reply ever flows through the Connector.
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (_running, events) = accepted_call(&rig).await;
     rig.agent.on_task(found(TaskStatus::AuthRequired, json!({"state": "auth_required"})));
     events
@@ -378,7 +378,7 @@ async fn a_waiting_call_notices_when_the_agent_moves_on_without_a_reply() {
 
 #[tokio::test]
 async fn a_cancel_accepted_while_a_question_is_open_is_followed_to_the_end() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let (_running, events) = accepted_call(&rig).await;
     rig.agent.on_task(found(TaskStatus::InputRequired, json!({"state": "input_required"})));
     events.send(input_required()).unwrap();
@@ -401,7 +401,7 @@ async fn a_cancel_accepted_while_a_question_is_open_is_followed_to_the_end() {
 #[tokio::test]
 async fn a_call_that_cannot_be_observed_still_gets_its_cancel() {
     // The agent offers neither subscribe nor a task query, but it can cancel.
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let mut spec = dispatch_spec(&did());
     spec.capabilities.subscribe = false;
     spec.capabilities.query_by_task = false;
@@ -424,7 +424,7 @@ async fn a_call_that_cannot_be_observed_still_gets_its_cancel() {
 async fn a_recorded_cancel_result_is_completed_by_the_next_holder() {
     // The former holder recorded "confirmed canceled" and died before it
     // reported the terminal event; the agent no longer knows the task.
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.worker.create().await;
     let mut old = acquire(&queue(&rig.store), &instance("conn-01")).await;
     old.begin_send(start_op()).await.unwrap();
@@ -456,7 +456,7 @@ fn polled_call(rig: &Rig) -> DispatchSpec {
 async fn a_stale_read_of_the_answered_question_is_not_a_new_question() {
     // A query-only agent that has not processed the reply yet keeps showing
     // the question that was just answered.
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create_spec(polled_call(&rig)).await;
     rig.worker.notify().await;
     rig.agent.on_task(found(TaskStatus::InputRequired, json!({"message": {"messageId": "m-1", "parts": [{"text": "A or B?"}]}})));
@@ -471,7 +471,7 @@ async fn a_stale_read_of_the_answered_question_is_not_a_new_question() {
 
 #[tokio::test]
 async fn a_question_asked_again_after_a_reply_is_a_new_interaction() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create_spec(polled_call(&rig)).await;
     rig.worker.notify().await;
     let question = |id: &str| found(TaskStatus::InputRequired, json!({"message": {"messageId": id, "parts": [{"text": "A or B?"}]}}));
@@ -502,7 +502,7 @@ async fn a_question_asked_again_after_a_reply_is_a_new_interaction() {
 
 #[tokio::test]
 async fn an_unknown_cancel_is_not_resent_on_every_tick() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.config.backoff_min = std::time::Duration::from_secs(30);
     rig.config.backoff_max = std::time::Duration::from_secs(60);
     let (running, _events) = accepted_call(&rig).await;
@@ -520,7 +520,7 @@ async fn an_unknown_cancel_is_not_resent_on_every_tick() {
 
 #[tokio::test]
 async fn an_idempotent_input_is_resent_a_bounded_number_of_times() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let mut spec = dispatch_spec(&did());
     spec.capabilities.idempotent_input = true;
     let _events = rig.agent.start_stream();

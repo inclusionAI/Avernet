@@ -29,6 +29,13 @@ recovery; the caller retries the same scoped InputId. A lost response after the
 create is repaired by the same retry. Admission writes use bounded JSON CAS;
 no Lua script or cross-key transaction is required.
 
+Connector key reports use the same admission record and activation path. The Store
+gets scope from the existing SessionSpec and checks the stable event identity
+(dispatch, event kind and question round). The first accepted payload wins: a
+new holder can observe different bytes for the same remote outcome. A different
+terminal state for that identity conflicts. Gateway requests retain their normal
+content digest.
+
 ## Scheduling and consumption
 
 The schedule document owns the sealed Session owner, activation version,

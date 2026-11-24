@@ -132,15 +132,12 @@ impl StoreInboxProducer {
             WriteOutcome::ConditionNotMet => None,
         })
     }
-    pub(super) fn validate_admission(
-        &self,
-        record: &AdmissionRecord,
-    ) -> Result<(), StoreError> {
+    pub(super) fn validate_admission(&self, record: &AdmissionRecord) -> Result<(), StoreError> {
         encoded_size(&record.request, self.inner.config.max_input_bytes)?;
         if record.schema_version != 1
             || record.generation == 0
             || record.request.input.business_digest
-                != super::validation::request_digest(&record.request)?
+                != super::validation::request_digest(&record.request,record.connector.as_ref())?
         {
             return Err(invalid("stored_admission_digest"));
         }

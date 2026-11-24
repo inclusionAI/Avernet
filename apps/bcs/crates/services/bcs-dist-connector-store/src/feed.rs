@@ -232,6 +232,13 @@ impl CommandFeedPort for StoreCommandFeed {
     }
 
     async fn ack(&mut self, delivery: &CommandDelivery) -> Result<(), StoreError> {
+        if delivery.backend != self.shared.config.backend
+            || delivery.consumer_generation != self.consumer
+        {
+            return Err(StoreError::Invalid {
+                code: "command_delivery_scope".into(),
+            });
+        }
         let (partition, id) = parse_opaque(&delivery.opaque)
             .filter(|(partition, _)| *partition < self.keys.len())
             .ok_or_else(|| StoreError::Invalid {

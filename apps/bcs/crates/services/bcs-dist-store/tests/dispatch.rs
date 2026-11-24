@@ -87,7 +87,7 @@ async fn unknown_holder_cannot_be_taken_over_and_resume_fences_old_actor() {
         request_id: RequestId("other".into()),
     };
     assert!(matches!(
-        f.board.claim(other.clone()).await.unwrap(),
+        f.queue.claim(other.clone()).await.unwrap(),
         ClaimOutcome::HeldByOther(_)
     ));
     *f.membership.0.lock().unwrap() = Liveness::Alive;
@@ -97,11 +97,11 @@ async fn unknown_holder_cannot_be_taken_over_and_resume_fences_old_actor() {
         request_id: RequestId("resume".into()),
     };
     assert!(matches!(
-        f.board.resume_owned(resume.clone()).await.unwrap(),
+        f.queue.resume_owned(resume.clone()).await.unwrap(),
         ClaimOutcome::Acquired(_)
     ));
     assert!(matches!(
-        f.board.resume_owned(resume).await.unwrap(),
+        f.queue.resume_owned(resume).await.unwrap(),
         ClaimOutcome::OwnedByMe(_)
     ));
     assert!(matches!(
@@ -110,7 +110,7 @@ async fn unknown_holder_cannot_be_taken_over_and_resume_fences_old_actor() {
     ));
     *f.membership.0.lock().unwrap() = Liveness::Dead;
     assert!(matches!(
-        f.board.claim(other).await.unwrap(),
+        f.queue.claim(other).await.unwrap(),
         ClaimOutcome::Acquired(_)
     ));
 }
@@ -290,4 +290,40 @@ async fn later_cancels_share_one_obligation_without_losing_request_identity() {
         f.board.request_cancel(f.cancel_with(7, "runner", "changed").await).await.unwrap(),
         ControlOutcome::ContentConflict
     );
+}
+
+/// Interleave a real Worker cancel after the Connector has read, before it claims.
+#[tokio::test]
+async fn takeover_preserves_a_concurrent_worker_cancel_in_the_same_document() {
+    use bcs_store_api::json::JsonStorePlugin;
+    let f = Fixture::new().await;
+    f.create().await;
+    let key = f.base.layout.disp(&spec().did).unwrap();
+    let cancel = f.cancel(2).await;
+    let pause = f.base.storage.pause_after("json.get", &key, 1);
+    let queue = f.queue.clone();
+    let claim = tokio::spawn(async move {
+        queue
+            .claim(DispatchClaimRequest {
+                did: spec().did,
+                me: me(),
+                request_id: RequestId("interleaved".into()),
+            })
+            .await
+    });
+    pause.reached().await;
+    f.board.request_cancel(cancel.clone()).await.unwrap();
+    pause.resume();
+    let ClaimOutcome::Acquired(mut held) = claim.await.unwrap().unwrap() else {
+        panic!("claim failed")
+    };
+    assert_eq!(
+        held.refresh().await.unwrap().control.cancel,
+        Some(cancel.intent)
+    );
+    let raw = f.base.storage.get_json(&key).await.unwrap().unwrap();
+    assert_eq!(raw.version.0, 1_000_000_000);
+    assert_eq!(raw.value["spec"]["did"], spec().did.0);
+    assert_eq!(raw.value["receipts"].as_array().unwrap().len(), 2);
+    assert!(raw.value.get("view").is_none() && raw.value.get("data").is_none());
 }

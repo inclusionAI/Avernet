@@ -5,6 +5,8 @@
 //! digests hash canonical JSON (object keys sorted at every level), so the same
 //! value always has the same digest whatever map order produced it.
 
+pub mod connector;
+
 use bcs_dist_model::Digest;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};

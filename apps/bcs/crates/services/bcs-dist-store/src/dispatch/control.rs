@@ -89,8 +89,11 @@ impl DispatchControlPort for StoreDispatch {
         if doc.value.view.spec.pool != *pool {
             return Err(invalid("dispatch_pool"));
         }
-        let key = self.layout.command(pool, 0)?;
-        let fields = BTreeMap::from([("did".into(), did.0.as_bytes().to_vec())]);
+        let key = self
+            .layout
+            .command(pool, self.config.command_streams.partition_of(did))?;
+        let fields =
+            BTreeMap::from([(crate::command::DID_FIELD.into(), did.0.as_bytes().to_vec())]);
         self.io(
             async {
                 self.stores
@@ -120,10 +123,13 @@ impl DispatchControlPort for StoreDispatch {
         .await
     }
     async fn get(&self, did: &Did) -> Result<Option<DispatchRecord>, StoreError> {
-        Ok(self.document(did).await?.map(|d| DispatchRecord {
+        Ok(self.document(did).await?.map(|mut d| {
+            d.value.discard_confirmed();
+            DispatchRecord {
             view: d.value.view,
             revision: Revision(d.version.0.to_string()),
-            terminal_evidence: d.value.terminal_evidence,
+            terminal_evidence: d.value.connector.and_then(|c| c.finish_evidence),
+        }
         }))
     }
     async fn scan_due(
@@ -149,7 +155,20 @@ impl DispatchControlPort for StoreDispatch {
         }
         let ended = doc.value.ended();
         doc.value.due = if ended { None } else { Some(at) };
-        if !self.write(&key, Some(doc.version), &doc.value).await? {
+        let mut patch = serde_json::Map::new();
+        patch.insert("due".into(), encode_json(&doc.value.due)?);
+        let before = doc.value.view.control.pending_input.len();
+        doc.value.discard_confirmed();
+        if before != doc.value.view.control.pending_input.len() {
+            patch.insert(
+                "control".into(),
+                serde_json::json!({"pending_input": doc.value.view.control.pending_input}),
+            );
+        }
+        if !self
+            .mutate_disp(&key, Some(doc.version), &doc.value, patch)
+            .await?
+        {
             return Ok(RecheckOutcome::NeedsRecheck);
         }
         let _ = self.hint(&doc.value).await;

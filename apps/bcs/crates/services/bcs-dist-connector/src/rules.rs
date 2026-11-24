@@ -5,7 +5,9 @@ use bcs_dist_model::*;
 use bcs_service_api::core::dist_connector::{
     DistConnectorCoreService, Reattach, Report, ReportCursor, ResumeStep, UncertainSend,
 };
-use bcs_service_api::port::repo::distributed::inbox::{AdmitRequest, AppendAgentEvent};
+use bcs_service_api::port::repo::distributed::inbox::{
+    AppendAgentEvent, ConnectorAdmission, ConnectorEventIdentity,
+};
 
 /// Schema version of the inputs the Connector writes.
 const SCHEMA_VERSION: u32 = 1;
@@ -115,7 +117,8 @@ impl DistConnectorCoreService for DistConnectorRules {
             },
             (kind, _) => kind,
         };
-        let digest = key.map(|key| identity::key_digest(did, key, state_of(&payload)));
+        let state = state_of(&payload).to_owned();
+        let digest = key.map(|key| identity::key_digest(did, key, &state));
         let event = AgentEvent {
             did: did.clone(),
             holder_epoch: cursor.holder_epoch,
@@ -125,7 +128,7 @@ impl DistConnectorCoreService for DistConnectorRules {
             payload,
         };
         match (key, digest) {
-            (Some(key), Some(business_digest)) => Report::Key(AdmitRequest {
+            (Some(key), Some(business_digest)) => Report::Key(ConnectorAdmission {
                 input: InputEnvelope {
                     schema_version: SCHEMA_VERSION,
                     sid: view.spec.sid.clone(),
@@ -134,8 +137,7 @@ impl DistConnectorCoreService for DistConnectorRules {
                     business_digest,
                     body: InputBody::Agent { event },
                 },
-                create_session: None,
-                create_task: None,
+                identity: ConnectorEventIdentity { round: key.round(), state },
             }),
             _ => Report::Stream(AppendAgentEvent {
                 sid: view.spec.sid.clone(),

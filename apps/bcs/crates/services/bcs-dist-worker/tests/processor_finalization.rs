@@ -205,7 +205,7 @@ async fn local_terminal_keeps_sending_or_cancel_unknown_supervised_until_definit
             .await
             .unwrap();
         let ClaimOutcome::Acquired(mut held) = f
-            .dispatch
+            .queue
             .claim(DispatchClaimRequest {
                 did: did.clone(),
                 me: connector,

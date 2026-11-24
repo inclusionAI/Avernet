@@ -84,6 +84,7 @@ pub struct Host {
     pub archive: Arc<DbArchiveStore>,
     pub coordination: Arc<CoordinationStore>,
     pub dispatch: Arc<StoreDispatch>,
+    pub queue: bcs_dist_connector_store::StoreDispatchQueue,
     pub runner: Arc<Runner>,
     pub workers: Vec<Worker>,
     pub supervisor: DispatchSupervisor,
@@ -133,6 +134,19 @@ impl Host {
             )
             .unwrap(),
         );
+        let queue = bcs_dist_connector_store::StoreDispatchQueue::new(
+            model.clone(),
+            model.clone(),
+            model.clone(),
+            coordination.clone(),
+            layout.clone(),
+            Arc::new(SystemClock),
+            bcs_dist_connector_store::DispatchBoardConfig::new(
+                BackendId(layout.namespace_identity()),
+                DispatchConfig::default().command_streams,
+            ),
+        )
+        .unwrap();
         let dispatch = Arc::new(
             StoreDispatch::new(
                 DispatchStores {
@@ -169,6 +183,7 @@ impl Host {
             feed,
             archive,
             coordination,
+            queue,
             dispatch,
             runner: Arc::new(Runner::default()),
             workers: vec![],

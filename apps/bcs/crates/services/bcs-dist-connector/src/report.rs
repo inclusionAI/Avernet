@@ -9,7 +9,9 @@ use bcs_dist_model::*;
 use bcs_service_api::core::dist_connector::Report;
 use bcs_service_api::port::repo::distributed::common::IdempotentWrite;
 use bcs_service_api::port::repo::distributed::dispatch::HolderError;
-use bcs_service_api::port::repo::distributed::inbox::{AdmitOutcome, AdmitRequest, AppendAgentEvent};
+use bcs_service_api::port::repo::distributed::inbox::{
+    AdmitOutcome, AppendAgentEvent, ConnectorAdmission,
+};
 use sha2::{Digest as _, Sha256};
 
 /// How an admission ended.
@@ -94,10 +96,10 @@ impl Call {
         Ok(())
     }
 
-    async fn admit(&mut self, request: AdmitRequest) -> Flow<Admitted> {
+    async fn admit(&mut self, request: ConnectorAdmission) -> Flow<Admitted> {
         let mut backoff = self.backoff();
         loop {
-            match self.ports.inbox.admit(request.clone()).await {
+            match self.ports.inbox.admit_connector(request.clone()).await {
                 Ok(AdmitOutcome::ContentConflict) => {
                     tracing::error!(
                         did = %self.did().0, input_id = %request.input.input_id.0,
@@ -168,10 +170,10 @@ impl Call {
             return Ok(payload);
         }
         let hash = hex::encode(Sha256::digest(&bytes));
-        let reference = BlobRef {
-            key: format!("bcn/agent-event/{}/{hash}", self.did().0),
-            digest: Digest(format!("sha256:{hash}")),
-        };
+        let reference = bcs_dist_encoding::blob_reference(
+            &format!("bcn/agent-event/{}/{hash}", self.did().0),
+            &bytes,
+        );
         let mut backoff = self.backoff();
         loop {
             match self.ports.blobs.put_immutable(reference.clone(), bytes.clone()).await {

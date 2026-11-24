@@ -152,7 +152,6 @@ impl StoreDispatch {
                     (
                         None,
                         Document {
-                            schema_version: 1,
                             view: DispatchView {
                                 spec: spec.clone(),
                                 control: DispatchControlState {
@@ -169,10 +168,8 @@ impl StoreDispatch {
                                 },
                             },
                             receipts: vec![],
-                            claim: None,
-                            sends: BTreeMap::new(),
                             due: Some(TimestampMillis(0)),
-                            terminal_evidence: None,
+                            connector: None,
                         },
                         ReceiptResult::Applied,
                     )
@@ -188,7 +185,17 @@ impl StoreDispatch {
                 result: result.clone(),
             });
             doc.due = Some(TimestampMillis(0));
-            if budget.io(&key, self.write(&key, version, &doc)).await? {
+            let mut patch = serde_json::Map::new();
+            if version.is_some() {
+                doc.discard_confirmed();
+                patch.insert("control".into(), encode_json(&doc.view.control)?);
+                patch.insert("receipts".into(), encode_json(&doc.receipts)?);
+                patch.insert("due".into(), encode_json(&doc.due)?);
+            }
+            if budget
+                .io(&key, self.mutate_disp(&key, version, &doc, patch))
+                .await?
+            {
                 return Ok((result, true));
             }
         }
@@ -277,6 +284,6 @@ fn apply_control(doc: &mut Document, intent: &Intent) -> Result<ReceiptResult, S
 }
 fn superseded(doc: &Document) -> Option<ReceiptResult> {
     doc.final_outcome()
-        .zip(doc.terminal_evidence.clone())
+        .zip(doc.connector.as_ref().and_then(|c| c.finish_evidence.clone()))
         .map(|(outcome, evidence)| ReceiptResult::Superseded { outcome, evidence })
 }

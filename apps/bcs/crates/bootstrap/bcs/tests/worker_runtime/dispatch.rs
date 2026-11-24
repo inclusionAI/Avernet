@@ -98,7 +98,7 @@ impl Host {
                     )
                     .await?;
                 let ClaimOutcome::Acquired(mut held) = self
-                    .dispatch
+                    .queue
                     .claim(DispatchClaimRequest {
                         did: did.clone(),
                         me,
@@ -140,7 +140,7 @@ impl Host {
                 // Resume through the public generation fence; never reconstruct
                 // a holder by writing the Dispatch document directly.
                 let ClaimOutcome::Acquired(mut held) = self
-                    .dispatch
+                    .queue
                     .resume_owned(ResumeOwnedDispatch {
                         did: did.clone(),
                         previous,

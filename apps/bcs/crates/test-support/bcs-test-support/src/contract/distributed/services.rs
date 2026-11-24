@@ -178,7 +178,8 @@ pub fn dist_connector_core_service_contract_tests(
         (Report::Key(a), Report::Key(b)) => {
             assert_eq!(a.input.input_id, b.input.input_id);
             assert_eq!(a.input.business_digest, b.input.business_digest);
-            assert!(a.create_session.is_none() && a.create_task.is_none());
+            assert_eq!(a.identity, b.identity);
+            assert_eq!(a.identity.round, None);
         }
         _ => panic!("a final event must be admitted"),
     }
