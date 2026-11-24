@@ -170,16 +170,6 @@ The gateway starts on port 8888 by default and exposes:
 - `http://127.0.0.1:8888/docs` — OpenAPI documentation (when enabled)
 - `http://127.0.0.1:8888/api/test` — connectivity test endpoint
 
-## Task collaboration routing
-
-The community Gateway does not expose `/openapi/v1/task-commission/a2a` or
-forward `/a2a/task-commission`. Bot opportunity discovery, application and
-execution reports through that ingress are not provided. The retained
-[Backend adapter and authentication boundary](../backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md#backend-only-bot-ingress-and-authentication)
-are not a Gateway route. Existing context-collaboration Swarm `step`, `stages`
-and `interactions` routes remain mapped to Backend without changes to their
-current authentication.
-
 ## Browser Access (CORS)
 
 The gateway is the origin a browser talks to, so it answers CORS itself: a
