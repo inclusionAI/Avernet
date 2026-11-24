@@ -5,7 +5,7 @@ import { ConversationSessionStatus } from '@/pages/Workspace/Chat/components/Con
 import { useSessionStatusBridge } from '@/pages/Workspace/Chat/hooks/useSessionStatusBridge';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useSessionStatusStore } from '@/stores/sessionStatusStore';
-import { act, render, renderHook, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 
 import '@testing-library/jest-dom';
 
@@ -94,7 +94,7 @@ it('patches known rows only, retains omitted values, deduplicates, clears explic
   store.patch('ctx', [{ sessionId: sid, status }], new Set());
   expect(useSessionStatusStore.getState().statuses).toEqual({});
 });
-it('isolates view identity, leaves status-less rows empty, and uses accessible text', () => {
+it('isolates view identity, leaves status-less rows empty, and uses plain accessible text', async () => {
   useSessionStatusStore.getState().patch('ctx', [{ sessionId: sid, status }], new Set([sid]));
   const view = render(
     <>
@@ -102,10 +102,17 @@ it('isolates view identity, leaves status-less rows empty, and uses accessible t
       <ConversationSessionStatus botId="bot-a:other-owner" sessionId={sid} />
     </>,
   );
-  expect(screen.getAllByLabelText('DevFlow：进行中')).toHaveLength(1);
+  expect(screen.getAllByLabelText('进行中')).toHaveLength(1);
+  const statusIcon = screen.getByRole('status', { name: '进行中' });
+  fireEvent.focus(statusIcon);
+  await waitFor(() => {
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip).toHaveTextContent('进行中');
+    expect(tooltip).not.toHaveTextContent('DevFlow');
+  });
   expect(view.container.querySelectorAll('svg')).toHaveLength(1);
   act(() => useSessionStatusStore.getState().end('ctx'));
-  expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
+  expect(screen.queryByLabelText(/进行中|已完成|空闲|未知|待回复/)).toBeNull();
   expect(view.container.querySelectorAll('svg')).toHaveLength(0);
 });
 
@@ -127,12 +134,12 @@ it('buffers the initial snapshot before surface ready and swaps all rows to DevF
       <ConversationSessionStatus botId="bot-a:owner" sessionId={other} />
     </>,
   );
-  expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
+  expect(screen.queryByLabelText(/进行中|已完成|空闲|未知|待回复/)).toBeNull();
   expect(view.container.querySelectorAll('svg')).toHaveLength(0);
 
   act(() => useSessionStatusStore.getState().commit('ctx'));
-  expect(screen.getAllByLabelText('DevFlow：进行中')).toHaveLength(1);
-  expect(screen.getAllByLabelText('DevFlow：已完成')).toHaveLength(1);
+  expect(screen.getAllByLabelText('进行中')).toHaveLength(1);
+  expect(screen.getAllByLabelText('已完成')).toHaveLength(1);
   expect(view.container.querySelectorAll('svg')).toHaveLength(2);
 });
 
@@ -142,13 +149,13 @@ it('waits for both surface readiness and the initial status snapshot before show
   const view = render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} />);
 
   act(() => useSessionStatusStore.getState().commit('ctx'));
-  expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
+  expect(screen.queryByLabelText(/进行中|已完成|空闲|未知|待回复/)).toBeNull();
   expect(view.container.querySelector('svg')).toBeNull();
 
   act(() =>
     useSessionStatusStore.getState().patch('ctx', [{ sessionId: sid, status }], new Set([sid]), { snapshot: true }),
   );
-  expect(screen.getByLabelText('DevFlow：进行中')).toBeTruthy();
+  expect(screen.getByLabelText('进行中')).toBeTruthy();
   expect(view.container.querySelectorAll('svg')).toHaveLength(1);
 });
 it('treats the first normal patch from an older child as the initial snapshot', () => {
@@ -170,10 +177,10 @@ it('treats the first normal patch from an older child as the initial snapshot', 
 
   act(() => result.current.onSessionStatusEvent(patch(contextId, 1)));
   expect(useSessionStatusStore.getState().snapshotReady).toBe(true);
-  expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
+  expect(screen.queryByLabelText(/进行中|已完成|空闲|未知|待回复/)).toBeNull();
 
   act(() => result.current.commitSessionStatuses());
-  expect(screen.getByLabelText('DevFlow：进行中')).toBeTruthy();
+  expect(screen.getByLabelText('进行中')).toBeTruthy();
   view.unmount();
 });
 
@@ -200,12 +207,12 @@ it('keeps an explicit v1 regular patch from satisfying the initial snapshot gate
   });
 
   expect(useSessionStatusStore.getState().snapshotReady).toBe(false);
-  expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
+  expect(screen.queryByLabelText(/进行中|已完成|空闲|未知|待回复/)).toBeNull();
 
   act(() => {
     result.current.onSessionStatusEvent({ ...patch(contextId, 2), snapshot: true });
   });
-  expect(screen.getByLabelText('DevFlow：进行中')).toBeTruthy();
+  expect(screen.getByLabelText('进行中')).toBeTruthy();
   view.unmount();
 });
 
@@ -241,7 +248,7 @@ it('buffers a status snapshot that wins the host-list race, then flushes it when
     }),
   );
   const view = render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} />);
-  expect(screen.getByLabelText('DevFlow：进行中')).toBeTruthy();
+  expect(screen.getByLabelText('进行中')).toBeTruthy();
   view.unmount();
   unmount();
 });
@@ -303,7 +310,7 @@ it('renders no icon for explicit idle', () => {
     .getState()
     .patch('ctx', [{ sessionId: sid, status: { code: 'idle', label: '空闲', tone: 'neutral' } }], new Set([sid]));
   const { container } = render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} />);
-  expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
+  expect(screen.queryByLabelText(/进行中|已完成|空闲|未知|待回复/)).toBeNull();
   expect(container.querySelector('svg')).toBeNull();
 });
 
@@ -322,7 +329,7 @@ it('falls back to the normal reply spinner when an unsupported status is present
     .patch('ctx', [{ sessionId: sid, status: { code: 'unknown-future-status', label: '未知', tone: 'neutral' } }], new Set([sid]));
   render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} showReplying />);
   expect(screen.getByLabelText('Bot 正在回复')).toBeInTheDocument();
-  expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
+  expect(screen.queryByLabelText(/进行中|已完成|空闲|未知|待回复/)).toBeNull();
 });
 
 it.each([
@@ -334,7 +341,7 @@ it.each([
     .patch('ctx', [{ sessionId: sid, status: { code, label, tone: 'neutral' } }], new Set([sid]));
   const { container } = render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} />);
   const icon = container.querySelector('svg');
-  expect(screen.getByLabelText(`DevFlow：${label}`)).toBeTruthy();
+  expect(screen.getByLabelText(`${label}`)).toBeTruthy();
   expect(icon).toHaveClass('size-3.5', iconClass, colorClass, animationClass);
 });
 
@@ -350,7 +357,7 @@ it.each([
     .patch('ctx', [{ sessionId: sid, status: { code, label, tone: 'neutral' } }], new Set([sid]));
   const { container } = render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} />);
   const icon = container.querySelector('svg');
-  expect(screen.getByLabelText(`DevFlow：${label}`)).toBeTruthy();
+  expect(screen.getByLabelText(`${label}`)).toBeTruthy();
   expect(icon).toHaveClass('size-3.5', iconClass, colorClass);
   expect(icon).not.toHaveClass('animate-spin', 'bell-wiggle');
 });
@@ -360,7 +367,7 @@ it('renders Coding status as the compact AIX-style icon and suppresses the fallb
   const { container, rerender } = render(
     <ConversationSessionStatus botId="bot-a:owner" sessionId={sid} showReplying />,
   );
-  expect(screen.getByLabelText('DevFlow：进行中')).toBeTruthy();
+  expect(screen.getByLabelText('进行中')).toBeTruthy();
   expect(screen.queryByLabelText('Bot 正在回复')).toBeNull();
   expect(screen.queryByText('进行中')).toBeNull();
   expect(container.querySelector('svg')).toHaveClass('size-3.5', 'animate-spin', 'text-info');
@@ -368,7 +375,7 @@ it('renders Coding status as the compact AIX-style icon and suppresses the fallb
   act(() => useSessionStatusStore.getState().patch('ctx', [{ sessionId: sid, status: null }], new Set([sid])));
   rerender(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} showReplying />);
   expect(screen.getByLabelText('Bot 正在回复')).toBeTruthy();
-  expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
+  expect(screen.queryByLabelText(/进行中|已完成|空闲|未知|待回复/)).toBeNull();
 });
 
 it('status remains read-only and coexists with reply, favorite and selection controls', () => {
@@ -394,13 +401,13 @@ it('status remains read-only and coexists with reply, favorite and selection con
       replyingSessionId={sid}
     />,
   );
-  expect(screen.getByLabelText('DevFlow：进行中')).toBeTruthy();
+  expect(screen.getByLabelText('进行中')).toBeTruthy();
   expect(screen.queryByLabelText('Bot 正在回复')).toBeNull();
   expect(screen.getByRole('button', { name: '收藏会话' })).toBeTruthy();
   act(() => screen.getByRole('button', { name: /Long session title/ }).click());
   expect(onSelect).toHaveBeenCalledTimes(1);
   view.rerender(<ConversationSessionRow session={session} selected={false} readOnly onSelect={onSelect} />);
-  expect(screen.getByLabelText('DevFlow：进行中')).toBeTruthy();
+  expect(screen.getByLabelText('进行中')).toBeTruthy();
   expect(screen.getByText('只读')).toBeTruthy();
   expect(screen.queryByRole('button', { name: '收藏会话' })).toBeNull();
 });
