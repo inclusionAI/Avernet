@@ -190,7 +190,7 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
 async fn metrics_wrapper_forwards_catalog_label_normalization() {
     let _runtime = install_runtime();
     let group = MetricsGroupManagementService::new(
-        Arc::new(LabelPolicyFake),
+        Arc::new(GroupServiceFake),
         Arc::from("label-forward"),
     );
     // A configured inner service must accept a policy-valid key. Before the
@@ -209,7 +209,7 @@ async fn metrics_wrapper_forwards_catalog_label_normalization() {
         "normalized labels must come from the inner service's policy"
     );
 
-    // Invalid keys must fail with the inner service's rejection, so callers
+    // Invalid values must fail with the inner service's rejection, so callers
     // see the same error whether or not metrics instrumentation is enabled.
     let rejected: bcs_service_api::types::catalog_labels::CatalogLabelsInput = serde_json::from_value(
         serde_json::json!({"lifecycle": ["invalid-value"]}),
@@ -218,10 +218,15 @@ async fn metrics_wrapper_forwards_catalog_label_normalization() {
     let error = group
         .normalize_catalog_labels(rejected)
         .expect_err("inner service rejection must propagate through the wrapper");
-    assert!(
-        format!("{error}").contains("UNKNOWN_VALUE"),
-        "expected the inner service's UNKNOWN_VALUE rejection, got: {error}"
+    let ServiceError::A2aManagement(error) = error else {
+        panic!("expected the inner service's structured rejection, got: {error}");
+    };
+    assert_eq!(
+        error.code,
+        bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::InvalidRequest,
     );
+    assert_eq!(error.field, "catalog_labels.lifecycle[0]");
+    assert_eq!(error.reason, "UNKNOWN_VALUE");
 }
 
 #[cfg(feature = "prometheus-metrics")]
@@ -275,12 +280,10 @@ fn install_runtime() -> Arc<MetricsRuntime> {
         .expect("metrics enabled")
 }
 
-/// Group service whose label policy differs from the trait default, so any
-/// wrapper that fails to forward `normalize_catalog_labels` is detectable.
-struct LabelPolicyFake;
+struct GroupServiceFake;
 
 #[async_trait]
-impl GroupManagementService for LabelPolicyFake {
+impl GroupManagementService for GroupServiceFake {
     fn normalize_catalog_labels(
         &self,
         input: bcs_service_api::types::catalog_labels::CatalogLabelsInput,
@@ -299,110 +302,6 @@ impl GroupManagementService for LabelPolicyFake {
         policy.normalize(input)
     }
 
-    async fn create_group(
-        &self,
-        _cmd: GroupCreateCommand,
-    ) -> Result<GroupDetailResult, GroupUseCaseError> {
-        Ok(group_detail(GroupStatus::Active, GroupKind::Normal))
-    }
-
-    async fn create_dm(&self, _cmd: DmCreateCommand) -> Result<DmCreateResult, GroupUseCaseError> {
-        Ok(DmCreateResult {
-            group: group_detail(GroupStatus::Active, GroupKind::Dm),
-            created: true,
-        })
-    }
-
-    async fn update_status(
-        &self,
-        cmd: GroupStatusCommand,
-    ) -> Result<GroupDetailResult, GroupUseCaseError> {
-        let status = match cmd.status.as_str() {
-            "completed" => GroupStatus::Completed,
-            "closed" => GroupStatus::Closed,
-            _ => GroupStatus::Active,
-        };
-        Ok(group_detail(status, GroupKind::Normal))
-    }
-
-    async fn add_member(
-        &self,
-        _cmd: GroupAddMemberCommand,
-    ) -> Result<GroupAddMemberResult, GroupUseCaseError> {
-        Ok(GroupAddMemberResult {
-            group_id: "group-wrapper".to_string(),
-            member: participant_view("bot-member"),
-        })
-    }
-
-    async fn remove_member(
-        &self,
-        cmd: GroupRemoveMemberCommand,
-    ) -> Result<GroupRemoveMemberResult, GroupUseCaseError> {
-        Ok(GroupRemoveMemberResult {
-            group_id: cmd.group_id,
-            removed_bot_uuid: cmd.bot_id,
-        })
-    }
-
-    async fn delete_group(
-        &self,
-        _cmd: GroupDeleteCommand,
-    ) -> Result<GroupDeleteResult, GroupUseCaseError> {
-        Ok(GroupDeleteResult {
-            group_id: "group-wrapper".to_string(),
-            deleted: true,
-        })
-    }
-
-    async fn terminate_group(
-        &self,
-        _cmd: GroupTerminateCommand,
-    ) -> Result<GroupDetailResult, GroupUseCaseError> {
-        Ok(group_detail(GroupStatus::Completed, GroupKind::Normal))
-    }
-
-    async fn update_label(
-        &self,
-        _cmd: GroupUpdateLabelCommand,
-    ) -> Result<GroupDetailResult, GroupUseCaseError> {
-        Ok(group_detail(GroupStatus::Active, GroupKind::Normal))
-    }
-
-    async fn update_visibility(
-        &self,
-        _cmd: GroupUpdateVisibilityCommand,
-    ) -> Result<GroupDetailResult, GroupUseCaseError> {
-        Ok(group_detail(GroupStatus::Active, GroupKind::Normal))
-    }
-
-    async fn update_routing_policy(
-        &self,
-        _cmd: GroupRoutingPolicyCommand,
-    ) -> Result<GroupRoutingPolicyResult, GroupUseCaseError> {
-        Ok(GroupRoutingPolicyResult {
-            group_id: "group-wrapper".to_string(),
-            routing_policy: RoutingPolicy::default(),
-        })
-    }
-
-    async fn update_participant_mode(
-        &self,
-        cmd: GroupParticipantModeCommand,
-    ) -> Result<GroupParticipantModeResult, GroupUseCaseError> {
-        Ok(GroupParticipantModeResult {
-            group_id: cmd.group_id,
-            actor_id: cmd.actor_id,
-            mode: cmd.mode,
-            message_view_scope: cmd.message_view_scope.unwrap_or_default(),
-        })
-    }
-}
-
-struct GroupServiceFake;
-
-#[async_trait]
-impl GroupManagementService for GroupServiceFake {
     async fn create_group(
         &self,
         _cmd: GroupCreateCommand,
