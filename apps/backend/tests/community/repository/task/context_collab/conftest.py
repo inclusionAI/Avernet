@@ -4,6 +4,7 @@ Mirrors tests/community/repository/task/conftest.py: a real in-memory SQLite
 engine, Base.metadata.create_all, and a minimal orm_session stub that commits
 on clean exit / rolls back on error — same semantics the prod DatabasePlugin
 gives, so the single ORM body behaves identically here."""
+
 from contextlib import contextmanager
 
 import pytest
@@ -12,7 +13,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
-# Side-effect import: registers the 2 context collab models on Base.metadata.
+
+# Side-effect import: registers the Collet/Task/Event models on Base.metadata.
 import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401
 
 
