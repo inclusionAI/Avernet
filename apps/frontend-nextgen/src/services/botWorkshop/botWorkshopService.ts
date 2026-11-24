@@ -285,6 +285,7 @@ export const botWorkshopService = {
     const request_detail = input.excludes.length ? { excludes: input.excludes } : undefined;
     const response = await copyBot({
       source_bot_id: input.sourceBotId,
+      source_owner_id: input.sourceOwnerId ?? '',
       bot_name: name,
       bot_desc: description,
       ...(request_detail ? { request_detail } : {}),
