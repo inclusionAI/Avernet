@@ -78,6 +78,8 @@ class BaasDeviceFileSystem(DeviceFileSystem):
     bot-class-agnostic (personal + service bots).
     """
 
+    missing_directory_is_authoritative = True
+
     def __init__(
         self,
         *,

@@ -12,7 +12,7 @@ Current implementations:
 - ``core.devices.services.arca_device_filesystem.ArcaDeviceFileSystem``
 """
 
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 
 class FileTooLargeError(Exception):
@@ -26,6 +26,10 @@ class FileTooLargeError(Exception):
 
 class DeviceFileSystem(Protocol):
     """Read / write / delete files on a device filesystem."""
+
+    # True when a None from list_dir proves absence. Some legacy adapters
+    # also return None for a failed listing.
+    missing_directory_is_authoritative: ClassVar[bool] = False
 
     async def read_file(
         self,

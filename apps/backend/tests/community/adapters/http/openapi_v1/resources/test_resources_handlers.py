@@ -183,6 +183,9 @@ class _StubFileService:
         self.exists_calls.append(path)
         return path in self.existing
 
+    async def lookup_path_is_dir(self, *, path, **_kw) -> bool | None:
+        return False if path in self.existing else None
+
     async def upload_file(self, **kwargs) -> dict:
         self.upload_calls.append(kwargs)
         if self.raises is not None:
@@ -270,6 +273,9 @@ class _StubReadFileService(_StubFileService):
         the workspace in the state the handlers expect."""
         self.exists_calls.append(path)
         return path in self._files
+
+    async def lookup_path_is_dir(self, *, path, **_kw) -> bool | None:
+        return False if path in self._files else None
 
     async def upload_file(self, **kwargs) -> dict:
         info = await super().upload_file(**kwargs)
