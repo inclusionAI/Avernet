@@ -1,0 +1,32 @@
+apps/backend/tests/community/core/task/context_collab/test_l6_contracts.py
+  h_059e888e5e4e82 1-364
+apps/backend/tests/community/core/task/context_collab/test_l6_fixed_agent_roles.py
+  h_059e888e5e4e82 1-153
+apps/backend/tests/community/core/task/context_collab/test_l6_layering.py
+  h_059e888e5e4e82 1-92
+apps/backend/tests/community/core/task/context_collab/test_l6_product_e2e.py
+  h_059e888e5e4e82 1-333
+apps/backend/tests/community/core/task/context_collab/test_l6_product_profile_operations.py
+  h_059e888e5e4e82 1-716
+apps/backend/tests/community/core/task/context_collab/test_l6_runtime_contract.py
+  h_059e888e5e4e82 1-776
+apps/backend/tests/community/core/task/context_collab/test_l6_service_placement.py
+  h_059e888e5e4e82 1-111
+apps/backend/tests/community/core/task/context_collab/test_optional_product_profiles.py
+  h_059e888e5e4e82 1-461
+apps/backend/tests/community/core/task/context_collab/test_product_profile_codec.py
+  h_059e888e5e4e82 1-81
+apps/backend/tests/community/core/task/context_collab/test_product_profile_persistence.py
+  h_059e888e5e4e82 1-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0cb61402d597d55115e575dcf13b29eaee85d81c",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
