@@ -1,5 +1,6 @@
 use super::ContractResult;
 use bcs_dist_model::*;
+use bcs_domain::collaboration::StateMachineDefinition;
 use bcs_service_api::{
     application::{dist_gateway::*, dist_runtime::*},
     core::{dist_connector::*, dist_gateway::*, dist_runner::*},
@@ -18,6 +19,21 @@ pub fn dist_runner_core_service_contract_tests(
     assert_eq!(
         runner.reduce(context, state, inputs)?,
         runner.reduce(context, state, inputs)?
+    );
+    Ok(())
+}
+
+/// Pure publication gate: identical inputs reproduce identical validation
+/// outcomes, so a rejection is deterministic and never time- or IO-dependent.
+pub fn fsm_validator_core_service_contract_tests(
+    validator: &dyn FsmValidatorCoreService,
+    frozen: &SessionSpec,
+    workflow: &StateMachineDefinition,
+    supported: &FsmCapabilities,
+) -> ContractResult {
+    assert_eq!(
+        validator.validate(frozen, workflow, supported),
+        validator.validate(frozen, workflow, supported)
     );
     Ok(())
 }

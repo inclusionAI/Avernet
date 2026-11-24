@@ -13,6 +13,7 @@ bcs-dist-encoding.workspace = true
 async-trait = { workspace = true }
 bcs-dist-model = { workspace = true }
 bcs-db-api = { workspace = true }
+bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-store-api = { workspace = true }
 futures = { workspace = true }
@@ -28,6 +29,8 @@ tokio = { workspace = true }
 hex.workspace = true
 hmac.workspace = true
 bcs-dist-connector-store.workspace = true
+# The real strict-FSM validator injection for workflow-revision conformance.
+bcs-dist-runner-fsm.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 bcs-dist-projection = { workspace = true }
 bcs-test-support = { workspace = true }

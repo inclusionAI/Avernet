@@ -17,5 +17,6 @@ pub mod runtime_safety;
 pub mod services;
 pub mod state;
 pub mod task_feed;
+pub mod workflow_revision;
 
 pub type ContractResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;

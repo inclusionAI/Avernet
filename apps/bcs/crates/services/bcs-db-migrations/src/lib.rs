@@ -165,6 +165,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 46, name: "configured_catalog_labels" },
     SqliteMigration { version: 47, name: "dist_immutable_objects" },
     SqliteMigration { version: 48, name: "fsm_node_history" },
+    SqliteMigration { version: 49, name: "fsm_workflow_revision" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -620,6 +621,20 @@ async fn apply_sqlite_migration_body(
             db.transaction(steps).await?;
             Ok(())
         }
+        // Immutable workflow-revision directory (plan W): append-only
+        // revision object rows with unique hashed identity plus the group's
+        // current publish pointer. Additive only: two CREATE TABLE IF NOT
+        // statements and the load index; no existing table is touched.
+        49 => {
+            let steps = bcs_db_api::split_sql_statements(include_str!(
+                "../../../../migrations/sqlite/049_fsm_workflow_revision.sql"
+            ))
+            .into_iter()
+            .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql)))
+            .collect();
+            db.transaction(steps).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -732,6 +747,11 @@ fn sqlite_migration_checksum(migration: &SqliteMigration) -> String {
     if migration.version == 48 {
         hasher.update(include_bytes!("../../../../migrations/sqlite/048_fsm_node_history.sql"));
     }
+    if migration.version == 49 {
+        hasher.update(include_bytes!(
+            "../../../../migrations/sqlite/049_fsm_workflow_revision.sql"
+        ));
+    }
     hex::encode(hasher.finalize())
 }
 
@@ -785,3 +805,7 @@ mod dist_archive_tests;
 #[cfg(test)]
 #[path = "migrations/node_history_tests.rs"]
 mod node_history_tests;
+
+#[cfg(test)]
+#[path = "migrations/workflow_revision_tests.rs"]
+mod workflow_revision_tests;

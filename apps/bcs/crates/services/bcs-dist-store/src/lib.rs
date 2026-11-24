@@ -25,6 +25,7 @@ pub mod inbox;
 pub mod layout;
 pub mod node_history;
 pub mod task_feed;
+pub mod workflow_revision;
 pub mod version;
 
 pub mod coordination;

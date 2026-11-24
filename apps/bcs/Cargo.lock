@@ -1655,6 +1655,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-runner-fsm"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-dist-model",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-test-support",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "bcs-dist-store"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1666,6 +1680,8 @@ dependencies = [
  "bcs-dist-encoding",
  "bcs-dist-model",
  "bcs-dist-projection",
+ "bcs-dist-runner-fsm",
+ "bcs-domain",
  "bcs-service-api",
  "bcs-store-api",
  "bcs-test-support",
@@ -2559,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",
