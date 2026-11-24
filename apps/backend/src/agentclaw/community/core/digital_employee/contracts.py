@@ -1,4 +1,5 @@
 """Service contracts for employee binding; no transport or vendor SDK types."""
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -19,6 +20,8 @@ class DigitalEmployeeRepositoryProtocol(Protocol):
 
     def list_service_bots(self, creator_no: str) -> list[dict[str, Any]]: ...
 
+    def serialize_passport_scope(self, bot: dict[str, Any]) -> AbstractContextManager[None]: ...
+
     def begin_binding(
         self, bot_pk: int, work_no: str, event_id: str, detail: dict[str, Any]
     ) -> dict[str, Any]: ...
@@ -37,6 +40,8 @@ class DigitalEmployeeServiceProtocol(Protocol):
     def query_permissions(
         self, bot_pk: int, mcp_codes: list[str]
     ) -> dict[str, Any]: ...
+
+    def serialize_passport_scope(self, bot: dict[str, Any]) -> AbstractContextManager[None]: ...
 
     def prepare_mcp_change(
         self, bot: dict[str, Any], desired: list[dict[str, Any]],

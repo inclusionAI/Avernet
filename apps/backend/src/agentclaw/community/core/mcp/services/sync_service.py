@@ -959,7 +959,8 @@ class MCPSyncService(MCPSyncServiceProtocol):
         engine_type: Optional[str] = None,
     ) -> dict[str, Any]:
         """更新完整 MCP scope；身份或 bot 元数据不可读取时中止覆盖。"""
-        return update_mcp_passport_scope(
+        return await asyncio.to_thread(
+            update_mcp_passport_scope,
             passport_plugin=self.passport_update,
             bot_repository=self.bot_repository,
             caller_identity_repository=self.caller_identity_repository,

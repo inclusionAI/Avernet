@@ -1,5 +1,7 @@
 """Serialize employee association changes on the existing Bot aggregate row."""
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from injector import inject
@@ -47,6 +49,22 @@ class DigitalEmployeeRepository(DigitalEmployeeRepositoryProtocol):
                 BotModel.env == get_current_env(), BotModel.is_delete == 0,
             ).order_by(BotModel.id).all()
             return [_bot(row) for row in rows]
+
+    @contextmanager
+    def serialize_passport_scope(self, bot: dict[str, Any]) -> Iterator[None]:
+        # The draft and releases use the source Bot's Passport. Hold its row
+        # across the overwrite so the next writer reads the resulting scope.
+        with self._db.transactional_orm_session() as session:
+            row = self._query(session, bot["id"]).with_for_update().one_or_none()
+            if (
+                row is None
+                or row.owner_id != bot["owner_id"]
+                or (binding := _ext(row).get("digital_employee")) != bot["ext"]["digital_employee"]
+                or not binding
+                or binding.get("status") != "ACTIVE"
+            ):
+                raise DigitalEmployeeError("数字员工绑定已变化或尚未完成，请重试")
+            yield
 
     def begin_binding(self, bot_pk: int, work_no: str, event_id: str,
                       detail: dict[str, Any]) -> dict[str, Any]:

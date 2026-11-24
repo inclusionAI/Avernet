@@ -1,4 +1,5 @@
 """Recoverable metadata binding driven by verified platform events."""
+from contextlib import AbstractContextManager
 from typing import Any
 import hashlib
 import json
@@ -135,6 +136,10 @@ class DigitalEmployeeService:
         if not 1 <= len(mcp_codes) <= 100:
             raise DigitalEmployeeError("MCP query requires 1 to 100 codes")
         return self._platform.query_mcp_permissions(binding["work_no"], mcp_codes)
+
+    def serialize_passport_scope(self, bot: dict[str, Any]) -> AbstractContextManager[None]:
+        self._require_enabled()
+        return self._repo.serialize_passport_scope(bot)
 
     def prepare_mcp_change(self, bot: dict[str, Any], desired: list[dict[str, Any]],
                            historical: list[dict[str, Any]], operator: str) -> list[dict[str, Any]]:

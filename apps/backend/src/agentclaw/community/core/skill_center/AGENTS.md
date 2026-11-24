@@ -421,7 +421,7 @@ CommunityDatabase 的 operator-managed SQLite（`create_schema=false`）在启�
 
 ## 数字员工共享凭证保护
 
-已绑定数字员工的服务 Bot 在完整能力投影更新 AgentPass 前，通过数字员工服务申请非公开 MCP 权限，并保留历史 MCP 授权与草稿期望范围的并集。删除仅影响草稿 Runtime 配置；审批通过的发布流程在最终上线时收敛凭证范围。未绑定 Bot 的投影语义保持不变。
+已绑定数字员工的服务 Bot 在完整能力投影更新 AgentPass 前，通过数字员工服务申请非公开 MCP 权限，并保留历史 MCP 授权与草稿期望范围的并集。草稿的 Passport 读取、合并和覆盖写入与审批发布的范围收敛共用源 Bot 数据库行锁，避免旧快照覆盖并发写入；锁仅围绕共享凭证更新。删除仅影响草稿 Runtime 配置；审批通过的发布流程在最终上线时收敛凭证范围。未绑定 Bot 的投影语义保持不变。
 
 ## Existing-Bot Manifest capability delivery
 
