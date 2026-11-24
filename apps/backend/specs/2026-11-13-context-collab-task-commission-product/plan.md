@@ -125,3 +125,21 @@ class TaskCommissionDetailView:
 - 类型一致：`TASK_COMMISSION_PRECONDITIONS`/`resolve_workflow_status`（T1 产 T2 消）、`TaskCommissionServiceProtocol`/视图（T2/T3 产，T3 DI/api 消）签名逐字。
 - Review Focus 6 项全部有归属测试（终态/时序/越权/无 artifacts/非恒等/白名单不松旧禁→T1/T2）。
 - 比例：3 任务，签名与断言为主、零方法体转写；T1 行为不变以 append 套件回归为证。
+
+
+## 2026-11-24 follow-up: remove the Gateway Bot ingress
+
+- Product scope: do not expose Bot opportunity discovery, application or execution
+  reports through the community Gateway. Removed the commission A2A forwarding
+  domain/path rewrite and its Bot-specific authentication rule; no replacement
+  public route or relaxed authentication was introduced.
+- Retained the Backend signed A2A adapter and its authentication, Service API and
+  Swarm `step`/`stages`/`interactions` resources unchanged. Current behavior is
+  documented in the [product boundary](../../src/agentclaw/community/core/task/context_collab/products/task_commission/README.md#backend-only-bot-ingress-and-authentication)
+  and [Gateway routing scope](../../../gateway/README.md#task-collaboration-routing).
+- Verification: 230 targeted Gateway routing/security tests passed, including a
+  real HTTP 404 before authentication/signing/forwarding and unchanged Swarm
+  routing. Command from `apps/gateway/`:
+  `PYTHONPATH=src ../backend/.venv/bin/python -m pytest -q tests/unit/core/forwarding/test_commission_a2a_routing.py tests/unit/core/authn/test_route_security.py tests/unit/core/forwarding/test_domain_map.py`.
+- Full tests, total-line coverage and changed-line coverage were not run at the
+  user's request. This is local verification, not deployment or live-Bot evidence.

@@ -456,25 +456,35 @@ role-to-binding conversion in the opportunity scope, rejection of undeclared
 roles and propagated query/submission failures. Separate regression cases send
 the actual signed HTTP Apply envelope to preserve ingress coverage.
 
-## Bot ingress and authentication
+## Backend-only Bot ingress and authentication
+
+The community Gateway does **not** publish
+`POST /openapi/v1/task-commission/a2a` for Bot opportunity discovery, application
+or execution reports. Its shipped configuration has neither a forwarding domain
+nor a Bot-specific authentication rule for this path; requests receive Gateway
+HTTP 404 before authentication, principal signing or upstream forwarding.
+The existing Swarm `step`, `stages` and `interactions` resources under
+`/openapi/v1/collaboration/task/context_collab/...` keep their routing and
+current authentication unchanged.
+
+The [HTTP adapter](../../../../../adapters/http/task/commission_a2a.py) remains
+registered on Backend at `POST /a2a/task-commission`. The following describes that
+retained boundary and its local signed-HTTP contract tests, not a published
+Gateway route or a deployed Bot integration:
 
 ```text
-Bot HTTP tool / A2A client
-  → POST /openapi/v1/task-commission/a2a (Gateway)
-  → Bot token registry authentication + signed X-Avernet-Principal
-  → POST /a2a/task-commission (Backend, explicit Gateway path rewrite)
+Trusted caller with a valid signed X-Avernet-Principal
+  → POST /a2a/task-commission (Backend)
   → verified Bot tenant + ActorContext(bot, exact bot_uuid, source=a2a)
   → Query/Apply or report_execution → shared G1/G4 and L5 admission as applicable
   → A2A Message containing AccsOperationResult
 ```
 
-The Bot supplies its **registered Bot credential** via `X-Avernet-Bot-Token`
-(the gateway default dedicated header), not a self-created principal JWT.
-The gateway resolves the token and signs its authoritative Bot UUID, owner and
-tenant. Backend independently verifies signature, issuer, audience and expiry,
-requires exactly one Bot principal and rejects extra user/app identities.
-The existing boot-time shared signing-key configuration must be provisioned on
-both services; missing key fails closed. Neither body identity nor SSO nor
+Backend verifies signature, issuer, audience and expiry, requires exactly one
+Bot principal and rejects extra user/app identities. Its trusted signing-key
+configuration must still be provisioned; a missing key fails closed. This
+adapter does not authenticate a raw `X-Avernet-Bot-Token`, and an untrusted
+caller cannot mint its own principal JWT. Neither body identity nor SSO nor
 `X-Bot-Id`/`X-Staff-Id` provides a fallback. Ordinary public user/app APIs have
 **not** been opened to Bot-only callers.
 
@@ -642,9 +652,10 @@ also verifies active scoped Open admission before execution.
   Reconcile authoritative state first. Opportunity discovery is not a full
   task-state/revision reconciliation endpoint; a refreshed authorized handoff
   is still needed after an execution conflict. Discovery does not solve that gap.
-- [Outbound dispatch](dispatch.py) still uses local `MockA2aDelivery`; this change
-  makes inbound HTTP reachable but does not install a live outbound transport,
-  automatic Bot runtime reporting tool or session-injection capability.
+- [Outbound dispatch](dispatch.py) still uses local `MockA2aDelivery`. The
+  retained Backend ingress does not install a live outbound transport, automatic
+  Bot runtime reporting tool or session-injection capability, and the community
+  Gateway does not expose it.
 - MethodStore remains in-memory; publication crosses SQL/MethodStore/dispatch
   without a distributed transaction. Open screen/admit or dispatch failure may
   leave a submitted/admitted intermediate state; the error propagates, with no
@@ -732,10 +743,13 @@ DEPLOY_PROFILE=test .venv/bin/python -m pytest \
   tests/community/endpoints/test_endpoint_runner.py -k 'a2a/task-commission' -q
 ```
 
-Changing the wire, opaque Bot identity, version fences or role rule affects Bot
-clients and generic L4 writers; keep DTOs, gateway routing/security, product
-contract and both entrypoint tests aligned. Verification here is local HTTP/SQL
-and gateway routing/auth policy evidence, not deployed multi-service/live-Bot
+Changing the Backend wire, opaque Bot identity, version fences or role rule
+affects trusted clients and generic L4 writers; keep DTOs, the product contract
+and Backend entrypoint tests aligned. Gateway
+[routing regressions](../../../../../../../../../gateway/tests/unit/core/forwarding/test_commission_a2a_routing.py)
+assert that the commission A2A path is not exposed, returns HTTP 404 without
+forwarding, and leaves the Swarm control routes intact. Verification here is
+local HTTP/SQL and Gateway refusal evidence, not deployed multi-service/live-Bot
 interoperability.
 
 ## Task authority and compatibility
