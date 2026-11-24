@@ -1,0 +1,21 @@
+engine/adapter/src/engine/community/core/adapters/openclaw/tests/test_session.py
+  s_fd1b8e677fa2d8::t_13e5f7258df652 819-827
+apps/backend/tests/community/acceptance/expert_chat/test_caller_cron_sessions.py
+  s_fd1b8e677fa2d8::t_925f1b4607f747 138-142,144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f584be44703f6e227c3226eeb574f771decf45ac",
+  "prompts": {},
+  "sessions": {
+    "s_fd1b8e677fa2d8": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "e7fbf75b-2d21-42d0-912d-1920e852afa4",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
