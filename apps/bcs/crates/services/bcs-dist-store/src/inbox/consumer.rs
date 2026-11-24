@@ -7,7 +7,7 @@ use crate::{
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_service_api::port::repo::distributed::{common::*, inbox::*, session::CheckpointEnvelope};
-use bcs_store_api::stream::*;
+use bcs_store_api::{Version, stream::*};
 use std::{
     collections::VecDeque,
     num::NonZeroU32,
@@ -177,7 +177,7 @@ impl StoreInboxProducer {
         sid: &Sid,
         input: &InputEnvelope,
         key: &[u8],
-    ) -> Result<Option<AdmissionRecord>, StoreError> {
+    ) -> Result<Option<(Version, AdmissionRecord)>, StoreError> {
         let key = std::str::from_utf8(key).map_err(|_| invalid("admission_key"))?;
         if !key.starts_with(&format!(
             "{}:admission:",
@@ -185,7 +185,7 @@ impl StoreInboxProducer {
         )) {
             return Err(invalid("admission_namespace"));
         }
-        let Some((_, c)) = self.admission_record(key).await? else {
+        let Some((version, c)) = self.admission_record(key).await? else {
             return Ok(None);
         };
         if c.sid() != sid
@@ -194,7 +194,7 @@ impl StoreInboxProducer {
         {
             return Err(invalid("admission_input_mismatch"));
         }
-        Ok(Some(c))
+        Ok(Some((version, c)))
     }
     /// None: unresolved admission position, stop only this session. Some(None):
     /// durable duplicate/rejection, advance coverage without invoking the Runner.
@@ -202,14 +202,50 @@ impl StoreInboxProducer {
         &self,
         sid: &Sid,
         row: &StreamEntry,
+        deadline: Instant,
     ) -> Result<Option<Option<InputEnvelope>>, StoreError> {
         let input = decode_inbox_entry(sid, &row.fields)?;
         if let Some(key) = row.fields.get("admission") {
-            let Some(c) = self.admission_for_input(sid, &input, key).await? else {
+            let deadline = tokio::time::Instant::from_std(deadline);
+            let Some((version, mut c)) =
+                tokio::time::timeout_at(deadline, self.admission_for_input(sid, &input, key))
+                    .await
+                    .map_err(|_| unknown("session_read_timeout"))??
+            else {
                 return Ok(None);
             };
             match c.decision {
-                None => Ok(None),
+                None => {
+                    if c.phase != Phase::TaskReady
+                        || !c.registered
+                        || c.append_attempts == 0
+                        || c.request.input != input
+                    {
+                        return Err(invalid("admission_append_evidence"));
+                    }
+                    let key = std::str::from_utf8(key).map_err(|_| invalid("admission_key"))?;
+                    let help = async {
+                        if c.position.is_none() {
+                            // The append itself succeeded. Select this observed position by
+                            // the same EQ as the producer rather than appending another copy.
+                            c.position = Some(self.position(sid, row.id));
+                            self.save(key, Some(version), &c, key).await?;
+                        } else {
+                            self.advance(key, false).await?;
+                        }
+                        Ok(())
+                    };
+                    // Never acknowledge a row on the strength of an attempted repair.
+                    // Leave it pending on timeout/contention and reclassify next visit.
+                    match tokio::time::timeout_at(deadline, help).await {
+                        Err(_)
+                        | Ok(
+                            Ok(())
+                            | Err(StoreError::OutcomeUnknown { .. } | StoreError::NotApplied { .. }),
+                        ) => Ok(None),
+                        Ok(Err(error)) => Err(error),
+                    }
+                }
                 Some(Decision::Rejected) => Ok(Some(None)),
                 Some(Decision::Accepted) => {
                     let pos = c
@@ -374,18 +410,12 @@ impl Feed {
                 }
                 break;
             }
-            let classified = match tokio::time::timeout_at(
-                tokio::time::Instant::from_std(deadline),
-                self.store.classify(&watch.sid, &row),
-            )
-            .await
-            {
-                Ok(Ok(value)) => value,
+            let classified = match self.store.classify(&watch.sid, &row, deadline).await {
+                Ok(value) => value,
                 // Retain a confirmed continuous prefix; retry the unfinished row
                 // next time. A failure at the first row still suspends the watch.
-                _ if result.physical > 0 => break,
-                Ok(Err(error)) => return Err(error),
-                Err(_) => return Err(unknown("session_read_timeout")),
+                Err(_) if result.physical > 0 => break,
+                Err(error) => return Err(error),
             };
             let Some(classified) = classified else {
                 result.pending = true;

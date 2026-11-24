@@ -344,7 +344,7 @@ impl StoreAdmissionControl {
         let mut terminal = None;
         if let Some(key) = row.fields.get("admission") {
             let input = crate::codec::decode_inbox_entry(&owner.sid, &row.fields)?;
-            let admission = self.store.admission_for_input(&owner.sid, &input, key).await?
+            let (_, admission) = self.store.admission_for_input(&owner.sid, &input, key).await?
                 .ok_or_else(|| invalid("closure_admission_missing"))?;
             if admission.decision == Some(Decision::Accepted)
                 && admission.generation == progress.closure.generation

@@ -23,11 +23,21 @@ one document for each `(scope, input_id)`; `schedule:<sid>`, `ckpt:<sid>` and
    a previously accepted record is observed. A different digest returns
    `ContentConflict`.
 
-The recovery guarantee starts when the admission document exists. If the
-create-if-absent write never succeeds, the provider does not promise background
-recovery; the caller retries the same scoped InputId. A lost response after the
-create is repaired by the same retry. Admission writes use bounded JSON CAS;
-no Lua script or cross-key transaction is required.
+An unconfirmed request can still execute. Retrying the same scoped InputId
+resumes its original admission; creating the document alone does not guarantee
+background completion. No later accepted input may depend on that retry:
+
+- When a reader finds an undecided Inbox row, it checks the stored request and
+  can select the observed append position by EQ if the producer lost its reply.
+  It helps finish activation and rereads the decision before advancing coverage.
+  Only the accepted position is delivered; physical duplicates are skipped.
+- If registration would exceed the Session slot or byte limit, the producer
+  helps one existing eligible slot within its current time budget and rechecks
+  capacity. Further attempts rotate through eligible slots. Only the closure
+  provider may release a closed-generation Start; capacity pressure is never proof
+  of completion.
+
+Neither path scans other Sessions or requires a shard journal.
 
 Connector key reports use the same admission record and activation path. The Store
 gets scope from the existing SessionSpec and checks the stable event identity

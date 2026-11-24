@@ -195,3 +195,61 @@ async fn forged_owner_and_old_activation_tokens_do_not_authorize_settle() {
         ScheduleObservation::Fenced
     );
 }
+
+#[tokio::test]
+async fn reader_help_rejects_abandoned_start_and_leaves_its_closed_slot() {
+    let store = Arc::new(Recorder::default());
+    let p = provider(store.clone());
+    p.admit(request("a")).await.unwrap();
+    let o = owner(&store, &p).await;
+    let mut b = request("b");
+    b.input.tid = Tid(format!("{SID}.b"));
+    b.create_task.as_mut().unwrap().tid = b.input.tid.clone();
+    let pause = store.pause_after("stream.append", &layout().inbox(&o.sid).unwrap(), 1);
+    {
+        let admission = p.admit(b.clone());
+        tokio::pin!(admission);
+        tokio::select! {
+            _ = pause.reached() => (),
+            result = &mut admission => panic!("admission finished before crash: {result:?}"),
+        }
+    }
+    close(&p, &o).await;
+    let mut feed = p.open(o.shard).await.unwrap();
+    feed.watch(o.sid.clone(), None).await.unwrap();
+    let mut delivered = Vec::new();
+    for _ in 0..6 {
+        let batch = feed
+            .next(
+                ReadLimits {
+                    max_sessions: std::num::NonZeroU32::MIN,
+                    max_entries: std::num::NonZeroU32::new(8).unwrap(),
+                    max_bytes: std::num::NonZeroU32::new(1024 * 1024).unwrap(),
+                },
+                std::time::Duration::ZERO,
+            )
+            .await
+            .unwrap();
+        assert!(batch.failures.is_empty());
+        delivered.extend(
+            batch
+                .sessions
+                .into_iter()
+                .flat_map(|s| s.entries.into_iter().map(|e| e.input_id.0)),
+        );
+    }
+    assert_eq!(delivered, ["a"]);
+    assert_eq!(
+        p.admission_decision(&b.scope, &b.input.input_id)
+            .await
+            .unwrap(),
+        Some(AdmitOutcome::Quarantined)
+    );
+    let schedule = store
+        .read_document(&layout().schedule(&o.sid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let key = layout().admission(&b.scope, &b.input.input_id).unwrap();
+    assert!(schedule.value["slots"].get(&key).is_some());
+}

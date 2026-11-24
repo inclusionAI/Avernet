@@ -192,3 +192,91 @@ async fn takeover_scan_shrinks_to_budget_and_resumes_at_its_cursor() {
     assert_eq!(second.items, vec![Sid(sids[2].into())]);
     assert!(second.next.is_none());
 }
+
+fn start(id: &str) -> AdmitRequest {
+    let mut r = request(id);
+    let tid = Tid(format!("{SID}.{id}"));
+    r.input.tid = tid.clone();
+    r.create_task.as_mut().unwrap().tid = tid;
+    r
+}
+
+async fn abandon_at(p: &StoreInboxProducer, r: AdmitRequest, pause: Arc<Pause>) {
+    {
+        let admission = p.admit(r);
+        tokio::pin!(admission);
+        tokio::select! {
+            _ = pause.reached() => (),
+            result = &mut admission => panic!("admission finished before crash: {result:?}"),
+        }
+    }
+    pause.resume();
+}
+
+#[tokio::test]
+async fn abandoned_append_does_not_block_later_accepted_input() {
+    let store = Arc::new(Recorder::default());
+    let p = provider(store.clone(), config());
+    let sid = Sid(SID.into());
+    assert!(matches!(
+        p.admit(start("a")).await.unwrap(),
+        AdmitOutcome::Accepted(_)
+    ));
+    let pause = store.pause_after("stream.append", &layout().inbox(&sid).unwrap(), 1);
+    abandon_at(&p, start("b"), pause).await;
+    assert!(matches!(
+        p.admit(start("c")).await.unwrap(),
+        AdmitOutcome::Accepted(_)
+    ));
+    let worker = provider(store, config());
+    let mut feed = worker.open(ShardId(42)).await.unwrap();
+    feed.watch(sid, None).await.unwrap();
+    let mut ids = Vec::new();
+    for _ in 0..12 {
+        let batch = feed
+            .next(
+                ReadLimits {
+                    max_sessions: NonZeroU32::MIN,
+                    max_entries: NonZeroU32::new(16).unwrap(),
+                    max_bytes: NonZeroU32::new(1024 * 1024).unwrap(),
+                },
+                Duration::ZERO,
+            )
+            .await
+            .unwrap();
+        assert!(batch.failures.is_empty(), "{:?}", batch.failures);
+        ids.extend(
+            batch
+                .sessions
+                .into_iter()
+                .flat_map(|s| s.entries.into_iter().map(|e| e.input_id.0)),
+        );
+    }
+    ids.sort();
+    assert_eq!(ids, ["a", "b", "c"]);
+}
+
+#[tokio::test]
+async fn abandoned_registrations_do_not_block_next_start() {
+    let store = Arc::new(Recorder::default());
+    let p = provider(store.clone(), config());
+    p.admit(start("seed")).await.unwrap();
+    let sk = layout().schedule(&Sid(SID.into())).unwrap();
+    for i in 0..56 {
+        // The slot CAS succeeded, but the admission still says Created.
+        let pause = store.pause_after("document.replace", &sk, 1);
+        abandon_at(&p, start(&format!("lost{i}")), pause).await;
+    }
+    store.clear();
+    let next = provider(store.clone(), config());
+    assert!(matches!(
+        next.admit(start("next")).await,
+        Ok(AdmitOutcome::Accepted(_))
+    ));
+    assert!(
+        !store
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("zset.range"))
+    );
+}
