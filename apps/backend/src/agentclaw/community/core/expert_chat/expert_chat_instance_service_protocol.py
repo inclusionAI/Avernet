@@ -67,6 +67,13 @@ class ExpertChatInstanceServiceProtocol(Protocol):
         """Read an existing exact-subject record or None without lifecycle side effects."""
         ...
 
+    async def refresh_existing_caller_instance(
+        self, user_id: str, bot_id: str, owner_id: str,
+        iam_token: str | None = None,
+    ) -> Dict[str, Any] | None:
+        """Reconcile only the registered in-flight publication; never allocate or upgrade."""
+        ...
+
     async def get_caller_connection(
         self,
         user_id: str,
