@@ -26,9 +26,8 @@ describe('useCommunityTopicActions', () => {
       currentUserId: viewer.id,
       viewer,
       selectedTopic: null,
-      replyPage: 1,
-      replyTotal: 0,
-      goToReplyPage: jest.fn().mockResolvedValue(undefined),
+      refreshReply: jest.fn().mockResolvedValue(undefined),
+      recordReplyCreated: jest.fn(),
       interactions,
     }));
 

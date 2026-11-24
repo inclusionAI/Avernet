@@ -25,6 +25,7 @@ const EMPTY_STATS: InteractionStats = {
 interface TopicFirstFloorProps {
   topic: CommunityTopic;
   currentUserId?: string;
+  onPick?: (index: number) => void;
   targetSummary?: InteractionSummary;
   viewerTopicSummary?: InteractionSummary;
   getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
@@ -41,6 +42,7 @@ interface TopicFirstFloorProps {
 
 export function TopicFirstFloor({
   topic,
+  onPick,
   currentUserId,
   targetSummary,
   viewerTopicSummary,
@@ -64,6 +66,8 @@ export function TopicFirstFloor({
       createdAt={topic.createdAt}
       contentExtra={
         <PollPanel
+          viewer={topic.viewer}
+          onPick={onPick}
           topicType={topic.topicType}
           status={topic.status}
           poll={topic.topicConfig?.poll}
@@ -72,6 +76,7 @@ export function TopicFirstFloor({
       }
       topicActionRow={
         <TopicInteractionBar
+          compact={topic.topicType === 'poll'}
           topicId={topic.id}
           topicStats={
             targetSummary
@@ -87,7 +92,7 @@ export function TopicFirstFloor({
                   replyParticipantCount: targetSummary.replyParticipantCount,
                   helpfulReplyCount: targetSummary.helpfulReplyCount,
                 }
-              : EMPTY_STATS
+              : { ...EMPTY_STATS, favoriteCount: topic.favoriteCount ?? 0, viewCount: topic.viewCount ?? 0, likeCount: topic.likeCount ?? 0 }
           }
           publishedAt={topic.createdAt}
           liked={(viewerTopicSummary?.likeCount ?? 0) > 0}
