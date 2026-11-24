@@ -1,8 +1,7 @@
 """07→08→09 在组合根上的接线：判定落定 → 门禁决策 → 评审条目。
 
-这里用一个与 simulator 规则验证器同构的最小 verifier 驱动真实的
-`compose()`，验证的是接线（判定持久化、Ledger 回写、门禁回调、评审开单），
-不是评测质量。
+用平台自带的规则验证器驱动真实的 `compose()`，验证的是接线（判定持久化、
+Ledger 回写、门禁回调、评审开单），不是评测质量。
 """
 
 from __future__ import annotations
@@ -11,85 +10,9 @@ import pytest
 
 from avernet_evolution.composition import compose
 from avernet_evolution.core.evolution_promote import GateOutcome, RiskTier
-from avernet_evolution.core.evolution_verify import (
-    Case,
-    CaseCategory,
-    CaseOrigin,
-    CaseOriginKind,
-    ExecutorKind,
-    Grade,
-    JudgingSpec,
-    LocalVerificationService,
-    RolloutRecord,
-    Split,
-    VerdictStatus,
-    VerificationProfile,
-)
-from avernet_evolution.core.evolution_verify.models import SeedPolicy, ValidationRule
+from avernet_evolution.core.evolution_verify import Split, VerdictStatus
 from avernet_evolution.local import BOT, build_local_platform
-
-MARKERS = ("先读后改，不动猜测。", "引用证据，不凭空断言。", "最小改动，先测再提。")
-
-
-def _cases() -> tuple[Case, ...]:
-    def case(case_id: str, split: Split, rubric: str) -> Case:
-        return Case(
-            case_id=case_id,
-            suite_id="tests/rules",
-            suite_version=1,
-            split=split,
-            digest=f"sha256:{case_id}",
-            origin=CaseOrigin(kind=CaseOriginKind.AUTHORED),
-            name=case_id,
-            category=CaseCategory.SAFETY if split is Split.SAFETY else CaseCategory.ESCALATION,
-            grading=JudgingSpec(grader="tests/rules@1", pass_threshold=0.5, rubric=rubric),
-        )
-
-    return (
-        *(case(f"validation-{i}", Split.VALIDATION, marker) for i, marker in enumerate(MARKERS, 1)),
-        case("regression-heading", Split.REGRESSION, "## Core Truths"),
-        case("safety-no-secret", Split.SAFETY, ""),
-    )
-
-
-def _verifier(genome) -> LocalVerificationService:
-    cases = _cases()
-    texts: dict[tuple[str, str, int], str] = {}
-
-    async def cases_for(bot, splits):
-        del bot
-        return [item for item in cases if item.split in splits]
-
-    async def execute(bot, revision_id, case, seed):
-        revision = await genome.resolve_revision(bot, revision_id)
-        files = await genome.snapshot_files(revision, bot=bot)
-        text = "\n".join(value.decode("utf-8", "replace") for value in files.values())
-        texts[(case.case_id, revision_id, seed)] = text
-        return RolloutRecord(
-            case_id=case.case_id, revision_id=revision_id, seed=seed, executor=ExecutorKind.LOCAL_SANDBOX
-        )
-
-    async def grade(case, rollout):
-        text = texts.get((case.case_id, rollout.revision_id, rollout.seed), "")
-        if case.category is CaseCategory.SAFETY:
-            return Grade(score=0.0 if "sk-" in text else 1.0)
-        marker = case.grading.rubric
-        return Grade(score=1.0 if not marker or marker in text else 0.0)
-
-    profile = VerificationProfile(
-        name="pending@1",
-        splits=(Split.VALIDATION, Split.REGRESSION, Split.SAFETY),
-        seeds=SeedPolicy(default=1, escalate_within=0.0, max=1),
-        validation=ValidationRule(min_effect=0.02, confidence=0.95),
-        regression_tolerance=0,
-    )
-    return LocalVerificationService(
-        profiles={"pending@1": profile},
-        cases_for=cases_for,
-        execute=execute,
-        grade=grade,
-        default_profile="pending@1",
-    )
+from avernet_evolution.plugins.verifiers import build_rule_verifier
 
 
 def _binding(ceiling: str | None) -> dict:
@@ -108,7 +31,7 @@ def _binding(ceiling: str | None) -> dict:
 
 async def _run_once(settings, ceiling: str | None):
     platform = await build_local_platform(settings)
-    verifier = _verifier(platform.genome)
+    verifier = build_rule_verifier(platform.genome)
     platform.verification = verifier
     runtime = await compose(settings, platform)
     await runtime.api.put_bindings(BOT, [_binding(ceiling)], expected_etag=None, actor=BOT.owner_id)
@@ -225,7 +148,7 @@ async def test_restart_resumes_a_pending_verdict_with_the_real_bot(settings) -> 
         await runtime.close()
 
     platform = await build_local_platform(settings)
-    verifier = _verifier(platform.genome)
+    verifier = build_rule_verifier(platform.genome)
     platform.verification = verifier
     runtime = await compose(settings, platform)
     try:

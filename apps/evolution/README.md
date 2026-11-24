@@ -194,8 +194,9 @@ Backend 配置与故障边界见 [Bot RSI 控制入口](../backend/docs/flows/bo
 
 ## 判定、门禁与评审面（07–09）
 
-状态（2026-11-24）：07 有可运行的**规则型**执行器（simulator 进程内：读 revision
-文件、按用例打分），08 只做决策，09 的报告/队列/approve/reject 已可调用。
+状态（2026-11-24）：07 有可运行的**规则型**执行器（`plugins/verifiers/rules.py`：读
+revision 文件、按用例打分；simulator 只负责选用），08 只做决策，09 的报告/队列/
+approve/reject 已可调用。
 **apply 仍未启用**：revision 目前只捕获 persona 等部分文件，不是 bot 的完整快照；
 因此 `promote()` 与 approve 之后的 apply 都会显式失败，而不是把 bot 覆盖成残缺状态。
 
@@ -208,6 +209,13 @@ Backend 配置与故障边界见 [Bot RSI 控制入口](../backend/docs/flows/bo
 
 错误码沿用 09 §2.1 的信封：未知候选/条目 `404 not_found`；不在队列
 （已自动晋升或不可晋升）`409 not_reviewable`；已决策 `409 already_decided`。
+
+验证器是插件：
+`build_rule_verifier(genome)`（`plugins/verifiers/rules.py`）演示了最小实现——
+用例（`cases_for`）、执行器（`execute`，当前只读文件）、评分器（`grade`，标记匹配 +
+密钥扫描）。接 LLM judge 或真实 rollout 时替换这几个回调即可，
+`compare.py` / `policy.py` / 门禁 / 09 接口都不用改；同时要把 `agreement` 接上，
+否则 T2+ 候选的“多评分器集成”要求不会被执行。
 
 数据落在与 Run 同一个 SQLite：`evolution_verdict`（按 `(candidate, profile)` 幂等，
 终态永不改写）、`evolution_gate_decision`（每候选一条）、`evolution_review_item`
