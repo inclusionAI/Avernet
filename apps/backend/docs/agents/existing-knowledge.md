@@ -50,6 +50,7 @@ This catalog routes existing repository knowledge into the app framework without
 - [src/agentclaw/community/core/bot_collaborator/manager_sync/README.md](../../src/agentclaw/community/core/bot_collaborator/manager_sync/README.md)
 - [src/agentclaw/community/core/bot_config_manifest/README.md](../../src/agentclaw/community/core/bot_config_manifest/README.md)
 - [src/agentclaw/community/core/bot_config_surface/README.md](../../src/agentclaw/community/core/bot_config_surface/README.md)
+- [src/agentclaw/community/core/bot_dormant/README.md](../../src/agentclaw/community/core/bot_dormant/README.md)
 - [src/agentclaw/community/core/bot_genome/README.md](../../src/agentclaw/community/core/bot_genome/README.md)
 - [src/agentclaw/community/core/bot_inventory/README.md](../../src/agentclaw/community/core/bot_inventory/README.md)
 - [src/agentclaw/community/core/bot_knowledge/README.md](../../src/agentclaw/community/core/bot_knowledge/README.md)

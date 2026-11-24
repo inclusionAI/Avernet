@@ -235,13 +235,23 @@ onboard acknowledgement is successful profile delivery, not an unknown result.
 
 For IAM-triggered outbound token plugins, the orchestrator authenticates the
 requester separately from the Bot owner and the rollout-list entity. The optional
-`caller_runtime_target` selects the stage service binding or the requester's
-independent instance. The optional `device_uuid` identifies an active replica
-within the selected binding. The target resolver verifies authority and
-membership before converting either selector to a physical injection target.
-OpenAPI supplies the verified gateway human principal, including for a friend
-session. The public principal takes precedence over a delegated query user ID.
-The legacy IAM route uses its authentication plugin. Device identifiers are
-opaque and compared verbatim; an explicitly empty selector cannot choose a
-default device. The Bot entity determines the existing rollout scope.
-The Caller refresh runs before selector validation and retains its own result.
+`f_user_id` is the caller's own friend-chat subject and pairs with an owned
+`session_key`; it selects the authenticated friend's existing ready Caller
+instance when the engine strategy requires an independent instance. Without it
+the resolver uses the service stage binding; shared engines keep that binding
+even with a friend selector. The optional `device_uuid` identifies one exact
+active replica within
+the resolved binding. The container locator resolves an already authorized
+Bot/entity to an existing binding and its ACTIVE devices; it does not
+authenticate the friend selector or authorize credential writes. Caller
+authentication, subject equality, current binding and session validation remain
+in their existing domains. OpenAPI supplies the verified gateway human
+principal, including for a friend session. The public principal takes precedence
+over a delegated query user ID. The legacy IAM route uses its authentication
+plugin. Device identifiers are opaque and compared verbatim; an explicitly
+empty selector is equivalent to omission, and multiple current replicas are
+rejected rather than broadcast. The Bot entity determines the existing rollout
+scope. The Caller refresh and plugin pipelines run concurrently and isolate
+failures; the Caller result is returned even when plugin preparation fails.
+`caller_runtime_target` is no longer part of the IAM/JIT contract; unrelated
+session-file APIs retain their explicit selector.
