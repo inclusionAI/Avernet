@@ -205,33 +205,34 @@ async def _list_dir_or_empty(
     bot_repo: BotRepository,
     path: str,
     target: dict[str, Any] | None = None,
+    reject_file_path: bool = False,
 ) -> list[dict[str, Any]]:
-    """One directory's entries, treating an absent directory as empty.
-
-    The baas providers re-raise an upstream 404 rather than answering "nothing
-    there", and that loudness is load-bearing at the device
-    (``baas_device_filesystem.py:68``). It is only here that a 404 stops being a
-    failure: the providers that return ``None`` already produce an empty listing
-    for an absent directory, so without this the same request is a 500 on baas
-    and an empty page everywhere else. Every other status still propagates.
-    """
+    """List one directory, keeping the existing empty result for absence."""
     coords = _file_coords(bot_id, owner_id, bot_repo)
-    entity_type, entity_id, engine_type = (
-        coords.entity_type, coords.entity_id, coords.engine_type
+    file_args = dict(
+        **(target or {}),
+        entity_type=coords.entity_type,
+        entity_id=coords.entity_id,
+        bot_id=bot_id,
+        engine_type=coords.engine_type,
+        path=path,
     )
     try:
-        listed = await file_svc.list_dir(
-            **(target or {}),
-            entity_type=entity_type,
-            entity_id=entity_id,
-            bot_id=bot_id,
-            engine_type=engine_type,
-            path=path,
-        )
+        listed = await file_svc.list_dir(**file_args)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code != 404:
-            raise
-        return []
+        status = exc.response.status_code
+        if status == 404:
+            return []
+        if reject_file_path and path and status == 400:
+            # A generic 400 does not identify the failure. Only a confirmed file
+            # can be reported as an invalid directory path.
+            try:
+                is_directory = await file_svc.lookup_path_is_dir(**file_args)
+            except (ListingFailed, httpx.HTTPError):
+                is_directory = None
+            if is_directory is False:
+                raise HTTPException(status_code=400, detail="path must refer to a directory") from exc
+        raise
     return listed or []
 
 
@@ -262,7 +263,17 @@ DirPathQuery = Annotated[
 ]
 
 
-@router.get("", response_model=Envelope[Page[FileEntry]])
+@router.get(
+    "",
+    response_model=Envelope[Page[FileEntry]],
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "Invalid request, including a path that refers to a file.",
+            **error_example(400, "path must refer to a directory"),
+        },
+    },
+)
 @envelope_errors
 async def list_resources(
     page: PageParamsDep,
@@ -292,8 +303,8 @@ async def list_resources(
     removes the divergence the other direction — a record whose bytes are not
     where it claims can no longer be reported as a file that exists.
 
-    The path parameter selects the directory (empty = workspace root). Listing
-    is non-recursive, which bounds the device round trip this endpoint makes.
+    The path parameter selects the directory (empty = workspace root). A
+    confirmed file path returns 400. Listing is non-recursive.
 
     Paging is applied by this server over the whole directory, because the
     engine's listing API takes no page, limit or cursor: `page_size` bounds the
@@ -316,7 +327,13 @@ async def list_resources(
 
     safe = _safe_path(path)
     listed = await _list_dir_or_empty(
-        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=safe, target=target
+        file_svc,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        bot_repo=bot_repo,
+        path=safe,
+        target=target,
+        reject_file_path=True,
     )
     entries = [_to_file_entry(entry) for entry in listed]
     if type is not None:

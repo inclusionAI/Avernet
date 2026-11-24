@@ -1923,6 +1923,8 @@ tell from a real address until it fails. `GET /stat` replaces both the
 id-addressed single lookup and `check-name`: it answers existence against the
 workspace, the same authority the listing reads, so the two cannot disagree._
 
+The `GET /resources` list endpoint accepts a directory path. An empty path lists the workspace root. If the device rejects the listing and the parent entry confirms that the supplied path is a file, the endpoint returns 400 with `path must refer to a directory`. Use `GET /resources/stat` for a single entry.
+
 `DELETE` resolves the target in the parent directory listing before changing its record or deleting its content. A missing target returns 404. An ambiguous parent listing or a target without a valid type returns 502. Downstream listing errors still propagate, and deletion stops before changing the resource record.
 
 _Note: `Page` here is applied by the backend over a whole directory listing —
