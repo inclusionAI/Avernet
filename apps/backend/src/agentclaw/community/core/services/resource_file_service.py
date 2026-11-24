@@ -49,6 +49,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.devices.services.device_filesystem import (
+    DeviceFileSystem,
     FileTooLargeError as DeviceFileTooLargeError,
 )
 from agentclaw.community.core.resources.service import (
@@ -595,6 +596,30 @@ class ResourceFileService(ResourceFilePort):
         )
         return await device_fs.exists(self._logical(path))
 
+    async def lookup_path_is_dir(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+        runtime_context: DeviceContext | None = None,
+    ) -> bool | None:
+        """Return the listed type, or None when the path is absent."""
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        entry = await self._find_child_entry(device_fs, path, require_known_result=True)
+        if entry is None:
+            return None
+        is_dir = entry.get("is_dir")
+        if not isinstance(is_dir, (bool, int)) or is_dir not in (0, 1):
+            raise ListingFailed("Workspace entry has no valid file type")
+        return bool(is_dir)
+
     async def create_directory(
         self,
         *,
@@ -625,6 +650,7 @@ class ResourceFileService(ResourceFilePort):
         path: str,
         runtime_context: DeviceContext | None = None,
         report_directory_failure: bool = False,
+        is_directory: bool | None = None,
     ) -> bool:
         """Delete a file or directory; returns False when nothing was deleted.
 
@@ -633,6 +659,9 @@ class ResourceFileService(ResourceFilePort):
         raises ``DirectoryDeleteFailed``. The default ResourceFilePort contract
         remains boolean for existing callers; a failed listing is not proof of
         absence and retains the existing file-branch behavior.
+
+        Pass ``is_directory`` when the target type was already verified by
+        ``lookup_path_is_dir``. Omit it to apply the legacy listing behavior.
 
         A directory needs ``delete_tree``: the engines route the two through
         separate operations (``/api/file/remove`` vs ``/api/file/rmtree``), and
@@ -646,7 +675,9 @@ class ResourceFileService(ResourceFilePort):
             bot_id=bot_id, engine_type=engine_type,
         )
         logical = self._logical(path)
-        if await self._is_dir(device_fs, path):
+        if is_directory is None:
+            is_directory = await self._is_dir(device_fs, path)
+        if is_directory:
             deleted = await device_fs.delete_tree(logical)
             if not deleted and report_directory_failure:
                 raise DirectoryDeleteFailed()
@@ -768,17 +799,26 @@ class ResourceFileService(ResourceFilePort):
         projection pass. A listing failure answers "not a directory": the delete
         then takes the file branch, which is what it did unconditionally until now.
         """
-        parent, _, leaf = path.rpartition("/")
         try:
-            entries = await device_fs.list_dir(self._logical(parent))
+            named = await self._find_child_entry(device_fs, path)
         except Exception as exc:
             logger.warning(
                 "[%s._is_dir] listing %r failed, assuming file: %s",
-                type(self).__name__, parent, exc,
+                type(self).__name__, path.rpartition("/")[0], exc,
             )
             return False
-        named = self._named_in(entries or (), leaf)
         return bool(self._is_dir_flag(named)) if named is not None else False
+
+    async def _find_child_entry(
+        self, device_fs: DeviceFileSystem, path: str, *, require_known_result: bool = False,
+    ) -> dict[str, Any] | None:
+        parent, _, leaf = path.rpartition("/")
+        entries = await device_fs.list_dir(self._logical(parent))
+        if entries is None:
+            if require_known_result and not device_fs.missing_directory_is_authoritative:
+                raise ListingFailed("Could not list the workspace parent directory")
+            return None
+        return self._named_in(entries, leaf)
 
     @staticmethod
     def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:
