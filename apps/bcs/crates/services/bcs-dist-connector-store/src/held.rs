@@ -4,6 +4,34 @@
 //! `{instance, epoch}`, then write at `read version + 1`. A rejected write
 //! re-reads and decides again from the fresh document (the Worker may have
 //! written `control` in between); it never retries with a bigger number.
+//! A bigger number would apply on top of a write this holder has not seen,
+//! so the decision would rest on a stale read.
+//!
+//! Where this sits: a claim (`queue.rs`) returns a [`StoreHeldDispatch`];
+//! the Connector's actor for that call keeps it for the call's life and
+//! makes every store change through it. When the handle answers
+//! `HolderError::Lost`, another generation holds the call and the actor stops.
+//!
+//! Keys touched:
+//!
+//! ```text
+//! disp:       bcn:v1:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1
+//!             patch e.g. {"execution": {"phase": "accepted",
+//!             "remote": {"task_id": "t-81", "context_id": null}}}
+//!             written at read version + 1, e.g. 2000000004 -> 2000000005
+//! held index: bcn:v1:held:c01:main:conn-03:1794370950
+//!             member "s0042.7f3a9c.b21e.n2.a1" removed by `finish`
+//! ```
+//!
+//! Glossary:
+//! - **Transition**: one change of the document from one state to the next
+//!   (e.g. `claimed -> sending`), decided from a fresh fenced read.
+//! - **Send intent**: the durable record, written before any network call,
+//!   that a message may be on its way to the agent (spec rule B3). For the
+//!   first message it is the phase `sending`; for a human reply it is
+//!   `/connector/input_sending`.
+//! - **Settled**: the answer to give when an earlier attempt's write had an
+//!   unknown outcome and the re-read shows it did land.
 
 use crate::doc::{ConnectorState, DispatchDoc, holder_view};
 use crate::held_index;
@@ -19,12 +47,30 @@ use bcs_service_api::port::repo::distributed::dispatch::{
 use bcs_store_api::Version;
 use std::sync::Arc;
 
+/// The actor's handle on one claimed call.
+///
+/// - Proves ownership: only a claim (or resume) creates one, for the holder
+///   `{instance, epoch}` it wrote.
+/// - Fences: every read checks the stored holder is still this one, and
+///   every write is conditional on the version just read (B18).
+/// - Offers the state transitions the actor may make: start a send, record
+///   the agent's acceptance, confirm a reply, record a cancel observation,
+///   finish.
+///
+/// It makes no network call and no decision about the agent; it refuses a
+/// transition the stored state does not allow (`InvalidTransition`).
 pub struct StoreHeldDispatch {
     shared: Arc<Shared>,
+    /// The `{instance, epoch}` this handle claimed as.
     holder: Holder,
+    /// The last document read or written, as the holder sees it (confirmed
+    /// replies hidden, see `doc::holder_view`).
     view: DispatchView,
+    /// The store version of `view`.
     version: Version,
-    /// Highest input seq this handle itself recorded send intent for.
+    /// Highest input seq this handle itself recorded send intent for. Kept in
+    /// memory only: it tells this handle's own intent apart from a former
+    /// generation's in `begin_send`.
     own_input_intent: Option<InputSeq>,
 }
 
@@ -42,6 +88,8 @@ fn invalid<T>(code: &str) -> Result<T, HolderError> {
     })
 }
 
+/// Rejects a remote task reference that is empty or too large to store
+/// (task id and context id at most 1024 bytes, whole JSON at most 4096).
 fn validate_remote(remote: &RemoteTaskRef) -> Result<(), HolderError> {
     if remote.task_id.is_empty()
         || remote.task_id.len() > 1024
@@ -84,6 +132,19 @@ impl StoreHeldDispatch {
 
     /// Runs one transition. `settled` is the answer when a write of unknown
     /// outcome turns out to have landed (the re-read then asks for no write).
+    ///
+    /// Each attempt: fenced read, then `decide` on that read, then either
+    /// answer (`Keep`) or write at `read version + 1` (`Write`). `decide` is
+    /// called again on every fresh read, so it must only look at the document
+    /// it is given. Up to `write_attempts` attempts; then `NotApplied`
+    /// (`disp_write_contended`), or `OutcomeUnknown` if any attempt's write
+    /// had an unknown outcome. A `?` on the read or on `decide` ends the
+    /// transition with that error (`Lost` when the holder changed).
+    ///
+    /// Example of `settled`: `confirm_input` writes, the answer is lost
+    /// (`Unknown`), the re-read shows the input confirmed, so `decide` says
+    /// `Keep(AlreadyApplied)`; but the write was this handle's own, so the
+    /// answer is `settled` = `Applied`. `None` keeps `decide`'s answer.
     async fn transition<T: Clone>(
         &mut self,
         settled: Option<T>,
@@ -152,6 +213,22 @@ impl HeldDispatchPort for StoreHeldDispatch {
         Ok(self.view.clone())
     }
 
+    /// Records send intent before any network call to the agent (B3) and
+    /// returns the permit to send.
+    ///
+    /// - `Start` (the first message): `claimed -> sending`. Finding `sending`
+    ///   already gives the permit without a write (intent is durable). A new
+    ///   holder that finds `sending` after its claim must first resolve the
+    ///   start (B15); that decision is the actor's, not this handle's.
+    /// - `Input { seq }` (a human reply, B12): allowed only in `accepted`,
+    ///   for `seq = confirmed + 1`, while the Worker still has `seq` queued
+    ///   in `/control/pending_input`. Writes `/connector/input_sending = seq`.
+    ///
+    /// The pre-check for `Input` refuses with `INPUT_MAYBE_SENT` when a former
+    /// generation recorded intent for this seq (`recorded && !mine`) and the
+    /// seq is not yet confirmed. `!confirmed` keeps a false "maybe sent"
+    /// away from an input the agent definitely accepted: such a request is
+    /// refused as `input_out_of_order` by the transition instead.
     async fn begin_send(&mut self, operation: SendOperation) -> Result<SendPermit, HolderError> {
         let permit = SendPermit {
             did: self.view.spec.did.clone(),
@@ -168,8 +245,10 @@ impl HeldDispatchPort for StoreHeldDispatch {
             if recorded && !mine && !confirmed {
                 return invalid(INPUT_MAYBE_SENT);
             }
-            // Nobody recorded intent before this read, and only this holder
-            // can write it from here on: whatever is recorded later is this
+            // Past the check, intent for `seq` was either not recorded at
+            // this read, or recorded by this handle, or `seq` is already
+            // confirmed (the transition refuses that). Only this holder can
+            // write it from here on, so whatever is recorded later is this
             // handle's own, even if the write's answer is lost.
             self.own_input_intent = self.own_input_intent.max(Some(*seq));
         }
@@ -197,6 +276,9 @@ impl HeldDispatchPort for StoreHeldDispatch {
                     if !doc.view.control.pending_input.iter().any(|p| p.seq == *seq) {
                         return invalid("input_not_pending");
                     }
+                    // Intent already recorded, and the pre-check showed it is
+                    // this handle's own (e.g. a resend after an unknown
+                    // write): idempotent, nothing to write.
                     if doc.connector.input_sending.is_some_and(|sent| sent >= *seq) {
                         return Ok(Step::Keep(permit.clone()));
                     }
@@ -210,6 +292,15 @@ impl HeldDispatchPort for StoreHeldDispatch {
         Ok(permit)
     }
 
+    /// Records that the agent accepted the first message and stores its task
+    /// reference: `sending -> accepted` with `/execution/remote` (B4, before
+    /// any event is reported). Repeating it with the same task id is kept;
+    /// another task id is `remote_task_mismatch`.
+    ///
+    /// Returns the Worker's cancel intent (`/control/cancel`) from the same
+    /// read the write was based on. A cancel written while the start was in
+    /// flight could not be carried out (there was no remote task yet); with
+    /// it in the answer the actor can cancel the new remote task at once.
     async fn record_acceptance(
         &mut self,
         evidence: AcceptanceEvidence,
@@ -242,6 +333,14 @@ impl HeldDispatchPort for StoreHeldDispatch {
         .await
     }
 
+    /// Records that the agent definitely accepted reply `seq`: sets
+    /// `/execution/confirmed_input_through = seq` (B12). Only as a gap-free
+    /// prefix (`seq = confirmed + 1`), only for a reply the Worker queued and
+    /// this holder recorded send intent for, and only on the stored remote
+    /// task. An already confirmed seq answers `AlreadyApplied`.
+    ///
+    /// The entry stays in `/control/pending_input` until the Worker removes
+    /// it; the holder's view hides it from now on.
     async fn confirm_input(
         &mut self,
         seq: InputSeq,
@@ -277,6 +376,12 @@ impl HeldDispatchPort for StoreHeldDispatch {
         .await
     }
 
+    /// Stores what the holder knows about carrying out the Worker's cancel
+    /// (`/execution/cancellation`, B13). `RequestAccepted` ("the agent took
+    /// the cancel request") and `ConfirmedCanceled` ("the task is canceled")
+    /// stay distinct. A definite result is never replaced and nothing goes
+    /// back to `not_sent` (`cancel_observation_backward`); the same value
+    /// again answers `AlreadyApplied`.
     async fn record_cancel(
         &mut self,
         observation: CancelObservation,
@@ -308,6 +413,12 @@ impl HeldDispatchPort for StoreHeldDispatch {
         .await
     }
 
+    /// Ends the call: phase `ended` with its outcome, and the evidence string
+    /// in `/connector/finish_evidence` (non-empty, at most 4096 bytes as JSON).
+    /// Called after the final event was admitted (B5). Ending it again with
+    /// the same outcome answers `AlreadyApplied`; with another outcome
+    /// `ContentConflict` (nothing is written). Then the call is removed from
+    /// the held index (B6); a failed removal is only logged.
     async fn finish(
         &mut self,
         outcome: FinalDispatchOutcome,

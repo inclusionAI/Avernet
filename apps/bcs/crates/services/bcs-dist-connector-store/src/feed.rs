@@ -9,6 +9,38 @@
 //! - The group is created from the beginning, so a hint posted before any
 //!   Connector existed is not skipped. Re-reading an old hint is harmless: the
 //!   claim checks the dispatch document.
+//!
+//! Keys and values:
+//!
+//! ```text
+//! partition key: bcn:v1:cmd:<cluster>:<ns>:<pool>:p<n>
+//!                bcn:v1:cmd:c01:main:a2a:p3
+//! entry:         id 1794370950123-0, fields {"did": "s0042.7f3a9c.b21e.n2.a1"}
+//! group:         connectors      consumer: conn-03:1794370950
+//! ```
+//!
+//! Glossary:
+//! - **Hint**: one entry, "go look at `disp:<did>`"; never an instruction.
+//! - **Consumer group** `connectors`: shared by every Connector. The store
+//!   hands each new entry to exactly one consumer: the first group read
+//!   served wins. There is no routing to the Connector that holds the call.
+//! - **Pending list**: per partition, the entries delivered to some consumer
+//!   and not yet acknowledged. A group read for new entries never returns
+//!   them again, and nothing waits behind them: later hints are delivered as
+//!   usual.
+//! - **Ack**: removes an entry from the pending list. It means "the claim
+//!   decision was made" (spec rule B2), not "the call finished". A hint that
+//!   lands on a Connector that does not hold the call gets `HeldByOther` and
+//!   is acknowledged; the holder learns of the reply or cancel from its own
+//!   tick (B14).
+//! - **Idle takeover** (`claim_idle`): every `reclaim_every` (10 s), move
+//!   entries pending for at least `reclaim_min_idle` (30 s) under any
+//!   consumer to this one. It is not an ack: the entry stays pending, now
+//!   under this consumer, and its idle time restarts, so of several
+//!   Connectors doing it at once only one gets it. It covers crashed
+//!   Connectors and claim errors (the engine leaves a hint unacknowledged on
+//!   purpose when its claim failed). Known gap: a hint whose claim fails
+//!   every time is retried this way forever.
 
 use crate::shared::Shared;
 use async_trait::async_trait;
@@ -30,23 +62,53 @@ use tokio::time::Instant;
 
 type GroupRead = BoxFuture<'static, (usize, Result<Vec<StreamEntry>, PluginError>)>;
 
+/// The `CommandFeedPort` provider: one per Connector process run, opened by
+/// `StoreDispatchQueue::notifications`. Used by one task at a time (`&mut`).
 pub struct StoreCommandFeed {
     shared: Arc<Shared>,
-    /// `<node>:<incarnation>`: one consumer per process run.
+    /// `<node>:<incarnation>`: one consumer per process run,
+    /// e.g. `conn-03:1794370950`.
     consumer: String,
+    /// One stream key per partition, indexed by partition number,
+    /// e.g. `["bcn:v1:cmd:c01:main:a2a:p0", ..., "...:p7"]`.
     keys: Vec<String>,
     /// At most one in-flight group read per partition.
+    ///
+    /// These reads are kept across `receive` calls on purpose. A group read
+    /// that the store already served has registered its entries as pending
+    /// under this consumer; dropping its future before the answer is read
+    /// would lose those entries until idle takeover brings them back. So a
+    /// `receive` that hits its deadline leaves the reads running, and the
+    /// next `receive` collects them. Each finished read yields
+    /// `(partition, entries)`, e.g. `(3, [entry 1794370950123-0])`.
     reads: FuturesUnordered<GroupRead>,
+    /// `reading[p]` is true while partition `p` has a read in `reads`,
+    /// e.g. `[true, true, false, true]` right after partition 2 answered.
     reading: Vec<bool>,
+    /// Deliveries read but not yet returned by `receive` (it returns at most
+    /// `max`). They are already pending under this consumer.
+    /// E.g. `[CommandDelivery { did: "s0042.7f3a9c.b21e.n2.a1", opaque:
+    /// "p3:1794370950123-0", .. }]`.
     buffer: VecDeque<CommandDelivery>,
+    /// When the last idle-takeover round ran; `None` until the first one, so
+    /// the first `receive` runs one at once.
     reclaimed_at: Option<Instant>,
     /// Where the next idle-takeover round starts, and how far each
     /// partition's pending list was scanned.
+    ///
+    /// `reclaim_from`: the partition the next round starts at, e.g. `2`.
+    /// It rotates by one per round, because a round stops early once the
+    /// buffer is full and would otherwise always favour the first partitions.
     reclaim_from: usize,
+    /// `reclaim_cursor[p]`: the bookmark in partition `p`'s pending list where
+    /// the next page starts, e.g. `Some(1794370950123-0)`; `None` = from the
+    /// start (a full pass ended, or none began).
     reclaim_cursor: Vec<Option<StreamId>>,
 }
 
 impl StoreCommandFeed {
+    /// Builds the partition keys and joins (creates if needed) the group on
+    /// every partition. Fails if a key is invalid or a group cannot be created.
     pub(crate) async fn open(shared: Arc<Shared>, pool: PoolId, me: &Instance) -> Result<Self, StoreError> {
         // The held-index key validates the instance (no ':' inside its parts).
         shared.layout.held(me)?;
@@ -72,6 +134,8 @@ impl StoreCommandFeed {
     }
 
     /// Starts a group read on every partition that has none in flight.
+    /// Only queues the futures; they make progress while `receive` polls
+    /// `reads`.
     fn start_reads(&mut self) {
         for (partition, key) in self.keys.iter().enumerate() {
             if self.reading[partition] {
@@ -93,6 +157,11 @@ impl StoreCommandFeed {
     /// Buffers entries; one without a readable dispatch id is acked and
     /// dropped. Valid entries are buffered before any await, so dropping the
     /// caller's future cannot lose a delivery that was already registered.
+    ///
+    /// `opaque` encodes where to ack: `p<partition>:<stream id>`, e.g.
+    /// `p3:1794370950123-0`. `consumer_generation` is the consumer name
+    /// (`node:incarnation`), diagnostic and checked by `ack`; it is not the
+    /// holder epoch.
     async fn accept(&mut self, partition: usize, entries: Vec<StreamEntry>) {
         let mut malformed = Vec::new();
         for entry in entries {
@@ -124,6 +193,11 @@ impl StoreCommandFeed {
     /// one page per partition per round, continuing where the last round
     /// stopped and starting at a different partition each time, so no
     /// partition is starved and a long pending list is not rescanned at once.
+    ///
+    /// Stops early once `max` deliveries are buffered. A failed page is only
+    /// logged; that partition is tried again next round. Entries the stream
+    /// already trimmed (`deleted`) are dropped from the pending list by the
+    /// store and only logged here.
     async fn reclaim(&mut self, max: usize) {
         let limit = self.shared.config.read_batch;
         let partitions = self.keys.len();
@@ -158,6 +232,7 @@ impl StoreCommandFeed {
         self.reclaim_from = (self.reclaim_from + 1) % partitions;
     }
 
+    /// Removes and returns up to `max` deliveries from the front of `buffer`.
     fn take(&mut self, max: usize) -> Vec<CommandDelivery> {
         let count = self.buffer.len().min(max);
         self.buffer.drain(..count).collect()
@@ -174,6 +249,8 @@ async fn create_group(shared: &Shared, key: &str) -> Result<(), StoreError> {
         .map_err(|e| from_write(&e, key))
 }
 
+/// Reverses the `opaque` of a delivery: `p3:1794370950123-0` ->
+/// `(3, StreamId { major: 1794370950123, minor: 0 })`.
 fn parse_opaque(opaque: &str) -> Option<(usize, StreamId)> {
     let (partition, id) = opaque.strip_prefix('p')?.split_once(':')?;
     let (major, minor) = id.split_once('-')?;
@@ -188,6 +265,19 @@ fn parse_opaque(opaque: &str) -> Option<(usize, StreamId)> {
 
 #[async_trait]
 impl CommandFeedPort for StoreCommandFeed {
+    /// Returns up to `max` hints, waiting at most `timeout`.
+    ///
+    /// First, if an idle-takeover round is due, it runs it. Then the inner
+    /// loop: return as soon as anything is buffered; return empty only at the
+    /// deadline; otherwise make sure every partition has a read in flight and
+    /// wait for the next one to answer. Without the loop, the first empty
+    /// partition read (a blocking read ends empty after `read_block`) would
+    /// return early with nothing while other partitions are still waiting.
+    ///
+    /// Dropping this future (e.g. a `select!` picked another branch) while it
+    /// waits for reads loses nothing: buffered deliveries stay in `buffer`,
+    /// and reads in flight stay in `reads` for the next call. A drop during an
+    /// idle-takeover page can only delay those entries to a later takeover.
     async fn receive(
         &mut self,
         max: NonZeroU32,
@@ -211,6 +301,8 @@ impl CommandFeedPort for StoreCommandFeed {
                 return Ok(Vec::new());
             }
             self.start_reads();
+            // Deadline passed (`Err`) or no read in flight (`None`, not
+            // expected after `start_reads`): return empty; the reads stay.
             let Ok(Some((partition, result))) =
                 tokio::time::timeout_at(deadline, self.reads.next()).await
             else {
@@ -231,6 +323,12 @@ impl CommandFeedPort for StoreCommandFeed {
         }
     }
 
+    /// Acknowledges one delivery: "the claim decision was made" (B2), not
+    /// "the call finished". Removes the entry from the pending list so idle
+    /// takeover will not bring it back. Refuses a delivery from another
+    /// backend or another consumer (`command_delivery_scope`), or with an
+    /// unreadable `opaque` (`command_delivery_opaque`). A failed ack only
+    /// means the hint comes back later, which is harmless (B19).
     async fn ack(&mut self, delivery: &CommandDelivery) -> Result<(), StoreError> {
         if delivery.backend != self.shared.config.backend
             || delivery.consumer_generation != self.consumer

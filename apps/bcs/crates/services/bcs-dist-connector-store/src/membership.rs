@@ -1,8 +1,17 @@
 //! A membership provider that is not there.
 //!
-//! The real provider is `bcs_dist_store::coordination` (executor team); the
-//! composition injects it. This stub is what a Connector runs with when none
-//! is injected.
+//! Membership (`MembershipPort`) is the list of live processes: each one
+//! registers, renews a lease, and others ask whether it is alive. The
+//! Connector needs it for one decision: a dispatch held by another instance
+//! may be taken over only on proof that the holder is dead (`Liveness::Dead`).
+//! `Unknown` is never `Dead`.
+//!
+//! The real provider is `bcs_dist_store::coordination::CoordinationStore`,
+//! which implements `MembershipPort`. Nothing wires it into a Connector yet,
+//! so a Connector runs with this stub. Consequences while it does:
+//! - no claim can take over a call held by another instance (every liveness
+//!   check fails, so the answer is `HeldByOther`);
+//! - the Connector runs without a registration (no lease to renew).
 //!
 //! CONFORMANCE_WAIVED: this is a stub of a provider another team builds; it
 //! cannot pass a provider harness and must not pretend to.
@@ -19,9 +28,13 @@ use std::time::Duration;
 /// No membership provider is wired.
 ///
 /// Heartbeats and liveness (decision 15) are not built here. Every method
-/// fails with `need_contract_not_implemented`, so the claim cannot prove
-/// another holder dead and answers `HeldByOther`, and the Connector runs
-/// without a registration.
+/// fails with `need_contract_not_implemented` (a `StoreError::NotApplied`),
+/// so the claim cannot prove another holder dead and answers `HeldByOther`,
+/// and the Connector runs without a registration.
+///
+/// `register` takes a `control_address`: the URL where other processes reach
+/// this process's control endpoint, stored in the member record. The real
+/// provider refuses an empty or non-http(s) one.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PendingMembership;
 

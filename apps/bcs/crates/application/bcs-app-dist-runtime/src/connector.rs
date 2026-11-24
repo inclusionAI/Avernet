@@ -1,4 +1,18 @@
 //! Health and graceful shutdown of a Connector process.
+//!
+//! The facade wires one thing: the application use cases
+//! (`DistConnectorRuntimeService`: `snapshot`, `drain`) onto the engine's
+//! control port (`DistRuntimeControlPort`, implemented by
+//! `bcs_dist_connector::ConnectorEngine`). It adds only the grace-period
+//! limit. It does not choose the engine's ports: whoever builds the engine
+//! passes `ConnectorPorts`, including the membership provider. No code in
+//! this repository wires the real provider
+//! (`bcs_dist_store::coordination::CoordinationStore`) into a Connector, so
+//! a Connector runs with the stub `PendingMembership`: no registration, and
+//! no takeover of another instance's calls.
+//!
+//! There is no business API here; calls reach the Connector only through
+//! dispatch documents and the command stream.
 
 use async_trait::async_trait;
 use bcs_service_api::application::dist_runtime::{
@@ -25,6 +39,8 @@ impl ConnectorRuntimeFacade {
 
 #[async_trait]
 impl DistConnectorRuntimeService for ConnectorRuntimeFacade {
+    /// The engine's health: ready, draining, active calls (live actors plus
+    /// calls waiting for a resume) and how many of them are unsettled.
     async fn snapshot(&self) -> Result<RuntimeSnapshot, RuntimeError> {
         self.engine.snapshot().await
     }
