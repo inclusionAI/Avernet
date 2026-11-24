@@ -1,0 +1,16 @@
+apps/bcs-internal/tests/fixtures/sofa_rpc_cd_json_baseline.json
+  h_fa66fe7c023b4b 1-34
+apps/bcs-internal/tests/test_sofa_rpc_process.py
+  h_fa66fe7c023b4b 31-107,360-385,421
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "241fa914086fd815ee940d437b487a74d12f1591",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

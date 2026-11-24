@@ -1,0 +1,18 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/README.md
+  h_fa66fe7c023b4b 15-16,18-20,27-50,56,62,93,110-113,137,168-169,171-173,178,184,187,190-195,214-216
+apps/bcs-internal/docs/sofa-rpc/agent-card-management-service-spec.md
+  h_fa66fe7c023b4b 26-27,68-69,71-73,75-76,79,298,310,324,326,332-333,347,349,354,401,444,446,448,453,455,732
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  h_fa66fe7c023b4b 55-56,60-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "85464bb2b19f2cf19551d418f4289c48aa28f40b",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

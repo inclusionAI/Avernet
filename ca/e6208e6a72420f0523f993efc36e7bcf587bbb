@@ -1,0 +1,19 @@
+apps/backend/tests/community/endpoints/test_openapi_context_collab_endpoints.py
+  s_7ab90fcb7b0ff0::t_fffba0c3ce3056 248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cae6208e6a72420f0523f993efc36e7bcf587bbb",
+  "prompts": {},
+  "sessions": {
+    "s_7ab90fcb7b0ff0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0270308e-3f7f-424f-a1b3-a2e6113a5268",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

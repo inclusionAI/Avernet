@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-ai-draft-host.test.ts
+  h_5f06d4d8b4bdd5 1-164
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-ai-draft-runtime.test.ts
+  h_5f06d4d8b4bdd5 1-216
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-ai-draft-security.test.ts
+  h_5f06d4d8b4bdd5 1-88
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_5f06d4d8b4bdd5 2,475,969,985
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/pack-security.ts
+  h_5f06d4d8b4bdd5 1,61,64,67-73,75,79-95
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-ai-draft-runtime.ts
+  h_5f06d4d8b4bdd5 1-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c97e60b2287dd0d38ec3615a959649df664c7414",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/gateway/configs/schemas/bots.openapi.json
+  s_bcc2d0974a665d::t_cdc322530f4eb5 18968-19013,83179,83193-83204,83273,83277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5f321aa9d382cf6816138eba1fe0543140cb0eea",
+  "prompts": {},
+  "sessions": {
+    "s_bcc2d0974a665d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d9-072f-7481-adc1-c3e3d78b7fd1",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

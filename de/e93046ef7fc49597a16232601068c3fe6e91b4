@@ -1,0 +1,18 @@
+apps/frontend-nextgen/src/internal/market/hooks/useAddToCapabilitySet.ts
+  h_5f06d4d8b4bdd5 6,163
+apps/frontend-nextgen/src/internal/market/policy.ts
+  h_5f06d4d8b4bdd5 1-2,89-108
+apps/frontend-nextgen/test/internal/market/policy.test.ts
+  h_5f06d4d8b4bdd5 10,98-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dee93046ef7fc49597a16232601068c3fe6e91b4",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

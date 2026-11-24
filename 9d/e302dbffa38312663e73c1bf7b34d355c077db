@@ -1,0 +1,29 @@
+apps/agentclawscs/conf/docker/nginx.conf
+  s_e1407634c93708::t_9b5e392997c7f0 183-215
+apps/agentclawscs/docker/bcs/nginx.conf
+  s_e1407634c93708::t_7b5308112c8041 184-216
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/README.md
+  s_e1407634c93708::t_22f1329431d8fc 30-32
+apps/bcs-internal/docs/plans/2026-11-03-sofa-tr-demo-preprod-examples.md
+  s_e1407634c93708::t_15da5d7c8c4d97 53-54,58,331-347
+apps/bcs-internal/docs/plans/2026-11-03-sofa-tr-interoperability-demo.md
+  s_e1407634c93708::t_7a9afe36d81fe3 466-467,478,651-652
+apps/bcs-internal/scripts/check-sofa-tr-demo.sh
+  s_e1407634c93708::t_d1886ef1c5d38f 47-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9de302dbffa38312663e73c1bf7b34d355c077db",
+  "prompts": {},
+  "sessions": {
+    "s_e1407634c93708": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19f78-4083-78d1-a904-3ffbcadfbafc",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

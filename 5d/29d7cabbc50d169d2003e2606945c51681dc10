@@ -1,0 +1,61 @@
+apps/bcs/crates/services/bcs-dist-store/src/inbox/mod.rs
+  s_9dac9fbdf9fc56::t_fb103cb620c726 9
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_retention.rs
+  s_9dac9fbdf9fc56::t_54640f7604d768 65-89
+  s_9dac9fbdf9fc56::t_893e779d5db9cf 56-64
+  s_9dac9fbdf9fc56::t_5cce66bb05b2c0 100-104,114-123
+  s_9dac9fbdf9fc56::t_b322c8a1e2efe0 1-55,90,196-212,219-230,236-241,249-250,266-278,283-284,291-292,303
+  s_9dac9fbdf9fc56::t_6f17b949b7b574 127-156,163-170,175-179,190-195,257-265
+  s_9dac9fbdf9fc56::t_db69220b125815 157-162,171-174,180-189,213-218,231-235,242-248,251-256,279-282,285-290,293-302
+  s_9dac9fbdf9fc56::t_c034cfdd768415 91-99,105-113,124-126
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
+  s_9dac9fbdf9fc56::t_251caf4991d8db 285-286
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec-audit.md
+  s_9dac9fbdf9fc56::t_488959fb7f3d3e 5,15,144,226,238,275,277,289-290,359,371
+  s_9dac9fbdf9fc56::t_106e877bb84cb3 372-388
+  s_9dac9fbdf9fc56::t_365b1060f10eae 389-390
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/implementation-plan.md
+  s_9dac9fbdf9fc56::t_9b94c1b74c528c 188-192,201-212
+apps/bcs/crates/services/bcs-dist-store/src/inbox/health.rs
+  s_9dac9fbdf9fc56::t_7b5500b099c40e 46,311-338
+  s_9dac9fbdf9fc56::t_db69220b125815 112-114
+  s_9dac9fbdf9fc56::t_4e495e0e4c8168 47-72,150
+  s_9dac9fbdf9fc56::t_fb103cb620c726 18,33,44
+  s_9dac9fbdf9fc56::t_6e8bea1859f6b8 45,310
+apps/bcs/crates/services/bcs-dist-store/tests/coordination.rs
+  s_9dac9fbdf9fc56::t_4353abf21af123 579-582
+  s_9dac9fbdf9fc56::t_07af7de1df1ec3 564-578,583-597
+apps/bcs/crates/services/bcs-dist-store/src/coordination/mod.rs
+  s_9dac9fbdf9fc56::t_14748efdd18a2d 287-295,341-355
+  s_9dac9fbdf9fc56::t_346b215b2ad7a0 356
+apps/bcs/crates/services/bcs-dist-store/src/inbox/capacity.rs
+  s_9dac9fbdf9fc56::t_54640f7604d768 6-22,24-26,157-172
+  s_9dac9fbdf9fc56::t_0c4462a720088a 136-139,148-149
+  s_9dac9fbdf9fc56::t_ebbad75c25a7a4 23
+  s_9dac9fbdf9fc56::t_fb103cb620c726 5,27-75,78,91,96-110,173-174
+  s_9dac9fbdf9fc56::t_db69220b125815 76-77,79-90,92-95
+apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md
+  s_9dac9fbdf9fc56::t_ebbad75c25a7a4 179-191,268-270
+  s_9dac9fbdf9fc56::t_3d22069b77eb97 130,139-178,192-197,263-267
+apps/bcs/crates/services/bcs-dist-store/src/coordination/README.md
+  s_9dac9fbdf9fc56::t_251caf4991d8db 76-86
+apps/bcs/crates/services/bcs-dist-store/src/inbox/producer.rs
+  s_9dac9fbdf9fc56::t_fb103cb620c726 27-28,83-85
+  s_9dac9fbdf9fc56::t_54640f7604d768 102-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5d29d7cabbc50d169d2003e2606945c51681dc10",
+  "prompts": {},
+  "sessions": {
+    "s_9dac9fbdf9fc56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ef8f-99fd-7003-aabd-a16850889d4d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

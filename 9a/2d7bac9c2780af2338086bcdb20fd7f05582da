@@ -1,0 +1,89 @@
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSidebarItems.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 147-156,190
+apps/frontend-nextgen/src/components/ui/InlineCode.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 1-14
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotItem.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 47,87,105,218-219
+apps/frontend-nextgen/src/stores/conversationStoreState.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 82-83,109
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotItemLayout.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 25-26,36-37,61,71-74,78-83,105
+apps/frontend-nextgen/src/components/CollaborationSquare/FriendRequestConfirmModal/index.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 2,22,24
+apps/frontend-nextgen/test/components/CollaborationSquare/BotCard.test.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 103-128
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSidebar.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 25-26,78-81,194-196,219-220
+apps/frontend-nextgen/test/services/backendApi/collaborationFriendConnectionController.test.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 127,131-132,137-139
+apps/frontend-nextgen/src/components/CollaborationSquare/SquarePageShell/index.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 63-64
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotItem.types.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 58-59
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useFriendBotRemoval.test.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 1-123
+apps/frontend-nextgen/test/collaborationSquareService.test.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 34,55-63
+apps/frontend-nextgen/src/stores/conversationStore.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 62-76
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareGateway.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 42-43
+apps/frontend-nextgen/src/services/workspace/conversationService.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 23,194-198
+  s_d23d2dd74fff18::t_bd6928fcd0dd7f 199
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationBotItem.test.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 29,55,726-758
+  s_d23d2dd74fff18::t_c3f27198f9440f 759
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useFriendBotRemoval.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 1-72
+apps/frontend-nextgen/src/services/backendApi/collaboration/collaborationFriendConnectionController.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 64-67,126,129
+apps/frontend-nextgen/src/hooks/useCollaborationSquare.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 130-131,170
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/FriendBotRemovalDialog.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 1-32
+apps/frontend-nextgen/src/components/ui/index.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 11
+apps/frontend-nextgen/test/stores/conversationStore.test.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 271-301
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 134-135,349-350
+apps/frontend-nextgen/src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 158
+apps/frontend-nextgen/src/hooks/useCollaborationSquareFriendActions.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 159-211
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotItemActions.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 17,63-66,95-96,190-205
+  s_d23d2dd74fff18::t_935ef53d0951ba 206-208
+apps/frontend-nextgen/src/components/CollaborationSquare/BotCard/index.tsx
+  s_d23d2dd74fff18::t_d50b0d03724a62 15,47-48,51,132-147
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiHelpers.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 90-93
+apps/frontend-nextgen/src/services/collaborationSquare/mockCollaborationSquareAdapter.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 114-122
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareService.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 160-166
+apps/frontend-nextgen/src/services/collaborationSquare/unsupportedCollaborationSquareAdapter.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 24-26
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiAdapter.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 36-39,66-80,85-98,329-339
+  s_d23d2dd74fff18::t_9b8a0857286fb4 340-342
+apps/frontend-nextgen/src/services/collaborationSquare/friendConnectionRelationships.ts
+  s_d23d2dd74fff18::t_d50b0d03724a62 33-39,65,72,75-80,104-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a2d7bac9c2780af2338086bcdb20fd7f05582da",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

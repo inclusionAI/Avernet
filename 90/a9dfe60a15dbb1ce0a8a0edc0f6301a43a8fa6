@@ -1,0 +1,44 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 416-424
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/binding.py
+  h_059e888e5e4e82 31,62
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/contracts.py
+  h_059e888e5e4e82 58,77-86
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/product_instantiation.py
+  h_059e888e5e4e82 40-42,118,125,190,195,228
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/validation.py
+  h_059e888e5e4e82 27,63-65,140-141
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  h_059e888e5e4e82 62,193
+apps/backend/src/agentclaw/community/di/modules/task_commission_self_application.py
+  h_059e888e5e4e82 63,126-127
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 93,350
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py
+  h_059e888e5e4e82 212
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_l6.py
+  h_059e888e5e4e82 30,88-89,127,347,361
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_open_single.py
+  h_059e888e5e4e82 38,100-104
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_protocol_integration.py
+  h_059e888e5e4e82 55-57,174,202
+apps/backend/tests/community/core/task/context_collab/test_l4_work_start.py
+  h_059e888e5e4e82 42,116
+apps/backend/tests/community/core/task/context_collab/test_l6_contracts.py
+  h_059e888e5e4e82 179,184
+apps/backend/tests/community/core/task/context_collab/test_l6_product_profile_operations.py
+  h_059e888e5e4e82 36,201,203,389-428,580,596
+apps/backend/tests/community/core/task/context_collab/test_optional_product_profiles.py
+  h_059e888e5e4e82 39,143,418
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "90a9dfe60a15dbb1ce0a8a0edc0f6301a43a8fa6",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  h_fa66fe7c023b4b 77
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/sofa_rpc.rs
+  h_fa66fe7c023b4b 167,213,222,225
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  h_fa66fe7c023b4b 1,81,92,104,311
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host.rs
+  h_fa66fe7c023b4b 4,7,12-13,15,17-18,21-24
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa.rs
+  h_fa66fe7c023b4b 18,29,94-96,126,128-129,134-135,140-141,146-147,219,225
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_tonic.rs
+  h_fa66fe7c023b4b 3,6,35,37
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/lib.rs
+  h_fa66fe7c023b4b 2,8
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  h_fa66fe7c023b4b 4,8
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  h_fa66fe7c023b4b 7,28,38,430
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/contracts.rs
+  h_fa66fe7c023b4b 5
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/provider_host.rs
+  h_fa66fe7c023b4b 6,36,45,73,95,129,159
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/roundtrip.rs
+  h_fa66fe7c023b4b 14,59,61,65,68,172-173,186,201,232,375,401
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/runtime_config.rs
+  h_fa66fe7c023b4b 5,11,14,159,170,232,241-242,249,285-286,359
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/sofa_provider_host.rs
+  h_fa66fe7c023b4b 17,87,125,147,228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0fddd6cfb6e94356be9c6e69b841f41524abe7bb",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

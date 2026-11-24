@@ -1,0 +1,14 @@
+apps/backend/tests/community/di/test_task_todo_bindings.py
+  h_059e888e5e4e82 4,25-36,44-46,177-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2c85027cac0f93c055f9a594b7d16f5781d9a1f2",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

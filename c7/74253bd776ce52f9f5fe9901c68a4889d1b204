@@ -1,0 +1,34 @@
+apps/bcs/specs/2026-11-18-group-collaboration-runner-phase2/spec.md
+  s_0730f4b1dc32cc::t_7046ac8def04be 4,12,36,178-179,322,324-325,400-401
+  s_0730f4b1dc32cc::t_fc1b227a16e5d6 48,90,247-248,285,316,326,328
+  s_0730f4b1dc32cc::t_ca24f670a1e0ca 168,207,245,304-305,319-320,358,361,368,374-375,389
+  s_0730f4b1dc32cc::t_eedcf37589ec72 393-395
+  s_0730f4b1dc32cc::t_671767a3e3def5 1-3,5-11,13-35,37,39-47,49-58,60-61,63-89,91,95-110,113-123,125,128-167,169-177,180-183,185-198,200-206,208-218,220-231,234,236-244,246,249-269,271,273-279,281-284,286-303,306-315,317-318,321,323,327,329-357,359-360,362-367,369-373,376-388,390-392,396-399
+  s_0730f4b1dc32cc::t_8f666ebfae8858 38,59,62,92-94,111-112,124,126-127,184,199,219,232-233,235,270,272,280
+apps/bcs/specs/README.md
+  s_0730f4b1dc32cc::t_671767a3e3def5 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c774253bd776ce52f9f5fe9901c68a4889d1b204",
+  "prompts": {},
+  "sessions": {
+    "s_0730f4b1dc32cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea8a-f549-7c23-a211-5859e5a259fe",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    },
+    "s_19e1c67879702a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea5f-2aaa-7150-98c8-e055d66f36a3",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

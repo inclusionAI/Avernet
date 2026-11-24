@@ -1,0 +1,24 @@
+apps/bcs/specs/2026-11-20-retained-membership-lease/verification.md
+  s_b033c54cc00da7::t_d6323d5d38b273 31-41
+  s_b033c54cc00da7::t_3cfb6db5e18d09 42-47
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/dispatch.rs
+  s_b033c54cc00da7::t_b740b084867fae 202,219-225
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/README.md
+  s_b033c54cc00da7::t_d6323d5d38b273 17-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "af220e29f5a528c45c1c51e697cccdcb67865453",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

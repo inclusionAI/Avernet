@@ -1,0 +1,33 @@
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_7cb74316caa338::t_61a9053a0638bc 38,49
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/runner.rs
+  s_7cb74316caa338::t_61a9053a0638bc 13
+apps/bcs/Cargo.toml
+  s_7cb74316caa338::t_61a9053a0638bc 138,337
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/README.md
+  s_7cb74316caa338::t_61a9053a0638bc 18-19
+apps/bcs/crates/test-support/bcs-dist-test-runner/README.md
+  s_7cb74316caa338::t_61a9053a0638bc 1-11
+apps/bcs/crates/test-support/bcs-dist-test-runner/src/lib.rs
+  s_7cb74316caa338::t_61a9053a0638bc 1-244
+apps/bcs/crates/test-support/bcs-dist-test-runner/Cargo.toml
+  s_7cb74316caa338::t_61a9053a0638bc 1-18
+apps/bcs/Cargo.lock
+  s_7cb74316caa338::t_c087eecefb138b 382,1525-1535
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "00b5cb053a93fb126b9f2fe439d5d35b64185eeb",
+  "prompts": {},
+  "sessions": {
+    "s_7cb74316caa338": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f30a-e108-7703-a2d8-42182b554ac6",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

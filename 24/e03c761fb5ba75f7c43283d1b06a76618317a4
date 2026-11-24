@@ -1,0 +1,29 @@
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/lib.rs
+  s_b8bd53b858e9e7::t_4c53081e6d8314 53-64,176-182
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/sink.rs
+  s_b8bd53b858e9e7::t_2e016bce6d71b1 62,67-68
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/fixtures/future_kind.rs.in
+  s_b8bd53b858e9e7::t_a1d2eb71ffe589 1-66
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/trace_chain.rs
+  s_b8bd53b858e9e7::t_e62f3aff549b01 642-645
+apps/bcs-internal/docs/sofa-tracer.md
+  s_b8bd53b858e9e7::t_e29d2d4fe5dfe1 412-440
+apps/bcs-internal/scripts/check-tracing-api-compat.py
+  s_b8bd53b858e9e7::t_94137262b27f09 1-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "24e03c761fb5ba75f7c43283d1b06a76618317a4",
+  "prompts": {},
+  "sessions": {
+    "s_b8bd53b858e9e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e47d-1b63-7362-aaf7-7096b19afd9f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_77c4f9f7ea36d3 342,416,421
+  s_3d36bb45bb2a35::t_56b2f516880444 385
+  s_3d36bb45bb2a35::t_df3d67c32e91b7 387-409
+  s_3d36bb45bb2a35::t_298bd4877bf27b 386
+apps/backend/tests/community/core/skill_center/test_mutation_flow_timing.py
+  s_3d36bb45bb2a35::t_f714c6e3c69a3f 395
+  s_3d36bb45bb2a35::t_77c4f9f7ea36d3 381,387,400,412,414
+  s_3d36bb45bb2a35::t_18b67304149916 415
+apps/backend/src/agentclaw/community/core/skill_center/services/recovering_bot_runtime_projector.py
+  s_3d36bb45bb2a35::t_77c4f9f7ea36d3 85,87-88,91-92
+  s_3d36bb45bb2a35::t_12a4050760f9c7 93
+apps/backend/src/agentclaw/community/core/skill_center/services/_mutation_flow.py
+  s_3d36bb45bb2a35::t_77c4f9f7ea36d3 223,294,331-337,339-347,358,363,378-380
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_reconcile.py
+  s_3d36bb45bb2a35::t_77c4f9f7ea36d3 79,81
+  s_3d36bb45bb2a35::t_a5f0026af57e50 82
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_179fe928dee537 286
+  s_3d36bb45bb2a35::t_df3d67c32e91b7 241,269-272,275-276,278-280,287
+  s_3d36bb45bb2a35::t_77c4f9f7ea36d3 262,264
+  s_3d36bb45bb2a35::t_66b836b175234d 265,283-285
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_a11a2e7f22a1ed 441-443
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f9a1b21369657cf2103b01a0a190d211a8366a3d",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

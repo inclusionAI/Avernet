@@ -1,0 +1,146 @@
+apps/backend/docs/openapi-v1/README.md
+  h_5b2ec9c12c4d18 1368,1372-1394
+apps/backend/src/agentclaw/community/adapters/http/knowledge_management/content_router.py
+  h_5b2ec9c12c4d18 136-137,141-144
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest.py
+  h_5b2ec9c12c4d18 20-22,48,55,65,108-115,126-129,137,140-143,171-182
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest_apply.py
+  h_5b2ec9c12c4d18 106-107,112-113
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_config_manifest_apply.py
+  h_5b2ec9c12c4d18 142,182,197-198
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/file_access.py
+  h_5b2ec9c12c4d18 37-38
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/content.py
+  h_5b2ec9c12c4d18 176-177,188-189
+apps/backend/src/agentclaw/community/api/knowledge_content_service.py
+  h_5b2ec9c12c4d18 97-98
+apps/backend/src/agentclaw/community/core/apply_engine/README.md
+  h_5b2ec9c12c4d18 14-15,18-19,79,133
+apps/backend/src/agentclaw/community/core/apply_engine/compiler.py
+  h_5b2ec9c12c4d18 169-179
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  h_5b2ec9c12c4d18 46,684,686,707-712,719
+apps/backend/src/agentclaw/community/core/apply_engine/run/service_protocol.py
+  h_5b2ec9c12c4d18 171,173,175-177,186-188
+apps/backend/src/agentclaw/community/core/bot_config_manifest/README.md
+  h_5b2ec9c12c4d18 434,443-448,528,531
+apps/backend/src/agentclaw/community/core/bot_config_manifest/compiler/compile.py
+  h_5b2ec9c12c4d18 120-129
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  h_5b2ec9c12c4d18 158-175
+apps/backend/src/agentclaw/community/core/expert_chat/expert_chat_instance_service_protocol.py
+  h_5b2ec9c12c4d18 64-69
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_caller_sessions.py
+  h_5b2ec9c12c4d18 1-195
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py
+  h_5b2ec9c12c4d18 306-311
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_owned_session.py
+  h_5b2ec9c12c4d18 11-14,26,38-39,57-58,61,65,73-74,96-97,100,104,111-112,132-133,136,140,147-148,163-164,167,171,178-179
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py
+  h_5b2ec9c12c4d18 51,115,468-469,477-480,627-628,656-657,666-676
+apps/backend/src/agentclaw/community/core/knowledge_management/README.md
+  h_5b2ec9c12c4d18 180-193
+apps/backend/src/agentclaw/community/core/quality/services/task_processor.py
+  h_5b2ec9c12c4d18 282,318-321,412-417
+apps/backend/src/agentclaw/community/core/service_bot/services/service_bot_eval_service.py
+  h_5b2ec9c12c4d18 30-33,306,308-310
+apps/backend/src/agentclaw/community/core/service_bot/services/standard_eval_snapshots.py
+  h_5b2ec9c12c4d18 1-143
+apps/backend/tests/community/acceptance/expert_chat/test_caller_cron_sessions.py
+  h_5b2ec9c12c4d18 1-154
+apps/backend/tests/community/adapters/http/openapi_v1/test_schema_docs.py
+  h_5b2ec9c12c4d18 203-218
+apps/backend/tests/community/core/expert_chat/services/test_caller_cron_sessions.py
+  h_5b2ec9c12c4d18 1-518
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_owned_session.py
+  h_5b2ec9c12c4d18 13-16,19,80-81,86
+apps/backend/tests/community/core/quality/test_task_processor.py
+  h_5b2ec9c12c4d18 1156-1183,1556-1575
+apps/backend/tests/community/core/service_bot/services/test_service_bot_eval_service.py
+  h_5b2ec9c12c4d18 405-435
+apps/backend/tests/community/endpoints/test_openapi_config_manifest.py
+  h_5b2ec9c12c4d18 598
+apps/backend/tests/community/endpoints/test_openapi_config_manifest_apply.py
+  h_5b2ec9c12c4d18 34-39,51,711-861
+apps/backend/tests/community/knowledge_management/test_book_ui_contract.py
+  h_5b2ec9c12c4d18 191-232
+apps/frontend-nextgen/assets/task-panel/package-lock.json
+  h_5b2ec9c12c4d18 3,9
+apps/frontend-nextgen/assets/task-panel/package.json
+  h_5b2ec9c12c4d18 3
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatComposer.tsx
+  h_5b2ec9c12c4d18 23-26,61-62,69,103-107
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatInput.tsx
+  h_5b2ec9c12c4d18 8-9
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  h_5b2ec9c12c4d18 43-44,53-55,260-261,267
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/EvaluationHistoryCard.tsx
+  h_5b2ec9c12c4d18 13,15,52-69,97
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/RestartEvaluationPanel.tsx
+  h_5b2ec9c12c4d18 2,4,53-54,198-205
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/StandardEvaluationFlowSteps.tsx
+  h_5b2ec9c12c4d18 1-80
+apps/frontend-nextgen/src/hooks/useStandardEvaluationFlow.ts
+  h_5b2ec9c12c4d18 4,12-14,48,60-66,107-115,119-124,127,133,137,140-143,148,153-155,157,174,178-222,247-248
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/index.tsx
+  h_5b2ec9c12c4d18 208-210
+apps/frontend-nextgen/src/pages/Lab/index.tsx
+  h_5b2ec9c12c4d18 97
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilePreview.ts
+  h_5b2ec9c12c4d18 66,74-76,90-92
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFiles.ts
+  h_5b2ec9c12c4d18 47-48,55-57,84-86,111-113,122-124,156-158
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  h_5b2ec9c12c4d18 14,19,67-97,99-100,107-109,116-118
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  h_5b2ec9c12c4d18 395-400
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  h_5b2ec9c12c4d18 57-58
+apps/frontend-nextgen/src/services/botWorkshop/standardEvaluationService.ts
+  h_5b2ec9c12c4d18 114
+apps/frontend-nextgen/src/services/botWorkshop/standardEvaluationWorkflow.ts
+  h_5b2ec9c12c4d18 3-4,26,40-41,44,79,89,106-120,123,127-206,208-394
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  h_5b2ec9c12c4d18 11,132-133,172-194,272,276-277,295-296
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  h_5b2ec9c12c4d18 153-156,159,167,184
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  h_5b2ec9c12c4d18 70-73
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatComposer.test.tsx
+  h_5b2ec9c12c4d18 112-134
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  h_5b2ec9c12c4d18 82,140
+apps/frontend-nextgen/test/components/BotWorkshop/ServiceBotEvaluation/EvaluationHistoryCard.test.tsx
+  h_5b2ec9c12c4d18 51-52,64-114
+apps/frontend-nextgen/test/components/BotWorkshop/ServiceBotEvaluation/RestartEvaluationPanel.test.tsx
+  h_5b2ec9c12c4d18 64-65
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  h_5b2ec9c12c4d18 41-42,44-48,83-99
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  h_5b2ec9c12c4d18 57
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileStages.test.tsx
+  h_5b2ec9c12c4d18 39,43,54-56,61,66,82-83
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  h_5b2ec9c12c4d18 57,73,199
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFilesFeature.test.tsx
+  h_5b2ec9c12c4d18 10,21-26,65-72,80,90,196-198,205-207,238-239,242-307
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  h_5b2ec9c12c4d18 329-340
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  h_5b2ec9c12c4d18 14-21,58-59,250-253,260-261,263,280-282,285,292-295,306,313-314,317-322
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  h_5b2ec9c12c4d18 579,589-590
+apps/gateway/configs/schemas/bots.openapi.json
+  h_5b2ec9c12c4d18 4221-4223,4228,4300-4303,4383,33005-33081,72901,72915-72926,72995,72999,73408
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b478688af7c86bf133b290e4dd5b30235a595f0f",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

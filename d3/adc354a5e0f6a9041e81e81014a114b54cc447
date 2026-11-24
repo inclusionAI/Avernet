@@ -1,0 +1,46 @@
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_gates.rs
+  s_f3ae670ed86b2f::t_5570d269b88e6e 198-199,201-221,233,240-241,253-255
+  s_f3ae670ed86b2f::t_32eee5c4d39453 200
+  s_f3ae670ed86b2f::t_830f3ea916534e 222-232,234-239,242-252
+apps/bcs/crates/services/bcs-dist-store/src/coordination/README.md
+  s_f3ae670ed86b2f::t_75aa34a045446a 35-38
+apps/bcs/crates/services/bcs-dist-store/src/inbox/consumer.rs
+  s_f3ae670ed86b2f::t_6439bdef6b2679 10,180,188,197,205,209,218,222-240,246-248,413-414,417-418
+  s_f3ae670ed86b2f::t_830f3ea916534e 210-214,219-221,241-245
+apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md
+  s_f3ae670ed86b2f::t_32eee5c4d39453 36-38
+  s_f3ae670ed86b2f::t_75aa34a045446a 26-35,39-40
+apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
+  s_f3ae670ed86b2f::t_365b61040a8079 150-151,155,163,166,168,174,178,180,279,282,284,315,321,325,351,353-354
+apps/bcs/crates/services/bcs-dist-store/src/inbox/producer.rs
+  s_f3ae670ed86b2f::t_4de71ccf149f0e 15,118,161
+apps/bcs/crates/services/bcs-dist-store/src/inbox/progress.rs
+  s_f3ae670ed86b2f::t_4de71ccf149f0e 21
+  s_f3ae670ed86b2f::t_830f3ea916534e 3-8,36-39,43
+apps/bcs/crates/services/bcs-dist-store/src/inbox/closure/progress.rs
+  s_f3ae670ed86b2f::t_6439bdef6b2679 347
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/README.md
+  s_f3ae670ed86b2f::t_75aa34a045446a 64-70
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_maintenance.rs
+  s_f3ae670ed86b2f::t_830f3ea916534e 221-281
+  s_f3ae670ed86b2f::t_bf9c6713275faa 195-220,282
+apps/bcs/crates/services/bcs-dist-store/src/inbox/admission.rs
+  s_f3ae670ed86b2f::t_830f3ea916534e 119-125,132-134,143-150
+  s_f3ae670ed86b2f::t_4de71ccf149f0e 1,5-16,22,33,42-52,60,72,79,83,86,88-90,104-105,108-118,126-131,135-142,151-163,166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d3adc354a5e0f6a9041e81e81014a114b54cc447",
+  "prompts": {},
+  "sessions": {
+    "s_f3ae670ed86b2f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20b78-3f5e-71a3-93fd-23eeeee68179",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
