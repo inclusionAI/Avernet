@@ -733,22 +733,28 @@ async def test_content_streams_from_engine_without_baas_download_call():
 
 
 @pytest.mark.asyncio
-async def test_upload_and_later_content_keep_the_persisted_device_uuid():
+async def test_legacy_upload_and_later_content_keep_the_persisted_device_uuid():
     from unittest.mock import Mock
 
     resolver = Mock()
     resolver.resolve_for_binding.return_value = _Resolver()._context()
     service, repo, _ = _service(resolver=resolver)
-    intent = service.create_upload_intent(
-        owner_id="owner-1", bot_id="bot-1", session_key="session/raw value",
-        scope_type="openapi_session", engine_type="openclaw", filename="a.txt",
-        binding_id=91, device_uuid="DEVICE-B",
+    result = await create_upload_intents(
+        body=UploadIntentRequest(
+            bot_id="bot-1", session_key="session/raw value",
+            scope_type="personal_bot_chat", engine_type="openclaw",
+            binding_id=91, device_uuid="DEVICE-B", files=[{"filename": "a.txt"}],
+        ),
+        user=AuthenticatedUser("id", "owner-1", "owner-1"),
+        service=service,
     )
-    assert intent.resource.binding_id == 91 and intent.resource.device_uuid == "DEVICE-B"
-    repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
+    record = repo.value
+    assert result["files"][0]["resource_id"] == record.resource_id
+    assert record.binding_id == 91 and record.device_uuid == "DEVICE-B"
+    repo.value = replace(record, status=SessionResourceStatus.READY)
     _, response = await service.open_content(
         owner_id="owner-1", bot_id="bot-1", session_key="session/raw value",
-        resource_id=intent.resource.resource_id, disposition="inline",
+        resource_id=record.resource_id, disposition="inline",
     )
     await response.close()
     assert len(resolver.resolve_for_binding.call_args_list) == 2
