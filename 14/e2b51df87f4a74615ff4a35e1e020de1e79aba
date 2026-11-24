@@ -1,0 +1,114 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/mcp/router.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 84-85,113-118
+  s_fc1557df5d7924::t_ad85ea0f5e242c 119
+apps/backend/src/agentclaw/community/core/runtime_binding/README.md
+  s_fc1557df5d7924::t_d90d7604d0aad8 33-36,57-60
+apps/backend/tests/community/core/mcp/test_bot_config_projection.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 1-112
+apps/backend/tests/community/core/runtime_binding/test_container_locator.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 9-11,141,155-156,159,161,200-208,214-215,257-272
+docs/specs/2026-11-21-bot-mcp-config-ops/spec.md
+  s_fc1557df5d7924::t_d90d7604d0aad8 1-81
+apps/backend/tests/community/repository/bot/test_scoped_mcp_config.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 11,265-351
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 674,900-901
+apps/backend/tests/community/repository/skill_center/test_capability_desired_state_apply_claims.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 271-298
+apps/backend/src/agentclaw/community/core/mcp/scoped_config_flow.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 5,12-13,38-39,407-478
+apps/bcs/crates/adapters/ws/bcs-ws/src/web/dispatcher/lease.rs
+  s_fc1557df5d7924::t_d90d7604d0aad8 15-22,85-87,93
+apps/gateway/tests/contracts/test_bot_mcp_config_published_contract.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 1-35
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 332-339
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/scoped_mcp_config.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 9,12-14,143-199
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_stage_addressing.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 142-143
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 338,344-347
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_bot_mcp.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 1-24
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_sync.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 274-275,281,285,287
+apps/backend/src/agentclaw/community/core/mcp/services/sync_service.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 24,277,311-315,342,880,888
+apps/backend/src/agentclaw/community/core/devices/services/mcp_device_transport.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 80-82,96-98,201,203,205,233-236,249
+apps/backend/tests/community/plugins/community/agentswarm/test_bot_authorization.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 96,101,120
+apps/backend/src/agentclaw/community/core/mcp/mcp_config_service_protocol.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 26,52
+apps/backend/tests/community/adapters/http/openapi_v1/test_authorization_inventory.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 584
+apps/backend/src/agentclaw/community/core/mcp/services/detail_fanout.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 57,73
+apps/backend/src/agentclaw/community/core/config_compose/services/collector.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 386-407,454
+apps/backend/src/agentclaw/community/core/mcp/README.md
+  s_fc1557df5d7924::t_d90d7604d0aad8 26-27,126-159
+apps/backend/tests/community/adapters/http/openapi_v1/test_friend_iam.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 196,201-202
+apps/backend/tests/community/endpoints/test_mcp_scoped_config.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 18,211-268
+apps/bcs/crates/adapters/ws/bcs-ws/tests/support/ws_lease_harness.rs
+  s_fc1557df5d7924::t_d90d7604d0aad8 122-129,148-160,162,229-237,242,311-322
+apps/backend/src/agentclaw/community/core/mcp/services/detail_delivery.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 51,85-88,112-122
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_fc1557df5d7924::t_d90d7604d0aad8 401
+apps/bcs/crates/adapters/ws/bcs-ws/tests/speaking_lease_commands_contract.rs
+  s_fc1557df5d7924::t_d90d7604d0aad8 9,227-283
+apps/backend/src/agentclaw/community/core/mcp/services/config_service.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 142,153,155,191,201,352,377-378
+  s_fc1557df5d7924::t_06481e3c8ccf78 379
+apps/frontend-nextgen/test/services/workspace/groupSpeakingLeaseService.test.ts
+  s_fc1557df5d7924::t_d90d7604d0aad8 37-41,44,307-370
+  s_fc1557df5d7924::t_4e5a1dd0613f26 371
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 4,332
+apps/frontend-nextgen/src/services/workspace/groupSpeakingLeaseService.ts
+  s_fc1557df5d7924::t_d90d7604d0aad8 33-38,154-155,172-175,186,194-200
+  s_fc1557df5d7924::t_d419fd9a389bcd 201-202
+apps/backend/tests/community/core/token_exchange/test_actor_identity.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 225,237,244,249-250,255,271-272,276,284-285,298-322
+apps/backend/src/agentclaw/community/core/runtime_binding/service.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 58
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 3392-3393,3396-3398,3430
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/mcp.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 15,100-107
+  s_fc1557df5d7924::t_432de214f65dbc 108
+apps/frontend-nextgen/src/services/workspace/groupChatProvider.ts
+  s_fc1557df5d7924::t_d90d7604d0aad8 188-190
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/mcp/bot_config.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 1-113
+apps/backend/src/agentclaw/community/core/mcp/scoped_config_contract.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 6-8,35-47,50,64-71
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 157
+apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 82-83
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_mcp_config.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 1-256
+apps/gateway/configs/schemas/bots.openapi.json
+  s_fc1557df5d7924::t_a6803dcd70fd49 4-206,33294-33786
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "14e2b51df87f4a74615ff4a35e1e020de1e79aba",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

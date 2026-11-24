@@ -1,0 +1,43 @@
+apps/frontend-nextgen/src/internal/market/hooks/useAddToCapabilitySet.ts
+  s_7e2b32e8bf8305::t_6d3068b9effcb0 169
+apps/gateway/tests/unit/plugins/authn/user_xoneid/test_resolver.py
+  s_7e2b32e8bf8305::t_05fa2a04a9c8e0 280-305
+apps/frontend-nextgen/scripts/assemble-internal.sh
+  s_7e2b32e8bf8305::t_ef118c3a67f10e 198-200,205
+  s_7e2b32e8bf8305::t_d653b030d7f26e 201-204
+apps/frontend-nextgen/scripts/test-public-repository.sh
+  s_7e2b32e8bf8305::t_f761e6aed17505 1-40
+apps/frontend-nextgen/scripts/assemble-public-tests.sh
+  s_7e2b32e8bf8305::t_f761e6aed17505 29-39
+apps/frontend-nextgen/scripts/public-tests.list
+  s_7e2b32e8bf8305::t_6d3068b9effcb0 281-287
+  s_7e2b32e8bf8305::t_9102643aec1dce 266-280
+apps/frontend-nextgen/scripts/ci-internal.sh
+  s_7e2b32e8bf8305::t_f761e6aed17505 21
+apps/frontend-nextgen/scripts/public-repository-tests.list
+  s_7e2b32e8bf8305::t_f761e6aed17505 1-2
+apps/backend/tests/corp/e2e/test_manifest_mcp_full_replace_flow.py
+  s_7e2b32e8bf8305::t_68b10a576fcb17 320,322,334-336,435-436
+apps/frontend-nextgen/test/internal/market/components/SkillDetailPage.test.tsx
+  s_7e2b32e8bf8305::t_27d372305395ea 24
+src/backend/specs/rel20261117-on-dev/001-plan.md
+  s_7e2b32e8bf8305::t_9329909923ae32 9-16
+src/backend/specs/rel20261117-on-dev/009-pr-report.md
+  s_7e2b32e8bf8305::t_ab64ecdac17d85 40-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8bab69a3147e778410e8780dbf153674938c5e9b",
+  "prompts": {},
+  "sessions": {
+    "s_7e2b32e8bf8305": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e9f7-3ee6-7642-9ee1-6a5e7213ac36",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

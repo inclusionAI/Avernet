@@ -1,0 +1,56 @@
+apps/bcs-internal/bcn-configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 16-27
+apps/bcs-internal/bcn-configs/sofa-rpc-gray.toml
+  h_fa66fe7c023b4b 17-28
+apps/bcs-internal/bcn-configs/sofa-rpc-pre.toml
+  h_fa66fe7c023b4b 16-27
+apps/bcs-internal/bcn-configs/sofa-rpc-prod.toml
+  h_fa66fe7c023b4b 17-28
+apps/bcs-internal/bcn-configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 58-73
+apps/bcs-internal/configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 16-27
+apps/bcs-internal/configs/sofa-rpc-gray.toml
+  h_fa66fe7c023b4b 17-28
+apps/bcs-internal/configs/sofa-rpc-local.toml
+  h_fa66fe7c023b4b 16-27
+apps/bcs-internal/configs/sofa-rpc-pre.toml
+  h_fa66fe7c023b4b 16-27
+apps/bcs-internal/configs/sofa-rpc-prod.toml
+  h_fa66fe7c023b4b 17-28
+apps/bcs-internal/configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 48-63
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/README.md
+  h_fa66fe7c023b4b 181-192
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  h_fa66fe7c023b4b 6,41-55,60,90
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host.rs
+  h_fa66fe7c023b4b 1-4,16-33,37-52,54
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  h_fa66fe7c023b4b 27-29,32,72-75
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  h_fa66fe7c023b4b 282,292-293,295
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/provider_host.rs
+  h_fa66fe7c023b4b 36-37
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/roundtrip.rs
+  h_fa66fe7c023b4b 75-76,144,147
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/runtime_config.rs
+  h_fa66fe7c023b4b 3-4,18-19,40-124
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  h_fa66fe7c023b4b 70-97
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 162-191
+apps/bcs-internal/tests/test_sofa_rpc_process.py
+  h_fa66fe7c023b4b 164-168,271-275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5716895009aab9954fd68d350e32c0ef8998e634",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

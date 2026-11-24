@@ -1,0 +1,31 @@
+apps/backend/src/agentclaw/community/core/skill_center/runtime_projection_contract.py
+  s_3d36bb45bb2a35::t_2254faee587a9c 7,9,49-54,88-101
+  s_3d36bb45bb2a35::t_af729dcab6c851 102
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest_support.py
+  s_3d36bb45bb2a35::t_2254faee587a9c 14-16,263,281-283
+apps/backend/src/agentclaw/community/core/apply_engine/run/report_codec.py
+  s_3d36bb45bb2a35::t_2254faee587a9c 33-35,89,112-115
+apps/backend/tests/community/core/apply_engine/test_apply_reports_and_failures.py
+  s_3d36bb45bb2a35::t_bbdd3f52db7e8a 86-126
+apps/backend/src/agentclaw/community/core/apply_engine/outcomes.py
+  s_3d36bb45bb2a35::t_2254faee587a9c 20-22,508-510,550,565-569
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_config_manifest_apply.py
+  s_3d36bb45bb2a35::t_2254faee587a9c 24-27,230-234
+  s_3d36bb45bb2a35::t_b31aba1843a2bc 235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e116b58c6453eba28fcc8491c0d8da83ae84359a",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

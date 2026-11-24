@@ -1,0 +1,39 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_projection.py
+  s_3d36bb45bb2a35::t_069b817d9bea2a 387-398,432
+apps/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py
+  s_3d36bb45bb2a35::t_069b817d9bea2a 5,182,204,247,249,254,642
+  s_3d36bb45bb2a35::t_6b9b7c326dbbc6 62,253
+  s_3d36bb45bb2a35::t_4b5935f6c564b7 63
+apps/backend/src/agentclaw/community/core/repository/protocols/capability_projection.py
+  s_3d36bb45bb2a35::t_069b817d9bea2a 50-53
+  s_3d36bb45bb2a35::t_df27b54eea8713 49
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_delivery_guard.py
+  s_3d36bb45bb2a35::t_069b817d9bea2a 33-35,39
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_069b817d9bea2a 234-241,243,255-256
+  s_3d36bb45bb2a35::t_6b9b7c326dbbc6 43,233
+apps/backend/src/agentclaw/community/core/skill_center/services/passport_write_checkpoint.py
+  s_3d36bb45bb2a35::t_069b817d9bea2a 1-25
+apps/backend/src/agentclaw/community/core/mcp/services/sync_service.py
+  s_3d36bb45bb2a35::t_b51b5a21a814f9 311-340,342-349,351,373
+apps/backend/tests/community/core/mcp/services/test_sync_service.py
+  s_3d36bb45bb2a35::t_120c82f0d886f4 1688-1712
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_7d58e4023eaa39 355,360,370-374,376-391,411-412,433-485
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "60616eeacb2e5ad58f0bf67d7b69da3a336fcfa3",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

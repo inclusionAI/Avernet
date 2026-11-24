@@ -1,0 +1,24 @@
+apps/bcs/crates/bootstrap/bcs/tests/config_loading_process.rs
+  s_b033c54cc00da7::t_517bfa0bd913ff 2-5,11-13,25-28,30-31,43-52,56-60,64-71,79-83,85-88,96-100,104-106,113-117,128-132
+  s_b033c54cc00da7::t_84474bdc2613d8 1,6-10,14-24,29,32-42,53-55,61-63,72-78,84,89-95,101-103,107-112,118-127,133-136
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_b033c54cc00da7::t_af0684d361ce07 158-162
+apps/bcs/crates/bootstrap/bcs/src/config/loading.rs
+  s_b033c54cc00da7::t_af0684d361ce07 150,209-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8405c987714be49131da4149c85acd5fe5afe769",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

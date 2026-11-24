@@ -1,0 +1,18 @@
+apps/bcs-internal/bcn-configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 1-3,5,8,11-12,15,19-21
+apps/bcs-internal/bcn-configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 1-4,27,37,44,47-53,55,61-65
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  h_fa66fe7c023b4b 112,148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a960ae53bfe12223adc8fb1cfd26c0851e147526",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

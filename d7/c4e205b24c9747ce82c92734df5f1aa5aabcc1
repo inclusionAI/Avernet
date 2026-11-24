@@ -1,0 +1,21 @@
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  s_bff5f362001415::t_77e87002fe79e1 13-19,85-88,150-154,193-206,229-230
+apps/bcs-internal/vendor/README.md
+  s_bff5f362001415::t_99f2aa2e387d25 1-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d7c4e205b24c9747ce82c92734df5f1aa5aabcc1",
+  "prompts": {},
+  "sessions": {
+    "s_bff5f362001415": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf88-6d03-7101-8fb4-9e6c106916be",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

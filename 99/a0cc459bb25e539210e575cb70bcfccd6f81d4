@@ -1,0 +1,24 @@
+singlebox/ci/tests/test_check_secrets_references.py
+  s_c3ece772cfb1b0::t_25a24061396bfb 145
+devops/hook/check_secrets.py
+  s_c3ece772cfb1b0::t_25a24061396bfb 486,546
+  s_c3ece772cfb1b0::t_6b010fcd0b4817 201,222-223,231,334-335,351-356,389-398,484-485,502
+devops/hook/test_check_secrets.py
+  s_c3ece772cfb1b0::t_6b010fcd0b4817 147-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "99a0cc459bb25e539210e575cb70bcfccd6f81d4",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": null
+    }
+  }
+}

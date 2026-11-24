@@ -1,0 +1,42 @@
+apps/bcs-internal/specs/2026-11-16-tbase-store/progress.md
+  s_a9c87caa3de52e::t_e139caaf42a148 3,5-9,11-16,18-25
+  s_a9c87caa3de52e::t_01068eed38cc1f 10
+  s_a9c87caa3de52e::t_c34fe0458fcafe 27
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/tests.rs
+  s_a9c87caa3de52e::t_c61edddec4a442 524-535,538-551,553-601
+  s_a9c87caa3de52e::t_fe2f9df175b441 521-523,536-537,552,602
+  s_a9c87caa3de52e::t_fbf25b1d583416 32
+apps/bcs-internal/specs/2026-11-16-tbase-store/verification.md
+  s_a9c87caa3de52e::t_01068eed38cc1f 6-9,11,13-23,25-30,32-103
+  s_a9c87caa3de52e::t_5f20b2382a136a 3,5
+apps/bcs-internal/crates/plugins/bcs-tbase-store/tests/dev.rs
+  s_a9c87caa3de52e::t_7d0b228d7c372b 176-178,288-307
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/stream.rs
+  s_a9c87caa3de52e::t_c61edddec4a442 12,64-90,245
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/lib.rs
+  s_a9c87caa3de52e::t_c61edddec4a442 84
+  s_a9c87caa3de52e::t_354ab7daebd746 16-17,21
+apps/bcs-internal/specs/2026-11-16-tbase-store/plan.md
+  s_a9c87caa3de52e::t_def31b5b8fa165 11,16,18
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/config.rs
+  s_a9c87caa3de52e::t_c61edddec4a442 22,35,58
+apps/bcs-internal/crates/plugins/bcs-tbase-store/README.md
+  s_a9c87caa3de52e::t_fbf25b1d583416 82,84-87
+  s_a9c87caa3de52e::t_def31b5b8fa165 149-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cc5c8b7d62006e33cc852ddbbe487ca27269cfff",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

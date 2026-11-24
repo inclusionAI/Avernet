@@ -1,0 +1,20 @@
+apps/frontend-nextgen/test/services/workspace/groupSpeakingLeaseService.test.ts
+  s_86ab1d867617ae::t_1d547606fc0df1 17
+  s_86ab1d867617ae::t_127ac87c6faee3 72-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a161770abf33c7650aad034febefb0842a39b64d",
+  "prompts": {},
+  "sessions": {
+    "s_86ab1d867617ae": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "d2978a65-e0ab-42cc-8de8-e299a9412ef8",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

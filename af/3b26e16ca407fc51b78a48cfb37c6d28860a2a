@@ -1,0 +1,19 @@
+apps/bcs-internal/specs/openspec/changes/unify-sofa-rpc-tracing/verification.md
+  s_b8bd53b858e9e7::t_0383983148ef2c 1,3-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "af3b26e16ca407fc51b78a48cfb37c6d28860a2a",
+  "prompts": {},
+  "sessions": {
+    "s_b8bd53b858e9e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e47d-1b63-7362-aaf7-7096b19afd9f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

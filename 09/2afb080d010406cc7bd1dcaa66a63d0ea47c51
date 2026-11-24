@@ -1,0 +1,19 @@
+apps/bcsfuse/configs/application-prepub.yaml
+  s_ce84d91f3d35be::t_159ab2bd3fc881 29-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "092afb080d010406cc7bd1dcaa66a63d0ea47c51",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
