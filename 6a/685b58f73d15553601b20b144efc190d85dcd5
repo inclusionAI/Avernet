@@ -1,0 +1,29 @@
+apps/backend/tests/community/plugins/community/agentswarm/test_host_running_apply.py
+  s_c3ece772cfb1b0::t_6df17fd5481a11 40-42
+apps/backend/src/agentclaw/community/plugins/community/agentswarm/host.py
+  s_c3ece772cfb1b0::t_6df17fd5481a11 22-23,583-591
+apps/backend/tests/community/plugins/community/agentswarm/test_host_running_creation_apply.py
+  s_c3ece772cfb1b0::t_8d9910aaa54062 17-36
+  s_c3ece772cfb1b0::t_6df17fd5481a11 51-54
+apps/backend/src/agentclaw/community/core/agentswarm/README.md
+  s_c3ece772cfb1b0::t_6df17fd5481a11 386-388,489
+apps/backend/tests/community/core/agentswarm/test_bot_e2e.py
+  s_c3ece772cfb1b0::t_71af218c118a70 81,539-542,545-546,583-584,604-608,616-626,701-703
+  s_c3ece772cfb1b0::t_dbf73ec98e342c 86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6a685b58f73d15553601b20b144efc190d85dcd5",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
