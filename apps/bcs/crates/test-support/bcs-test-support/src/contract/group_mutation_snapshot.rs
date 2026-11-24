@@ -6,6 +6,7 @@ use bcs_service_api::{Group, GroupMutableFieldsPatch, GroupStrategy, ServiceErro
 use serde_json::json;
 
 pub async fn group_mutation_snapshot_contract_tests(repo: Arc<dyn GroupRepoPort>) {
+    assert!(repo.read_detail_snapshot("missing").await.unwrap().is_none());
     let mut group = Group::new("snapshot-group", "driver", vec![]);
     group.group_strategy = GroupStrategy::ManagerWorker;
     let trial: CatalogLabels = serde_json::from_value(json!({"stage":["trial"]})).unwrap();
@@ -26,6 +27,10 @@ pub async fn group_mutation_snapshot_contract_tests(repo: Arc<dyn GroupRepoPort>
         assert_eq!(snapshot.group.version, version+1);
         assert_eq!(snapshot.group.label, Some(format!("version-{}", version+1)));
         assert_eq!(snapshot.catalog_labels, expected);
+        let detail = repo.read_detail_snapshot(&group.id).await.unwrap().unwrap();
+        assert_eq!(detail.group.version, snapshot.group.version);
+        assert_eq!(detail.group.label, snapshot.group.label);
+        assert_eq!(detail.catalog_labels, snapshot.catalog_labels);
         let current = repo.read_card_snapshot(&group.id).await.unwrap().unwrap();
         assert_eq!(current.version, snapshot.group.version);
         assert_eq!(current.catalog_labels, snapshot.catalog_labels);

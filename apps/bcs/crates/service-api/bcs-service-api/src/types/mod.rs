@@ -39,7 +39,7 @@ pub struct GroupCardSnapshot {
     pub card_template: Option<serde_json::Value>,
 }
 
-/// Group metadata and labels belonging to the same committed mutation version.
+/// Group metadata and labels belonging to the same persisted Group version.
 /// Callers must not re-read labels after receiving this snapshot.
 #[derive(Debug, Clone)]
 pub struct GroupMutationSnapshot {

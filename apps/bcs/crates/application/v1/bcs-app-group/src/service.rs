@@ -444,10 +444,10 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError> {
-        let group = self
+        let snapshot = self
             .load_group_detail_for_caller(&query.caller, &query.group_id)
             .await?;
-        self.project_detail(group).await
+        self.project_detail_with_labels(snapshot.group, None, snapshot.catalog_labels).await
     }
 
     async fn update(&self,command:UpdateGroup)->Result<GroupDetail,ApplicationError> {

@@ -2,6 +2,13 @@
 
 ## Provides
 
+- GET/create label-bearing details use the uncached, version-fenced
+  `GroupCoreService::read_detail_snapshot`; GET authorizes that same metadata
+  before display projection. Local snapshot retries are bounded at three.
+  PATCH retains its own commit snapshot without a response-time re-read.
+  The owning [label contract](../../../../docs/catalog-labels.md#detail-response-consistency)
+  records consistency scope, failure behavior and SQL query cost.
+
 - PATCH details use `GroupCoreService::mutate_with_snapshot`: name, version
   and catalog labels are from the same commit, not a later Card query. Omitted
   labels preserve that commit's collection; an explicit empty collection clears.
