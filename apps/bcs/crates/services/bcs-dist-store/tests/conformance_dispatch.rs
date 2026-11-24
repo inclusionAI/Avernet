@@ -11,7 +11,7 @@ use dispatch_support::*;
 async fn conformance_dispatch_queue_and_commands() {
     let f = Fixture::new().await;
     f.create().await;
-    let port: &StoreDispatch = &f.board;
+    let port = &f.queue;
     dispatch_queue_port_contract_tests(
         port,
         DispatchClaimRequest {
@@ -22,7 +22,7 @@ async fn conformance_dispatch_queue_and_commands() {
     )
     .await
     .unwrap();
-    port.notify(&spec().pool, &spec().did).await.unwrap();
+    f.board.notify(&spec().pool, &spec().did).await.unwrap();
     // Commands is the real private command-feed implementation returned here.
     let mut feed = port.notifications(spec().pool, me()).await.unwrap();
     command_feed_port_contract_tests(feed.as_mut(), &spec().did)

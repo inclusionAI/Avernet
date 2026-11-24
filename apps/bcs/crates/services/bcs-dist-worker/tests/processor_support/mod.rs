@@ -221,6 +221,7 @@ pub struct Fixture {
     pub feed: Arc<StoreTaskFeed>,
     pub publisher: Arc<FaultPublisher>,
     pub dispatch: Arc<StoreDispatch>,
+    pub queue: bcs_dist_connector_store::StoreDispatchQueue,
     pub runtime: Arc<WorkerRuntime>,
     pub processor: WorkerProcessor,
     pub clock: Arc<ClockAt>,
@@ -331,6 +332,19 @@ impl Fixture {
             failure_entered: tokio::sync::Notify::new(),
             failure_resume: tokio::sync::Notify::new(),
         });
+        let queue = bcs_dist_connector_store::StoreDispatchQueue::new(
+            model.clone(),
+            model.clone(),
+            model.clone(),
+            coordination.clone(),
+            layout.clone(),
+            clock.clone(),
+            bcs_dist_connector_store::DispatchBoardConfig::new(
+                BackendId(layout.namespace_identity()),
+                DispatchConfig::default().command_streams,
+            ),
+        )
+        .unwrap();
         let dispatch = Arc::new(
             StoreDispatch::new(
                 DispatchStores {
@@ -405,6 +419,7 @@ impl Fixture {
             blobs,
             feed,
             publisher,
+            queue,
             dispatch,
             runtime,
             processor,

@@ -1,9 +1,6 @@
 //! Durable DispatchBoard over public document, index and stream plugins.
-mod commands;
 mod control;
-mod held;
 mod journal;
-mod queue;
 mod scan;
 mod scan_scheduler;
 mod storage;
@@ -18,8 +15,8 @@ use bcs_service_api::port::repo::distributed::{
     common::*, dispatch::*, ownership::*, session::EffectKind,
 };
 use bcs_store_api::{
-    StoreCapability, Version, Versioned, WriteOutcome, document::DocumentStorePlugin, stream::*,
-    zset::*,
+    StoreCapability, Version, Versioned, WriteOutcome, document::DocumentStorePlugin,
+    json::JsonStorePlugin, stream::*, zset::*,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -29,16 +26,21 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Worker journals use exact document CAS; shared dispatch records use persistent object merge.
+pub trait DispatchDocuments: DocumentStorePlugin + JsonStorePlugin {}
+impl<T: DocumentStorePlugin + JsonStorePlugin> DispatchDocuments for T {}
+
 #[derive(Clone)]
 pub struct DispatchStores {
     pub scan_budget: Arc<dyn bcs_service_api::port::repo::distributed::budget::ScanBudgetPort>,
-    pub documents: Arc<dyn DocumentStorePlugin>,
+    pub documents: Arc<dyn DispatchDocuments>,
     pub streams: Arc<dyn StreamStorePlugin>,
     pub index: Arc<dyn ZSetStorePlugin>,
     pub membership: Arc<dyn MembershipPort>,
 }
 #[derive(Debug, Clone)]
 pub struct DispatchConfig {
+    pub command_streams: crate::command::CommandStreams,
     pub max_dispatches: usize,
     pub max_receipts: usize,
     pub receipt_bytes: usize,
@@ -51,6 +53,7 @@ pub struct DispatchConfig {
 impl Default for DispatchConfig {
     fn default() -> Self {
         Self {
+            command_streams: crate::command::CommandStreams::new(NonZeroU32::MIN),
             max_dispatches: 1024,
             max_receipts: 256,
             receipt_bytes: 512 * 1024,
@@ -97,8 +100,9 @@ impl StoreDispatch {
         }
         crate::budget::validate_profile(&stores.scan_budget.profile(), config.pool_size)?;
         if !stores.documents.supports(StoreCapability::DocumentCas)
+            || !stores.documents.supports(StoreCapability::PersistentJsonMerge)
             || !stores.index.supports(StoreCapability::ZSet)
-            || !stores.streams.supports(StoreCapability::StreamGroups)
+            || !stores.streams.supports(StoreCapability::Stream)
         {
             return Err(unavailable("dispatch_capabilities"));
         }
@@ -165,28 +169,25 @@ impl Default for Journal {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct Claim {
-    request: RequestId,
-    me: Instance,
-    previous: Option<Holder>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Send {
-    request: RequestId,
-    remote: Option<RemoteTaskRef>,
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ConnectorEvidence {
+    finish_evidence: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Document {
-    schema_version: u32,
+    #[serde(flatten)]
     view: DispatchView,
     receipts: Vec<Receipt>,
-    claim: Option<Claim>,
-    sends: BTreeMap<String, Send>,
     due: Option<TimestampMillis>,
-    terminal_evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    connector: Option<ConnectorEvidence>,
 }
 impl Document {
+    fn discard_confirmed(&mut self) {
+        if let Some(last) = self.view.execution.confirmed_input_through {
+            self.view.control.pending_input.retain(|p| p.seq > last);
+        }
+    }
     fn receipt(&self, intent: &Intent) -> Option<ReceiptResult> {
         self.receipts
             .iter()
@@ -238,12 +239,6 @@ fn format(version: u32) -> Result<(), StoreError> {
         Ok(())
     } else {
         Err(StoreError::UnsupportedFormat { format: version })
-    }
-}
-fn operation_key(operation: &SendOperation) -> (String, &RequestId) {
-    match operation {
-        SendOperation::Start { request_id } => ("start".into(), request_id),
-        SendOperation::Input { seq, request_id } => (format!("input:{}", seq.0), request_id),
     }
 }
 struct Budget {

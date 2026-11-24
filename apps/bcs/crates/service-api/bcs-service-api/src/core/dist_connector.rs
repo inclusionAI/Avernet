@@ -24,7 +24,7 @@
 //!   differ from the streamed event, and the first admitted report wins;
 //! - a remote `canceled` or `rejected` state is an `Error` event with the state
 //!   in the payload (`{"state": "canceled" | "rejected" | "failed", ...}`).
-use crate::port::repo::distributed::inbox::{AdmitRequest, AppendAgentEvent};
+use crate::port::repo::distributed::inbox::{AppendAgentEvent, ConnectorAdmission};
 use bcs_dist_model::*;
 
 /// Transition code a held-dispatch provider answers `begin_send(Input)` with
@@ -81,7 +81,7 @@ pub enum Report {
     /// Intermediate event: appended, filtered by `(did, holder_epoch, seq)`.
     Stream(AppendAgentEvent),
     /// Key event: admitted under a stable input id.
-    Key(AdmitRequest),
+    Key(ConnectorAdmission),
 }
 
 /// Deterministic, no IO, clock reads or random IDs.

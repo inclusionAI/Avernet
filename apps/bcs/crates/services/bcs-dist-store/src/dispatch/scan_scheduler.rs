@@ -5,7 +5,7 @@ use std::{future::Future, pin::Pin, sync::Mutex};
 use tokio::time::Instant;
 const MAX_JOBS: usize = 2;
 const SLICE: Duration = Duration::from_millis(100);
-type ScanFuture = Pin<Box<dyn Future<Output = Result<Step, StoreError>> + std::marker::Send>>;
+type ScanFuture = Pin<Box<dyn Future<Output = Result<Step, StoreError>> + Send>>;
 pub(super) struct Job {
     future: Option<ScanFuture>,
     items: Vec<Did>,

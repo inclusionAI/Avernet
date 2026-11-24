@@ -13,6 +13,8 @@ pub(super) struct AdmissionRecord {
     pub schema_version: u32,
     pub generation: u64,
     pub request: AdmitRequest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<bcs_service_api::port::repo::distributed::inbox::ConnectorEventIdentity>,
     pub created_at: TimestampMillis,
     pub position: Option<InboxPos>,
     pub decision: Option<Decision>,

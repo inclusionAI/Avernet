@@ -22,7 +22,7 @@ fn second_did() -> Did {
 
 #[tokio::test]
 async fn snapshot_reports_readiness_and_work() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let engine = rig.engine();
     let idle = engine.snapshot().await.unwrap();
     assert_eq!(idle.instance, instance("conn-03"));
@@ -44,7 +44,7 @@ async fn snapshot_reports_readiness_and_work() {
 
 #[tokio::test]
 async fn at_capacity_no_hints_are_read() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.config.max_active_calls = 1;
     let first = rig.agent.start_stream();
     let second = rig.agent.start_stream();
@@ -65,7 +65,7 @@ async fn at_capacity_no_hints_are_read() {
 
 #[tokio::test]
 async fn drain_stops_claiming_and_leaves_running_calls_held() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let events = rig.agent.start_stream();
     rig.worker.create().await;
     rig.worker.notify().await;
@@ -98,7 +98,7 @@ async fn drain_stops_claiming_and_leaves_running_calls_held() {
 
 #[tokio::test]
 async fn drain_returns_as_soon_as_held_calls_end() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let events = rig.agent.start_stream();
     rig.worker.create().await;
     rig.worker.notify().await;
@@ -115,7 +115,7 @@ async fn drain_returns_as_soon_as_held_calls_end() {
 
 #[tokio::test]
 async fn invalid_settings_are_refused() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let mut config = rig.config.clone();
     config.max_active_calls = 0;
     assert_eq!(
@@ -165,7 +165,7 @@ impl MembershipPort for Leases {
 
 #[tokio::test]
 async fn the_connector_registers_renews_and_marks_draining() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
     rig.membership = leases.clone();
     let running = rig.start();
@@ -177,7 +177,7 @@ async fn the_connector_registers_renews_and_marks_draining() {
 
 #[tokio::test]
 async fn a_refused_registration_fails_the_start() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let refusal = StoreError::Invalid { code: "registration".into() };
     let leases = Arc::new(Leases { lose_after: usize::MAX, register_errors: Mutex::new(vec![refusal]), ..Leases::default() });
     rig.membership = leases.clone();
@@ -190,7 +190,7 @@ async fn a_refused_registration_fails_the_start() {
 
 #[tokio::test]
 async fn an_uncertain_registration_is_asked_again_before_any_claim() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let unknown = || StoreError::OutcomeUnknown { operation_id: "register".into() };
     let leases = Arc::new(Leases {
         lose_after: usize::MAX,
@@ -210,7 +210,7 @@ async fn an_uncertain_registration_is_asked_again_before_any_claim() {
 
 #[tokio::test]
 async fn a_registration_not_confirmed_within_its_lifetime_fails_the_start() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.config.membership_ttl = Duration::from_millis(40);
     // The first answer is lost; the lifetime then runs out unrenewed and the
     // provider refuses this incarnation for good.
@@ -228,7 +228,7 @@ async fn a_registration_not_confirmed_within_its_lifetime_fails_the_start() {
 
 #[tokio::test]
 async fn a_lost_registration_stops_claiming_but_not_held_calls() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let leases = Arc::new(Leases { lose_after: 3, ..Leases::default() });
     rig.membership = leases.clone();
     let events = rig.agent.start_stream();
@@ -249,7 +249,7 @@ async fn a_lost_registration_stops_claiming_but_not_held_calls() {
 async fn the_pending_membership_stub_does_not_stop_the_connector() {
     // MembershipPort provider pending from the executor team: registration
     // fails with need_contract and the Connector runs without it.
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let events = rig.agent.start_stream();
     rig.worker.create().await;
     rig.worker.notify().await;
@@ -262,7 +262,7 @@ async fn the_pending_membership_stub_does_not_stop_the_connector() {
 
 #[tokio::test]
 async fn the_registration_is_kept_alive_during_the_drain_grace_period() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
     rig.membership = leases.clone();
     let events = rig.agent.start_stream();
@@ -310,7 +310,7 @@ async fn a_feed_outage_does_not_let_the_registration_expire() {
             Ok(Box::new(BrokenFeed))
         }
     }
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     // The feed backoff is far longer than the renewal period.
     rig.config.backoff_min = Duration::from_secs(20);
     rig.config.backoff_max = Duration::from_secs(60);

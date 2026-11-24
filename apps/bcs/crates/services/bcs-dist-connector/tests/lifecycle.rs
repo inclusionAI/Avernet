@@ -4,12 +4,13 @@
 mod rig;
 
 use bcs_dist_model::*;
+use bcs_service_api::port::repo::distributed::inbox::InboxProducerPort;
 use rig::*;
 use serde_json::json;
 
 #[tokio::test]
 async fn a_call_runs_from_hint_to_end_in_the_contract_order() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     // The agent's whole answer is already waiting when the start returns.
     let events = rig.agent.start_stream();
     events.send(delta("Q3 ")).unwrap();
@@ -56,13 +57,23 @@ async fn a_call_runs_from_hint_to_end_in_the_contract_order() {
     // The key event was admitted under its stable identity; deltas were not.
     let final_id = &reported[2].0.input_id;
     assert!(final_id.0.starts_with("ae:"));
-    let admit = layout().admit(&Sid("s0042.7f3a9c".into()), final_id).unwrap();
-    assert!(bcs_store_api::kv::KvStorePlugin::get(&rig.store.model, &admit).await.unwrap().is_some());
+    assert_eq!(
+        rig.inbox()
+            .lookup(&bcs_dist_test_runner::scope(), final_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .input,
+        reported[2].0
+    );
     assert!(reported[0].0.input_id.0.starts_with("as-"));
 
     // The final event was admitted before the dispatch was finished.
     let calls = rig.store.calls();
-    let admitted = calls.iter().position(|c| c.starts_with("kv.put_if_absent")).unwrap();
+    let admitted = calls
+        .iter()
+        .position(|c| c.starts_with("document.create") && c.contains(":admission:"))
+        .unwrap();
     let ended = calls.iter().rposition(|c| c.starts_with("json.mutate") && c.contains(":disp:")).unwrap();
     assert!(admitted < ended, "final before finish");
 
@@ -74,7 +85,7 @@ async fn a_call_runs_from_hint_to_end_in_the_contract_order() {
 
 #[tokio::test]
 async fn the_hint_is_acked_only_after_the_claim_decision() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let events = rig.agent.start_stream();
     rig.worker.create().await;
     rig.worker.notify().await;
@@ -90,7 +101,7 @@ async fn the_hint_is_acked_only_after_the_claim_decision() {
 
 #[tokio::test]
 async fn hints_for_calls_with_nothing_to_do_are_acked_and_dropped() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     // A hint for a dispatch that does not exist, and a repeat for an ended one.
     rig.worker.notify_did(&Did("s0042.7f3a9c.b21e.n9.a1".into())).await;
     rig.worker.create().await;
@@ -122,7 +133,7 @@ async fn hints_for_calls_with_nothing_to_do_are_acked_and_dropped() {
 
 #[tokio::test]
 async fn a_synchronous_answer_ends_the_call_without_a_remote_task() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create().await;
     rig.worker.notify().await;
     rig.agent
@@ -137,7 +148,7 @@ async fn a_synchronous_answer_ends_the_call_without_a_remote_task() {
 
 #[tokio::test]
 async fn a_definite_rejection_is_reported_as_an_error_and_ends_failed() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create().await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Rejected("http_400"));
@@ -155,7 +166,7 @@ async fn a_definite_rejection_is_reported_as_an_error_and_ends_failed() {
 #[tokio::test]
 async fn remote_canceled_and_failed_are_errors_with_the_state_in_the_payload() {
     for (state, outcome) in [("canceled", "canceled"), ("failed", "failed"), ("rejected", "failed")] {
-        let rig = Rig::new();
+        let rig = Rig::new().await;
         let events = rig.agent.start_stream();
         rig.worker.create().await;
         rig.worker.notify().await;
@@ -172,7 +183,7 @@ async fn remote_canceled_and_failed_are_errors_with_the_state_in_the_payload() {
 
 #[tokio::test]
 async fn a_broken_stream_is_not_an_agent_result() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let first = rig.agent.start_stream();
     let second = rig.agent.subscribe_stream();
     // The re-attach reads the task first (query_by_task), then subscribes.
@@ -195,7 +206,7 @@ async fn a_broken_stream_is_not_an_agent_result() {
 
 #[tokio::test]
 async fn an_agent_without_subscribe_is_followed_by_polling() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let mut spec = dispatch_spec(&did());
     spec.capabilities.subscribe = false;
     rig.worker.create_spec(spec).await;
@@ -213,7 +224,7 @@ async fn an_agent_without_subscribe_is_followed_by_polling() {
 
 #[tokio::test]
 async fn large_payloads_go_to_blob_storage_and_requests_are_loaded_from_it() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.config.max_inline_bytes = 64;
     let events = rig.agent.start_stream();
     // The Worker stored the request by reference.
@@ -249,7 +260,7 @@ async fn large_payloads_go_to_blob_storage_and_requests_are_loaded_from_it() {
 
 #[tokio::test]
 async fn a_missing_request_blob_fails_the_call_without_sending() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let mut spec = dispatch_spec(&did());
     spec.request = Payload::Ref(BlobRef { key: "gone".into(), digest: Digest("sha256:x".into()) });
     rig.worker.create_spec(spec).await;
@@ -267,28 +278,35 @@ async fn a_missing_request_blob_fails_the_call_without_sending() {
 
 #[tokio::test]
 async fn a_conflicting_key_event_is_surfaced_and_does_not_end_the_call() {
-    use bcs_dist_connector::identity::{KeyEvent, key_input_id};
-    use bcs_dist_store::codec::AdmitRecord;
-    let rig = Rig::new();
+    use bcs_service_api::core::dist_connector::{DistConnectorCoreService, Report, ReportCursor};
+    let rig = Rig::new().await;
     let events = rig.agent.start_stream();
     rig.worker.create().await;
     rig.worker.notify().await;
-    // Another content is already admitted under the final event's identity.
-    let sid = Sid("s0042.7f3a9c".into());
-    let input_id = key_input_id(&did(), KeyEvent::Final);
-    let record = AdmitRecord { digest: Digest("sha256:other".into()), sid: sid.clone(), tid: Tid("s0042.7f3a9c.b21e".into()) };
-    bcs_store_api::kv::KvStorePlugin::put_if_absent(
-        &rig.store.model,
-        &layout().admit(&sid, &input_id).unwrap(),
-        &record.encode().unwrap(),
-        bcs_store_api::Expiry::Persistent,
-    )
-    .await
-    .unwrap();
+    // Persist a real conflicting admission in the current, scoped store.
+    let view: DispatchView = serde_json::from_value(rig.doc().await).unwrap();
+    let mut cursor = ReportCursor {
+        holder_epoch: HolderEpoch(1),
+        last_seq: InputSeq(0),
+    };
+    let Report::Key(first) = bcs_dist_connector::rules::DistConnectorRules.report(
+        &view,
+        &mut cursor,
+        AgentEventKind::Final,
+        None,
+        Payload::Inline(json!({"state":"other"})),
+    ) else {
+        panic!("expected final")
+    };
+    rig.inbox().admit_connector(first).await.unwrap();
     let _running = rig.start();
     until("accepted", || async { rig.phase().await == "accepted" }).await;
     events.send(final_event()).unwrap();
     settle().await;
     assert_eq!(rig.phase().await, "accepted", "not ended on a conflict");
-    assert!(rig.kinds().await.is_empty(), "a conflicting event is not written");
+    assert_eq!(
+        rig.kinds().await,
+        vec!["final"],
+        "only the original event remains"
+    );
 }

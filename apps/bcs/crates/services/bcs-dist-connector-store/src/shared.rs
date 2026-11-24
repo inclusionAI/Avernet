@@ -43,15 +43,16 @@ impl Shared {
     }
 
     /// Writes the Connector's two objects at exactly `version`, which must be
-    /// above everything the key ever had (greater wins, equal is rejected).
+    /// above the current persistent object revision (equal is rejected).
     pub async fn write(
         &self,
         did: &Did,
         version: Version,
+        old: &DispatchDoc,
         execution: &DispatchExecution,
         connector: &ConnectorState,
     ) -> Result<Wrote, StoreError> {
-        let mutation = doc::connector_write(execution, connector)?;
+        let mutation = doc::connector_write(old, execution, connector)?;
         self.mutate(did, version, mutation).await
     }
 

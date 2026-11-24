@@ -130,6 +130,17 @@ one atomic operation. If the second edit fails, the first must not remain visibl
 A path-only ownership update invalidates an old whole-document CAS. Replacement
 and patch are single-document operations, not transactions across documents.
 
+`PersistentJsonMerge` is a separate, narrower capability for persistent objects.
+A key is dedicated to this contract: read the full business object via `get_json`;
+create it at version 1 with `Absent + Replace(object)`; patch a live object with
+`Version(expected) + Merge` (next revision) or `Newer(version) + Merge` (exactly
+that newer revision). Each mutation uses `Expiry::Preserve`. A missing object or
+rejected version cannot be created by a patch. `_store` is reserved at the root.
+A merge follows RFC 7396: omitted members stay, null members are removed, arrays
+replace as units. This capability does not imply arbitrary path edits, projection,
+expiry, deletion or historical version fencing after external deletion. Do not mix
+these keys with `DocumentCas` keys, whose logical values permit arbitrary JSON.
+
 ## Sorted sets and scheduling
 
 Score and version are independent. Scores accept positive/negative infinity,

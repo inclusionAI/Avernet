@@ -32,7 +32,8 @@ async fn first_claim_takes_the_call_at_the_claim_version() {
     assert_eq!(doc["execution"]["holder"]["epoch"], 1);
     assert_eq!(doc["execution"]["holder"]["instance"]["node"], "conn-03");
     assert_eq!(doc["execution"]["phase"], "claimed");
-    assert_eq!(doc["connector"], serde_json::json!({"input_sending": null, "finish_evidence": null}));
+    assert_eq!(doc["connector"], serde_json::json!({}));
+    assert_eq!(held.view().execution.confirmed_input_through, None);
     // The Worker's objects are untouched.
     assert_eq!(doc["spec"]["did"], DID);
     assert_eq!(doc["control"], serde_json::json!({"cancel": null, "pending_input": []}));
@@ -299,7 +300,7 @@ async fn startup_fails_without_a_required_capability() {
     use bcs_dist_connector_store::StoreDispatchQueue;
     use bcs_dist_connector_store::membership::PendingMembership;
     for capability in [
-        StoreCapability::AtomicJson,
+        StoreCapability::PersistentJsonMerge,
         StoreCapability::ZSet,
         StoreCapability::Stream,
         StoreCapability::StreamGroups,

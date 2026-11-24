@@ -75,9 +75,29 @@ impl StoreDispatch {
         &self,
         did: &Did,
     ) -> Result<Option<Versioned<Document>>, StoreError> {
-        let doc = self.read::<Document>(&self.layout.disp(did)?).await?;
+        let key = self.layout.disp(did)?;
+        let doc = self
+            .io(
+                async {
+                    self.stores
+                        .documents
+                        .get_json(&key)
+                        .await
+                        .map_err(|e| crate::error::from_read(&e))?
+                        .map(|d| {
+                            Ok(Versioned {
+                                version: d.version,
+                                value: decode_json::<Document>(d.value)?,
+                            })
+                        })
+                        .transpose()
+                },
+                false,
+                &key,
+            )
+            .await?;
         if let Some(d) = &doc {
-            format(d.value.schema_version)?;
+            format(d.value.view.spec.schema_version)?;
             if d.value.view.spec.did != *did {
                 return Err(invalid("dispatch_identity"));
             }
@@ -142,11 +162,40 @@ impl StoreDispatch {
         )
         .await
     }
-    pub(super) async fn live(&self, instance: &Instance) -> Result<Liveness, StoreError> {
+    /// Worker-only fields are patched under the exact version observed. Never
+    /// copy execution or Connector state back over an intervening takeover.
+    pub(super) async fn mutate_disp(
+        &self,
+        key: &str,
+        version: Option<Version>,
+        doc: &Document,
+        patch: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<bool, StoreError> {
+        use bcs_store_api::{Expiry, WriteCondition, json::JsonMutation};
+        if bytes(doc)? > 960 * 1024 {
+            return Err(invalid("dispatch_document_capacity"));
+        }
+        let (condition, mutation) = match version {
+            Some(v) => {
+                crate::version::next(v)?;
+                (WriteCondition::Version(v), JsonMutation::Merge(patch))
+            }
+            None => (
+                WriteCondition::Absent,
+                JsonMutation::Replace(encode_json(doc)?),
+            ),
+        };
         self.io(
-            self.stores.membership.liveness(instance),
-            false,
-            "dispatch_liveness",
+            async {
+                self.stores
+                    .documents
+                    .mutate_json(key, condition, mutation, Expiry::Preserve)
+                    .await
+                    .map(|r| matches!(r, WriteOutcome::Applied { .. }))
+                    .map_err(|e| crate::error::from_write(&e, key))
+            },
+            true,
+            key,
         )
         .await
     }

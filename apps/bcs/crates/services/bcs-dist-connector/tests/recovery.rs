@@ -39,7 +39,7 @@ fn dead_holders(rig: &mut Rig) {
 
 #[tokio::test]
 async fn a_crash_between_final_and_finish_is_completed_by_the_next_holder() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let _old = former_holder(&rig, dispatch_spec(&did()), DispatchPhase::Accepted).await;
     // The former holder admitted the final event and died before `finish`.
     let rules = bcs_dist_connector::rules::DistConnectorRules;
@@ -53,7 +53,7 @@ async fn a_crash_between_final_and_finish_is_completed_by_the_next_holder() {
     let Report::Key(first) = rules.report(&view, &mut cursor, AgentEventKind::Final, Some("evt-9".into()), Payload::Inline(json!({"state": "completed"}))) else {
         panic!("final is a key event");
     };
-    rig.inbox().admit(first.clone()).await.unwrap();
+    rig.inbox().admit_connector(first.clone()).await.unwrap();
     assert_eq!(rig.phase().await, "accepted");
 
     // A new holder takes over, re-reads the remote task and re-reports.
@@ -78,7 +78,7 @@ async fn a_crash_between_final_and_finish_is_completed_by_the_next_holder() {
 
 #[tokio::test]
 async fn a_takeover_of_an_accepted_call_reattaches_and_restarts_seq_at_one() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let _old = former_holder(&rig, dispatch_spec(&did()), DispatchPhase::Accepted).await;
     dead_holders(&mut rig);
     rig.agent.on_task(found(TaskStatus::Working, json!({"task": {"id": "rt-77c2"}})));
@@ -101,7 +101,7 @@ async fn a_takeover_of_an_accepted_call_reattaches_and_restarts_seq_at_one() {
 
 #[tokio::test]
 async fn a_possibly_sent_call_is_not_resent_without_a_capability() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let _old = former_holder(&rig, dispatch_spec(&did()), DispatchPhase::Sending).await;
     dead_holders(&mut rig);
     rig.worker.notify().await;
@@ -129,7 +129,7 @@ async fn a_possibly_sent_call_is_not_resent_without_a_capability() {
 
 #[tokio::test]
 async fn an_idempotent_start_is_resent_with_the_same_request_id() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let _old = former_holder(&rig, spec_with(|c| c.idempotent_start = true), DispatchPhase::Sending).await;
     dead_holders(&mut rig);
     let events = rig.agent.start_stream();
@@ -144,7 +144,7 @@ async fn an_idempotent_start_is_resent_with_the_same_request_id() {
 
 #[tokio::test]
 async fn an_agent_that_can_be_asked_is_asked_instead_of_resent() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let _old = former_holder(&rig, spec_with(|c| c.query_by_request = true), DispatchPhase::Sending).await;
     dead_holders(&mut rig);
     rig.agent.on_request(found(TaskStatus::Working, json!({"task": {}})));
@@ -162,7 +162,7 @@ async fn an_agent_that_can_be_asked_is_asked_instead_of_resent() {
 
 #[tokio::test]
 async fn an_agent_that_does_not_know_the_request_leaves_the_call_unresolved() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let _old = former_holder(&rig, spec_with(|c| c.query_by_request = true), DispatchPhase::Sending).await;
     dead_holders(&mut rig);
     rig.agent.on_request(bcs_service_api::port::dist_agent::QueryOutcome::NotFound);
@@ -176,7 +176,7 @@ async fn an_agent_that_does_not_know_the_request_leaves_the_call_unresolved() {
 #[tokio::test]
 async fn an_unknown_first_send_follows_the_same_policy() {
     // No capability: unresolved after one attempt.
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create().await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Unknown);
@@ -187,7 +187,7 @@ async fn an_unknown_first_send_follows_the_same_policy() {
     assert_eq!(rig.phase().await, "sending");
 
     // Idempotent: sent again, same request id, then accepted.
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Unknown);
@@ -203,7 +203,7 @@ async fn an_unknown_first_send_follows_the_same_policy() {
 
 #[tokio::test]
 async fn a_rejected_resend_does_not_fail_a_start_that_may_have_arrived() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
     rig.worker.notify().await;
     // The first send may have reached the agent; only the resend is refused.
@@ -219,7 +219,7 @@ async fn a_rejected_resend_does_not_fail_a_start_that_may_have_arrived() {
 
 #[tokio::test]
 async fn a_definite_not_sent_is_retried_three_times_then_unresolved() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create().await;
     rig.worker.notify().await;
     for _ in 0..4 {
@@ -246,7 +246,7 @@ async fn a_definite_not_sent_is_retried_three_times_then_unresolved() {
 
 #[tokio::test]
 async fn a_not_sent_start_succeeds_on_a_retry() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create().await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::NotSent);
@@ -262,7 +262,7 @@ async fn a_not_sent_start_succeeds_on_a_retry() {
 
 #[tokio::test]
 async fn owned_by_me_without_an_actor_resumes_under_a_new_generation() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create().await;
     // This instance holds the call but runs no actor for it (its claim answer
     // was lost, or the actor died).
@@ -280,7 +280,7 @@ async fn owned_by_me_without_an_actor_resumes_under_a_new_generation() {
 
 #[tokio::test]
 async fn a_holder_that_lost_the_call_stops_and_writes_nothing() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.config.poll_interval = std::time::Duration::from_secs(30); // it will not find out by polling
     let events = rig.agent.start_stream();
     rig.worker.create().await;
@@ -315,7 +315,7 @@ async fn a_holder_that_lost_the_call_stops_and_writes_nothing() {
 
 #[tokio::test]
 async fn an_actor_that_dies_is_resumed_under_a_new_generation() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
@@ -331,7 +331,7 @@ async fn an_actor_that_dies_is_resumed_under_a_new_generation() {
 
 #[tokio::test]
 async fn a_failed_resume_is_retried_until_it_succeeds() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
@@ -348,7 +348,7 @@ async fn a_failed_resume_is_retried_until_it_succeeds() {
 
 #[tokio::test]
 async fn a_resume_owed_from_a_failure_never_replaces_the_actor_that_settled_it() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     // Long enough for a hint to arrive between two rounds of the main loop.
     rig.config.receive_timeout = std::time::Duration::from_millis(1000);
     rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
@@ -376,7 +376,7 @@ async fn a_resume_owed_from_a_failure_never_replaces_the_actor_that_settled_it()
 
 #[tokio::test]
 async fn a_resume_that_landed_without_an_answer_is_resumed_again() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
@@ -397,7 +397,7 @@ async fn a_resume_that_landed_without_an_answer_is_resumed_again() {
 #[tokio::test]
 async fn a_request_id_lookup_that_already_has_the_result_ends_the_call() {
     // The agent can be asked by request id but offers no way to follow a task.
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let spec = spec_with(|c| {
         c.query_by_request = true;
         c.subscribe = false;
@@ -420,7 +420,7 @@ async fn a_request_id_lookup_that_already_has_the_result_ends_the_call() {
 async fn a_takeover_of_a_call_whose_request_is_gone_fails_it_cleanly() {
     // Nothing was ever sent (the former holder died right after its claim)
     // and the request blob no longer exists.
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let mut spec = dispatch_spec(&did());
     spec.request = Payload::Ref(BlobRef { key: "gone".into(), digest: Digest("sha256:x".into()) });
     let _old = former_holder(&rig, spec, DispatchPhase::Claimed).await;

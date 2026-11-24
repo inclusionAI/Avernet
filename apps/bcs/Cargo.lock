@@ -378,6 +378,7 @@ dependencies = [
  "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-dist-a2a-output",
+ "bcs-dist-connector-store",
  "bcs-dist-gateway",
  "bcs-dist-gateway-http",
  "bcs-dist-model",
@@ -1510,13 +1511,17 @@ dependencies = [
  "serde_json",
 ]
 
+[[package]]
 name = "bcs-dist-connector"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-dist-connector-store",
+ "bcs-dist-encoding",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-dist-store",
+ "bcs-dist-test-runner",
  "bcs-service-api",
  "bcs-store-api",
  "bcs-test-support",
@@ -1647,6 +1652,7 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-db-migrations",
+ "bcs-dist-connector-store",
  "bcs-dist-encoding",
  "bcs-dist-model",
  "bcs-dist-projection",
@@ -1656,6 +1662,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tracing",
@@ -1683,6 +1690,7 @@ dependencies = [
  "bcs-db-local",
  "bcs-db-migrations",
  "bcs-dist-a2a-output",
+ "bcs-dist-connector-store",
  "bcs-dist-encoding",
  "bcs-dist-gateway",
  "bcs-dist-gateway-http",

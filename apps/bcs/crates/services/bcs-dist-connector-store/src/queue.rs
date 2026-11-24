@@ -78,7 +78,7 @@ pub struct StoreDispatchQueue {
 }
 
 impl StoreDispatchQueue {
-    /// Fails when a store lacks `AtomicJson`, `ZSet`, `Stream` or `StreamGroups`.
+    /// Fails when a store lacks `PersistentJsonMerge`, `ZSet`, `Stream` or `StreamGroups`.
     pub fn new(
         json: Arc<dyn JsonStorePlugin>,
         zset: Arc<dyn ZSetStorePlugin>,
@@ -89,7 +89,7 @@ impl StoreDispatchQueue {
         config: DispatchBoardConfig,
     ) -> Result<Self, StoreError> {
         capability::require(&[
-            (json.as_ref(), StoreCapability::AtomicJson),
+            (json.as_ref(), StoreCapability::PersistentJsonMerge),
             (zset.as_ref(), StoreCapability::ZSet),
             (stream.as_ref(), StoreCapability::Stream),
             (stream.as_ref(), StoreCapability::StreamGroups),

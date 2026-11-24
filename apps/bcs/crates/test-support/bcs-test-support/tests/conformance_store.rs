@@ -41,6 +41,10 @@ async fn conformance_json() {
     json_store_plugin_contract_tests(&Model::default(), "json").await;
 }
 #[tokio::test]
+async fn conformance_persistent_json_merge() {
+    persistent_json_merge_contract_tests(&Model::default(), "merge").await;
+}
+#[tokio::test]
 async fn conformance_zset() {
     z_set_store_plugin_contract_tests(&Model::default(), "zset").await;
 }

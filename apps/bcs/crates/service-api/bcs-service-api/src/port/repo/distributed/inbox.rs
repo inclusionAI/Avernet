@@ -13,6 +13,18 @@ pub struct AdmitRequest {
     pub create_task: Option<TaskSnapshot>,
 }
 
+/// Identifies one semantic report across Connector holders. Captured before payload offload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectorEventIdentity {
+    pub round: Option<u64>,
+    pub state: String,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectorAdmission {
+    pub input: InputEnvelope,
+    pub identity: ConnectorEventIdentity,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdmitOutcome {
     Accepted(AdmissionReceipt),
@@ -35,6 +47,17 @@ pub trait InboxProducerPort: Send + Sync {
     /// Unsupported legacy providers fail explicitly rather than pretend absent.
     async fn lookup(&self, _scope: &TaskScope, _id: &InputId) -> Result<Option<AdmitRequest>, StoreError> {
         Err(StoreError::Invalid { code: "admission_lookup_unsupported".into() })
+    }
+
+    /// Report an existing dispatch into its frozen Session scope. A replay from another
+    /// holder can carry different payload bytes; the first accepted report wins.
+    async fn admit_connector(
+        &self,
+        _request: ConnectorAdmission,
+    ) -> Result<AdmitOutcome, StoreError> {
+        Err(StoreError::Invalid {
+            code: "connector_admission_unsupported".into(),
+        })
     }
 
     /// Optional shared scan-budget profile used by Worker startup validation.

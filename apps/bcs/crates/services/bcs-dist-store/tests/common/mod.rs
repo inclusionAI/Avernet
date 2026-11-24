@@ -1,7 +1,12 @@
 //! Test support: the exported store model behind a wrapper that records every
 //! call and can lose the response of the n-th write (the write is applied, the
 //! caller sees `OutcomeUnknown`), plus fixtures of the merged model types.
-#![allow(dead_code, clippy::unwrap_used, clippy::expect_used, reason = "test support")]
+#![allow(
+    dead_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test support"
+)]
 
 use async_trait::async_trait;
 use bcs_dist_model::*;
@@ -247,7 +252,19 @@ impl DocumentStorePlugin for Recorder {
 impl JsonStorePlugin for Recorder {
     async fn get_json(&self, key: &str) -> StoreResult<Option<Versioned<Value>>> {
         self.read("json.get", key);
-        self.model.get_json(key).await
+        {
+            let mut failure = self.fail_document_read.lock().unwrap();
+            if failure
+                .as_ref()
+                .is_some_and(|pattern| key.contains(pattern))
+            {
+                *failure = None;
+                return Err(StoreError::NotApplied("injected_read".into()));
+            }
+        }
+        let result = self.model.get_json(key).await;
+        self.paused("json.get", key).await;
+        result
     }
     async fn get_paths(&self, key: &str, pointers: &[String]) -> StoreResult<Option<JsonProjection>> {
         self.read("json.get_paths", key);

@@ -3,14 +3,14 @@
 //! Layout: the JSON of the merged `DispatchView` (`spec`, `control`,
 //! `execution`) plus a Connector-owned `connector` object. The Worker writes
 //! `spec` (at creation) and `control`; the holding Connector writes `execution`
-//! and `connector`, always as whole objects built from what it just read (the
-//! Worker creates the document without `connector`, and a path edit needs an
-//! existing parent).
+//! and `connector` through one object merge. The Worker can omit `connector` at creation.
 
-use bcs_dist_model::{DispatchControlState, DispatchExecution, DispatchSpec, DispatchView, InputSeq};
+use bcs_dist_model::{
+    DispatchControlState, DispatchExecution, DispatchSpec, DispatchView, InputSeq,
+};
 use bcs_dist_store::codec::SCHEMA_VERSION;
 use bcs_service_api::port::repo::distributed::common::StoreError;
-use bcs_store_api::json::{JsonEdit, JsonMutation};
+use bcs_store_api::json::JsonMutation;
 use bcs_store_api::{Version, Versioned};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -70,52 +70,80 @@ pub fn decode(stored: Versioned<Value>) -> Result<DispatchDoc, StoreError> {
     })
 }
 
-/// The Connector's write: both of its objects, whole. Never `/spec` or `/control`.
+/// Diff only the two Connector-owned objects at the version already read.
+/// Optional null and absent both decode as None; clearing an enum variant's
+/// fields requires explicit nulls (MERGE does not remove omitted keys).
+fn delta(old: &Value, new: &Value) -> Option<Value> {
+    if old == new {
+        return None;
+    }
+    if let (Value::Object(a), Value::Object(b)) = (old, new) {
+        let mut patch = serde_json::Map::new();
+        for k in a.keys().filter(|k| !b.contains_key(*k)) {
+            patch.insert(k.clone(), Value::Null);
+        }
+        for (k, v) in b {
+            if let Some(change) = delta(a.get(k).unwrap_or(&Value::Null), v) {
+                patch.insert(k.clone(), change);
+            }
+        }
+        return Some(Value::Object(patch));
+    }
+    Some(new.clone())
+}
+
 pub fn connector_write(
+    old: &DispatchDoc,
     execution: &DispatchExecution,
     connector: &ConnectorState,
 ) -> Result<JsonMutation, StoreError> {
-    let set = |pointer: &str, value: Result<Value, serde_json::Error>| {
-        value
-            .map(|value| JsonEdit::Set {
-                pointer: pointer.to_owned(),
-                value,
-            })
-            .map_err(|_| invalid("disp_encode"))
-    };
-    Ok(JsonMutation::Patch(vec![
-        set("/execution", serde_json::to_value(execution))?,
-        set("/connector", serde_json::to_value(connector))?,
-    ]))
+    let encode = |value: Result<Value, _>| value.map_err(|_| invalid("disp_encode"));
+    let mut patch = serde_json::Map::new();
+    // A terminal report must be reconsidered even after a long supervisor backoff.
+    if old.view.execution.phase != execution.phase
+        && execution.phase == bcs_dist_model::DispatchPhase::Ended
+    {
+        patch.insert("due".into(), Value::from(0));
+    }
+    for (key, before, after) in [
+        (
+            "execution",
+            encode(serde_json::to_value(&old.view.execution))?,
+            encode(serde_json::to_value(execution))?,
+        ),
+        (
+            "connector",
+            encode(serde_json::to_value(&old.connector))?,
+            encode(serde_json::to_value(connector))?,
+        ),
+    ] {
+        if let Some(value) = delta(&before, &after) {
+            patch.insert(key.into(), value);
+        }
+    }
+    Ok(JsonMutation::Merge(patch))
 }
 
-/// The claim's write: only the holder (and the first phase step), by path, so
-/// it cannot undo anything a former holder wrote after the claimant's read.
-/// `/connector` is created when the Worker's document has none yet.
+/// A higher-generation claim may race intervening writes: never send a snapshot.
 pub fn claim_write(
     holder: &bcs_dist_model::Holder,
     first_claim: bool,
     create_connector: bool,
 ) -> Result<JsonMutation, StoreError> {
-    let holder = serde_json::to_value(holder).map_err(|_| invalid("disp_encode"))?;
-    let mut edits = vec![JsonEdit::Set {
-        pointer: "/execution/holder".to_owned(),
-        value: holder,
-    }];
+    let mut execution = serde_json::Map::new();
+    execution.insert(
+        "holder".into(),
+        serde_json::to_value(holder).map_err(|_| invalid("disp_encode"))?,
+    );
     if first_claim {
-        edits.push(JsonEdit::Set {
-            pointer: "/execution/phase".to_owned(),
-            value: Value::String("claimed".to_owned()),
-        });
+        execution.insert("phase".into(), Value::String("claimed".into()));
     }
+    let mut patch = serde_json::Map::new();
+    patch.insert("execution".into(), Value::Object(execution));
     if create_connector {
-        let empty = serde_json::to_value(ConnectorState::default()).map_err(|_| invalid("disp_encode"))?;
-        edits.push(JsonEdit::Set {
-            pointer: "/connector".to_owned(),
-            value: empty,
-        });
+        patch.insert("connector".into(), Value::Object(Default::default()));
     }
-    Ok(JsonMutation::Patch(edits))
+    Ok(JsonMutation::Merge(patch))
 }
 
 /// The view a holder works with: pending inputs at or below the confirmed

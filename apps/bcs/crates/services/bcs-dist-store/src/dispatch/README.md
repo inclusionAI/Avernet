@@ -1,9 +1,11 @@
 # Durable DispatchBoard provider
 
-`StoreDispatch` implements the public control, queue, held-dispatch and command
-feed ports over `DocumentCas`, `ZSet` and `StreamGroups`; membership is injected
-through `MembershipPort`. It contains no enterprise client or connector network
-algorithm. The owning contract is
+`StoreDispatch` owns Worker create, control, receipts, notification and supervision.
+`bcs-dist-connector-store` owns command feeds, claims and holder writes. Both
+use the same persistent JSON object and storage revision at `disp(did)`.
+The root contains `spec`, `control`, `execution`, optional `connector`,
+`receipts` and `due`; no nested `view` or positional array is used. Use a fresh
+namespace when switching from the earlier experimental encoding. The owning contract is
 [`distributed/dispatch.rs`](../../../../service-api/bcs-service-api/src/port/repo/distributed/dispatch.rs),
 with [phase-one SPEC](../../../../../specs/2026-11-18-worker-runtime-phase1/spec.md)
 §5.1, §7.1 and §8.2.
@@ -53,25 +55,26 @@ Changing the content of an already accepted cancellation ID is a conflict.
 A new request against a proven terminal dispatch records that outcome and
 evidence rather than creating another cancellation obligation.
 
-Claims require live membership for the claimant and `Dead` for takeover; Unknown
-is never eligibility. Resumption requires the exact prior holder and advances
-epoch. Replays return `OwnedByMe`, preventing duplicate local actors. Every held
-write rechecks exact holder and membership, then CAS-fences concurrent takeover.
-`begin_send` persists the fixed request identity before returning a send permit.
-Accepted operations never grant another network send permit; their evidence
-methods remain idempotent. Inputs advance only an accepted contiguous prefix. `OutcomeUnknown` cancellation
-remains nonterminal; `finish` requires a definitive outcome and nonempty evidence.
+Worker writes use the exact observed revision (EQ); receipts and control changes
+commit together. Connector writes use a strictly greater revision (GT): normally
+the last read plus one, or `epoch × 10^9` on claim. A claim changes only holder,
+initial phase and the optional Connector object; it cannot overwrite a racing
+Worker cancel or queued input. A former holder's late write cannot cross the new
+version band. A terminal write sets `due=0` in the same mutation as its evidence.
+Object updates recursively merge; `null` removes an obsolete field, while arrays
+(including queued inputs and receipts) replace as units. Worker journals and
+scan cursors still use exact whole-document replacement.
 
-Command feeds merge repeated did hints until acknowledgement, including idle PEL
-redelivery. One application acknowledgement covers all merged raw stream IDs.
-Tokens are checked against this exact feed generation and actual deliveries.
-After append, disposable notification streams are trimmed with `MaxLen(4096)`.
-This is a healthy-storage length target, not a cross-call atomic admission cap.
-Trim failure is reported without undoing the append; assembly must count these
-failures and monitor hint backlog. No authoritative receipt/journal is trimmed.
-The feed bounds raw in-flight entries and remembered acknowledgement identities
-at 128 each. New notifications after acknowledgement may legitimately represent
-new control and are delivered again; Dispatch claim fencing prevents actor forks.
+Connector takeover requires the prior holder to be definitively dead. Retries by
+an already current owner do not start another actor. A durable send intent and
+contiguous acceptance watermark protect pending input; a cancel observation alone
+never ends a call. See `bcs-dist-connector-store` for the authoritative rules.
+
+Worker and Connector must configure the same `CommandStreams` partition count.
+Each physical hint has its own acknowledgement. Duplicate hints are harmless:
+the dispatch record decides who can act. A lost or trimmed hint does not remove
+the independent Worker recovery obligation. Notifications are trimmed to a target
+of 4,096 after append; trim failure does not roll back an append.
 
 ## Explicit initial capacities
 
@@ -93,7 +96,7 @@ Reservations account for receipts, queued copies and future bounded send evidenc
 in the same journal CAS; concurrent admission cannot overdraw a read-then-write
 balance. All receipt and directory evidence is retained, with no TTL or GC.
 Remote references and terminal evidence each admit at most 4 KiB of encoded
-JSON; send/claim request identities admit 512 encoded bytes. These limits account
+JSON. These limits account
 for escape expansion, rather than treating raw string length as stored size.
 Capacity therefore includes historical ended dispatches and controls. At the
 maximum profile dispatch documents alone may retain roughly 512 MiB per shard,

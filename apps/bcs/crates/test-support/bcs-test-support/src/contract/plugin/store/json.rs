@@ -193,3 +193,68 @@ pub async fn json_store_plugin_contract_tests<P: JsonStorePlugin + ?Sized>(p: &P
         expected
     );
 }
+
+/// Worker updates and Connector claims share one revision on a persistent object.
+pub async fn persistent_json_merge_contract_tests(p: &dyn JsonStorePlugin, key: &str) {
+    assert!(p.supports(StoreCapability::PersistentJsonMerge));
+    let patch = |value: serde_json::Value| JsonMutation::Merge(value.as_object().unwrap().clone());
+    let merge = |condition, value| p.mutate_json(key, condition, patch(value), Expiry::Preserve);
+    let claim = WriteCondition::Newer(Version(1_000_000_000));
+    assert_eq!(
+        merge(claim, json!({"holder":"B"})).await.unwrap(),
+        WriteOutcome::ConditionNotMet
+    );
+    let original =
+        json!({"holder":"A","execution":{"kind":"rejected","code":"busy"},"control":{"inputs":[]}});
+    assert_eq!(
+        applied(
+            p.mutate_json(
+                key,
+                WriteCondition::Absent,
+                JsonMutation::Replace(original),
+                Expiry::Preserve
+            )
+            .await
+            .unwrap()
+        ),
+        Version(1)
+    );
+    assert_eq!(
+        applied(
+            merge(
+                WriteCondition::Version(Version(1)),
+                json!({"control":{"inputs":[null,{"id":1}]}})
+            )
+            .await
+            .unwrap()
+        ),
+        Version(2)
+    );
+    assert_eq!(
+        applied(
+            merge(
+                claim,
+                json!({"holder":"B","execution":{"kind":"accepted","code":null}})
+            )
+            .await
+            .unwrap()
+        ),
+        Version(1_000_000_000)
+    );
+    for stale in [
+        claim,
+        WriteCondition::Version(Version(2)),
+        WriteCondition::Newer(Version(3)),
+    ] {
+        assert_eq!(
+            merge(stale, json!({"holder":"A"})).await.unwrap(),
+            WriteOutcome::ConditionNotMet
+        );
+    }
+    let doc = p.get_json(key).await.unwrap().unwrap();
+    assert_eq!(doc.version, Version(1_000_000_000));
+    assert_eq!(
+        doc.value,
+        json!({"holder":"B","execution":{"kind":"accepted"},"control":{"inputs":[null,{"id":1}]}})
+    );
+}

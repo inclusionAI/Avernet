@@ -42,6 +42,17 @@ fn invalid<T>(code: &str) -> Result<T, HolderError> {
     })
 }
 
+fn validate_remote(remote: &RemoteTaskRef) -> Result<(), HolderError> {
+    if remote.task_id.is_empty()
+        || remote.task_id.len() > 1024
+        || remote.context_id.as_ref().is_some_and(|s| s.len() > 1024)
+        || serde_json::to_vec(remote).map_or(true, |b| b.len() > 4096)
+    {
+        return invalid("remote_identity");
+    }
+    Ok(())
+}
+
 impl StoreHeldDispatch {
     pub(crate) fn new(shared: Arc<Shared>, holder: Holder, view: DispatchView, version: Version) -> Self {
         Self {
@@ -101,7 +112,7 @@ impl StoreHeldDispatch {
                 Step::Write(execution, connector, answer) => (execution, connector, answer),
             };
             let next = version::next(doc.version)?;
-            match self.shared.write(&did, next, &execution, &connector).await? {
+            match self.shared.write(&did, next, &doc, &execution, &connector).await? {
                 Wrote::Applied(version) => {
                     self.version = version;
                     let mut view = doc.view;
@@ -203,6 +214,7 @@ impl HeldDispatchPort for StoreHeldDispatch {
         &mut self,
         evidence: AcceptanceEvidence,
     ) -> Result<Option<CancelIntent>, HolderError> {
+        validate_remote(&evidence.remote)?;
         if !matches!(evidence.operation, SendOperation::Start { .. }) {
             return invalid("acceptance_of_input");
         }
@@ -235,6 +247,7 @@ impl HeldDispatchPort for StoreHeldDispatch {
         seq: InputSeq,
         evidence: AcceptanceEvidence,
     ) -> Result<IdempotentWrite, HolderError> {
+        validate_remote(&evidence.remote)?;
         if !matches!(&evidence.operation, SendOperation::Input { seq: sent, .. } if *sent == seq) {
             return invalid("confirm_evidence_mismatch");
         }
@@ -255,6 +268,8 @@ impl HeldDispatchPort for StoreHeldDispatch {
             if !doc.view.control.pending_input.iter().any(|p| p.seq == seq) {
                 return invalid("input_not_pending");
             }
+            if doc.connector.input_sending.is_none_or(|sent| sent < seq) { return invalid("send_intent_missing"); }
+            if execution.remote.as_ref() != Some(&evidence.remote) { return invalid("remote_task_mismatch"); }
             let mut next = execution.clone();
             next.confirmed_input_through = Some(seq);
             Ok(Step::Write(Box::new(next), doc.connector.clone(), IdempotentWrite::Applied))
@@ -298,6 +313,9 @@ impl HeldDispatchPort for StoreHeldDispatch {
         outcome: FinalDispatchOutcome,
         evidence: String,
     ) -> Result<IdempotentWrite, HolderError> {
+        if evidence.is_empty() || serde_json::to_vec(&evidence).map_or(true, |b| b.len() > 4096) {
+            return invalid("terminal_evidence");
+        }
         let stored = match outcome {
             FinalDispatchOutcome::Completed => DispatchOutcome::Completed,
             FinalDispatchOutcome::Failed => DispatchOutcome::Failed,

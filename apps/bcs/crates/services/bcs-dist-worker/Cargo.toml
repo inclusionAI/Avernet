@@ -21,6 +21,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+bcs-dist-connector-store.workspace = true
 bcs-app-dist-gateway.workspace = true
 bcs-dist-gateway.workspace = true
 bcs-dist-gateway-http.workspace = true

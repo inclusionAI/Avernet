@@ -55,13 +55,28 @@ pub struct Fixture {
     pub base: crate::task_feed_support::Fixture,
     pub membership: Arc<Members>,
     pub board: StoreDispatch,
+    pub queue: bcs_dist_connector_store::StoreDispatchQueue,
 }
 impl Fixture {
     pub async fn new() -> Self {
         let base = crate::task_feed_support::Fixture::new().await;
         let membership = Arc::new(Members(Mutex::new(Liveness::Alive)));
         let board = build(&base, membership.clone(), DispatchConfig::default());
+        let queue = bcs_dist_connector_store::StoreDispatchQueue::new(
+            base.storage.clone(),
+            base.storage.clone(),
+            base.storage.clone(),
+            membership.clone(),
+            base.layout.clone(),
+            Arc::new(bcs_dist_store::inbox::SystemClock),
+            bcs_dist_connector_store::DispatchBoardConfig::new(
+                BackendId(base.layout.namespace_identity()),
+                DispatchConfig::default().command_streams,
+            ),
+        )
+        .unwrap();
         Self {
+            queue,
             base,
             membership,
             board,
@@ -146,7 +161,7 @@ impl Fixture {
     }
     pub async fn claim(&self) -> Box<dyn HeldDispatchPort> {
         match self
-            .board
+            .queue
             .claim(DispatchClaimRequest {
                 did: spec().did,
                 me: me(),
@@ -314,5 +329,61 @@ impl bcs_store_api::document::DocumentStorePlugin for HangingDocument {
         value: &serde_json::Value,
     ) -> bcs_store_api::StoreResult<bcs_store_api::WriteOutcome> {
         self.inner.replace_document(key, version, value).await
+    }
+}
+
+#[async_trait]
+impl bcs_store_api::json::JsonStorePlugin for SlowDocuments {
+    async fn get_json(
+        &self,
+        key: &str,
+    ) -> bcs_store_api::StoreResult<Option<bcs_store_api::Versioned<serde_json::Value>>> {
+        tokio::time::sleep(self.delay).await;
+        self.inner.get_json(key).await
+    }
+    async fn get_paths(
+        &self,
+        key: &str,
+        p: &[String],
+    ) -> bcs_store_api::StoreResult<Option<bcs_store_api::json::JsonProjection>> {
+        self.inner.get_paths(key, p).await
+    }
+    async fn mutate_json(
+        &self,
+        key: &str,
+        c: bcs_store_api::WriteCondition,
+        m: bcs_store_api::json::JsonMutation,
+        e: bcs_store_api::Expiry,
+    ) -> bcs_store_api::StoreResult<bcs_store_api::WriteOutcome> {
+        self.inner.mutate_json(key, c, m, e).await
+    }
+}
+
+#[async_trait]
+impl bcs_store_api::json::JsonStorePlugin for HangingDocument {
+    async fn get_json(
+        &self,
+        key: &str,
+    ) -> bcs_store_api::StoreResult<Option<bcs_store_api::Versioned<serde_json::Value>>> {
+        if key == self.key {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        self.inner.get_json(key).await
+    }
+    async fn get_paths(
+        &self,
+        key: &str,
+        p: &[String],
+    ) -> bcs_store_api::StoreResult<Option<bcs_store_api::json::JsonProjection>> {
+        self.inner.get_paths(key, p).await
+    }
+    async fn mutate_json(
+        &self,
+        key: &str,
+        c: bcs_store_api::WriteCondition,
+        m: bcs_store_api::json::JsonMutation,
+        e: bcs_store_api::Expiry,
+    ) -> bcs_store_api::StoreResult<bcs_store_api::WriteOutcome> {
+        self.inner.mutate_json(key, c, m, e).await
     }
 }
