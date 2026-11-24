@@ -35,6 +35,11 @@ The schedule document owns the sealed Session owner, activation version,
 next-check, listening flag and admission slots. `active` and `wake` are
 notifications used to discover work; they are not authority. Worker takeover
 enumerates the durable active index and then validates schedule/checkpoint state.
+Each page uses one bounded range read and reserves up to the requested rows
+from the Discovery log budget. Visits to Session state have their own quota.
+If the log quota or shared IO slots run out, no page is read and the Worker
+retries from the same cursor. The continuation is based on the granted page
+size, including if the requested upper bound was larger.
 A new admission invalidates an old schedule observation, and `settle` checks the
 owner and token atomically.
 

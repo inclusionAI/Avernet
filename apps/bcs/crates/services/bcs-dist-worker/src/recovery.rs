@@ -6,6 +6,11 @@ use bcs_service_api::{
 };
 use std::{num::NonZeroU32, time::Duration};
 use tokio::time::{Instant, timeout};
+enum RecoveryVisit {
+    Visited,
+    Deferred,
+}
+
 impl WorkerRuntime {
     pub(crate) async fn recover_owned(&self, budget: &mut usize) -> Result<(), RuntimeError> {
         let mut visited = std::collections::BTreeSet::new();
@@ -26,9 +31,11 @@ impl WorkerRuntime {
                     state.recovery_turn = true;
                     None
                 };
-                priority.or_else(|| {
+                if let Some(claim) = priority {
+                    Some((claim, false))
+                } else {
                     let after = state.recovery_cursor;
-                    let normal = state
+                    state
                         .shards
                         .iter()
                         .filter(|(s, _)| after.is_none_or(|a| **s > a))
@@ -39,33 +46,38 @@ impl WorkerRuntime {
                                 .filter(|(s, _)| after.is_some_and(|a| **s <= a)),
                         )
                         .find(|(s, _)| !visited.contains(*s))
-                        .map(|(_, claim)| claim.clone());
-                    if let Some(claim) = &normal {
-                        state.recovery_cursor = Some(claim.shard);
-                    }
-                    normal
-                })
+                        .map(|(_, claim)| (claim.clone(), true))
+                }
             };
-            let Some(claim) = claim else {
+            let Some((claim, normal)) = claim else {
                 break;
             };
             if !visited.insert(claim.shard) {
                 continue;
             }
-            if let Err(error) = self.recover_page(&claim, budget).await {
-                failure.get_or_insert(error);
+            match self.recover_page(&claim, budget).await {
+                // Keep both cursors so the next round starts with the first
+                // shard that could not read a page.
+                Ok(RecoveryVisit::Deferred) => break,
+                Ok(RecoveryVisit::Visited) => {}
+                Err(error) => {
+                    failure.get_or_insert(error);
+                }
+            }
+            if normal {
+                self.state()?.recovery_cursor = Some(claim.shard);
             }
         }
         failure.map_or(Ok(()), Err)
     }
 
-    pub(crate) async fn recover_page(
+    async fn recover_page(
         &self,
         claim: &ShardClaim,
         budget: &mut usize,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<RecoveryVisit, RuntimeError> {
         if self.state()?.draining || *budget == 0 {
-            return Ok(());
+            return Ok(RecoveryVisit::Visited);
         }
         let need_page = self
             .state()?
@@ -78,18 +90,25 @@ impl WorkerRuntime {
                 .scans
                 .get(&claim.shard)
                 .and_then(|s| s.next.clone());
-            let page = self
-                .bounded(
-                    self.inbox.enumerate_pending(
-                        claim.shard,
-                        PageRequest {
-                            after,
-                            limit: NonZeroU32::new(self.config.page_size)
-                                .ok_or_else(|| err("page_size"))?,
-                        },
-                    ),
-                )
-                .await?;
+            let page = timeout(
+                self.config.request_timeout,
+                self.inbox.enumerate_pending(
+                    claim.shard,
+                    PageRequest {
+                        after,
+                        limit: NonZeroU32::new(self.config.page_size)
+                            .ok_or_else(|| err("page_size"))?,
+                    },
+                ),
+            )
+            .await
+            .map_err(|_| err("store_outcome_unknown"))?;
+            let page = match page {
+                Err(StoreError::NotApplied { code }) if code == PENDING_SCAN_DEFERRED => {
+                    return Ok(RecoveryVisit::Deferred);
+                }
+                result => result.map_err(store_error)?,
+            };
             self.state()?.scans.insert(
                 claim.shard,
                 Scan {
@@ -137,7 +156,7 @@ impl WorkerRuntime {
                 failure.get_or_insert(error);
             }
         }
-        failure.map_or(Ok(()), Err)
+        failure.map_or(Ok(RecoveryVisit::Visited), Err)
     }
     fn retry_later(
         &self,

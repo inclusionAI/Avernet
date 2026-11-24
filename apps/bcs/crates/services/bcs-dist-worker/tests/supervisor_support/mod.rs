@@ -42,6 +42,17 @@ impl ScanBudgetPort for Budget {
             self.inner.claim(c, l, s)
         }
     }
+    fn claim_log_page(
+        &self,
+        class: ScanClass,
+        limit: NonZeroU32,
+    ) -> Result<Option<NonZeroU32>, StoreError> {
+        if self.reject.load(Ordering::SeqCst) {
+            Ok(None)
+        } else {
+            self.inner.claim_log_page(class, limit)
+        }
+    }
 }
 pub struct Inbox {
     pub inner: Arc<bcs_dist_store::inbox::StoreInboxProducer>,

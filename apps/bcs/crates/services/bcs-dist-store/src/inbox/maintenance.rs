@@ -8,7 +8,9 @@
 use super::{StoreInboxProducer, storage::*};
 use async_trait::async_trait;
 use bcs_dist_model::*;
-use bcs_service_api::port::repo::distributed::{admission::*, budget::ScanClass, common::*};
+use bcs_service_api::port::repo::distributed::{
+    admission::*, budget::ScanClass, common::*, inbox::PENDING_SCAN_DEFERRED,
+};
 use bcs_store_api::zset::{ZSetEntry, ZSetRange};
 use std::ops::Bound;
 
@@ -21,9 +23,6 @@ impl StoreInboxProducer {
         if page.limit.get() > 128 {
             return Err(invalid("page_limit"));
         }
-        if !self.inner.scan_budget.claim(ScanClass::Discovery, page.limit.get(), page.limit.get())? {
-            return Err(StoreError::NotApplied { code: "scan_budget".into() });
-        }
         let after = page
             .after
             .map(|p| {
@@ -32,7 +31,14 @@ impl StoreInboxProducer {
                     .map_err(|_| invalid("pending_cursor"))
             })
             .transpose()?;
+        let deferred = || StoreError::NotApplied { code: PENDING_SCAN_DEFERRED.into() };
+        let _scan_io = self.inner.scan_budget.try_io().ok_or_else(deferred)?;
         let _permit = self.io_permit().await?;
+        let limit = self
+            .inner
+            .scan_budget
+            .claim_log_page(ScanClass::Discovery, page.limit)?
+            .ok_or_else(deferred)?;
         let entries = tokio::time::timeout(
             std::time::Duration::from_millis(100),
             self.inner.zset.range(
@@ -41,7 +47,7 @@ impl StoreInboxProducer {
                     min: Bound::Unbounded,
                     max: Bound::Unbounded,
                     after,
-                    limit: page.limit,
+                    limit,
                 },
             ),
         )
@@ -57,7 +63,7 @@ impl StoreInboxProducer {
             .collect::<Vec<_>>();
         let next = entries
             .last()
-            .filter(|_| entries.len() == page.limit.get() as usize)
+            .filter(|_| entries.len() == limit.get() as usize)
             .map(|entry| {
                 serde_json::to_string(&(entry.score, &entry.member))
                     .map(PageToken)

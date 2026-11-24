@@ -2,6 +2,7 @@
 //! Reservations never wait while holding a processor slot. A permit is released
 //! on drop, including cancellation. Work quotas count attempted authoritative IO.
 use super::common::StoreError;
+use std::num::NonZeroU32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanClass {
     Repair,
@@ -29,4 +30,11 @@ pub trait ScanBudgetPort: Send + Sync {
     /// Atomically reserve both dimensions, or consume neither. Each of the three
     /// classes retains a quarter of the quota; only the fourth quarter is shared.
     fn claim(&self, class: ScanClass, logs: u32, sessions: u32) -> Result<bool, StoreError>;
+    /// Atomically reserve up to `limit` index rows from the log quota. Session
+    /// visits reserve their own quota. `None` means no row can be reserved now.
+    fn claim_log_page(
+        &self,
+        class: ScanClass,
+        limit: NonZeroU32,
+    ) -> Result<Option<NonZeroU32>, StoreError>;
 }

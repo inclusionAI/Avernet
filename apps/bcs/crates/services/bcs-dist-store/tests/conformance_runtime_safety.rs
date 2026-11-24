@@ -11,8 +11,8 @@ use bcs_dist_store::{
 use bcs_service_api::port::repo::distributed::control::*;
 use bcs_test_support::contract::distributed::runtime_safety::*;
 use control_support::Fixture;
-#[test]
-fn conformance_shared_scan_budget() {
+#[tokio::test(start_paused = true)]
+async fn conformance_shared_scan_budget() {
     scan_budget_port_contract_tests(&SharedScanBudget::new(Default::default()).unwrap());
 }
 #[tokio::test]

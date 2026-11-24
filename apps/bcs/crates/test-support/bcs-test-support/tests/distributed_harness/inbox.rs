@@ -81,7 +81,7 @@ async fn consumer_checks_durable_coverage_and_repeat_confirmation() -> ContractR
                 owner().shard,
                 PageRequest {
                     after: None,
-                    limit: NonZeroU32::new(128).unwrap(),
+                    limit: NonZeroU32::new(64).unwrap(),
                 },
             ),
             ok(Page {

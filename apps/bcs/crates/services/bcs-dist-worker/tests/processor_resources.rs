@@ -596,6 +596,21 @@ async fn authoritative_acquisition_respects_the_shared_session_quota() {
     assert!(f.coordination.load(&spec().sid).await.unwrap().is_some());
 }
 
+#[tokio::test(start_paused = true)]
+async fn exhausted_scan_budget_defers_recovery_without_failing_tick() {
+    let f = Fixture::new(Arc::new(FinishingRunner::default())).await;
+    f.warm().await;
+    f.admit("deferred-discovery").await;
+    tokio::time::advance(std::time::Duration::from_secs(1)).await;
+    assert!(f.scan_budget.claim(ScanClass::Discovery, 64, 0).unwrap());
+    f.runtime.tick().await.unwrap();
+    assert!(f.coordination.load(&spec().sid).await.unwrap().is_none());
+
+    tokio::time::advance(std::time::Duration::from_millis(20)).await;
+    f.runtime.tick().await.unwrap();
+    assert!(f.coordination.load(&spec().sid).await.unwrap().is_some());
+}
+
 #[tokio::test]
 async fn output_inline_threshold_does_not_change_the_input_capacity() {
     let f = Fixture::new(Arc::new(FinishingRunner::default())).await;

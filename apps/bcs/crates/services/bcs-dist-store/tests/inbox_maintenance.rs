@@ -1,23 +1,27 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "test assertions")]
 mod common;
 use bcs_dist_model::*;
-use bcs_dist_store::{inbox::*, layout::KeyLayout};
-use bcs_service_api::port::repo::distributed::{admission::*, common::*, inbox::*};
+use bcs_dist_store::{budget::SharedScanBudget, inbox::*, layout::KeyLayout};
+use bcs_service_api::port::repo::distributed::{admission::*, budget::*, common::*, inbox::*};
 use common::*;
-use std::sync::Arc;
+use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetStorePlugin};
+use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
 fn layout() -> KeyLayout {
     KeyLayout::new("test", "maintenance").unwrap()
 }
 
 fn provider(store: Arc<Recorder>, config: InboxProducerConfig) -> StoreInboxProducer {
+    provider_with_budget(store, config, Arc::new(SharedScanBudget::new(Default::default()).unwrap()))
+}
+
+fn provider_with_budget(
+    store: Arc<Recorder>,
+    config: InboxProducerConfig,
+    budget: Arc<SharedScanBudget>,
+) -> StoreInboxProducer {
     StoreInboxProducer::new(
-        Arc::new(
-            bcs_dist_store::budget::SharedScanBudget::new(
-                bcs_dist_store::budget::ScanBudgetConfig::default(),
-            )
-            .unwrap(),
-        ),
+        budget,
         Arc::new(bcs_dist_projection::OutputProjectionService),
         store.clone(),
         store.clone(),
@@ -88,7 +92,7 @@ async fn takeover_enumeration_uses_the_durable_active_index() {
             ShardId(42),
             PageRequest {
                 after: None,
-                limit: std::num::NonZeroU32::new(1).unwrap(),
+                limit: NonZeroU32::new(1).unwrap(),
             },
         )
         .await
@@ -99,7 +103,7 @@ async fn takeover_enumeration_uses_the_durable_active_index() {
             ShardId(42),
             PageRequest {
                 after: first.next,
-                limit: std::num::NonZeroU32::new(1).unwrap(),
+                limit: NonZeroU32::new(1).unwrap(),
             },
         )
         .await
@@ -110,7 +114,7 @@ async fn takeover_enumeration_uses_the_durable_active_index() {
             ShardId(42),
             PageRequest {
                 after: second_page.next,
-                limit: std::num::NonZeroU32::new(1).unwrap(),
+                limit: NonZeroU32::new(1).unwrap(),
             },
         )
         .await
@@ -123,7 +127,7 @@ async fn takeover_enumeration_uses_the_durable_active_index() {
 async fn valid_single_io_profile_can_advance_maintenance() {
     let store = Arc::new(Recorder::default());
     let budget = Arc::new(
-        bcs_dist_store::budget::SharedScanBudget::new(
+        SharedScanBudget::new(
             bcs_dist_store::budget::ScanBudgetConfig {
                 pool_size: 4,
                 io_slots: 1,
@@ -148,4 +152,43 @@ async fn valid_single_io_profile_can_advance_maintenance() {
     .unwrap();
     assert!(p.repair(ShardId(42)).await.unwrap().round_complete);
     assert!(p.discover(ShardId(42)).await.unwrap().round_complete);
+}
+
+#[tokio::test(start_paused = true)]
+async fn takeover_scan_shrinks_to_budget_and_resumes_at_its_cursor() {
+    let store = Arc::new(Recorder::default());
+    let budget = Arc::new(SharedScanBudget::new(Default::default()).unwrap());
+    let p = provider_with_budget(store.clone(), config(), budget.clone());
+    let shard = ShardId(42);
+    let sids = ["s0042.a", "s0042.b", "s0042.c"];
+    store
+        .add(
+            &layout().active(shard),
+            &sids.map(|sid| ZSetEntry { score: 1.0, member: sid.into() }),
+            ZAddMode::Upsert,
+        )
+        .await
+        .unwrap();
+    let slots: Vec<_> = (0..budget.profile().io_slots)
+        .map(|_| budget.try_io().unwrap())
+        .collect();
+    assert!(budget.claim(ScanClass::Discovery, 62, 0).unwrap());
+    let request = |after| PageRequest { after, limit: NonZeroU32::new(128).unwrap() };
+    assert!(matches!(
+        p.enumerate_pending(shard, request(None)).await,
+        Err(StoreError::NotApplied { code }) if code == PENDING_SCAN_DEFERRED
+    ));
+    drop(slots);
+    let first = p.enumerate_pending(shard, request(None)).await.unwrap();
+    assert_eq!(first.items, vec![Sid(sids[0].into()), Sid(sids[1].into())]);
+    let cursor = first.next.expect("a full budget-limited page retains its cursor");
+    assert!(matches!(
+        p.enumerate_pending(shard, request(Some(cursor.clone()))).await,
+        Err(StoreError::NotApplied { code }) if code == PENDING_SCAN_DEFERRED
+    ));
+    assert!(budget.claim(ScanClass::Discovery, 0, 64).unwrap());
+    tokio::time::advance(Duration::from_millis(20)).await;
+    let second = p.enumerate_pending(shard, request(Some(cursor))).await.unwrap();
+    assert_eq!(second.items, vec![Sid(sids[2].into())]);
+    assert!(second.next.is_none());
 }
