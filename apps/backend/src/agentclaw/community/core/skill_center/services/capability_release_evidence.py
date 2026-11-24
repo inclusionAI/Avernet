@@ -4,7 +4,10 @@ from collections.abc import Sequence
 from uuid import uuid4
 
 from agentclaw.community.core.devices.repository.record import capability_release_property
-from agentclaw.community.core.devices.services.device_context import RuntimeBindingTarget
+from agentclaw.community.core.devices.services.device_context import (
+    RuntimeBindingChangedError,
+    RuntimeBindingTarget,
+)
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.skill_center.capability_projection_reconcile import CapabilityProjectionRetry
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
@@ -13,8 +16,6 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-
-from .capability_delivery_guard import CapabilityDeliveryUnavailable
 
 
 def component_converged(result: RuntimeProjectionResult | None, name: str) -> bool:
@@ -55,7 +56,7 @@ class CapabilityReleaseEvidence:
 
     def __init__(self, bindings: DeviceBindingRepository, target: RuntimeBindingTarget) -> None:
         if target.binding_id is None or target.device_id is None:
-            raise CapabilityDeliveryUnavailable()
+            raise RuntimeBindingChangedError("Bot Runtime binding is unavailable for release evidence")
         self._bindings = bindings
         self._binding_id = target.binding_id
         self._device_id = target.device_id
@@ -72,7 +73,7 @@ class CapabilityReleaseEvidence:
     def load(self) -> CapabilityProjectionRetry:
         binding = self._bindings.get_by_id(self._binding_id)
         if binding is None or binding.device_id != self._device_id:
-            raise CapabilityDeliveryUnavailable()
+            raise RuntimeBindingChangedError("Bot Runtime binding is unavailable for release evidence")
         self._snapshot = binding.device_props.get(self._key)
         return self._decode(self._snapshot)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import replace
 
 from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeServiceProtocol
@@ -250,7 +251,6 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         self, plan: ResolvedCapabilityPlan, result: RuntimeProjectionResult,
     ) -> RuntimeProjectionResult:
         try:
-            # Keep the worker's delivery lease heartbeat live during Passport I/O.
             await asyncio.to_thread(self._apply_passport_projection, plan=plan)
         except Exception:
             logger.exception(
@@ -625,27 +625,32 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 len(plan.effective_cli_items),
                 0,
             )
-            passport = self._passport.query_agent_passport(plan.bot_id, stable_resource_owner_id(plan.bot))
+            employee_service = None
             if (plan.bot.get("ext") or {}).get("digital_employee"):
                 if self._employee_service_provider is None:
                     raise ValueError("Digital employee governance is not wired")
-                mcp_items = self._employee_service_provider().prepare_mcp_change(
-                    plan.bot, mcp_items, extract_passport_mcp_items(passport), plan.owner_id
+                employee_service = self._employee_service_provider()
+            guard = employee_service.serialize_passport_scope(plan.bot) if employee_service else nullcontext()
+            with guard:
+                passport = self._passport.query_agent_passport(plan.bot_id, stable_resource_owner_id(plan.bot))
+                if employee_service is not None:
+                    mcp_items = employee_service.prepare_mcp_change(
+                        plan.bot, mcp_items, extract_passport_mcp_items(passport), plan.owner_id
+                    )
+                resource_scope = build_passport_resource_scope(
+                    passport,
+                    desired_mcp_items=mcp_items,
+                    mcp_identity_modes=plan.identity_modes,
+                    additional_cli_items=plan.effective_cli_items,
                 )
-            resource_scope = build_passport_resource_scope(
-                passport,
-                desired_mcp_items=mcp_items,
-                mcp_identity_modes=plan.identity_modes,
-                additional_cli_items=plan.effective_cli_items,
-            )
-            stage = "update"
-            verify_passport_write()
-            self._passport.update_passport(
-                bot_id=plan.bot_id,
-                user_id=stable_resource_owner_id(plan.bot),
-                engine_type=plan.engine,
-                resource_scope=resource_scope,
-            )
+                stage = "update"
+                verify_passport_write()
+                self._passport.update_passport(
+                    bot_id=plan.bot_id,
+                    user_id=stable_resource_owner_id(plan.bot),
+                    engine_type=plan.engine,
+                    resource_scope=resource_scope,
+                )
             logger.info(
                 "agentpass_runtime_scope_update_succeeded bot_id=%s engine_type=%s "
                 "branch=runtime_projection stage=%s status=succeeded mcp_count=%s cli_count=%s duration_ms=%s",

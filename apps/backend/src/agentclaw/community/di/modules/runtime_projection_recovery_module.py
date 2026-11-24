@@ -28,9 +28,6 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
-from agentclaw.community.core.skill_center.services.capability_delivery_guard import (
-    CapabilityDeliveryGuard,
-)
 from agentclaw.community.core.skill_center.services.capability_projection_reconciler import (
     CapabilityProjectionReconciler,
 )
@@ -39,7 +36,6 @@ from agentclaw.community.core.skill_center.services.recovering_bot_runtime_proje
 )
 from agentclaw.community.di.manifest_apply_config import ManifestApplyConfig
 from agentclaw.community.di.modules.config_module import read_user_config
-from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
@@ -75,14 +71,12 @@ class RuntimeProjectionRecoveryModule(Module):
     def capability_projection_reconciler(
         self,
         projector: BotRuntimeProjector,
-        cache: CachePlugin,
         bots: BotRepository,
         bindings: DeviceBindingRepository,
         config: ManifestApplyConfig,
     ) -> CapabilityProjectionReconciler:
         return CapabilityProjectionReconciler(
             projector=projector,
-            guard=CapabilityDeliveryGuard(cache),
             bots=bots,
             bindings=bindings,
             defer_enabled=config.defer_capability_projection,
