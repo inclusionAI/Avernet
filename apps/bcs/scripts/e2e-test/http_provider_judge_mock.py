@@ -25,6 +25,11 @@ class MockState:
         # the create/accept event notifications come in on the work-order path.
         self.friend_auth_sync_requests: list[dict[str, Any]] = []
         self.work_order_event_requests: list[dict[str, Any]] = []
+        # Friend-request cancellation invalidations ("pending approval"
+        # work order withdrawn by the applicant). The first call succeeds so
+        # the adapter's success branch is exercised; later calls are rejected
+        # so the best-effort retry/failure branch is covered too.
+        self.work_order_cancel_requests: list[dict[str, Any]] = []
         self.judge_started = threading.Event()
         self.judge_release = threading.Event()
         self.judge_outcomes: list[str] | None = None
@@ -36,6 +41,7 @@ class MockState:
             self.event_webhook_requests.clear()
             self.friend_auth_sync_requests.clear()
             self.work_order_event_requests.clear()
+            self.work_order_cancel_requests.clear()
             self.judge_outcomes = None
         self.judge_started.clear()
         self.judge_release.clear()
@@ -75,6 +81,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/control/event-webhook/requests":
             with STATE.lock:
                 requests = list(STATE.event_webhook_requests)
+            self.send_json(200, {"requests": requests})
+            return
+        if self.path == "/control/work-order-cancel/requests":
+            with STATE.lock:
+                requests = list(STATE.work_order_cancel_requests)
             self.send_json(200, {"requests": requests})
             return
         if self.path == "/control/friend-auth-sync/requests":
@@ -200,6 +211,24 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 )
             self.send_json(200, {"ok": True})
+            return
+        if self.path == "/api/v1/work-orders/events/cancel":
+            # BCS invalidates the owner's pending friend-approval work order
+            # when the applicant withdraws the request. First call: accepted.
+            # Later calls: rejected so BCS's best-effort retry path runs.
+            body = self.read_json()
+            with STATE.lock:
+                STATE.work_order_cancel_requests.append(
+                    {
+                        "principal": self.headers.get("x-avernet-principal"),
+                        "body": body,
+                    }
+                )
+                reject = len(STATE.work_order_cancel_requests) > 1
+            if reject:
+                self.send_json(409, {"error": "already_cancelled"})
+            else:
+                self.send_json(200, {"ok": True})
             return
         if self.path == "/api/internal/bot-friend-auth/sync":
             # The TC friend grant sync point: BCS arrives with the inbound

@@ -146,6 +146,11 @@ impl DeleteFriendConnectionQuery {
 pub fn cancel_command(
     caller: AuthenticatedCaller,
     request_id: String,
+    request_auth: Option<RequestAuthHeaders>,
 ) -> CancelFriendConnectionRequest {
-    CancelFriendConnectionRequest { caller, request_id }
+    CancelFriendConnectionRequest {
+        caller,
+        request_id,
+        request_auth,
+    }
 }

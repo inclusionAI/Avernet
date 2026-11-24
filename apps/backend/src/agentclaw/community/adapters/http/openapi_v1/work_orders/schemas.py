@@ -41,6 +41,7 @@ class WorkOrderStatus(_DocumentedEnum):
     PROCESSING = "PROCESSING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"
     FAILED = "FAILED"
 
     __descriptions__ = {
@@ -48,6 +49,7 @@ class WorkOrderStatus(_DocumentedEnum):
         "PROCESSING": "An automatic approval is being processed.",
         "APPROVED": "Approved by an authorized reviewer or the Bot's auto-approval policy.",
         "REJECTED": "Rejected by an authorized reviewer.",
+        "CANCELLED": "Withdrawn by the applicant before a reviewer decided.",
         "FAILED": "Automatic approval processing failed.",
     }
 
@@ -179,6 +181,35 @@ class WorkOrderEventCreated(BaseModel):
     )
     status: WorkOrderEventStatus = Field(
         description="Resulting state of the accepted event."
+    )
+
+
+class CancelWorkOrderEventRequest(BaseModel):
+    """Withdraw a pending approval whose business request was cancelled."""
+
+    biz_type: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Business type whose request was withdrawn.",
+    )
+    biz_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="Identifier of the withdrawn business request.",
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=512,
+        description="Why the applicant withdrew the request.",
+    )
+
+
+class WorkOrderEventCancelled(BaseModel):
+    """Result of withdrawing pending work orders for one business request."""
+
+    cancelled_count: int = Field(
+        ge=0,
+        description="Number of pending work orders moved to the cancelled state.",
     )
 
 

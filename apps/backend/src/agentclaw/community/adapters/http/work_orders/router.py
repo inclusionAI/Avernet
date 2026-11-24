@@ -11,7 +11,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
 )
 from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
+    CancelWorkOrderEventRequest,
     CreateWorkOrderEventRequest,
+    WorkOrderEventCancelled,
     WorkOrderEventCreated,
 )
 from agentclaw.community.adapters.http.work_orders.converter import (
@@ -30,6 +32,28 @@ _CALLBACK_HEADER_NAMES = {
 }
 
 router = APIRouter(prefix="/api/v1/work-orders", tags=["work-orders"])
+
+
+@router.post(
+    "/events/cancel",
+    status_code=201,
+    response_model=Envelope[WorkOrderEventCancelled],
+)
+@envelope_errors
+async def cancel_work_order_event_http(
+    body: CancelWorkOrderEventRequest,
+    request: Request,
+    caller: VerifiedCaller = Depends(require_user_caller),
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[WorkOrderEventCancelled]:
+    """Withdraw pending work orders for a business request the caller owns."""
+    cancelled_count = service.cancel_pending_friend_event(
+        biz_type=body.biz_type,
+        biz_id=body.biz_id,
+        actor_id=caller.user_id,
+        reason=body.reason,
+    )
+    return created(WorkOrderEventCancelled(cancelled_count=cancelled_count), request)
 
 
 @router.post(

@@ -59,7 +59,7 @@ impl ConnectService for NoopConnectService {
     }
     async fn approve(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
     async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { Ok(()) }
-    async fn cancel(&self, _: &str) -> ServiceResult<()> { Ok(()) }
+    async fn cancel(&self, _: &str, _request_auth: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<()> { Ok(()) }
     async fn get_request(&self, _: &str) -> ServiceResult<PermissionRequest> {
         Err(bcs_service_api::ServiceError::FriendRequestNotFound("noop".to_string()))
     }

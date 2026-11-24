@@ -641,7 +641,11 @@ use super::*;
             Ok(())
         }
 
-        async fn cancel(&self, _request_id: &str) -> ServiceResult<()> {
+        async fn cancel(
+            &self,
+            _request_id: &str,
+            _request_auth: Option<RequestAuthHeaders>,
+        ) -> ServiceResult<()> {
             unreachable!("facade auth forwarding never cancels")
         }
 

@@ -152,6 +152,26 @@ class WorkOrderRepositoryProtocol(Protocol):
         env: str,
         source_event_type: str | None = None,
     ) -> WorkOrderReviewResult: ...
+
+    @abstractmethod
+    def cancel_pending_by_biz(
+        self,
+        *,
+        biz_type: str,
+        biz_id: str,
+        applicant_user_id: str,
+        reason: str,
+        env: str,
+    ) -> int:
+        """Withdraw pending MANUAL orders for one business object.
+
+        Returns how many orders were cancelled. Raises
+        ``WorkOrderAccessDeniedError`` when a matching pending order belongs to
+        another applicant. Already-terminal or missing orders are a no-op so
+        the caller can retry an idempotent cancel.
+        """
+        ...
+
     @abstractmethod
     def create_space_join_request(
         self,

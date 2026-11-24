@@ -22,6 +22,10 @@ class WorkOrderStatus(StrEnum):
     PROCESSING = "PROCESSING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    # Terminal state for a pending approval whose underlying business request
+    # was withdrawn by the applicant (for example a cancelled friend request).
+    # It is not a reviewer decision, so it must stay distinct from REJECTED.
+    CANCELLED = "CANCELLED"
     FAILED = "FAILED"
 
 
