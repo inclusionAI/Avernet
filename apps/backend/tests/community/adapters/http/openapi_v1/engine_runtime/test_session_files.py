@@ -289,6 +289,25 @@ def test_owner_can_list_one_verified_friends_session(client, friendships, expert
     assert owned[1][:4] == ("friend-1", BOT, OWNER, SESSION_ID)
 
 
+def test_owner_caller_files_use_the_authenticated_subject_instance(
+    client, relay, resources, friendships, expert
+):
+    relay.set_bot_type("service")
+    relay.set_call_type("caller")
+
+    data = ok(client.get(_base(), params={
+        "owner_id": OWNER, "f_user_id": OWNER, "stage": "online",
+    }))
+
+    assert data["files"][0]["resource_id"] == "sr_1"
+    assert friendships.calls == []
+    assert [call[0] for call in expert.calls] == [
+        "add_chat_bot", "get_owned_chat_session",
+    ]
+    assert resources.calls[-1][1]["actor_user_id"] == OWNER
+    assert resources.calls[-1][1]["session_user_id"] == OWNER
+
+
 @pytest.mark.parametrize("selector", [None, "online"])
 def test_friend_service_files_use_resolved_online_stage(client, friendships, expert, resources, selector):
     from unittest.mock import Mock
