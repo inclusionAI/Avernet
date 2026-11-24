@@ -565,7 +565,7 @@ def status_to_dto(result: ContextCollabStatusProjection) -> ContextCollabStatusR
                 status=current_event["status"],
                 summary=current_event["summary"],
                 content=current_event["content"],
-                occurred_at=current_event["created_at"],
+                occurred_at=current_event["occurred_at"],
             )
             if current_event is not None
             else None

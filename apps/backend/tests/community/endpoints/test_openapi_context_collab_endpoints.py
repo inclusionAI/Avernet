@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import time
-from datetime import datetime, timezone
 
 import jwt
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
@@ -246,7 +245,7 @@ def _seed_get_happy(world) -> None:
                 "status": "active",
                 "summary": None,
                 "content": "上下文做一下补充xxx",
-                "created_at": datetime(2026, 11, 15, tzinfo=timezone.utc),
+                "occurred_at": datetime(2026, 11, 15, tzinfo=timezone.utc),
             },
             task_progress=TaskProgressProjectionDTO(
                 total_events=2,
