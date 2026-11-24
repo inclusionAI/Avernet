@@ -15,10 +15,14 @@ from search_core.application.search import CatalogSearchApplication
 
 
 @pytest.mark.asyncio
-async def test_empty_after_final_eligibility_and_missing_card():
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [(1, ["valid"]), (5, ["valid", "later"]), (20, ["valid", "later"])],
+)
+async def test_empty_after_final_eligibility_and_missing_card(limit, expected):
     valid = {"missing", "retired", "valid", "later"}
     filters = {"labels.visibility": ("public",)}
-    req = SearchCommand("miss", 5, "search", filters)
+    req = SearchCommand("miss", limit, "search", filters)
     identity = VerifiedIdentity("test")
     seen = []
 
@@ -60,7 +64,7 @@ async def test_empty_after_final_eligibility_and_missing_card():
     ).items
     result = await service.execute(req, identity)
     assert seen == [(filters, 5)]
-    assert [i.item_id for i in result.items] == ["valid"]
+    assert [i.item_id for i in result.items] == expected
     assert result.reasons == ("card_metadata_missing", "default_candidates")
 
 
