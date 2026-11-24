@@ -34,6 +34,9 @@ const BotWorkshopDetailPage: React.FC = () => {
     detail.bot.serviceMode === 'service' &&
     (runtimeStage === 'verify' || isServiceVerification(detail.bot));
   const editable = requestedEditable && !verifying;
+  // 查看模式下预发(prestable)与运行态保持一致的只读体验:锁定横幅与整页禁用
+  // 仅在请求编辑时生效;查看模式由 editable=false 自然只读,可浏览但不能改。
+  const panelLocked = verifying && requestedEditable;
   // Editing a service Bot must execute against its draft configuration. Keep
   // explicit verification and ordinary online views on their requested stages.
   const debugRuntimeStage = verifying
@@ -139,7 +142,7 @@ const BotWorkshopDetailPage: React.FC = () => {
           }}
           onReload={() => void detail.retry()}
         />
-        {isOwner && !verifying && bot.expertOriginName && <ExpertCreationDetails key={bot.id} botId={bot.id} />}
+        {isOwner && !panelLocked && bot.expertOriginName && <ExpertCreationDetails key={bot.id} botId={bot.id} />}
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <DetailNavigation
             hidden={debugFullscreen}
@@ -165,16 +168,16 @@ const BotWorkshopDetailPage: React.FC = () => {
               debugFullscreen && 'hidden',
             )}
           >
-            {verifying ? (
+            {panelLocked ? (
               <p className="border-b border-divider bg-muted px-6 py-3 text-sm text-muted-foreground">
                 预发验证中，配置已锁定；请在右侧对话区验证 Bot。
               </p>
             ) : null}
             <fieldset
-              disabled={verifying}
+              disabled={panelLocked}
               // h-full 定高:Chromium 下 fieldset 内的百分比高度(min-h-full)不生效,
               // 不给 fieldset 定高时面板内容不到底、分割线接不了页底(headless 实测 fieldset 内 min-height:100% 解析为 auto)。
-              className={cn('h-full min-w-0 border-0 p-0', verifying && 'pointer-events-none opacity-50')}
+              className={cn('h-full min-w-0 border-0 p-0', panelLocked && 'pointer-events-none opacity-50')}
             >
               <DetailPanelContent
                 authenticatedUserId={requestIdentity.ready ? requestIdentity.userId : undefined}
