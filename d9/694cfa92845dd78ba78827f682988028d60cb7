@@ -1,0 +1,56 @@
+apps/bcs/crates/service-api/bcs-config-api/src/a2a_test_user.rs
+  s_405f6041118eb1::t_ef635831cb8e13 1,5,8,11-21,36
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_names.rs
+  s_405f6041118eb1::t_ef635831cb8e13 52-53,70,74,77-81,88,91
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_management_errors.rs
+  s_405f6041118eb1::t_640d6f73235dc7 596,674,676-678,680-682,685-688,693
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery/test_user_contract.rs
+  s_405f6041118eb1::t_640d6f73235dc7 5,8-9,16-17,23-24,28,44-47,51-56
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/runner.rs
+  s_405f6041118eb1::t_24494891118a4f 7-8
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  s_405f6041118eb1::t_3935953a1a7e6c 207-211
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/dispatch.rs
+  s_405f6041118eb1::t_87b700b2bc954f 3
+  s_405f6041118eb1::t_ef635831cb8e13 65-67,74-76,249
+apps/bcs/crates/adapters/http/bcs-http/src/state.rs
+  s_405f6041118eb1::t_ef635831cb8e13 492,772
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued.rs
+  s_405f6041118eb1::t_bd8dc91440e8db 72
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued_runtime.rs
+  s_405f6041118eb1::t_bd8dc91440e8db 11,51
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client/tests.rs
+  s_405f6041118eb1::t_3935953a1a7e6c 110-116,135-167
+  s_405f6041118eb1::t_1f5d4f345d0cdb 168-169
+apps/bcs/scripts/e2e-test/a2a_test_user_story.py
+  s_405f6041118eb1::t_24494891118a4f 88,98,118,121,155,159,174-175,199
+apps/bcs/crates/bootstrap/bcs/src/http_adapter.rs
+  s_405f6041118eb1::t_ef635831cb8e13 151
+apps/bcs/crates/bootstrap/bcs/tests/a2a_http_identity/plugin.rs
+  s_405f6041118eb1::t_24494891118a4f 22-24
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs
+  s_405f6041118eb1::t_bd8dc91440e8db 12,74-75,78,88,121,125-127,194,203-205
+  s_405f6041118eb1::t_640d6f73235dc7 72
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client.rs
+  s_405f6041118eb1::t_bd8dc91440e8db 28,33,45-49,65-68,70-71
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/mod.rs
+  s_405f6041118eb1::t_ef635831cb8e13 306
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_direct_a2a.rs
+  s_405f6041118eb1::t_dd0552cd1bb44e 121,137,146-150,154-158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d9694cfa92845dd78ba78827f682988028d60cb7",
+  "prompts": {},
+  "sessions": {
+    "s_405f6041118eb1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4a4-3df3-7910-8f9f-0ef7f4920a3e",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
