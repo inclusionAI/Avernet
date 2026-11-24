@@ -9,6 +9,9 @@
   application enforces Provider/resource authorization. Responses use the V1
   `code/message/data/request_id` envelope and no-store headers; creation Location
   stays under this prefix. Framework/path/body/method errors are also enveloped.
+  AgentCard protocol/authentication errors explain the required method, JSON format,
+  size limit or Provider-admin credential. Internal failures return safe support
+  guidance with request_id, not raw exception details; shared non-A2A errors are unchanged.
   Card payloads preserve unknown fields. Chat and run controls remain exclusively
   on the legacy `/a2a/...` routes.
 

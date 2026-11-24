@@ -14,6 +14,11 @@ pub struct ErrorResponse {
 }
 
 impl ErrorResponse {
+    pub(crate) fn with_public_message(mut self, message: &'static str) -> Self {
+        self.message = message.to_string();
+        self
+    }
+
     pub fn unauthenticated(request_id: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,

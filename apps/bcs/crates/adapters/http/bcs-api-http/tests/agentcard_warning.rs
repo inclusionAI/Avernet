@@ -121,3 +121,26 @@ async fn diagnostics_do_not_read_oversized_bodies_before_protocol_or_credential_
         assert_eq!(response.status(),status);
     }
 }
+
+#[tokio::test]
+async fn invalid_card_response_preserves_safe_validation_location_and_reason() {
+    for (field, value, expected) in [
+        ("name", json!(" "), "agent_card.name: name must contain 2 to 64 characters"),
+        ("description", json!(""), "agent_card.description: a non-empty string is required"),
+        ("supportedInterfaces", json!([]), "agent_card.supportedInterfaces: a non-empty array is required"),
+    ] {
+        let mut invalid = card("Agent");
+        invalid[field] = value;
+        let request = Request::builder().method("POST").uri("/api/v1/collaboration/a2a/agents")
+            .header("content-type", "application/json").header("authorization", "Bearer private-credential")
+            .header("x-request-id", "request-validation")
+            .body(Body::from(json!({"provider_bot_ref":"demo","agent_card":invalid}).to_string())).unwrap();
+        let response = app().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body: Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 16_384).await.unwrap()).unwrap();
+        assert_eq!(body["data"]["error_code"], "INVALID_CARD");
+        assert_eq!(body["request_id"], "request-validation");
+        assert!(body["message"].as_str().unwrap().contains(expected), "{body}");
+        assert!(!body.to_string().contains("private-credential") && !body.to_string().contains("nested-value"));
+    }
+}
