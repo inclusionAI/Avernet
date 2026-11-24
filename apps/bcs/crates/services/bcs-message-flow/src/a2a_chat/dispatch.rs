@@ -1,5 +1,6 @@
 //! Direct chat validation and legacy transport dispatch.
 use super::*;
+use bcs_service_api::BotDeliveryTarget;
 
 impl A2aChat {
     pub(super) async fn chat_with_queue_mode(&self, cmd: A2aChatCommand, selected_queue_mode: Option<bool>) -> ServiceResult<A2aChatOutcome> {
@@ -61,16 +62,18 @@ impl A2aChat {
                 other => ServiceError::InternalError(other.to_string()),
             })?;
         }
-        if cmd.async_mode && match selected_queue_mode { Some(queued) => queued, None => self.queue_enabled(&cmd.target_bot_id).await } {
+        if cmd.a2a_test_user.is_none() && cmd.async_mode
+            && match selected_queue_mode { Some(queued) => queued, None => self.queue_enabled(&cmd.target_bot_id).await }
+        {
             return self.admit_direct(&cmd, &from_bot_id, &run_id, &session_key, expires_at_ms).await;
-        }
-        if cmd.a2a_test_user.is_some() {
-            return Err(ServiceError::Conflict("A2A test user selection requires queued direct chat".into()));
         }
         self.guard_legacy(&cmd.target_bot_id, &session_key).await?;
         let delivery_target = bcs_observability::observe_result("chat.delivery.resolve", self
             .registry
             .resolve_delivery_target(&cmd.target_bot_id)).await?;
+        if cmd.a2a_test_user.is_some() && !matches!(delivery_target, BotDeliveryTarget::A2a { .. }) {
+            return Err(ServiceError::Forbidden("A2A test user requires an A2A target".into()));
+        }
         let target_is_gateway = delivery_target.is_gateway();
         if !bcs_observability::observe_value("chat.delivery.available", self.bot_delivery.is_available(&delivery_target)).await {
             self.emit_run_lifecycle(
@@ -243,7 +246,7 @@ impl A2aChat {
         let delivery = match bcs_observability::observe_result("chat.delivery.send", self
             .bot_delivery
             .deliver(BotDeliveryCommand {
-                a2a_test_user: None,
+                a2a_test_user: cmd.a2a_test_user,
                 target: delivery_target,
                 run_id: run_id.clone(),
                 frame,

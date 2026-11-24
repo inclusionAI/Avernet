@@ -204,12 +204,11 @@ The run freezes either Provider Bearer credential kind or explicit anonymous
 mode. Anonymous HTTP/gRPC clients do not look up or transmit Provider credentials.
 Authentication errors never switch a run to anonymous or change its binding.
 
-Pre-release named chat can carry a configured fixture selection on a queued
-direct Send. The selection contains references only. The adapter validates the
-binding, caller selection, stable target and full HTTPS endpoint before adding
-a sensitive header to the initial JSON-RPC streaming client. Follow-up Task
-operations use the ordinary client. These fixture references do not define an
-application user identity contract.
+Pre-release named chat can carry a request-scoped test `user_id`. The adapter
+checks the caller, stable target, full HTTPS endpoint, and JSON-RPC streaming
+binding. The initial Send uses a sensitive user header and requires application
+identity on a Card without a Bearer scheme. The user ID is kept in memory for
+the submission. Follow-up Task operations use the ordinary client.
 
 ## JSON-RPC 1.0 binding
 
