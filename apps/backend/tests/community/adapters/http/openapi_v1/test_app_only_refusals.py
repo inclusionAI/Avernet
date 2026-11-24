@@ -93,8 +93,8 @@ def _token(*, with_user: bool) -> str:
     )
 
 
-@pytest.fixture
-def client():
+@pytest.fixture(scope="module")
+def refusal_app() -> FastAPI:
     """The whole public surface, with no services bound.
 
     Nothing needs binding: every request in this file is refused *before* a
@@ -108,7 +108,17 @@ def client():
     app.add_middleware(AvernetTenantMiddleware)
     app.include_router(public_router())
     app.add_exception_handler(Exception, _unhandled_exception_handler)
-    return TestClient(app, raise_server_exceptions=False)
+    return app
+
+
+@pytest.fixture
+def client(refusal_app):
+    # Share the statically mounted routes, not client state or signing setup.
+    test_client = TestClient(refusal_app, raise_server_exceptions=False)
+    try:
+        yield test_client
+    finally:
+        test_client.close()
 
 
 def _refused_operations():
