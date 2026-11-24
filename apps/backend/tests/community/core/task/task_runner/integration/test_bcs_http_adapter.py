@@ -349,3 +349,35 @@ def test_get_chat_run_long_polls_with_bot_identity():
         caller_bearer="drv-session-token",
     ))
     assert result["state"] == "completed"
+
+
+def test_query_deliveries_reuses_participant_identity_and_existing_route():
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/openapi/v1/collaboration/sessions/s1/message-deliveries/query"
+        assert request.headers["Authorization"] == "Bearer participant"
+        assert request.headers["X-ECB-Token"] == "drv"
+        assert json.loads(request.content) == {"message_ids": ["source"]}
+        return httpx.Response(200, json=[{"message_id": "source", "status": "failed"}])
+    rows = _run(_adapter(handler).query_message_deliveries("s1", message_ids=["source"], caller_bearer="participant"))
+    assert rows[0]["status"] == "failed"
+
+
+@pytest.mark.parametrize("status", [401, 403, 503])
+def test_delivery_query_denial_or_outage_is_not_a_failed_delivery(status):
+    with pytest.raises(BcsClientError):
+        _run(_adapter(lambda request: httpx.Response(status)).query_message_deliveries("s1", message_ids=["source"]))
+
+
+@pytest.mark.parametrize("body", [{}, {"code": 0}, [None]])
+def test_delivery_query_rejects_malformed_success(body):
+    with pytest.raises(BcsClientError):
+        _run(_adapter(lambda request: httpx.Response(200, json=body)).query_message_deliveries("s1", message_ids=["source"]))
+
+
+def test_history_includes_pending_admissions_when_requested():
+    def handler(request):
+        assert request.url.params["include_pending"] == "true"
+        assert request.headers["Authorization"] == "Bearer participant"
+        return httpx.Response(200, json=[])
+    assert _run(_adapter(handler).get_session_messages("s1", include_pending=True, caller_bearer="participant")) == []

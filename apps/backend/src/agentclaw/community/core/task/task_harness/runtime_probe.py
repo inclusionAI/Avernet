@@ -26,6 +26,7 @@ RuntimeLivenessState = Literal[
     "terminal_failed",
     "unknown",
     "probe_unavailable",
+    "activity_unknown",
 ]
 
 
@@ -33,13 +34,14 @@ RuntimeLivenessState = Literal[
 class RuntimeProbeResult:
     """One liveness observation and the evidence used to derive it.
 
-    ``heartbeat_cursor`` is a stable digest of runtime state/message facts. It
-    does not need to be globally meaningful; callers only compare consecutive
-    observations to determine whether the runtime showed new activity.
+    ``heartbeat_cursor`` carries an activity run identity and sequence for Bot
+    sessions, or a semantic digest for legacy run/group probes. New generations
+    reset the observation baseline instead of counting as execution progress.
     """
 
     state: RuntimeLivenessState
     progressed: bool = False
+    baseline_reset: bool = False
     heartbeat_cursor: str | None = None
     source: str | None = None
     status: str | None = None
@@ -135,7 +137,7 @@ def _message_sort_key(entry: tuple[int, dict[str, Any]]) -> tuple[Any, ...]:
     source = ""
     for key in (
         "seq", "gmt_seq", "version", "updated_at", "gmt_modified",
-        "created_at", "gmt_create", "message_id", "id",
+        "timestamp", "created_at", "gmt_create", "message_id", "id",
     ):
         value = _message_order_value(message.get(key))
         # Prefer the highest independently comparable field. Multiple equal
@@ -310,21 +312,19 @@ class TaskRuntimeLivenessProbe:
         if group_id:
             return await self._probe_group(
                 node=node,
-                run_id=run_id,
+                run_id=None if props.get("relay_harness_resume_message_id") else run_id,
                 group_id=group_id,
                 session_id=session_id,
                 previous_cursor=previous_cursor,
             )
+        if session_id:
+            return await self._probe_bot_runtime(
+                session_id=session_id, previous_cursor=previous_cursor,
+                bot_id=bot_id, lifecycle_stage=lifecycle_stage,
+            )
         if run_id:
             return await self._probe_bot_run(
                 run_id=run_id,
-                session_id=session_id,
-                previous_cursor=previous_cursor,
-                bot_id=bot_id,
-                lifecycle_stage=lifecycle_stage,
-            )
-        if session_id:
-            return await self._probe_session_messages(
                 session_id=session_id,
                 previous_cursor=previous_cursor,
                 bot_id=bot_id,
@@ -336,55 +336,56 @@ class TaskRuntimeLivenessProbe:
             detail={"reason": "no_dispatch_handle"},
         )
 
-    async def _probe_session_messages(
-        self,
-        *,
-        session_id: str,
-        previous_cursor: str | None,
-        bot_id: str | None,
-        lifecycle_stage: str | None,
+    async def _probe_bot_runtime(
+        self, *, session_id: str, previous_cursor: str | None,
+        bot_id: str | None, lifecycle_stage: str | None,
     ) -> RuntimeProbeResult:
-        """Probe a root execution conversation when only a session id exists.
-
-        The task node remains RUNNING, so message growth is the liveness
-        signal. No run handle is inferred and no conversation is created.
-        """
-        if self._bot is None:
-            return RuntimeProbeResult(
-                state="unknown",
-                source="openapi_bot.session",
-                detail={"reason": "port_missing"},
-            )
+        source = "openapi_bot.runtime"
         try:
-            messages = await self._bot.get_session_messages(
-                session_id,
-                limit=20,
-                bot_id=bot_id,
-                lifecycle_stage=lifecycle_stage,
+            if self._bot is None:
+                raise RuntimeError("Bot port is not configured")
+            observation = await self._bot.get_session_runtime_status(
+                session_id, bot_id=bot_id, lifecycle_stage=lifecycle_stage,
             )
-        except Exception as exc:  # noqa: BLE001
-            return self._unavailable(
-                source="openapi_bot.session",
-                error=exc,
-                detail={
-                    "session_id": session_id,
-                    "bot_id_missing": not bot_id,
-                    "lifecycle_stage": lifecycle_stage,
-                },
+        except Exception as exc:  # An unreadable activity path is not a dead Bot.
+            return RuntimeProbeResult(
+                state="activity_unknown", source=source,
+                error=f"{type(exc).__name__}: {exc}"[:500],
+                detail={"reason": "activity_query_failed"},
             )
-        cursor = _join_cursors(
-            {"session_id": session_id},
-            _last_message_cursor(messages),
+        if not observation.found:
+            return RuntimeProbeResult(
+                state="activity_unknown", source=source,
+                detail={"reason": observation.reason},
+            )
+        assert observation.last_event_seq is not None
+        assert observation.state is not None
+        identity = [observation.run_id, observation.started_at]
+        cursor = "runtime:" + json.dumps(
+            [identity, observation.last_event_seq], separators=(",", ":"),
         )
-        return self._active_result(
-            source="openapi_bot.session",
-            status="active",
-            cursor=cursor,
-            previous_cursor=previous_cursor,
-            detail={
-                "session_id": session_id,
-                "lifecycle_stage": lifecycle_stage,
-            },
+        previous = None
+        if previous_cursor and previous_cursor.startswith("runtime:"):
+            try:
+                previous = json.loads(previous_cursor[len("runtime:"):])
+            except (ValueError, TypeError):
+                pass
+        same_run = (
+            isinstance(previous, list) and len(previous) == 2
+            and previous[0] == identity and type(previous[1]) is int
+        )
+        baseline_reset = not same_run or observation.last_event_seq < previous[1]
+        progressed = same_run and observation.last_event_seq > previous[1]
+        states: dict[str, RuntimeLivenessState] = {
+            "starting": "active", "running": "active", "final": "terminal_success",
+            "error": "terminal_failed", "aborted": "terminal_failed",
+        }
+        return RuntimeProbeResult(
+            state=states[observation.state], progressed=progressed, baseline_reset=baseline_reset,
+            heartbeat_cursor=cursor, source=source, status=observation.state,
+            detail={"engine_run_id": observation.run_id,
+                    "last_event_seq": observation.last_event_seq,
+                    "lifecycle_stage": lifecycle_stage},
         )
 
     def _active_result(
@@ -562,14 +563,15 @@ class TaskRuntimeLivenessProbe:
         group_status = _normalized_status((group or {}).get("status"))
         group_state = _classify_status(group_status)
         session_state = _classify_status(session_status)
-        if group_state == "terminal_failed" or session_state == "terminal_failed":
+        managed = (group or {}).get("group_strategy") == "manager_worker"
+        if not managed and (group_state == "terminal_failed" or session_state == "terminal_failed"):
             return RuntimeProbeResult(
                 state="terminal_failed",
                 source="bcs.group",
                 status=group_status or session_status,
                 detail={"group_id": group_id, "run_error": run_error},
             )
-        if group_state == "terminal_success" or session_state == "terminal_success":
+        if not managed and (group_state == "terminal_success" or session_state == "terminal_success"):
             return RuntimeProbeResult(
                 state="terminal_success",
                 source="bcs.group",
@@ -599,6 +601,11 @@ class TaskRuntimeLivenessProbe:
                 detail={"run_error": run_error, "group_id": group_id},
             )
 
+        if managed and not session_id:
+            return RuntimeProbeResult(
+                state="activity_unknown", source="bcs.delivery",
+                detail={"reason": "missing_session_id"},
+            )
         cursor_value = _group_cursor(group)
         message_error: str | None = None
         if session_id:
@@ -608,16 +615,32 @@ class TaskRuntimeLivenessProbe:
                     group=group,
                     node=node,
                 )
+                managed = group.get("group_strategy") == "manager_worker"
                 messages = await self._bcs.get_session_messages(
                     session_id,
-                    limit=20,
+                    limit=100 if managed else 20,
                     caller_bearer=caller_bearer,
+                    **({"include_pending": True} if managed else {}),
                 )
+                if group.get("group_strategy") == "manager_worker":
+                    from agentclaw.community.core.task.task_harness.group_delivery_probe import probe_group_deliveries
+
+                    return await probe_group_deliveries(
+                        self._bcs, node, messages=messages, caller_bearer=caller_bearer,
+                        driver=str(group.get("driver_bot_id") or group.get("driver_bot") or ""),
+                        previous_cursor=previous_cursor,
+                    )
                 cursor_value = (
                     cursor_value,
                     _last_message_cursor(messages),
                 )
             except Exception as exc:  # noqa: BLE001 - heartbeat read is optional
+                if group.get("group_strategy") == "manager_worker":
+                    return RuntimeProbeResult(
+                        state="activity_unknown", source="bcs.delivery",
+                        error=f"{type(exc).__name__}: {exc}"[:500],
+                        detail={"reason": "delivery_observation_unavailable"},
+                    )
                 message_error = f"{type(exc).__name__}: {exc}"[:500]
         cursor = _join_cursors(cursor_value)
         return self._active_result(

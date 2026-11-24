@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from secbaas.community.api import ApiResponse
+from secbaas.community.api.bot_runtime import SessionRuntimeStatus
 
 
 class RunRequest(BaseModel):
@@ -313,3 +314,9 @@ class SessionListResponse(ApiResponse[SessionListResponseData]):
     data: SessionListResponseData | None = Field(
         default=None, description="Response data"
     )
+
+
+class SessionRuntimeStatusResponse(ApiResponse[SessionRuntimeStatus]):
+    """Live observation, not a persisted message result."""
+
+    data: SessionRuntimeStatus | None = None

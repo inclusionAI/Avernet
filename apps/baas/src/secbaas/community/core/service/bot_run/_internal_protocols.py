@@ -19,6 +19,7 @@ from secbaas.community.api.bot_runtime import (
     BotResponse,
     MessageInfo,
     SessionInfo,
+    SessionRuntimeStatus,
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
@@ -157,6 +158,16 @@ class BotService(Protocol):
             session_pending: session_id 为提前构造的计划值，尚未在 adapter 侧物化，
                 注入前需先执行物化
         """
+        ...
+
+    async def get_session_runtime_status(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> SessionRuntimeStatus:
+        """Observe an existing run without creating a session or sending a message."""
         ...
 
     async def get_session(

@@ -34,6 +34,7 @@ from secbaas.community.api.bot_runtime import (
     BotChatContext,
     MessageInfo,
     SessionInfo,
+    SessionRuntimeStatus,
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run import BotRunRecord, BotRunRepository
@@ -628,6 +629,21 @@ class BotRunner:
 
         return await route.bot_service.get_messages(
             session_id=session.session_id,
+            binding_info=route.binding_info,
+            context=context,
+        )
+
+    async def get_session_runtime_status(
+        self,
+        *,
+        bot_id: str,
+        session_id: str,
+        context: BotChatContext,
+        metadata: dict[str, Any],
+    ) -> SessionRuntimeStatus:
+        route = await self._resolve_bot_route(bot_id, metadata)
+        return await route.bot_service.get_session_runtime_status(
+            session_id=session_id,
             binding_info=route.binding_info,
             context=context,
         )

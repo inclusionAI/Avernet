@@ -1075,3 +1075,37 @@ class TestContextManager:
 
         assert isinstance(result, SessionInfo)
         assert client._session is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_uses_query_parameter_and_validates_response():
+    from unittest.mock import AsyncMock
+
+    from secbaas.community.core.service.bot_run._async_session_client import (
+        AsyncSessionClient,
+    )
+
+    client = AsyncSessionClient("http://engine")
+    client._request = AsyncMock(
+        return_value={
+            "success": True,
+            "data": {
+                "session_id": "agent:main:session:a/user:u",
+                "found": True,
+                "run_id": "r",
+                "state": "running",
+                "started_at": 1,
+                "last_event_seq": 3,
+            },
+        }
+    )
+    result = await client.get_session_runtime_status("agent:main:session:a/user:u")
+    assert result.last_event_seq == 3
+    client._request.assert_awaited_once_with(
+        "GET",
+        "/api/sessions/runtime/status",
+        params={"session_id": "agent:main:session:a/user:u"},
+    )
+    client._request.return_value["data"]["session_id"] = "another-session"
+    with pytest.raises(ValueError, match="session mismatch"):
+        await client.get_session_runtime_status("agent:main:session:a/user:u")

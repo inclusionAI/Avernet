@@ -1025,6 +1025,21 @@ class EngineWebSocketServer:
 
     # ── OpenClaw foreground chat recovery ──────────────────────────────────
 
+    def get_session_runtime_status(self, session_key: str) -> dict[str, Any]:
+        """Called only after the HTTP adapter authorizes session history access."""
+        try:
+            run = self._openclaw_resume.lookup_session(session_key)
+        except ValueError:
+            return {"session_id": session_key, "found": False, "reason": "AMBIGUOUS_RUN"}
+        if run is None:
+            return {"session_id": session_key, "found": False, "reason": "NO_ACTIVE_RUN"}
+        return {
+            "session_id": session_key, "found": True,
+            "run_id": run.run_id, "state": run.state,
+            "started_at": run.started_at_ms, "last_event_seq": run.summary()["lastResumeSeq"],
+            "reason": None,
+        }
+
     def _handle_chat_status(
         self, request: RequestFrame, params: Dict[str, Any]
     ) -> ResponseFrame:

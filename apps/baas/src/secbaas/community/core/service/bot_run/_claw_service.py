@@ -27,6 +27,7 @@ from secbaas.community.api.bot_runtime import (
     MessageInfo,
     SessionInfo,
     SessionNotFoundError,
+    SessionRuntimeStatus,
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
@@ -435,6 +436,31 @@ class ClawBotService(BotService):
             raise
         except Exception as e:
             raise BotServiceError(f"Failed to get messages: {e}") from e
+
+    async def get_session_runtime_status(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> SessionRuntimeStatus:
+        """Observe an existing run without creating a session or sending a message."""
+        if binding_info.engine_type != "openclaw":
+            return SessionRuntimeStatus(
+                session_id=session_id,
+                found=False,
+                reason="UNSUPPORTED_ENGINE",
+            )
+        try:
+            if binding_info.sandbox_id is None:
+                raise BotServiceError(
+                    "ClawBotService requires sandbox_id in binding_info."
+                )
+            client = self._create_session_client(binding_info.sandbox_id)
+            async with client:
+                return await client.get_session_runtime_status(session_id)
+        except Exception as exc:
+            raise BotServiceError("Runtime observation request failed") from exc
 
     async def get_session(
         self,

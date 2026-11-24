@@ -49,6 +49,7 @@ class RelayResumeResult:
     channel: str
     session_id: str
     dispatch_handle: str | None = None
+    message_id: str | None = None
 
 
 class RelaySessionRecovery:
@@ -86,10 +87,22 @@ class RelaySessionRecovery:
                 message=relay_harness_resume_prompt(resume_step),
                 caller_bearer=caller_bearer,
             )
-            if result.get("delivered") is False:
+            admission = result.get("queue_admission")
+            admitted = []
+            if isinstance(admission, dict) and admission.get("message_id"):
+                admitted = [row for row in admission.get("deliveries", [])
+                            if isinstance(row, dict) and row.get("run_id")
+                            and result.get("driver_bot")
+                            and row.get("message_id") == admission["message_id"]
+                            and row.get("target_bot_id") == result.get("driver_bot")
+                            and row.get("status") in {"queued", "dispatching", "running", "unknown", "completed"}]
+                if len(admitted) != 1:
+                    raise RelaySessionRecoveryError("resume queue did not admit the coordinator")
+            if not admitted and result.get("delivered") is False:
                 raise RelaySessionRecoveryError("existing group session did not accept resume")
             handle = str(
-                result.get("state_machine_run_id")
+                (admitted[0]["run_id"] if admitted else None)
+                or result.get("state_machine_run_id")
                 or result.get("run_id")
                 or ""
             )
@@ -106,6 +119,7 @@ class RelaySessionRecovery:
                 channel="bcs_session",
                 session_id=session_id,
                 dispatch_handle=handle or None,
+                message_id=str(admission["message_id"]) if admitted else None,
             )
 
         if not session_id:
