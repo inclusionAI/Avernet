@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { DOMSerializer } from '@tiptap/pm/model';
 import { EditorContent, useEditor } from '@tiptap/react';
@@ -103,23 +104,27 @@ export function RichTextEditor({
         aria-label="正文格式"
         className="flex flex-wrap items-center gap-1 border-b border-divider px-3 py-2"
       >
-        <select
-          aria-label="段落样式"
-          disabled={disabled}
-          value={editor.isActive('heading') ? editor.getAttributes('heading').level : 0}
-          onChange={(event) => {
-            const level = Number(event.target.value) as 0 | 1 | 2 | 3;
+        <Select
+          value={String(editor.isActive('heading') ? editor.getAttributes('heading').level : 0)}
+          onValueChange={(value) => {
+            const level = Number(value) as 0 | 1 | 2 | 3;
             if (level) chain().setHeading({ level }).run();
             else chain().setParagraph().run();
           }}
+          disabled={disabled}
         >
-          <option value="0">正文</option>
-          {[1, 2, 3].map((level) => (
-            <option key={level} value={level}>
-              标题 {level}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger aria-label="段落样式" className="h-9 w-28 shrink-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="0">正文</SelectItem>
+            {[1, 2, 3].map((level) => (
+              <SelectItem key={level} value={String(level)}>
+                标题 {level}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <TooltipProvider delayDuration={200}>
           {controls.map(({ label, mark, Icon, click }) => (
             <Tooltip key={label}>
