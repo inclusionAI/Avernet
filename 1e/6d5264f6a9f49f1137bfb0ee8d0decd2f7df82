@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/apply_engine/test_mcp_artifact_contract.py
+  s_b7f94a3bd241d6::t_1e94c711cd9c7c 3,8,127-128,169-172,174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1e6d5264f6a9f49f1137bfb0ee8d0decd2f7df82",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

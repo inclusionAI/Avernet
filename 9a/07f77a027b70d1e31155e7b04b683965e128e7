@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/plugin_api/device_adapter_transport.py
+  s_2e8b942b88d6dd::t_4c6a1b9d7a18de 99
+apps/backend/tests/community/plugins/community/test_device_adapter_transport.py
+  s_2e8b942b88d6dd::t_00c598cc9651ab 185-201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a07f77a027b70d1e31155e7b04b683965e128e7",
+  "prompts": {},
+  "sessions": {
+    "s_2e8b942b88d6dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c562-4457-7403-afb9-17edbe830325",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

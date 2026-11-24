@@ -1,0 +1,19 @@
+submodules/avernet
+  s_1d9cf05cb64a53::t_abf5cf388a3179 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3ab4333e6eb59ca0b121652f3b77b60af41a3fd0",
+  "prompts": {},
+  "sessions": {
+    "s_1d9cf05cb64a53": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "11538b87-c8aa-4c8d-a63d-a8a4d0affc4c",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

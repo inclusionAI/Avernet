@@ -1,0 +1,97 @@
+apps/bcsfuse/packages/search-core/README.md
+  s_89ee1c722ef961::t_6a3450e9b27df5 42
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_89ee1c722ef961::t_c9aa658659664f 5,9
+apps/bcsfuse/packages/search-core/docs/search-api.md
+  s_89ee1c722ef961::t_3664c36d2ce87b 34-36,115,135,262,295,343
+apps/bcsfuse/packages/search-core/src/search_core/api/services.py
+  s_89ee1c722ef961::t_ba9efbc8dce0c8 18,24
+apps/bcsfuse/packages/search-core/src/search_core/application/catalog_retrieval.py
+  s_89ee1c722ef961::t_06d0897e1fd55e 12,28
+apps/bcsfuse/packages/search-core/src/search_core/application/default_candidates.py
+  s_89ee1c722ef961::t_8e2204244b1d1f 25,31,85
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_9e428ec8192673::t_af168f0f810443 125,173,181,185,187,195
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_89ee1c722ef961::t_76f4ea79c420a4 196,281,283,285
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/local.py
+  s_89ee1c722ef961::t_c9693ef0d642e0 25
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_9e428ec8192673::t_5a981b21cab9b6 180,186
+apps/bcsfuse/packages/search-core/src/search_core/core/retrieval.py
+  s_89ee1c722ef961::t_90aa0b87f0f889 104,129,144
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/retrieval.py
+  s_89ee1c722ef961::t_85111b60074593 1,18,26
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  s_9e428ec8192673::t_dd9370439d6253 120,123,125-126,132,136-137,143
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  s_89ee1c722ef961::t_5816214b6776bd 39
+apps/bcsfuse/packages/search-core/tests/test_document_retrieval.py
+  s_89ee1c722ef961::t_eee96bcdb1371a 20,50,68,72
+apps/bcsfuse/packages/search-core/tests/test_embedding_singleflight_drm.py
+  s_89ee1c722ef961::t_bdcfb2eefbcb43 55,72
+apps/bcsfuse/packages/search-core/tests/test_http_contract.py
+  s_89ee1c722ef961::t_fbb43ecc1986f4 48,85
+apps/bcsfuse/packages/search-core/tests/test_index_builds.py
+  s_89ee1c722ef961::t_de4adf0a4c6723 224
+apps/bcsfuse/packages/search-core/tests/test_index_status_details.py
+  s_89ee1c722ef961::t_37903615944ca9 41
+apps/bcsfuse/packages/search-core/tests/test_native_async_models.py
+  s_89ee1c722ef961::t_39396470ffa74b 79
+apps/bcsfuse/packages/search-core/tests/test_provider_execution.py
+  s_89ee1c722ef961::t_1a9a4f835e6f63 102,124,126,128,155
+apps/bcsfuse/packages/search-core/tests/test_qdrant_modes.py
+  s_89ee1c722ef961::t_8ed11280055c45 62-63,73-74,77-78,163-164,172
+apps/bcsfuse/packages/search-core/tests/test_retrieval_pipeline.py
+  s_89ee1c722ef961::t_2f56ad5053e358 49,53,77,80,83
+apps/bcsfuse/packages/search-core/tests/test_retrieval_resilience.py
+  s_89ee1c722ef961::t_558b7cdc4f0c1c 37,41,67,148,157
+apps/bcsfuse/packages/search-core/tests/test_retrieval_review.py
+  s_89ee1c722ef961::t_26bdb89754555d 34,39,76
+apps/bcsfuse/packages/search-core/tests/test_retrieval_switches.py
+  s_89ee1c722ef961::t_e5bca79668a8e7 30,46
+apps/bcsfuse/packages/search-core/tests/test_score_details.py
+  s_89ee1c722ef961::t_d5e260b2c5b3fe 38,89
+apps/bcsfuse/packages/search-core/tests/test_search_timing.py
+  s_89ee1c722ef961::t_55c45e91e027f1 70,91,110,151,179,199,212,215,252,304,370,394
+apps/bcsfuse/src/app/application/search/service.py
+  s_89ee1c722ef961::t_4d794806d6b62c 61
+apps/bcsfuse/src/app/tc/catalog.py
+  s_9e428ec8192673::t_a88d4a883c0180 89-90
+apps/bcsfuse/src/app/tc/legacy_catalog.py
+  s_89ee1c722ef961::t_8e1041068e8413 83,85-86,114
+apps/bcsfuse/src/app/tc/legacy_index.py
+  s_89ee1c722ef961::t_d51af1de9566d3 16,18,138,140,167,170,193-194,196-197
+apps/bcsfuse/src/app/tc/search.py
+  s_9e428ec8192673::t_8d83535e918277 78,125-126,149,154,180-185
+apps/bcsfuse/src/app/tc/v2.py
+  s_9e428ec8192673::t_f43298da48c422 22
+apps/bcsfuse/tests/contract/test_shared_search_application.py
+  s_89ee1c722ef961::t_d93272a3fb7305 46,68,98,126,141
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_9e428ec8192673::t_60fafc59aaf14d 541-543,547
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b9bd6c7e00fdc37bdaa395b1bd3b0d77cb6c316a",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

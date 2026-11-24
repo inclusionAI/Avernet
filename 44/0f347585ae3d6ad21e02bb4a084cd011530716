@@ -1,0 +1,49 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_b0363fa1846349 40,161-169
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_f0a765598d207e 61,619-628,1107-1110
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_67be1298431f8b 79,101
+apps/bcs/scripts/e2e-runner/bcs_e2e/structured_density/__init__.py
+  s_cecdc98e721f4b::t_7092bb5f9f0805 1-43
+apps/bcs/scripts/e2e-runner/bcs_e2e/structured_density/contract.py
+  s_cecdc98e721f4b::t_9ae7c4c08d7c81 1-199
+apps/bcs/scripts/e2e-runner/bcs_e2e/structured_density/dual_case_run.py
+  s_cecdc98e721f4b::t_3cd62ce4cd3aa4 1-241
+apps/bcs/scripts/e2e-runner/bcs_e2e/structured_density/live_transport.py
+  s_cecdc98e721f4b::t_066aa9245e09f3 1-338
+apps/bcs/scripts/e2e-runner/bcs_e2e/structured_density/profile.py
+  s_cecdc98e721f4b::t_55cf3a1df6f9fa 1-147
+apps/bcs/scripts/e2e-runner/bcs_e2e/structured_density/run.py
+  s_cecdc98e721f4b::t_30fce656fc39dc 1-207
+apps/bcs/scripts/e2e-runner/bcs_e2e/structured_density/transport.py
+  s_cecdc98e721f4b::t_36f3f10d7614e2 1-35
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_cb0267b08fae1f 67-68
+apps/bcs/scripts/e2e-runner/nested-fixed-loop-migration-contract.json
+  s_cecdc98e721f4b::t_cf3f90d6fd74f1 168
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_3a134c19913f5c 649
+apps/bcs/scripts/e2e-runner/tests/test_structured_density.py
+  s_cecdc98e721f4b::t_3cd30592e0c7bf 1-197
+apps/bcs/scripts/e2e-runner/tests/test_structured_density_dual_case_run.py
+  s_cecdc98e721f4b::t_0999c426b65506 1-361
+apps/bcs/scripts/e2e-runner/tests/test_structured_density_live_transport.py
+  s_cecdc98e721f4b::t_d1ef7104a893b8 1-364
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "440f347585ae3d6ad21e02bb4a084cd011530716",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

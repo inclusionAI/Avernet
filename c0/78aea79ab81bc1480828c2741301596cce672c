@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/engine_runtime/relay.py
+  s_790b589fe781a6::t_4d33a89b70b554 25,76-87,99-112,410-415,417-443,445-465
+apps/backend/tests/community/core/engine_runtime/test_relay.py
+  s_790b589fe781a6::t_f58cf1fa3fa8a2 1039-1239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c078aea79ab81bc1480828c2741301596cce672c",
+  "prompts": {},
+  "sessions": {
+    "s_790b589fe781a6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ee94-80bf-7a20-bad0-98b916108470",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

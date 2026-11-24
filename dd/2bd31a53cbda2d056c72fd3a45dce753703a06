@@ -1,0 +1,31 @@
+apps/backend/specs/preserve-caller-outbound-append/001-spec-output.md
+  s_6f405a676c2088::t_1d4f6f9435974c 6,24-26
+apps/backend/specs/preserve-caller-outbound-append/002-code-report.md
+  s_6f405a676c2088::t_18357d8031483d 9-10,15,30
+apps/backend/specs/preserve-caller-outbound-append/003-review-report.md
+  s_6f405a676c2088::t_40424e085227de 4,9,18,24-26
+apps/backend/specs/preserve-caller-outbound-append/003b-regression-report.md
+  s_6f405a676c2088::t_3f44c6cdc19b7c 23,25,28-30
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_6f405a676c2088::t_d5720b38c25ca9 3092,3117-3118,3123
+apps/backend/tests/community/core/service_bot/services/test_baas_service_outbound_append.py
+  s_6f405a676c2088::t_e1a794b06f964e 109
+apps/backend/tests/community/core/service_bot/services/test_baas_service_teclaw_outbound_rule.py
+  s_6f405a676c2088::t_4b62a5e9ea569a 204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd2bd31a53cbda2d056c72fd3a45dce753703a06",
+  "prompts": {},
+  "sessions": {
+    "s_6f405a676c2088": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18185-bb88-7473-91c4-546e1daafbc8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

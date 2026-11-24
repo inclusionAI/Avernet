@@ -1,0 +1,72 @@
+apps/backend/tests/community/plugins/community/agentswarm/test_bot_authorization.py
+  s_fc1557df5d7924::t_e932c1893b90be 21-22,29-42,266
+apps/backend/tests/community/api/test_dingtalk_iam_token.py
+  s_fc1557df5d7924::t_c4ded7048e0484 90
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/token/router.py
+  s_fc1557df5d7924::t_1cb042c70bfab6 107,140
+apps/backend/tests/community/api/test_legacy_iam_friend_selectors.py
+  s_fc1557df5d7924::t_5879cff558cbea 1-99
+  s_fc1557df5d7924::t_b2f1481db82f53 100-111
+apps/backend/src/agentclaw/community/adapters/http/token_exchange/router.py
+  s_fc1557df5d7924::t_c5de505c014f11 109-110,116-117,123-124,129-130
+apps/backend/tests/community/adapters/http/openapi_v1/test_friend_iam.py
+  s_fc1557df5d7924::t_0e6158c1c5b727 189-190,195
+  s_fc1557df5d7924::t_d8d0f201795133 235-254
+  s_fc1557df5d7924::t_d90d7604d0aad8 196,201-202
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  s_fc1557df5d7924::t_1cb042c70bfab6 182,206
+  s_fc1557df5d7924::t_d90d7604d0aad8 157
+apps/backend/src/agentclaw/community/core/runtime_binding/README.md
+  s_fc1557df5d7924::t_d90d7604d0aad8 33-36,57-60
+  s_fc1557df5d7924::t_c6f01dffc4211a 15-17,26-30,47-56,61-65
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_fc1557df5d7924::t_d90d7604d0aad8 3392-3393,3396-3398,3430
+  s_fc1557df5d7924::t_1cb042c70bfab6 3386-3391,3394-3395,3399-3429,3431-3444
+apps/backend/tests/community/core/token_exchange/test_actor_identity.py
+  s_fc1557df5d7924::t_cedf1ffc8f70ac 235-236,254,279,297
+  s_fc1557df5d7924::t_d90d7604d0aad8 225,237,244,249-250,255,271-272,276,284-285,298-322
+apps/backend/tests/community/core/runtime_binding/test_container_locator.py
+  s_fc1557df5d7924::t_ceb7f3fafadbe2 1-8,12-38,64-107,109,111-114,116,118,120-126,128,130-137,139-140,142-143,145-154,157-158,160,162-189,191,244-254,256
+  s_fc1557df5d7924::t_d90d7604d0aad8 9-11,141,155-156,159,161,200-208,214-215,257-272
+  s_fc1557df5d7924::t_a4ce38a1836cfc 39-63,119
+  s_fc1557df5d7924::t_fa9818a37d4b0c 108,110,127,129,138,144,190,209-213,216-243,255
+  s_fc1557df5d7924::t_d8d0f201795133 115,117,192-199
+apps/backend/src/agentclaw/community/core/runtime_binding/container_locator.py
+  s_fc1557df5d7924::t_1455ef4500f156 1-72,74-103
+  s_fc1557df5d7924::t_a4ce38a1836cfc 73
+apps/gateway/configs/schemas/bots.openapi.json
+  s_fc1557df5d7924::t_1ba849a2b6544c 84677,84679,84682-84692,84696,84698,84709-84748,84752,84754,84759,84766-84796
+apps/backend/src/agentclaw/community/core/runtime_binding/service.py
+  s_fc1557df5d7924::t_a4ce38a1836cfc 54-57
+apps/backend/src/agentclaw/community/di/modules/engine_runtime_module.py
+  s_fc1557df5d7924::t_a5b100c550a410 149-150
+  s_fc1557df5d7924::t_1cb042c70bfab6 65-66,139-148
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_fc1557df5d7924::t_b2f1481db82f53 252-263
+apps/backend/src/agentclaw/community/core/runtime_binding/models.py
+  s_fc1557df5d7924::t_6bac0bf5f1a998 9
+  s_fc1557df5d7924::t_a4ce38a1836cfc 38
+  s_fc1557df5d7924::t_1455ef4500f156 8,49-86,92-95
+apps/backend/src/agentclaw/community/plugin_api/token_plugin.py
+  s_fc1557df5d7924::t_1cb042c70bfab6 6,24
+apps/backend/tests/community/di/test_runtime_container_locator.py
+  s_fc1557df5d7924::t_fa9818a37d4b0c 1-11
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  s_fc1557df5d7924::t_a00184f0085e97 156-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b859d15f0e52f0ce63a825da7b0548b55152e875",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

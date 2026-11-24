@@ -1,0 +1,47 @@
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_handoff_sessions.py
+  s_620fb772f449f4::t_5af4a238547389 118-124
+engine/adapter/src/engine/community/plugins/openclaw/_session.py
+  s_620fb772f449f4::t_65e87577541ece 346,368-385,387-391
+engine/adapter/src/engine/community/plugin_api/openclaw/session.py
+  s_620fb772f449f4::t_65e87577541ece 66,68-75
+engine/adapter/src/engine/community/plugin_api/openclaw/README.md
+  s_620fb772f449f4::t_3c6f14f0d8e5e4 45-63
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/converter_creation.py
+  s_620fb772f449f4::t_65e87577541ece 1,6,9-10,12-19,22-36
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_sessions.py
+  s_620fb772f449f4::t_c622a6624e52ae 7,37-46,198,203,208-212,215-216,218,220-226,233,257-258,262,271-272,275-285,287,289-291,294-308,330
+  s_620fb772f449f4::t_c20373a894ee4a 236-239,241-244,246-256
+  s_620fb772f449f4::t_cfb57480ec66f9 836-837,906-907
+engine/adapter/src/engine/community/plugins/openclaw/tests/test_session_port.py
+  s_620fb772f449f4::t_2ae3d46457add6 666-674,676,684,691,697-729
+engine/adapter/src/engine/community/core/adapters/openclaw/tests/test_session.py
+  s_620fb772f449f4::t_2ae3d46457add6 122-123,414-418,431-439
+engine/adapter/src/engine/community/core/adapters/openclaw/session.py
+  s_620fb772f449f4::t_65e87577541ece 364-367
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_operator_access.py
+  s_620fb772f449f4::t_c20373a894ee4a 88-90
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_620fb772f449f4::t_65e87577541ece 52,267-269
+engine/adapter/src/engine/community/local/openclaw/plugin_impl.py
+  s_620fb772f449f4::t_65e87577541ece 186-187,189-193
+engine/adapter/src/engine/community/tests/contracts/test_openclaw_session_create.py
+  s_620fb772f449f4::t_3c6f14f0d8e5e4 1-79
+engine/adapter/src/engine/community/tests/contracts/test_openclaw_local_plugin.py
+  s_620fb772f449f4::t_3c6f14f0d8e5e4 18-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d05817f1e2075a903a33e44cca009a3175a9aa0d",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

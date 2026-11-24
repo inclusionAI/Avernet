@@ -1,0 +1,71 @@
+apps/bcs/Cargo.lock
+  s_3390a382ab8b6f::t_7db9844c6b597d 563,567,573-574,1600
+apps/bcs/crates/adapters/http/bcs-api-http/Cargo.toml
+  s_3390a382ab8b6f::t_b971c66314e33d 37-40
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_catalog_sync.rs
+  s_3390a382ab8b6f::t_266b0c147ab6d8 1-106
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_provider_a2a_registration.rs
+  s_3390a382ab8b6f::t_33d555f494b2b1 52-55,69-70,394-396
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_notifications.rs
+  s_3390a382ab8b6f::t_1030a47e0b0ed3 1-107
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_3390a382ab8b6f::t_1d09a66feb1ea3 286-296
+apps/bcs/crates/bootstrap/bcs/src/lib.rs
+  s_3390a382ab8b6f::t_24cb8b1b36d1e4 118,210-217,263-264
+apps/bcs/crates/bootstrap/bcs/src/server.rs
+  s_3390a382ab8b6f::t_38b71eb7da0494 180
+apps/bcs/crates/bootstrap/bcs/src/server/a2a_wiring.rs
+  s_3390a382ab8b6f::t_39cbe106456bd1 17,20-22
+apps/bcs/crates/bootstrap/bcs/src/server/catalog_wiring.rs
+  s_3390a382ab8b6f::t_ef1b4f5dad62e1 1-51
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_3390a382ab8b6f::t_bae5c6546f1962 23,167
+apps/bcs/crates/bootstrap/bcs/src/server/state.rs
+  s_3390a382ab8b6f::t_139f4f8894ebf5 186-187,194-200
+apps/bcs/crates/external-clients/bcs-fuse-client/CONTEXT.md
+  s_3390a382ab8b6f::t_f8c095b926f87d 49-59
+apps/bcs/crates/external-clients/bcs-fuse-client/Cargo.toml
+  s_3390a382ab8b6f::t_a2f04f6087ed80 24
+apps/bcs/crates/external-clients/bcs-fuse-client/src/card_observation.rs
+  s_3390a382ab8b6f::t_b09ef1d3c08a51 1-59
+apps/bcs/crates/external-clients/bcs-fuse-client/src/cards.rs
+  s_3390a382ab8b6f::t_9657cbc43834a5 72-89,91,99-116,118
+apps/bcs/crates/external-clients/bcs-fuse-client/src/lib.rs
+  s_3390a382ab8b6f::t_9807ecacb41559 8
+apps/bcs/crates/external-clients/bcs-fuse-client/tests/card_observations.rs
+  s_3390a382ab8b6f::t_7f077f9b993819 1-99
+apps/bcs/crates/services/bcs-bot/CONTEXT.md
+  s_3390a382ab8b6f::t_cc233587650c19 237-246
+apps/bcs/crates/services/bcs-bot/src/core/a2a_bot.rs
+  s_3390a382ab8b6f::t_f6a041bf82413e 11,16-29,73-75,84,95
+apps/bcs/crates/services/bcs-bot/src/core/a2a_provider_registration.rs
+  s_3390a382ab8b6f::t_c688f9bc655555 17,22,24-38,94-97
+apps/bcs/docs/bcsfuse-catalog.md
+  s_3390a382ab8b6f::t_3d684d68a81ed5 164-183
+apps/bcs/specs/2026-11-13-agentcard-fuse-sync/delivery.md
+  s_3390a382ab8b6f::t_0d294a85453fb4 1-75
+apps/bcs/specs/2026-11-13-agentcard-fuse-sync/plan.md
+  s_3390a382ab8b6f::t_b2aa8fb743f1c2 1-91
+apps/bcs/specs/2026-11-13-agentcard-fuse-sync/spec.md
+  s_3390a382ab8b6f::t_e33cdefc8e37e3 1-218
+apps/bcs/specs/2026-11-13-agentcard-fuse-sync/tasks.md
+  s_3390a382ab8b6f::t_c612fa287f9206 1-44
+apps/bcs/specs/README.md
+  s_3390a382ab8b6f::t_a1e1442ad45dcc 45-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "29f2d91a3b1cb76b60b939e85c20743d07377da2",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

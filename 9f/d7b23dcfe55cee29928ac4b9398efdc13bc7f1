@@ -1,0 +1,33 @@
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/index.tsx
+  s_3ebd6837893943::t_155945c07d564a 208-210
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatComposer.tsx
+  s_3ebd6837893943::t_b03774733afe46 23-26
+  s_3ebd6837893943::t_189cddf758d621 103-107
+  s_3ebd6837893943::t_30325ebb26c196 61-62,69
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatComposer.test.tsx
+  s_3ebd6837893943::t_69d4639e2ede75 112-134
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  s_3ebd6837893943::t_477ea4db7db733 41-42,44-48
+  s_3ebd6837893943::t_de9028b531ef79 83-99
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  s_3ebd6837893943::t_dd63e1909cdac9 43-44,53-55
+  s_3ebd6837893943::t_18211b88d74f3f 260-261,267
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatInput.tsx
+  s_3ebd6837893943::t_a1fa30ab944342 8-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9fd7b23dcfe55cee29928ac4b9398efdc13bc7f1",
+  "prompts": {},
+  "sessions": {
+    "s_3ebd6837893943": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "c722886f-7dbd-4535-80f1-3c6e2ea14147",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

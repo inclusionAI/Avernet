@@ -1,0 +1,19 @@
+apps/backend/tests/corp/plugins/prod/test_device_adapter_transport.py
+  s_abfbc2844fbe36::t_c89e27544343ae 1101,1106,1168,1174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d2a0996d26299cc255e25de590e7354e462ca79f",
+  "prompts": {},
+  "sessions": {
+    "s_abfbc2844fbe36": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a694-ee58-71f2-958b-c972ea3fbf78",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

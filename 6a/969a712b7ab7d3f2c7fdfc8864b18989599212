@@ -1,0 +1,40 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  s_41d2ae492c3a5b::t_273cc942292b1f 140-141
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_41d2ae492c3a5b::t_273cc942292b1f 345
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/bootstrap-evidence.test.ts
+  s_41d2ae492c3a5b::t_e9d44b155d2dfb 9
+  s_41d2ae492c3a5b::t_3f2043186693ab 32-36,90
+  s_41d2ae492c3a5b::t_5d6264b36d4daa 1-8,10-31,37-89,91
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  s_41d2ae492c3a5b::t_273cc942292b1f 12,255,310
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/agent-service.test.ts
+  s_41d2ae492c3a5b::t_2be0aac6376670 104-124,128-143
+  s_41d2ae492c3a5b::t_3f2043186693ab 125-127
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_41d2ae492c3a5b::t_273cc942292b1f 25,309,321
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/bootstrap-evidence.ts
+  s_41d2ae492c3a5b::t_273cc942292b1f 1-5,8-14,16,18-23,26-36,39,41,43-44,47-50
+  s_41d2ae492c3a5b::t_0b8112dee908bf 6-7,15,17,24-25,42
+  s_41d2ae492c3a5b::t_e9d44b155d2dfb 37-38,40
+  s_41d2ae492c3a5b::t_3f2043186693ab 45-46
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_41d2ae492c3a5b::t_c697cd7fecb4c6 18
+  s_41d2ae492c3a5b::t_2be0aac6376670 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6a969a712b7ab7d3f2c7fdfc8864b18989599212",
+  "prompts": {},
+  "sessions": {
+    "s_41d2ae492c3a5b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9f5-9952-7503-85ab-66a3e3271d26",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

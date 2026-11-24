@@ -1,0 +1,14 @@
+apps/agentclawscs/docker/bcn/scripts/admin/bin/health.sh
+  h_45bbed694cc8b0 52-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a709eeb8d81c101d6ea721e56e76bb703b1ec83c",
+  "prompts": {},
+  "humans": {
+    "h_45bbed694cc8b0": {
+      "author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

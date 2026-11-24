@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/monitoring-runtime.test.ts
+  h_b601d8706f5d44 15,135-173
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_b601d8706f5d44 745-746
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/monitoring-runtime.ts
+  h_b601d8706f5d44 12-34,57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6b3bc72bb2511c464bfb2cd93c8dd620eeb58d89",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

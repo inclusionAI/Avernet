@@ -1,0 +1,19 @@
+apps/backend/tests/community/plugins/community/agentswarm/test_bot_authorization.py
+  s_fc1557df5d7924::t_e932c1893b90be 21-22,29-42,265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "231c6a78d626fc1fd6a6498a1f5d4fdc1a0f3a73",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

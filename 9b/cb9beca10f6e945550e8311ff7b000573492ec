@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_sync.py
+  s_3d36bb45bb2a35::t_3618814af608f9 271-272,274,303,322-325,382
+apps/backend/tests/community/core/devices/test_teclaw_device_sync.py
+  s_3d36bb45bb2a35::t_a7bfd8a572f27c 426-437
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9bcb9beca10f6e945550e8311ff7b000573492ec",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

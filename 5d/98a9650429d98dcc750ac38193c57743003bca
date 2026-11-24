@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/engine_runtime/README.md
+  s_620fb772f449f4::t_9cbeab8593b22f 50
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_620fb772f449f4::t_9cbeab8593b22f 425
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5d98a9650429d98dcc750ac38193c57743003bca",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

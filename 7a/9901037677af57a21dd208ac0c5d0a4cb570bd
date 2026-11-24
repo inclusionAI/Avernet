@@ -1,0 +1,62 @@
+apps/backend/tests/community/adapters/http/task/test_commission_profile_versions.py
+  h_059e888e5e4e82 1-70
+apps/backend/tests/community/adapters/http/task/test_context_collab_creation.py
+  h_059e888e5e4e82 1-176
+apps/backend/tests/community/adapters/http/task/test_context_collab_method_schemas.py
+  h_059e888e5e4e82 1-70
+apps/backend/tests/community/architecture/test_context_collab_compatibility_imports.py
+  h_059e888e5e4e82 1-70
+apps/backend/tests/community/architecture/test_context_collab_l4_dependencies.py
+  h_059e888e5e4e82 1-52
+apps/backend/tests/community/architecture/test_context_collab_l5_dependencies.py
+  h_059e888e5e4e82 1-84
+apps/backend/tests/community/architecture/test_service_api_conformance.py
+  h_059e888e5e4e82 421-423,426
+apps/backend/tests/community/core/task/context_collab/test_l1_delivery_mock.py
+  h_059e888e5e4e82 1-157
+apps/backend/tests/community/core/task/context_collab/test_l1_wire_objects.py
+  h_059e888e5e4e82 1-328
+apps/backend/tests/community/core/task/todos/collaboration/test_in_process.py
+  h_059e888e5e4e82 6,33-37,80-83,118,120-122,125-126,129-141,161,195-196,206,213-214,245,269,280,287,297-299,314,329,356,376,400,427,454,479,506,539
+apps/backend/tests/community/di/modules/test_swarm_runtime.py
+  h_059e888e5e4e82 1-218
+apps/backend/tests/community/di/test_l4_collab_service.py
+  h_059e888e5e4e82 1-230
+apps/backend/tests/community/di/test_task_module.py
+  h_059e888e5e4e82 3-4,13,18-84,99-100,105-107,119-129,242,252,418-631
+apps/backend/tests/community/di/test_task_todo_bindings.py
+  h_059e888e5e4e82 16,133-134,138-140
+apps/backend/tests/community/endpoints/test_context_collab_endpoints.py
+  h_059e888e5e4e82 16-17,19-22,25-27,29-33,37-39,41,44-45,47-48,55-62,102-104,110-113,135-138,140,172-176,190-193,242-266,273-275,343-345,358-360,393-395,398-400,413-415,428-430,441-444,471-473,510-516,520-522,527,531-533,551-553,562-564,583,611-613,622-624,656-657,697-698,741-742
+apps/backend/tests/community/endpoints/test_context_collab_methods_endpoints.py
+  h_059e888e5e4e82 1-517
+apps/backend/tests/community/endpoints/test_open_publication_cases.py
+  h_059e888e5e4e82 1-188
+apps/backend/tests/community/endpoints/test_open_review_cases.py
+  h_059e888e5e4e82 1-230
+apps/backend/tests/community/endpoints/test_open_submission_cases.py
+  h_059e888e5e4e82 1-168
+apps/backend/tests/community/endpoints/test_openapi_context_collab_endpoints.py
+  h_059e888e5e4e82 18,23,34-43,49-59,88-96,121-125,139-142,163,168-173,176-192,194-196,217-219,228-230,277-279,288-290,307-317,332-334,346-348,392-394,481-483,499-500
+apps/backend/tests/community/endpoints/test_spaces_management.py
+  h_059e888e5e4e82 30
+apps/backend/tests/community/endpoints/test_swarm_execution_cases.py
+  h_059e888e5e4e82 1-171
+apps/backend/tests/community/endpoints/test_swarm_execution_endpoints.py
+  h_059e888e5e4e82 1-103
+apps/backend/tests/community/endpoints/test_task_commission_a2a_endpoints.py
+  h_059e888e5e4e82 1-84
+apps/backend/tests/community/factories/task_commission.py
+  h_059e888e5e4e82 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7a9901037677af57a21dd208ac0c5d0a4cb570bd",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

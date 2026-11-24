@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/docs/recovery-owner-feedback/README.md
+  h_b601d8706f5d44 43-45
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/recovery-owner-callback.test.ts
+  h_b601d8706f5d44 62-101
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/recovery-owner-callback.ts
+  h_b601d8706f5d44 23-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a93dc974ca283b7d0bf84d81eafb29f6cf95c479",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

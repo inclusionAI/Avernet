@@ -1,0 +1,22 @@
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  h_fa66fe7c023b4b 47-49,51,406,429,436,441-442,505-507,513-519,525,527,534-540,546-552,558,560-565,614,625,666-668,936,938,1036-1056,1061,1064-1081,1090-1093,1106-1109,1128-1129,1143,1165-1169,1172-1173,1185,1188-1195,1214,1224-1230,1232,1244-1247,1250-1253,1273,1291,1312
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/lib.rs
+  h_fa66fe7c023b4b 40,48
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/mapping.rs
+  h_fa66fe7c023b4b 1-1791
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/port.rs
+  h_fa66fe7c023b4b 4-5,22-25,38,50-52,87,115,123-124,134,141-142,148-149,156,163,165,169,176-181,194-195,197-204
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/dto_mapping.rs
+  h_fa66fe7c023b4b 1-420
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f262f36f83992562009c32f0b1836369474874d6",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

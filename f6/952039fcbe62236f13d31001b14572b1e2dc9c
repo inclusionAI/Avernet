@@ -1,0 +1,21 @@
+apps/bcs-internal/bcn-configs/README.md
+  s_5a886b46403e7c::t_d62d5411d58834 7-40
+apps/bcs-internal/bcn-configs/bcs-config-dev.toml
+  s_5a886b46403e7c::t_3abd3f9520bbf3 7,36-44,60,71,106,115,125,138,152-153,158,161,163,169,187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f6952039fcbe62236f13d31001b14572b1e2dc9c",
+  "prompts": {},
+  "sessions": {
+    "s_5a886b46403e7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfe7-6471-7a70-90de-e0018bca400d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

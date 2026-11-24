@@ -1,0 +1,27 @@
+apps/frontend-nextgen/src/internal/market/hooks/referenceFlow.ts
+  s_c3635e70e0c280::t_f2c5bbcb02ffc5 132
+apps/frontend-nextgen/test/internal/market/policy.test.ts
+  s_c3635e70e0c280::t_fbb51f43882724 283-286
+  s_c3635e70e0c280::t_229def99796aff 214-223
+apps/frontend-nextgen/test/internal/market/useSkillCenterReferences.test.ts
+  s_c3635e70e0c280::t_c5e8ffc68ed91d 363-384
+apps/frontend-nextgen/src/internal/market/policy.ts
+  s_c3635e70e0c280::t_f2c5bbcb02ffc5 17-20
+  s_c3635e70e0c280::t_fbb51f43882724 34-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "01bdf52fd2374ca44402139b7e87d888a1a2141c",
+  "prompts": {},
+  "sessions": {
+    "s_c3635e70e0c280": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e77f-372c-7113-9501-d75fefd234b4",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

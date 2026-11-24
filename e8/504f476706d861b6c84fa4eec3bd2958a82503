@@ -1,0 +1,39 @@
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  s_fc1557df5d7924::t_77ac66fe5aa75a 9,193,200
+apps/backend/src/agentclaw/corp/di/token_exchange.py
+  s_fc1557df5d7924::t_d422a45b52728f 7,9-13,54,60,63-71,85-128,130,132-134,142-147,149-153,155-156,158
+apps/backend/src/agentclaw/corp/plugins/prod/README.md
+  s_fc1557df5d7924::t_803a58fc0ea65b 146-154
+apps/backend/tests/corp/di/test_jit_runtime_selection.py
+  s_fc1557df5d7924::t_2c345444d74d91 1-146
+apps/backend/tests/corp/di/test_jit_teclaw_eligibility.py
+  s_fc1557df5d7924::t_2d644cafe05d88 8,11,33,50,108,177-178,247,250-251,253-255,267-358
+apps/backend/tests/corp/di/test_jit_token_injection.py
+  s_fc1557df5d7924::t_94d2ff8db5b7f7 16,53-54,175-176
+apps/backend/tests/corp/di/test_token_exchange_adapters.py
+  s_fc1557df5d7924::t_61893fbdd86c04 21,41,174,218,224,228-229
+apps/gateway-cli/src/api/operations.rs
+  s_fc1557df5d7924::t_4e73f452d29fc3 334-343
+apps/gateway-cli/teamclawgw-apigw-verified.openapi.json
+  s_fc1557df5d7924::t_91dcab6cc9ab05 30263-30298
+apps/gateway-cli/tests/bot_iam_token.rs
+  s_fc1557df5d7924::t_93fb0f4735885d 11-20
+apps/gateway/configs/schemas/bots.openapi.json
+  s_fc1557df5d7924::t_b85842a5e13023 83617-83652
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e8504f476706d861b6c84fa4eec3bd2958a82503",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

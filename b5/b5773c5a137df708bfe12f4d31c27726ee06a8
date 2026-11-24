@@ -1,0 +1,32 @@
+apps/gateway/src/gateway/community/core/forwarding/_openapi.py
+  s_7c97e57846d67d::t_7ec85aea1c9e5a 105-106,110-114,267,271,278
+  s_7c97e57846d67d::t_78082469b10c8e 107-109,268-270,272-277
+apps/gateway/tests/unit/plugins/test_plugin_registry.py
+  s_7c97e57846d67d::t_78082469b10c8e 36,41-43
+  s_7c97e57846d67d::t_6f77734efb6ea0 15,34-35,37-40,44-49
+apps/gateway/tests/unit/core/forwarding/test_combined_schema_catalogs.py
+  s_7c97e57846d67d::t_78082469b10c8e 7,375-382,386-389
+  s_7c97e57846d67d::t_6f77734efb6ea0 370-374,383-385,390-393
+  s_7c97e57846d67d::t_63007ce1bdd932 8
+apps/gateway/tests/unit/core/forwarding/test_served_openapi.py
+  s_7c97e57846d67d::t_6f77734efb6ea0 21,42,47-50
+  s_7c97e57846d67d::t_78082469b10c8e 43-46,56-86,90-92,95-99
+  s_7c97e57846d67d::t_ad882810c40f54 53-55,87-89,93-94,100-102
+  s_7c97e57846d67d::t_0f24b812c37dc2 51-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b5b5773c5a137df708bfe12f4d31c27726ee06a8",
+  "prompts": {},
+  "sessions": {
+    "s_7c97e57846d67d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ee18-34ed-7dc1-9e5d-7bce40c3556e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

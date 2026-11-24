@@ -1,0 +1,19 @@
+apps/bcs-internal/crates/external-clients/bcs-layotto/src/zdas/pool.rs
+  s_db09ad8df679b8::t_46f5835c624315 307-370,381,589-609,611
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d5fd5d1b9034ac571d953d4d4ec48112aae563b",
+  "prompts": {},
+  "sessions": {
+    "s_db09ad8df679b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c02a-5f80-7381-9ee0-df7ca269149e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

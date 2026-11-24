@@ -1,0 +1,43 @@
+docs/designs/bcn-distributed/README.md
+  s_ae779de10e764a::t_c8ac948bb8af8a 1-98
+docs/designs/bcn-distributed/bcn-distributed-design.md
+  s_ae779de10e764a::t_094d52712479d6 1-523
+docs/designs/bcn-distributed/01-architecture-and-adapters.md
+  s_ae779de10e764a::t_c8ac948bb8af8a 1-116
+docs/designs/bcn-distributed/presentation.html
+  s_ae779de10e764a::t_094d52712479d6 1-88
+docs/designs/bcn-distributed/02-communication-and-failover.md
+  s_ae779de10e764a::t_2cbd81cddbbf78 1-111
+docs/designs/bcn-distributed/03-collaboration-modes.md
+  s_ae779de10e764a::t_04e746de28adf8 1-106
+docs/designs/bcn-distributed/04-validation-and-operations.md
+  s_ae779de10e764a::t_85c521e81aabc4 1-80
+docs/designs/bcn-distributed/assets/01-logical-architecture.svg
+  s_ae779de10e764a::t_0710cffa3f5c4b 1
+docs/designs/bcn-distributed/assets/02-deployment.svg
+  s_ae779de10e764a::t_6b510413beabb6 1
+docs/designs/bcn-distributed/assets/03-transport-adapters.svg
+  s_ae779de10e764a::t_2cc02e9b359f9d 1
+docs/designs/bcn-distributed/assets/04-durable-handoffs.svg
+  s_ae779de10e764a::t_dcf25787afdca1 1
+docs/designs/bcn-distributed/assets/05-failover-sequence.svg
+  s_ae779de10e764a::t_1d4851ca46ab3d 1
+docs/designs/bcn-distributed/assets/06-four-modes.svg
+  s_ae779de10e764a::t_b0165f9384086b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c2dc73f160b7aefcb7ec6c2101c40ba145c33d7e",
+  "prompts": {},
+  "sessions": {
+    "s_ae779de10e764a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19844-2a00-7a03-ac17-a1a451636220",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

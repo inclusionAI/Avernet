@@ -1,0 +1,18 @@
+apps/bcs/crates/services/bcs-message-flow/src/queued_task_terminal.rs
+  h_7ecb107b24dd7d 341-343
+apps/bcs/crates/services/bcs-message-flow/src/queued_task_terminal/result_leg_identity_tests.rs
+  h_7ecb107b24dd7d 1-400
+apps/bcs/crates/services/bcs-message-flow/tests/protected_result_leg_contract.rs
+  h_7ecb107b24dd7d 241-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d1f23d2a0727de01c65e3b047ccd819e86971bf9",
+  "prompts": {},
+  "humans": {
+    "h_7ecb107b24dd7d": {
+      "author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

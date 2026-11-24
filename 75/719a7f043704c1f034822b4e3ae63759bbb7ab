@@ -1,0 +1,53 @@
+tools/a2a-json-tool/editor/json-editor.js
+  s_a5600e99ae94e6::t_00859059082afa 43
+  s_a5600e99ae94e6::t_12f0ddb8e5978d 1-42,44-167
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/tasks.md
+  s_a5600e99ae94e6::t_552726e5e94554 19-21
+  s_a5600e99ae94e6::t_6204b2beab3f70 22
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/validation.md
+  s_a5600e99ae94e6::t_552726e5e94554 80-91
+tools/a2a-json-tool/web/json-editor.js
+  s_a5600e99ae94e6::t_00859059082afa 11
+  s_a5600e99ae94e6::t_42051949f0a73b 1-10
+tools/a2a-json-tool/web/style.css
+  s_a5600e99ae94e6::t_00859059082afa 16
+  s_a5600e99ae94e6::t_ca5e74aee51ff0 12,14-15
+tools/a2a-json-tool/README.md
+  s_a5600e99ae94e6::t_70cb47dbbaf863 26-27,186-199,210-211
+tools/a2a-json-tool/package-lock.json
+  s_a5600e99ae94e6::t_bcc2280044446d 1-647
+tools/a2a-json-tool/package.json
+  s_a5600e99ae94e6::t_ade59db2db9a84 7-12,15,17-24
+tools/a2a-json-tool/scripts/build-editor.mjs
+  s_a5600e99ae94e6::t_08802e29f4de84 1-30
+tools/a2a-json-tool/server.mjs
+  s_a5600e99ae94e6::t_4d69bfeb8eec86 5,12,26-27,53-54
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/spec.md
+  s_a5600e99ae94e6::t_27eaea568e9745 13,18,24-25
+tools/a2a-json-tool/test/json-editor.test.js
+  s_a5600e99ae94e6::t_abbf1a7583c50d 1-53
+tools/a2a-json-tool/test/server.test.js
+  s_a5600e99ae94e6::t_fd57ba30e4d289 29,36-51
+tools/a2a-json-tool/web/EDITOR-LICENSES.txt
+  s_a5600e99ae94e6::t_66f1bd4b173e12 1-329
+tools/a2a-json-tool/web/app.js
+  s_a5600e99ae94e6::t_8d1ce9940a2a64 5,8-12,22,47,49,90,115,230-237,284
+tools/a2a-json-tool/web/index.html
+  s_a5600e99ae94e6::t_9f1c3448024b7f 7,54,56-57,62,64-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75719a7f043704c1f034822b4e3ae63759bbb7ab",
+  "prompts": {},
+  "sessions": {
+    "s_a5600e99ae94e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ca8b-71af-7751-8713-438bf41cca27",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "胡笳 <hujia.ly@alibaba-inc.com>"
+    }
+  }
+}

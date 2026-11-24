@@ -1,0 +1,29 @@
+engine/adapter/src/engine/community/openclaw/client/merged_announce.py
+  s_3b198be521bb7f::t_0226e1ff273b3a 5,30-41
+  s_3b198be521bb7f::t_7f95f33947f46b 1-4,6-29,42-56,60,62-63,66,86-87,93-101,105-106,108-123
+  s_3b198be521bb7f::t_bf93e706214e1d 88-92,102-104
+  s_3b198be521bb7f::t_89c80d11d68bb5 57-59,61,64-65,67-85,107
+engine/adapter/src/engine/community/openclaw/client/gateway_client.py
+  s_3b198be521bb7f::t_b0ab7da6872114 36,225-226,448,588-590,592-598,600,749-756
+  s_3b198be521bb7f::t_c4c0e01317d898 227,399-415,417,591,599,601,867-869
+engine/adapter/src/engine/community/openclaw/client/tests/test_merged_announce.py
+  s_3b198be521bb7f::t_e62d6a5c66e9ad 67,78-81,100-101,111-127
+  s_3b198be521bb7f::t_89c80d11d68bb5 1,16,56-59,61-64,103
+  s_3b198be521bb7f::t_54ed5130cf7062 2-15,17-55,60,65-66,68-77,82-99,102,104-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "958ec036b2225acf8d30a2e1234176a38630b7d7",
+  "prompts": {},
+  "sessions": {
+    "s_3b198be521bb7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a166c7-61d8-7221-aa2e-e6efde122735",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

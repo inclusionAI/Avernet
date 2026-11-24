@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/clawflows-git-client.test.ts
+  h_43af82e14600e4 410-427
+apps/evolverun/clawweb/public/modules/workflow/server/services/clawflows-git-client.ts
+  h_43af82e14600e4 551-553,577
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "89e3e024aec559cf549a80eeffd00e4b1eba7a72",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

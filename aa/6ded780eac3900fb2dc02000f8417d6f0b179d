@@ -1,0 +1,19 @@
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration.test.tsx
+  s_ad6596e5f395ca::t_a3961188ae7a98 2,4,8,140-142,144-153,352,360,368-460
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aa6ded780eac3900fb2dc02000f8417d6f0b179d",
+  "prompts": {},
+  "sessions": {
+    "s_ad6596e5f395ca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e724-7273-7761-8b9a-88eacb18b252",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

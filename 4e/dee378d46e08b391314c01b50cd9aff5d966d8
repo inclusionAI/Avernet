@@ -1,0 +1,19 @@
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_4645e948b53118::t_1ff1b4e6c65dcd 81,172-174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4edee378d46e08b391314c01b50cd9aff5d966d8",
+  "prompts": {},
+  "sessions": {
+    "s_4645e948b53118": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e741-60e4-7c20-be5a-3c6017a7a86b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

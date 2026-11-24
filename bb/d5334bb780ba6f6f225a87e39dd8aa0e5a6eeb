@@ -1,0 +1,53 @@
+docs/quick-start.zh-CN.md
+  s_ce84d91f3d35be::t_fbcf134900e436 24-25
+apps/bcsfuse/main.py
+  s_ce84d91f3d35be::t_30cfb114b4002b 17-19
+singlebox/ci/tests/test_singlebox_coverage_workflow.py
+  s_ce84d91f3d35be::t_db399866929cf6 1,59-92
+  s_ce84d91f3d35be::t_2aa56ae4a85a59 93-94
+apps/bcsfuse/tests/contract/test_qdrant_deployment_modes.py
+  s_ce84d91f3d35be::t_30cfb114b4002b 7
+  s_ce84d91f3d35be::t_db399866929cf6 1,34-38
+  s_ce84d91f3d35be::t_48b7816be01b0e 4
+apps/bcsfuse/src/app/tc/providers.py
+  s_ce84d91f3d35be::t_30cfb114b4002b 88-95
+devops/hook/pre_push.sh
+  s_ce84d91f3d35be::t_30cfb114b4002b 203-204
+apps/bcsfuse/docs/qdrant-modes.md
+  s_ce84d91f3d35be::t_fbcf134900e436 5,16-17,20-22,25-28,42-43,50
+singlebox/ci/tests/test_pre_push_dispatch.py
+  s_ce84d91f3d35be::t_fbcf134900e436 103-122
+  s_ce84d91f3d35be::t_30cfb114b4002b 28,30
+  s_ce84d91f3d35be::t_1cc0d4ef6bedc7 56,76,96
+  s_ce84d91f3d35be::t_8d326b72751c30 67
+.github/workflows/singlebox-coverage.yml
+  s_ce84d91f3d35be::t_f158f00c3669f8 106-109
+  s_ce84d91f3d35be::t_30cfb114b4002b 99,270,274-281
+  s_ce84d91f3d35be::t_d6486255efa6cc 282
+apps/bcsfuse/README.md
+  s_ce84d91f3d35be::t_fbcf134900e436 54-55,63,68,73,97-99,250,252-255,257,259-260
+  s_ce84d91f3d35be::t_538b6563ce45d8 184,435-436,482-486,490
+singlebox/modules/bcsfuse.sh
+  s_ce84d91f3d35be::t_30cfb114b4002b 313-314,319,338
+  s_ce84d91f3d35be::t_fbcf134900e436 298
+docs/agents/validation.md
+  s_ce84d91f3d35be::t_fbcf134900e436 72
+docs/quick-start.md
+  s_ce84d91f3d35be::t_fbcf134900e436 36-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bbd5334bb780ba6f6f225a87e39dd8aa0e5a6eeb",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

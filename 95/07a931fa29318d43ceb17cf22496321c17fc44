@@ -1,0 +1,16 @@
+.gitmodules
+  h_109ba21d0fda5e 4
+submodules/avernet
+  h_109ba21d0fda5e 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9507a931fa29318d43ceb17cf22496321c17fc44",
+  "prompts": {},
+  "humans": {
+    "h_109ba21d0fda5e": {
+      "author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

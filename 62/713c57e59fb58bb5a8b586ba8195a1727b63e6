@@ -1,0 +1,24 @@
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  h_059e888e5e4e82 168-180
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChat.ts
+  h_059e888e5e4e82 115
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatPanelCleanup.ts
+  h_059e888e5e4e82 1,9-10,19,22,24
+apps/frontend-nextgen/src/services/tasks/taskConversationNavigation.ts
+  h_059e888e5e4e82 115-129
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  h_059e888e5e4e82 160-181
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupChat.test.ts
+  h_059e888e5e4e82 9-10,126-127,234-256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "62713c57e59fb58bb5a8b586ba8195a1727b63e6",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
