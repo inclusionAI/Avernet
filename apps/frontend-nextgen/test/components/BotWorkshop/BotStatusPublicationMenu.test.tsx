@@ -72,13 +72,13 @@ test('按需读取状态，直接选择操作并确认升级，刷新列表且�
   expect(load).not.toHaveBeenCalled();
   await openMenu();
   expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
-  expect(screen.queryByText('V2 · 线上')).not.toBeInTheDocument();
+  expect(screen.queryByText('V2 · 正式运行')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '重启发布' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '删除草稿' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '创建升级草稿' }));
   expect(botEditorService.upgradeLifecycle).not.toHaveBeenCalled();
   const dialog = await screen.findByRole('alertdialog');
-  expect(within(dialog).getByText(/V2（线上）/)).toBeInTheDocument();
+  expect(within(dialog).getByText(/V2（正式运行）/)).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole('button', { name: '创建升级草稿' }));
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   expect(botEditorService.upgradeLifecycle).toHaveBeenCalledWith(bot.id, 17, bot.ownerId);
@@ -226,7 +226,7 @@ test('V2 行仅显示自身操作，不混入 V3 草稿操作', async () => {
   const { refresh } = setup();
   await openMenu();
   expect(screen.queryByText('V3 · 草稿')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: '发布到预发' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '提交试运行' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '下线' }));
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '下线' }));
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
@@ -267,12 +267,12 @@ test('V3 草稿行仅展示 V3 的预发操作', async () => {
   ]);
   const { refresh } = setup({ ...bot, cardId: 'bot-1:18', publicationVersion: 3, lifecycle: 'draft' });
   fireEvent.click(screen.getByRole('button', { name: '服务 Bot 发布状态' }));
-  await screen.findByRole('button', { name: '发布到预发' });
-  expect(screen.queryByText('V2 · 线上')).not.toBeInTheDocument();
+  await screen.findByRole('button', { name: '提交试运行' });
+  expect(screen.queryByText('V2 · 正式运行')).not.toBeInTheDocument();
   expect(screen.queryByText('V3 · 草稿')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '下线' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '发布到预发' }));
-  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '发布到预发' }));
+  fireEvent.click(screen.getByRole('button', { name: '提交试运行' }));
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '提交试运行' }));
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   expect(precheck).toHaveBeenCalledWith(bot.id, '3', bot.ownerId);
   expect(botEditorService.advanceLifecycle).toHaveBeenCalledWith(bot.id, 'prestable', bot.ownerId);
@@ -301,8 +301,8 @@ test('评测门禁未通过时拦截预发推进并引导评测', async () => {
     </BotStatusPublicationMenu>,
   );
   fireEvent.click(screen.getByRole('button', { name: '服务 Bot 发布状态' }));
-  fireEvent.click(await screen.findByRole('button', { name: '发布到预发' }));
-  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '发布到预发' }));
+  fireEvent.click(await screen.findByRole('button', { name: '提交试运行' }));
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '提交试运行' }));
   await waitFor(() => expect(precheck).toHaveBeenCalledWith(bot.id, '3', bot.ownerId));
   expect(blocked).toHaveBeenCalledWith(expect.objectContaining({ id: bot.id, publicationVersion: 3 }));
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
@@ -325,5 +325,5 @@ test('当前版本没有操作时，不展示其他版本的操作', async () =>
   setup();
   fireEvent.click(screen.getByRole('button', { name: '服务 Bot 发布状态' }));
   expect(await screen.findByText('当前暂无可执行操作')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: '发布到预发' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '提交试运行' })).not.toBeInTheDocument();
 });

@@ -168,7 +168,7 @@ export function BotManagementRuntimeItems({
                     ? 'TeClaw 暂不支持重启发布'
                     : restartPublishDisabledReason && !bot.actions.includes('restart_publish')
                     ? restartPublishDisabledReason
-                    : '指重新启动该服务已发布环境（预发/线上）的运行时，不影响草稿机器。'
+                    : '指重新启动该服务已发布环境（试运行环境／正式运行环境）的运行时，不影响草稿机器。'
                 }
               >
                 {actionLabel.restart_publish}
