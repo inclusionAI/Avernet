@@ -26,11 +26,21 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.devices.models import DeviceBindingStatus
 
 
 _BINDING_ROUTED_PROVIDERS = frozenset({"baas", "teclaw"})
 _DEFAULT_ENGINE_PORT = 20003
 _DEFAULT_ENGINE_TYPE = "openclaw"
+# Terminal BaaS binding states never resolve to a live device. Treating them
+# as "not bound" keeps the expert-chat path from re-entering BaaS on every
+# request after the device has been released (AC-2). Scoped to the baas
+# provider so ARCA/Local/Teclaw behavior, which is out of this Dima's scope,
+# stays unchanged.
+_TERMINAL_BINDING_STATUSES = frozenset({
+    DeviceBindingStatus.STOPPED.value,
+    DeviceBindingStatus.RELEASED.value,
+})
 
 
 class DeviceContextResolver:
@@ -136,6 +146,16 @@ class DeviceContextResolver:
         if binding is None:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: binding_id={binding_id} not found"
+            )
+
+        binding_status = getattr(binding, "status", None)
+        if (
+            binding.device_provider == "baas"
+            and binding_status in _TERMINAL_BINDING_STATUSES
+        ):
+            raise DeviceNotBoundError(
+                f"DeviceContextResolver: binding_id={binding_id} is "
+                f"{binding_status} (no active device)"
             )
 
         provider = binding.device_provider

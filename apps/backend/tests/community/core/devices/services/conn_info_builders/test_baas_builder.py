@@ -28,6 +28,7 @@ def fake_binding():
     binding.device_id = "BOT-desktop-xyz"
     binding.entity_id = "100019"
     binding.device_props = {"bolt_id": "20260527_lqk6d4og"}
+    binding.status = DeviceBindingStatus.ACTIVE.value
     return binding
 
 
@@ -111,6 +112,8 @@ def test_build_raises_conn_info_build_error_on_get_ws_info_failure(
 
     with pytest.raises(ConnInfoBuildError):
         builder.build(fake_binding, user_id="user-1")
+
+    fake_device_repo.update_status.assert_not_called()
 
 
 def test_build_preserves_explicit_device_offline_as_provider_neutral_error(
@@ -345,7 +348,6 @@ def test_build_default_device_uuid_none_omits_from_conn_info(
     assert fake_baas_service.get_ws_info.call_args.kwargs.get("device_uuid") is None
 
 
-
 # ── Binding status sync on device offline ──────────────────────────
 
 
@@ -364,8 +366,39 @@ def test_build_offline_updates_binding_status_to_stopped(
     assert "No active device for binding=42" in str(exc_info.value)
     fake_device_repo.update_status.assert_called_once_with(
         binding_id=42,
-        status="STOPPED",
+        status=DeviceBindingStatus.STOPPED.value,
     )
+
+
+def test_build_offline_does_not_update_pending_binding(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    """A PENDING binding may still be provisioning; never terminalise it."""
+    fake_binding.status = DeviceBindingStatus.PENDING.value
+    fake_baas_service.get_ws_info.side_effect = BaasNoActiveDevicesError(
+        status_code=404
+    )
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    with pytest.raises(DeviceOfflineError):
+        builder.build(fake_binding, user_id="user-1")
+
+    fake_device_repo.update_status.assert_not_called()
+
+
+def test_build_offline_does_not_terminalise_transient_503(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    """503 NO_ACTIVE_DEVICES means "device still coming up", not released."""
+    fake_baas_service.get_ws_info.side_effect = BaasNoActiveDevicesError(
+        status_code=503
+    )
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    with pytest.raises(DeviceOfflineError):
+        builder.build(fake_binding, user_id="user-1")
+
+    fake_device_repo.update_status.assert_not_called()
 
 
 def test_build_offline_still_raises_when_update_status_fails(

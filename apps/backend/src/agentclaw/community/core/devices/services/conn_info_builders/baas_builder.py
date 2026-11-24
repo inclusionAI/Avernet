@@ -68,7 +68,7 @@ class BaasConnInfoBuilder:
                 device_uuid=device_uuid,
             )
         except BaasNoActiveDevicesError as error:
-            self._sync_binding_offline(binding)
+            self._sync_binding_offline(binding, error)
             raise DeviceOfflineError(
                 f"No active device for binding={binding.id}"
             ) from error
@@ -131,12 +131,33 @@ class BaasConnInfoBuilder:
             sandbox_client=self._sandbox_client,
         )
 
-    def _sync_binding_offline(self, binding: DeviceBindingRecord) -> None:
+    def _sync_binding_offline(
+        self,
+        binding: DeviceBindingRecord,
+        error: BaasNoActiveDevicesError,
+    ) -> None:
         """Sync binding status to STOPPED when BaaS confirms device is offline.
 
         Best-effort: a failure to update the binding status is logged but
         does not suppress the DeviceOfflineError that follows.
+
+        Only a released device (HTTP 404) on an ACTIVE binding is terminal.
+        A 503 ``NO_ACTIVE_DEVICES`` means the device is still coming up (an
+        expected, self-healing state), and a PENDING binding may still be
+        provisioning; never terminalise either of those.
         """
+        if (
+            getattr(binding, "status", None) != DeviceBindingStatus.ACTIVE.value
+            or getattr(error, "status_code", None) != 404
+        ):
+            logger.info(
+                "[BaasConnInfoBuilder] skip binding status sync: binding_id=%s "
+                "status=%s error_status=%s",
+                binding.id,
+                getattr(binding, "status", None),
+                getattr(error, "status_code", None),
+            )
+            return
         try:
             self._device_repo.update_status(
                 binding_id=binding.id,
