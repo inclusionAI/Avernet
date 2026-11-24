@@ -24,4 +24,7 @@ def test_commission_a2a_routes_to_backend_with_bounded_rewrite() -> None:
     assert domain is not None
     assert domain.name == "task-commission-a2a"
     assert domain.server.name == "backend"
-    assert domain.upstream_path("/openapi/v1/task-commission/a2a") == "/a2a/task-commission"
+    assert (
+        domain.upstream_path("/openapi/v1/task-commission/a2a")
+        == "/a2a/task-commission"
+    )
