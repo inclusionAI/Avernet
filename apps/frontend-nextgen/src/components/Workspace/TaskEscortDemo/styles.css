@@ -25,8 +25,8 @@
 @media (prefers-reduced-motion: reduce) {
   .task-escort-demo-panel,
   .task-escort-demo-panel .escort-node {
-    animation: none !important;
-    transition: none !important;
+    animation: none;
+    transition: none;
   }
 }
 
