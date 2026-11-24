@@ -145,4 +145,3 @@ impl Facts {
         Ok(request)
     }
 }
-
