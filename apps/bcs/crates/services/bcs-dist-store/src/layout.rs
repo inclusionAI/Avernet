@@ -10,7 +10,7 @@
 //! There is no hash tag (`{…}`) anywhere: a brace in a name would create one, so
 //! every segment rejects `{` and `}`.
 
-use bcs_dist_model::{Did, InputId, Instance, PoolId, ShardId, Sid, Tid};
+use bcs_dist_model::{Did, InputId, Instance, PoolId, ShardId, ShardParseError, Sid, Tid};
 use bcs_service_api::port::repo::distributed::common::StoreError;
 
 const PREFIX: &str = "bcn:v1";
@@ -321,18 +321,10 @@ impl KeyLayout {
 
 /// Parses the shard from `s<digits>` before the first `.` of a sid, tid or did.
 fn shard_of_prefixed(id: &str) -> Result<ShardId, StoreError> {
-    let head = id.split('.').next().unwrap_or_default();
-    let digits = head
-        .strip_prefix('s')
-        .filter(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
-        .ok_or_else(|| invalid("id_without_shard_prefix"))?;
-    if !id.contains('.') {
-        return Err(invalid("id_without_shard_prefix"));
-    }
-    digits
-        .parse::<u32>()
-        .map(ShardId)
-        .map_err(|_| invalid("shard_out_of_range"))
+    bcs_dist_model::shard_of(id).map_err(|error| match error {
+        ShardParseError::MissingShardPrefix => invalid("id_without_shard_prefix"),
+        ShardParseError::ShardOutOfRange => invalid("shard_out_of_range"),
+    })
 }
 
 fn instance_segments(instance: &Instance) -> Result<(&str, &str), StoreError> {

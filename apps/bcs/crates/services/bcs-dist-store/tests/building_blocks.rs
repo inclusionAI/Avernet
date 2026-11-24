@@ -90,6 +90,30 @@ fn ids_must_carry_a_shard() {
 }
 
 #[test]
+fn shard_prefix_failures_keep_their_store_codes() {
+    for bad in ["x0042.7f3a9c", "s.7f3a9c", "s0042", "7f3a9c", "s+1.7f3a9c"] {
+        assert_eq!(
+            KeyLayout::shard_of(&Sid(bad.into())),
+            Err(StoreError::Invalid {
+                code: "id_without_shard_prefix".into()
+            }),
+            "{bad:?}"
+        );
+    }
+    for bad in ["s4294967296.a", "s99999999999.a"] {
+        assert_eq!(
+            KeyLayout::shard_of(&Sid(bad.into())),
+            Err(StoreError::Invalid {
+                code: "shard_out_of_range".into()
+            }),
+            "{bad:?}"
+        );
+    }
+    // The store applies no charset policy on the rest: an empty rest is accepted.
+    assert_eq!(KeyLayout::shard_of(&Sid("s0042.".into())).unwrap(), ShardId(42));
+}
+
+#[test]
 fn version_helpers_follow_the_bands() {
     assert_eq!(version::CREATE, Version(1));
     assert_eq!(
