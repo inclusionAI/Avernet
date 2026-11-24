@@ -1,5 +1,5 @@
 import asyncio
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 
@@ -13,6 +13,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_access import EngineCheck
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotOperationsForbiddenError,
 )
@@ -27,6 +28,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.managed_bots import ManagedBotServiceProtocol
 from agentclaw.community.core.bot_management.engines.registry import resolve_status_ext
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.di import Injected
 from agentclaw.community.di.openapi_bot_operations_config import (
@@ -44,6 +46,49 @@ from .schemas import (
     TemplateBotRow,
 )
 
+PrincipalDep = Annotated[Principal, Depends(require_principal)]
+_CODING_ENGINES = frozenset({'claude_code', 'aicoding'})
+
+
+def _trust(principal: Principal, config: OpenApiBotOperationsConfig) -> None:
+    if caller_names_a_user(principal) or not config.allows(
+        env=get_current_env(), tenant=principal.tenant, app_name=caller_app_name(principal),
+    ):
+        raise BotOperationsForbiddenError('calling application is not approved for Bot operations')
+
+
+def require_managed_application(
+    principal: PrincipalDep,
+    config: OpenApiBotOperationsConfig = Injected(OpenApiBotOperationsConfig),
+) -> None:
+    _trust(principal, config)
+
+
+async def restart_engine_targets(
+    body: ManagedBotRestart,
+    approved: Annotated[None, Depends(require_managed_application)],
+    service: ManagedBotServiceProtocol = Injected(ManagedBotServiceProtocol),
+) -> list[dict[str, Any]]:
+    items = await asyncio.to_thread(
+        service.statuses, template_key=body.template_key, targets=[(body.bot_id, body.owner_id)],
+    )
+    if not items:
+        raise BotAddressNotFoundError('no Bot in the requested template scope')
+    return items
+
+
+async def status_engine_targets(
+    body: ManagedBotStatusQueries,
+    approved: Annotated[None, Depends(require_managed_application)],
+    service: ManagedBotServiceProtocol = Injected(ManagedBotServiceProtocol),
+) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(
+        service.statuses,
+        template_key=body.template_key,
+        targets=[(target.bot_id, target.owner_id) for target in body.bots],
+    )
+
+
 router = APIRouter(
     prefix='/openapi/v1/bots',
     tags=['Bots'],
@@ -55,14 +100,6 @@ router = APIRouter(
         },
     },
 )
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
-
-
-def _trust(principal: Principal, config: OpenApiBotOperationsConfig) -> None:
-    if caller_names_a_user(principal) or not config.allows(
-        env=get_current_env(), tenant=principal.tenant, app_name=caller_app_name(principal),
-    ):
-        raise BotOperationsForbiddenError('calling application is not approved for Bot operations')
 
 
 @router.post(
@@ -108,13 +145,12 @@ async def get_template_snapshot(
     response_model=Envelope[ManagedBotStatus],
     summary='Accept a managed draft Bot restart',
 )
+@EngineCheck(engines=_CODING_ENGINES, bots=restart_engine_targets)
 @envelope_errors
 async def restart_for_others(
     body: ManagedBotRestart,
     request: Request,
-    principal: PrincipalDep,
     service: ManagedBotServiceProtocol = Injected(ManagedBotServiceProtocol),
-    config: OpenApiBotOperationsConfig = Injected(OpenApiBotOperationsConfig),
 ) -> Envelope[ManagedBotStatus]:
     """Approved applications may restart another Owner's draft Bot without a per-Bot grant.
 
@@ -122,7 +158,6 @@ async def restart_for_others(
     Uses the existing restart lock, operation deduplication and backup policy.
     Poll status-for-others for engine-owned operation progress and backup warnings.
     """
-    _trust(principal, config)
     bot = await service.restart(
         bot_id=body.bot_id,
         owner_id=body.owner_id,
@@ -154,19 +189,11 @@ async def restart_for_others(
     response_model=Envelope[Page[ManagedBotStatus]],
     summary='Read managed draft restart progress in a batch',
 )
+@EngineCheck(engines=_CODING_ENGINES, bots=status_engine_targets)
 @envelope_errors
 async def status_for_others(
-    body: ManagedBotStatusQueries,
     request: Request,
-    principal: PrincipalDep,
-    service: ManagedBotServiceProtocol = Injected(ManagedBotServiceProtocol),
-    config: OpenApiBotOperationsConfig = Injected(OpenApiBotOperationsConfig),
+    items: Annotated[list[dict[str, Any]], Depends(status_engine_targets)],
 ) -> Envelope[Page[ManagedBotStatus]]:
     """Runtime status is separate from restart completion. Failed operations remain successful query results."""
-    _trust(principal, config)
-    items = await asyncio.to_thread(
-        service.statuses,
-        template_key=body.template_key,
-        targets=[(target.bot_id, target.owner_id) for target in body.bots],
-    )
     return page(len(items), [ManagedBotStatus(**item) for item in items], request)

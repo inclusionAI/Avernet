@@ -33,7 +33,8 @@ def operations_client():
     service.snapshot_context.return_value = {
         'template_config': {'template_key': 'coding'}, 'template_config_hash': 'a' * 64,
     }
-    service.statuses.return_value = [{'bot_id': 'bot', 'owner_id': 'owner', 'status': 'ACTIVE', 'is_ready': True,
+    service.statuses.return_value = [{'bot_id': 'bot', 'owner_id': 'owner', 'active_engine': 'aicoding',
+        'status': 'ACTIVE', 'is_ready': True,
         'ext': {'aicoding': {'restart': {'operation_id': 'op', 'status': 'FAILED', 'phase': 'BACKING_UP',
             'message': 'Backup failed', 'warning': {'code': 'backup_failed_continue', 'message': 'Risk'}}}}}]
     app = mount_public_error_handlers(FastAPI())
@@ -189,3 +190,151 @@ def test_submission_only_reports_the_operation_explicitly_identified_by_lifecycl
     restart = ((data.get('ext') or {}).get('aicoding') or {}).get('restart')
     assert (restart or {}).get('operation_id') == expected_operation
     assert service.restart.return_value['ext']['coding_restart']['operation_id'] == 'old'
+
+
+@pytest.mark.parametrize('operation', ['restart-for-others', 'status-for-others'])
+@pytest.mark.parametrize('engine', ['claude_code', 'aicoding'])
+def test_managed_engine_gate_accepts_both_coding_engines(operations_client, operation, engine):
+    client, service = operations_client
+    service.statuses.return_value[0]['active_engine'] = engine
+    payload = {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}
+    if operation == 'status-for-others':
+        payload = {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}
+
+    response = client.post('/openapi/v1/bots/' + operation, headers=headers(), json=payload)
+
+    assert response.status_code == 200
+    service.statuses.assert_called_once_with(template_key='coding', targets=[('bot', 'owner')])
+    if operation == 'status-for-others':
+        assert 'active_engine' not in response.json()['data']['items'][0]
+
+
+@pytest.mark.parametrize('operation', ['restart-for-others', 'status-for-others'])
+@pytest.mark.parametrize('engine', ['openclaw', 'teclaw', 'unknown', '', None, 'AICODING'])
+@pytest.mark.parametrize('with_snapshot', [False, True])
+def test_managed_engine_gate_refuses_other_or_unknown_engines(operations_client, operation, engine, with_snapshot):
+    client, service = operations_client
+    service.statuses.return_value[0]['active_engine'] = engine
+    payload = {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}
+    if operation == 'status-for-others':
+        payload = {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}
+    elif with_snapshot:
+        payload['extra_configs'] = {
+            'template_config': {'template_key': 'coding', 'template_version_id': 4},
+            'confirmed_template_update': 'true', 'expected_template_config_hash': 'a' * 64,
+        }
+
+    response = client.post('/openapi/v1/bots/' + operation, headers=headers(), json=payload)
+
+    assert response.status_code == 501
+    assert response.json()['code'] == 501000
+    assert response.json()['data'] is None
+    service.restart.assert_not_awaited()
+
+
+def test_status_engine_gate_refuses_the_whole_mixed_batch(operations_client):
+    client, service = operations_client
+    service.statuses.return_value.append({
+        'bot_id': 'other', 'owner_id': 'owner', 'active_engine': 'openclaw',
+        'status': 'ACTIVE', 'is_ready': True,
+    })
+
+    response = client.post('/openapi/v1/bots/status-for-others', headers=headers(), json={
+        'template_key': 'coding',
+        'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}, {'bot_id': 'other', 'owner_id': 'owner'}],
+    })
+
+    assert response.status_code == 501
+    assert response.json()['data'] is None
+    service.statuses.assert_called_once()
+
+
+@pytest.mark.parametrize('operation,expected_status', [('restart-for-others', 404), ('status-for-others', 200)])
+def test_engine_gate_preserves_missing_target_semantics(operations_client, operation, expected_status):
+    client, service = operations_client
+    service.statuses.return_value = []
+    payload = {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}
+    if operation == 'status-for-others':
+        payload = {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}
+
+    response = client.post('/openapi/v1/bots/' + operation, headers=headers(), json=payload)
+
+    assert response.status_code == expected_status
+    service.restart.assert_not_awaited()
+    if operation == 'status-for-others':
+        assert response.json()['data'] == {'total': 0, 'items': []}
+
+
+def test_engine_gate_leaves_discovery_and_snapshot_reads_unrestricted(operations_client):
+    client, service = operations_client
+    service.snapshot_context.return_value['active_engine'] = 'openclaw'
+
+    assert client.post('/openapi/v1/bots/template-queries', headers=headers(), json={
+        'template_key': 'coding',
+    }).status_code == 200
+    assert client.post('/openapi/v1/bots/template-config-for-others', headers=headers(), json={
+        'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner',
+    }).status_code == 200
+    service.statuses.assert_not_called()
+
+
+def test_managed_engine_restrictions_are_documented_without_changing_request_bodies():
+    app = FastAPI()
+    app.include_router(router)
+    document = app.openapi()
+
+    for operation, schema in [
+        ('restart-for-others', 'ManagedBotRestart'), ('status-for-others', 'ManagedBotStatusQueries'),
+    ]:
+        entry = document['paths']['/openapi/v1/bots/' + operation]['post']
+        assert entry['requestBody']['content']['application/json']['schema'] == {
+            '$ref': '#/components/schemas/' + schema,
+        }
+        assert entry['responses']['501']['content']['application/json']['schema'] == {
+            '$ref': '#/components/schemas/ErrorEnvelope',
+        }
+
+
+@pytest.mark.parametrize('operation', ['restart-for-others', 'status-for-others'])
+def test_engine_gate_fails_closed_when_the_engine_field_is_missing(operations_client, operation):
+    client, service = operations_client
+    service.statuses.return_value[0].pop('active_engine')
+    payload = {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}
+    if operation == 'status-for-others':
+        payload = {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}
+
+    response = client.post('/openapi/v1/bots/' + operation, headers=headers(), json=payload)
+
+    assert response.status_code == 501
+    service.restart.assert_not_awaited()
+
+
+def test_engine_gate_composes_with_the_existing_owner_aspect():
+    from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+    from agentclaw.community.adapters.http.openapi_v1.engine_access import EngineCheck
+
+    async def targets():
+        return [{'active_engine': 'aicoding'}]
+
+    @EngineCheck(engines=frozenset({'aicoding'}), bots=targets)
+    async def handler():
+        return {}
+
+    route = PublicAPIRoute('/openapi/v1/bots/{bot_id}/status', handler, methods={'GET'})
+    gate_modules = {dependency.call.__module__ for dependency in route.dependant.dependencies}
+
+    assert 'agentclaw.community.adapters.http.openapi_v1.bot_access' in gate_modules
+    assert 'agentclaw.community.adapters.http.openapi_v1.engine_access' in gate_modules
+    assert 501 in route.responses
+
+
+def test_unrestricted_owner_route_does_not_acquire_an_engine_gate():
+    from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+
+    async def handler():
+        return {}
+
+    route = PublicAPIRoute('/openapi/v1/bots/{bot_id}/status', handler, methods={'GET'})
+
+    assert all(not dependency.call.__module__.endswith('.engine_access') for dependency in route.dependant.dependencies)
+    assert 501 not in route.responses
