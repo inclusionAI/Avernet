@@ -1,0 +1,32 @@
+apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs
+  s_b033c54cc00da7::t_02800b8bb898b3 40
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
+  s_b033c54cc00da7::t_02800b8bb898b3 288
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
+  s_b033c54cc00da7::t_02800b8bb898b3 9,48,99,128
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/catalog_labels_tests.rs
+  s_b033c54cc00da7::t_02800b8bb898b3 26
+apps/bcs/crates/bootstrap/bcs/tests/bootstrap_auth_boundaries.rs
+  s_b033c54cc00da7::t_02800b8bb898b3 5
+apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs
+  s_b033c54cc00da7::t_e13566c7217abe 62,66
+  s_b033c54cc00da7::t_02800b8bb898b3 60,193,195
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/dist_archive_tests.rs
+  s_b033c54cc00da7::t_02800b8bb898b3 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a0925ef5b0ae562bb569e337eca546d683768d80",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

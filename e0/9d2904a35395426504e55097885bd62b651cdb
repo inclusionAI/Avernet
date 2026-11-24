@@ -1,0 +1,37 @@
+apps/evolverun/clawweb/internal/modules/tclog/server/services/__tests__/session-trajectory-reader.test.ts
+  s_c1c3b383e07265::t_9e95ac81bcd5ca 3,334-424
+apps/evolverun/clawweb/internal/modules/tclog/server/services/aivision-session-trajectory.ts
+  s_c1c3b383e07265::t_3b709bf6d6582f 196-198,266-268
+  s_c1c3b383e07265::t_ae86f4b5f71fc2 99-114,116,118-128,130-134,136-159,164-195,199-245,249-265,269-272,274-278,280-300,302
+  s_c1c3b383e07265::t_590d61deff60a8 129,135,160-163,246-248
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/private/__tests__/config-mist-runtime.test.ts
+  s_c1c3b383e07265::t_9e95ac81bcd5ca 12,137-138,143,162,177,189
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/private/config-mist-runtime.ts
+  s_c1c3b383e07265::t_9e95ac81bcd5ca 116
+  s_c1c3b383e07265::t_30c6c5c327fd12 14,44
+apps/evolverun/clawweb/internal/modules/tclog/server/services/session-trajectory-reader.ts
+  s_c1c3b383e07265::t_ae86f4b5f71fc2 110,114-115
+  s_c1c3b383e07265::t_6f14792395713e 6,80,150-153,227-230
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/session-recovery-runtime.test.ts
+  s_c1c3b383e07265::t_4e2d41905d82cd 258-270
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/session-recovery-runtime.ts
+  s_c1c3b383e07265::t_effe3fd3aa229d 9,34,46-47,52-53,62-64,66
+apps/evolverun/clawweb/internal/configs/application-pre.yaml
+  s_c1c3b383e07265::t_e9c1f98cfce380 7-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e09d2904a35395426504e55097885bd62b651cdb",
+  "prompts": {},
+  "sessions": {
+    "s_c1c3b383e07265": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d465-5126-72c1-8669-c1bfa31d01dc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

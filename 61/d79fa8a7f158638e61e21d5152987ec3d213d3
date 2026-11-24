@@ -1,0 +1,21 @@
+apps/frontend-nextgen/src/internal/market/hooks/useAddToCapabilitySet.ts
+  s_30131f6595b5d5::t_4c66550f4db879 5,164,166-173,175-177
+apps/frontend-nextgen/test/internal/market/hooks/useAddToCapabilitySet.test.tsx
+  s_30131f6595b5d5::t_41775fea4e0be7 30,90-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "61d79fa8a7f158638e61e21d5152987ec3d213d3",
+  "prompts": {},
+  "sessions": {
+    "s_30131f6595b5d5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e7f9-9388-7702-95ad-bebd50450d5d",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+singlebox/modules/bcs.sh
+  s_b8318b4c84fe50::t_5e4d50702d1e04 62-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d5bb18d8e5cff415700d289c99914ac6685cf0b5",
+  "prompts": {},
+  "sessions": {
+    "s_b8318b4c84fe50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e357-98ca-7510-8478-04820a9fb003",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

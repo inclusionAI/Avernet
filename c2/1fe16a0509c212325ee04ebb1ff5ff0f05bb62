@@ -1,0 +1,39 @@
+apps/bcsfuse/docs/deployment/zbcsfuse-sre-tr-load-test.md
+  s_9e428ec8192673::t_64636be855856b 78
+apps/bcsfuse/internal/bcsfuse_internal/providers/discover_tr.py
+  s_9e428ec8192673::t_35eed643639c84 1,19,27,31-34,36-41,43-46,48-50,53,56,59,62,64-74
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_9e428ec8192673::t_6e1600943aa520 1,173,189-190,210
+apps/bcsfuse/pyproject.toml
+  s_9e428ec8192673::t_15a4a72dc1a8db 26-27
+apps/bcsfuse/requirements.txt
+  s_9e428ec8192673::t_c5290d1492eed6 9-11
+apps/bcsfuse/tests/alipay/test_discovery_input_cards.py
+  s_9e428ec8192673::t_53f9d978752c04 102
+apps/bcsfuse/tests/alipay/test_resource_cards.py
+  s_9e428ec8192673::t_b640d2dc1faa2c 216
+apps/bcsfuse/tests/alipay/test_resource_types.py
+  s_9e428ec8192673::t_0079e9df404988 178
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_9e428ec8192673::t_9a4f83b957a22a 70,74,86,131,179,260,312,359,390,394,404,438,445
+apps/bcsfuse/tests/alipay/test_tr_server.py
+  s_9e428ec8192673::t_7680a0a7a4b185 10,73,120-126,183-189
+apps/bcsfuse/tests/alipay/test_v2_visibility_labels.py
+  s_9e428ec8192673::t_ff17943f82c182 64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c21fe16a0509c212325ee04ebb1ff5ff0f05bb62",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

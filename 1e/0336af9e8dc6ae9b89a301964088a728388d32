@@ -1,0 +1,14 @@
+apps/bcs-internal/.aci.yml
+  h_fa66fe7c023b4b 36-41,44-50,58-73,92,95-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1e0336af9e8dc6ae9b89a301964088a728388d32",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

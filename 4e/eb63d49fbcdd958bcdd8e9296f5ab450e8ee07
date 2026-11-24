@@ -1,0 +1,23 @@
+apps/bcsfuse/tests/deployment/test_zbcsfuse_config.py
+  s_4645e948b53118::t_d71b9f1c80ac29 343-348,351,357
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_4645e948b53118::t_30a504c813e3db 55-56
+apps/bcsfuse/configs/zbcsfuse/application-prepub.yaml
+  s_4645e948b53118::t_d71b9f1c80ac29 10-14,25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4eeb63d49fbcdd958bcdd8e9296f5ab450e8ee07",
+  "prompts": {},
+  "sessions": {
+    "s_4645e948b53118": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e741-60e4-7c20-be5a-3c6017a7a86b",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

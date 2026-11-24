@@ -1,0 +1,16 @@
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/logging.rs
+  h_fa66fe7c023b4b 424,431
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/sofa_rpc_rs_poc.rs
+  h_fa66fe7c023b4b 258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ef805c49c59427e7b819b93cdc5e13eede570cfb",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

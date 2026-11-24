@@ -1,0 +1,25 @@
+apps/frontend-nextgen/test/deploy/dwsTestAssembly.test.ts
+  s_7e2b32e8bf8305::t_7b1643174fe716 26-32,42-44
+apps/frontend-nextgen/scripts/test-assemble-public-tests.sh
+  s_7e2b32e8bf8305::t_878a6928cac29b 38-53
+apps/frontend-nextgen/test/deploy/testAssembly.test.ts
+  s_7e2b32e8bf8305::t_7b1643174fe716 2,27-33,44-46
+src/backend/specs/rel20261117-on-dev/009-pr-report.md
+  s_7e2b32e8bf8305::t_cbfd2055b370ec 58-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e1fd76e091088f7c0b4f22a09deec5dbd5e0e443",
+  "prompts": {},
+  "sessions": {
+    "s_7e2b32e8bf8305": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e9f7-3ee6-7642-9ee1-6a5e7213ac36",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

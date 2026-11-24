@@ -1,0 +1,19 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a/catalog_sync.rs
+  s_83a624b3301ddd::t_65ab703e8ef3d2 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e3f30b4c2af9fac717c10ae6e34167d139d63d85",
+  "prompts": {},
+  "sessions": {
+    "s_83a624b3301ddd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e45d-5111-7891-a6fd-1154755a372f",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

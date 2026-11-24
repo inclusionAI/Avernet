@@ -1,0 +1,30 @@
+engine/adapter/src/engine/community/core/adapters/openclaw/tests/test_session.py
+  s_fd1b8e677fa2d8::t_47aed95cfd6992 854-855
+  s_fd1b8e677fa2d8::t_7aaa2f2a66e959 786-808
+  s_fd1b8e677fa2d8::t_504a24a930ff47 20,24
+  s_fd1b8e677fa2d8::t_53c51f3dd547bb 772-785,809-853
+engine/adapter/src/engine/community/core/adapters/openclaw/session.py
+  s_fd1b8e677fa2d8::t_45e8f2e986453e 237-243
+  s_fd1b8e677fa2d8::t_5921b846d40ef7 123-125,127-130
+  s_fd1b8e677fa2d8::t_8ff8de942e89af 65-70
+  s_fd1b8e677fa2d8::t_0ccfab91ef99ac 531
+  s_fd1b8e677fa2d8::t_c6cd76dffc9479 424
+  s_fd1b8e677fa2d8::t_6c97188a125e0b 78-122,126,131-133
+  s_fd1b8e677fa2d8::t_3e34d662b34910 134-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cf80bdb8a7d5c455a598ccf4100ded1b52a62a50",
+  "prompts": {},
+  "sessions": {
+    "s_fd1b8e677fa2d8": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "e7fbf75b-2d21-42d0-912d-1920e852afa4",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_fc1557df5d7924::t_b2f1481db82f53 252-264
+apps/backend/src/agentclaw/community/adapters/http/token_exchange/router.py
+  s_fc1557df5d7924::t_c5de505c014f11 109-110,116-117,123-124,129-130
+apps/backend/tests/community/api/test_legacy_iam_friend_selectors.py
+  s_fc1557df5d7924::t_b2f1481db82f53 155-195
+  s_fc1557df5d7924::t_5879cff558cbea 1-154
+apps/backend/src/agentclaw/community/di/modules/caller_identity_module.py
+  s_fc1557df5d7924::t_c5de505c014f11 5-11,285-298,308,316
+apps/backend/src/agentclaw/community/core/caller_identity/legacy_friend_iam.py
+  s_fc1557df5d7924::t_3e1e30a4fe8eb3 1-94
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  s_fc1557df5d7924::t_c5de505c014f11 11-15,37,43,59-79
+apps/backend/tests/community/api/test_dingtalk_iam_token.py
+  s_fc1557df5d7924::t_c4ded7048e0484 90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "06eaf04f5b240a8d0ae7d58df9584081cdb33e57",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

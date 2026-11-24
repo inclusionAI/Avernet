@@ -1,0 +1,45 @@
+apps/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py
+  s_9dea857d1bcaae::t_49f426cf513a8d 8,628,632-652
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_9dea857d1bcaae::t_49f426cf513a8d 424
+apps/backend/src/agentclaw/community/core/digital_employee/publication.py
+  s_9dea857d1bcaae::t_49f426cf513a8d 188-205
+apps/backend/src/agentclaw/community/core/mcp/services/passport_scope_sync.py
+  s_9dea857d1bcaae::t_49f426cf513a8d 6,99-103,105-106,109-110,113-137,139-142,145-146,149-151,153-155,157-158,160-265
+apps/backend/src/agentclaw/community/core/digital_employee/service.py
+  s_9dea857d1bcaae::t_49f426cf513a8d 2,140-142
+  s_9dea857d1bcaae::t_ef614125af407e 143
+apps/backend/src/agentclaw/community/core/repository/implementations/identity/digital_employee.py
+  s_9dea857d1bcaae::t_49f426cf513a8d 3-4,53-67
+  s_9dea857d1bcaae::t_88e5aec6f175a7 68
+apps/backend/src/agentclaw/community/core/digital_employee/contracts.py
+  s_9dea857d1bcaae::t_49f426cf513a8d 2,23-24,44
+  s_9dea857d1bcaae::t_d8e468a9098b07 45
+apps/backend/src/agentclaw/community/core/mcp/services/sync_service.py
+  s_9dea857d1bcaae::t_d73413ee8873a4 962-963
+apps/backend/tests/community/core/digital_employee/test_repositories.py
+  s_9dea857d1bcaae::t_64bc9b9e3775e9 28-29,98-102
+apps/backend/tests/community/core/skill_center/test_bot_runtime_projector_timing.py
+  s_9dea857d1bcaae::t_64bc9b9e3775e9 218-258
+  s_9dea857d1bcaae::t_3439866e004109 4-8,11-17,183,195-217,259-265
+apps/backend/tests/community/core/digital_employee/test_publication.py
+  s_9dea857d1bcaae::t_01ddb2b3bb6065 2,25,70
+apps/backend/tests/community/core/mcp/services/test_passport_scope_sync.py
+  s_9dea857d1bcaae::t_f3c5a582fe99c5 1-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "94498898226cb0d2350ecb946cc77054175cbc4c",
+  "prompts": {},
+  "sessions": {
+    "s_9dea857d1bcaae": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207dc-20be-7eb2-a41d-880e11b171ec",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

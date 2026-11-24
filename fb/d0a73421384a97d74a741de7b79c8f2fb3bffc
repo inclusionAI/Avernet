@@ -1,0 +1,23 @@
+apps/baas/src/secbaas/enterprise/plugins/sandbox/arca/_arca_sdk.py
+  s_c3ece772cfb1b0::t_fc5d2c473f2ed7 304,310-315
+apps/baas/tests/unit/plugins/sandbox/arca/test_arca_sdk.py
+  s_c3ece772cfb1b0::t_fc5d2c473f2ed7 10-11,608-615,620-621,711,715-723,728-732
+  s_c3ece772cfb1b0::t_4dc7c15fd2c3db 616-619,680-688,693-705,712-714,724-727
+  s_c3ece772cfb1b0::t_2bbea4e19d0850 733
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fbd0a73421384a97d74a741de7b79c8f2fb3bffc",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
