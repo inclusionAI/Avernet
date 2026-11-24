@@ -228,6 +228,17 @@ def _is_no_active_devices_response(response: httpx.Response) -> bool:
     return isinstance(detail, dict) and detail.get("error") == "NO_ACTIVE_DEVICES"
 
 
+def _is_no_devices_response(response: httpx.Response) -> bool:
+    if response.status_code not in {404, 503}:
+        return False
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        return False
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    return isinstance(detail, dict) and detail.get("error") == "NO_DEVICES_FOUND"
+
+
 @dataclass
 class BotWsConnectionInfoResponse:
     """BAAS WebSocket connection info.
@@ -2132,7 +2143,7 @@ class BaasService:  # pragma: no cover
             # intermittent redirects by bot/tenant/target device — the data
             # needed to tell a partial-instance/routing fault apart from a
             # blanket auth requirement.
-            if _is_no_active_devices_response(e.response):
+            if _is_no_active_devices_response(e.response) or _is_no_devices_response(e.response):
                 logger.info(
                     "[BaasService.get_ws_info_by_bot_uuid] no active device: "
                     "status=%s bot_uuid=%s tenant=%s device_affinity=%s",
@@ -3914,6 +3925,12 @@ class BaasService:  # pragma: no cover
             return result
 
         except httpx.HTTPStatusError as e:
+            if _is_no_active_devices_response(e.response) or _is_no_devices_response(e.response):
+                raise BaasNoActiveDevicesError(status_code=e.response.status_code) from e
+            if e.response.status_code >= 500:
+                raise BaasTransientServiceError(
+                    f"BaaS HTTP connection resolution unavailable: {e.response.status_code}"
+                ) from e
             logger.error(
                 f"[BaasService.get_http_info] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
@@ -3921,6 +3938,10 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+        except httpx.RequestError as e:
+            raise BaasTransientServiceError(
+                f"Failed to get http info: {type(e).__name__}"
+            ) from e
         except BaasServiceError:
             raise
         except Exception as e:

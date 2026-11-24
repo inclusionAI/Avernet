@@ -19,6 +19,7 @@ import httpx
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
+from agentclaw.community.core.devices.services.device_read_errors import raise_if_unavailable
 from agentclaw.community.core.devices.services.baas_invoke_transport import (
     BaasTransport,
     is_not_directory_error,
@@ -91,6 +92,13 @@ class BaasDeviceFileSystem(DeviceFileSystem):
         self._path_mapper = path_mapper
         # for logging only
         self._bot_uuid: str = conn_info.get("paas_device_id", "")
+
+    async def read_file_checked(self, file_path: str, *, enforce_download_limit: bool = False) -> bytes | None:
+        try:
+            return await self.read_file(file_path, enforce_download_limit=enforce_download_limit)
+        except Exception as error:
+            raise_if_unavailable(error)
+            raise
 
     async def read_file(
         self,

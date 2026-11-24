@@ -98,6 +98,24 @@ class LocalDeviceFileSystem(DeviceFileSystem):
 
     # ── Public API: dispatches to _baas_* or _pathlib_* per ctor mode ──
 
+    async def read_file_checked(self, file_path: str, *, enforce_download_limit: bool = False) -> bytes | None:
+        from agentclaw.community.core.devices.services.device_read_errors import raise_if_unavailable
+
+        mapped = self._path_mapper(file_path)
+        if self._is_baas_mode:
+            try:
+                return await self._baas_read_file(mapped)
+            except Exception as error:
+                raise_if_unavailable(error)
+                raise
+        return await self._pathlib_read_file_checked(mapped)
+
+    async def _pathlib_read_file_checked(self, mapped: str) -> bytes | None:
+        try:
+            return Path(mapped).read_bytes()
+        except (FileNotFoundError, IsADirectoryError):
+            return None
+
     async def read_file(
         self,
         file_path: str,

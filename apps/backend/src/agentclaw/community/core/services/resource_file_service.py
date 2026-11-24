@@ -42,6 +42,8 @@ from agentclaw.community.core.resources.service import InvalidResourcePathError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceContext,
+    DeviceOfflineError,
+    DeviceConnectionUnavailableError,
     DeviceNotBoundError,
     UnknownProviderError,
 )
@@ -50,6 +52,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.core.devices.services.device_filesystem import (
     DeviceFileSystem,
+    checked_read_file,
     FileTooLargeError as DeviceFileTooLargeError,
 )
 from agentclaw.community.core.resources.service import (
@@ -264,6 +267,7 @@ class ResourceFileService(ResourceFilePort):
     def _resolve_ctx(
         self, *, bot_id: str, entity_id: str, publish_id: str | None = None,
         device_uuid: str | None = None,
+        checked: bool = False,
     ) -> DeviceContext:
         """Resolve the device context.
 
@@ -286,6 +290,10 @@ class ResourceFileService(ResourceFilePort):
                 return self._resolver.resolve_for_binding(
                     int(bind_id), entity_id, bot_id=bot_id, device_uuid=device_uuid,
                 )
+            except (DeviceOfflineError, DeviceConnectionUnavailableError):
+                if checked:
+                    raise
+                raise ValueError(f"Failed to get device info for publish_id={publish_id}") from None
             except (
                 ValueError,  # non-numeric bind_id — was shielded by the old broad except
                 DeviceNotBoundError,
@@ -442,6 +450,7 @@ class ResourceFileService(ResourceFilePort):
         device_uuid: str | None = None,
         enforce_download_limit: bool = False,
         runtime_context: DeviceContext | None = None,
+        checked: bool = False,
     ) -> bytes | None:
         """Read a file's bytes via the device, provider-blind.
 
@@ -454,12 +463,14 @@ class ResourceFileService(ResourceFilePort):
         """
         ctx = runtime_context or self._resolve_ctx(
             bot_id=bot_id, entity_id=entity_id, publish_id=publish_id,
-            device_uuid=device_uuid,
+            device_uuid=device_uuid, checked=checked,
         )
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
         )
+        if checked:
+            return await checked_read_file(device_fs, self._logical(path), enforce_download_limit=enforce_download_limit)
         return await device_fs.read_file(
             self._logical(path), enforce_download_limit=enforce_download_limit
         )

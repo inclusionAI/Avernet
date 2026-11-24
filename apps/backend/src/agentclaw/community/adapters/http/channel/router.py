@@ -24,6 +24,7 @@ from agentclaw.community.core.channel.models import ChannelRecord
 from agentclaw.community.di import Injected
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.devices.services.device_context import DeviceOfflineError, DeviceConnectionUnavailableError
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user as _get_current_user
 from agentclaw.community.log import get_logger
@@ -304,6 +305,8 @@ async def get_openclaw_configs(
             online=configs.online,
             eval=configs.eval,
         )
+    except (DeviceOfflineError, DeviceConnectionUnavailableError) as e:
+        raise HTTPException(status_code=503, detail="Device temporarily unavailable") from e
     except FileNotFoundError as e:
         logger.exception(f"[get_openclaw_configs] FileNotFoundError: bot_id={bot_id}, owner_id={owner_id}, error={e}")
         raise HTTPException(status_code=500, detail=f"生成配置失败：openclaw.json不存在 - {e}") from e
