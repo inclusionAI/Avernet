@@ -111,3 +111,9 @@ reservation. Updates pin at most once across CAS retries, while the store's slug
 comparison fences concurrent renames. Store projection validation remains defense
 in depth. No transaction spans Card fetching; a later DB/CAS failure is not a
 rollback guarantee for the separate Provider reservation.
+
+V1 typed management failures now report code/field/reason to the explicit
+`bcs-observability::business_warning` scope before safe response conversion.
+HTTP owns the original wire snapshot; the application never reconstructs it or
+logs raw ServiceError Debug strings or credentials. Without a transport snapshot,
+the diagnostic marks payload unavailable. No extra database/network calls occur.

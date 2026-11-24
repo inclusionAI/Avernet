@@ -328,3 +328,13 @@ with an explicit in-memory Store mock and the existing SQLite Result/Blob
 provider. The external Singlebox story validates functional processing and
 in-process ownership takeover; it cannot certify Store restart persistence or
 capacity. See [companion boundaries and commands](tests/worker_runtime/README.md).
+
+## Business warning output
+
+Logging composition registers a dedicated failure-only `bcs-warning.log` output
+for `bcs_business_warning` even with older explicit output lists. It is isolated
+from console/main/error wildcard sinks; it does not copy every WARN event. File
+creation and daily rotation use the standard rotating writer semantics shared with
+other BCS log files, without a permission exception. See the request-operation
+logging diagnostic contract for redaction, correlation, limits and runtime
+verification boundaries.

@@ -47,6 +47,13 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 pub(crate) fn failure(error: ServiceError) -> ApplicationError {
+    // Preserve typed diagnostics in the failure-only stream before the public
+    // facade intentionally removes upstream fields/reasons from its response.
+    if let ServiceError::A2aManagement(detail) = &error {
+        let code = serde_json::to_value(detail.code).unwrap_or_default();
+        bcs_observability::business_warning::warn_current(
+            code.as_str().unwrap_or("INTERNAL_ERROR"), &detail.field, detail.reason);
+    }
     match error {
         ServiceError::A2aManagement(error) => {
             let code = serde_json::to_value(error.code)

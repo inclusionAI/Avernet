@@ -17,6 +17,7 @@ axum = { workspace = true }
 bcs-config-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
+bcs-observability = { workspace = true }
 bcs-storage-api = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
@@ -34,6 +35,8 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 
 [dev-dependencies]
+bcs-app-a2a-bot = { workspace = true }
+bcs-tracing-api = { workspace = true }
 bcs-app-auth = { workspace = true }
 bcs-auth-api = { workspace = true }
 bcs-auth-oauth = { workspace = true }

@@ -77,6 +77,7 @@ async fn execute(
         .map_err(|_| {
             ApplicationError::payload_too_large("request_too_large", "Request body exceeds limit")
         })?;
+    bcs_observability::business_warning::capture_payload(&bytes);
     if parts.method == axum::http::Method::GET {
         if !bytes.is_empty() {
             return Err(ApplicationError::invalid(
@@ -223,6 +224,7 @@ pub async fn register_named(
         let token = bearer(&parts.headers)?;
         let bytes = axum::body::to_bytes(request_body, 2 * 1024 * 1024).await
             .map_err(|_|ApplicationError::payload_too_large("request_too_large", "Request body exceeds limit"))?;
+        bcs_observability::business_warning::capture_payload(&bytes);
         if parts.uri.query().is_some() { return Err(ApplicationError::invalid("invalid_request", "Query is not allowed")); }
         let input: NamedRegistration = body(&parts.headers, &bytes)?;
         let result = service(&state)?.register_named(RegisterNamedA2aAgent { catalog_labels:input.catalog_labels, token, provider_name,
