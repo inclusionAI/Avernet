@@ -45,6 +45,9 @@ _KINDS = frozenset(
         "worker.log.received",
         "worker.strategy.started",
         "worker.strategy.finished",
+        "verdict.finalized",
+        "gate.decided",
+        "review.decided",
     }
 )
 _FIELDS = frozenset(
@@ -61,6 +64,11 @@ _FIELDS = frozenset(
         "message_sha256",
         "next_job_id",
         "end_reason",
+        "verdict_status",
+        "gate_outcome",
+        "risk_tier",
+        "review_status",
+        "actor",
     }
 )
 

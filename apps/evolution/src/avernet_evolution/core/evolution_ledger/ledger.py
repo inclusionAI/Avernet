@@ -208,6 +208,16 @@ class LocalExperimentLedger:
         )
         return seq
 
+    def find_entry(self, *, owner_id: str, bot_id: str, run_id: str, candidate_id: str) -> str | None:
+        """判定回写要先定位条目；提交与判定是两条路径，只能按内容哈希对齐。"""
+
+        row = self.conn.execute(
+            "SELECT entry_id FROM ledger_entries WHERE owner_id=? AND bot_id=? AND run_id=? "
+            "AND candidate_id=?",
+            (owner_id, bot_id, run_id, candidate_id),
+        ).fetchone()
+        return None if row is None else row["entry_id"]
+
     async def get(self, entry_id: str) -> LedgerEntry:
         row = self.conn.execute("SELECT * FROM ledger_entries WHERE entry_id=?", (entry_id,)).fetchone()
         if row is None:

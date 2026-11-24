@@ -90,6 +90,13 @@ CREATE INDEX IF NOT EXISTS evolution_charge_run ON evolution_budget_charge (run_
 CREATE TABLE IF NOT EXISTS evolution_trigger_firing (
   binding_id TEXT NOT NULL, fire_key TEXT NOT NULL, status TEXT NOT NULL,
   reason TEXT, PRIMARY KEY (binding_id, fire_key));
+CREATE TABLE IF NOT EXISTS evolution_verdict (
+  candidate_id TEXT NOT NULL, profile TEXT NOT NULL, run_id TEXT,
+  status TEXT NOT NULL, body TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (candidate_id, profile));
+CREATE INDEX IF NOT EXISTS evolution_verdict_run ON evolution_verdict (run_id);
+CREATE TABLE IF NOT EXISTS evolution_candidate_risk (
+  candidate_id TEXT PRIMARY KEY, risk_tier TEXT NOT NULL, recorded_at TEXT NOT NULL);
 """
 
 
@@ -302,6 +309,24 @@ class EvolutionStore(JobStoreMixin):
             "INSERT INTO evolution_run_key (owner_id, bot_id, idempotency_key, run_id) VALUES (?, ?, ?, ?)",
             (owner_id, bot_id, run.idempotency_key, run.id),
         )
+
+    def set_candidate_risk(self, candidate_id: str, tier: str) -> None:
+        """补丁的风险等级在提交时固定；门禁只读，不再重新推断。"""
+
+        from datetime import UTC, datetime
+
+        self.conn.execute(
+            "INSERT INTO evolution_candidate_risk (candidate_id, risk_tier, recorded_at) "
+            "VALUES (?, ?, ?) ON CONFLICT(candidate_id) DO UPDATE SET risk_tier=excluded.risk_tier",
+            (candidate_id, tier, datetime.now(UTC).isoformat()),
+        )
+        self.conn.commit()
+
+    def candidate_risk(self, candidate_id: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT risk_tier FROM evolution_candidate_risk WHERE candidate_id=?", (candidate_id,)
+        ).fetchone()
+        return None if row is None else row["risk_tier"]
 
     def get_run(self, run_id: str) -> Run | None:
         row = self.conn.execute("SELECT * FROM evolution_run WHERE run_id=?", (run_id,)).fetchone()

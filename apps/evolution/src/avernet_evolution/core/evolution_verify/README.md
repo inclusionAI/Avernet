@@ -9,7 +9,8 @@
 | `models.py` | §2.1–§2.6 | `Suite`、`Case`、`VerificationProfile`、`RolloutRecord`、`SplitResult`、`Verdict`、`StrategyVerdictView` |
 | `compare.py` | §3 第 4 步 | 纯比较器：按 (case, seed) 配对、均值差、置信区间、胜率、新失败用例 |
 | `policy.py` | §4.1 | `decide()` 纯函数、种子升级判定、过拟合标记 |
-| `service.py` | §4、§5、§6、§9 | `verify`（pending→最终、按候选幂等）、`strategy_view`（仅 validation 聚合）、训练评估、holdout 审计 |
+| `service.py` | §4、§5、§6、§9 | `verify`（pending→最终、按候选幂等）、`strategy_view`（仅 validation 聚合）、`resume_pending`（重启补跑）、训练评估、holdout 审计 |
+| `store.py` | §4.2 | `VerdictStore`：`evolution_verdict`，跨重启读取，终态不改写 |
 
 ## 不变量
 
@@ -27,5 +28,12 @@
   与 `seeds.max` 的语义保留。
 - 执行器/评分器的具体实现（沙箱、ClawBench 评分）留给部署层。
 
-The independent production composition currently does not enable 07–09. Existing
-verification code/tests are preserved, not a claim of end-to-end evaluation.
+## 接入状态（2026-11-24）
+
+- 组合根在平台提供 `Platform.verification` 时接上：`attach_store` → 判定落定回调
+  （写 Ledger + `verdict.finalized`）→ 08 门禁。平台不提供时行为不变，候选停在
+  `pending`（01–06 兼容路径）。
+- 进程内流水线不跨重启；启动时 `resume_pending()` 会把库里停在 `pending` 的判定
+  重跑一遍（只补完没跑完的那次，不改写终态）。
+- 执行器/评分器的真实实现仍在部署层：simulator 目前是**规则型**（读 revision 文件、
+  按用例标记打分），不是 LLM judge，也不是质量评测的终点。

@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
-from ..control_contract import BindingsBody, CancelBody, RunBody
+from ..control_contract import BindingsBody, CancelBody, ReviewBody, RunBody
 from ..core.evolution_run.api import error_envelope
 
 BASE = "/openapi/v1/bots/{bot_id}/evolution"
@@ -58,6 +58,13 @@ def install_errors(app: FastAPI):
     async def domain_error(request, exc):
         return response(request, status=error_envelope(exc)["status"])
 
+    from ..core.evolution_promote import (
+        AlreadyDecided,
+        CandidateNotFound,
+        NotReviewable,
+        PromotionNotReady,
+        ReviewNotFound,
+    )
     from ..core.evolution_run import errors
 
     for name in (
@@ -72,6 +79,9 @@ def install_errors(app: FastAPI):
         "BudgetExhausted",
     ):
         app.add_exception_handler(getattr(errors, name), domain_error)
+    # 09 评审面：404/409 的形状与 09 §2.1 的错误信封一致。
+    for kind in (CandidateNotFound, ReviewNotFound, NotReviewable, AlreadyDecided, PromotionNotReady):
+        app.add_exception_handler(kind, domain_error)
     for kind in (ValueError, KeyError, TypeError):
         app.add_exception_handler(kind, domain_error)
 
@@ -155,6 +165,62 @@ def build_control_router(runtime, *, backend_access=None) -> APIRouter:
     async def evidence(request: Request, bot_id: str, run_id: str, after: int = Query(0, ge=0)):
         access = await grant(request, bot_id)
         return response(request, await runtime.api.run_evidence(access.bot, run_id, after=after))
+
+    @router.get(BASE + "/candidates/{candidate_id}")
+    async def candidate_report(request: Request, bot_id: str, candidate_id: str):
+        access = await grant(request, bot_id)
+        return response(request, await runtime.api.candidate_report(access.bot, candidate_id))
+
+    @router.get(BASE + "/review-queue")
+    async def review_queue(
+        request: Request,
+        bot_id: str,
+        status: str = Query("open"),
+        min_tier: str | None = Query(None),
+        page: int = Query(1, ge=1),
+        page_size: int = Query(20, ge=1, le=100),
+    ):
+        access = await grant(request, bot_id)
+        return response(
+            request,
+            await runtime.api.review_queue(
+                access.bot, status=status, min_tier=min_tier, page=page, page_size=page_size
+            ),
+        )
+
+    @router.post(BASE + "/candidates/{candidate_id}:approve")
+    async def approve(request: Request, bot_id: str, candidate_id: str, payload: ReviewBody):
+        access = await grant(request, bot_id, True)
+        key = request.headers.get("idempotency-key", "")
+        if len(key) > 200:
+            return response(request, status=400)
+        return response(
+            request,
+            await runtime.api.approve_candidate(
+                access.bot,
+                candidate_id,
+                reason=payload.reason,
+                actor=access.actor,
+                idempotency_key=key or None,
+            ),
+        )
+
+    @router.post(BASE + "/candidates/{candidate_id}:reject")
+    async def reject(request: Request, bot_id: str, candidate_id: str, payload: ReviewBody):
+        access = await grant(request, bot_id, True)
+        key = request.headers.get("idempotency-key", "")
+        if len(key) > 200:
+            return response(request, status=400)
+        return response(
+            request,
+            await runtime.api.reject_candidate(
+                access.bot,
+                candidate_id,
+                reason=payload.reason,
+                actor=access.actor,
+                idempotency_key=key or None,
+            ),
+        )
 
     @router.get(BASE + "/strategies")
     @router.get("/openapi/v1/evolution/strategies", include_in_schema=False)

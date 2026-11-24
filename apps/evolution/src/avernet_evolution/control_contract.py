@@ -42,3 +42,18 @@ class CancelBody(BaseModel):
         max_length=500,
         description="Auditable cancellation reason; must not include credentials or private conversation text.",
     )
+
+
+class ReviewBody(BaseModel):
+    """Approve or reject one open review item; the decision is audited with its reason."""
+
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(
+        min_length=1,
+        max_length=2000,
+        description="Why this decision was made; never include credentials or private conversation text.",
+    )
+    override_stale_parent: bool = Field(
+        default=False,
+        description="Promote even though `active` moved since verification; audited and not yet applied.",
+    )

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import secrets
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
@@ -36,6 +37,7 @@ from .models import (
     VerificationProfile,
 )
 from .policy import assess_overfit, decide, needs_more_seeds
+from .store import VerdictStore
 
 __all__ = ["CandidateRef", "Evaluation", "LocalVerificationService"]
 
@@ -48,6 +50,9 @@ class CandidateRef:
     revision: str
     parent_revision: str
     run_id: str | None = None
+    #: 真实的 BotRef。缺省时按 id 重建，会丢掉 entity_type 等字段，
+    #: 只适用于按 (owner, bot) 取内容的 HTTP 提供者。
+    bot: Any = None
 
 
 @dataclass(frozen=True)
@@ -71,17 +76,38 @@ class LocalVerificationService:
     grade: Callable[[Case, RolloutRecord], Awaitable[Grade]]
     agreement: Callable[[Sequence[RolloutRecord]], Awaitable[float | None]] | None = None
     default_profile: str = "default@1"
+    #: 判定持久化；缺省时退化为纯内存（测试/单进程）。跨重启幂等要求它存在。
+    store: Any = None
+    #: 判定落定（accept/reject/inconclusive）后的下游钩子：写记录、驱动晋升。
+    on_final: Callable[[Verdict], Awaitable[None]] | None = None
     _verdicts: dict[tuple[str, str], Verdict] = field(default_factory=dict, repr=False)
     _evaluations: dict[str, Evaluation] = field(default_factory=dict, repr=False)
     _tasks: set[asyncio.Task] = field(default_factory=set, repr=False)
     _train_cases: dict[str, list[Case]] = field(default_factory=dict, repr=False)
 
+    def attach_store(self, store: Any) -> None:
+        """组合根注入持久化；接受 EvolutionStore 或已构造的 VerdictStore。"""
+
+        self.store = store if isinstance(store, VerdictStore) else VerdictStore(store.conn)
+
+    def _save(self, verdict: Verdict) -> None:
+        if self.store is not None:
+            self.store.save(verdict)
+
+    def _load(self, candidate_id: str, profile: str) -> Verdict | None:
+        return None if self.store is None else self.store.load(candidate_id, profile)
+
+    async def _notify(self, verdict: Verdict) -> None:
+        if self.on_final is not None:
+            await self.on_final(verdict)
+
     # -- §9 verify ------------------------------------------------------
     async def verify(self, candidate: CandidateRef, profile: str | None = None) -> Verdict:
         name = profile or self.default_profile
         key = (candidate.candidate_id, name)
-        existing = self._verdicts.get(key)
+        existing = self._verdicts.get(key) or self._load(candidate.candidate_id, name)
         if existing is not None:
+            self._verdicts[key] = existing
             return existing
         pending = Verdict(
             candidate=candidate.candidate_id,
@@ -94,18 +120,25 @@ class LocalVerificationService:
             status=VerdictStatus.PENDING,
         )
         self._verdicts[key] = pending
+        self._save(pending)
         task = asyncio.create_task(self._run_pipeline(candidate, name))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return pending
 
     async def get_verdict(self, candidate_id: str, profile: str | None = None) -> Verdict:
-        return self._verdicts[(candidate_id, profile or self.default_profile)]
+        name = profile or self.default_profile
+        verdict = self._verdicts.get((candidate_id, name)) or self._load(candidate_id, name)
+        if verdict is None:
+            raise KeyError(candidate_id)
+        self._verdicts[(candidate_id, name)] = verdict
+        return verdict
 
     async def strategy_view(self, candidate_id: str, run_id: str) -> StrategyVerdictView:
-        for (cid, _profile), verdict in self._verdicts.items():
-            if cid != candidate_id:
-                continue
+        known = [v for (cid, _p), v in self._verdicts.items() if cid == candidate_id]
+        if not known and self.store is not None:
+            known = self.store.for_candidate(candidate_id)
+        for verdict in known:
             if verdict.run_id is not None and verdict.run_id != run_id:
                 raise PermissionError("candidate was not submitted by this run")
             aggregates: dict[str, AggregateScores] = {}
@@ -126,6 +159,40 @@ class LocalVerificationService:
             )
         raise KeyError(candidate_id)
 
+    async def resume_pending(self, bot_for: Callable[[Verdict], Awaitable[Any] | Any] | None = None) -> int:
+        """重启恢复：把库里停在 pending 的判定重新跑起来。
+
+        判定按 (候选, 配置) 幂等且终态永不改写，所以重跑只会补完没跑完的那次，
+        不会推翻已经落定的结论。`bot_for` 由组合根提供，用来还原真实的 `BotRef`
+        （只按 id 重建会丢掉 `entity_id`，HTTP 提供者会拿错主体）。
+        """
+
+        if self.store is None:
+            return 0
+        resumed = 0
+        for verdict in self.store.pending():
+            key = (verdict.candidate, verdict.profile)
+            if key in self._verdicts or verdict.profile not in self.profiles:
+                continue
+            self._verdicts[key] = verdict
+            bot = bot_for(verdict) if bot_for is not None else None
+            if inspect.isawaitable(bot):
+                bot = await bot
+            candidate = CandidateRef(
+                candidate_id=verdict.candidate,
+                bot_owner_id=verdict.bot_owner_id,
+                bot_id=verdict.bot_id,
+                revision=verdict.revision or "",
+                parent_revision=verdict.parent_revision,
+                run_id=verdict.run_id,
+                bot=bot,
+            )
+            task = asyncio.create_task(self._run_pipeline(candidate, verdict.profile))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+            resumed += 1
+        return resumed
+
     async def settle(self, candidate_id: str, profile: str | None = None) -> Verdict:
         """测试与运维用：等待后台流水线结束。"""
 
@@ -141,15 +208,20 @@ class LocalVerificationService:
             verdict = await self._evaluate(candidate, profile)
         except Exception as exc:  # noqa: BLE001 - 执行失败是 inconclusive，不是异常
             current = self._verdicts[key]
-            self._verdicts[key] = replace(
+            failed = replace(
                 current,
                 status=VerdictStatus.INCONCLUSIVE,
                 reasons=(f"evaluation failed: {exc}",),
                 reasons_categories=(VerdictReasonCategory.VALIDATION_INCONCLUSIVE,),
                 decided_at=_now(),
             )
+            self._verdicts[key] = failed
+            self._save(failed)
+            await self._notify(failed)
             return
         self._verdicts[key] = verdict
+        self._save(verdict)
+        await self._notify(verdict)
 
     async def _evaluate(self, candidate: CandidateRef, profile: VerificationProfile) -> Verdict:
         bot = _bot(candidate)
@@ -311,6 +383,8 @@ class LocalVerificationService:
 
 
 def _bot(candidate: CandidateRef) -> Any:
+    if candidate.bot is not None:
+        return candidate.bot
     from avernet_genome.models import BotRef
 
     return BotRef(

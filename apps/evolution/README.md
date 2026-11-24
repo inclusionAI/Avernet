@@ -11,7 +11,8 @@ Canonical Python 包为 `avernet_evolution`，不依赖 Backend 的 Python 包�
 远端登录、用户名称显示或真实任务验收已修复。
 `local` 是明确的测试夹具，不是真实 Bot、聊天导出、LLM、Agent Swarm 或远端沙箱。
 `production` 必须提供经过评审的 Platform 插件，缺失时启动失败，不回退本地夹具。
-07–09 评测/晋升不在本次验收范围内，`completed` / `pending` 不代表可发布。
+07–09 见下文「判定、门禁与评审面」：目前只有规则型验证 + 门禁决策 + 评审 API，
+**apply 未启用**，`accept` / `needs_review` 都不代表 bot 已经改变。
 
 ## Context Boundary
 
@@ -191,6 +192,37 @@ Backend 配置与故障边界见 [Bot RSI 控制入口](../backend/docs/flows/bo
 }
 ```
 
+## 判定、门禁与评审面（07–09）
+
+状态（2026-11-24）：07 有可运行的**规则型**执行器（simulator 进程内：读 revision
+文件、按用例打分），08 只做决策，09 的报告/队列/approve/reject 已可调用。
+**apply 仍未启用**：revision 目前只捕获 persona 等部分文件，不是 bot 的完整快照；
+因此 `promote()` 与 approve 之后的 apply 都会显式失败，而不是把 bot 覆盖成残缺状态。
+
+| 方法 / 后缀 | 输入 → 输出 |
+| --- | --- |
+| `GET /candidates/{candidate_id}` | 候选报告：diff 指针、判定与 splits、门禁、评审状态；判定仍 pending 时 `gate` / `review` 为 `null` |
+| `GET /review-queue?status=open&min_tier=T1&page=1&page_size=20` | `{total, items}`；`status` 可取 `open` / `approved` / `rejected` / `superseded` / `all` |
+| `POST /candidates/{candidate_id}:approve` | `{reason}` + `Idempotency-Key` → 记录批准；响应 `promotion` 为 `null`，`promotion_note` 说明 apply 未启用 |
+| `POST /candidates/{candidate_id}:reject` | `{reason}` → 记录拒绝，条目变为 `rejected` |
+
+错误码沿用 09 §2.1 的信封：未知候选/条目 `404 not_found`；不在队列
+（已自动晋升或不可晋升）`409 not_reviewable`；已决策 `409 already_decided`。
+
+数据落在与 Run 同一个 SQLite：`evolution_verdict`（按 `(candidate, profile)` 幂等，
+终态永不改写）、`evolution_gate_decision`（每候选一条）、`evolution_review_item`
+（`open → approved / rejected / superseded`）、`evolution_review_idempotency`
+（同键重试返回第一次的响应）。
+
+门禁规则（08 §4.4）：判定非 `accept`、safety 新失败、回归超容差、超预算 →
+`not_promotable`；被容忍的回归、冻结、事件 → `needs_review`；风险等级在绑定
+`auto_promote_ceiling` 之内且非 T3 才 `auto_promote`。等级在提交时按补丁操作算一次
+（persona → T2，resource/memory → T1，`memory.set_mode=replace` → T3，未知 → T2）。
+
+进程内验证流水线不跨重启：启动时会把库里停在 `pending` 的判定重跑一遍
+（`LocalVerificationService.resume_pending`），只补完没跑完的那次；门禁决策与评审条目
+本身是持久状态，重启后照常可读。
+
 ### Worker Plugin API（内部作业面）
 
 独立于用户控制面认证。前缀 `/openapi/v1/evolution/jobs`，历史相对路径保留，
@@ -220,6 +252,16 @@ HTTP422、业务码422000、且所有 reasons 都是 `already_recorded` 的响�
 - 重复运行同一确定性示例不会产生新内容。合法的新输出应通过有意义的策略/参数变更产生；
   修改策略实现必须提升版本并规划部署身份迁移，不能删旧候选、重置数据库或加随机标记凑成功。
 
+
+### 已知缺口（不要当成已验收）
+
+- **apply 未启用**：`promote()` 与 approve 之后的 apply 都显式失败，`active` 不会移动。
+- **静态底线未接线**：`check_floor` 返回 `not_run`。结构、可变基因、允许的基因与大小
+  已由提交路径和 Genome 注册表强制；密钥 / PII / 出站 URL 扫描器尚未接入，
+  因此门禁里没有 `static_floor` 这一项。
+- **holdout 与预算对齐基线**未接入门禁（07 还没有产出 holdout 结果）。
+- **revision 完整性**：revision 只覆盖 persona、本地 skills 与 resources，
+  不是 bot 的完整快照——这也是 apply 保持关闭的原因。
 
 ## 持久化、恢复与观测
 

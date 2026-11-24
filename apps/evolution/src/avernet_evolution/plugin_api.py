@@ -52,6 +52,8 @@ class Platform:
     # override a registered image or rewrite persisted version identities.
     sandbox: Any = None
     worker_image: str = ""
+    #: 07 验证服务（平台所有）。None 时作业协议对候选一律回答 pending。
+    verification: Any = None
 
     async def close(self) -> None:
         """Override to release provider resources after runner shutdown."""

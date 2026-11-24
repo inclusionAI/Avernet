@@ -17,6 +17,12 @@ from .records import Run
 __all__ = ["submit_candidate"]
 
 
+def _patch_items(patch: Any) -> list[dict[str, str]]:
+    from avernet_evolution.core.evolution_promote.report import op_items
+
+    return op_items(patch)
+
+
 async def submit_candidate(
     *,
     store: Any,
@@ -39,6 +45,10 @@ async def submit_candidate(
     from avernet_evolution.core.evolution_strategy import candidate_id_of
 
     candidate_id = candidate_id_of(candidate)
+    # 等级是补丁的属性，提交时定一次；门禁读它，不再看补丁内容。
+    from avernet_evolution.core.evolution_promote import classify
+
+    store.set_candidate_risk(candidate_id, classify(patch).value)
     row = store.reserve_candidate(run.id, candidate_id)
     if row.verdict == "reject" or store.submission_complete(run.id, candidate_id):
         return candidate_id
@@ -91,7 +101,12 @@ async def submit_candidate(
             parent_revision=run.parent_revision,
             candidate_revision=revision,
             evidence=list(candidate.evidence),
-            patch={"ops": len(patch.ops), "rationale": patch.rationale},
+            # `items` 是 09 报告要用的逐操作摘要；`ops` 保留为计数，旧记录仍可读。
+            patch={
+                "ops": len(patch.ops),
+                "rationale": patch.rationale,
+                "items": _patch_items(patch),
+            },
             cost=BudgetUsage(),
             actor=run.strategy_ref,
         )
@@ -111,6 +126,7 @@ async def submit_candidate(
                 revision=revision,
                 parent_revision=run.parent_revision,
                 run_id=run.id,
+                bot=run.bot,
             ),
             run.verification_profile,
         )
