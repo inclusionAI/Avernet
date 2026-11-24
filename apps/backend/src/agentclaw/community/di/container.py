@@ -45,6 +45,7 @@ from agentclaw.community.di.modules.bot_copy_module import BotCopyModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_knowledge_module import BotKnowledgeModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
+from agentclaw.community.di.modules.manifest_apply_module import ManifestApplyModule
 from agentclaw.community.di.modules.bot_message_feedback_module import (
     BotMessageFeedbackModule,
 )
@@ -232,6 +233,7 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        ManifestApplyModule(),
         BotCopyModule(),
         ExecutionIdentityModule(),
         OwnerHandoffModule(),

@@ -73,6 +73,7 @@ def build_apply_task_payload(
     carry_from_apply_id: Optional[str] = None,
     engine_type: Optional[str] = None,
     bot_type: Optional[str] = None,
+    permission_subject: str | None = None,
 ) -> dict[str, Any]:
     """The task payload: identifiers, never state.
 
@@ -152,6 +153,7 @@ def build_apply_task_payload(
         "carry_from_apply_id": carry_from_apply_id,
         "engine_type": engine_type,
         "bot_type": bot_type,
+        "permission_subject": permission_subject,
     }
 
 
