@@ -564,10 +564,8 @@ class TeclawPlatformDelivery(_PhaseTableDelivery):
         return self._ports()
 
     async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
-        if report.state.kind != "manifest":
-            return await self._redeliver(ctx)
         deliver = getattr(self._redeliver, "deliver_with_receipt", None)
-        if not callable(deliver):
+        if not callable(deliver) or report.state.kind != "manifest":
             return await self._redeliver(ctx)
         receipt = await deliver(ctx)
         if receipt.status is not ManifestDeliveryStatus.CONFIRMED or receipt.delivered_mcp_codes is None:
