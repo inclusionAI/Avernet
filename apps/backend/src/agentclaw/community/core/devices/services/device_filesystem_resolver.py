@@ -105,6 +105,13 @@ class DefaultDeviceFileSystemResolver:
                 tenant=tenant,
                 baas_service=self._baas_service,
                 device_uuid=conn_info.get("device_uuid"),
+                # For baas bots ``paas_device_id`` is the BaaS bot uuid — the key
+                # the transport needs to find another ACTIVE instance when the
+                # gateway says the auto-selected one is unreachable (read
+                # failover; see ``BaasInvokeTransport._rotate_once``). Teclaw and
+                # desktop deliberately pass nothing: their device ids are not
+                # BaaS bot uuids and their transports never rotate.
+                bot_uuid=conn_info.get("paas_device_id"),
             )
             logger.info(
                 "[DEVICE-PLUGIN-DEBUG] → BaasDeviceFileSystem(paas_device_id=%s, bot_type=%s)",

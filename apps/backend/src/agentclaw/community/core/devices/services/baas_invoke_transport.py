@@ -27,11 +27,15 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import httpx
 
+from agentclaw.community.log import get_logger
+
 if TYPE_CHECKING:
     from agentclaw.community.core.service_bot.services.baas_service import (
         BaasService,
         HttpConnectionInfo,
     )
+
+logger = get_logger()
 
 
 # BaaS mints ``http_url`` + ``token`` per (bind_id, port, path). A package upload
@@ -53,6 +57,36 @@ _HTTP_INFO_TTL_SECONDS = 30.0
 # ``device_uuid`` pinning the instance, possibly run it against a *different* device —
 # while hiding the engine's actual verdict from the caller.
 _STALE_TOKEN_STATUS = 401
+
+# The proxypass gateway answers one of these when its routing *target* cannot be
+# reached — the sandbox gateway fails the connect (e.g. an ARCA sandbox whose sync
+# channel is dead answers 502 immediately, with no downstream span) before any
+# engine code runs. That verdict is about the selected device, not about the
+# request: replaying the same read against another ACTIVE instance of the same bot
+# is the same read, which is what makes a one-shot rotation safe on the read paths
+# that opt in. Deliberately NOT retried: mutating routes — see
+# :data:`_ROTATABLE_READ_PATHS`.
+_GATEWAY_UNAVAILABLE_STATUS = frozenset({502, 503, 504})
+
+# The idempotent, side-effect-free engine file routes eligible for device
+# rotation on a gateway-unavailable response. ``/api/file/upload`` /
+# ``/api/file/remove`` / ``/api/file/rmtree`` stay single-shot: a replayed
+# mutation could double-apply on a device it did reach, or run against a
+# different instance the caller never named.
+_ROTATABLE_READ_PATHS = frozenset({"/api/file/read", "/api/file/list"})
+
+
+def _paas_device_id_from_target(target: str) -> str | None:
+    """``{TYPE}_{paas_device_id}:{port}`` → ``paas_device_id``.
+
+    An empty or unshaped target (the secbaas transparent-proxy URL style carries
+    none) returns ``None`` — without knowing which instance failed, a rotation
+    could pick that very instance again, so it is skipped instead.
+    """
+    if not target:
+        return None
+    _, _, paas_device_id = target.rsplit(":", 1)[0].partition("_")
+    return paas_device_id or None
 
 
 def is_not_directory_error(exc: Exception) -> bool:
@@ -131,6 +165,7 @@ class BaasInvokeTransport(BaasTransport):
         tenant: str,
         baas_service: "BaasService",
         device_uuid: str | None = None,
+        bot_uuid: str | None = None,
     ):
         self._bind_id = bind_id
         self._engine_port = engine_port
@@ -140,6 +175,12 @@ class BaasInvokeTransport(BaasTransport):
         # invoke_http → get_http_info → BaaS /http-info?device_uuid=。``None`` 表示
         # 单实例 / 未指定，走 BaaS 自动选活跃实例的老行为。
         self._device_uuid = device_uuid
+        # Read failover only: the BaaS bot the binding resolves to — the key
+        # ``list_devices_by_bot_uuid`` needs to find another ACTIVE instance to
+        # rotate to when the gateway says the selected one is unreachable. Callers
+        # that cannot name a BaaS bot (e.g. teclaw, whose ``paas_device_id`` is not
+        # a bot uuid) pass ``None`` and failover stays disabled.
+        self._bot_uuid = bot_uuid
         # Guards the cache against the worker threads ``asyncio.to_thread`` fans
         # device I/O out across. Deliberately held across the ``get_http_info``
         # call itself, so a batch of concurrent writes coalesces onto ONE
@@ -186,6 +227,142 @@ class BaasInvokeTransport(BaasTransport):
             )
             return info
 
+    def _http_info_for_device(
+        self,
+        path: str,
+        *,
+        stale: "HttpConnectionInfo",
+        device_uuid: str,
+    ) -> "HttpConnectionInfo":
+        """Resolve ``http_info`` for ``path`` pinned to one specific device.
+
+        The failover path needs its own resolve because :meth:`_http_info`
+        always resolves with this transport's fixed ``device_uuid``, while a
+        rotation hands the failed read to a *different* instance of the same
+        bot. Shares the same cache slot and the same compare-and-swap
+        discipline (``stale`` must name the entry the caller just saw fail), so
+        a batch of concurrent readers rejected together coalesces onto one
+        rotation instead of each rotating on its own.
+        """
+        with self._http_info_lock:
+            cached = self._http_info_cache.get(path)
+            if (
+                cached is not None
+                and cached[0] > time.monotonic()
+                and cached[1] is not stale
+            ):
+                return cached[1]
+            info = self._baas_service.get_http_info(
+                bind_id=self._bind_id,
+                port=self._engine_port,
+                path=path,
+                tenant=self._tenant,
+                device_uuid=device_uuid,
+            )
+            self._http_info_cache[path] = (
+                time.monotonic() + _HTTP_INFO_TTL_SECONDS,
+                info,
+            )
+            return info
+
+    def _alternate_device_uuid(
+        self, failed_paas_device_id: str | None
+    ) -> str | None:
+        """Another ACTIVE BaaS instance of this bot, excluding the failed one.
+
+        Listing devices costs one BaaS round trip, paid only on the failure
+        path. Any problem (no bot uuid, list failure, no surviving instance)
+        means "no rotation", and the caller keeps the gateway's own verdict.
+        """
+        if not self._bot_uuid:
+            return None
+        try:
+            devices = self._baas_service.list_devices_by_bot_uuid(
+                self._bot_uuid, tenant=self._tenant
+            )
+        except Exception as e:
+            logger.warning(
+                "[BaasInvokeTransport] read failover skipped: listing devices "
+                "of bot %s failed: %s",
+                self._bot_uuid,
+                e,
+            )
+            return None
+        for device in devices:
+            if not isinstance(device, dict):
+                continue
+            # Same case-normalized status read as ``baas_device_header_updater``:
+            # a BaaS reply whose casing varies must not silently disable rotation.
+            if str(device.get("status", "")).upper() != "ACTIVE":
+                continue
+            provider_device_id = device.get("provider_device_id")
+            device_uuid = device.get("device_uuid")
+            if not provider_device_id or not device_uuid:
+                continue
+            if (
+                failed_paas_device_id
+                and provider_device_id == failed_paas_device_id
+            ):
+                continue
+            return device_uuid
+        return None
+
+    def _rotate_once(
+        self,
+        path: str,
+        call: dict[str, Any],
+        failed_info: "HttpConnectionInfo",
+        failed_response: httpx.Response,
+    ) -> httpx.Response:
+        """One bounded hand-off of a gateway-unavailable read to another instance.
+
+        Bounded to a single attempt; every miss (unknown failed instance, no
+        other ACTIVE device, resolution error) returns the original response
+        so the caller still observes the gateway's verdict. Rotation is
+        disabled when the caller pinned a ``device_uuid``: an explicitly
+        targeted instance is a caller decision this transport must not
+        second-guess.
+        """
+        target = getattr(failed_info, "target", None)
+        failed_paas_device_id = (
+            _paas_device_id_from_target(target)
+            if isinstance(target, str)
+            else None
+        )
+        if not failed_paas_device_id:
+            # Nothing to exclude, so a "rotation" could land right back on the
+            # same dead instance — a wasted duplicate call, not a recovery.
+            return failed_response
+        alternate = self._alternate_device_uuid(failed_paas_device_id)
+        if not alternate:
+            return failed_response
+        try:
+            alt_info = self._http_info_for_device(
+                path, stale=failed_info, device_uuid=alternate
+            )
+        except Exception as e:
+            logger.warning(
+                "[BaasInvokeTransport] read failover skipped: resolving %s "
+                "on device %s failed: %s",
+                path,
+                alternate,
+                e,
+            )
+            return failed_response
+        response = self._baas_service.invoke_http(
+            **dict(call, device_uuid=alternate), http_info=alt_info
+        )
+        logger.info(
+            "[BaasInvokeTransport] read failover: %s answered HTTP %d on "
+            "device %s, retried once on device_uuid=%s -> HTTP %d",
+            path,
+            failed_response.status_code,
+            failed_paas_device_id,
+            alternate,
+            response.status_code,
+        )
+        return response
+
     def _invoke(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """Issue one container call against this transport's cached ``http_info``.
 
@@ -197,7 +374,9 @@ class BaasInvokeTransport(BaasTransport):
         stream. A genuine misconfiguration simply fails twice.
 
         Every other status — 403 included, see :data:`_STALE_TOKEN_STATUS` — is the
-        device's own answer and is returned untouched.
+        device's own answer and is returned untouched, with one exception: a
+        gateway-unavailable 502/503/504 on an auto-selected read path rotates
+        once to another ACTIVE instance (see :meth:`_rotate_once`).
         """
         call = dict(
             bind_id=self._bind_id,
@@ -219,6 +398,14 @@ class BaasInvokeTransport(BaasTransport):
             return self._baas_service.invoke_http(
                 **call, http_info=self._http_info(path, stale=info)
             )
+        if (
+            response.status_code in _GATEWAY_UNAVAILABLE_STATUS
+            and method == "POST"
+            and path in _ROTATABLE_READ_PATHS
+            and self._bot_uuid
+            and self._device_uuid is None
+        ):
+            return self._rotate_once(path, call, info, response)
         return response
 
     def post(self, path: str, *, json: Any | None = None) -> httpx.Response:
