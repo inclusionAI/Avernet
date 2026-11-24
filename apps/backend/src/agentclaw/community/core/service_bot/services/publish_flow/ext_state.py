@@ -20,7 +20,11 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 )
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     DeliveryArtifact,
+    EngineStageStamp,
     restamp_stage,
+)
+from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
+    TECLAW_DEVICE_PROVIDER,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
@@ -175,10 +179,18 @@ class PublishExtState:
     # only in *where the stage overrides come from* — the one legitimate per-path
     # choice, made explicit here instead of re-derived at each call site.
     def compose_live(
-        self, publish_record: BotPublishRecord, stage: PublishStage
+        self,
+        publish_record: BotPublishRecord,
+        stage: PublishStage,
+        *,
+        stage_stamp: EngineStageStamp | None = None,
     ) -> tuple[DeliveryArtifact, dict | None]:
-        """Compose the delivery artifact for ``stage`` using a LIVE re-fetch of that
-        stage's channel ``engine_overrides`` from the channel reader.
+        """Compose the final delivery artifact for ``stage`` using a LIVE re-fetch.
+
+        The channel reader supplies that stage's currently-active
+        ``engine_overrides``. ``stage_stamp`` is optional and only needed by a
+        delivery-specific engine subtype (currently TeClaw Default/Eval evaluation);
+        when omitted, the default ``PublishStage -> engine stage`` mapping is used.
 
         Used by the release (first/upgrade) and eval paths, which run *at promotion
         time* and want the stage's currently-active channels. Returns the composed
@@ -188,7 +200,51 @@ class PublishExtState:
         no-op for the ARCA mount path (``config_artifact=None``, ``overrides=None``)."""
         overrides = self.stage_overrides(publish_record, stage)
         base = (publish_record.ext or {}).get("config_artifact")
-        return DeliveryArtifact.compose(base, stage, overrides), overrides
+        return (
+            DeliveryArtifact.compose(base, stage, overrides, stage_stamp=stage_stamp),
+            overrides,
+        )
+
+    def compose_eval_delivery(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        default_tag: str,
+        device_provider: str,
+    ) -> DeliveryArtifact:
+        """Compose the final EVAL delivery artifact for one evaluation instance.
+
+        ``default_tag`` is the public business dimension; it is *not* an engine
+        stage. The TeClaw engine, however, distinguishes the two long-lived
+        evaluation runtimes as ``eval`` and ``eval-default`` in its own
+        ``engine_ext.stage`` vocabulary. This helper is the single mapping seam:
+        both the first eval release and subsequent refresh/update callers
+        compose the same final artifact here, rather than one path shipping the
+        raw production ``release`` artifact downstream.
+
+        Non-TeClaw runtimes keep the ordinary ``PublishStage.EVAL`` mapping and
+        carry no TeClaw subtype. A missing or unsupported TeClaw tag fails early;
+        it is never silently delivered as production ``release``.
+        """
+        stage_stamp: EngineStageStamp | None
+        if device_provider != TECLAW_DEVICE_PROVIDER:
+            stage_stamp = None
+        elif default_tag == "eval":
+            stage_stamp = EngineStageStamp(stage="eval", default_tag="eval")
+        elif default_tag == "default":
+            stage_stamp = EngineStageStamp(stage="eval-default", default_tag="default")
+        else:
+            raise PublishFlowServiceError(
+                "unsupported evaluation default_tag for TeClaw: "
+                f"{default_tag!r}"
+            )
+
+        delivery, _ = self.compose_live(
+            publish_record,
+            PublishStage.EVAL,
+            stage_stamp=stage_stamp,
+        )
+        return delivery
 
     def compose_stored(self, ext: dict, stage: PublishStage) -> DeliveryArtifact:
         """Compose the delivery artifact for ``stage`` from the STORED per-stage

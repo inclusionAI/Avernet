@@ -6,6 +6,7 @@ from typing import Any, Dict
 from agentclaw.community.kernel.device_dto import ResourceSpecification
 
 from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
     PublishOperationKind,
     PublishStatus,
 )
@@ -13,6 +14,9 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
 from agentclaw.community.core.service_bot.baas_service_errors import BaasBotNotFoundError
+from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
+    DeliveryArtifact,
+)
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
     service_publish_extra_envs,
     service_publish_template_config,
@@ -125,15 +129,26 @@ class EvalPublishMixin:
         if device_count < 1:
             raise PublishFlowServiceError("device_count must be at least 1")
 
-        # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
-        # config_artifact read above is only the build-artifact presence guard. Eval
-        # does not persist, so the applied overrides are discarded.
-        delivery, _ = self._ext_state.compose_live(publish_record, publish_stage)
+        # Resolve the provider once. It selects the TeClaw delivery-specific engine
+        # stage inside the shared eval composer below, and is reused by image-pin
+        # resolution so the two layers cannot disagree about the target runtime.
+        provider = self.device_provider(bot)
+
+        # Compose through the single delivery seam (LIVE overrides re-fetch). This is
+        # the same seam used by eval refresh/update, ensuring every path receives
+        # ``eval`` or ``eval-default`` rather than the raw production ``release``
+        # artifact. The raw config_artifact read above is only the build-artifact
+        # presence guard, and eval discards the live overlay snapshot.
+        delivery = self.compose_eval_delivery(
+            publish_record,
+            default_tag=default_tag,
+            device_provider=provider,
+        )
         if docker_image:
             image_pin_docker_image = docker_image
         else:
             image_pin = self.resolve_publish_image_pin(
-                publish_record, device_provider=self.device_provider(bot)
+                publish_record, device_provider=provider
             )
             image_pin_docker_image = image_pin.docker_image
 
@@ -179,6 +194,7 @@ class EvalPublishMixin:
                 publish_stage=publish_stage,
                 version=str(publish_record.version or 1),
                 delivery=delivery,
+                runtime_kind=provider,
                 ext_info=ext_info,
                 extra_envs=eval_envs,
                 docker_image=image_pin_docker_image,
@@ -232,6 +248,20 @@ class EvalPublishMixin:
             f"[PublishFlowService.eval_publish] Release success: {result}"
         )
         return result
+
+    def compose_eval_delivery(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        default_tag: str,
+        device_provider: str,
+    ) -> DeliveryArtifact:
+        """Compose the final EVAL delivery artifact for one evaluation instance."""
+        return self._ext_state.compose_eval_delivery(
+            publish_record,
+            default_tag=default_tag,
+            device_provider=device_provider,
+        )
 
     def eval_teardown(
         self,

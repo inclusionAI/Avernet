@@ -13,6 +13,13 @@ import pytest
 
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     DeliveryArtifact,
+    EngineStageStamp,
+)
+from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
+    TECLAW_DEVICE_PROVIDER,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    PublishFlowServiceError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
     PublishExtState,
@@ -58,6 +65,79 @@ def test_compose_live_overlays_live_channels_and_returns_overrides():
     assert delivery.config_artifact["engine_overrides"] == _CH  # live channels overlaid
     assert overrides == _CH  # handed back for the release path to persist
     reader.overrides_for_stage.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "default_tag,expected_stage",
+    [
+        ("eval", "eval"),
+        ("default", "eval-default"),
+    ],
+)
+def test_compose_live_stage_stamp_finalizes_teclaw_eval_delivery(default_tag, expected_stage):
+    seam, reader = _ext_state(reader_result=_CH)
+    record = _record({"config_artifact": _artifact("draft")})
+
+    delivery, overrides = seam.compose_live(
+        record,
+        PublishStage.EVAL,
+        stage_stamp=EngineStageStamp(stage=expected_stage, default_tag=default_tag),
+    )
+
+    engine_ext = delivery.config_artifact["engine_ext"]
+    assert engine_ext["stage"] == expected_stage
+    assert engine_ext["default_tag"] == default_tag
+    assert delivery.config_artifact["engine_overrides"] == _CH
+    assert overrides == _CH
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "default_tag,expected_stage",
+    [
+        ("eval", "eval"),
+        ("default", "eval-default"),
+    ],
+)
+def test_compose_eval_delivery_maps_default_tag_to_teclaw_stage(default_tag, expected_stage):
+    seam, reader = _ext_state(reader_result=_CH)
+    record = _record({"config_artifact": _artifact("release")})
+
+    delivery = seam.compose_eval_delivery(
+        record, default_tag=default_tag, device_provider=TECLAW_DEVICE_PROVIDER
+    )
+
+    assert delivery.config_artifact["engine_ext"]["stage"] == expected_stage
+    assert delivery.config_artifact["engine_ext"]["default_tag"] == default_tag
+    assert delivery.config_artifact["engine_overrides"] == _CH
+    reader.overrides_for_stage.assert_called_once()
+
+
+@pytest.mark.unit
+def test_compose_eval_delivery_non_teclaw_uses_eval_stage_without_tag():
+    seam, reader = _ext_state(reader_result=_CH)
+    record = _record({"config_artifact": _artifact("release")})
+
+    delivery = seam.compose_eval_delivery(
+        record, default_tag="default", device_provider="baum"
+    )
+
+    assert delivery.config_artifact["engine_ext"]["stage"] == "eval"
+    assert "default_tag" not in delivery.config_artifact["engine_ext"]
+    assert delivery.config_artifact["engine_overrides"] == _CH
+    reader.overrides_for_stage.assert_called_once()
+
+
+@pytest.mark.unit
+def test_compose_eval_delivery_rejects_unknown_teclaw_tag():
+    seam, _ = _ext_state()
+    record = _record({"config_artifact": _artifact("release")})
+
+    with pytest.raises(PublishFlowServiceError):
+        seam.compose_eval_delivery(
+            record, default_tag="production", device_provider=TECLAW_DEVICE_PROVIDER
+        )
 
 
 @pytest.mark.unit
