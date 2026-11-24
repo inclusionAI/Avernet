@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import time
 
+import httpx
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
@@ -355,3 +356,93 @@ endpoint_test(
         status=502, json_contains={"code": 502000, "message": "Bot device is offline", "data": None}
     ),
 )(lambda: None)
+
+
+# The CDO-reported shape on this surface: an upstream transport fault from the
+# device filesystem escaping the handler as an unhandled ``HTTPStatusError``
+# (500 + ERROR traceback), instead of this group's classified 502. Storage
+# faults must answer 502 whichever leg raises — the listing itself, or the
+# existence probe delete and upload make before touching the workspace.
+def _http_status_error(code: int):
+    request = httpx.Request("POST", "http://baas/api/file/list")
+    return httpx.HTTPStatusError(
+        f"HTTP {code}", request=request, response=httpx.Response(code, request=request)
+    )
+
+
+def _seed_upstream_fault_services(world) -> None:
+    _seed_happy_services(world)
+
+    async def list_dir(_self, **_kwargs):
+        raise _http_status_error(503)
+
+    async def read_file(_self, **_kwargs):
+        raise _http_status_error(500)
+
+    async def exists(_self, *, path, **_kwargs):
+        raise _http_status_error(500)
+
+    bind_overrides(
+        world,
+        ResourceFileService,
+        {"list_dir": list_dir, "read_file": read_file, "exists": exists},
+    )
+
+
+for _method, _path, _input, _status in (
+    (
+        "GET",
+        _BASE_PATH,
+        CaseInput(
+            path_params=_PATH_PARAMS,
+            query_params=_query(path="docs"),
+            headers=_HEADERS,
+        ),
+        502,
+    ),
+    (
+        "GET",
+        f"{_BASE_PATH}/download",
+        CaseInput(
+            path_params=_PATH_PARAMS,
+            query_params=_query(path=_EXISTING_PATH),
+            headers=_HEADERS,
+        ),
+        502,
+    ),
+    (
+        "DELETE",
+        _BASE_PATH,
+        CaseInput(
+            path_params=_PATH_PARAMS,
+            query_params=_query(path=_EXISTING_PATH),
+            headers=_HEADERS,
+        ),
+        502,
+    ),
+    (
+        "POST",
+        f"{_BASE_PATH}/upload",
+        CaseInput(
+            path_params=_PATH_PARAMS,
+            query_params=_query(path=_NEW_PATH),
+            headers=_OCTET_HEADERS,
+            raw_body=b"hello world",
+        ),
+        502,
+    ),
+):
+    endpoint_test(
+        method=_method,
+        path=_path,
+        scenario="upstream_storage_fault",
+        input=_input,
+        seed=_seed_upstream_fault_services,
+        # The public message is the status phrase by house convention; the
+        # handler's per-operation detail ("List storage failed" etc.) is
+        # logged, not returned.
+        expect=ExpectError(
+            status=_status,
+            json_contains={"code": _status * 1000, "message": "Bad Gateway", "data": None},
+        ),
+    )(lambda: None)

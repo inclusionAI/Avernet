@@ -212,7 +212,9 @@ async def _list_dir_or_empty(
     (``baas_device_filesystem.py:68``). It is only here that a 404 stops being a
     failure: the providers that return ``None`` already produce an empty listing
     for an absent directory, so without this the same request is a 500 on baas
-    and an empty page everywhere else. Every other status still propagates.
+    and an empty page everywhere else. Every other transport fault is a storage
+    failure, answered as this group's 502 (see ``upload_resource``) rather than
+    an unhandled 500; the device layer already logged the upstream detail.
     """
     coords = _file_coords(bot_id, owner_id, bot_repo)
     entity_type, entity_id, engine_type = (
@@ -229,8 +231,16 @@ async def _list_dir_or_empty(
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code != 404:
-            raise
+            logger.warning(
+                "[resources] list storage failed: upstream HTTP %d",
+                exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="List storage failed") from exc
         return []
+    except httpx.HTTPError as exc:
+        # Connect/timeout faults: same verdict, different family.
+        logger.warning("[resources] list storage failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="List storage failed") from exc
     return listed or []
 
 
@@ -432,14 +442,24 @@ async def upload_resource(
     # changed. Closing it needs an exclusive-create on the engine's write API,
     # since ``DeviceFileSystem`` has no conditional-create to make the check and
     # the write one operation; see the spec's known-limitation section.
-    occupied = await file_svc.exists(
-        **(target or {}),
-        entity_type=entity_type,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        path=safe,
-    )
+    try:
+        occupied = await file_svc.exists(
+            **(target or {}),
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+        )
+    except httpx.HTTPError as exc:
+        # The duplicate probe is the same device read the delete route's
+        # existence probe makes; a transport fault there is the write leg's
+        # 502 verdict arriving before any bytes or record were written.
+        logger.warning(
+            "[resources] upload storage failed on the duplicate probe: %s",
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=502, detail="Upload storage failed") from exc
     if occupied and not overwrite:
         raise DuplicateResourceError(f"Resource already exists: {safe}")
     try:
@@ -619,11 +639,20 @@ async def _read_file_or_404(
         # promoted files, so that loudness is load-bearing and must not be
         # changed at the device. It is only *here* that a 404 stops being a
         # failure and becomes an ordinary answer: this route documents 404 for a
-        # path that is not there. Every other status stays unmapped and surfaces
-        # as a 500, which is what an upstream fault is.
+        # path that is not there. Every other transport fault is a storage
+        # failure, answered as this group's 502 rather than an unhandled 500;
+        # the device layer already logged the upstream detail.
         if exc.response.status_code != 404:
-            raise
+            logger.warning(
+                "[resources] read storage failed: upstream HTTP %d",
+                exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Read storage failed") from exc
         raise HTTPException(status_code=404, detail="Resource not found") from exc
+    except httpx.HTTPError as exc:
+        # Connect/timeout faults: same verdict, different family.
+        logger.warning("[resources] read storage failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="Read storage failed") from exc
     # ``None`` is absent. ``b""`` is a file that exists and happens to be empty,
     # and it is served as one: an empty file appears in a listing, so answering
     # 404 for it would be the workspace and the API disagreeing about what
@@ -742,11 +771,21 @@ async def download_directory(
         # ``None`` (same loudness ``_read_file_or_404`` relies on), and — same
         # rule as there — only *here* does that 404 stop being an upstream fault
         # and become this route's documented "not found"; a missing directory is
-        # an ordinary answer, an empty walk is not. Every other status still
-        # surfaces as a 500, which is what an upstream fault is.
+        # an ordinary answer, an empty walk is not. Every other transport fault
+        # is a storage failure, answered as this group's 502 rather than an
+        # unhandled 500; the device layer has already logged the upstream
+        # detail at ERROR.
         if exc.response.status_code != 404:
-            raise
+            logger.warning(
+                "[resources] read storage failed: upstream HTTP %d",
+                exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Read storage failed") from exc
         raise HTTPException(status_code=404, detail="Resource not found") from exc
+    except httpx.HTTPError as exc:
+        # Connect/timeout faults: same verdict, different family.
+        logger.warning("[resources] read storage failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="Read storage failed") from exc
     filename = quote(f"{root_name}.zip")
     return FileResponse(
         zip_path,
@@ -832,6 +871,11 @@ async def create_directory(
         )
     except DeviceFileSystemReadOnlyError:
         raise HTTPException(status_code=403, detail="Cannot write to a read-only path")
+    except httpx.HTTPError as exc:
+        # A transport fault writing the ``.keep`` placeholder is a storage
+        # failure, answered as this group's 502 like upload/delete.
+        logger.warning("[resources] mkdir storage failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="Mkdir storage failed") from exc
     return created(
         FileEntry(
             path=safe,
@@ -877,14 +921,25 @@ async def delete_file(
     entity_type, entity_id, engine_type = (
         coords.entity_type, coords.entity_id, coords.engine_type
     )
-    if not await file_svc.exists(
-        **(target or {}),
-        entity_type=entity_type,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        path=safe,
-    ):
+    try:
+        present = await file_svc.exists(
+            **(target or {}),
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+        )
+    except httpx.HTTPError as exc:
+        # The probe reads the path and lists its parent; a transport fault
+        # there means the storage could not be consulted — the refused delete
+        # below answers the same verdict as 502.
+        logger.warning(
+            "[resources] delete storage failed on the existence probe: %s",
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=502, detail="Delete storage failed") from exc
+    if not present:
         raise HTTPException(status_code=404, detail="Resource not found")
     # Record first, file second — the reverse order cannot recover. Deleting the
     # file first and then failing to drop the record leaves the manifest pointing
@@ -900,13 +955,24 @@ async def delete_file(
     # existence check above already ran, so False here means the device refused,
     # not that the path was absent. The record is gone by now, which the retry
     # tolerates — a missing record is not an error — while it retries the file.
-    if not await file_svc.delete(
-        **(target or {}),
-        entity_type=entity_type,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        path=safe,
-    ):
+    try:
+        deleted = await file_svc.delete(
+            **(target or {}),
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+        )
+    except httpx.HTTPError as exc:
+        # The refused-delete branch below already answers False as 502; a raised
+        # transport fault is the same verdict arriving differently.
+        logger.warning(
+            "[resources] delete storage failed: %s", type(exc).__name__
+        )
+        raise HTTPException(
+            status_code=502, detail="Delete storage failed"
+        ) from exc
+    if not deleted:
         raise HTTPException(status_code=502, detail="Delete storage failed")
     return deleted_envelope(request)

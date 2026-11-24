@@ -536,14 +536,19 @@ async def test_list_of_an_absent_directory_is_an_empty_page_not_a_500():
 
 
 @pytest.mark.asyncio
-async def test_list_does_not_swallow_other_upstream_statuses():
-    """Only 404 is an ordinary answer; an upstream fault must still surface."""
+@pytest.mark.parametrize("code", [400, 401, 500, 503])
+async def test_list_answers_an_upstream_fault_as_a_classified_502(code):
+    """Only 404 is an ordinary answer. An upstream transport fault is a storage
+    failure, which this group answers as a classified 502 (the ``upload`` and
+    ``delete`` routes' own verdict) rather than an unhandled 500 — the bug the
+    CDO report on ``GET /resources`` filed as repeated ``[Unhandled
+    exception] HTTPStatusError``."""
 
     class _FailingDirService:
         async def list_dir(self, **_kw):
-            raise _http_status(503)
+            raise _http_status(code)
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(HTTPException) as exc:
         await list_resources(
             page=PageParams(page=1, page_size=10),
             user_id="u1",
@@ -554,6 +559,34 @@ async def test_list_does_not_swallow_other_upstream_statuses():
             file_svc=_FailingDirService(),
             request=_request_without_trace(),
         )
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "List storage failed"
+
+
+@pytest.mark.asyncio
+async def test_list_answers_a_transport_fault_as_a_classified_502():
+    """A connect/timeout fault (the ``httpx.HTTPError`` family) is the same
+    storage-failure verdict as an upstream status, not a distinct one."""
+
+    class _UnreachableDirService:
+        async def list_dir(self, **_kw):
+            raise httpx.ConnectTimeout("timed out")
+
+    with pytest.raises(HTTPException) as exc:
+        await list_resources(
+            page=PageParams(page=1, page_size=10),
+            user_id="u1",
+            owner_id="u1",
+            bot_id="bot-x",
+            path="docs",
+            bot_repo=_StubBotRepo(),
+            file_svc=_UnreachableDirService(),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "List storage failed"
 
 
 @pytest.mark.asyncio
@@ -1170,6 +1203,32 @@ async def test_upload_502_when_the_device_write_fails():
 
 
 @pytest.mark.asyncio
+async def test_upload_502_when_the_duplicate_probe_hits_a_transport_fault():
+    """The duplicate probe is a device read before any bytes or record were
+    written; a transport fault there gets the write branch's verdict, not an
+    unhandled 500."""
+
+    class _UnreachableProbeService(_StubFileService):
+        async def exists(self, *, path, **_kw) -> bool:
+            raise httpx.ReadTimeout("timed out")
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt",
+            content=b"x",
+            user_id="u1",
+            owner_id="u1",
+            bot_id="bot-a",
+            bot_repo=_StubBotRepo(),
+            file_svc=_UnreachableProbeService(),
+            request=_request_without_trace(),
+        )
+
+    assert excinfo.value.status_code == 502
+    assert excinfo.value.detail == "Upload storage failed"
+
+
+@pytest.mark.asyncio
 async def test_upload_maps_explicit_device_read_only_error():
     from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
 
@@ -1320,10 +1379,10 @@ async def test_read_404s_when_the_provider_reports_the_file_missing(handler):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("code", [401, 500, 503])
-async def test_read_does_not_swallow_other_upstream_statuses(code):
-    """Only 404 is an ordinary answer. Anything else is an upstream fault and
-    must stay unmapped, which is what a 500 reports."""
-    with pytest.raises(httpx.HTTPStatusError):
+async def test_read_answers_an_upstream_fault_as_a_classified_502(code):
+    """Only 404 is an ordinary answer. Anything else is a storage failure,
+    answered as this group's 502 rather than an unhandled 500."""
+    with pytest.raises(HTTPException) as exc:
         await download_file(
             path="a.txt",
             user_id="u1",
@@ -1333,6 +1392,28 @@ async def test_read_does_not_swallow_other_upstream_statuses(code):
             file_svc=_StubReadFileService({}, read_raises=_http_status(code)),
             request=_request_without_trace(),
         )
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "Read storage failed"
+
+
+@pytest.mark.asyncio
+async def test_preview_answers_a_transport_fault_as_a_classified_502():
+    """A connect/timeout fault on the read leg reaches ``preview`` through the
+    same helper, so it carries the same verdict."""
+    with pytest.raises(HTTPException) as exc:
+        await preview_file(
+            path="a.txt",
+            user_id="u1",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubReadFileService({}, read_raises=httpx.ReadTimeout("timed out")),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "Read storage failed"
 
 
 @pytest.mark.asyncio
@@ -1546,6 +1627,59 @@ async def test_delete_file_502_when_the_device_refuses():
 
 
 @pytest.mark.asyncio
+async def test_delete_502_when_the_existence_probe_hits_a_transport_fault():
+    """The existence probe reads the path and lists its parent; a transport
+    fault there means the storage could not be consulted — the same verdict the
+    refused delete above answers as 502, not an unhandled 500. This is the
+    CDO-reported shape: ``[Unhandled exception] HTTPStatusError`` on
+    ``DELETE /openapi/v1/bots/{bot_id}/resources``."""
+
+    class _UnreachableProbeService(_StubReadFileService):
+        async def exists(self, *, path, **_kw) -> bool:
+            raise _http_status(500)
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_file(
+            path="docs/a.txt",
+            user_id="u1",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_StubFactory(),
+            bot_repo=_StubBotRepo(),
+            file_svc=_UnreachableProbeService({"docs/a.txt": b"x"}),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "Delete storage failed"
+
+
+@pytest.mark.asyncio
+async def test_delete_502_when_the_file_delete_call_hits_a_transport_fault():
+    """The device providers report a refused delete as False, but a transport
+    fault still surfaces as a raise — the same verdict arriving differently."""
+
+    class _RaisingDeleteService(_StubReadFileService):
+        async def delete(self, *, path, **_kw) -> bool:
+            raise httpx.ConnectError("unreachable")
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_file(
+            path="docs/a.txt",
+            user_id="u1",
+            owner_id="u1",
+            bot_id="bot-x",
+            factory=_StubFactory(),
+            bot_repo=_StubBotRepo(),
+            file_svc=_RaisingDeleteService({"docs/a.txt": b"x"}),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "Delete storage failed"
+
+
+@pytest.mark.asyncio
 async def test_delete_file_404_when_absent():
     with pytest.raises(HTTPException) as exc:
         await delete_file(
@@ -1596,6 +1730,25 @@ async def test_mkdir_maps_explicit_device_read_only_error():
             bot_repo=_StubBotRepo(), file_svc=ReadOnlyService(), request=_request_without_trace(),
         )
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_mkdir_answers_a_transport_fault_as_a_classified_502():
+    """The ``.keep`` write meets the same device the upload's write does, so a
+    transport fault carries the write branch's verdict: storage failure, 502."""
+
+    class UnreachableService:
+        async def create_directory(self, **kwargs):
+            raise httpx.ConnectError("unreachable")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_directory(
+            path="docs/spec", user_id="u1", owner_id="u1", bot_id="bot-x",
+            bot_repo=_StubBotRepo(), file_svc=UnreachableService(),
+            request=_request_without_trace(),
+        )
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "Mkdir storage failed"
 
 
 # ── End-to-end integration ──────────────────────────────────────────
@@ -2257,10 +2410,11 @@ async def test_download_dir_404s_when_the_provider_raises_the_upstream_404():
 
 
 @pytest.mark.asyncio
-async def test_download_dir_surfaces_an_upstream_fault():
-    """Only 404 is an ordinary answer; an upstream fault must still surface."""
+async def test_download_dir_answers_an_upstream_fault_as_a_classified_502():
+    """Only 404 is an ordinary answer; another upstream fault is a storage
+    failure, answered as this group's 502 rather than an unhandled 500."""
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(HTTPException) as exc:
         await download_directory(
             path="docs",
             user_id="u1",
@@ -2270,6 +2424,9 @@ async def test_download_dir_surfaces_an_upstream_fault():
             file_svc=_StubTreeFileService({}, tree_raises=_http_status(503)),
             request=_request_without_trace(),
         )
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "Read storage failed"
 
 
 @pytest.mark.asyncio
