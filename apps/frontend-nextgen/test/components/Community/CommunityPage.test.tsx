@@ -39,7 +39,8 @@ const mockCommunityState = {
   replies: [],
   replyLoading: false,
   replyError: null,
-  replyPage: 1,
+  firstReplyPage: 1,
+  lastReplyPage: 1,
   replyPageCount: 1,
   hasMore: false,
   loadingMore: false,
@@ -100,12 +101,12 @@ describe('CommunityPage 滚动容器结构', () => {
     expect(scrollMain.parentElement).toHaveClass('h-full', 'flex', 'flex-col');
   });
 
-  test('主题类型筛选后移除范围按钮，保留可点击关注、当前用户头像和发帖入口', () => {
+  test('主题类型筛选后移除范围按钮，保留可点击关注、主视图标签和发帖入口', () => {
     render(<CommunityPage />);
 
     const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
     const searchInput = screen.getByRole('textbox', { name: '搜索社区主题' });
-    const personalCenterButton = screen.getByRole('button', { name: '个人中心' });
+    const personalCenterButton = screen.getByRole('tab', { name: '我的' });
     const publishButton = screen.getByRole('button', { name: '发帖' });
 
     expect(
@@ -122,17 +123,43 @@ describe('CommunityPage 滚动容器结构', () => {
     expect(screen.getByText(topic.title)).toBeInTheDocument();
     fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
     expect(screen.getByText(topic.title)).toBeInTheDocument();
-    expect(topicTypeGroup).toHaveClass('bg-background', 'sm:w-2/5', 'sm:min-w-[240px]', 'sm:max-w-[50%]');
-    expect(topicTypeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(personalCenterButton).getByAltText('张三').getAttribute('src')).toBe(
-      'https://example.com/avatar.png',
-    );
-    expect(searchInput.compareDocumentPosition(personalCenterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(personalCenterButton).toBeEnabled();
-    expect(personalCenterButton.compareDocumentPosition(publishButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('tab', { name: '全部帖子', selected: true })).toBeVisible();
+    expect(personalCenterButton).toHaveAttribute('aria-selected', 'false');
+    expect(searchInput).toBeVisible();
+    expect(publishButton).toBeEnabled();
 
     fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
     expect(mockCommunityState.setTopicType).toHaveBeenCalledWith('share');
+  });
+
+  test('社区主 Tab 使用 Bot 管理相同的浅蓝色块，并随选择切换', () => {
+    render(<CommunityPage />);
+    const tabs = within(screen.getByRole('tablist', { name: '社区视图' }));
+    const all = tabs.getByRole('tab', { name: '全部帖子' });
+    const mine = tabs.getByRole('tab', { name: '我的' });
+    expect(all).toHaveClass('rounded-md', 'bg-primary/10');
+    expect(mine).not.toHaveClass('bg-primary/10');
+    fireEvent.click(mine);
+    expect(mine).toHaveClass('rounded-md', 'bg-primary/10');
+    expect(mine).toHaveAttribute('aria-selected', 'true');
+    expect(all).not.toHaveClass('bg-primary/10');
+  });
+
+  test('我的视图保留搜索和发帖，确认搜索返回帖子列表', () => {
+    render(<CommunityPage />);
+    fireEvent.click(screen.getByRole('tab', { name: '我的' }));
+    const search = screen.getByRole('textbox', { name: '搜索社区主题' });
+    expect(search).toBeVisible();
+    expect(screen.getByRole('button', { name: '发帖' })).toBeEnabled();
+    fireEvent.change(search, { target: { value: '测试主题' } });
+    expect(mockCommunityState.setQuery).toHaveBeenCalledWith('测试主题');
+    mockCommunityState.query = '测试主题';
+    try {
+      fireEvent.keyDown(search, { key: 'Enter' });
+      expect(screen.getByRole('tab', { name: '全部帖子', selected: true })).toBeVisible();
+    } finally {
+      mockCommunityState.query = '';
+    }
   });
 
   test('主题类型筛选 tab 图标与发帖弹窗保持一致', () => {
