@@ -23,7 +23,7 @@ from agentclaw.community.core.session_resources.types import (
     UploadGrant,
     hash_identifier,
 )
-from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
+from agentclaw.community.core.session_resources.runtime import SessionFileRuntimeResolver
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -151,14 +151,14 @@ def _seed_happy_services(world) -> None:
         },
     )
 
-    def resolve_binding(_self, _request):
+    def resolve_binding(_self, _request, *, session_user_id=None, device_uuid=None):
         return SimpleNamespace(
-            binding_id=101,
+            binding_id=101, owner_id=_OWNER, device_uuid=device_uuid,
         )
 
     bind_overrides(
         world,
-        RuntimeBindingResolutionService,
+        SessionFileRuntimeResolver,
         {
             "resolve": resolve_binding,
         },
@@ -196,14 +196,14 @@ def _seed_happy_services(world) -> None:
         },
     )
 
-    async def list_files(_self, _target, _session_key, *, session_user_id=None):
+    async def list_files(_self, _target, _session_key, *, session_user_id=None, device_uuid=None):
         return [{"resource_id": record.resource_id, "display_name": record.display_name,
                  "status": "ready", "size_bytes": record.size_bytes}]
 
-    async def open_content(_self, _target, _session_key, _resource_id, _disposition, *, session_user_id=None):
+    async def open_content(_self, _target, _session_key, _resource_id, _disposition, *, session_user_id=None, device_uuid=None):
         return _ContentUpstream()
 
-    async def delete_file(_self, _target, _session_key, _resource_id):
+    async def delete_file(_self, _target, _session_key, _resource_id, *, session_user_id=None, device_uuid=None):
         return None
 
     bind_overrides(world, EngineSessionFilesProtocol, {

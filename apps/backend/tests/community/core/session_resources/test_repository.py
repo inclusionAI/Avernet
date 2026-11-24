@@ -63,6 +63,28 @@ async def test_owned_lookup_requires_owner_bot_and_session(repo):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("uuid", [None, "DEVICE-B"])
+async def test_selected_device_survives_repository_reload_and_materialization_cas(repo, uuid):
+    repo.create(replace(_record(), device_uuid=uuid))
+    assert repo.get_by_resource_id("sr_001").device_uuid == uuid
+    started = repo.cas_start_materialization(
+        resource_id="sr_001", owner_id="owner-1", bot_id="bot-1", session_key_hash="session-hash",
+        transfer_id="transfer-1", task_id="task-1",
+    )
+    assert started.device_uuid == uuid
+    finished = repo.cas_finish_materialization(
+        resource_id="sr_001", transfer_id="transfer-1", task_id="task-1", task_version=1,
+        ready=False, materialized_ref=None, error_code="temporary_failure",
+    )
+    assert finished.device_uuid == uuid
+    restarted = repo.cas_start_materialization(
+        resource_id="sr_001", owner_id="owner-1", bot_id="bot-1", session_key_hash="session-hash",
+        transfer_id="transfer-1", task_id="task-2",
+    )
+    assert restarted.device_uuid == uuid and restarted.task_version == 2
+
+
+@pytest.mark.asyncio
 async def test_task_version_cas_rejects_stale_callback(repo):
     repo.create(_record())
     started = repo.cas_start_materialization(

@@ -52,7 +52,6 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.converter_creation import reconcile_created_session
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import (
     OpenApiSessionFileAdapter,
-    SessionFileRuntimeTargetDep,
     UploadActorNameDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import (
@@ -78,7 +77,6 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import resolve_operable_bot
 from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
@@ -554,9 +552,9 @@ async def create_session_file_upload_intents(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
-    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
     f_user_id: FriendUserIdQuery = None,
+    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -566,13 +564,14 @@ async def create_session_file_upload_intents(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
         owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
         relay=relay, friendships=friendships, expert=expert,
-        runtime_target=runtime_target, require_caller_instance=True,
+        require_explicit_subject=True,
     )
     try:
         intents = adapter.create_upload_intents(
             actor_user_id=user_id,
             creator_name=creator_name,
-            target=runtime_target,
+            session_user_id=access.session_user_id,
+            device_uuid=device_uuid,
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,
@@ -683,9 +682,9 @@ async def list_ready_session_files(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
-    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
     f_user_id: FriendUserIdQuery = None,
+    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -693,17 +692,17 @@ async def list_ready_session_files(
 ) -> Envelope[SessionFileList]:
     resolved_stage = await authorize_file_list(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
-        owner_id=owner_id, stage=stage, friend_user_id=f_user_id, runtime_target=runtime_target,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
         relay=relay, friendships=friendships, expert=expert,
     )
     try:
         records = await adapter.list_ready(
             target=RuntimeBindingRequest(
-                target=runtime_target,
                 bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=resolved_stage,
             ),
             session_key=session_id,
             session_user_id=f_user_id,
+            device_uuid=device_uuid,
         )
     except ValueError as exc:
         _session_file_not_found(exc)
@@ -730,9 +729,9 @@ async def stream_session_file_content(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
-    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
     f_user_id: FriendUserIdQuery = None,
+    device_uuid: DeviceUuidQuery = None,
     disposition: DispositionQuery = "inline",
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
@@ -741,17 +740,17 @@ async def stream_session_file_content(
 ) -> StreamingResponse:
     resolved_stage = await authorize_file_list(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
-        owner_id=owner_id, stage=stage, friend_user_id=f_user_id, runtime_target=runtime_target,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
         relay=relay, friendships=friendships, expert=expert,
     )
     try:
         upstream = await adapter.open_content(
             target=RuntimeBindingRequest(
-                target=runtime_target,
                 bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=resolved_stage,
             ),
             session_key=session_id,
             session_user_id=f_user_id,
+            device_uuid=device_uuid,
             resource_id=resource_id,
             disposition=disposition,
         )
@@ -787,9 +786,9 @@ async def delete_session_file(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
-    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
     f_user_id: FriendUserIdQuery = None,
+    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -799,16 +798,17 @@ async def delete_session_file(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
         owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
         relay=relay, friendships=friendships, expert=expert,
-        runtime_target=runtime_target, require_caller_instance=True,
+        require_explicit_subject=True,
     )
     try:
         await adapter.delete(
             target=RuntimeBindingRequest(
-                target=runtime_target,
                 bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=access.stage,
             ),
             session_key=session_id,
             resource_id=resource_id,
+            session_user_id=access.session_user_id,
+            device_uuid=device_uuid,
         )
     except ValueError as exc:
         _session_file_not_found(exc)
