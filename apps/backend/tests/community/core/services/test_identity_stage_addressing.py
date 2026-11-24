@@ -87,6 +87,16 @@ async def test_a_read_naming_no_stage_resolves_the_bots_own_binding():
 
 
 @pytest.mark.asyncio
+async def test_internal_read_without_operator_keeps_owner_scoped_resolution():
+    svc, resolver, _, _ = _service()
+
+    await svc.get_bot_file("staff", OWNER, BOT, "RULES.md", "")
+
+    resolver.resolve_for_bot.assert_called_once_with(BOT, OWNER)
+    resolver.resolve_for_binding.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_transferred_owner_read_locates_by_entity_and_connects_as_operator():
     svc, resolver, _, _ = _service()
 

@@ -334,7 +334,7 @@ class IdentityService(IdentityFilePort):
             bot_id=bot_id,
             owner_id=owner_id,
             stage=stage,
-            operator_id=operator_id,
+            operator_id=operator_id or None,
         )
         return self._device_fs_dispatcher.dispatch_addressed(
             ctx,
