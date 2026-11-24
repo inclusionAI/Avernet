@@ -6,7 +6,7 @@
 mod common;
 
 use async_trait::async_trait;
-use bcs_app_dist_gateway::{Clock, DistGateway, DistGatewayConfig};
+use bcs_app_dist_gateway::{Clock, DistGateway, DistGatewayConfig, parse_session};
 use bcs_dist_gateway::DistGatewayCore;
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
@@ -731,4 +731,58 @@ async fn a_retried_first_message_needs_no_directory_once_its_session_is_frozen()
         g.submit(&me(), message("msg-2", "hello")).await,
         Err(GatewayError::Unavailable { code: "group_directory_unavailable".into() })
     );
+}
+
+#[tokio::test]
+async fn malformed_client_ids_are_refused_before_any_store_access() {
+    let p = ports();
+    let g = gateway(&p);
+    for bad in [
+        "x0042.ab12",
+        "s.ab12",
+        "s0042",
+        "s+1.ab12",
+        "s1234567890.ab12",
+        "s99999999999.ab12",
+        "s0042.",
+        "s0042.ab 12",
+        "S0042.ab12",
+    ] {
+        let mut submit = message("m-bad", "hello");
+        submit.session = Some(Sid(bad.into()));
+        assert_eq!(
+            g.submit(&me(), submit).await,
+            Err(GatewayError::Invalid {
+                code: "session_id_format".into()
+            }),
+            "{bad:?}"
+        );
+    }
+    let mut long = message("m-long", "hello");
+    long.session = Some(Sid(format!("s0042.{}", "a".repeat(200))));
+    assert_eq!(
+        g.submit(&me(), long).await,
+        Err(GatewayError::Invalid {
+            code: "session_id_format".into()
+        })
+    );
+    for bad in ["b21e", "s0042", "x0042.ab12.b21e", "s0042.b21e."] {
+        assert_eq!(
+            g.get_task(&me(), &grp(), &Tid(bad.into())).await,
+            Err(GatewayError::Invalid {
+                code: "task_id_format".into()
+            }),
+            "{bad:?}"
+        );
+    }
+    // Well-formed ids pass the format gate and fail later business checks.
+    assert_eq!(parse_session(&Sid("s0001.other".into())), Ok(()));
+    assert_eq!(parse_session(&Sid("s1.a".into())), Ok(()));
+    assert_eq!(
+        g.get_task(&me(), &grp(), &Tid("s0042.ab12.b21e".into())).await,
+        Err(GatewayError::NotFound)
+    );
+    let mut fresh = message("m-fresh", "hello");
+    fresh.session = Some(Sid("s0009.deadbeef".into()));
+    assert_eq!(g.submit(&me(), fresh).await, Err(GatewayError::NotFound));
 }

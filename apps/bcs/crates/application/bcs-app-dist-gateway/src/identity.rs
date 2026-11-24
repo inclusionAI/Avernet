@@ -113,9 +113,9 @@ pub fn parse_session(sid: &Sid) -> Result<(), GatewayError> {
     if sid.0.len() > MAX_ID_BYTES {
         return Err(bad());
     }
-    let (shard, rest) = sid.0.split_once('.').ok_or_else(bad)?;
-    let digits = shard.strip_prefix('s').ok_or_else(bad)?;
-    if digits.is_empty() || digits.len() > 9 || !digits.bytes().all(|b| b.is_ascii_digit()) || !plain(rest) {
+    let (_, digits, rest) = sid.parts().map_err(|_| bad())?;
+    // Beyond the shared prefix shape, this boundary caps the digits and the rest.
+    if digits.len() > 9 || !plain(rest) {
         return Err(bad());
     }
     Ok(())
