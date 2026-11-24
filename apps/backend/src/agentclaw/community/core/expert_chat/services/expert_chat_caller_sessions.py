@@ -59,9 +59,12 @@ class ExpertChatCallerSessionsMixin:
 
     async def _prepare_authorized_session_connection(self, bot, user_id, owner_id, session_key, iam_token, *, bcn_friend_authorized=False, actor_user_id=None):
         if self._is_independent_caller(bot):
-            connection, need_poll = self._prepare_existing_caller_connection(
-                bot, user_id, owner_id, bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id)
+            connection, need_poll = await self._prepare_existing_caller_connection(
+                bot, user_id, owner_id, bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id, iam_token=iam_token)
             if need_poll:
+                instance = self._instance_service.get_existing_caller_instance(user_id, bot["bot_id"], owner_id)
+                if instance and instance.get("status") == "init":
+                    return None, True
                 raise ConnectionError("Bot服务正在启动，请稍后重试", error_code="5001")
             await self._require_caller_runtime_session(bot, connection, user_id, session_key)
             return connection, False
@@ -70,9 +73,9 @@ class ExpertChatCallerSessionsMixin:
         return await self._prepare_chat_connection(bot, user_id, owner_id, iam_token,
             bcn_friend_authorized=bcn_friend_authorized, **({"actor_user_id": actor_user_id} if actor_user_id is not None else {}))
 
-    async def _list_caller_sessions(self, bot, user_id, owner_id, session_key, favorite_only, limit, offset, *, bcn_friend_authorized, actor_user_id):
-        connection, need_poll = self._prepare_existing_caller_connection(bot, user_id, owner_id,
-            bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id)
+    async def _list_caller_sessions(self, bot, user_id, owner_id, session_key, favorite_only, limit, offset, *, bcn_friend_authorized, actor_user_id, iam_token=None):
+        connection, need_poll = await self._prepare_existing_caller_connection(bot, user_id, owner_id,
+            bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id, iam_token=iam_token)
         if connection is None or need_poll:
             return {"total": 0, "items": [], **({"need_poll": True} if need_poll else {})}
         if session_key is not None:
@@ -103,9 +106,9 @@ class ExpertChatCallerSessionsMixin:
         items.sort(key=lambda item: (self._session_sort_key(item), item["id"]), reverse=True)
         return {"total": len(items), "items": items[offset:offset + limit]}
 
-    def _prepare_existing_caller_connection(
+    async def _prepare_existing_caller_connection(
         self, bot: dict[str, Any], user_id: str, owner_id: str, *,
-        bcn_friend_authorized: bool, actor_user_id: str | None,
+        bcn_friend_authorized: bool, actor_user_id: str | None, iam_token: str | None = None,
     ) -> tuple[dict[str, Any] | None, bool]:
         """Resolve an existing Caller for reads without entering lifecycle flows."""
         connection_user_id = self._session_read_actor(
@@ -120,6 +123,14 @@ class ExpertChatCallerSessionsMixin:
         instance = self._instance_service.get_existing_caller_instance(
             user_id, bot["bot_id"], owner_id,
         )
+        if instance and instance.get("status") == "init" and all(
+            (instance.get("ext") or {}).get(key) for key in ("bot_uuid", "binding_id", "baas_publish_id")
+        ):
+            instance = await self._instance_service.refresh_existing_caller_instance(
+                user_id, bot["bot_id"], owner_id,
+                # COSEC: an owner inspecting a friend's session cannot install their own IAM as that Caller.
+                iam_token=iam_token if actor_user_id in (None, user_id) else None,
+            )
         if instance is None:
             logger.info("caller_runtime_sessions_skipped bot_id=%s user_id=%s reason=instance_missing", bot["bot_id"], user_id)
             return None, False

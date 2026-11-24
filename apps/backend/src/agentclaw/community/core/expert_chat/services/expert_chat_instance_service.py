@@ -309,6 +309,79 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
         """Read the exact subject's instance without creating or upgrading it."""
         return self._instance_repo.get_instance(user_id, bot_id, owner_id)
 
+    async def refresh_existing_caller_instance(
+        self, user_id: str, bot_id: str, owner_id: str,
+        iam_token: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Advance an allocated publication without creating or upgrading a Caller."""
+        instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
+        ext = (instance or {}).get("ext") or {}
+        if (instance and instance.get("status") == "init"
+                and all(ext.get(key) for key in ("bot_uuid", "binding_id", "baas_publish_id"))):
+            await self._refresh_caller_publish_progress(
+                user_id=user_id, bot_id=bot_id, owner_id=owner_id, ext=ext,
+                service_bot_publish_id=ext.get("service_bot_publish_id"), iam_token=iam_token,
+            )
+            return self._instance_repo.get_instance(user_id, bot_id, owner_id)
+        return instance
+
+    async def _refresh_caller_publish_progress(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+        ext: Dict[str, Any], service_bot_publish_id: int | None,
+        iam_token: str | None,
+    ) -> None:
+        """Reuse the lifecycle's publication query, initialization and writeback."""
+        baas_publish_id = ext["baas_publish_id"]
+        binding_id = ext.get("binding_id")
+        progress = self._baas.get_publish_progress(
+            publish_id=int(baas_publish_id),
+            include_devices=True,
+        )
+        status = progress.get("status")
+
+        # Update binding status based on progress (before instance update)
+        if binding_id:
+            if status == "SUCCESS":
+                binding_status = DeviceBindingStatus.ACTIVE.value
+            elif status == "FAILED":
+                binding_status = DeviceBindingStatus.FAILED.value
+            else:
+                binding_status = DeviceBindingStatus.PENDING.value
+            self._binding_repo.update_status(binding_id=binding_id, status=binding_status)
+            logger.info(
+                "[ExpertChatInstance] Updated binding status: binding_id=%s status=%s",
+                binding_id, binding_status,
+            )
+
+        # Exchange caller identity when container is successfully pulled
+        if status == "SUCCESS":
+            if iam_token:
+                await self._exchange_caller_identity(
+                    iam_token=iam_token,
+                    user_id=user_id,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    publish_id=service_bot_publish_id,
+                    binding_id=binding_id,
+                    force_runtime_refresh=True,
+                )
+            else:
+                logger.warning(
+                    "[ExpertChatInstance] Skip caller identity exchange: no iam_token provided bot=%s owner=%s user=%s",
+                    bot_id, owner_id, user_id,
+                )
+
+        ext = dict(ext)
+        ext["baas_publish"] = progress
+        instance_status = "success" if status == "SUCCESS" else "failed" if status == "FAILED" else "init"
+        self._instance_repo.update_instance(
+            user_id=user_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            status=instance_status,
+            ext=ext,
+        )
+
     async def get_caller_connection(
         self,
         user_id: str,
@@ -454,53 +527,10 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
             )
 
             if baas_publish_id:
-                progress = self._baas.get_publish_progress(
-                    publish_id=int(baas_publish_id),
-                    include_devices=True,
-                )
-                status = progress.get("status")
-
-                # Update binding status based on progress (before instance update)
-                if binding_id:
-                    if status == "SUCCESS":
-                        binding_status = DeviceBindingStatus.ACTIVE.value
-                    elif status == "FAILED":
-                        binding_status = DeviceBindingStatus.FAILED.value
-                    else:
-                        binding_status = DeviceBindingStatus.PENDING.value
-                    self._binding_repo.update_status(binding_id=binding_id, status=binding_status)
-                    logger.info(
-                        "[ExpertChatInstance] Updated binding status: binding_id=%s status=%s",
-                        binding_id, binding_status,
-                    )
-
-                # Exchange caller identity when container is successfully pulled
-                if status == "SUCCESS":
-                    if iam_token:
-                        await self._exchange_caller_identity(
-                            iam_token=iam_token,
-                            user_id=user_id,
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            publish_id=service_bot_publish_id,
-                            binding_id=binding_id,
-                            force_runtime_refresh=True,
-                        )
-                    else:
-                        logger.warning(
-                            "[ExpertChatInstance] Skip caller identity exchange: no iam_token provided bot=%s owner=%s user=%s",
-                            bot_id, owner_id, user_id,
-                        )
-
-                ext = dict(ext)
-                ext["baas_publish"] = progress
-                instance_status = "success" if status == "SUCCESS" else "failed" if status == "FAILED" else "init"
-                self._instance_repo.update_instance(
-                    user_id=user_id,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    status=instance_status,
-                    ext=ext,
+                await self._refresh_caller_publish_progress(
+                    user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+                    ext=ext, service_bot_publish_id=service_bot_publish_id,
+                    iam_token=iam_token,
                 )
 
             instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
