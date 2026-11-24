@@ -658,6 +658,27 @@ export interface BotModelBadgeContext {
 }
 
 export interface AppCapabilities {
+  /** Optional deployment preparation for a cloud Coding Bot's draft/default restart.
+   * Returns extra_configs additions; rejection aborts restart. Never called for
+   * local bots, engine-only actions, or published-service lifecycle restarts.
+   * Must preserve owner/operator identity and must not restart or poll itself.
+   */
+  prepareCodingBotRestart?: (target: {
+    botId: string;
+    ownerId?: string;
+    userId?: string;
+  }) => Promise<Record<string, unknown>>;
+  /** Optional deployment-only submit hook for a prepared Coding Bot restart.
+   * It must route the engine-owned `extra_configs` envelope to a backend contract
+   * that persists and applies it before restart. Rejection aborts without
+   * falling back to a confirmation-only restart. It must not poll or update UI.
+   */
+  submitCodingBotRestart?: (target: {
+    botId: string;
+    ownerId?: string;
+    userId?: string;
+    extraConfigs: Record<string, unknown>;
+  }) => Promise<{ success?: boolean; message?: string; data?: unknown }>;
   /** Open Core 返回版本化提示配置；Internal 返回 null，且不得访问知悉状态。 */
   getOpenSourceExperienceNotice: () => CapabilityResult<OpenSourceExperienceNoticeSpec | null>;
   /**

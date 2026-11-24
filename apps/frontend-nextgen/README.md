@@ -418,3 +418,18 @@ authorization succeeds. An empty submitted architecture-domain value is ignored.
 Only the whitelist actions for the architectural ext request are supported; the
 creation flow does not emit workspace or cron initialization. Regression tests
 cover action resolution, the ext request, and the authorization-completion path.
+
+## Optional Coding Bot restart preparation
+
+`AppCapabilities.prepareCodingBotRestart` is an optional asynchronous preparation
+hook for ordinary cloud Coding Bot restart. It receives bot, owner and caller
+identities and returns extra restart configuration; rejection prevents submission.
+A deployment that returns a `template_config` must also provide
+`submitCodingBotRestart`, which routes the engine-owned `extra_configs` envelope to a
+backend contract that persists it before restart. Rejection aborts without a
+fallback restart. Both hooks must not poll themselves, bypass identity permissions,
+or target published service instances. Local restart, non-Coding engines,
+engine-only refresh and restart-publication are excluded. Without an extension,
+confirmation-only restart behavior is unchanged. See
+[capability types](src/capabilities/types.ts) and
+[workshop service](src/services/botWorkshop/botWorkshopService.ts).
