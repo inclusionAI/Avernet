@@ -103,7 +103,8 @@ impl Call {
                     .await;
             };
             // Send intent is durable before the network call (B3). On a later
-            // pass the same intent is written again, which the store accepts.
+            // pass the phase is already `sending`: the permit comes from a
+            // fenced read, with no write.
             held_write!(self, "send intent", self.held.begin_send(operation.clone()));
             let send = StableSendRequest {
                 request_id: request_id.clone(),

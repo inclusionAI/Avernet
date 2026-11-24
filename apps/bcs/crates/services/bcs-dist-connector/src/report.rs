@@ -120,8 +120,11 @@ impl Call {
 
     /// Ends the dispatch in `disp` (phase `ended`) with `outcome` and an
     /// evidence code saying why, then stops following the call. Called only
-    /// after the terminal event was admitted. Finishing twice with the same
-    /// outcome is harmless; another outcome already stored is only logged.
+    /// after the terminal event was admitted, or after its session turned out
+    /// to be quarantined (the event was then not delivered, so an ended call
+    /// does not always have its terminal event in the inbox). Finishing twice
+    /// with the same outcome is harmless; another outcome already stored is
+    /// only logged.
     pub async fn finish(&mut self, outcome: FinalDispatchOutcome, evidence: &str) -> Flow {
         let written = held_write!(self, "finish", self.held.finish(outcome, evidence.to_owned()));
         if written == IdempotentWrite::ContentConflict {

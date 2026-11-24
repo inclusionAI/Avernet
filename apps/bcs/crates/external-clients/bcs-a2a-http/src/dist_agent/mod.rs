@@ -132,7 +132,9 @@ pub struct A2aDistAgentClient {
     /// SSRF check for HTTP+JSON and JSON-RPC agent URLs.
     guard: OutboundUrlGuard,
     /// The mesh sidecar and its routes; `None` makes every gRPC target fail
-    /// with `grpc_not_configured` (`NotSent`).
+    /// with `grpc_not_configured`: a send answers `NotSent`, a query
+    /// `Unavailable`, a subscribe an `AgentReadError`, a cancel
+    /// `OutcomeUnknown`.
     grpc: Option<GrpcMeshConfig>,
 }
 
