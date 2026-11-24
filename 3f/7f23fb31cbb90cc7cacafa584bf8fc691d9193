@@ -1,0 +1,22 @@
+apps/bcs/crates/services/bcs-dist-worker/tests/admission_replay.rs
+  s_b033c54cc00da7::t_00bb7ece5f5d70 86-113
+  s_b033c54cc00da7::t_873cdaf218fec8 85
+apps/bcs/crates/services/bcs-dist-store/src/inbox/admission.rs
+  s_b033c54cc00da7::t_9210452577be1b 10,17-19,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3f7f23fb31cbb90cc7cacafa584bf8fc691d9193",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
