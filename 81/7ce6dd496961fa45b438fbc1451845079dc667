@@ -1,0 +1,33 @@
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_delete_workspace_path.py
+  s_9e36e09e5dbdc6::t_60544cf67d843d 8-87
+  s_9e36e09e5dbdc6::t_cd78ad11f1b413 1-7,88-89
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/resources/router.py
+  s_9e36e09e5dbdc6::t_60544cf67d843d 849-856
+  s_9e36e09e5dbdc6::t_9e6103b91c0002 80,888-899,922
+apps/backend/docs/openapi-v1/README.md
+  s_9e36e09e5dbdc6::t_62addf6345b8d7 1926-1927
+apps/backend/docs/openapi-v1/README.zh-CN.md
+  s_9e36e09e5dbdc6::t_04ab4b6fe6b927 1033-1034
+apps/backend/src/agentclaw/community/core/services/resource_file_service.py
+  s_9e36e09e5dbdc6::t_fe141df789af35 598-621,652,674-676,799,803,808-812
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_resources_handlers.py
+  s_9e36e09e5dbdc6::t_150b7b08480be6 186-188,277-279
+apps/backend/tests/community/endpoints/test_openapi_resources.py
+  s_9e36e09e5dbdc6::t_c00279c2efbbd4 152-154,177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "817ce6dd496961fa45b438fbc1451845079dc667",
+  "prompts": {},
+  "sessions": {
+    "s_9e36e09e5dbdc6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20c40-35fa-7b63-a937-b9f3623a79af",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

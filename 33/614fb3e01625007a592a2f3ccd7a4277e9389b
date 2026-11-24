@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  s_b7f94a3bd241d6::t_560dccd2ee48a3 656,670
+  s_b7f94a3bd241d6::t_0eb5219e0463ac 86,288,657,708
+apps/backend/src/agentclaw/community/core/bot_config_manifest/create_job.py
+  s_b7f94a3bd241d6::t_560dccd2ee48a3 659,662
+apps/backend/tests/community/core/bot_config_manifest/creation/test_create_job.py
+  s_b7f94a3bd241d6::t_a4032e2e23b3f2 106-107,113
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/manifest_permission_subject.py
+  s_b7f94a3bd241d6::t_57dd147cdf6e61 4,11,27
+apps/backend/src/agentclaw/community/core/apply_engine/run/context_builder.py
+  s_b7f94a3bd241d6::t_0eb5219e0463ac 1-24,26-74,76-79
+  s_b7f94a3bd241d6::t_300d93a3c5ece6 25,75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "33614fb3e01625007a592a2f3ccd7a4277e9389b",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
