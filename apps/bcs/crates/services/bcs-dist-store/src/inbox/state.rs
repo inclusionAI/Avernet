@@ -48,6 +48,7 @@ pub(super) enum Phase {
 pub(super) enum Decision {
     Accepted,
     Rejected,
+    ContentConflict,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

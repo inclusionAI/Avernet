@@ -50,7 +50,7 @@ impl StoreInboxProducer {
                             .await?
                             .ok_or_else(|| unknown(key))?;
                         if stored.scope != spec.scope || stored.group != spec.group {
-                            return Err(invalid("frozen_spec_conflict"));
+                            return self.finish_content_conflict(v, c, key).await;
                         }
                     }
                 }
@@ -108,17 +108,36 @@ impl StoreInboxProducer {
                         || stored.sid != task.sid
                         || stored.tid != task.tid
                     {
-                        return Err(invalid("frozen_task_conflict"));
+                        return self.finish_content_conflict(v, c, key).await;
                     }
                 }
                 c.phase = Phase::TaskReady;
             }
             Phase::TaskReady if c.position.is_some() => {
-                c.decision = Some(self.activate_slot(key, &c).await?);
+                c.decision = Some(self.decide_slot(key, &c, Decision::Accepted).await?);
             }
             Phase::TaskReady => return self.append_step(v, c, key).await,
         }
-        Ok(if self.save(key, Some(v), &c, key).await? {
+        self.save_progress(v, &c, key).await
+    }
+    async fn finish_content_conflict(
+        &self,
+        v: Version,
+        mut c: AdmissionRecord,
+        key: &str,
+    ) -> Result<Progress, StoreError> {
+        // These identity fields are frozen. After an interrupted write, the
+        // same phase finds the conflict again and copies the existing slot decision.
+        c.decision = Some(self.decide_slot(key, &c, Decision::ContentConflict).await?);
+        self.save_progress(v, &c, key).await
+    }
+    async fn save_progress(
+        &self,
+        v: Version,
+        c: &AdmissionRecord,
+        key: &str,
+    ) -> Result<Progress, StoreError> {
+        Ok(if self.save(key, Some(v), c, key).await? {
             Progress::Changed
         } else {
             Progress::Retry
