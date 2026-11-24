@@ -1,0 +1,30 @@
+apps/backend/tests/community/core/task/context_collab/open_profile_support.py
+  h_059e888e5e4e82 1-371
+apps/backend/tests/community/core/task/context_collab/test_open_collet_participation.py
+  h_059e888e5e4e82 1-237
+apps/backend/tests/community/core/task/context_collab/test_open_guards.py
+  h_059e888e5e4e82 1-226
+apps/backend/tests/community/core/task/context_collab/test_open_lifecycle.py
+  h_059e888e5e4e82 1-614
+apps/backend/tests/community/core/task/context_collab/test_open_profile.py
+  h_059e888e5e4e82 1-204
+apps/backend/tests/community/core/task/context_collab/test_open_publication.py
+  h_059e888e5e4e82 1-334
+apps/backend/tests/community/core/task/context_collab/test_open_query.py
+  h_059e888e5e4e82 1-329
+apps/backend/tests/community/core/task/context_collab/test_open_review.py
+  h_059e888e5e4e82 1-202
+apps/backend/tests/community/core/task/context_collab/test_open_submission.py
+  h_059e888e5e4e82 1-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a4a0b17455fd883431fcb81bde20f80cad06e378",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
