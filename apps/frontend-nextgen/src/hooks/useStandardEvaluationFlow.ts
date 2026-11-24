@@ -1,20 +1,28 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type StandardQualityTask, type StandardTaskEnvironment } from '@/services/botWorkshop/standardEvaluationService';
 import {
-  standardEvaluationService,
-  type StandardEvaluationGoalType, type StandardEvaluationSetItem,
-  type StandardQualityTask,
-  type StandardTaskEnvironment,
-} from '@/services/botWorkshop/standardEvaluationService';
+  createInterruptedFlowResult,
+  createRunningInBackgroundFlowResult,
+  createStepRetrySucceededFlowResult,
+  createTaskFlowResult,
+  isBackgroundTaskMessage,
+  markStepsInterrupted,
+  resumeStepsAfter as resumeEvaluationStepsAfter,
+  type StandardEvaluationFlowResult,
+} from '@/services/botWorkshop/standardEvaluationFlowState';
 import {
   applyEvaluationTaskSteps,
   createInitialEvaluationSteps,
-  EVALUATION_GOAL_INPUT_ENABLED,
   getEvaluationTaskError,
   retryStandardEvaluationStep,
   startStandardEvaluationTask,
   type StandardEvaluationStepKey,
   type StandardEvaluationStepStatus,
 } from '@/services/botWorkshop/standardEvaluationWorkflow';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useStandardEvaluationGoal } from '@/hooks/useStandardEvaluationGoal';
+import { useStandardEvaluationSampleSets } from '@/hooks/useStandardEvaluationSampleSets';
+
+export type { StandardEvaluationFlowResult };
 
 export interface StandardEvaluationFlowInput {
   botId: string;
@@ -33,19 +41,13 @@ export function useStandardEvaluationFlow({
   canStart = true,
   onFinished,
 }: StandardEvaluationFlowInput) {
-  const [sampleSets, setSampleSets] = useState<StandardEvaluationSetItem[]>([]);
-  const [sampleSetLoading, setSampleSetLoading] = useState(false);
-  const [sampleSetError, setSampleSetError] = useState<string>();
-  const [selectedSampleSetId, setSelectedSampleSetId] = useState<string>();
-  const [goalType, setGoalType] = useState<StandardEvaluationGoalType>('json');
-  const [goalFile, setGoalFile] = useState<File>();
-  const [goalPrompt, setGoalPrompt] = useState('');
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState(createInitialEvaluationSteps);
   const [evaluationTask, setEvaluationTask] = useState<StandardQualityTask>();
   const [environment, setEnvironment] = useState<StandardTaskEnvironment>();
   const [error, setError] = useState<string>();
   const [retryingStep, setRetryingStep] = useState<StandardEvaluationStepKey>();
+  const [flowResult, setFlowResult] = useState<StandardEvaluationFlowResult>();
 
   const currentStepKeyRef = useRef<StandardEvaluationStepKey>();
   const aliveRef = useRef(true);
@@ -56,6 +58,11 @@ export function useStandardEvaluationFlow({
       aliveRef.current = false;
     };
   }, []);
+
+  const sampleSetState = useStandardEvaluationSampleSets({ botId, botVersion, ownerId, enabled });
+  const goalState = useStandardEvaluationGoal();
+  const { sampleSets, selectedSampleSetId, selectedSampleSet } = sampleSetState;
+  const { goalType, goalPrompt, goalReady } = goalState;
 
   const updateStep = useCallback(
     (key: StandardEvaluationStepKey, status: StandardEvaluationStepStatus, stepError?: string) => {
@@ -70,39 +77,17 @@ export function useStandardEvaluationFlow({
     setSteps(createInitialEvaluationSteps());
   }, []);
 
-  const loadSampleSets = useCallback(async () => {
-    if (!botId || !enabled) return;
-    setSampleSetLoading(true);
-    setSampleSetError(undefined);
-    try {
-      const result = await standardEvaluationService.listEvaluationSets(botId, botVersion, ownerId);
-      if (!aliveRef.current) return;
-      setSampleSets(result.sets || []);
-      setSelectedSampleSetId((current) => current || result.sets?.[0]?.uuid || undefined);
-    } catch (cause) {
-      if (!aliveRef.current) return;
-      setSampleSets([]);
-      setSelectedSampleSetId(undefined);
-      setSampleSetError(cause instanceof Error ? cause.message : '获取评测样本集失败');
-    } finally {
-      if (aliveRef.current) setSampleSetLoading(false);
-    }
-  }, [botId, botVersion, enabled, ownerId]);
+  const markFlowInterrupted = useCallback((failureStep: StandardEvaluationStepKey | undefined, message: string) => {
+    setSteps((prev) => markStepsInterrupted(prev, failureStep, message));
+  }, []);
 
-  useEffect(() => {
-    void loadSampleSets();
-  }, [loadSampleSets]);
+  const resumeStepsAfter = useCallback((stepKey: StandardEvaluationStepKey) => {
+    setSteps((prev) => resumeEvaluationStepsAfter(prev, stepKey));
+  }, []);
 
-  const selectedSampleSet = useMemo(
-    () => sampleSets.find((item) => item.uuid === selectedSampleSetId),
-    [sampleSets, selectedSampleSetId],
-  );
-
-  const goalReady = EVALUATION_GOAL_INPUT_ENABLED
-    ? goalType === 'json'
-      ? Boolean(goalFile)
-      : Boolean(goalPrompt.trim())
-    : true;
+  const setTaskFlowResult = useCallback((task: StandardQualityTask) => {
+    setFlowResult(createTaskFlowResult(task));
+  }, []);
 
   const updateEvaluationTask = useCallback(
     (task: StandardQualityTask) => {
@@ -128,6 +113,7 @@ export function useStandardEvaluationFlow({
     setError(undefined);
     setEvaluationTask(undefined);
     setEnvironment(undefined);
+    setFlowResult(undefined);
 
     try {
       const task = await startStandardEvaluationTask({
@@ -147,11 +133,17 @@ export function useStandardEvaluationFlow({
       if (task.status !== 'success') {
         setError(getEvaluationTaskError(task) || '评测未通过，已按 BLOCKED 保存门禁结果');
       }
+      setTaskFlowResult(task);
       onFinished?.();
     } catch (cause) {
       const failureStep = currentStepKeyRef.current;
       const message = cause instanceof Error ? cause.message : '重新发起评测失败';
-      if (failureStep) updateStep(failureStep, 'failed', message);
+      markFlowInterrupted(failureStep, message);
+      setFlowResult(
+        isBackgroundTaskMessage(message)
+          ? createRunningInBackgroundFlowResult(message)
+          : createInterruptedFlowResult(failureStep, message),
+      );
       setError(message);
     } finally {
       setRetryingStep(undefined);
@@ -172,6 +164,8 @@ export function useStandardEvaluationFlow({
     sampleSets,
     selectedSampleSetId,
     updateEvaluationTask,
+    markFlowInterrupted,
+    setTaskFlowResult,
     updateStep,
   ]);
 
@@ -182,8 +176,9 @@ export function useStandardEvaluationFlow({
       setRetryingStep(key);
       setRunning(true);
       setError(undefined);
+      setFlowResult(undefined);
       try {
-        await retryStandardEvaluationStep({
+        const result = await retryStandardEvaluationStep({
           step: key,
           botId,
           botVersion,
@@ -196,9 +191,21 @@ export function useStandardEvaluationFlow({
           onEnvironmentUpdate: setEnvironment,
           onTaskUpdate: updateEvaluationTask,
         });
+
+        if (result.task) {
+          setTaskFlowResult(result.task);
+        } else {
+          resumeStepsAfter(key);
+          setFlowResult(createStepRetrySucceededFlowResult(key));
+        }
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : '节点重试失败';
-        updateStep(key, 'failed', message);
+        markFlowInterrupted(key, message);
+        setFlowResult(
+          isBackgroundTaskMessage(message)
+            ? createRunningInBackgroundFlowResult(message)
+            : createInterruptedFlowResult(key, message),
+        );
         setError(message);
       } finally {
         setRetryingStep(undefined);
@@ -215,6 +222,9 @@ export function useStandardEvaluationFlow({
       ownerId,
       running,
       selectedSampleSet,
+      markFlowInterrupted,
+      resumeStepsAfter,
+      setTaskFlowResult,
       updateEvaluationTask,
       updateStep,
     ],
@@ -223,25 +233,14 @@ export function useStandardEvaluationFlow({
   const reportUrl = evaluationTask?.report_url || evaluationTask?.ext?.eval_progress?.report?.reportUrl;
 
   return {
-    sampleSets,
-    sampleSetLoading,
-    sampleSetError,
-    selectedSampleSetId,
-    selectedSampleSet,
-    setSelectedSampleSetId,
-    reloadSampleSets: loadSampleSets,
-    goalType,
-    setGoalType,
-    goalFile,
-    setGoalFile,
-    goalPrompt,
-    setGoalPrompt,
-    goalReady,
+    ...sampleSetState,
+    ...goalState,
     running,
     steps,
     environment,
     evaluationTask,
     reportUrl,
+    flowResult,
     error,
     startEvaluation,
     retryStep,
