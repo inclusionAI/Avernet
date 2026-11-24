@@ -12,6 +12,7 @@ import type {
   CodingBotRestoredSessionItem,
   ConversationSessionArchiveListState,
 } from '@/domain/conversation';
+import type { SessionStatusPresentation } from '@/domain/conversation/sessionStatusProtocol';
 import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
 import type { ComponentType } from 'react';
@@ -555,6 +556,35 @@ export type CodingBotRestoredSessionListResult =
   | CodingBotRestoredSessionListResultOk
   | { ok: false; message: string };
 
+export interface CodingBotSessionStatusQueryInput {
+  /** The sidebar/compound Bot identity used by the conversation store. */
+  viewBotId: string;
+  /** The real AICoding engine Bot ID (without the TeamClaw owner suffix). */
+  botId: string;
+  /** The current canonical OpenAPI user ID. */
+  userId: string;
+  /** Optional Bot owner, used by the internal legacy connection resolver. */
+  ownerId?: string;
+  /** All currently loaded full session keys for the expanded Bot. */
+  sessionIds: string[];
+  /** Cancellation is mandatory when the active expanded Bot changes. */
+  signal?: AbortSignal;
+}
+
+export type CodingBotSessionStatusQueryResult =
+  | {
+      ok: true;
+      items: Array<{
+        sessionId: string;
+        status: SessionStatusPresentation | null;
+      }>;
+    }
+  | { ok: false; message: string };
+
+export interface CodingBotSessionStatusHost {
+  query(input: CodingBotSessionStatusQueryInput): Promise<CodingBotSessionStatusQueryResult>;
+}
+
 export interface CodingBotSessionArchiveHost {
   list(input: CodingBotSessionArchiveListInput): Promise<CodingBotSessionArchiveListResult>;
   restore(input: CodingBotSessionArchiveRestoreInput): Promise<CodingBotSessionArchiveRestoreResult>;
@@ -586,6 +616,8 @@ export interface CodingBotConversationHost {
    */
   createSession?: (input: CodingBotSessionCreateInput) => Promise<CodingBotSessionActionResult>;
   runSessionAction?: (input: CodingBotSessionActionInput) => Promise<CodingBotSessionActionResult>;
+  /** Coding Bot 外层会话状态查询能力。Open Core 不注实现；旧 Child bridge 继续兜底。 */
+  sessionStatus?: CodingBotSessionStatusHost;
   /** Coding Bot 会话归档能力。Open Core 不注实现；旧 Child 缺方法时必须返回 unsupported。 */
   sessionArchive?: CodingBotSessionArchiveHost;
 }
