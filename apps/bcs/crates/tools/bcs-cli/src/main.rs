@@ -182,7 +182,7 @@ use environment::{NetworkEnv, detect_network_env, normalize_bcs_ws_url};
 use environment::{get_current_env, resolve_bcs_url};
 #[cfg(test)]
 use environment::{
-    discover_token, is_localhost_url, load_optional_session_info, normalize_bcs_api_url,
+    discover_token, is_localhost_url, load_optional_session_info,
 };
 #[cfg(test)]
 use group_context_commands::{

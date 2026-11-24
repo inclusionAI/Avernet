@@ -283,18 +283,13 @@ async fn materialization_validation_matches_payload_hash_and_leased_state() {
     wrong_hash.delivery.payload_sha256 = "wrong-hash".to_string();
     let mut leased = materialization();
     leased.delivery.lease_owner = Some("owner".to_string());
-    for command in [wrong_hash, leased] {
-        let memory_message =
-            invalid_message(memory.materialize_fanout_target(command.clone()).await);
-        let db_message = invalid_message(db.materialize_fanout_target(command).await);
-        assert_eq!(memory_message, db_message);
+    for (command, expected) in [
+        (wrong_hash, "Delivery payload SHA-256 does not match payload bytes"),
+        (leased, "new Delivery must be pending or a projection dead letter, unattempted, and unleased"),
+    ] {
+        assert_eq!(invalid_message(memory.materialize_fanout_target(command.clone()).await), expected);
+        assert_eq!(invalid_message(db.materialize_fanout_target(command).await), expected);
     }
-    let mut wrong_hash = materialization();
-    wrong_hash.delivery.payload_sha256 = "wrong-hash".to_string();
-    assert_eq!(
-        invalid_message(memory.materialize_fanout_target(wrong_hash).await),
-        "Delivery payload SHA-256 does not match payload bytes"
-    );
 }
 
 #[tokio::test]
@@ -307,23 +302,14 @@ async fn completion_validation_matches_retry_wait_and_first_error() {
     no_attempt.attempt_no = 0;
     let mut backwards = completion();
     backwards.started_at_ms = 2_000;
-    for command in [retry_without_time, no_attempt, backwards] {
-        let memory_message =
-            invalid_message(memory.complete_delivery_attempt(command.clone()).await);
-        let db_message = invalid_message(db.complete_delivery_attempt(command).await);
-        assert_eq!(memory_message, db_message);
+    for (command, expected) in [
+        (retry_without_time, "Attempt result and next Delivery state are inconsistent"),
+        (no_attempt, "completion identifiers and attempt number must be non-empty"),
+        (backwards, "attempt completion cannot precede its start"),
+    ] {
+        assert_eq!(invalid_message(memory.complete_delivery_attempt(command.clone()).await), expected);
+        assert_eq!(invalid_message(db.complete_delivery_attempt(command).await), expected);
     }
-    let mut retry_without_time = completion();
-    retry_without_time.result = EventDeliveryAttemptRecordResult::Retryable;
-    retry_without_time.next_status = EventDeliveryStatus::RetryWait;
-    assert_eq!(
-        invalid_message(
-            memory
-                .complete_delivery_attempt(retry_without_time)
-                .await
-        ),
-        "Attempt result and next Delivery state are inconsistent"
-    );
 }
 
 #[tokio::test]
@@ -333,17 +319,13 @@ async fn replay_validation_matches_overlong_reason_and_missing_identifiers() {
     overlong.reason = Some("x".repeat(129));
     let mut missing = replay();
     missing.subscription_revision = 0;
-    for command in [overlong, missing] {
-        let memory_message = invalid_message(memory.create_replay_target(command.clone()).await);
-        let db_message = invalid_message(db.create_replay_target(command).await);
-        assert_eq!(memory_message, db_message);
+    for (command, expected) in [
+        (overlong, "replay reason exceeds 128 bytes"),
+        (missing, "replay identifiers, revision, and env must be non-empty"),
+    ] {
+        assert_eq!(invalid_message(memory.create_replay_target(command.clone()).await), expected);
+        assert_eq!(invalid_message(db.create_replay_target(command).await), expected);
     }
-    let mut overlong = replay();
-    overlong.reason = Some("x".repeat(129));
-    assert_eq!(
-        invalid_message(memory.create_replay_target(overlong).await),
-        "replay reason exceeds 128 bytes"
-    );
 }
 
 #[tokio::test]
@@ -369,27 +351,13 @@ async fn replacement_keeps_the_backend_specific_first_error() {
 
     let mut max_revision = replacement();
     max_revision.expected_revision = u64::MAX;
-    let memory_message = invalid_message(
-        memory
-            .replace_subscription_revision(max_revision.clone())
-            .await,
-    );
-    let db_message = invalid_message(db.replace_subscription_revision(max_revision).await);
-    assert_eq!(memory_message, db_message);
-
     let mut skipped_revision = replacement();
     skipped_revision.expected_revision = 2;
-    let memory_message = invalid_message(
-        memory
-            .replace_subscription_revision(skipped_revision.clone())
-            .await,
-    );
-    let db_message = invalid_message(db.replace_subscription_revision(skipped_revision).await);
-    assert_eq!(memory_message, db_message);
-    assert_eq!(
-        db_message,
-        "replacement must contain the next immutable revision"
-    );
+    for command in [max_revision, skipped_revision] {
+        let expected = "replacement must contain the next immutable revision";
+        assert_eq!(invalid_message(memory.replace_subscription_revision(command.clone()).await), expected);
+        assert_eq!(invalid_message(db.replace_subscription_revision(command).await), expected);
+    }
 }
 
 #[tokio::test]

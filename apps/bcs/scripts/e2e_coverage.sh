@@ -426,7 +426,12 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-collaboration-store/src/memory_definition.rs
     bcs-collaboration-store/src/memory_runs.rs
     bcs-collaboration-store/src/memory_transition.rs
-    bcs-event-store/src/memory.rs
+    # PR 4316 SQLite E2E: the split MemoryEventStore operations had zero hits;
+    # memory.rs itself runs initialization code and src/validation.rs is shared with SQL.
+    bcs-event-store/src/memory/delivery.rs
+    bcs-event-store/src/memory/fanout.rs
+    bcs-event-store/src/memory/repo.rs
+    bcs-event-store/src/memory/retention.rs
     bcs-friend-store/src/memory.rs
     bcs-group-store/src/memory.rs
     bcs-group-store/src/memory_builder.rs

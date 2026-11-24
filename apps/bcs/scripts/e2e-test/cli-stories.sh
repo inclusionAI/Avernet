@@ -1,6 +1,14 @@
 #!/bin/bash
 # cli-stories.sh — Complete bcs-cli coverage organized as user journeys.
 
+E2E_TESTS_STORIES+=(story_session_group_page)
+story_session_group_page() {
+    local rc=0
+    get_bcs_cli_bin && python3 "$SCRIPT_DIR/session_group_page_story.py" \
+        --cli "$BCS_CLI_BIN_PATH" --binary "${BCS_BIN:-$SCRIPT_DIR/../../target/debug/bcs}" || rc=$?
+    assert_eq "Resumed CLI session pages its Groups without duplicating members or webhook delivery" "$rc" "0"
+}
+
 _cli_story_run() {
     local desc="$1" bot="$2"; shift 2
     info "CLI story: bcs-cli $*"

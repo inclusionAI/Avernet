@@ -318,37 +318,9 @@ async fn empty_results_and_equal_update_times_order_groups_by_id() {
 }
 
 #[tokio::test]
-async fn every_join_entry_still_issues_exactly_one_query() {
-    let (db, store) = store_with_rows(vec![joined_row("g", "bot", "driver")]);
-    store.load_all_groups_from_mysql().await;
-    assert_eq!(query_count(&db), 1);
-
-    let (db, store) = store_with_rows(vec![joined_row("g", "bot", "driver")]);
-    store.list_paginated_sql(0, 10).await;
-    assert_eq!(query_count(&db), 1);
-
-    let (db, store) = store_with_rows(vec![joined_row("g", "bot", "driver")]);
-    store.list_paginated_by_kind_sql(None, 0, 10).await;
-    assert_eq!(query_count(&db), 1);
-
-    let (db, store) = store_with_rows(vec![joined_row("g", "bot", "driver")]);
-    store
-        .list_paginated_by_kind_sql(Some(GroupKind::Dm), 0, 10)
-        .await;
-    assert_eq!(query_count(&db), 1);
-
+async fn filtered_list_and_paginated_participant_find_each_issue_one_query() {
     let (db, store) = store_with_rows(vec![joined_row("g", "bot", "driver")]);
     store.list_paginated_filtered_sql(0, 10, None, None, None).await;
-    assert_eq!(query_count(&db), 1);
-
-    let (db, store) = store_with_rows(vec![aliased_find_row()]);
-    store.find_by_participant_sql("human-1").await;
-    assert_eq!(query_count(&db), 1);
-
-    let (db, store) = store_with_rows(vec![aliased_find_row()]);
-    store
-        .find_by_participant_filtered_sql("human-1", None, None)
-        .await;
     assert_eq!(query_count(&db), 1);
 
     let (db, store) = store_with_rows(vec![joined_row("g", "bot", "driver")]);

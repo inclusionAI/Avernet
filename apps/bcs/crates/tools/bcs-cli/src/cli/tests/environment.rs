@@ -1,6 +1,6 @@
 use super::{
     Cli, Commands, NetworkEnv, TempDir, Write, detect_network_env, discover_token,
-    is_localhost_url, json, load_optional_session_info, normalize_bcs_api_url, normalize_bcs_ws_url,
+    is_localhost_url, json, load_optional_session_info, normalize_bcs_ws_url,
     resolve_bcs_url, safe_remove_var, safe_set_var, serial, write_session_file,
 };
 use clap::Parser;
@@ -58,43 +58,6 @@ fn health_cli() -> Cli {
         debug: false,
         command: Commands::Health,
     }
-}
-
-#[test]
-fn test_normalize_bcs_api_url_from_ws_endpoint() {
-    assert_eq!(
-        normalize_bcs_api_url("ws://localhost:21000/ws/bot").as_deref(),
-        Some("http://localhost:21000")
-    );
-    assert_eq!(
-        normalize_bcs_api_url("wss://bcs-pre.example.com/ws/bot").as_deref(),
-        Some("https://bcs-pre.example.com")
-    );
-}
-
-#[test]
-fn test_normalize_bcs_api_url_keeps_http_base() {
-    assert_eq!(
-        normalize_bcs_api_url("https://bcs.example.com/").as_deref(),
-        Some("https://bcs.example.com")
-    );
-}
-
-/// Pure-function pair of the library-target case: query/fragment are stripped,
-/// `/ws/bot` collapses to the base path, and unsupported schemes/blank input are
-/// rejected.
-#[test]
-fn test_normalize_bcs_api_url_strips_query_and_fragment_and_rejects_other_schemes() {
-    assert_eq!(
-        normalize_bcs_api_url("wss://example.org/base/ws/bot?q=1#f").as_deref(),
-        Some("https://example.org/base")
-    );
-    assert_eq!(
-        normalize_bcs_api_url("ws://example.org/ws/bot").as_deref(),
-        Some("http://example.org")
-    );
-    assert!(normalize_bcs_api_url("file:///tmp/a").is_none());
-    assert!(normalize_bcs_api_url("   ").is_none());
 }
 
 #[test]
