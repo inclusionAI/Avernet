@@ -1303,3 +1303,44 @@ class TestTraceIdInjection:
             )
 
         assert client._send_request_frame.await_args.args[0]["params"]["traceId"] == "-"
+
+
+class _FailingWS:
+    """``async for`` 直接抛异常的 ws stub，用于触发 recv loop 断连回调。"""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise self._exc
+
+
+class TestRecvLoopDisconnectPayload:
+    """断连回调 payload 应携带根因异常摘要（正常关闭时为空）。"""
+
+    @pytest.mark.asyncio
+    async def test_disconnect_callback_receives_close_error(self, client):
+        client._ws = _FailingWS(RuntimeError("boom"))
+        callback = MagicMock()
+        client.on_disconnect(callback)
+
+        await client._recv_loop()
+
+        callback.assert_called_once_with("disconnect", {"error": "RuntimeError: boom"})
+        assert client._connected is False
+
+    @pytest.mark.asyncio
+    async def test_disconnect_callback_empty_payload_on_normal_close(self, client):
+        import websockets
+
+        client._ws = _FailingWS(websockets.ConnectionClosedOK(None, None))
+        callback = MagicMock()
+        client.on_disconnect(callback)
+
+        await client._recv_loop()
+
+        callback.assert_called_once_with("disconnect", {})
+        assert client._connected is False
