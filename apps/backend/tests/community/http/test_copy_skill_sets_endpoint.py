@@ -88,10 +88,12 @@ def _call_submit_copy(mocks: Any, source: Any = None) -> Any:  # type: ignore[na
     # Default to the openclaw source; callers that need a different engine
     # (scenario ④'s non-openclaw refusal) pass their own source and skip the
     # reset so the precondition they set on ``bot_repo`` survives.
-    bot_repo.get_by_id.return_value = source if source is not None else _source_bot()
+    bot_repo.get_by_id_and_owner.return_value = source if source is not None else _source_bot()
     passport.apply_agent_passport.return_value = {"token": "tok_1"}
     return submit_copy(
-        body=BotCopyRequest(source_bot_id=_SOURCE_BOT_ID, bot_name="copied"),
+        body=BotCopyRequest(
+            source_bot_id=_SOURCE_BOT_ID, source_owner_id=_OWNER, bot_name="copied"
+        ),
         owner_id=_OWNER,
         owner_name="owner",
         bot_repo=bot_repo,
@@ -287,7 +289,7 @@ def test_scenario_4_non_openclaw_source_refused_before_persist():
     mocks = _mocks()
     bot_repo = mocks[0]
     # Source is teclaw-equivalent: a non-openclaw engine.
-    bot_repo.get_by_id.return_value = _source_bot(active_engine="teclaw")
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(active_engine="teclaw")
     with pytest.raises(HTTPException) as exc:
         _call_submit_copy(mocks, source=_source_bot(active_engine="teclaw"))
     assert exc.value.status_code == 409
