@@ -60,7 +60,17 @@ For new MySQL-compatible deployments, `gmt_create` and `gmt_modify` are
 The SQL adapter projects modification time through `UNIX_TIMESTAMP` and binds
 write/range values through `FROM_UNIXTIME`; the service-facing cursor remains
 epoch seconds. Range predicates keep the indexed column unwrapped. SQLite retains
-its existing numeric schema. Deploy this adapter with its matching timestamp DDL;
+its existing numeric schema. Nonpositive initial replay checkpoints use a positive
+fractional epoch before `FROM_UNIXTIME`, because MariaDB returns NULL at epoch
+zero. The `vector` identifier is backtick-quoted in reads and writes for servers
+that reserve VECTOR (MariaDB 11.7+); result keys and stored values are unchanged.
+The optional `test_index_documents_mysql.py` suite runs against an isolated
+MySQL-compatible database when `SEARCH_CORE_TEST_MYSQL_HOST`,
+`SEARCH_CORE_TEST_MYSQL_DATABASE`, `SEARCH_CORE_TEST_MYSQL_USER` and
+`SEARCH_CORE_TEST_MYSQL_PASSWORD` are set (`SEARCH_CORE_TEST_MYSQL_PORT` defaults
+to 3306). It creates and drops only uniquely named fixture tables and requires
+`mysql-connector-python`; use a test-only account and database, never production.
+Deploy this adapter with its matching timestamp DDL;
 existing numeric MySQL columns require an explicit data migration, not a direct
 type change or merely rerunning `CREATE TABLE IF NOT EXISTS`.
 

@@ -17,6 +17,7 @@ from search_core.api.cards import (
 from search_core.providers.card_schema import validate_card_table
 from search_core.providers.card_writes import CardWrites
 from search_core.providers.sql_index_documents import (
+    MYSQL_EPOCH_PARAMETER,
     validate_environment,
 )
 
@@ -181,7 +182,7 @@ class SqlCardRepository(CardWrites):
         """
         if not 1 <= batch_size <= 1000:
             raise ValueError("invalid page size")
-        stamp = "?" if self.placeholder == "?" else "FROM_UNIXTIME(?)"
+        stamp = "?" if self.placeholder == "?" else MYSQL_EPOCH_PARAMETER
         modified = (
             "gmt_modify" if self.placeholder == "?" else "UNIX_TIMESTAMP(gmt_modify)"
         )
