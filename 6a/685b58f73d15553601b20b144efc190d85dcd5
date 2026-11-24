@@ -10,6 +10,7 @@ apps/backend/src/agentclaw/community/core/agentswarm/README.md
 apps/backend/tests/community/core/agentswarm/test_bot_e2e.py
   s_c3ece772cfb1b0::t_71af218c118a70 81,539-542,545-546,583-584,604-608,616-626,701-703
   s_c3ece772cfb1b0::t_dbf73ec98e342c 86
+  s_c3ece772cfb1b0::t_a3b92390d38638 695-700
 ---
 {
   "schema_version": "authorship/3.0.0",
