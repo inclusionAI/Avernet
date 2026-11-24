@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_b7f94a3bd241d6::t_29566f991f19c0 124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "849d186ef826124e441c660d52a6278ffc5afbbd",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

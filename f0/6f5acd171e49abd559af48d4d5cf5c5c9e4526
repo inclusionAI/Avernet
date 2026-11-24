@@ -1,0 +1,24 @@
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  s_1174cf1b08bda1::t_e1d53dbe7c90ac 100-121
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/index.tsx
+  s_1174cf1b08bda1::t_2ce6a3912a179f 180
+  s_1174cf1b08bda1::t_d171a53dac69d8 145
+  s_1174cf1b08bda1::t_1bcb1be14b8606 171,177
+  s_1174cf1b08bda1::t_5988e2a1fc8cd6 37-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f06f5acd171e49abd559af48d4d5cf5c5c9e4526",
+  "prompts": {},
+  "sessions": {
+    "s_1174cf1b08bda1": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "4d73b506-5081-45a2-8f06-5f7be442abea",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

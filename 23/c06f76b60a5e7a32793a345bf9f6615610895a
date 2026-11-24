@@ -1,0 +1,21 @@
+apps/bcs/crates/bootstrap/bcs/tests/metrics_group_catalog_labels.rs
+  s_0a834df03ae803::t_96f2e789d7bdb9 1-159
+apps/bcs/crates/bootstrap/bcs/tests/metrics_wrappers.rs
+  s_0a834df03ae803::t_4ee0fe316c9454 193,212,221-226,228-229,283,286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23c06f76b60a5e7a32793a345bf9f6615610895a",
+  "prompts": {},
+  "sessions": {
+    "s_0a834df03ae803": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20c7f-8eab-7802-bb9c-796de9f4d3f8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
