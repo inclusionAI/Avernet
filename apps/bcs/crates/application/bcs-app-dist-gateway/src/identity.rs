@@ -36,8 +36,9 @@ pub(crate) fn session_id(scope: &TaskScope, group: &GroupId, message: &RequestId
     let digest = hash(&["sid", &scope.tenant.0, &scope.principal.0, &group.0, &message.0]);
     let mut head = [0u8; 8];
     head.copy_from_slice(&digest[..8]);
-    let shard = u64::from_be_bytes(head) % u64::from(shards.max(1));
-    Sid(format!("s{shard:04}.{}", hex::encode(&digest[8..16])))
+    // The modulus is below the shard count, so the narrowing is lossless.
+    let shard = ShardId((u64::from_be_bytes(head) % u64::from(shards.max(1))) as u32);
+    Sid(format!("{}.{}", shard.prefix(), hex::encode(&digest[8..16])))
 }
 
 pub(crate) fn task_id(sid: &Sid, message: &RequestId) -> Tid {

@@ -50,7 +50,7 @@ impl KeyLayout {
 
     /// Text form of a shard, at least four digits: `s0042`.
     pub fn shard_text(shard: ShardId) -> String {
-        format!("s{:04}", shard.0)
+        shard.prefix()
     }
 
     pub fn owner(&self, shard: ShardId) -> String {

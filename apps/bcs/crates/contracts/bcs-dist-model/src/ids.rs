@@ -94,6 +94,14 @@ impl Sid {
     }
 }
 
+impl ShardId {
+    /// Text form of the shard prefix, at least four digits: `s0042`. It
+    /// round-trips through `shard_of`.
+    pub fn prefix(self) -> String {
+        format!("s{:04}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CommitSeq(pub u64);
@@ -216,5 +224,19 @@ mod shard_tests {
         for bad in ["s4294967296.x", "s99999999999.a"] {
             assert_eq!(shard_of(bad), Err(ShardParseError::ShardOutOfRange), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn renders_the_prefix_with_at_least_four_digits() {
+        assert_eq!(ShardId(0).prefix(), "s0000");
+        assert_eq!(ShardId(1).prefix(), "s0001");
+        assert_eq!(ShardId(42).prefix(), "s0042");
+        assert_eq!(ShardId(123456).prefix(), "s123456");
+        assert_eq!(ShardId(u32::MAX).prefix(), "s4294967295");
+        // The text form round-trips through the shared parser.
+        assert_eq!(
+            shard_of(&format!("{}.x", ShardId(42).prefix())),
+            Ok(ShardId(42))
+        );
     }
 }
