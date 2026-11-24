@@ -44,6 +44,8 @@ def _passthrough(path: str) -> str:
 class LocalDeviceFileSystem(DeviceFileSystem):
     """DeviceFileSystem with dual mode: BaaS HTTP for singlebox, pathlib fallback for tests."""
 
+    missing_directory_is_authoritative = True
+
     def __init__(
         self,
         baas_service: BaasService | None = None,
