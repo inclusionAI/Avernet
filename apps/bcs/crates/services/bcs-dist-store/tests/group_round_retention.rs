@@ -270,11 +270,15 @@ async fn publication_permission_survives_compaction_and_takeover() {
     p.admit(&a).await.unwrap();
     complete(&p, &a.input.key).await.unwrap();
     p.compact(&a.input.key).await.unwrap();
+    let b = request("a", "message-b", 2);
+    p.admit(&b).await.unwrap();
+    complete(&p, &b.input.key).await.unwrap();
     let q = p.takeover().await;
     q.append_feed(&a.input.key).await.unwrap();
+    q.append_feed(&b.input.key).await.unwrap();
     let r = q.takeover().await;
     r.publish_snapshot(&a.input.key).await.unwrap();
     r.publish_snapshot(&a.input.key).await.unwrap();
-    assert_eq!(r.feed_events(&a.input.key.sid).await.unwrap().len(), 2);
+    assert_eq!(r.feed_events(&a.input.key.sid).await.unwrap().len(), 4);
     assert_eq!(r.feed_snapshot(&a.input.key).await.unwrap()["result"], "answer-a");
 }

@@ -546,7 +546,7 @@ fn bounded_retry_before_failing_the_round() {
     assert_eq!(attempt, 2);
     assert_ne!(retry_did, first_did, "a retry is a new attempt identity");
     assert!(
-        retry_did.starts_with("fsm:") && retry_did.contains("start:2"),
+        retry_did.starts_with("task-1.fsm:") && retry_did.contains("start:2"),
         "attempt identities derive from round/node/attempt, not time: {retry_did}"
     );
     assert!(Round::finished(&retried).is_empty());

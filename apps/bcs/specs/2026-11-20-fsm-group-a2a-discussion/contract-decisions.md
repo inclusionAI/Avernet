@@ -1,6 +1,6 @@
 # FSM 群 A2A：D0 合同决策（2026-11-24）
 
-状态：**S1.1～S1.5 全部完成，D0 已冻结（放行 Stage 2 开工；T2 的 provider GREEN 仍阻塞于外部 P；非上线批准）**。本文细化[讨论稿](spec.md)，验证工作归入[实施计划](plan.md)的 T1～T9，门禁证据见[验证记录](validation.md)。以下记录和字段是设计，不是 `dev` 已交付的 API。[#4245 固定版本的受理说明](https://github.com/inclusionAI/Avernet/blob/c7187edcc99354f017f2e1a9bfcb3d6e88c15b96/apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md)区分 input 文档、schedule、checkpoint 和 Inbox；现行 input 级 CAS 本身不能裁决不同 input 争用同一 Sid。
+状态（2026-11-25 复核）：**D0 冻结结论暂停、待修复后门禁重新确认；Stage 2 已有实现，但退出验收未完成，P 未交付，不放行 Stage 3。** 历史 S1.5 冻结记录保留用于追溯，不覆盖文末复核裁决。本文细化[讨论稿](spec.md)，验证工作归入[实施计划](plan.md)的 T1～T9，门禁证据见[验证记录](validation.md)。以下记录和字段是设计，不是 `dev` 已交付的 API。[#4245 固定版本的受理说明](https://github.com/inclusionAI/Avernet/blob/c7187edcc99354f017f2e1a9bfcb3d6e88c15b96/apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md)区分 input 文档、schedule、checkpoint 和 Inbox；现行 input 级 CAS 本身不能裁决不同 input 争用同一 Sid。
 
 ## 1. 受理：在 `ckpt:<sid>` 上安装一轮，而非另加 Session 锁
 
@@ -129,7 +129,9 @@ List 首页取得按授权群过滤、按 Tid 唯一的版本化快照，行、t
 
 **结论：** 无未解决的接口冲突；两处已记录缺口（closure_ref 按 Task 物化、从未应用 Feed 许可跨 head）已指派 T4/T7，映射本身成立，不需要回改 S1.1～S1.3。剩余装配验证逐项：T2（P）——生产 `group_admission.rs` GroupRoundRepo、真实 provider GREEN；T4——`fsm_task_artifacts.sql` 双方言迁移、closure/冷证明按 Tid 转存、Blob pin/release、公共索引与游标物化；T6（P：ByRequest adapter）——Connector 严格 `CallAuthority`/SendProof、GetTask 完整产物校验→`admit_connector(Final)` 全链、request-id 反查扩展；T7（P：跨进程故障）——processor 接 GroupStart、统一停止屏障、task_feed 成对首次写许可、dispatch 目录回收+稳定游标、核实交接、Supervisor 装配；T9（P）——Singlebox 独立进程故障矩阵与容量验收。
 
-### S1.5 D0 冻结记录（Stage 1 收口）
+### S1.5 D0 冻结记录（历史；2026-11-25 暂停，见下节）
+
+> 本节保留原判定及当时证据，不代表 2026-11-25 修复工作树已重新冻结。
 
 本节把 S1.5 门禁后的冻结事实固化为单一登记点。D0 冻结是**设计实施门槛**，不是上线批准；放行范围 = Stage 2（T2/T3/T4/T5/W）开工，其中 **T2 的 provider GREEN 与整个 Stage 2 退出仍 blocked 于外部 P**。全部命令/结果/限制台账见 [验证记录 S1.5 节](validation.md)。
 
@@ -160,3 +162,17 @@ List 首页取得按授权群过滤、按 Tid 唯一的版本化快照，行、t
 | 集中合同 harness | `bcs-test-support/src/contract/distributed/group_round.rs`（`group_round_repo_contract_tests`）+ `bcs-dist-store/tests/conformance_group_round.rs` |
 
 **D0 冻结依据与边界：** S1.1～S1.4 逐项证据 + S1.5 全部门禁台账（受影响 729 绿、workspace check 绿、真实 API 差异门禁绿、全工作区 9616/3/74 且 3 项为预告的 host 基线红、R25 红 100% 为 dev 预存在且本分支唯一新增 trait 合规）。两个已指派合同缝（closure_ref 按 Task 物化 → T4/T7；未应用 Feed 许可跨 head → T7）与 deferred minors 不阻塞 D0，属 Stage 2+ 装配范围；R25.3 因基础设施中止的记录与等价证据见验证记录。真实 provider、跨进程恢复、生产默认值上线仍按 plan 归 T2/T9 等任务与单独授权。
+
+## 2026-11-25 修复后的协议修订与裁决
+
+本节优先于历史冻结结论。基线 `564a2b7e30`；未执行 T6/T7 生产装配或 P 交付。
+
+- 请求准备/受理行不可跨 Sid/Tid/代次或规范化依据改绑；Inbox 拒绝结果不能授权执行。已废弃行仍可在原 checkpoint 栅栏成立后重新受理。
+- 来源隔离只拒绝旧 RPC 入口，不屏蔽通过既有身份校验的 `admit_connector` 报告。
+- Dispatch ID 使用 `<tid>.fsm:<generation>:<node>:<attempt>`。最终节点 Canceling 后的已核验 Final 产生一次 Completed 意图。
+- 原型先提交全部 attempt 意图，再写接收端效果。冷热压缩保留独立 `feed_tail`，不从可删除热记录推导下一轮前驱。
+- 目录回收先在 checkpoint 精确版本 CAS 登记 `directory_retired=true`，再删除目录。新受理先提交则回收冲突；回收先提交则旧准备被栅栏拒绝，新受理拒绝 retired Sid。回收后的 Sid 不复用，需新 context；生产保留策略仍待验收。
+- `SaveResult` 提交只授权归档。首次冷证明确认要求更晚的 terminal commit，owner-fenced checkpoint 的 `runner_state.state.value.group_terminal` 保留完全相同的 TerminalProof、对应 Tid 的 Done/result_ref，且 closure 文档可读、身份/摘要匹配。T7 在冷转存读回前必须保留这些事实。相同已确认证明可不依赖热 checkpoint 重放。当前测试显式注入该提交，尚无 T7 生产写者，不宣称跨角色集成。
+- 首次证明转存增加 1 次 checkpoint 和 1 次 closure 读取，无历史扫描；重放不增加两次读取。目录回收增加 1 次 checkpoint CAS，预登记增加至多 1 次 checkpoint 读取，不引入跨键事务或网络锁。
+
+**核定：D0 冻结结论暂停，Stage 2 未完成退出验收，不放行 Stage 3。** 原型修复不等于必需门禁已重新通过；当前 API/R25、workspace 与真实 MySQL/provider 证据见 validation.md 第六轮。P 仍缺交付，模型与 SQLite 测试不能替代。

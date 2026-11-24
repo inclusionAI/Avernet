@@ -150,6 +150,10 @@ impl Prototype {
     /// 目录回收: 只有当前 sealed owner 可以回收一个 Sid 行, 且要求该 Sid 没有
     /// 残留轮次、没有仍指向它的未决预留; 不删 checkpoint, 不依赖 TTL。
     pub async fn recycle_directory(&self, sid: &Sid) -> Result<(), StoreError> {
+        self.recycle_directory_paused(sid, None).await
+    }
+    pub async fn recycle_directory_paused(&self, sid: &Sid,
+        pause: Option<(&tokio::sync::Notify, &tokio::sync::Notify)>) -> Result<(), StoreError> {
         if KeyLayout::shard_of(sid)? != ShardId(42) { return Err(error("shard")); }
         let a = self.acquired(sid).await?;
         let state = runner(&a.envelope.checkpoint)?;
@@ -163,6 +167,16 @@ impl Prototype {
                 if request.input.key.sid.0 == sid.0 { return Err(dependency("recycle_pending")); }
             }
         }
+        if let Some((reached, resume)) = pause {
+            reached.notify_one();
+            resume.notified().await;
+        }
+        // Permanently retire this Sid at the execution authority before
+        // removing discovery. New admissions reject the marker; a prepared
+        // old admission carries the pre-retirement head and is fenced.
+        let mut retired = state.clone();
+        retired["directory_retired"] = json!(true);
+        self.commit(a, retired, "directory-retire").await?;
         for _ in 0..8 {
             let old = self.document("t1-group-registry").await?;
             let (version, rows) = match old {

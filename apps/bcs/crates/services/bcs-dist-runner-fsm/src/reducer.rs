@@ -542,7 +542,9 @@ impl FsmReducerRunner {
                 NodeStatus::Canceling { .. } => {
                     // A timed-out attempt raced to verified success: its
                     // own stop fact is the Final report.
-                    if let Some(run) = round.nodes.get_mut(&node_id) {
+                    if workflow.final_node.0 == node_id {
+                        self.commit(round, TerminalStatus::Completed, event.payload.clone(), actions);
+                    } else if let Some(run) = round.nodes.get_mut(&node_id) {
                         run.artifact = Some(event.payload.clone());
                         run.status = NodeStatus::Succeeded;
                         self.schedule_ready(context, round, workflow, actions, deadlines)?;
@@ -779,7 +781,7 @@ impl FsmReducerRunner {
 /// identities.
 fn attempt_did(key: &RoundKey, node: &str, attempt: u32) -> Did {
     Did(format!(
-        "fsm:{}:{}:{node}:{attempt}",
+        "{}.fsm:{}:{node}:{attempt}",
         key.tid.0,
         key.generation.get()
     ))

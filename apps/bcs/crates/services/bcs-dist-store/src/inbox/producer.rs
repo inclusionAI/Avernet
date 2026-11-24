@@ -511,6 +511,7 @@ impl StoreInboxProducer {
                 // (old JSON-RPC) admission is rejected here, before its
                 // record is written and before any physical write.
                 if strict.is_none()
+                    && connector.is_none()
                     && schedule.slots.values().any(|slot| slot.strict)
                 {
                     return Err(StoreError::NotApplied {
@@ -551,7 +552,7 @@ impl StoreInboxProducer {
         // Start stream append: a session strictly claimed since that record
         // stranded must never resume it. Decided records only replay their
         // terminal outcome and cannot produce new physical state.
-        if strict.is_none() && existing.decision.is_none() {
+        if strict.is_none() && connector.is_none() && existing.decision.is_none() {
             self.fence_strict_claim(&sid).await?;
         }
         self.advance(&key, false).await.map_err(|_| unknown(&op))

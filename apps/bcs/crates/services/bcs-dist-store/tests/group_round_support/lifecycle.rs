@@ -10,6 +10,13 @@ pub(super) fn digest(value: &Value) -> Result<Digest, StoreError> {
     let bytes = serde_json::to_vec(value).map_err(|_| error("encode"))?;
     Ok(Digest(format!("{:x}", Sha256::digest(bytes))))
 }
+fn permission_tail(state: &Value, key: &RoundKey) -> Result<Value, StoreError> {
+    let encoded = encode(key)?;
+    let record = records(state)?.iter().find(|r| r["accepted"]["input"]["key"] == encoded)
+        .ok_or_else(|| error("round_missing"))?;
+    Ok(record["feed_permission"]["snapshot"]["snapshot_event_id"].clone())
+}
+
 impl Prototype {
     /// Simulated external receiver: durable idempotent accept keyed by full round.
     /// This proves a prototype effect executes; it is NOT a real A2A Connector.
@@ -74,10 +81,7 @@ impl Prototype {
         self.validate(key)?;
         let a = self.acquired(&key.sid).await?;
         let mut state = runner(&a.envelope.checkpoint)?.clone();
-        let previous=records(&state)?.iter().take_while(|r|
-            r["accepted"]["input"]["key"]!=encode(key).unwrap())
-            .filter_map(|r|r["feed_permission"]["snapshot"]["snapshot_event_id"].as_array().map(|_|r["feed_permission"]["snapshot"]["snapshot_event_id"].clone()))
-            .last();
+        let previous = state.get("feed_tail").filter(|v| !v.is_null()).cloned();
         let r = matching(&mut state, key)?;
         if !r["terminal"].is_null() { return Ok(()); }
         let archive_key = format!("archive:{}", key.tid.0);
@@ -124,6 +128,7 @@ impl Prototype {
         } else if !self.replace(&closure_key, None, closure).await? { return Err(dependency("closure_race")); }
         r["feed_permission"]=permission;
         r["terminal"]=encode(&proof)?;
+        state["feed_tail"] = permission_tail(&state, key)?;
         // Retained record is part of the same checkpoint CAS: both proof and
         // append/publish obligations survive the next head and owner seal.
         self.commit(a,state,"terminal").await
@@ -187,8 +192,8 @@ impl Prototype {
         let r = matching(&mut state, key)?;
         if !r["terminal"].is_null() { return Err(error("terminal_dispatch")); }
         r["dispatch_intent"] = json!(true);
-        r["dispatched"] = json!(true);
         r["attempts"] = json!(ids);
+        self.commit(a, state, "dispatch-attempt-intents").await?;
         for id in ids {
             let path = format!("sink:{}#{}", key.tid.0, id);
             let content = json!({"key": key, "attempt": id});
@@ -200,6 +205,9 @@ impl Prototype {
                 },
             }
         }
+        let a = self.acquired(&key.sid).await?;
+        let mut state = runner(&a.envelope.checkpoint)?.clone();
+        matching(&mut state, key)?["dispatched"] = json!(true);
         self.commit(a, state, "dispatch-attempts").await
     }
     /// Independently persisted, identity-verified per-attempt stop fact.
@@ -260,10 +268,7 @@ impl Prototype {
         }
         let a = self.acquired(&key.sid).await?;
         let mut state = runner(&a.envelope.checkpoint)?.clone();
-        let previous=records(&state)?.iter().take_while(|r|
-            r["accepted"]["input"]["key"]!=encode(key).unwrap())
-            .filter_map(|r|r["feed_permission"]["snapshot"]["snapshot_event_id"].as_array().map(|_|r["feed_permission"]["snapshot"]["snapshot_event_id"].clone()))
-            .last();
+        let previous = state.get("feed_tail").filter(|v| !v.is_null()).cloned();
         let r = matching(&mut state, key)?;
         if !r["terminal"].is_null() { return Ok(()); }
         self.assert_all_stopped(&r, key).await?;
@@ -298,6 +303,7 @@ impl Prototype {
         r["feed_permission"] = feed::permission(key, &proof, None, "failed", Some(reason),
             &record_ref, previous, &budgets)?;
         r["terminal"] = encode(&proof)?;
+        state["feed_tail"] = permission_tail(&state, key)?;
         self.commit(a, state, "fail").await
     }
     /// Accepted-round guard that tolerates a lost/corrupted result blob: the

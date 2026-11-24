@@ -3,7 +3,7 @@
 #
 # crates/service-api/* 的 pub 项变更必须升版本；breaking 变更必须跨过兼容
 # 边界（1.x → major，0.x → minor）；bcs-dist-model 单独做版本 + 序列化 wire
-# 兼容检查（旧格式回归测试 group_round_wire 必须保持绿）。
+# 兼容检查（旧格式 persistence_shape 与新格式 group_round_wire 均须保持绿）。
 #
 # 差异模式（不强制 checkout，允许脏工作区）：
 #   baseline = 临时 `git worktree add --detach <dir> <base-commit>`（独立
@@ -14,7 +14,7 @@
 #   两侧各取 `cargo public-api -p <crate>` 清单，再对清单做统一 diff。
 #   工具任一侧失败都会 FAIL 并展示 stderr，不吞错误。
 #
-# 工具安装与固定（记录用，不进 CI 默认工具链）：
+# 工具安装与固定（CI 同步安装）：
 #   rustup toolchain install nightly-2025-11-30 --profile minimal
 #   CARGO_INSTALL_ROOT=<repo>/.superpowers/tools \
 #     cargo install cargo-public-api --version 0.52.0 --locked
@@ -29,15 +29,18 @@ BCS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPO_TOP="$(git -C "$BCS_ROOT" rev-parse --show-toplevel)"
 BCS_PREFIX="$(git -C "$BCS_ROOT" rev-parse --show-prefix)"
 # 共享本 workspace 既有 target（复用依赖产物；禁止另开/清理缓存）。
-CARGO_TARGET_DIR="$BCS_ROOT/target"
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$BCS_ROOT/target}"
 export CARGO_TARGET_DIR
 
 PR_BODY_FILE=${PR_BODY_FILE:-/tmp/pr_body.txt}
 NIGHTLY_TOOLCHAIN=${CARGO_PUBLIC_API_NIGHTLY:-nightly-2025-11-30}
 ARTIFACT_DIR=${PUBLIC_API_ARTIFACT_DIR:-}
 
+PREREQUISITE_EXIT=77
+if [[ "${CI:-false}" == "true" ]]; then PREREQUISITE_EXIT=1; fi
+
 if ! command -v cargo >/dev/null; then
-  echo "SKIP [API-1]: cargo 不可用"; exit 77
+  echo "API-1 unavailable: cargo 不可用"; exit "$PREREQUISITE_EXIT"
 fi
 
 pubapi_bin=""
@@ -50,12 +53,12 @@ done
 if [[ -z "$pubapi_bin" ]]; then
   echo "SKIP [API-1]: cargo-public-api 未安装"
   echo "  （建议：CARGO_INSTALL_ROOT=<repo>/.superpowers/tools cargo install cargo-public-api --version 0.52.0 --locked）"
-  exit 77
+  exit "$PREREQUISITE_EXIT"
 fi
 
 if ! rustup toolchain list 2>/dev/null | grep -q "$NIGHTLY_TOOLCHAIN"; then
   echo "SKIP [API-1]: 未安装 pinned nightly toolchain $NIGHTLY_TOOLCHAIN（rustdoc JSON 需要）"
-  exit 77
+  exit "$PREREQUISITE_EXIT"
 fi
 
 fail=0
@@ -70,7 +73,7 @@ BASE_COMMIT=$(git -C "$BCS_ROOT" merge-base "$BASE_REF" HEAD 2>/dev/null) || {
 
 BASE_WORKTREE=""
 cleanup() {
-  if [[ -n "$BASE_WORKTREE" && -d "$BASE_WORKTREE/.git" ]]; then
+  if [[ -n "$BASE_WORKTREE" && -e "$BASE_WORKTREE/.git" ]]; then
     git -C "$BCS_ROOT" worktree remove --force "$BASE_WORKTREE" >/dev/null 2>&1 || true
     rm -rf "$BASE_WORKTREE"
   fi
@@ -206,13 +209,13 @@ model_path="contracts/bcs-dist-model"
 if [[ -d "$BCS_ROOT/crates/$model_path" ]]; then
   if check_crate "bcs-dist-model" "$model_path"; then
     if ! cmp -s "$ARTIFACT_DIR/bcs-dist-model.base.txt" "$ARTIFACT_DIR/bcs-dist-model.head.txt"; then
-      echo "[API-1] bcs-dist-model 序列化兼容检查：cargo test -p bcs-dist-model --test group_round_wire"
+      echo "[API-1] bcs-dist-model 序列化兼容检查：cargo test -p bcs-dist-model --test group_round_wire --test persistence_shape"
       model_wise_log="$ARTIFACT_DIR/bcs-dist-model.wire.log"
       model_rc=0
       (cd "$BCS_ROOT" && unset RUSTUP_TOOLCHAIN && \
        CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-12}" \
        CARGO_PROFILE_DEV_DEBUG=line-tables-only \
-       cargo test -p bcs-dist-model --test group_round_wire --color never \
+       cargo test -p bcs-dist-model --test group_round_wire --test persistence_shape --color never \
        >"$model_wise_log" 2>&1) || model_rc=$?
       if [[ "$model_rc" -ne 0 ]]; then
         echo "FAIL [API-1]: bcs-dist-model 序列化 wire 兼容测试失败（尾部输出，全文 $model_wise_log）："

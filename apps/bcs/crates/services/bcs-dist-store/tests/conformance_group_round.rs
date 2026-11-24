@@ -7,6 +7,8 @@
 #[path = "group_round_support/mod.rs"]
 mod support;
 mod common;
+#[path = "group_admission_cases/regressions.rs"]
+mod regressions;
 
 use bcs_test_support::contract::distributed::group_round::group_round_repo_contract_tests;
 

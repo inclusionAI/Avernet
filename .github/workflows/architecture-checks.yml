@@ -42,6 +42,7 @@ jobs:
       - name: Install Rust toolchain
         run: |
           rustup toolchain install 1.94.0 --profile minimal
+          rustup toolchain install nightly-2025-11-30 --profile minimal
           rustup default 1.94.0
           rustc --version
           cargo --version
@@ -58,7 +59,10 @@ jobs:
             ${{ runner.os }}-cargo-arch-${{ env.RUSTUP_TOOLCHAIN }}-
 
       - name: Install architecture check tools
-        run: cargo install cargo-machete cargo-public-api --locked
+        run: |
+          cargo install cargo-machete --locked
+          cargo install cargo-public-api --version 0.52.0 --locked
+          python3 scripts/ci/test_public_api_gate.py
 
       - name: Write pull request body
         if: github.event_name == 'pull_request'

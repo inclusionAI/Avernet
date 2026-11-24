@@ -166,6 +166,8 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 47, name: "dist_immutable_objects" },
     SqliteMigration { version: 48, name: "fsm_node_history" },
     SqliteMigration { version: 49, name: "fsm_workflow_revision" },
+    SqliteMigration { version: 50, name: "fsm_task_artifacts" },
+    SqliteMigration { version: 51, name: "fsm_task_artifact_pins" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -635,6 +637,34 @@ async fn apply_sqlite_migration_body(
             db.transaction(steps).await?;
             Ok(())
         }
+        // Per-task immutable final-product archive (plan T4): preparing /
+        // committed / expired archive rows plus ordered artifact-part
+        // references. Additive only: two CREATE TABLE IF NOT EXISTS
+        // statements and index builds; no existing table is touched.
+        50 => {
+            let steps = bcs_db_api::split_sql_statements(include_str!(
+                "../../../../migrations/sqlite/050_fsm_task_artifacts.sql"
+            ))
+            .into_iter()
+            .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql)))
+            .collect();
+            db.transaction(steps).await?;
+            Ok(())
+        }
+        // Preparing-archive blob pins (plan T4 review fix R1): the derived
+        // content-addressed blob keys a preparing archive still intends to
+        // reference, consulted by reclamation before any blob deletion.
+        // Additive only; no existing table is touched.
+        51 => {
+            let steps = bcs_db_api::split_sql_statements(include_str!(
+                "../../../../migrations/sqlite/051_fsm_task_artifact_pins.sql"
+            ))
+            .into_iter()
+            .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql)))
+            .collect();
+            db.transaction(steps).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -752,6 +782,16 @@ fn sqlite_migration_checksum(migration: &SqliteMigration) -> String {
             "../../../../migrations/sqlite/049_fsm_workflow_revision.sql"
         ));
     }
+    if migration.version == 50 {
+        hasher.update(include_bytes!(
+            "../../../../migrations/sqlite/050_fsm_task_artifacts.sql"
+        ));
+    }
+    if migration.version == 51 {
+        hasher.update(include_bytes!(
+            "../../../../migrations/sqlite/051_fsm_task_artifact_pins.sql"
+        ));
+    }
     hex::encode(hasher.finalize())
 }
 
@@ -809,3 +849,11 @@ mod node_history_tests;
 #[cfg(test)]
 #[path = "migrations/workflow_revision_tests.rs"]
 mod workflow_revision_tests;
+
+#[cfg(test)]
+#[path = "migrations/task_artifact_tests.rs"]
+mod task_artifact_tests;
+
+#[cfg(test)]
+#[path = "migrations/task_artifact_pins_tests.rs"]
+mod task_artifact_pins_tests;

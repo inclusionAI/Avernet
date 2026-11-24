@@ -554,9 +554,18 @@ impl StoreGroupRoundAdmission {
                 return Ok(Admission::Conflict);
             }
         }
-        self.bind_row(request, &row_key, head, &owner).await?;
-        // Stage repairable pre-writes; they never carry permission.
-        self.aftermath(request).await?;
+        if !self.bind_row(request, &row_key, head, &owner).await? {
+            return Ok(Admission::Conflict);
+        }
+        // A rejected staged entry cannot grant an execution license.
+        match self.aftermath(request).await? {
+            StrictOutcome::Staged
+            | StrictOutcome::Delivered(AdmitOutcome::Accepted(_) | AdmitOutcome::Duplicate(_)) => {}
+            StrictOutcome::Delivered(AdmitOutcome::ContentConflict) => return Ok(Admission::Conflict),
+            StrictOutcome::Delivered(AdmitOutcome::Quarantined) => {
+                return Err(invalid("strict_start_rejected"));
+            }
+        }
         match self.license_commit(&snapshot, request).await? {
             CommitOutcome::Committed(_) | CommitOutcome::AlreadyCommitted(_) => {}
             CommitOutcome::Fenced => {
@@ -595,9 +604,10 @@ impl StoreGroupRoundAdmission {
         }
         self.mark_accepted(request, &row_key).await?;
         match self.aftermath(request).await? {
-            StrictOutcome::Delivered(_) => Ok(Admission::New {
+            StrictOutcome::Delivered(AdmitOutcome::Accepted(_) | AdmitOutcome::Duplicate(_)) => Ok(Admission::New {
                 accepted: request.clone(),
             }),
+            StrictOutcome::Delivered(_) => Err(invalid("strict_start_rejected")),
             StrictOutcome::Staged => Err(StoreError::NotApplied {
                 code: "strict_round_superseded".into(),
             }),
@@ -634,7 +644,7 @@ impl StoreGroupRoundAdmission {
         key: &str,
         head: u64,
         owner: &ShardOwner,
-    ) -> Result<(), StoreError> {
+    ) -> Result<bool, StoreError> {
         let fresh = GroupRequestRow {
             schema_version: 1,
             request_id: request.request_id.0.clone(),
@@ -647,36 +657,30 @@ impl StoreGroupRoundAdmission {
             match self.load::<GroupRequestRow>(key).await? {
                 None => {
                     if self.save_row(key, None, &fresh).await? {
-                        return Ok(());
+                        return Ok(true);
                     }
                 }
                 Some((version, row)) => match row.state.as_str() {
-                    "expired" => return Ok(()),
+                    "expired" => return Ok(false),
                     "abandoned" => {
-                        // Same identity reuses the slot once its binding was
-                        // fenced off; the exact-CAS below enforces freshness.
                         if self.save_row(key, Some(version), &fresh).await? {
-                            return Ok(());
+                            return Ok(true);
                         }
                     }
-                    state => {
-                        if row.request.request_id != request.request_id {
-                            return Err(invalid("group_request_identity"));
-                        }
-                        if row.request.request_digest != request.request_digest {
-                            // Another normalization owns this message key.
-                            if state != "prepared" {
-                                return Err(invalid("group_request_state"));
-                            }
-                            return Ok(());
+                    "prepared" | "accepted" => {
+                        // A scope-wide message reservation is not transferable
+                        // to another session, task, generation or normalization.
+                        if row.request != *request {
+                            return Ok(false);
                         }
                         let mut rebound = row;
                         rebound.head = head;
                         rebound.owner = owner.clone();
                         if self.save_row(key, Some(version), &rebound).await? {
-                            return Ok(());
+                            return Ok(true);
                         }
                     }
+                    _ => return Err(invalid("group_request_state")),
                 },
             }
         }

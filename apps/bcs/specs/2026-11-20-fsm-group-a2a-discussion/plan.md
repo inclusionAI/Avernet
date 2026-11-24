@@ -54,7 +54,7 @@
 
 ## 分阶段执行与放行门槛
 
-Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者不重复计算完成度。当前位于 **Stage 1，部分完成，D0 未冻结**。已有模型、正向原型和测试继续复用，不从零重写，也不把候选接口视作冻结合同。每次推进在 [validation.md](validation.md) 记录具体版本、命令、通过/失败/跳过项及证据层级。
+Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者不重复计算完成度。当前正在进行 **2026-11-25 修复复核：D0 冻结结论暂停，Stage 2 已有实现但未完成退出验收；不放行 Stage 3**。已有模型、正向原型和测试继续复用，不从零重写，也不把候选接口视作冻结合同。每次推进在 [validation.md](validation.md) 记录具体版本、命令、通过/失败/跳过项及证据层级。
 
 | Stage | 目标与任务映射 | 进入条件 | 退出条件 |
 | --- | --- | --- | --- |
@@ -157,7 +157,7 @@ Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者
 
 ### T1：冻结跨进程合同，不先写 HTTP handler
 
-**执行状态：Stage 1 部分完成，D0 未冻结。** 已有 wire、正向协议原型、候选 repo/Runner 接口及审查修复证据见 [T1 验证记录](validation.md)。候选接口已进入工作树不代表已冻结；剩余工作按 S1.1～S1.5 收口。旧 `resolve_commit` 的反例只是基线能力探查，不是必须改变旧 API 的冻结门槛。模型通过不等于真实 provider/联合版本通过，Stage 1 退出前不放行 T2/T7。
+**执行状态（2026-11-25）：D0 原冻结结论暂停，修复与门禁重新核定中。** 已有 wire、正向协议原型、候选 repo/Runner 接口及审查修复证据见 [T1 验证记录](validation.md)。候选接口已进入工作树不代表已冻结；剩余工作按 S1.1～S1.5 收口。旧 `resolve_commit` 的反例只是基线能力探查，不是必须改变旧 API 的冻结门槛。模型通过不等于真实 provider/联合版本通过，Stage 1 退出前不放行 T2/T7。
 
 **文件：** 新增 `crates/contracts/bcs-dist-model/src/group_round.rs`、`crates/service-api/bcs-service-api/src/port/repo/distributed/group_round.rs`、`crates/test-support/bcs-test-support/src/contract/distributed/group_round.rs`、`crates/contracts/bcs-dist-model/tests/group_round_wire.rs`；修改各模块导出、`src/core/dist_runner.rs`（Service API）、相应 Cargo.toml 和 `Cargo.lock`。
 

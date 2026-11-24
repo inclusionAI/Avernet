@@ -39,6 +39,8 @@ pub mod pagination;
 pub mod encoding;
 mod reservation;
 mod retention;
+#[cfg(test)]
+mod review_regressions;
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_dist_store::{coordination::CoordinationStore, layout::KeyLayout};
@@ -257,6 +259,11 @@ impl Prototype {
     /// recycle operation and saturation fails closed.
     pub async fn prepare(&self, request: &GroupStartRequest) -> Result<(), StoreError> {
         self.validate(&request.input.key)?;
+        if let Some(envelope) = self.store.load(&request.input.key.sid).await? {
+            if runner(&envelope.checkpoint)?["directory_retired"] == true {
+                return Err(dependency("session_retired"));
+            }
+        }
         for _ in 0..8 {
             let old = self.document("t1-group-registry").await?;
             let (version, mut rows) = match old { Some((v,x)) => (Some(v), x), None => (None, json!([])) };

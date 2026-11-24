@@ -348,6 +348,34 @@ fn final_on_canceling_attempt_counts_as_verified_success() {
     assert!(Round::finished(&raced).is_empty(), "no terminal from a timeout that lost the race");
 }
 
+#[test]
+fn dispatch_identity_is_accepted_by_joint_worker() {
+    let mut round = Round::open(workflow_of(vec![("final", &[], true)]), 1);
+    let input = round_for(&round.spec, "s0042.context.task", ROUND_DEADLINE_MS);
+    let decision = round.step(&[group_start(input)]);
+    let dispatch = decision.actions.iter().find_map(|action| match action {
+        ActionIntent::StartDispatch(spec) => Some(spec),
+        _ => None,
+    }).unwrap();
+    assert!(dispatch.did.0.starts_with(&format!("{}.", dispatch.tid.0)));
+}
+
+#[test]
+fn final_node_final_after_timeout_finishes_once() {
+    let mut round = Round::open(workflow_of(vec![("final", &[], true)]), 1);
+    let input = round_for(&round.spec, "task-1", ROUND_DEADLINE_MS);
+    let opened = round.step(&[group_start(input)]);
+    let did = dispatch_of(&opened, "final").1;
+    let deadline = dispatch_deadline_of(&opened, &did);
+    round.step(&[RunnerInput::Timeout(deadline)]);
+    let report = agent("task-1", &did, 2, AgentEventKind::Final,
+        serde_json::json!({"value": "late final"}));
+    let finished = round.step(&[report.clone()]);
+    assert_eq!(Round::finished(&finished).len(), 1);
+    assert_eq!(Round::finished(&finished)[0].0, TerminalStatus::Completed);
+    assert!(Round::finished(&round.step(&[report])).is_empty());
+}
+
 /// Final reports are stop evidence inside the barrier: the terminal commits
 /// only after the last one lands, exactly once, with the frozen status.
 #[test]

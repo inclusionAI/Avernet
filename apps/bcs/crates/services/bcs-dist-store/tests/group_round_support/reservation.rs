@@ -55,6 +55,7 @@ impl Prototype {
         self.prepare(request).await?;
         let snapshot=self.acquired(&request.input.key.sid).await?;
         let state=runner(&snapshot.envelope.checkpoint)?;
+        if state["directory_retired"] == true { return Err(dependency("session_retired")); }
         if records(state)?.iter().any(|r|r["terminal"].is_null()) { return Err(dependency("busy")); }
         if state["generation"].as_u64().and_then(|v|v.checked_add(1))!=Some(request.input.key.generation.get()) {
             return Err(error("stale_generation"));

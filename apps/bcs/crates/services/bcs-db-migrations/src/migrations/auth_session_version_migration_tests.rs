@@ -92,6 +92,8 @@ async fn auth_session_version_upgrade_clears_legacy_tokens_once() -> DbResult<()
             (47, "dist_immutable_objects"),
             (48, "fsm_node_history"),
             (49, "fsm_workflow_revision"),
+            (50, "fsm_task_artifacts"),
+            (51, "fsm_task_artifact_pins"),
         ],
         "only versions after 41 are pending on the upgrade path"
     );

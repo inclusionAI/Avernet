@@ -1,7 +1,8 @@
 #![allow(
+    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
-    reason = "contract test support"
+    reason = "contract test support shared by several test targets"
 )]
 use async_trait::async_trait;
 use bcs_db_api::*;
@@ -25,6 +26,12 @@ pub struct Fixture {
     pub documents: Arc<Model>,
     pub store: DbArchiveStore,
     _directory: tempfile::TempDir,
+}
+impl Fixture {
+    /// Physical SQLite file backing this fixture (for reopen-with-new-connection).
+    pub fn database_path(&self) -> std::path::PathBuf {
+        self._directory.path().join("archive.db")
+    }
 }
 pub fn layout(namespace: &str) -> KeyLayout {
     KeyLayout::new("archive", namespace).unwrap()
@@ -164,6 +171,11 @@ pub struct FaultDb {
     fail_resolution: AtomicBool,
     fail_read: AtomicBool,
     fail_before_write: AtomicBool,
+    fail_writes_from: AtomicUsize,
+    transactions: AtomicUsize,
+    fail_transactions_from: AtomicUsize,
+    lose_transactions_from: AtomicUsize,
+    log: Mutex<Vec<String>>,
     pause_read: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 impl FaultDb {
@@ -176,6 +188,11 @@ impl FaultDb {
             fail_resolution: AtomicBool::new(false),
             fail_read: AtomicBool::new(false),
             fail_before_write: AtomicBool::new(false),
+            fail_writes_from: AtomicUsize::new(0),
+            transactions: AtomicUsize::new(0),
+            fail_transactions_from: AtomicUsize::new(0),
+            lose_transactions_from: AtomicUsize::new(0),
+            log: Mutex::new(Vec::new()),
             pause_read: Mutex::new(None),
         }
     }
@@ -195,6 +212,37 @@ impl FaultDb {
     pub fn fail_before_write(&self) {
         self.fail_before_write.store(true, Ordering::SeqCst);
     }
+    /// Fail every execute from the 1-based n-th write (0 disables).
+    pub fn fail_writes_from(&self, n: usize) {
+        self.fail_writes_from.store(n, Ordering::SeqCst);
+    }
+    /// 1-based number of transactions attempted so far.
+    pub fn transactions(&self) -> usize {
+        self.transactions.load(Ordering::SeqCst)
+    }
+    /// Fail every transaction from the 1-based n-th call (0 disables).
+    pub fn fail_transactions_from(&self, n: usize) {
+        self.fail_transactions_from.store(n, Ordering::SeqCst);
+    }
+    /// Lose the reply of every transaction from the 1-based n-th call (0 disables).
+    pub fn lose_transactions_from(&self, n: usize) {
+        self.lose_transactions_from.store(n, Ordering::SeqCst);
+    }
+    /// Recorded statement texts, calls in order.
+    pub fn statements(&self) -> Vec<String> {
+        self.log.lock().unwrap().clone()
+    }
+    pub fn clear_log(&self) {
+        self.log.lock().unwrap().clear();
+    }
+    /// Direct physical probe read bypassing faults and the statement log.
+    pub async fn scalar(&self, sql: &str) -> i64 {
+        let rows = self.inner.query(DbStatement::new(sql)).await.unwrap();
+        match rows.into_iter().next().and_then(|row| row.get("c").cloned()) {
+            Some(DbValue::I64(value)) => value,
+            other => panic!("probe {sql} returned {other:?}"),
+        }
+    }
     pub fn pause_next_read(&self) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
         let pair = (
             Arc::new(tokio::sync::Notify::new()),
@@ -208,6 +256,7 @@ impl FaultDb {
 impl DbPlugin for FaultDb {
     async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        self.log.lock().unwrap().push(statement.sql().to_owned());
         if self.fail_read.swap(false, Ordering::SeqCst) {
             return Err(DbError::Backend("injected read failure".into()));
         }
@@ -221,10 +270,15 @@ impl DbPlugin for FaultDb {
     }
     async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
         self.writes.fetch_add(1, Ordering::SeqCst);
+        self.log.lock().unwrap().push(statement.sql().to_owned());
         if self.fail_before_write.swap(false, Ordering::SeqCst) {
             return Err(DbError::Backend(
                 "unclassified transport failure before write".into(),
             ));
+        }
+        let from = self.fail_writes_from.load(Ordering::SeqCst);
+        if from > 0 && self.writes.load(Ordering::SeqCst) == from {
+            return Err(DbError::Backend("injected write failure".into()));
         }
         let result = self.inner.execute(statement).await?;
         if self.lose.swap(false, Ordering::SeqCst) {
@@ -239,7 +293,26 @@ impl DbPlugin for FaultDb {
         &self,
         steps: Vec<DbTransactionStep>,
     ) -> DbResult<Vec<DbTransactionStepResult>> {
-        self.inner.transaction(steps).await
+        let sequence = self.transactions.fetch_add(1, Ordering::SeqCst) + 1;
+        let texts: Vec<String> = steps
+            .iter()
+            .map(|step| match step {
+                DbTransactionStep::Query(statement)
+                | DbTransactionStep::Execute(statement)
+                | DbTransactionStep::ExecuteChecked { statement, .. } => statement.sql().to_owned(),
+            })
+            .collect();
+        self.log.lock().unwrap().extend(texts);
+        let fail_from = self.fail_transactions_from.load(Ordering::SeqCst);
+        if fail_from > 0 && sequence == fail_from {
+            return Err(DbError::Backend("injected transaction failure".into()));
+        }
+        let result = self.inner.transaction(steps).await?;
+        let lose_from = self.lose_transactions_from.load(Ordering::SeqCst);
+        if lose_from > 0 && sequence == lose_from {
+            return Err(DbError::Backend("injected lost transaction response".into()));
+        }
+        Ok(result)
     }
     async fn health_check(&self) -> DbResult<DbHealth> {
         self.inner.health_check().await
