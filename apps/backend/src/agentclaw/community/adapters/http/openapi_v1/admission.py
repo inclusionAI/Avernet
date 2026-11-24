@@ -58,6 +58,7 @@ ADMITTING_MODES = frozenset(
         AdmissionMode.GRANT_FILTERED,
         AdmissionMode.USER_GATED,
         AdmissionMode.USER_DELEGATED,
+        AdmissionMode.ENGINE,
         AdmissionMode.OPEN,
     }
 )

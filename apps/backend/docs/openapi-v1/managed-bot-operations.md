@@ -21,8 +21,13 @@ environment and current Owner remain checked on this side. Desktop and separatel
 managed local runtimes are not supported. Published runtimes are read-only.
 
 Restart and batch status accept only Bots whose persisted `active_engine` is
-`claude_code` or `aicoding`. The reusable `EngineCheck` aspect is attached by
-`PublicAPIRoute`, independently of application admission and Owner checks.
+`claude_code` or `aicoding`. Both operations declare `AdmissionMode.ENGINE` in
+`ADMISSION`, rather than `OPEN`. Each ENGINE operation configures its allowed
+engines and authorized, request-cached Bot reader through `EngineCheck`.
+`PublicAPIRoute` attaches the mode's gate independently of Owner checks.
+ENGINE without configuration or with an empty engine allowlist fails startup;
+an `EngineCheck` on a non-ENGINE operation also fails startup. Other operations'
+admission and authorization policies remain unchanged.
 The application trust and stored template scope are checked before engine
 support. Other engines, including missing or unknown engine values, return
 HTTP 501 / `501000` / `Not supported for this engine` using `ErrorEnvelope`.

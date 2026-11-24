@@ -152,7 +152,7 @@ class PublicAPIRoute(APIRoute):
 
     This runs at *decoration* time — when ``@router.get(...)`` constructs the
     route — which is earlier than assembly and earlier than the first request.
-    An optional EngineCheck adds an independent capability gate; it never
+    ENGINE admission attaches its configured capability gate; it never
     replaces the authorization table's permission decision.
     """
 
@@ -197,7 +197,7 @@ class PublicAPIRoute(APIRoute):
                 },
             )
             kwargs["responses"] = responses
-        apply_engine_check(endpoint, kwargs)
+        apply_engine_check(path, endpoint, kwargs)
         super().__init__(path, endpoint, **kwargs)
 
     def get_route_handler(self) -> Callable[..., Any]:

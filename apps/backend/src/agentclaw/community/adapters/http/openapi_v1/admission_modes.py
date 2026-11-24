@@ -6,7 +6,11 @@ from enum import StrEnum
 
 
 class AdmissionMode(StrEnum):
-    """How an operation admits an application caller with no human on the wire."""
+    """How an operation admits an application caller with no human on the wire.
+
+    ENGINE requires an EngineCheck declaring its allowed engines and authorized
+    Bot reader. It does not replace the operation's Owner or application checks.
+    """
 
     GRANT_CHECKED_OWN_BOT = "grant-checked"
     GRANT_CHECKED_ADDRESSED_BOT = "grant-checked-owner-addressed"
@@ -17,5 +21,6 @@ class AdmissionMode(StrEnum):
     #: by ``require_delegated_user`` before the handler runs; a bot grant
     #: cannot serve here because there is no bot for it to name yet.
     USER_DELEGATED = "user-delegated"
+    ENGINE = "engine"
     OPEN = "open"
     REFUSED = "refused"

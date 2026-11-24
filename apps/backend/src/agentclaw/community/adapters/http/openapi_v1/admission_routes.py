@@ -82,8 +82,8 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/metadata/queries"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/template-queries"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/template-config-for-others"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/bots/restart-for-others"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/bots/status-for-others"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/restart-for-others"): AdmissionMode.ENGINE,
+    ("POST", "/openapi/v1/bots/status-for-others"): AdmissionMode.ENGINE,
     # Transitional app-only lookup; its handler enforces the configured app allowlist.
     ("GET", "/openapi/v1/bots/{bot_id}/access"): AdmissionMode.OPEN,
     # Non-user Bot overview; the gateway requires no user credential for it.

@@ -1,4 +1,4 @@
-"""Engine capability checks, independent of application admission and ownership."""
+"""Configurable engine admission, independent of Bot ownership checks."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -6,6 +6,8 @@ from typing import Any
 
 from fastapi import Depends
 
+from agentclaw.community.adapters.http.openapi_v1.admission_modes import AdmissionMode
+from agentclaw.community.adapters.http.openapi_v1.admission_routes import ADMISSION
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ErrorEnvelope,
     error_example,
@@ -18,7 +20,7 @@ from agentclaw.community.adapters.http.openapi_v1.error_decorator import envelop
 
 @dataclass(frozen=True)
 class EngineCheck:
-    """Declare supported engines and a request-cached, authorized Bot reader."""
+    """Configure ENGINE admission with allowed engines and an authorized Bot reader."""
 
     engines: frozenset[str]
     bots: Callable[..., Any]
@@ -28,11 +30,23 @@ class EngineCheck:
         return endpoint
 
 
-def apply_engine_check(endpoint: Callable[..., Any], route_options: dict[str, Any]) -> None:
-    """Attach a declared engine gate and its error contract to a public route."""
+def apply_engine_check(
+    path: str, endpoint: Callable[..., Any], route_options: dict[str, Any]
+) -> None:
+    """Enforce ENGINE mode's configuration and attach its gate and error contract."""
     rule = getattr(endpoint, '__openapi_engine_check__', None)
-    if rule is None:
+    methods = set(route_options.get('methods') or {'GET'}) - {'HEAD', 'OPTIONS'}
+    modes = {ADMISSION.get((method, path)) for method in methods}
+    if modes != {AdmissionMode.ENGINE}:
+        if rule is not None or AdmissionMode.ENGINE in modes:
+            raise ValueError(
+                f'EngineCheck requires AdmissionMode.ENGINE for every route method: {path}'
+            )
         return
+    if rule is None or not rule.engines:
+        raise ValueError(
+            f'AdmissionMode.ENGINE requires EngineCheck with a non-empty engine allowlist: {path}'
+        )
 
     async def gate(bots: list[dict[str, Any]] = Depends(rule.bots)) -> None:
         if any(bot.get('active_engine') not in rule.engines for bot in bots):
