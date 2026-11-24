@@ -13,7 +13,6 @@ import { useSpaceContext } from '@/hooks/useSpaceContext';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { workspaceService } from '@/services/workspace/workspaceService';
 import { useSpaceContextStore } from '@/stores/spaceContextStore';
-import { useConversationStore } from '@/stores/conversationStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -33,7 +32,7 @@ import { useConversationSelection } from './hooks/useConversationSelection';
 import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
-import { useCodingSessionStatusPolling } from './hooks/useCodingSessionStatusPolling';
+import { useExpandedCodingBotStatusPolling } from './hooks/useExpandedCodingBotStatusPolling';
 import { useLegacyShareLinkGuard } from './hooks/useLegacyShareLinkGuard';
 import { useLegacyFriendOthers } from './hooks/useLegacyFriendOthers';
 
@@ -118,12 +117,6 @@ export default function ConversationPage(): JSX.Element {
   const selectedSession = interactive.session;
   const codingBotHost = getCapabilities().getCodingBotConversationHost().value;
   const codingBotPreload = codingBotHost?.preload;
-  // capability 在应用启动时装配并封存，取一次稳定引用；避免每次渲染重建 provider 触发轮询。
-  const codingBotSessionStatusProvider = useMemo(
-    () => getCapabilities().getCodingBotConversationHost().value?.sessionStatus ?? null,
-    [],
-  );
-
   // interactive.bot 只有在目标 Session 已解析后才存在，太晚。这里从目录推导当前
   // 选中 Bot，以便在“Bot 已识别、Session 未就绪”时就挂载 embedded Stage。
   const selectedCodingBot = useMemo(() => {
@@ -148,23 +141,7 @@ export default function ConversationPage(): JSX.Element {
     [managedAndTeamBots, directory.friendBots],
   );
 
-  // 会话状态只跟随当前唯一展开的 Coding Bot；与主舞台是否选中 session 解耦。
-  // 内部部署注入 sessionStatus provider 时立即外层查询并进入 20s 轮询；
-  // Open Core provider 为 null 时保持无状态展示。
-  const expandedBotIds = useConversationStore((state) => state.expandedBotIds);
-  const activeCodingBotTarget = useMemo(() => {
-    const expandedBotId = Object.keys(expandedBotIds)[0] ?? null;
-    if (!expandedBotId) return null;
-    const bot = chatBots.find((item) => item.botId === expandedBotId);
-    return bot?.isAgentCodingBot === true
-      ? { botId: bot.botId, realBotId: bot.realBotId, ownerId: bot.ownerId }
-      : null;
-  }, [chatBots, expandedBotIds]);
-  useCodingSessionStatusPolling({
-    activeBot: activeCodingBotTarget,
-    userId,
-    provider: codingBotSessionStatusProvider,
-  });
+  useExpandedCodingBotStatusPolling({ chatBots, userId });
 
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
   const selectionIsReadonly = origin === 'others' && selectedCodingBot === null && store.selectedBotId !== null;
