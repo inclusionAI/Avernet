@@ -59,7 +59,7 @@ def engine():
 @pytest.fixture
 def db(engine):
     database = InMemorySqliteDB(engine)
-    from agentclaw.community.di.modules.context_collab_products import (
+    from agentclaw.community.di.modules.task.context_collab_products import (
         INSTALLED_PRODUCT_PROFILES,
     )
     from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (

@@ -85,7 +85,7 @@ from tests.community.core.task.context_collab.product_catalog import (
     standard_task_workflow,
 )
 
-from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+from agentclaw.community.di.modules.task.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
 

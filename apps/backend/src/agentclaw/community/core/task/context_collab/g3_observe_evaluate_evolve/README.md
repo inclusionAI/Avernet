@@ -12,7 +12,7 @@ full ACCS evaluation, automatic adoption or RSI orchestration.
   [TelemetryServiceProtocol](service_api.py). Existing `observation.py` remains
   the L4 Task/Event read-projection helper, not the Observation write service.
 - **Consumes:** injected `TelemetryRepositoryProtocol` and
-  `TelemetryAccessProtocol`. [DI](../../../../di/modules/telemetry_module.py)
+  `TelemetryAccessProtocol`. [DI](../../../../di/modules/task/telemetry_module.py)
   chooses SQL persistence and the [G1 access adapter](../g1_secure_govern/telemetry_access.py).
   The adapter reads current L4/L6 facts and uses the existing G1 event-visibility
   policy; acquisition never appends a fake Work Event for authorization.

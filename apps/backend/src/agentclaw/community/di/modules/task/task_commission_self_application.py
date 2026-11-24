@@ -85,7 +85,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     AssigneeAdmissionReceipt,
     TaskOpportunityView,
 )
-from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+from agentclaw.community.di.modules.task.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
 

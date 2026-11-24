@@ -35,7 +35,7 @@ from agentclaw.community.core.task.context_collab.l6_products.operations import 
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
 )
-from agentclaw.community.di.modules.swarm_runtime import (
+from agentclaw.community.di.modules.task.swarm_runtime import (
     ProductSwarmRuntimeResolver,
     SwarmPlanningCapabilities,
 )

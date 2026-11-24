@@ -56,7 +56,7 @@ def test_l6_has_no_product_composition_root_or_compatibility_dependencies():
         f"from {_CC}.products.task_commission.profile import TASK_COMMISSION_PROFILE",
         f"from {_CC} import products",
         "from ...products.task_commission.profile import TASK_COMMISSION_PROFILE",
-        "from agentclaw.community.di.modules.context_collab_products import build_product_catalog",
+        "from agentclaw.community.di.modules.task.context_collab_products import build_product_catalog",
         f"from {_CC}.services.method_bootstrap import project_created_context",
         f"import {_CC}.services.method_lifecycle_service",
         f"from {_CC}.service_api import CollaborationCreateCommand",

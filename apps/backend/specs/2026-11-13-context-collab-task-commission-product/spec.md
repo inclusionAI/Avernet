@@ -180,7 +180,7 @@ create_context（L4 Collet 持久）
 - **身份面**：申请的 `applicant_agent_ref`=指定 bot、`accountable_principal_ref`=发布人（系统代投的申请由发布人担责）；publish/screen/admit 走 G1 owner 面（发布人身份与本 Collet spec.principal_ref 字符串相等即过），submit_application 走公开面。产品面之外非 owner 不可达（`check_create` 先挡），非 owner 拒绝用例不住产品测试。
 - **幂等键**：`opportunity_id`/`application_id` 传 `None`（服务端生成）——`publish_task` 恒新 Collet 无重放路径；确定性键反而自陷（`opens_at` 参与机会 replay 形态比对，重试必炸形状校验）。`decision_id` 适配器生成（admit 形态面只比 `admitted_scope_ref`，确定性本可 replay-safe，统一生成口径并记录之）。
 - **失败语义**：方法面任一步抛错原样上穿 `publish_task`；Collet 已持久不回滚（交付缝同款纪律）。screen/admit 中途失败在 `mb_top_{collet_id}` 上留下 OPEN 机会孤儿行是 **P1 接受的中间态**，不做 close/reject 补偿（补偿翻倍失败面；孤儿仅方法面可见、Collet 已不可用）。
-- **依赖落点**（乙案白名单零改动）：窄端口 `TaskMethodOpsPort` + 命令/回执 DTO 住 `products/task_commission/service_api.py`；适配器 `TaskCommissionOpenMethodAdapter` 住 DI 层（`di/modules/task_commission_method_ops_adapter.py`，不受产品 import 法约束），`@inject` 拉 `OpenMethodOpsServiceProtocol` singleton；`TaskModule` 绑端口（同 `TaskDispatchPort` 直接构造样例）。
+- **依赖落点**（乙案白名单零改动）：窄端口 `TaskMethodOpsPort` + 命令/回执 DTO 住 `products/task_commission/service_api.py`；适配器 `TaskCommissionOpenMethodAdapter` 住 DI 层（`di/modules/task/task_commission_method_ops_adapter.py`，不受产品 import 法约束），`@inject` 拉 `OpenMethodOpsServiceProtocol` singleton；`TaskModule` 绑端口（同 `TaskDispatchPort` 直接构造样例）。
 - **已知缝隙（后续独立改动，防当 bug 报）**：`accept_task`/`cancel_task` 终态不闭合机会（owner 面 close_opportunity 语义在但未接）；E2E 外部流程零改动——方法面由发布编排自跑，bot 收到的仍是任务信息四步故事。
 
 **测试面**：`products/test_task_commission_method_lifecycle.py`（真链端面形态/缝次序/失败穿透/校验前置）+ E2E 方法 store 断言 + DI 接线测试。

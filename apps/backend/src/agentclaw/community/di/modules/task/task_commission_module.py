@@ -24,10 +24,10 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskDispatchPort,
     TaskMethodOpsPort,
 )
-from agentclaw.community.di.modules.task_commission_authorization import (
+from agentclaw.community.di.modules.task.task_commission_authorization import (
     CommissionAdmissionAuthorizer,
 )
-from agentclaw.community.di.modules.task_commission_self_application import (
+from agentclaw.community.di.modules.task.task_commission_self_application import (
     TaskCommissionSelfApplicationAdapter,
 )
 

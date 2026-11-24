@@ -221,7 +221,7 @@ checkpoint, not the v1 business semantics or its recorded verification:
   generic policy does not hardcode commission's typed subject sources.
 - Moved the other four installed compatibility definitions out of the generic
   catalog into `products/legacy_profiles.py`, preserving topology and v1 IDs.
-- `di/modules/context_collab_products.py` explicitly selects definitions;
+- `di/modules/task/context_collab_products.py` explicitly selects definitions;
   `TaskModule` binds one catalog per injector. Required constructor/helper
   injection propagates the **same** catalog through product/generic creation,
   repository creation/read, L5 projection/recovery and shared G4 checks. No

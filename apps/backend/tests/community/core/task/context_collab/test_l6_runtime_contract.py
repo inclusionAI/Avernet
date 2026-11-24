@@ -94,7 +94,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     ensure_top_level_binding,
 )
-from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+from agentclaw.community.di.modules.task.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
 from sqlalchemy import event as sql_event

@@ -137,7 +137,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskCommissionServiceProtocol,
     TaskMethodOpsPort,
 )
-from agentclaw.community.di.modules.context_collab_products import (
+from agentclaw.community.di.modules.task.context_collab_products import (
     INSTALLED_PRODUCT_PROFILES,
 )
 from agentclaw.community.di.modules.task_module import TaskModule

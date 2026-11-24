@@ -61,7 +61,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
 )
-from agentclaw.community.di.modules.task_commission_self_application import (
+from agentclaw.community.di.modules.task.task_commission_self_application import (
     TaskCommissionSelfApplicationAdapter,
 )
 

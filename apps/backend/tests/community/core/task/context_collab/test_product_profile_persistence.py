@@ -133,7 +133,7 @@ def test_corrupt_db_digest_and_db_errors_are_not_static_catalog_fallbacks(db, en
 
 
 def test_explicit_installed_seed_is_repeatable_and_keeps_first_audit(db):
-    from agentclaw.community.di.modules.context_collab_products import (
+    from agentclaw.community.di.modules.task.context_collab_products import (
         import_installed_product_profiles,
     )
 

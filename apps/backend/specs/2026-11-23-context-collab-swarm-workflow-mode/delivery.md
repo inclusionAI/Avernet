@@ -21,14 +21,14 @@
 | DAG 规划 | [WorkflowPlanningService](../../src/agentclaw/community/core/task/context_collab/workflow_planning.py)、[workflow_compilation.py](../../src/agentclaw/community/core/task/context_collab/l5_methods/workflow_compilation.py)：首次返回完整 DAG 和首个 assignment，之后按声明顺序选 READY 节点；均匀随机选择配置候选与当前合法参与者的交集，可注入 chooser。保留原动态规划 policy。 |
 | 分配与输入冻结 | [workflow_guards.py](../../src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/workflow_guards.py)、[Stage 操作](../../src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/stage.py)、[复合 Store 操作](../../src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/swarm_slice.py)：固定图/节点/候选/I/O 守卫，针对完整 Plan/Stage 快照原子接纳一个分配及命名输入，防止直接 API 绕过；完成时原子发布输出/SUCCEEDED/释放 allocation。 |
 | 产物证据及交接 | [Artifact manifest](../../src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/artifact_manifest.py)、[报告服务](../../src/agentclaw/community/core/task/context_collab/l5_methods/operations/swarm/report.py)、[只读验证端口](../../src/agentclaw/community/core/task/context_collab/l5_methods/swarm_workflow_ports.py)：校验必需输出、数量/类型/固定 revision/实际内容/refs 投影；SQL child `started` 保存节点和输入合同快照，`submitted/accepted` 保存完整 manifest。直接完成重新检查 done child、主体和实际资源。后继仅消费显式绑定的成功端口，纯控制边不传产物。 |
-| DI、兼容与预算 | [swarm_runtime.py](../../src/agentclaw/community/di/modules/swarm_runtime.py)：从固定实例选择配置规划器或原动态能力，受管图使用有界节点预算；重复在途 wake 不重抽/重派，旧根 Task/报告位置参数/动态 Swarm/Open + Swarm 路径保持兼容。 |
+| DI、兼容与预算 | [swarm_runtime.py](../../src/agentclaw/community/di/modules/task/swarm_runtime.py)：从固定实例选择配置规划器或原动态能力，受管图使用有界节点预算；重复在途 wake 不重抽/重派，旧根 Task/报告位置参数/动态 Swarm/Open + Swarm 路径保持兼容。 |
 
 ### 相对初稿的实现细节
 
 - 实际 planner 名称是 `WorkflowPlanningService`，初稿名称为 `WorkflowSwarmPlanningService`；两者指同一个新增配置式规划实现，不是两套引擎。
 - Plan 的 workflow ref/digest 使用既有 `termination_condition` 保存；Stage 新增不可变节点、objective/digest 和命名 bindings。没有增加运行表或现有表列。
 - 精确 Profile 读取是独立 outbound port；发布的 command/audit/Protocol 位于纯合同文件，与 SQL 发布实现分离。
-- 显式公开种子导入 helper 位于 [di/modules/context_collab_products.py](../../src/agentclaw/community/di/modules/context_collab_products.py)，不是单独的 `profile_seed.py`。发布、导入及迁移测试合并在 persistence 测试中。
+- 显式公开种子导入 helper 位于 [di/modules/task/context_collab_products.py](../../src/agentclaw/community/di/modules/task/context_collab_products.py)，不是单独的 `profile_seed.py`。发布、导入及迁移测试合并在 persistence 测试中。
 - `DesignatedOpenAdmission` 值类迁至 L5 publication，原 commission 路径 identity-reexport；因此完整定义 codec 不需要 L6 反向依赖具体产品。
 - 并发原子性测试直接竞争 MethodStore 复合 CAS；不使用共享单连接 SQLite 模拟独立事务并发。Profile 并发发布另以真实多连接 SQLite 验证。
 - 收尾补强了受管 allocation 的幂等边界：相同请求的并发重放返回首次记录；在途/暂停/租约已过时的查询式重放不重新分配或续租，同 key 改租约仍拒绝，当前 G1 仍必须授权。Driver 的受管分配 ID 按 Stage/attempt 派生，动态分配保持原语义。

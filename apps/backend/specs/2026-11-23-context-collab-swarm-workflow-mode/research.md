@@ -13,7 +13,7 @@
 | [L5 policy](../../src/agentclaw/community/core/task/context_collab/l5_methods/method_policies.py) | 当前 SwarmMethodPolicy 仅有必填 plan_service_ref。独立新增 workflow policy 可保留现有必填合同与位置参数。 |
 | [authoring](../../src/agentclaw/community/core/task/context_collab/l6_products/operations/product_profile.py)、[validation](../../src/agentclaw/community/core/task/context_collab/l6_products/validation.py)、[Catalog](../../src/agentclaw/community/core/task/context_collab/l6_products/catalog.py) | authoring 是纯操作，安装共享验证；产品定义为 code-owned 固定版本，不需要另建图注册中心。 |
 | [统一规划接口](../../src/agentclaw/community/core/task/context_collab/swarm_planning.py) | PlanningRequest 已携带 Stage 状态、输出引用和参与事实；PlanningDecision 同时带完整初始候选和一个 StageAssignment。新增规划实现可复用接口。 |
-| [runtime resolver](../../src/agentclaw/community/di/modules/swarm_runtime.py) | 当前按固定产品选择 plan_service_ref，且明确区分 coordinator 与 start_actor。新 policy 的实现选择应在这里，而不是 L5 反查产品。 |
+| [runtime resolver](../../src/agentclaw/community/di/modules/task/swarm_runtime.py) | 当前按固定产品选择 plan_service_ref，且明确区分 coordinator 与 start_actor。新 policy 的实现选择应在这里，而不是 L5 反查产品。 |
 | [Driver](../../src/agentclaw/community/core/task/context_collab/l5_methods/swarm_driver.py) | 已有独立子 Task 要求、过期决策快照、READY/role 检查和统一分配链路。RUNNING/ALLOCATING 时不继续规划，当前是串行派发。 |
 
 ## 2. 不能忽略的现状限制
@@ -43,7 +43,7 @@
 
 | 补充证据 | 当前事实及修订影响 |
 | --- | --- |
-| [Catalog](../../src/agentclaw/community/core/task/context_collab/l6_products/catalog.py)、[DI 安装](../../src/agentclaw/community/di/modules/context_collab_products.py)、[L6 当前合同](../../src/agentclaw/community/core/task/context_collab/l6_products/README.md) | 当前来源是不可变代码定义，无数据库/动态注册。新方案是有意演进，不是发现现有配置已落库；实现时必须更新合同与全部消费者。 |
+| [Catalog](../../src/agentclaw/community/core/task/context_collab/l6_products/catalog.py)、[DI 安装](../../src/agentclaw/community/di/modules/task/context_collab_products.py)、[L6 当前合同](../../src/agentclaw/community/core/task/context_collab/l6_products/README.md) | 当前来源是不可变代码定义，无数据库/动态注册。新方案是有意演进，不是发现现有配置已落库；实现时必须更新合同与全部消费者。 |
 | [L4 ORM](../../src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/models.py)、[Telemetry ORM](../../src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/persistence.py)、[SQL](../../src/agentclaw/community/core/task/context_collab/sql/) | 当前源码/DDL 共定义 Collet、Event、Task、Telemetry 4 张表，未发现 ProductProfile 表；拟新增后为 5 张。此为源码定义计数，不是对部署数据库的查询。 |
 | [L5 MethodProfile](../../src/agentclaw/community/core/task/context_collab/l5_methods/method_profile.py)、[Open publication](../../src/agentclaw/community/core/task/context_collab/l5_methods/publication.py) | MethodProfile 是代码声明的完整能力合同，Open admission 有不同 dataclass 子类型。存储 codec 需精确 MethodRef 和显式策略 discriminator，不能靠 asdict/JSON 自动恢复类型，更不能把 DB 配置当作执行代码。 |
 | [ProductInstance](../../src/agentclaw/community/core/task/context_collab/l6_products/instance.py) | 已在 Collet.creation_facts 保存精确 profile_ref，decoder 比较完整 JSON 形态；本次复用引用即可，不必新建实例表或修改历史 JSON。精确历史定义必须显式导入并保留。 |

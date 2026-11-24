@@ -40,7 +40,7 @@
 ### P4：可信 policy 接缝与运行时装配（AC-05、09、11）
 
 - 在 L5-owned 合同中新增窄 SwarmWorkflowPolicyReader，并提供与消费者行为对应的契约测试。
-- 扩展 `di/modules/swarm_runtime.py`，从固定 ProductInstance/数据库 ProductProfileReader 解析 policy，构造 DAG planner 或原具名 planner。
+- 扩展 `di/modules/task/swarm_runtime.py`，从固定 ProductInstance/数据库 ProductProfileReader 解析 policy，构造 DAG planner 或原具名 planner。
 - Reader 与 RuntimeResolver 共享固定产品解析，不能依赖全局目录或默认最新版本。
 - 保持 coordinator/start_actor 语义；补齐 Store/Service 测试替身和公共 DI 绑定，不用 optional 缺省绕过检查。
 - 扩展 `tests/community/di/modules/test_swarm_runtime.py`，新增 workflow 守卫测试。
@@ -139,7 +139,7 @@ bash scripts/ci_test.sh
 | 切片 | 实际状态 |
 | --- | --- |
 | P1 | 已实现 DAG/命名端口值合同、严格 codec、typed policy 和 Product scope 校验。 |
-| P2 | 已实现 SQL Reader/独立授权发布/事务导入/消费者迁移；显式导入 helper 位于 `di/modules/context_collab_products.py`，发布/导入测试合并在 persistence 文件。MySQL/OceanBase 目标库尚未验收。 |
+| P2 | 已实现 SQL Reader/独立授权发布/事务导入/消费者迁移；显式导入 helper 位于 `di/modules/task/context_collab_products.py`，发布/导入测试合并在 persistence 文件。MySQL/OceanBase 目标库尚未验收。 |
 | P3 | 已实现 `WorkflowPlanningService` 与全图编译、稳定 ID、串行 READY 调度和可注入 chooser。 |
 | P4 | 已实现 pinned policy port/DI/直接 API 守卫；公共资源 validator 默认 fail-closed，生产 provider 由宿主绑定。 |
 | P5 | 已实现命名 manifest、输入冻结、复合 allocation/completion CAS、真实内容验证端口、child 事件合同快照与部分报告协调。 |

@@ -143,11 +143,11 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.record
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
-from agentclaw.community.di.modules.context_collab_runtime import (
+from agentclaw.community.di.modules.task.context_collab_runtime import (
     ContextCollabRuntimeModule,
 )
-from agentclaw.community.di.modules.swarm_runtime import SwarmRuntimeModule
-from agentclaw.community.di.modules.task_commission_authorization import (
+from agentclaw.community.di.modules.task.swarm_runtime import SwarmRuntimeModule
+from agentclaw.community.di.modules.task.task_commission_authorization import (
     TaskMethodOpsAuthorizer,
 )
 from agentclaw.community.core.task.context_collab.products.service_api import (
@@ -256,8 +256,8 @@ from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.di.config import TaskDispatchConfig
-from agentclaw.community.di.modules.task_commission_module import TaskCommissionModule
-from agentclaw.community.di.modules.telemetry_module import TelemetryModule
+from agentclaw.community.di.modules.task.task_commission_module import TaskCommissionModule
+from agentclaw.community.di.modules.task.telemetry_module import TelemetryModule
 from agentclaw.community.plugin_api.notify_sender import (
     QUALIFIER_BBS_DIGEST,
     NotifySenderPlugin,

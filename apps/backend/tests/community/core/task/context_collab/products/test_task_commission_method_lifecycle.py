@@ -64,7 +64,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
 from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
     OpenMethodService,
 )
-from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+from agentclaw.community.di.modules.task.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
 from tests.community.core.task.context_collab.products.test_task_commission_publish import (

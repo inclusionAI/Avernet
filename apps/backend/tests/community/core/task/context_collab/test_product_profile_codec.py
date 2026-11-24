@@ -10,7 +10,7 @@ from agentclaw.community.core.task.context_collab.l6_products.profile_codec impo
     decode_profile,
     profile_digest,
 )
-from agentclaw.community.di.modules.context_collab_products import (
+from agentclaw.community.di.modules.task.context_collab_products import (
     INSTALLED_PRODUCT_PROFILES,
 )
 from tests.community.core.task.context_collab.swarm_workflow_support import profile

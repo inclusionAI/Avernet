@@ -42,7 +42,7 @@ ProductInstance JSON continues to pin its exact `profile_ref` unchanged.
    configure the dedicated publication authorizer for the authenticated operator.
 3. Call `publication.import_profiles(approved_definitions, actor)` explicitly.
    The composition helper
-   [`import_installed_product_profiles`](../../../../di/modules/context_collab_products.py)
+   [`import_installed_product_profiles`](../../../../di/modules/task/context_collab_products.py)
    supplies this distribution's public code definitions, not private settings.
    Import is transactional and replayable. Any same-version conflict or missing
    historical `product_profile_ref` aborts the whole batch. Supply all required

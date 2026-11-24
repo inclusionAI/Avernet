@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from agentclaw.community.core.task.context_collab.l6_products.profile_reader import ProductProfileReader
-from agentclaw.community.di.modules.context_collab_products import build_product_catalog
+from agentclaw.community.di.modules.task.context_collab_products import build_product_catalog
 
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator,
@@ -118,7 +118,7 @@ from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_disco
 )
 from agentclaw.community.di.modules.task.todo_bindings import TaskTodoBindings
 from agentclaw.community.di.config import TaskDispatchConfig
-from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+from agentclaw.community.di.modules.task.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -571,6 +571,35 @@ def test_task_module_binds_task_commission_service_singleton():
     assert inj.get(TaskCommissionServiceProtocol) is service
     assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)  # noqa: SLF001
     assert service._method_store is inj.get(MethodStoreProtocol)  # noqa: SLF001
+
+
+def test_task_module_shares_swarm_controls_with_commission_service():
+    """Task-scoped composition keeps one runtime behind the commission API."""
+    from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.service import (
+        SwarmExecutionOperations,
+    )
+    from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
+        SwarmDriverFactory,
+        SwarmExecutionControl,
+        SwarmInteractionPlanner,
+    )
+    from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+        SwarmWorkflowPolicyReader,
+    )
+    from agentclaw.community.di.modules.task.swarm_execution import InjectedSwarmDrivers
+
+    inj = Injector([TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()])
+    service = inj.get(TaskCommissionServiceProtocol)
+    controls = inj.get(SwarmExecutionControl)
+
+    assert controls is inj.get(SwarmExecutionControl)
+    assert controls is inj.get(SwarmExecutionOperations)
+    assert service._swarm_execution is controls  # noqa: SLF001
+    assert controls._store is inj.get(MethodStoreProtocol)  # noqa: SLF001
+    assert controls._workflow_policies is inj.get(SwarmWorkflowPolicyReader)  # noqa: SLF001
+    assert controls.drivers is inj.get(SwarmDriverFactory)
+    assert isinstance(controls.drivers, InjectedSwarmDrivers)
+    assert controls.interaction_planner is inj.get(SwarmInteractionPlanner)
 
 
 def test_product_instantiation_protocol_resolves_l6_implementation():

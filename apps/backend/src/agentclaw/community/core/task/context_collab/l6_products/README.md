@@ -987,7 +987,7 @@ allocation and reports recheck current L5 admission evidence without importing
 L6; the product-aware L4 policy also rechecks root start/progress/submission.
 Revocation or an inactive Open binding blocks those operations. Runtime DI
 assembly lives in
-[`context_collab_runtime.py`](../../../../di/modules/context_collab_runtime.py),
+[`context_collab_runtime.py`](../../../../di/modules/task/context_collab_runtime.py),
 installed by TaskModule using the same injected catalog, authorizer and store.
 
 This is a bounded local enrollment extension, not a generic join/leave/reassign

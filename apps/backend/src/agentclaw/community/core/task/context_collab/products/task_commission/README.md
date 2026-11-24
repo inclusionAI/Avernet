@@ -143,7 +143,7 @@ instances without an explicit root ref resolve it from L4 without rewriting
 storage. See the [L6 identity contract](../../l6_products/README.md#productinstance-identity-and-cardinality).
 
 1. Product staff author `OPEN_SINGLE_COMMISSION_PROFILE` via the pure L6
-   `create_product_profile` operation and explicitly install @2 through [DI installation](../../../../../di/modules/context_collab_products.py).
+   `create_product_profile` operation and explicitly install @2 through [DI installation](../../../../../di/modules/task/context_collab_products.py).
    “Online” means an immutable code-owned definition installed into the actual
    application catalog, not a mutable registry or a mocked registration call.
 2. Business staff call L6 once:

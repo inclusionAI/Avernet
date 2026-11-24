@@ -61,7 +61,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskAdvanceCommand,
     TaskMethodOpsPort,
 )
-from agentclaw.community.di.modules.context_collab_products import build_product_catalog
+from agentclaw.community.di.modules.task.context_collab_products import build_product_catalog
 
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
     opportunities_query_request,

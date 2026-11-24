@@ -56,7 +56,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.todos.collaboration.context_runtime import (
     TodoContextRuntime,
 )
-from agentclaw.community.di.modules.context_collab_products import build_product_catalog
+from agentclaw.community.di.modules.task.context_collab_products import build_product_catalog
 
 
 class RecordingContextRepository:

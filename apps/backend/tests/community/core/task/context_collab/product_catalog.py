@@ -7,7 +7,7 @@ from agentclaw.community.core.task.context_collab.l6_products.task_contracts imp
     STANDARD_TASK_CONTRACT,
 )
 
-from agentclaw.community.di.modules.context_collab_products import (
+from agentclaw.community.di.modules.task.context_collab_products import (
     INSTALLED_PRODUCT_PROFILES,
     build_product_catalog,
 )

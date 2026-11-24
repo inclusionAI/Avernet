@@ -211,7 +211,7 @@ def _method_port(repo, store):
     from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
         OpenMethodService,
     )
-    from agentclaw.community.di.modules.task_commission_self_application import (
+    from agentclaw.community.di.modules.task.task_commission_self_application import (
         TaskCommissionSelfApplicationAdapter,
     )
 

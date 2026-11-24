@@ -235,7 +235,7 @@ L5 SwarmDriver → L5 Swarm 操作 / G1-G4 → MethodStore + L4 SQL → StageExe
 
 1. `WorkflowPlanningService` 建议位于协作域根部新增的 `workflow_planning.py`，与 `swarm_planning.py` 同层，实现现有出站规划接口；不放在 L5 中当作写权威服务。
 2. 现有 `PlanningRequest`、`PlanningDecision`、`StageAssignment` 签名保持不变。规划器构造时接收固定 workflow、StoreAxes 与绑定执行作用域，并核对每个请求的 Collet/root Task 与构造作用域一致；`plan` 不自行读取 Catalog、数据库或全局 injector。
-3. DI 在 `di/modules/swarm_runtime.py` 根据实际 policy 类型选择实现；DAG 模式不要求注册外部 plan capability，动态模式仍严格检查 `plan_service_ref`。
+3. DI 在 `di/modules/task/swarm_runtime.py` 根据实际 policy 类型选择实现；DAG 模式不要求注册外部 plan capability，动态模式仍严格检查 `plan_service_ref`。
 4. `SwarmRuntimeResolver` 继续提供规划身份与受信任的 `start_actor`。配置 DAG 不改变根 Work.start 的身份选择，也不让随机选中的节点 Agent 兼任根启动者。
 5. 为防止只约束 Driver、却被直接调用 Swarm Service API 绕过，L5 新增窄端口 `SwarmWorkflowPolicyReader.workflow_for(collet_id, binding_id) -> SwarmWorkflowDefinition | None`。DI 的产品适配器从固定 ProductInstance 和作用域内的数据库 ProfileReader 返回下层定义；只有明确的非工作流场景才能返回 None，查找失败必须报错。
 6. RuntimeResolver 与 PolicyReader 共用同一固定产品选择解析，不维护第二份注册表。后者不构造规划器、不解析远程执行能力，只暴露 L5 需要的合同。

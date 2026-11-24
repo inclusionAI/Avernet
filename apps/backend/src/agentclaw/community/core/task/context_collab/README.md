@@ -44,6 +44,13 @@ state remains process-local.
   L6 composes lower-layer contracts; concrete business templates stay in
   `products/`. G1–G4 cross-cut these layers.
 
+Task-specific DI lives in [`di/modules/task/`](../../../di/modules/task/):
+ProductProfile installation, L4/L6 runtime composition, Swarm planning/execution,
+commission adapters/authorization and G3 telemetry. The existing
+[`TaskModule`](../../../di/modules/task_module.py) installs these runtime
+fragments; [`TaskPersistenceModule`](../../../di/modules/task_persistence_module.py)
+remains the persistence entrypoint. Core does not import these assembly modules.
+
 ## Published ProductProfiles and managed Swarm DAGs
 
 Production configuration is read through the exact-version, current-scope

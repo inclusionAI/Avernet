@@ -114,7 +114,7 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.reposi
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
-from agentclaw.community.di.modules.swarm_runtime import SwarmPlanningCapabilities
+from agentclaw.community.di.modules.task.swarm_runtime import SwarmPlanningCapabilities
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.plugin_api.database import DatabasePlugin
