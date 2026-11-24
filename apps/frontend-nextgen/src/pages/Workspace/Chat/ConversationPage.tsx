@@ -18,7 +18,7 @@ import { history } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
-import { CodingBotConversationStage } from './CodingBotConversationStage';
+import { RetainedCodingBotStage } from './RetainedCodingBotStage';
 import { StandardConversationStageContainer } from './StandardConversationStageContainer';
 import { ConversationMobileSidebarDrawer } from './components/ConversationMobileSidebarDrawer';
 import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
@@ -241,6 +241,12 @@ export default function ConversationPage(): JSX.Element {
           }}
         />
         <div className="relative flex h-full min-h-0 min-w-0 flex-1">
+          {human && !identityChanged && (
+            <RetainedCodingBotStage key={human.userId}
+              bot={selectionIsReadonly ? null : selectedCodingBot}
+              session={selectedSession} human={human} placeholder={placeholder}
+              onOpenSessionList={() => setMobileListOpen(true)} />
+          )}
           {selectionIsReadonly ? (
             <ReadOnlyConversationPanel
               bot={readonly.bot}
@@ -256,18 +262,7 @@ export default function ConversationPage(): JSX.Element {
               onLoadMore={() => void readonlyHistory.loadMore()}
               onOpenSessionList={() => setMobileListOpen(true)}
             />
-          ) : selectedCodingBot ? (
-            // managed/team Coding Bot 被选中即挂载 Stage；sessionId 只决定子应用打开的
-            // 会话，不决定 Runtime identity。loading / empty / unselected / error 等
-            // placeholder 统一覆盖在其上方，目标 controller 仍可完成注册。
-            <CodingBotConversationStage
-              bot={selectedCodingBot}
-              session={selectedSession}
-              human={human}
-              placeholder={placeholder}
-              onOpenSessionList={() => setMobileListOpen(true)}
-            />
-          ) : placeholder ? (
+          ) : selectedCodingBot ? null : placeholder ? (
             // 其他加载/失败/筛选空态继续由宿主占位，不启动消息 Runtime。
             <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={() => setMobileListOpen(true)} />
           ) : selectedBotPending ? (

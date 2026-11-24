@@ -406,6 +406,8 @@ export interface ConversationInstanceScopeState {
  * 不包含 TeamClaw URL、内部应用地址或部署信息。
  */
 export interface CodingBotConversationHostProps {
+  /** Suspend the primary runtime while retaining workspace-level services. Defaults to true. */
+  workspaceActive?: boolean;
   /** Host sidebar identity (may be compound); optional for older/custom hosts. */
   conversationBotId?: string;
   /**
@@ -598,6 +600,8 @@ export interface CodingBotSessionArchiveHost {
  */
 export interface CodingBotConversationHost {
   Stage: ComponentType<CodingBotConversationHostProps>;
+  /** Opt in only when Stage and its child implement workspaceActive. */
+  supportsWorkspaceSuspension?: boolean;
   /**
    * 内部会话的可见性策略。Open Core 不注入时列表保留全部会话；
    * TeamClaw 内部部署用它隐藏内部系统生成的 Coding 会话，不影响其他 Bot。
