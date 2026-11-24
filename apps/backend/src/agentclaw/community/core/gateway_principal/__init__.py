@@ -45,7 +45,6 @@ from agentclaw.community.core.gateway_principal.verifier import (
     is_weak_signing_key,
     key_fingerprint,
     verify_principal_token,
-    verify_bot_principal_token,
 )
 
 __all__ = [
@@ -72,5 +71,4 @@ __all__ = [
     "mint_service_app_principal",
     "resign_principal_token",
     "verify_principal_token",
-    "verify_bot_principal_token",
 ]
