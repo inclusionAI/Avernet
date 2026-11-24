@@ -45,15 +45,17 @@ export function useBotSessionTitleActions(
       const title = buildFirstMessageSessionTitle(session, content);
       if (!title) return false;
 
+      // 幂等语义＝成功才入集：失败不入集，下次发消息仍可重试；
+      // 成功后 message_count 即将 > 0，服务端末态与守卫第 2 判据兜住重复风险。
       const attemptKey = `${activeIdentityId}:${bot.botId}:${session.sessionId}`;
       if (attemptedFirstMessageTitlesRef.current.has(attemptKey)) return false;
-      attemptedFirstMessageTitlesRef.current.add(attemptKey);
 
       const res = await botSessionService.updateSessionTitle(bot, activeIdentityId, session.sessionId, title);
       if (!res.ok) {
         console.warn('[useBotSessionTitleActions] 首条消息自动重命名失败:', res.error.friendlyMessage);
         return false;
       }
+      attemptedFirstMessageTitlesRef.current.add(attemptKey);
       applyTitle(bot.botId, session.sessionId, res.data.title);
       return true;
     },
