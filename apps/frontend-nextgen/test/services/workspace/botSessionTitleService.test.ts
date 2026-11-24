@@ -27,4 +27,11 @@ describe('buildFirstMessageSessionTitle', () => {
     expect(buildFirstMessageSessionTitle(session(), '   ')).toBeNull();
     expect(buildFirstMessageSessionTitle(session(), longMessage)).toBe(`${longMessage.slice(0, 50)}...`);
   });
+
+  // OpenSpec fix-session-title-auto-rename §session-first-message-title：
+  // CodingBot 建会话写 `新对话`，守卫此前只认 `新会话` → marker 错配永不自动命名。
+  it('CodingBot 默认标题「新对话」也被守卫接受（marker 集合化）', () => {
+    const codingSession = session({ title: '新对话', messageCount: 0 });
+    expect(buildFirstMessageSessionTitle(codingSession, '帮我写个排序算法')).toBe('帮我写个排序算法');
+  });
 });

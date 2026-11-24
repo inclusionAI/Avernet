@@ -202,6 +202,32 @@ export interface BotSessionSummaryView {
   model?: string;
 }
 
+/** 被锚定剥除信任的最短尾巴长度：短于它的「本会话标识」宁可漏剥也不参与判据。 */
+const ANCHORED_SUFFIX_MIN_LENGTH = 8;
+
+/**
+ * 从 session id 提取其 uuid 段，解析语义对齐后端 adapter `_session_label_suffix`
+ * （create 写引擎 label 的后缀正是这个裸 uuid）。已知形态：
+ * - `session:<uuid>:user:<id>`（裸引擎 key）
+ * - `agent:<provider>:session:<uuid>:user:<id>`（canonical 完整 AID）
+ * 未知形态返回 null——宁漏剥不误剥（漏剥后续由后端出站剥除兜底）。
+ */
+export function extractSessionUuidFromSessionId(
+  sessionId?: string | null,
+): string | null {
+  if (!sessionId) return null;
+  const parts = sessionId.split(':');
+  // session:<uuid>:user:<id>
+  if (parts.length >= 4 && parts[0] === 'session' && parts[2] === 'user') {
+    return parts[1] || null;
+  }
+  // agent:<provider>:session:<uuid>:user:<id>
+  if (parts.length >= 5 && parts[0] === 'agent' && parts[2] === 'session') {
+    return parts[3] || null;
+  }
+  return null;
+}
+
 export function mapBotSessionSummary(s: {
   session_id: string;
   title: string;
@@ -210,14 +236,29 @@ export function mapBotSessionSummary(s: {
   gmt_create: string;
   model?: string;
 }): BotSessionSummaryView {
-  // 后端返回的 title 有时拼接了 `_${session_id}` 后缀（更新标题后尤其明显），
-  // 这里剥离掉该后缀，仅展示用户可见的标题；为空时回退为「新会话」（与 open-claw 一致）。
+  // 后端 adapter 写引擎 label 时可能拼两种后缀（同一写点不同入参）：
+  // - create：`标题_<本会话裸uuid>`；
+  // - update：`标题_<完整 session_id>`（更新标题后尤其明显）。
+  // 剥除判据全部锚定本会话自身标识（精确 endsWith），禁止无差别正则——
+  // 人类标题自带的下划线尾巴（如 `技能回放-ODPS_APPROVAL-100008`）不得误剥；
+  // 解析不到已知形态的 uuid 时宁可漏剥。为空时回退为「新会话」（与 open-claw 一致）。
   const rawTitle = s.title ?? '';
   const sessionIdSuffix = `_${s.session_id}`;
-  const trimmedTitle =
+  let trimmedTitle =
     rawTitle && rawTitle.endsWith(sessionIdSuffix)
       ? rawTitle.slice(0, -sessionIdSuffix.length).trim()
       : rawTitle.trim();
+  const sid = extractSessionUuidFromSessionId(s.session_id);
+  if (
+    sid &&
+    sid.length >= ANCHORED_SUFFIX_MIN_LENGTH &&
+    trimmedTitle &&
+    trimmedTitle.endsWith(`_${sid}`)
+  ) {
+    trimmedTitle = trimmedTitle
+      .slice(0, trimmedTitle.length - sid.length - 1)
+      .trim();
+  }
   return {
     sessionId: s.session_id,
     title: trimmedTitle || '新会话',
