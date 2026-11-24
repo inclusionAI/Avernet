@@ -246,7 +246,7 @@ impl StoreInboxProducer {
                         Ok(Err(error)) => Err(error),
                     }
                 }
-                Some(Decision::Rejected) => Ok(Some(None)),
+                Some(Decision::Rejected | Decision::ContentConflict) => Ok(Some(None)),
                 Some(Decision::Accepted) => {
                     let pos = c
                         .position

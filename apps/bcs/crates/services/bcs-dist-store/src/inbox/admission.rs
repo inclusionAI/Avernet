@@ -182,10 +182,11 @@ impl StoreInboxProducer {
         .map_err(|_| unknown(op))?
         .map_err(|e| crate::error::from_write(&e, op))
     }
-    pub(super) async fn activate_slot(
+    pub(super) async fn decide_slot(
         &self,
         key: &str,
         c: &AdmissionRecord,
+        proposed: Decision,
     ) -> Result<Decision, StoreError> {
         let sid = c.sid();
         let sk = self.inner.layout.schedule(sid)?;
@@ -204,14 +205,13 @@ impl StoreInboxProducer {
             if let Some(d) = &slot.decision {
                 return Ok(d.clone());
             }
-            let rejected = slot.start && (s.closed.is_some() || s.generation != slot.generation);
-            let decision = if rejected {
+            let decision = if slot.start && (s.closed.is_some() || s.generation != slot.generation) {
                 Decision::Rejected
             } else {
-                Decision::Accepted
+                proposed.clone()
             };
             slot.decision = Some(decision.clone());
-            if !rejected {
+            if decision == Decision::Accepted {
                 if c.position.is_none() {
                     return Err(invalid("activation_without_position"));
                 }

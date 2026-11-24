@@ -33,9 +33,11 @@ background completion. No later accepted input may depend on that retry:
   Only the accepted position is delivered; physical duplicates are skipped.
 - If registration would exceed the Session slot or byte limit, the producer
   helps one existing eligible slot within its current time budget and rechecks
-  capacity. Further attempts rotate through eligible slots. Only the closure
-  provider may release a closed-generation Start; capacity pressure is never proof
-  of completion.
+  capacity. Further attempts rotate through eligible slots. A confirmed conflict
+  with an existing SessionSpec or Task identity records `ContentConflict` in the
+  slot before copying the decision to the admission document and releasing the
+  slot. It does not append or activate the input. Only the closure provider may
+  release a closed-generation Start; capacity pressure is never proof of completion.
 
 Neither path scans other Sessions or requires a shard journal.
 

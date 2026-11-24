@@ -180,8 +180,10 @@ impl StoreInboxProducer {
             .map(|d| self.outcome(&record, d, false)))
     }
     pub(super) fn outcome(&self, c: &AdmissionRecord, d: &Decision, new: bool) -> AdmitOutcome {
-        if *d == Decision::Rejected {
-            return AdmitOutcome::Quarantined;
+        match d {
+            Decision::Rejected => return AdmitOutcome::Quarantined,
+            Decision::ContentConflict => return AdmitOutcome::ContentConflict,
+            Decision::Accepted => {}
         }
         let i = &c.request.input;
         let receipt = AdmissionReceipt {

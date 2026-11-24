@@ -424,6 +424,50 @@ async fn closure_does_not_finalize_a_creator_paused_before_acceptance() {
 }
 
 #[tokio::test]
+async fn task_identity_conflict_respects_a_concurrent_gate_close() {
+    use bcs_store_api::document::DocumentStorePlugin;
+
+    for close_first in [false, true] {
+        let f = Fixture::new().await;
+        let task_key = f.layout.task(&Tid(TID.into())).unwrap();
+        let pause = f.storage.pause_after("before.document.create", &task_key, 1);
+        let producer = f.inbox.clone();
+        let caller = tokio::spawn(async move { producer.admit(request("conflict")).await });
+        pause.reached().await;
+
+        // Simulate a conflicting task appearing after this request's preflight.
+        let mut foreign = task();
+        foreign.scope.principal = PrincipalId("another-principal".into());
+        let foreign = serde_json::to_value(&foreign).unwrap();
+        f.storage.create_document(&task_key, &foreign).await.unwrap();
+        let closure = if close_first { Some(f.isolate("isolate").await) } else { None };
+        let sk = f.layout.schedule(&f.owner.sid).unwrap();
+        // Closing the gate wakes the Worker; the conflicting request must not.
+        let before = f.storage.read_document(&sk).await.unwrap().unwrap().value;
+        pause.resume();
+
+        let expected = if close_first {
+            AdmitOutcome::Quarantined
+        } else {
+            AdmitOutcome::ContentConflict
+        };
+        assert_eq!(caller.await.unwrap().unwrap(), expected);
+        let id = InputId("conflict".into());
+        assert_eq!(f.inbox.admission_decision(&scope(), &id).await.unwrap(), Some(expected));
+        let key = f.layout.admission(&scope(), &id).unwrap();
+        let schedule = f.storage.read_document(&sk).await.unwrap().unwrap().value;
+        assert_eq!(schedule["activation"], before["activation"]);
+        assert_eq!(schedule["slots"].get(&key).is_some(), close_first);
+        if let Some(closure) = closure {
+            assert_eq!(complete(&f, &closure).await.terminal_tasks, 0);
+            let schedule = f.storage.read_document(&sk).await.unwrap().unwrap().value;
+            assert!(schedule["slots"].get(&key).is_none());
+        }
+        assert_eq!(f.storage.read_document(&task_key).await.unwrap().unwrap().value, foreign);
+    }
+}
+
+#[tokio::test]
 async fn delayed_ordinary_commit_cannot_cross_an_isolation_recovery_cycle_at_the_same_head() {
     use bcs_service_api::port::repo::distributed::session::*;
     let f = Fixture::new().await;

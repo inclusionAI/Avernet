@@ -4,7 +4,10 @@ use bcs_dist_model::*;
 use bcs_dist_store::{budget::SharedScanBudget, inbox::*, layout::KeyLayout};
 use bcs_service_api::port::repo::distributed::{admission::*, budget::*, common::*, inbox::*};
 use common::*;
-use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetStorePlugin};
+use bcs_store_api::{
+    document::DocumentStorePlugin,
+    zset::{ZAddMode, ZSetEntry, ZSetStorePlugin},
+};
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
 fn layout() -> KeyLayout {
@@ -279,4 +282,78 @@ async fn abandoned_registrations_do_not_block_next_start() {
             .iter()
             .any(|call| call.starts_with("zset.range"))
     );
+}
+
+async fn full_schedule_with_conflicting_start() -> (Arc<Recorder>, AdmitRequest) {
+    let store = Arc::new(Recorder::default());
+    let p = provider(store.clone(), config());
+    let mut pending: Vec<_> = (0..56).map(|i| start(&format!("lost{i}"))).collect();
+    // A fresh helper starts with the first persisted key, which is hashed.
+    pending.sort_by_key(|r| layout().admission(&r.scope, &r.input.input_id).unwrap());
+    let mut loser = pending.remove(0);
+    loser.create_session.as_mut().unwrap().group = GroupId("other-group".into());
+    let sk = layout().schedule(&loser.input.sid).unwrap();
+    let pause = store.pause_after("document.create", &sk, 1);
+    abandon_at(&p, loser.clone(), pause).await;
+    assert!(matches!(p.admit(start("winner")).await.unwrap(), AdmitOutcome::Accepted(_)));
+    for r in pending {
+        let pause = store.pause_after("document.replace", &sk, 1);
+        abandon_at(&p, r, pause).await;
+    }
+    (store, loser)
+}
+
+#[tokio::test]
+async fn conflicting_start_releases_slot_under_pressure() {
+    let (store, loser) = full_schedule_with_conflicting_start().await;
+    let p = provider(store.clone(), config());
+    let outcome = p.admit(start("next")).await;
+    assert!(matches!(outcome, Ok(AdmitOutcome::Accepted(_))), "{outcome:?}");
+    assert_eq!(p.admission_decision(&loser.scope, &loser.input.input_id).await.unwrap(),
+        Some(AdmitOutcome::ContentConflict));
+    assert_eq!(p.admit(loser.clone()).await.unwrap(), AdmitOutcome::ContentConflict);
+
+    let sk = layout().schedule(&loser.input.sid).unwrap();
+    let key = layout().admission(&loser.scope, &loser.input.input_id).unwrap();
+    let schedule = store.read_document(&sk).await.unwrap().unwrap().value;
+    assert!(schedule["slots"].get(&key).is_none());
+    assert_eq!(schedule["activation"], 2);
+    let mut feed = p.open(ShardId(42)).await.unwrap();
+    feed.watch(loser.input.sid, None).await.unwrap();
+    let batch = feed.next(
+        ReadLimits {
+            max_sessions: NonZeroU32::MIN,
+            max_entries: NonZeroU32::new(16).unwrap(),
+            max_bytes: NonZeroU32::new(1024 * 1024).unwrap(),
+        },
+        Duration::ZERO,
+    ).await.unwrap();
+    assert!(batch.failures.is_empty(), "{:?}", batch.failures);
+    let ids: Vec<_> = batch.sessions.into_iter()
+        .flat_map(|s| s.entries.into_iter().map(|e| e.input_id.0)).collect();
+    assert_eq!(ids, ["winner", "next"]);
+}
+
+#[tokio::test]
+async fn conflicting_start_replays_a_decision_written_only_to_the_slot() {
+    let (store, loser) = full_schedule_with_conflicting_start().await;
+    let sk = layout().schedule(&loser.input.sid).unwrap();
+    let key = layout().admission(&loser.scope, &loser.input.input_id).unwrap();
+    let p = provider(store.clone(), config());
+    let pause = store.pause_after("document.replace", &sk, 1);
+    abandon_at(&p, start("next"), pause).await;
+    let schedule = store.read_document(&sk).await.unwrap().unwrap().value;
+    assert_eq!(schedule["slots"][&key]["decision"], "ContentConflict");
+    assert_eq!(p.admission_decision(&loser.scope, &loser.input.input_id).await.unwrap(), None);
+
+    let restarted = provider(store.clone(), config());
+    assert!(matches!(
+        restarted.admit(start("next")).await.unwrap(),
+        AdmitOutcome::Duplicate(receipt) if receipt.input_id == InputId("next".into())
+    ));
+    assert_eq!(restarted.admission_decision(&loser.scope, &loser.input.input_id).await.unwrap(),
+        Some(AdmitOutcome::ContentConflict));
+    let schedule = store.read_document(&sk).await.unwrap().unwrap().value;
+    assert!(schedule["slots"].get(&key).is_none());
+    assert_eq!(schedule["activation"], 2);
 }
