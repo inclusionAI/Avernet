@@ -125,14 +125,34 @@ class ProgressSyncMixin:
             # poll can observe the same terminal BaaS workflow concurrently and
             # both run this handler. The loser's conditional update hits zero rows
             # and used to surface as an ERROR "Order not found" (a 404 for the
-            # caller) even though the record is already reconciled by the winner.
-            # Re-read and report the reconciled record instead; the winner has run
-            # the post-advance side effects, so skip them here. Only a genuinely
-            # missing record still raises.
+            # caller). Re-read and decide by the record's current status; only a
+            # genuinely missing record still raises.
             reconciled = self.get_publish_record(publish_id)
             if reconciled is None:
                 raise
             current_status = PublishStatus(reconciled.status)
+            if current_status == source_status:
+                # An ext-only concurrent writer fenced the whole-ext snapshot
+                # without advancing the status, so the transition this handler
+                # owes is still pending. Do not report the terminal progress
+                # payload — pollers key on it and would complete without
+                # reconciling; report a retryable conflict instead so they
+                # reschedule against a fresh snapshot.
+                logger.warning(
+                    f"[PublishFlowService._handle_sync_success] CAS conflict "
+                    f"with an ext-only write, transition still pending: "
+                    f"publish_id={publish_id}, status={current_status}"
+                )
+                return PublishFlowResult(
+                    publish_id=publish_id,
+                    status=current_status,
+                    message=(
+                        "Publish progress sync hit a concurrent ext write: "
+                        f"publish_id={publish_id} still at {current_status.value}, retry pending"
+                    ),
+                )
+            # A concurrent reconciler already advanced the record. Report it;
+            # the winner ran the post-advance side effects, so skip them here.
             logger.warning(
                 f"[PublishFlowService._handle_sync_success] Concurrent writer "
                 f"already advanced publish_id={publish_id}: expected "
@@ -377,15 +397,36 @@ class ProgressSyncMixin:
             # Same concurrent-reconcile race as the success handler: the durable
             # poll task and a client-driven /restart_status poll can both observe
             # the terminal BaaS FAILED outcome, and the loser's conditional
-            # update hits zero rows after the winner already marked the record
-            # FAILED. Report the reconciled record instead of raising a noisy
-            # "Order not found"; the ledger outcome correction above is
-            # idempotent, so re-running it was harmless. Only a genuinely
-            # missing record still raises.
+            # update hits zero rows. The ledger outcome correction above is
+            # idempotent, so re-running it was harmless. Decide by the record's
+            # current status; only a genuinely missing record still raises.
             reconciled = self.get_publish_record(publish_id)
             if reconciled is None:
                 raise
             reconciled_status = PublishStatus(reconciled.status)
+            if reconciled_status == current_status:
+                # An ext-only concurrent writer fenced the whole-ext snapshot
+                # without advancing the status, so the FAILED marking this
+                # handler owes is still pending. Do not report the terminal
+                # progress payload — pollers key on it and would give up
+                # without reconciling; report a retryable conflict instead so
+                # they reschedule against a fresh snapshot.
+                logger.warning(
+                    f"[PublishFlowService._handle_sync_failure] CAS conflict "
+                    f"with an ext-only write, failure marking still pending: "
+                    f"publish_id={publish_id}, status={reconciled_status}"
+                )
+                return PublishFlowResult(
+                    publish_id=publish_id,
+                    status=reconciled_status,
+                    message=(
+                        "BaaS failure sync hit a concurrent ext write: "
+                        f"publish_id={publish_id} still at {reconciled_status.value}, retry pending"
+                    ),
+                )
+            # A concurrent reconciler already marked the record FAILED (or moved
+            # it on). Report the reconciled record instead of raising a noisy
+            # "Order not found".
             logger.warning(
                 f"[PublishFlowService._handle_sync_failure] Concurrent writer "
                 f"already reconciled publish_id={publish_id}: expected "

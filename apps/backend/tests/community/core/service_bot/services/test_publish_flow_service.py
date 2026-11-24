@@ -1073,6 +1073,40 @@ def test_handle_sync_failure_cas_loses_race_reports_reconciled_record():
     assert result.data == progress
 
 
+def test_handle_sync_failure_cas_loses_ext_only_race_keeps_failure_pending():
+    # Ext-only concurrent write while the record is still at SUCCESS: the FAILED
+    # marking is NOT reconciled, so the result must not carry the terminal
+    # progress payload that would make the restart poll give up.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    conflicted_record = _make_publish_record(
+        id=43,
+        status=PublishStatus.SUCCESS.value,
+        ext={"restart": {"online": 456, "restarting": True}},
+    )
+    publish_service.get_publish_by_id.return_value = conflicted_record
+    publish_service.update_publish_status_with_ext.side_effect = PublishNotFoundError(
+        "Publish record not found or source status mismatch: publish_id=43, "
+        "expected source_status=success"
+    )
+
+    progress = {"status": "FAILED", "failed_devices": [{"id": "d1"}]}
+    result = svc._handle_sync_failure(
+        publish_id=43,
+        current_status=PublishStatus.SUCCESS,
+        ext={"restart": {"online": 456, "restarting": True}},
+        progress=progress,
+        baas_publish_id=456,
+    )
+
+    assert result.status == PublishStatus.SUCCESS
+    assert "retry pending" in result.message
+    assert result.data is None
+
+
 def test_handle_sync_failure_cas_lose_still_raises_when_record_missing():
     publish_service = Mock()
     build_service = Mock()
@@ -3838,6 +3872,55 @@ def test_handle_sync_success_cas_loses_race_reports_reconciled_record():
     svc._activate_binding.assert_not_called()
     svc._destroy_bot_by_stage.assert_not_called()
     svc._refresh_provider_mcp_after_success.assert_not_called()
+
+
+@pytest.mark.unit
+def test_handle_sync_success_cas_loses_ext_only_race_keeps_transition_pending():
+    # An ext-only concurrent writer fences the whole-ext CAS while the record is
+    # still at the source status: the transition is NOT reconciled, so the
+    # result must not carry the terminal progress payload (pollers key on it
+    # and would complete without reconciling) and side effects must not run.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    bot_service = Mock()
+
+    svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
+
+    conflicted_record = _make_publish_record(
+        id=33,
+        status=PublishStatus.VALIDATE_PUB.value,
+        ext={"restart": {"verify": 456, "restarting": True}},
+    )
+    publish_service.get_publish_by_id.return_value = conflicted_record
+    publish_service.update_publish_status_with_ext.side_effect = PublishNotFoundError(
+        "Publish record not found or source status mismatch: publish_id=33, "
+        "expected source_status=validate_pub"
+    )
+
+    publish_record = _make_publish_record(
+        id=33, status=PublishStatus.VALIDATE_PUB.value, ext={"restart": {"verify": 456}}
+    )
+    svc._mark_previous_publish_superseded = Mock()
+    svc._activate_binding = Mock()
+    svc._destroy_bot_by_stage = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+
+    progress = {"status": "SUCCESS", "device_details": []}
+    result = svc._handle_sync_success(
+        publish_id=33,
+        publish_record=publish_record,
+        stage=PublishStage.VERIFY,
+        ext=dict(publish_record.ext),
+        baas_publish_id=456,
+        progress=progress,
+    )
+
+    assert result.status == PublishStatus.VALIDATE_PUB
+    assert "retry pending" in result.message
+    assert result.data is None  # no terminal payload: poll handlers reschedule
+    svc._activate_binding.assert_not_called()
+    svc._mark_previous_publish_superseded.assert_not_called()
 
 
 @pytest.mark.unit
