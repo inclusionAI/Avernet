@@ -1,0 +1,78 @@
+apps/backend/README.md
+  h_059e888e5e4e82 93-95
+apps/backend/specs/2026-11-13-context-collab-l6-product-contracts/spec.md
+  h_059e888e5e4e82 224
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/spec.md
+  h_059e888e5e4e82 183
+apps/backend/specs/2026-11-23-context-collab-swarm-workflow-mode/delivery.md
+  h_059e888e5e4e82 24,31
+apps/backend/specs/2026-11-23-context-collab-swarm-workflow-mode/plan.md
+  h_059e888e5e4e82 43,142
+apps/backend/specs/2026-11-23-context-collab-swarm-workflow-mode/research.md
+  h_059e888e5e4e82 16,46
+apps/backend/specs/2026-11-23-context-collab-swarm-workflow-mode/spec.md
+  h_059e888e5e4e82 238
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 47-53
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/README.md
+  h_059e888e5e4e82 15
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/PROFILE-STORAGE.md
+  h_059e888e5e4e82 45
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 990
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 146
+apps/backend/src/agentclaw/community/di/modules/task/swarm_runtime.py
+  h_059e888e5e4e82 207
+apps/backend/src/agentclaw/community/di/modules/task/task_commission_module.py
+  h_059e888e5e4e82 27,30
+apps/backend/src/agentclaw/community/di/modules/task/task_commission_self_application.py
+  h_059e888e5e4e82 88
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 146,149-150,259-260
+apps/backend/tests/community/core/task/context_collab/conftest.py
+  h_059e888e5e4e82 62
+apps/backend/tests/community/core/task/context_collab/product_catalog.py
+  h_059e888e5e4e82 10
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_discovery.py
+  h_059e888e5e4e82 64
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 140
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_open_swarm.py
+  h_059e888e5e4e82 117
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py
+  h_059e888e5e4e82 83
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_method_lifecycle.py
+  h_059e888e5e4e82 67
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_open_single.py
+  h_059e888e5e4e82 64
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_publish.py
+  h_059e888e5e4e82 214
+apps/backend/tests/community/core/task/context_collab/test_execution_integration.py
+  h_059e888e5e4e82 59
+apps/backend/tests/community/core/task/context_collab/test_l6_layering.py
+  h_059e888e5e4e82 59
+apps/backend/tests/community/core/task/context_collab/test_l6_runtime_contract.py
+  h_059e888e5e4e82 97
+apps/backend/tests/community/core/task/context_collab/test_optional_product_profiles.py
+  h_059e888e5e4e82 88
+apps/backend/tests/community/core/task/context_collab/test_product_profile_codec.py
+  h_059e888e5e4e82 13
+apps/backend/tests/community/core/task/context_collab/test_product_profile_persistence.py
+  h_059e888e5e4e82 136
+apps/backend/tests/community/di/modules/test_swarm_runtime.py
+  h_059e888e5e4e82 38
+apps/backend/tests/community/di/test_task_module.py
+  h_059e888e5e4e82 4,121,576-604
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d799abedd33a730440a5e96b957c1e8e3f4eb56a",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
