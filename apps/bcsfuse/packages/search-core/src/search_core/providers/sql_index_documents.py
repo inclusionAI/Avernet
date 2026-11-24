@@ -19,12 +19,16 @@ from search_core.plugin_api.vector_point import VectorPoint
 from search_core.providers.card_schema import validate_card_table
 
 TABLE = "search_index_documents"
+# MariaDB returns NULL for FROM_UNIXTIME(0). A fractional positive epoch keeps
+# initial scans inclusive of all valid MySQL TIMESTAMP rows, without wrapping
+# indexed columns or changing SQLite's numeric checkpoint semantics.
+MYSQL_EPOCH_PARAMETER = "FROM_UNIXTIME(GREATEST(?, 0.000001))"
 COLUMNS = "id, vector, payload, source_revision, extra, is_deleted, version, gmt_modify, filters"
 VERSION_COLUMNS = "id, source_id, version, is_deleted, gmt_modify"
 SQLITE_SCHEMA = f"""CREATE TABLE IF NOT EXISTS {TABLE} (
     environment TEXT NOT NULL, index_key TEXT NOT NULL, id TEXT NOT NULL,
     source_id TEXT NOT NULL,
-    vector TEXT NOT NULL, payload TEXT NOT NULL, extra TEXT NOT NULL, filters TEXT,
+    `vector` TEXT NOT NULL, payload TEXT NOT NULL, extra TEXT NOT NULL, filters TEXT,
     source_revision INTEGER NOT NULL, version INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL, gmt_modify REAL NOT NULL,
     PRIMARY KEY(environment, index_key, id))"""
@@ -79,13 +83,16 @@ class SqlIndexDocuments:
         return self._read_columns(COLUMNS)
 
     def _read_columns(self, columns):
+        # VECTOR is reserved by MariaDB 11.7+. Keep result column names intact
+        # while quoting the identifier on every SELECT (also valid in SQLite).
+        columns = columns.replace("vector", "`vector`")
         if self.placeholder == "?":
             return columns
         return columns.replace("gmt_modify", "UNIX_TIMESTAMP(gmt_modify) AS gmt_modify")
 
     @property
     def _time_parameter(self):
-        return "?" if self.placeholder == "?" else "FROM_UNIXTIME(?)"
+        return "?" if self.placeholder == "?" else MYSQL_EPOCH_PARAMETER
 
     @property
     def scope(self):
@@ -260,13 +267,13 @@ class SqlIndexDocuments:
         if current is None:
             self._execute(
                 cur,
-                f"INSERT INTO {self.table} (source_id,vector,payload,extra,filters,source_revision,version,is_deleted,gmt_modify,environment,index_key,id) VALUES (?,?,?,?,?,?,?,?,{self._time_parameter},?,?,?)",
+                f"INSERT INTO {self.table} (source_id,`vector`,payload,extra,filters,source_revision,version,is_deleted,gmt_modify,environment,index_key,id) VALUES (?,?,?,?,?,?,?,?,{self._time_parameter},?,?,?)",
                 (*values, *self.scope, document.id),
             )
         else:
             self._execute(
                 cur,
-                f"UPDATE {self.table} SET source_id=?,vector=?,payload=?,extra=?,filters=?,source_revision=?,version=?,is_deleted=?,gmt_modify={self._time_parameter} WHERE environment=? AND index_key=? AND id=?",
+                f"UPDATE {self.table} SET source_id=?,`vector`=?,payload=?,extra=?,filters=?,source_revision=?,version=?,is_deleted=?,gmt_modify={self._time_parameter} WHERE environment=? AND index_key=? AND id=?",
                 (*values, *self.scope, document.id),
             )
         return True
@@ -349,7 +356,7 @@ class SqlIndexDocuments:
         upper = self.get_last_modified_time()
         if not upper:
             return
-        # FROM_UNIXTIME(-1) is NULL in MySQL; epoch zero is the lower bound.
+        # Nonpositive epochs are clamped by MYSQL_EPOCH_PARAMETER on MySQL.
         after_time, after_id = (0.0 if self.placeholder == "%s" else -1.0), ""
         stamp = self._time_parameter
         while True:
