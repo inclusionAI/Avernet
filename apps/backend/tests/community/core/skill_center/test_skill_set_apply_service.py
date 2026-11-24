@@ -185,3 +185,44 @@ async def test_bulk_apply_mcp_admission_uses_current_owner_defaults_and_keeps_en
         assert service.read_apply_snapshot(
             bot_id="bot-1", owner_id="entity-1", actor_id="collaborator"
         ) == before
+
+
+@pytest.mark.asyncio
+async def test_repeated_manifest_set_retries_declared_mcp_delivery():
+    from agentclaw.community.core.skill_center.mcp_apply_policy import manifest_mcp_install_scope
+    from agentclaw.community.plugin_api.models import BotModel
+
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        session.add(BotModel(bot_id="bot-1", entity_id="true-owner", owner_id="true-owner",
+                             entity_type="staff", creator_id="true-owner", env="dev"))
+    runtime = _Runtime(fail_first=False, snapshots=[(), (), (), ()])
+    service = _skill_service(CapabilityDesiredStateRepository(db), runtime)
+    before = service.read_apply_snapshot(bot_id="bot-1", owner_id="true-owner", actor_id="true-owner")
+    arguments = dict(scope=before.scope, actor_id="true-owner", sets=(ResolvedSkillSetWrite("expert"),),
+                     remove_names=(), default_change=DefaultExclusionChange(),
+                     platform_default_codes=before.platform_default_codes, project=True,
+                     retry_mcp_codes=frozenset({"weather"}))
+    with manifest_mcp_install_scope():
+        await service.replace_apply_skill_sets(**arguments)
+        await service.replace_apply_skill_sets(**arguments)
+    assert runtime.reconcile_calls[-1]["scope"].claimed_mcp == frozenset({"weather"})
+
+
+@pytest.mark.asyncio
+async def test_non_manifest_set_does_not_retry_unchanged_mcp():
+    from agentclaw.community.plugin_api.models import BotModel
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        session.add(BotModel(bot_id="bot-1", entity_id="true-owner", owner_id="true-owner",
+                             entity_type="staff", creator_id="true-owner", env="dev"))
+    runtime = _Runtime(fail_first=False, snapshots=[(), (), (), ()])
+    service = _skill_service(CapabilityDesiredStateRepository(db), runtime)
+    before = service.read_apply_snapshot(bot_id="bot-1", owner_id="true-owner", actor_id="true-owner")
+    arguments = dict(scope=before.scope, actor_id="true-owner", sets=(ResolvedSkillSetWrite("expert"),),
+                     remove_names=(), default_change=DefaultExclusionChange(),
+                     platform_default_codes=before.platform_default_codes, project=True,
+                     retry_mcp_codes=frozenset({"weather"}))
+    await service.replace_apply_skill_sets(**arguments)
+    await service.replace_apply_skill_sets(**arguments)
+    assert all("weather" not in call["scope"].claimed_mcp for call in runtime.reconcile_calls)

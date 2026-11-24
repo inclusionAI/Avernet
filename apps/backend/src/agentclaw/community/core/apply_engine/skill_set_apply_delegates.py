@@ -43,6 +43,7 @@ class _SkillSetApply(SkillSetApplyPort):
         remove_names: tuple[str, ...],
         default_change: DefaultExclusionChange,
         platform_default_codes: frozenset[str],
+        retry_mcp_codes: frozenset[str] = frozenset(),
     ) -> SkillSetApplyResult:
         return await self._inner.replace_apply_skill_sets(
             scope=scope,
@@ -51,6 +52,7 @@ class _SkillSetApply(SkillSetApplyPort):
             remove_names=remove_names,
             default_change=default_change,
             platform_default_codes=platform_default_codes,
+            retry_mcp_codes=retry_mcp_codes,
             project=self._PROJECT,
         )
 

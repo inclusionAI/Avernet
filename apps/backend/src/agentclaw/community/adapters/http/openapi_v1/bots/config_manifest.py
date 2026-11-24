@@ -19,9 +19,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CONFIG_MANIFEST_WRITE_RESPONSES,
     USER_SCOPED_403,
@@ -33,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
+    manifest_existing_bot_subject,
     ActingCallerDep,
     UserIdDep,
 )
@@ -123,6 +125,7 @@ async def update_bot_config_manifest(
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     caller: ActingCallerDep,
+    principal: Annotated[Principal, Depends(require_principal)],
     dry_run: Annotated[
         bool,
         Query(description="Preview the submitted document without saving or applying it."),
@@ -206,6 +209,7 @@ async def update_bot_config_manifest(
         bot=bot,
         owner_id=owner_id,
         actor_id=actor_id,
+        permission_subject=manifest_existing_bot_subject(caller, principal, bot=bot, bot_id=bot_id),
         audit=audit,
     )
     warnings = put_warnings(

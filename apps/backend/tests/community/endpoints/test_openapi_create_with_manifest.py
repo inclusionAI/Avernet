@@ -44,7 +44,7 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.repository.protocols.platform import (
     TaskQueueRepositoryProtocol,
 )
-from agentclaw.community.core.task_queue.types import DEFAULT_APP
+from agentclaw.community.core.task_queue.types import DEFAULT_APP, TaskStatus
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -776,13 +776,19 @@ def _seed_ready_to_create(world) -> None:
     _stand_in_for_provisioning(world)
 
 
-def _the_submission_allocated_a_bot_and_reported_no_state(response, _world) -> None:
+def _the_submission_allocated_a_bot_and_reported_no_state(response, world) -> None:
     data = response.json()["data"]
     assert data["bot_id"], "the 202 carried no bot_id to poll with"
     # The property the models make structural, asserted on the wire too: a
     # caller cannot read a state off a submission, because there is none to read.
     assert "state" not in data
     assert set(data) == {"bot_id", "iframe_url", "redirect_url"}
+    repo = world.get(TaskQueueRepositoryProtocol)
+    jobs = [task for status in TaskStatus for task in repo.list_by_status(
+        status=status, env=get_current_env(), app=DEFAULT_APP
+    ) if task.task_type == CREATE_JOB_TASK_TYPE and task.payload["bot_id"] == data["bot_id"]]
+    assert len(jobs) == 1
+    assert jobs[0].payload["permission_subject"] == _OWNER
 
 
 @endpoint_test(
@@ -798,6 +804,35 @@ def submitting_a_creation_answers_202_with_an_id():
     """Submission never waits and never creates: it validates the manifest,
     stores it against the allocated id, applies for the authorization and stops.
     The bot is created later, by the job, once the user has authorized."""
+
+
+def _app_principal() -> str:
+    from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
+
+    now = int(time.time())
+    return jwt.encode({"iss": "gateway", "aud": "backend", "iat": now, "exp": now + 3600,
+        "principals": [{"type": "app", "tenant": DEFAULT_AVERNET_TENANT,
+                        "app": {"app_id": 701, "app_name": "manifest-test",
+                                "owners": _OWNER, "tenant": DEFAULT_AVERNET_TENANT}}]}, _KEY, algorithm="HS256")
+
+
+def _seed_delegated_creation(world) -> None:
+    from agentclaw.community.api.user_app_grant_service import UserAppGrantServiceProtocol
+
+    _seed_ready_to_create(world)
+    world.get(UserAppGrantServiceProtocol).grant(user_id=_OWNER, app_id=701, app_name="manifest-test")
+
+
+@endpoint_test(
+    method="POST", path="/openapi/v1/bots/with-manifest",
+    scenario="delegated_app_creation_records_delegating_user_permission_subject",
+    input=CaseInput(json_body=_body(), query_params=_QUERY, headers={PRINCIPAL_HEADER: _app_principal()}),
+    seed=_seed_delegated_creation,
+    expect=ExpectSuccess(status=202, json_contains={"code": 202000}),
+    extra_assertions=(_the_submission_allocated_a_bot_and_reported_no_state,),
+)
+def delegated_creation_selects_permission_subject():
+    """The user-level grant authorizes creation and its personal permission observation."""
 
 
 # ── teclaw, platform-managed: the record, one phase, then the container (W8) ──
