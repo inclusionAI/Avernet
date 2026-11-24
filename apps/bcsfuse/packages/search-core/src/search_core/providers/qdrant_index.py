@@ -125,6 +125,14 @@ class QdrantRetrievalIndex:
             raise ValueError("internal index fields cannot be caller filters")
         return {key: list(values) for key, values in filters.items()}
 
+    def filtered_source_ids(self, filters, limit):
+        if not all(filters.values()) or limit <= 0:
+            return []
+        with self._lock.read(self.read_timeout_seconds):
+            return self._keyword.filtered_source_ids(
+                self._filters(filters), limit, **self._query_options
+            )
+
     def vector_search(self, vector, limit, filters):
         if any(not values for values in filters.values()):
             return []

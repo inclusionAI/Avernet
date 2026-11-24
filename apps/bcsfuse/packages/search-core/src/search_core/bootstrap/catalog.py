@@ -18,7 +18,10 @@ from search_core.api.services import RetrievalService, StagedRetrievalService
 from search_core.application.cache import CachedEmbedding, CachedRetrieval, SearchCaches
 from search_core.application.card_metadata import CardMetadataRetrieval
 from search_core.application.catalog_retrieval import CatalogRetrieval
-from search_core.application.default_candidates import DefaultCandidates
+from search_core.application.default_candidates import (
+    DefaultCandidates,
+    FilteredIndexFallback,
+)
 from search_core.application.emergency import (
     EmergencyControl,
     EmergencyPolicy,
@@ -79,6 +82,7 @@ def create_catalog_search_app(
     updates_factory=CardUpdates,
     metadata_factory=CardMetadataRetrieval,
     default_candidates_reader=None,
+    filtered_candidate_reader=None,
     http_app_factory=create_search_app,
     allow_document_mapping=False,
 ):
@@ -271,6 +275,14 @@ def create_catalog_search_app(
         build_retrieval,
         build_variants=build_variants,
     )
+    fallback = None
+    if filtered_candidate_reader is not None:
+        fallback = FilteredIndexFallback(
+            filtered_candidate_reader,
+            calls["default_candidates"],
+            updates,
+            emergency.snapshot,
+        )
     retrieval = CatalogRetrieval(emergency, updates)
     app = http_app_factory(
         retrieval,
@@ -281,6 +293,7 @@ def create_catalog_search_app(
         max_inflight_requests=settings.max_inflight_requests,
         emergency=emergency,
         operations=("search", "recommend"),
+        empty_search_fallback=fallback,
     )
     app.state.catalog_updates = updates
     app.state.search_emergency = emergency
