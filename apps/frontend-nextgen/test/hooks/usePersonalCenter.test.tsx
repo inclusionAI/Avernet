@@ -62,7 +62,7 @@ describe('usePersonalCenter', () => {
     await waitFor(() =>
       expect(communityService.getPersonalCenterActivities).toHaveBeenLastCalledWith({
         ownerUserId: '149844',
-        actorScope: 'ALL',
+        actorScope: 'HUMAN',
         activityType: 'REPLIED',
         targetType: 'ALL',
         page: 1,

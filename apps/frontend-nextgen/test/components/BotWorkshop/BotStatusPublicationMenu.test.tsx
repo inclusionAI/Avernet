@@ -142,7 +142,7 @@ test('锁定时不可执行发布操作', async () => {
 
 test('历史评测记录入口对无编辑权限用户置灰并展示说明', async () => {
   const openHistory = jest.fn();
-  const botWithoutPermission = { ...bot, canOpenEvalHistory: false, actions: ['view'] };
+  const botWithoutPermission = { ...bot, canOpenEvalHistory: false, evalGateVisible: true, actions: ['view'] };
 
   render(
     <BotManagementRuntimeItems
@@ -171,6 +171,7 @@ test('历史评测记录入口对无编辑权限用户置灰并展示说明', as
   const botWithPermission = {
     ...bot,
     canOpenEvalHistory: true,
+    evalGateVisible: true,
     actions: ['view', 'edit', 'delete'],
   };
   render(

@@ -6,6 +6,7 @@ const stepStatusLabel = (status: string) => {
   if (status === 'running') return '执行中';
   if (status === 'done') return '已完成';
   if (status === 'failed') return '失败';
+  if (status === 'skipped') return '未执行';
   return '待执行';
 };
 
@@ -14,12 +15,14 @@ const stepStatusTone: Record<string, BadgeTone> = {
   running: 'primary',
   done: 'success',
   failed: 'error',
+  skipped: 'neutral',
 };
 
 const stepStatusClassName = (status: string) => {
   if (status === 'running') return 'border-primary/30 bg-primary/5';
   if (status === 'done') return 'border-success/30 bg-success/5';
   if (status === 'failed') return 'border-destructive/30 bg-destructive/5';
+  if (status === 'skipped') return 'border-border bg-muted/20 text-muted-foreground';
   return 'border-border bg-background';
 };
 
@@ -47,7 +50,9 @@ export function StandardEvaluationFlowSteps({
         return (
           <div
             key={step.key}
-            className={`flex flex-col gap-3 rounded-lg border p-4 transition-colors sm:flex-row sm:items-center sm:justify-between ${stepStatusClassName(step.status)}`}
+            className={`flex flex-col gap-3 rounded-lg border p-4 transition-colors sm:flex-row sm:items-center sm:justify-between ${stepStatusClassName(
+              step.status,
+            )}`}
           >
             <div className="flex min-w-0 flex-1 items-start gap-3">
               <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
@@ -63,12 +68,7 @@ export function StandardEvaluationFlowSteps({
             </div>
             <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
               <Badge tone={stepStatusTone[step.status]}>{stepStatusLabel(step.status)}</Badge>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!canRetry || retrying}
-                onClick={() => onRetry(step.key)}
-              >
+              <Button variant="secondary" size="sm" disabled={!canRetry || retrying} onClick={() => onRetry(step.key)}>
                 {retrying ? '重试中…' : '重试'}
               </Button>
             </div>

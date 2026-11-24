@@ -1,9 +1,8 @@
 import { Button } from '@/components/ui/Button';
-import { Checkbox } from '@/components/ui/Checkbox';
 import type { BotEditorResource } from '@/domain/botEditor';
 import type { ExcludeCheckState } from '@/services/botWorkshop/excludeTree';
 import { cn } from '@/utils/cn';
-import { ChevronRight, File, Folder, FolderOpen, Loader2 } from 'lucide-react';
+import { ChevronRight, File, Folder, FolderOpen, Loader2, Minus, X } from 'lucide-react';
 import type React from 'react';
 
 interface ExcludeFileTreeProps {
@@ -83,12 +82,32 @@ export const ExcludeFileTree: React.FC<ExcludeFileTreeProps> = ({
             ) : (
               <span className="size-4 shrink-0" aria-hidden />
             )}
-            <Checkbox
-              checked={checked}
-              indeterminate={indeterminate}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              role="checkbox"
+              aria-checked={checked ? 'true' : indeterminate ? 'mixed' : 'false'}
               aria-label={`${checked ? '取消排除' : '排除'} ${item.name}`}
-              onCheckedChange={() => onToggle(item.path, item.type)}
-            />
+              onClick={() => onToggle(item.path, item.type)}
+              className={cn(
+                'group/exclude !size-4 !rounded-[5px] p-0',
+                checked
+                  ? '!border-destructive !bg-destructive/10 text-destructive hover:!bg-destructive/10 hover:!text-destructive'
+                  : '!border-input !bg-background text-muted-foreground hover:!border-destructive hover:!bg-background hover:!text-destructive',
+              )}
+            >
+              {checked ? (
+                <X className="size-3" aria-hidden />
+              ) : indeterminate ? (
+                <Minus className="size-2.5" aria-hidden />
+              ) : (
+                <X
+                  className="size-3 opacity-0 transition-opacity group-hover/exclude:opacity-50"
+                  aria-hidden
+                />
+              )}
+            </Button>
             {isFolder ? (
               isOpen ? (
                 <FolderOpen className="size-4 shrink-0 text-primary/70" aria-hidden />

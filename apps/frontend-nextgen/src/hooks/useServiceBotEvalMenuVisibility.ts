@@ -5,11 +5,11 @@ import { useEffect, useMemo, useState } from 'react';
 const evalAvailabilityKey = (bot: BotDomain) =>
   `${bot.id}:${bot.ownerId ?? ''}:${String(bot.publicationVersion ?? bot.liveVersion ?? 'latest')}`;
 
-/** 服务 Bot 草稿态列表项的评测入口可见性。 */
+/** 服务 Bot 列表项的评测入口可见性；发起评测与历史评测记录共用同一条 DRM 门禁白名单。 */
 export function useServiceBotEvalMenuVisibility(bots: BotDomain[], currentUserId?: string) {
   const targets = useMemo(
     () =>
-      bots.filter((bot) => bot.serviceMode === 'service' && bot.lifecycle === 'draft'),
+      bots.filter((bot) => bot.serviceMode === 'service'),
     [bots],
   );
   const [visibility, setVisibility] = useState<Record<string, boolean>>({});
