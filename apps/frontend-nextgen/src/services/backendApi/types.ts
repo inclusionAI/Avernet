@@ -4,6 +4,8 @@ export interface BackendApiEnvelope<T> {
   message?: string;
   data?: T;
   request_id?: string;
+  /** 09 §2.1 的领域错误码（与 code 并存，老调用方可忽略）。 */
+  error?: { code?: string; message?: string; details?: unknown };
 }
 
 /**

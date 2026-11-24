@@ -41,6 +41,7 @@ _ERROR_CODES = {
     "BindingBusy": ("409", "binding_busy"),
     "IdempotencyKeyReused": ("409", "idempotency_key_reused"),
     "RunNotFound": ("404", "run_not_found"),
+    "GenomeBaselineMissing": ("409", "no_genome_baseline"),
     "RunAlreadyEnded": ("409", "run_already_ended"),
     "BudgetExhausted": ("409", "budget_exhausted"),
     "StaleFencingToken": ("409", "stale_fencing_token"),

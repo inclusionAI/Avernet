@@ -44,7 +44,15 @@ Credentials = Callable[[BotRef], Awaitable[PlatformCredential]]
 
 
 class PlatformHttpError(RuntimeError):
-    """Safe error: never includes URL, headers, response body or transport text."""
+    """Safe error: never includes URL, headers, response body or transport text.
+
+    ``status`` 是上游 HTTP 状态码（若已拿到响应）；调用方据此区分 404 这类
+    有语义的拒绝，而不必解析文案。
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        self.status = status
+        super().__init__(message)
 
 
 class BotHttp:
@@ -91,7 +99,10 @@ class BotHttp:
                     # error. Do not expose arbitrary messages, reasons or paths.
                     if method == "POST" and suffix == "/genome/revisions" and response.status_code == 422:
                         await _candidate_refusal(response)
-                    raise PlatformHttpError(f"platform request refused ({response.status_code})")
+                    raise PlatformHttpError(
+                        f"platform request refused ({response.status_code})",
+                        status=response.status_code,
+                    )
                 chunks, size = [], 0
                 async for chunk in response.aiter_bytes():
                     size += len(chunk)
@@ -150,7 +161,16 @@ class HttpGenome:
         return Drift(active, observed)
 
     async def resolve_revision(self, bot, ref):
-        data = await self.http.request(bot, "GET", "/genome/revisions/" + quote(ref, safe=""))
+        try:
+            data = await self.http.request(bot, "GET", "/genome/revisions/" + quote(ref, safe=""))
+        except PlatformHttpError as exc:
+            # `active` 不存在 = 这个 Bot 还没有基因组基线，是可解释的领域状态，
+            # 不是服务故障；交给调用方映射成 409 no_genome_baseline。
+            if exc.status == 404 and ref == "active":
+                from avernet_evolution.core.evolution_run.errors import GenomeBaselineMissing
+
+                raise GenomeBaselineMissing(bot.bot_id) from None
+            raise
         meta = data["revision"]
         if meta["bot"] != {"bot_id": bot.bot_id, "owner_id": bot.owner_id}:
             raise PlatformHttpError("revision identity mismatch")

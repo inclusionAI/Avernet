@@ -13,6 +13,7 @@ __all__ = [
     "CeilingExceeded",
     "EvolutionFrozen",
     "EvolutionRunError",
+    "GenomeBaselineMissing",
     "IdempotencyKeyReused",
     "JobNotFound",
     "OperationNotFound",
@@ -57,6 +58,21 @@ class BindingBusy(EvolutionRunError):
 
 class IdempotencyKeyReused(EvolutionRunError):
     """同一幂等键被用于不同的请求体（§6）。"""
+
+
+class GenomeBaselineMissing(EvolutionRunError):
+    """这个 Bot 还没有基因组基线（`active` 不存在），先创建第一个版本。
+
+    它不是服务故障：新建 Bot 在首次 capture/promote 之前，任何需要解析
+    `parent: "active"` 的配置写入或运行提交都会得到它。
+    """
+
+    def __init__(self, bot_id: str) -> None:
+        self.bot_id = bot_id
+        super().__init__(
+            f"bot {bot_id} has no genome baseline: create its first revision "
+            "(capture and promote it) before configuring or running evolution"
+        )
 
 
 class RunNotFound(EvolutionRunError):

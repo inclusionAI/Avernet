@@ -16,13 +16,13 @@ from ..core.evolution_run.api import error_envelope
 BASE = "/openapi/v1/bots/{bot_id}/evolution"
 
 
-def response(request: Request, data: Any = None, *, status: int = 200, headers=None):
+def response(request: Request, data: Any = None, *, status: int = 200, headers=None, error=None):
     trace = getattr(request.state, "trace_id", None) or secrets.token_hex(16)
-    return JSONResponse(
-        {"code": status * 1000, "message": HTTPStatus(status).phrase, "data": data, "request_id": trace},
-        status_code=status,
-        headers={"X-Trace-Id": trace, **(headers or {})},
-    )
+    body = {"code": status * 1000, "message": HTTPStatus(status).phrase, "data": data, "request_id": trace}
+    # 09 §2.1 要 `error.code`；追加一个成员而不是改既有信封，老调用方不受影响。
+    if error is not None:
+        body["error"] = error
+    return JSONResponse(body, status_code=status, headers={"X-Trace-Id": trace, **(headers or {})})
 
 
 def install_errors(app: FastAPI):
@@ -56,7 +56,8 @@ def install_errors(app: FastAPI):
         return response(request, status=403)
 
     async def domain_error(request, exc):
-        return response(request, status=error_envelope(exc)["status"])
+        envelope = error_envelope(exc)
+        return response(request, status=envelope["status"], error=envelope["body"]["error"])
 
     from ..core.evolution_promote import (
         AlreadyDecided,
@@ -68,6 +69,7 @@ def install_errors(app: FastAPI):
     from ..core.evolution_run import errors
 
     for name in (
+        "GenomeBaselineMissing",
         "BindingCheckFailed",
         "PreconditionFailed",
         "EvolutionFrozen",
