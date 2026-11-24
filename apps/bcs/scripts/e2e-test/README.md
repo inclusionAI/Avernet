@@ -5,6 +5,16 @@
 processes. All producers finish before `../e2e_coverage.sh` aggregates their
 runtime profiles. Unit-test profiles are outside this E2E report.
 
+## Gateway and Worker runtime
+
+Both the standalone and split BCS coverage flows enable the Gateway–Worker
+story in `e2e.sh`. It runs the separate instrumented `bcs-worker-e2e` binary
+with a memory Store and SQLite archives. BCS validates all 15 scenarios before
+aggregation and prints the validated report into the existing `bcs/e2e.log`.
+The aggregate-only phase uses the resulting Worker profiles without rerunning
+the story. See the [Worker companion guide](../../crates/bootstrap/bcs/tests/worker_runtime/README.md)
+for the standalone command and test boundaries.
+
 ## Deleted group recipients
 
 The default `stories` inventory runs

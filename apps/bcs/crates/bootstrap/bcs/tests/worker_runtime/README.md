@@ -37,9 +37,11 @@ python3 apps/bcs/scripts/e2e-test/worker_runtime_story.py \
 ```
 
 [worker_e2e_coverage.sh](../../../../../scripts/worker_e2e_coverage.sh) builds an
-instrumented companion (or accepts `--run-only` after the shared builder), removes
-only its own profiles, and invalidates stale success evidence before starting.
-The Singlebox companion supervisor joins Caller, OAuth and Worker before
-aggregation and propagates each failure. The artifact gate requires all Worker
-stories and the explicit memory-only declaration. Existing coverage thresholds
-and source exclusions are unchanged.
+instrumented companion (or accepts `--run-only` after
+`build_e2e_companions.sh worker`), removes only its own profiles, and invalidates
+stale success evidence before starting. BCS runs it in its coverage story phase,
+before profile aggregation. The wrapper requires a report containing all 15
+scenarios and the explicit in-memory Store and SQLite archive declarations.
+The validated report is printed into the existing Singlebox `bcs/e2e.log`; on
+failure the same log records diagnostics, and the BCS story phase fails.
+Existing coverage thresholds and source exclusions are unchanged.
