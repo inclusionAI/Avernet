@@ -705,7 +705,7 @@ describe('ConversationBotItem 非运行中好友服务 Bot', () => {
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '搜索会话' })).not.toBeInTheDocument();
     fireEvent.pointerMove(row, { pointerType: 'mouse' });
-    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('非运行中服务 Bot'));
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('该服务 Bot 尚未处于正式运行状态'));
   });
 
   it.each([

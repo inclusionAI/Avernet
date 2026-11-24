@@ -257,7 +257,7 @@ export function RestartEvaluationPanel({
           </div>
         ) : null}
         <p className="m-0 text-xs leading-5 text-muted-foreground">
-          评测结果保存节点将统一写入 TeamClaw 门禁数据结构，作为服务 Bot 推进预发发布的卡点检查。
+          评测结果用于校验服务 Bot 是否可以提交试运行。
         </p>
       </section>
     </div>

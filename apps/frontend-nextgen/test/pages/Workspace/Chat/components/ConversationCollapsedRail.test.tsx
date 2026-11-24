@@ -116,7 +116,7 @@ it.each([false, true])(
     fireEvent.click(tile);
     expect(props.onQuickOpen).not.toHaveBeenCalled();
     fireEvent.pointerMove(tile, { pointerType: 'mouse' });
-    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('非运行中服务 Bot'));
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('该服务 Bot 尚未处于正式运行状态'));
   },
 );
 

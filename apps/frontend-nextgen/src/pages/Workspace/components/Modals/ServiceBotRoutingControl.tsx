@@ -40,7 +40,7 @@ export function ServiceBotRoutingControl({
               </Button>
             </TooltipTrigger>
             <TooltipContent className="max-w-72 space-y-1 leading-relaxed">
-              <p>动态路由规则：优先使用生产环境；生产不可用时，依次尝试预发、草稿。</p>
+              <p>动态路由规则：优先使用正式运行环境；不可用时，依次尝试试运行、草稿。</p>
               <p>指定路由：仅使用你选择的运行阶段。</p>
             </TooltipContent>
           </Tooltip>
