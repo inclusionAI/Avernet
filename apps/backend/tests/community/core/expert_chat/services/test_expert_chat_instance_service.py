@@ -921,6 +921,45 @@ class TestCallerBotGoneSelfHeal:
         assert "failed" in status_writes
         bot_build_service.release_async.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_retry_failure_keeps_replacement_ext(self):
+        """Codex P2 regression: reprovision succeeded, then a transient error
+        in the heal round must not let the outer frame's failure bookkeeping
+        clobber the replacement's bot_uuid/binding with the stale snapshot.
+        """
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        new_uuid = self._wire_selfheal(instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service)
+        stale_ext = {"bot_uuid": BOT_UUID, "version": 5, "baas_publish_id": 96079, "binding_id": 999}
+        polled_ext = {"bot_uuid": BOT_UUID, "version": 5, "binding_id": 999}
+        healed_ext = {"bot_uuid": new_uuid, "version": 1, "binding_id": BINDING_ID, "baas_publish_id": 777}
+        healed_row = {"id": 1, "status": "success", "ext": dict(healed_ext)}
+        instance_repo.get_instance = MagicMock(side_effect=[
+            {"id": 1, "status": "init", "ext": stale_ext},      # entry
+            {"id": 1, "status": "success", "ext": polled_ext},  # post-poll
+            {"id": 1, "status": "success", "ext": polled_ext},  # heal round entry
+            healed_row,                                         # heal round post-poll
+            healed_row,                                         # heal round failure re-read
+            healed_row,                                         # outer failure re-read
+        ])
+        # First ws-info hits the gone bot; the heal round's fresh container
+        # then hits a transient (non bot-gone) transport failure.
+        baas.get_ws_info_by_bot_uuid = MagicMock(
+            side_effect=[self._gone(), BaasServiceError("transient ws lookup failure")]
+        )
+
+        with pytest.raises(ConnectionError) as caught:
+            await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        assert caught.value.caller_bot_gone is False
+        final_writes = [c for c in instance_repo.update_instance.call_args_list if c.kwargs.get("status") == "failed"]
+        assert final_writes, "failure bookkeeping must run"
+        last = final_writes[-1].kwargs
+        # The replacement's identifiers survive the outer frame's failure record.
+        assert last["ext"]["bot_uuid"] == new_uuid
+        assert last["ext"]["binding_id"] == BINDING_ID
+        assert last["ext"]["baas_publish_id"] == 777
+        bot_build_service.release_async.assert_called_once()
+
 
 class TestGetCallerConnection:
     """Tests for get_caller_connection method."""

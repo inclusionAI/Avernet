@@ -326,8 +326,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
         """Return the caller's container ``connection``.
 
         Mirrors ``ExpertChatService.get_chat_session``'s ``connection``
-        shape; ``session_key`` is NOT produced here (D3 — that stays with
-        ``ExpertChatService``).
+        shape (``session_key`` stays with ``ExpertChatService``, D3).
         """
         return await self._get_caller_connection(
             user_id=user_id,
@@ -410,8 +409,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                     except ConnectionError as error:
                         if not error.caller_bot_gone:
                             raise
-                        # Stale success row → shared Step 3/4/5 flow below
-                        # (upgrade → BOT_GONE → fresh create) heals it.
+                        # Stale success row → shared Step 3/4/5 flow heals it.
                         logger.info(
                             "[ExpertChatInstance] Fast path hit gone bot, reprovisioning: bot=%s owner=%s user=%s bot_uuid=%s",
                             bot_id, owner_id, user_id, bot_uuid,
@@ -567,10 +565,8 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
             except ConnectionError as error:
                 if not error.caller_bot_gone or _bot_gone_retry:
                     raise
-                # Publish poll reported SUCCESS against a bot_uuid already
-                # gone from BaaS. One guarded re-entry with the fast path
-                # skipped reuses, by construction, the exact Step 4
-                # provisioning / binding / identity / persistence semantics.
+                # Poll SUCCESS against a bot_uuid already gone from BaaS:
+                # one guarded re-entry reuses the shared Step 4 semantics.
                 logger.info(
                     "[ExpertChatInstance] Bot gone after publish poll, "
                     "reprovisioning once: bot=%s owner=%s user=%s bot_uuid=%s",
@@ -608,7 +604,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 "[ExpertChatInstance] get_caller_connection failed: bot=%s owner=%s user=%s: %s\n%s",
                 bot_id, owner_id, user_id, e, error_traceback,
             )
-            ext = instance.get("ext") or {}
+            ext = self._failure_record_ext(instance, user_id, bot_id, owner_id)
             ext["error"] = {
                 "message": str(e),
                 "traceback": error_traceback,
@@ -627,6 +623,22 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                     bot_id, owner_id, user_id, update_error,
                 )
             raise
+
+    def _failure_record_ext(
+        self, instance: Dict[str, Any], user_id: str, bot_id: str, owner_id: str,
+    ) -> Dict[str, Any]:
+        """Base ``ext`` for failure bookkeeping, re-read from the persisted row.
+
+        The self-heal round persists newer state (replacement bot_uuid/
+        binding_id/baas_publish_id) before its exception reaches this frame;
+        recording against the older snapshot would clobber it.
+        """
+        try:
+            fresh = self._instance_repo.get_instance(user_id, bot_id, owner_id)
+        except Exception:
+            fresh = None
+        record = fresh if isinstance(fresh, dict) else instance
+        return record.get("ext") or {}
 
     # ------------------------------------------------------------------
     # Step 2: build-artifact reverse lookup
@@ -780,17 +792,13 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
     ) -> Dict[str, Any]:
         """Upgrade a RELEASED container, preferring ``bot_uuid`` preservation.
 
-        ``upgrade_async`` keeps ``bot_uuid``; when the upgrade target is
-        already gone from BaaS (structured ``success=False`` with
-        ``error_code`` in ``_BOT_GONE_ERROR_CODES`` — ``BOT_NOT_FOUND`` bot
-        record gone / ``DEVICE_NOT_FOUND`` device gone) it falls back to
-        ``create_bot`` (``_create_container``) and returns a new
-        ``bot_uuid``. Returns the baas publish order —
-        ``{bot_uuid, publish_id, binding_id?}`` — without querying the
-        workflow; the caller queries ``get_publish_progress`` once and
-        persists the trail (``baas_publish``) to the instance ext. Both the
-        in-place upgrade and the fallback-create path surface a
-        ``publish_id`` so the caller queries uniformly.
+        ``upgrade_async`` keeps ``bot_uuid``; when BaaS confirms the target
+        is gone (structured ``success=False`` with ``error_code`` in
+        ``_BOT_GONE_ERROR_CODES``) it falls back to ``create_bot``
+        (``_create_container``) and returns a new ``bot_uuid``. Returns the
+        baas publish order — ``{bot_uuid, publish_id, binding_id?}`` — for
+        the caller to poll once via ``get_publish_progress`` and persist the
+        trail (``baas_publish``) to the instance ext.
         """
         # Same alignment as ``_create_container``: carry the engine-owned envs
         # + sandbox template_config + skills-manifest ``ext_info`` so a
@@ -824,10 +832,9 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 result.get("success") is False
                 and result.get("error_code") in _BOT_GONE_ERROR_CODES
             ):
-                # BaaS confirms the upgrade target is gone (bot record or
-                # device aged out): heal within this request via a fresh first
-                # release instead of returning the dead ``bot_uuid`` with no
-                # publish to poll (design.md §D4/O6 self-heal contract).
+                # BaaS confirms the target is gone: heal within this request
+                # via a fresh first release instead of the dead ``bot_uuid``
+                # with no publish to poll (design.md §D4/O6 contract).
                 logger.warning(
                     "[ExpertChatInstance] Upgrade hit %s, falling back to "
                     "fresh create: bot=%s owner=%s bot_uuid=%s",
@@ -881,9 +888,8 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 device_affinity=user_id,
             )
         except BaasBotNotFoundError as e:
-            # Bot record aged out of BaaS (released/expired): a persistent,
-            # expected self-healing state; WARNING not ERROR, and the
-            # provisioning flow re-provisions instead of surfacing a 5001.
+            # Bot record aged out of BaaS (released/expired): persistent,
+            # expected self-healing state; WARNING not ERROR.
             logger.warning(
                 "[ExpertChatInstance] caller bot record gone: bot=%s "
                 "bot_uuid=%s: %s",
