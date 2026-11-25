@@ -538,6 +538,15 @@ impl StoreGroupRoundAdmission {
                     request_id: license.request_id.clone(),
                     request_digest: license.request_digest.clone(),
                 }).map_err(|_| invalid("cold_index_encoding"))?);
+                // 关闭轮次后有界压缩 checkpoint (plan T7): the predecessor's
+                // cold proof is now the substitute the successor installs, so
+                // the same acceptance CAS drops the closed round's hot
+                // history — Done task facts, view draft and deadline
+                // identities — from the checkpoint. The event watermarks,
+                // all unfinished obligations and every other task stay
+                // untouched; consecutive rounds keep the checkpoint bounded
+                // regardless of the size each archived round carried.
+                crate::group_terminal::compact_closed_round(&mut candidate, &license);
             }
         }
         value["group_cold"] = serde_json::Value::Array(cold);
@@ -611,6 +620,30 @@ impl StoreGroupRoundAdmission {
         snapshot: AcquiredSession,
         row: Option<(Version, GroupRequestRow)>,
     ) -> Result<Admission, StoreError> {
+        // Plan T7 slice 3: the directory-reclaim side registers
+        // `directory_retired` in the sealed runner state (an exact-version
+        // checkpoint CAS) before removing a Sid's discovery rows. New
+        // generations of a retired Sid never install — the session needs a
+        // new context. Only the install path is gated: requests already
+        // answered by their own first identity (Expired rows, licensed
+        // replays for a round accepted before the retirement) keep their
+        // tombstone/recovery answers.
+        if snapshot
+            .envelope
+            .checkpoint
+            .runner_state
+            .as_ref()
+            .is_some_and(|state| {
+                state
+                    .state
+                    .value
+                    .get("directory_retired")
+                    .and_then(|marker| marker.as_bool())
+                    == Some(true)
+            })
+        {
+            return Ok(Admission::Conflict);
+        }
         let row_key = self.row_key(request)?;
         let head = snapshot.envelope.checkpoint.commit_seq.0;
         let owner = snapshot.ownership.owner.clone();

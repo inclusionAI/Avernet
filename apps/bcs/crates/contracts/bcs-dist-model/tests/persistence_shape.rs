@@ -82,3 +82,48 @@ fn accepted_cancellation_is_distinct_from_confirmed_cancellation() -> Result<(),
     .is_err());
     Ok(())
 }
+
+#[test]
+fn dispatch_execution_decodes_old_payloads_without_verification_or_quarantine()
+-> Result<(), serde_json::Error> {
+    // Plan T7 slice 4 additive fields: documents written before the
+    // verification handoff and the Quarantined record existed decode with
+    // both absent — never fabricated, never defaulted into evidence.
+    let old = json!({
+        "holder": {"instance": {"node": "conn-1", "incarnation": "1794370950000"}, "epoch": 4},
+        "phase": "sending",
+        "remote": null,
+        "confirmed_input_through": null,
+        "cancellation": {"kind": "not_sent"},
+        "outcome": null
+    });
+    let execution: DispatchExecution = serde_json::from_value(old)?;
+    assert_eq!(execution.verification, None);
+    assert_eq!(execution.quarantined, None);
+    Ok(())
+}
+
+#[test]
+fn verification_handoff_and_quarantine_round_trip_as_wire_shapes()
+-> Result<(), serde_json::Error> {
+    let handoff = json!({
+        "claim": {
+            "instance": {"node": "conn-2", "incarnation": "1794370960000"},
+            "epoch": 3,
+        },
+        "attempt": 2,
+        "key": {"kind": "by_request", "request_id": "s1.task.d1.n1.a1:start"},
+        "method": "query",
+        "next_due": 1794371205200i64,
+        "backoff_ms": 64000
+    });
+    let decoded: VerificationHandoff = serde_json::from_value(handoff.clone())?;
+    assert_eq!(serde_json::to_value(&decoded)?, handoff);
+    let quarantined = json!({
+        "at": 1794371505200i64,
+        "reason": "stop_verification_deadline"
+    });
+    let record: QuarantineRecord = serde_json::from_value(quarantined.clone())?;
+    assert_eq!(serde_json::to_value(&record)?, quarantined);
+    Ok(())
+}

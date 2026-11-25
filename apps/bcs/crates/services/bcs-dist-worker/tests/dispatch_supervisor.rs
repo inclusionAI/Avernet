@@ -428,3 +428,56 @@ async fn accepted_dispatch_with_unknown_cancel_keeps_remote_supervision() {
     assert!(record.view.control.cancel.is_some());
     assert!(record.view.execution.outcome.is_none());
 }
+
+#[tokio::test(start_paused = true)]
+async fn verification_mode_dispatches_route_to_the_queue_not_a_hint() {
+    // Plan T7 slice 4: a handed-off dispatch found due by the Supervisor is
+    // routed to the verification queue index — the crash repair path — and
+    // never answers a normal execution hint.
+    let h = Harness::new().await;
+    let mut held = h.held().await;
+    let operation = SendOperation::Start {
+        request_id: RequestId("start".into()),
+    };
+    held.begin_send(operation.clone(), proof(&operation)).await.unwrap();
+    held.hand_off_verification(VerificationHandoffDraft {
+        attempt: 1,
+        key: VerificationKey::ByRequest { request_id: RequestId("start".into()) },
+        method: VerificationMethod::Query,
+        // The obligation was due before the supervisor's clock: the scan of
+        // the authoritative state must discover it (crash before index).
+        next_due: TimestampMillis(500),
+        backoff_ms: 500,
+    })
+    .await
+    .unwrap();
+    let mut s = h.supervisor();
+    h.drive(&mut s, 20).await;
+    assert!(
+        h.board.notify_calls.lock().unwrap().is_empty(),
+        "no normal execution hint for a verification-mode dispatch"
+    );
+    let routed = h.board.index_verification_calls.lock().unwrap().clone();
+    assert_eq!(routed.len(), 1, "exactly one queue repair");
+    assert_eq!(routed[0].0, h.did);
+    assert!(routed[0].1.0 <= 1000, "the repaired due is at or before the scan time");
+    // The authoritative record exposes the handoff state for T8's read seam.
+    let record = h.f.dispatch.get(&h.did).await.unwrap().unwrap();
+    assert!(record.verification.is_some(), "the handoff is visible in get()");
+    assert_eq!(record.view.execution.phase, DispatchPhase::Sending);
+    assert!(h.inbox.requests.lock().unwrap().is_empty());
+    // The recovered entry is physically page-able by the verifier engine.
+    let page = h
+        .f
+        .queue
+        .due_verifications(
+            TimestampMillis(1000),
+            PageRequest {
+                after: None,
+                limit: std::num::NonZeroU32::new(8).unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items, std::slice::from_ref(&h.did));
+}

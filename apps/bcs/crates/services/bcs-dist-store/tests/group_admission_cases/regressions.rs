@@ -68,3 +68,71 @@ async fn strict_round_accepts_authenticated_connector_terminal() {
     }).await.unwrap();
     assert!(matches!(admitted, AdmitOutcome::Accepted(_) | AdmitOutcome::Duplicate(_)));
 }
+
+/// Plan T7 slice 3 ruling: a Sid whose sealed checkpoint runner state carries
+/// `directory_retired=true` (the CAS marker the directory reclaim registers
+/// before removing discovery) must never admit NEW rounds again — the retry
+/// of an already-installed round stays a replay.
+#[tokio::test]
+async fn retired_session_directory_rejects_new_admissions() {
+    let rig = Rig::new().await;
+    let gateway = rig.gateway();
+    let first = round("retired-marker", 1);
+    assert!(matches!(
+        gateway.rounds.admit(&first).await.unwrap(),
+        Admission::New { .. }
+    ));
+    // The reclaim-side CAS: the sealed owner registers the retirement marker
+    // in the runner state and clears the scheduling duty, exactly like the
+    // retention prototype's `directory-retire` commit.
+    let snapshot = match rig
+        .coordination
+        .acquire(&Sid(SID.into()), &rig.claim, empty_checkpoint())
+        .await
+        .unwrap()
+    {
+        AcquireOutcome::Acquired(a) => a,
+        other => panic!("{other:?}"),
+    };
+    let mut candidate = snapshot.envelope.checkpoint.clone();
+    candidate.tasks.clear();
+    candidate.commit_seq = CommitSeq(snapshot.envelope.checkpoint.commit_seq.0 + 1);
+    if let Some(runner) = candidate.runner_state.as_mut() {
+        runner.state.value["directory_retired"] = serde_json::json!(true);
+    }
+    let commit_id = CommitId(format!("retire-{}", candidate.commit_seq.0));
+    let content_digest = Digest(serde_json::to_string(&candidate.runner_state).unwrap());
+    candidate.outbox = Some(CommittedBatch {
+        created_at: None,
+        commit_id: commit_id.clone(),
+        source_commit: candidate.commit_seq,
+        content_digest: content_digest.clone(),
+        effects: vec![],
+    });
+    assert!(matches!(
+        rig.coordination
+            .commit(CommitRequest {
+                purpose: CommitPurpose::Ordinary { control_revision: 0 },
+                owner: snapshot.ownership,
+                expected_commit_seq: CommitSeq(candidate.commit_seq.0 - 1),
+                commit_id,
+                content_digest,
+                candidate,
+            })
+            .await
+            .unwrap(),
+        CommitOutcome::Committed(_)
+    ));
+    // New message keys (fresh generations) on the retired Sid never install.
+    let second = round("retired-next", 2);
+    assert_eq!(
+        gateway.rounds.admit(&second).await.unwrap(),
+        Admission::Conflict,
+        "a retired Sid must not admit new rounds"
+    );
+    // The same-request retry of the already-installed round stays a replay.
+    assert!(matches!(
+        gateway.rounds.admit(&first).await.unwrap(),
+        Admission::Replay { .. }
+    ));
+}

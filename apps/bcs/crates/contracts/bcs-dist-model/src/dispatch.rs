@@ -105,6 +105,77 @@ pub struct DispatchExecution {
     /// proof before it may rely on the target's dedupe for a resend.
     #[serde(default)]
     pub send_proof: Option<SendProof>,
+    /// The fenced verification handoff (plan T7): one claim-fenced CAS
+    /// registered the verification mode, the attempt identity, the stable
+    /// query key, the approved method, the next due time and backoff — and
+    /// moved the holder line so the old holder's writes are fenced. Normal
+    /// claims refuse a dispatch in this state from then on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<VerificationHandoff>,
+    /// The durable `Quarantined` record (plan T7): the stop-verification
+    /// deadline passed with the outcome still unknown. Independent of any
+    /// terminal state — the call's phase never crosses the terminal
+    /// threshold on the strength of this record alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quarantined: Option<QuarantineRecord>,
+}
+
+/// The independent verifier claim line (plan T7): epochs on this line are
+/// handed out only by the store's verification CAS, so a write from an
+/// epoch that is no longer current is refused — even while the connector
+/// that originally held the call is still alive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerificationClaim {
+    pub instance: Instance,
+    pub epoch: HolderEpoch,
+}
+
+/// The stable query key of a handed-off obligation (plan T7): the original
+/// operation's request id, or the accepted remote task reference once one
+/// was recorded. Durable, so the verifier re-derives no identity and never
+/// fabricates a task id. `Retained` marks an obligation with no approved
+/// query key: it is kept and alarmed about, never guessed away.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VerificationKey {
+    ByRequest { request_id: RequestId },
+    ByTask { remote: RemoteTaskRef },
+    Retained,
+}
+
+/// What the verifier may still do with a handed-off call (plan T7): the
+/// approved query, an approved cancel, or — with no capability or permission
+/// — only retention and warning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationMethod {
+    Query,
+    CancelOnly,
+    Retain,
+}
+
+/// The durable verification handoff written by the single claim-fenced CAS.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerificationHandoff {
+    /// The current verifier claim, `None` until the first bounded takeover.
+    pub claim: Option<VerificationClaim>,
+    /// The attempt of the send whose outcome stayed unknown.
+    pub attempt: u32,
+    pub key: VerificationKey,
+    pub method: VerificationMethod,
+    /// When the next verification attempt is due.
+    pub next_due: TimestampMillis,
+    /// Backoff between verification attempts, in milliseconds.
+    pub backoff_ms: u64,
+}
+
+/// The abnormal public state reached when the stop-verification deadline
+/// passed with the outcome still unknown (plan T7): saved independently,
+/// never a terminal state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuarantineRecord {
+    pub at: TimestampMillis,
+    pub reason: String,
 }
 
 /// Which send attempt a proof was written for. Mirrors the store's

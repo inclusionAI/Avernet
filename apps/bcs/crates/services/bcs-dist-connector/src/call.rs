@@ -45,9 +45,11 @@ use crate::config::{Backoff, ConnectorConfig, ConnectorPorts};
 use crate::delayed::{self, UnresolvedKind};
 use bcs_dist_model::*;
 use bcs_service_api::core::dist_connector::{ReportCursor, ResumeStep};
-use bcs_service_api::port::dist_agent::{CallAuthority, CallOperation, RemoteEventStream};
+use bcs_service_api::port::dist_agent::{CallAuthority, CallOperation, QueryOutcome, RemoteEventStream, RemoteQuery};
 use crate::send::RemoteRead;
-use bcs_service_api::port::repo::distributed::dispatch::{HeldDispatchPort, HolderError};
+use bcs_service_api::port::repo::distributed::dispatch::{
+    HeldDispatchPort, HolderError, VerificationHandoffDraft,
+};
 use futures::StreamExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -167,9 +169,18 @@ pub(crate) struct Call {
     /// The recovery task read answered with a definite absence: asking
     /// again cannot help, so the stop fact waits for the deadline close.
     pub recovery_gone: bool,
+    /// Verification mode (plan T7): this actor holds a restricted handle
+    /// fenced by the independent verification claim epoch — approved query
+    /// and cancel, persistent reports, quarantine at the deadline, finish on
+    /// verified stop evidence — and never a start, resend or continuation.
+    pub verification: Option<VerificationHandoff>,
     /// The call was finished in `disp` by this actor: `follow` returns.
     pub ended: bool,
 }
+
+/// The durable reason recorded when the stop-verification deadline passed
+/// with the outcome still unknown (plan T7).
+pub(crate) const QUARANTINE_REASON: &str = "stop_verification_deadline";
 
 /// Runs a holder write until it is applied. A lost holder and an impossible
 /// transition stop the actor; a store error is retried with backoff.
@@ -244,8 +255,22 @@ impl Call {
             waiting_ticks: 0,
             completed_stop_seen: false,
             recovery_gone: false,
+            verification: None,
             ended: false,
         }
+    }
+
+    /// Turns this actor into the verifier of the handed-off call it holds
+    /// (plan T7). Called only by the engine after a bounded verification
+    /// claim; the handle fences every write by the claim epoch.
+    pub(crate) fn into_verifier(mut self) -> Self {
+        self.verification = self
+            .held
+            .view()
+            .execution
+            .verification
+            .clone();
+        self
     }
 
     pub fn did(&self) -> &Did {
@@ -352,6 +377,9 @@ impl Call {
     /// `start` and `reattach` return `Ok` also when they leave the call
     /// unresolved or blind; `follow` then keeps watching for a cancel.
     async fn drive(&mut self) -> Flow {
+        if self.verification.is_some() {
+            return self.verify_follow().await;
+        }
         match self.ports.rules.resume_step(self.held.view()) {
             ResumeStep::Nothing => return Ok(()),
             ResumeStep::EndCanceledUnsent => return self.end_canceled_unsent().await,
@@ -514,6 +542,244 @@ impl Call {
         }
     }
 
+    /// The verifier's loop (plan T7): a low-frequency bounded check of a
+    /// handed-off call, waken early by pokes. Ends when the call finished,
+    /// the claim was superseded (Lost), or the state became unactionable.
+    async fn verify_follow(&mut self) -> Flow {
+        while !self.ended {
+            let floor = self
+                .config
+                .verification_interval
+                .max(self.config.verification_backoff_min);
+            let next_tick = Instant::now() + self.retry_backoff.max(floor);
+            let poke = self.poke.clone();
+            tokio::select! {
+                _ = tokio::time::sleep_until(next_tick) => {
+                    self.verify_tick().await?;
+                }
+                _ = poke.notified() => {
+                    self.verify_tick().await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// One look at a handed-off dispatch: the deadline may quarantine the
+    /// call (durable, never terminal), an approved cancel is carried out,
+    /// and the stable key is asked once when due.
+    async fn verify_tick(&mut self) -> Flow {
+        let view = match self.held.refresh().await {
+            Ok(view) => view,
+            // A later verifier owns the epoch: this actor is done.
+            Err(HolderError::Lost) => return Err(Stop::Lost),
+            Err(error) => {
+                tracing::warn!(did = %self.did().0, ?error, "verification poll failed; next tick");
+                return Ok(());
+            }
+        };
+        self.publish_status(&view);
+        // The call was ended by someone else (a worker close, an approved
+        // cancel seen by another verifier): nothing left to verify.
+        let Some(handoff) = view.execution.verification.clone() else {
+            self.ended = true;
+            return Ok(());
+        };
+        let now = self.config.clock.now();
+        // 超过停止核实期限：保存独立 Quarantined，不越过终态门槛。
+        if now >= self.spec().deadline.0 && view.execution.quarantined.is_none() {
+            held_write!(
+                self,
+                "quarantine",
+                self.held.record_quarantine(TimestampMillis(now), QUARANTINE_REASON)
+            );
+        }
+        // An approved cancel is still carried out: request/cancel are the
+        // only actions this mode grants.
+        if view.control.cancel.is_some() {
+            if view.execution.remote.is_some() {
+                self.carry_out_cancel(&view).await?;
+            } else if view.execution.cancellation
+                == CancelObservation::NotSent
+            {
+                held_write!(
+                    self,
+                    "cancel observation",
+                    self.held.record_cancel(CancelObservation::OutcomeUnknown)
+                );
+            }
+        }
+        if self.ended {
+            return Ok(());
+        }
+        // The query cadence lives in this actor's retry backoff: the index
+        // entry keeps Sitzfleisch in the queue for crash recovery, while the
+        // running verifier owns the pacing (bounded doubling, ceiling).
+        if self.backing_off() {
+            return Ok(());
+        }
+        // Index repair before each attempt: a crash between the claim and the
+        // index entry never loses the obligation.
+        let re_due = TimestampMillis(now + self.config.verification_backoff_min.as_millis().min(i64::MAX as u128) as i64);
+        if let Err(error) = self.ports.queue.index_verification(self.did(), re_due).await {
+            tracing::warn!(did = %self.did().0, ?error, "verification index re-arm failed");
+        }
+        self.back_off();
+        match &handoff.key {
+            VerificationKey::ByRequest { request_id } => {
+                let request_id = request_id.clone();
+                return self
+                    .verify_by_request(request_id, handoff.method)
+                    .await;
+            }
+            VerificationKey::ByTask { .. } => {
+                match handoff.method {
+                    VerificationMethod::Query => {
+                        if self.spec().capabilities.query_by_task {
+                            self.read_remote().await?;
+                        } else {
+                            tracing::warn!(
+                                did = %self.did().0,
+                                "by-task verification without the query capability; obligation kept"
+                            );
+                        }
+                    }
+                    _ => tracing::warn!(
+                        did = %self.did().0,
+                        "verification without an approved method; obligation kept"
+                    ),
+                }
+                Ok(())
+            }
+            VerificationKey::Retained => {
+                // 无能力或权限则保留并告警：never fabricated, never dropped.
+                tracing::warn!(
+                    did = %self.did().0,
+                    "handed-off call has no stable query key; obligation retained"
+                );
+                Ok(())
+            }
+        }
+    }
+
+    /// Asks by the stable request key — the T6-requested extension profile —
+    /// and reports what it finds. A foreign task is never evidence; a found
+    /// task is recorded, its state reported, and verified stop evidence
+    /// finishes the call through the ordinary report path.
+    async fn verify_by_request(
+        &mut self,
+        request_id: RequestId,
+        method: VerificationMethod,
+    ) -> Flow {
+        if method != VerificationMethod::Query {
+            tracing::warn!(
+                did = %self.did().0,
+                "by-request verification without the approved query method; obligation kept"
+            );
+            return Ok(());
+        }
+        let authority = self.authority_now(
+            CallOperation::Query,
+            self.held.view().execution.remote.clone(),
+            self.spec(),
+        );
+        match self
+            .ports
+            .agent
+            .query(&authority, RemoteQuery::ByRequest(request_id.clone()))
+            .await
+        {
+            QueryOutcome::Found { remote, status, snapshot } => {
+                let known = self.held.view().execution.remote.clone();
+                if let Some(known) = &known {
+                    if !self.owns(&remote, known) {
+                        tracing::warn!(
+                            did = %self.did().0, task = %remote.task_id,
+                            "by-request answer of a foreign task ignored"
+                        );
+                        return Ok(());
+                    }
+                }
+                // The original task binds under the verification claim
+                // fence when no earlier acceptance did.
+                if known.is_none() {
+                    let evidence = bcs_service_api::port::repo::distributed::dispatch::AcceptanceEvidence {
+                        operation: bcs_service_api::port::repo::distributed::dispatch::SendOperation::Start {
+                            request_id: request_id.clone(),
+                        },
+                        remote: remote.clone(),
+                    };
+                    held_write!(self, "acceptance", self.held.record_acceptance(evidence.clone()));
+                }
+                self.report_task_state(status, snapshot).await
+            }
+            // NotFound stays unknown: never a licence to resend (plan T6).
+            QueryOutcome::NotFound => {
+                tracing::debug!(did = %self.did().0, "request index still has no entry");
+                Ok(())
+            }
+            QueryOutcome::Unavailable { code } => {
+                tracing::debug!(did = %self.did().0, code, "by-request verification unavailable");
+                Ok(())
+            }
+            QueryOutcome::Unsupported => {
+                // The standard profile: the obligation is kept and warned.
+                tracing::warn!(
+                    did = %self.did().0,
+                    "by-request lookup unsupported by this profile; obligation retained"
+                );
+                Ok(())
+            }
+        }
+    }
+
+    /// Hands this call off to the verification lane (plan T7): the one
+    /// claim-fenced CAS registers the mode, the attempt, the stable query
+    /// key, the approved method, the next due time, the backoff and the
+    /// pending scheduling obligation; the read-back confirmed, the actor
+    /// exits and frees its normal slot. Only short-term query exhaustion
+    /// reaches this.
+    pub(crate) async fn hand_off(&mut self, code: &str, key: VerificationKey) -> Flow {
+        let capabilities = self.spec().capabilities.clone();
+        let method = match (&key, capabilities.query_by_request || capabilities.query_by_task) {
+            (VerificationKey::ByRequest { .. }, true) => VerificationMethod::Query,
+            (VerificationKey::ByTask { .. }, true) => VerificationMethod::Query,
+            (_, _) if capabilities.cancel => VerificationMethod::CancelOnly,
+            (_, _) => VerificationMethod::Retain,
+        };
+        let now = self.config.clock.now();
+        let backoff = self.config.verification_backoff_min;
+        let draft = VerificationHandoffDraft {
+            attempt: self.spec().attempt,
+            key,
+            method,
+            next_due: TimestampMillis(now + backoff.as_millis().min(i64::MAX as u128) as i64),
+            backoff_ms: backoff.as_millis().min(u64::MAX as u128) as u64,
+        };
+        held_write!(self, "verification handoff", self.held.hand_off_verification(draft.clone()));
+        // 停摆窗口补齐: the CAS is durable; the index is written after it,
+        // and a crash in between is repaired by the Supervisor's scan of the
+        // authoritative state (`due`), or by the next claim-side repair.
+        if let Err(error) = self
+            .ports
+            .queue
+            .index_verification(self.did(), draft.next_due)
+            .await
+        {
+            tracing::warn!(
+                did = %self.did().0, ?error,
+                "verification index write failed; the Supervisor repair path owns the entry"
+            );
+        }
+        tracing::warn!(
+            did = %self.did().0, code,
+            "short-term query exhausted; call handed off to the verification lane"
+        );
+        // Only after the confirmation/read-back: exit the actor cleanly.
+        self.ended = true;
+        Ok(())
+    }
+
     /// The remote task is known but cannot be followed: report it (D2) and
     /// keep serving replies and cancels. The call stays in `accepted` and
     /// counts as a pending effect; the tick no longer re-attaches or polls.
@@ -556,7 +822,8 @@ impl Call {
             || self.input_blocked
             || self.completed_stop_seen
             || self.blind
-            || self.conflicted;
+            || self.conflicted
+            || self.verification.is_some();
         let pending = stuck || (cancel_open && !self.ended);
         self.status.pending_effect.store(pending, Ordering::SeqCst);
     }

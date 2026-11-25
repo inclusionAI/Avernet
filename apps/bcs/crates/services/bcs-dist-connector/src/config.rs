@@ -80,6 +80,18 @@ pub struct ConnectorConfig {
     /// send is left unresolved, and a finished task is reported from the
     /// cancel answer alone.
     pub not_sent_retries: u32,
+    /// Verifier concurrency: handed-off calls this process verifies at
+    /// once (plan T7). Independent of `max_active_calls`: a handed-off
+    /// call frees its normal slot, and verification slots never block a
+    /// normal claim.
+    pub max_verifications: usize,
+    /// How often the engine looks for due verification work (plan T7):
+    /// the lane runs at its own low frequency.
+    pub verification_interval: Duration,
+    /// First backoff between two verification attempts of one call.
+    pub verification_backoff_min: Duration,
+    /// Ceiling of the verification backoff.
+    pub verification_backoff_max: Duration,
     /// Lifetime of this process's membership record: without a renewal
     /// within it the record expires. A registration that
     /// is not confirmed within it fails the start-up.
@@ -108,6 +120,10 @@ impl ConnectorConfig {
             backoff_min: Duration::from_millis(200),
             backoff_max: Duration::from_secs(5),
             not_sent_retries: 3,
+            max_verifications: 8,
+            verification_interval: Duration::from_secs(2),
+            verification_backoff_min: Duration::from_secs(2),
+            verification_backoff_max: Duration::from_secs(60),
             membership_ttl: Duration::from_secs(3),
             membership_renew: Duration::from_secs(1),
             control_address: String::new(),

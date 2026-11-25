@@ -243,8 +243,9 @@ impl Call {
                             );
                             tries += 1;
                             if tries > self.config.not_sent_retries {
-                                self.mark_unresolved(UnresolvedKind::Uncertain, "remote_ref_mismatch").await;
-                                return Ok(());
+                                return self
+                                    .hand_off("remote_ref_mismatch", VerificationKey::ByRequest { request_id })
+                                    .await;
                             }
                             backoff.wait().await;
                             continue;
@@ -263,12 +264,19 @@ impl Call {
                     return Ok(());
                 }
                 QueryOutcome::Unsupported => {
-                    self.mark_unresolved(UnresolvedKind::Uncertain, "query_by_request_unsupported").await;
-                    return Ok(());
+                    // The standard profile keeps this unknown a verification
+                    // obligation (plan T7): never a resend, never a recovery.
+                    return self
+                        .hand_off(
+                            "query_by_request_unsupported",
+                            VerificationKey::ByRequest { request_id },
+                        )
+                        .await;
                 }
                 // "Not found" may only mean "not registered yet": ask a few
-                // times, and even then it is no proof, so the call is left
-                // unresolved rather than sent again.
+                // times, and even then it is no proof. The short-term query
+                // capacity is exhausted: hand the call to the verification
+                // lane (plan T7) instead of parking it in the actor forever.
                 outcome @ (QueryOutcome::NotFound | QueryOutcome::Unavailable { .. }) => {
                     tries += 1;
                     if tries > self.config.not_sent_retries {
@@ -276,8 +284,9 @@ impl Call {
                             QueryOutcome::Unavailable { code } => code,
                             _ => "not_found_by_request".to_owned(),
                         };
-                        self.mark_unresolved(UnresolvedKind::Uncertain, &code).await;
-                        return Ok(());
+                        return self
+                            .hand_off(&code, VerificationKey::ByRequest { request_id })
+                            .await;
                     }
                     backoff.wait().await;
                 }

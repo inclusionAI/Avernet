@@ -43,6 +43,7 @@ use bcs_service_api::core::dist_connector::INPUT_MAYBE_SENT;
 use bcs_service_api::port::repo::distributed::common::{IdempotentWrite, StoreError};
 use bcs_service_api::port::repo::distributed::dispatch::{
     AcceptanceEvidence, HeldDispatchPort, HolderError, SendOperation, SendPermit,
+    VerificationHandoffDraft,
 };
 use bcs_store_api::Version;
 use std::sync::Arc;
@@ -437,6 +438,93 @@ impl HeldDispatchPort for StoreHeldDispatch {
             Ok(Step::Write(Box::new(next), doc.connector.clone(), IdempotentWrite::Applied))
         })
         .await
+    }
+
+    /// The claim-fenced handoff CAS (plan T7). One merge — at the fencing
+    /// version of this handle — moves the holder line one generation past
+    /// this holder (a write of the old handle is refused from then on) and
+    /// registers the verification mode, the attempt identity, the stable
+    /// query key, the approved method, the next due time and backoff,
+    /// together with the `due` obligation. An unknown write outcome is
+    /// resolved by reading the document back: the handoff is only reported
+    /// successful once it is visibly durable.
+    async fn hand_off_verification(
+        &mut self,
+        draft: VerificationHandoffDraft,
+    ) -> Result<IdempotentWrite, HolderError> {
+        let did = self.view.spec.did.clone();
+        let handoff = VerificationHandoff {
+            claim: None,
+            attempt: draft.attempt,
+            key: draft.key,
+            method: draft.method,
+            next_due: draft.next_due,
+            backoff_ms: draft.backoff_ms,
+        };
+        let mut unknown = false;
+        for _ in 0..self.shared.config.write_attempts {
+            let doc = match self.read_fenced().await {
+                Err(HolderError::Store(_)) if unknown => {
+                    return Err(HolderError::Store(StoreError::OutcomeUnknown {
+                        operation_id: did.0,
+                    }));
+                }
+                other => other?,
+            };
+            match &doc.view.execution.verification {
+                Some(registered) if registered.key == handoff.key
+                    && registered.method == handoff.method =>
+                {
+                    // An earlier attempt landed: the read-back confirms it.
+                    return Ok(IdempotentWrite::AlreadyApplied);
+                }
+                Some(_) => {
+                    return invalid("verification_already_handed_off");
+                }
+                None => {}
+            }
+            if doc.view.execution.phase == DispatchPhase::Ended {
+                return invalid("handoff_ended_dispatch");
+            }
+            let holder = Holder {
+                instance: self.holder.instance.clone(),
+                epoch: HolderEpoch(self.holder.epoch.0.checked_add(1).ok_or_else(|| {
+                    HolderError::Store(StoreError::Invalid {
+                        code: "holder_epoch_overflow".into(),
+                    })
+                })?),
+            };
+            let next = version::next(doc.version)?;
+            let mutation = crate::doc::handoff_write(&holder, &handoff);
+            match self.shared.mutate(&did, next, mutation).await? {
+                Wrote::Applied(_) => {
+                    return Ok(IdempotentWrite::Applied);
+                }
+                Wrote::Rejected => {}
+                Wrote::Unknown => unknown = true,
+            }
+        }
+        Err(HolderError::Store(if unknown {
+            StoreError::OutcomeUnknown {
+                operation_id: did.0,
+            }
+        } else {
+            StoreError::NotApplied {
+                code: "disp_write_contended".into(),
+            }
+        }))
+    }
+
+    /// Quarantine is written only through the verification claim line; a
+    /// normal holder never crosses the terminal threshold on its own.
+    async fn record_quarantine(
+        &mut self,
+        _at: TimestampMillis,
+        _reason: &str,
+    ) -> Result<IdempotentWrite, HolderError> {
+        Err(HolderError::InvalidTransition {
+            code: "verification_mode".into(),
+        })
     }
 
     /// Ends the call: phase `ended` with its outcome, and the evidence string

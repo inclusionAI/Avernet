@@ -551,6 +551,7 @@ pub fn outcome_name(outcome: &ClaimOutcome) -> &'static str {
         ClaimOutcome::HeldByOther(_) => "held_by_other",
         ClaimOutcome::Ended => "ended",
         ClaimOutcome::NotFound => "not_found",
+        ClaimOutcome::Verification => "verification",
     }
 }
 
@@ -604,6 +605,8 @@ impl WorkerFixture {
                 cancellation: CancelObservation::NotSent,
                 outcome: None,
                 send_proof: None,
+                verification: None,
+                quarantined: None,
             },
         };
         let outcome = self

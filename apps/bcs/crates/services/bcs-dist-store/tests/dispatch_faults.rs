@@ -881,7 +881,10 @@ async fn delayed_dispatch_scan_keeps_its_fixed_cut_while_the_journal_grows() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(cursor.value["cut"], 1);
+    // The per-round upper bound is a stable directory key (schema 2): the
+    // round never swallows rows appended after the arm, whatever later
+    // reclaim removes from the arrays below.
+    assert_eq!(cursor.value["upper"], 1);
     let mut second = spec();
     second.did = Did(format!("{}.d2", common::TID));
     let source = f

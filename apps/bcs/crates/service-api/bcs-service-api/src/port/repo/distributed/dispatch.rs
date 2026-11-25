@@ -41,6 +41,15 @@ pub struct DispatchRecord {
     /// Retained evidence for the definitive terminal outcome. Unknown remote
     /// work has no terminal evidence; Supervisor must not fabricate an outcome.
     pub terminal_evidence: Option<String>,
+    /// The verification handoff currently in force (plan T7): the Supervisor
+    /// routes a record carrying one to the verification queue instead of a
+    /// normal execution hint.
+    pub verification: Option<VerificationHandoff>,
+    /// The durable `Quarantined` record (plan T7): the stop-verification
+    /// deadline passed with the outcome still unknown. Independent of the
+    /// terminal threshold; readers expose the retained WORKING state with a
+    /// `stop_unconfirmed`-class snapshot, never a fabricated outcome.
+    pub quarantined: Option<QuarantineRecord>,
 }
 
 #[async_trait]
@@ -83,6 +92,21 @@ pub trait DispatchControlPort: Send + Sync {
         expected: Revision,
         at: TimestampMillis,
     ) -> Result<RecheckOutcome, StoreError>;
+    /// Register this did in the verification queue index (plan T7). The
+    /// queue is a repairable index over the authoritative dispatch state,
+    /// never a second ownership source: it may list too much, never too
+    /// little. The Supervisor calls this from its scan of the authoritative
+    /// state when it finds a verification-mode dispatch whose index entry is
+    /// missing (a crash between the handoff CAS and the index write).
+    async fn index_verification(
+        &self,
+        _did: &Did,
+        _due: TimestampMillis,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::NotApplied {
+            code: "verification_queue_unsupported".into(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +120,54 @@ pub enum ClaimOutcome {
     Acquired(Box<dyn HeldDispatchPort>),
     OwnedByMe(Holder),
     HeldByOther(Holder),
+    Ended,
+    NotFound,
+    /// The dispatch is in verification mode (plan T7): normal execution
+    /// claims, repeated hints and no-actor rebuild paths are all refused;
+    /// the caller routes the did to the verification queue instead.
+    Verification,
+}
+
+/// The draft of one verification handoff (plan T7): the current claim
+/// fence protects the CAS that registers these facts all at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerificationHandoffDraft {
+    /// The attempt of the send whose outcome stayed unknown.
+    pub attempt: u32,
+    /// The stable query key: the original request id, or the accepted
+    /// remote task reference once one was recorded.
+    pub key: VerificationKey,
+    /// The approved verification method.
+    pub method: VerificationMethod,
+    /// When the next verification attempt is due — also the pending
+    /// scheduling obligation, so scans of the authoritative state never
+    /// miss a handed-off call.
+    pub next_due: TimestampMillis,
+    /// Backoff between verification attempts, in milliseconds.
+    pub backoff_ms: u64,
+}
+
+/// One bounded verification claim (plan T7). Claims through this request
+/// advance the independent verification epoch; the original Connector may
+/// still be alive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerificationClaimRequest {
+    pub did: Did,
+    pub me: Instance,
+    pub request_id: RequestId,
+}
+
+/// The outcome of one verification claim. The acquired handle is a
+/// restricted holder: approved query/cancel and persistent reports only;
+/// start, resend and continuation are refused.
+pub enum VerificationClaimOutcome {
+    /// The claim advanced one epoch and is durable; the old epoch's writes
+    /// are fenced from now on. A claim by the same instance also advances
+    /// the epoch (the issue rate is one at a time per instance, and the
+    /// taken-over handle is fenced by the new epoch).
+    Acquired(Box<dyn HeldDispatchPort>),
+    /// Another instance took the epoch first and holds it.
+    ClaimedBy(VerificationClaim),
     Ended,
     NotFound,
 }
@@ -119,11 +191,50 @@ pub trait DispatchQueuePort: Send + Sync {
     async fn claim(&self, request: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError>;
     /// Only after the local actor is stopped/joined. Atomically advances generation.
     async fn resume_owned(&self, request: ResumeOwnedDispatch) -> Result<ClaimOutcome, StoreError>;
+    /// Registers or re-registers a due verification entry in the queue
+    /// index (plan T7): the index is a repairable over-approximation of the
+    /// authoritative dispatch state, never an ownership source.
+    async fn index_verification(
+        &self,
+        _did: &Did,
+        _due: TimestampMillis,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::NotApplied {
+            code: "verification_queue_unsupported".into(),
+        })
+    }
     async fn notifications(
         &self,
         pool: PoolId,
         me: Instance,
     ) -> Result<Box<dyn CommandFeedPort>, StoreError>;
+    /// The due page of the verification queue index (plan T7): entries whose
+    /// due time has passed, oldest first. The index is repairable from the
+    /// authoritative dispatch state alone; a claim must re-check the
+    /// document before it takes anything.
+    async fn due_verifications(
+        &self,
+        now: TimestampMillis,
+        page: PageRequest,
+    ) -> Result<Page<Did>, StoreError> {
+        let _ = now;
+        let _ = page;
+        Err(StoreError::NotApplied {
+            code: "verification_queue_unsupported".into(),
+        })
+    }
+    /// One bounded verifier claim (plan T7): advances the independent
+    /// verification epoch of the dispatch's handoff and returns a restricted
+    /// holder that fences every write by that epoch.
+    async fn claim_verification(
+        &self,
+        request: VerificationClaimRequest,
+    ) -> Result<VerificationClaimOutcome, StoreError> {
+        let _ = request;
+        Err(StoreError::NotApplied {
+            code: "verification_queue_unsupported".into(),
+        })
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -213,4 +324,31 @@ pub trait HeldDispatchPort: Send {
         outcome: FinalDispatchOutcome,
         evidence: String,
     ) -> Result<IdempotentWrite, HolderError>;
+    /// The claim-fenced verification handoff CAS (plan T7). Registers the
+    /// verification mode, the attempt identity, the stable query key, the
+    /// approved method, the next due time and backoff — atomically, under
+    /// the holder fence, together with the pending scheduling obligation —
+    /// and moves the holder line so the old holder's further writes are
+    /// refused. The actor may exit only after the write is confirmed or
+    /// read back (the transition machinery resolves an unknown answer).
+    async fn hand_off_verification(
+        &mut self,
+        _draft: VerificationHandoffDraft,
+    ) -> Result<IdempotentWrite, HolderError> {
+        Err(HolderError::InvalidTransition {
+            code: "verification_handoff_unsupported".into(),
+        })
+    }
+    /// Records the durable `Quarantined` state (plan T7) through the
+    /// verifier's own fence: the stop-verification deadline passed with the
+    /// outcome still unknown. Idempotent; never moves the phase to Ended.
+    async fn record_quarantine(
+        &mut self,
+        _at: TimestampMillis,
+        _reason: &str,
+    ) -> Result<IdempotentWrite, HolderError> {
+        Err(HolderError::InvalidTransition {
+            code: "quarantine_unsupported".into(),
+        })
+    }
 }

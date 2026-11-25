@@ -50,9 +50,10 @@ use bcs_dist_store::command::CommandStreams;
 use bcs_dist_store::inbox::Clock;
 use bcs_dist_store::layout::KeyLayout;
 use bcs_dist_store::version;
-use bcs_service_api::port::repo::distributed::common::StoreError;
+use bcs_service_api::port::repo::distributed::common::{Page, PageRequest, StoreError};
 use bcs_service_api::port::repo::distributed::dispatch::{
     ClaimOutcome, CommandFeedPort, DispatchClaimRequest, DispatchQueuePort, ResumeOwnedDispatch,
+    VerificationClaimOutcome, VerificationClaimRequest,
 };
 use bcs_service_api::port::repo::distributed::ownership::{Liveness, MembershipPort};
 use bcs_store_api::StoreCapability;
@@ -303,6 +304,12 @@ impl StoreDispatchQueue {
             if doc.view.execution.phase == DispatchPhase::Ended {
                 return Ok(ClaimOutcome::Ended);
             }
+            // Verification mode (plan T7): normal execution claims, repeated
+            // hints and rebuild paths all refuse; the caller routes the did
+            // to the verification queue instead.
+            if doc.view.execution.verification.is_some() {
+                return Ok(ClaimOutcome::Verification);
+            }
             if let Some(holder) = &doc.view.execution.holder {
                 if holder.instance == request.me {
                     return Ok(ClaimOutcome::OwnedByMe(holder.clone()));
@@ -377,6 +384,9 @@ impl DispatchQueuePort for StoreDispatchQueue {
         if doc.view.execution.phase == DispatchPhase::Ended {
             return Ok(ClaimOutcome::Ended);
         }
+        if doc.view.execution.verification.is_some() {
+            return Ok(ClaimOutcome::Verification);
+        }
         match &doc.view.execution.holder {
             Some(holder) if *holder == request.previous => {}
             Some(holder) if holder.instance == *me => {
@@ -414,5 +424,137 @@ impl DispatchQueuePort for StoreDispatchQueue {
     ) -> Result<Box<dyn CommandFeedPort>, StoreError> {
         let feed = StoreCommandFeed::open(self.shared.clone(), pool, &me).await?;
         Ok(Box::new(feed))
+    }
+
+    /// Registers or re-registers a verification entry (plan T7). Idempotent
+    /// upsert: a repair rewrites the entry, never duplicates it. The index
+    /// may list too much, never too little — claims re-check the document.
+    async fn index_verification(
+        &self,
+        did: &Did,
+        due: TimestampMillis,
+    ) -> Result<(), StoreError> {
+        self.shared.layout.disp(did)?;
+        crate::verify_index::add(&self.shared, did, due).await
+    }
+
+    /// The due page of the verification queue index, oldest first. One
+    /// bounded window per call: entries newer than the page head surface in
+    /// a later sweep, so no unbounded work is pulled in one pass.
+    async fn due_verifications(
+        &self,
+        now: TimestampMillis,
+        page: PageRequest,
+    ) -> Result<Page<Did>, StoreError> {
+        let limit = crate::verify_index::limit(page.limit);
+        let items = crate::verify_index::page(&self.shared, now, None, limit).await?;
+        Ok(Page {
+            items: items.into_iter().map(|(did, _)| did).collect(),
+            next: None,
+        })
+    }
+
+    /// One bounded verifier claim (plan T7): re-checks the authoritative
+    /// document, then advances the independent verification epoch by one
+    /// through a single CAS — no liveness question stands between a due
+    /// entry and the next verifier, because the original Connector being
+    /// alive never blocks the takeover.
+    async fn claim_verification(
+        &self,
+        request: VerificationClaimRequest,
+    ) -> Result<VerificationClaimOutcome, StoreError> {
+        self.shared.layout.disp(&request.did)?;
+        let mut last_claim = None;
+        for _ in 0..CLAIM_ATTEMPTS {
+            let Some(doc) = self.shared.read(&request.did).await? else {
+                // Stale index entry: remove it so it stops paging.
+                let _ = crate::verify_index::remove(&self.shared, &request.did).await;
+                return Ok(VerificationClaimOutcome::NotFound);
+            };
+            if doc.view.execution.phase == DispatchPhase::Ended {
+                let _ = crate::verify_index::remove(&self.shared, &request.did).await;
+                return Ok(VerificationClaimOutcome::Ended);
+            }
+            let Some(handoff) = &doc.view.execution.verification else {
+                // Stale index entry: the dispatch left verification mode.
+                let _ = crate::verify_index::remove(&self.shared, &request.did).await;
+                return Ok(VerificationClaimOutcome::NotFound);
+            };
+            if let Some(claim) = &handoff.claim {
+                if claim.instance != request.me {
+                    last_claim = Some(claim.clone());
+                }
+                // A claim by this same instance also advances the epoch: the
+                // issue rate is one at a time per instance and per did, so a
+                // re-claim fences the old epoch's (crashed) handle instead of
+                // stranding the call on its own instance.
+            }
+            let epoch = handoff.claim.as_ref().map_or(0, |c| c.epoch.0);
+            let Some(epoch) = epoch.checked_add(1) else {
+                return Err(StoreError::Invalid {
+                    code: "verification_epoch_overflow".into(),
+                });
+            };
+            let claim = VerificationClaim {
+                instance: request.me.clone(),
+                epoch: HolderEpoch(epoch),
+            };
+            let mut next = doc.view.execution.clone();
+            next.verification = Some(VerificationHandoff {
+                claim: Some(claim.clone()),
+                ..handoff.clone()
+            });
+            let version = version::next(doc.version)?;
+            let holder = doc
+                .view
+                .execution
+                .holder
+                .clone()
+                .unwrap_or(Holder { instance: request.me.clone(), epoch: HolderEpoch(0) });
+            let mutation = crate::doc::handoff_write(&holder, next.verification.as_ref().unwrap());
+            let wrote = self.shared.mutate(&request.did, version, mutation).await?;
+            let unknown = matches!(wrote, Wrote::Unknown);
+            let read_back = match wrote {
+                Wrote::Rejected => None,
+                Wrote::Applied(_) | Wrote::Unknown => match self.shared.read(&request.did).await {
+                    Ok(Some(now)) if now
+                        .view
+                        .execution
+                        .verification
+                        .as_ref()
+                        .and_then(|h| h.claim.as_ref())
+                        == Some(&claim) =>
+                    {
+                        Some(Some(now))
+                    }
+                    Ok(_) if unknown => None,
+                    // Applied but not readable back: the claim state is
+                    // unknown, never assumed.
+                    Ok(_) => {
+                        return Err(StoreError::OutcomeUnknown {
+                            operation_id: request.did.0.clone(),
+                        });
+                    }
+                    Err(error) => return Err(error),
+                },
+            };
+            if let Some(now) = read_back.flatten() {
+                let handle = crate::verify_held::StoreVerificationDispatch::new(
+                    self.shared.clone(),
+                    claim,
+                    now.view,
+                    now.version,
+                );
+                // The claim is durable: the entry is due again at the
+                // handoff's own cadence, so the index never drops work.
+                return Ok(VerificationClaimOutcome::Acquired(Box::new(handle)));
+            }
+        }
+        match last_claim {
+            Some(claim) => Ok(VerificationClaimOutcome::ClaimedBy(claim)),
+            None => Err(StoreError::NotApplied {
+                code: "verification_claim_contended".into(),
+            }),
+        }
     }
 }

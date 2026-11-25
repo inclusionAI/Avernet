@@ -327,3 +327,82 @@ async fn takeover_preserves_a_concurrent_worker_cancel_in_the_same_document() {
     assert_eq!(raw.value["receipts"].as_array().unwrap().len(), 2);
     assert!(raw.value.get("view").is_none() && raw.value.get("data").is_none());
 }
+
+/// Plan T7 slice 4: the store-level `Quarantined` and verification handoff
+/// read semantics — the consumable seam handed to T8. A handed-off,
+/// deadline-quarantined call is exposed through `DispatchControlPort::get`
+/// with its verification record and its `Quarantined` marker, stays in a
+/// non-terminal phase with no outcome, and never answers a normal claim.
+#[tokio::test]
+async fn a_quarantined_handoff_is_readable_and_never_normally_claimable() {
+    let f = Fixture::new().await;
+    f.board.create(f.create().await).await.unwrap();
+    let mut held = f.claim().await;
+    held.begin_send(start(), proof(&start())).await.unwrap();
+    held.hand_off_verification(VerificationHandoffDraft {
+        attempt: 1,
+        key: VerificationKey::ByRequest {
+            request_id: RequestId(format!("{}:start", spec().did.0)),
+        },
+        method: VerificationMethod::Retain,
+        next_due: TimestampMillis(10),
+        backoff_ms: 1000,
+    })
+    .await
+    .unwrap();
+    // The verifier claims through the independent epoch line and quarantines
+    // at the deadline; nothing terminal is crossed doing so.
+    let mut verifier = match f
+        .queue
+        .claim_verification(VerificationClaimRequest {
+            did: spec().did,
+            me: me(),
+            request_id: RequestId("v1".into()),
+        })
+        .await
+        .unwrap()
+    {
+        VerificationClaimOutcome::Acquired(handle) => handle,
+        _other => panic!("claim_verification must acquire"),
+    };
+    verifier
+        .record_quarantine(TimestampMillis(5000), "stop_verification_deadline")
+        .await
+        .unwrap();
+    assert_eq!(
+        verifier
+            .record_quarantine(TimestampMillis(6000), "stop_verification_deadline")
+            .await
+            .unwrap(),
+        IdempotentWrite::AlreadyApplied,
+        "the durable quarantine record is idempotent"
+    );
+    // The consumable read seam (T8 maps the HTTP surface onto exactly this).
+    let record = f.board.get(&spec().did).await.unwrap().unwrap();
+    assert!(record.verification.is_some(), "the handoff is exposed");
+    assert!(record.quarantined.is_some(), "the quarantine record is exposed");
+    assert_eq!(record.quarantined.as_ref().unwrap().reason, "stop_verification_deadline");
+    assert_ne!(record.view.execution.phase, DispatchPhase::Ended, "no terminal crossing");
+    assert_eq!(record.view.execution.outcome, None);
+    // The retained WORKING-facing state stays intact for the reader.
+    assert!(record.terminal_evidence.is_none());
+    // Normal claims refuse the verification mode outright.
+    match f
+        .queue
+        .claim(DispatchClaimRequest {
+            did: spec().did,
+            me: me(),
+            request_id: RequestId("late".into()),
+        })
+        .await
+        .unwrap()
+    {
+        ClaimOutcome::Verification => {}
+        _other => panic!("normal claims must refuse verification mode"),
+    }
+    // The by-request read keeps the original task state half-open: the same
+    // read semantics repeat identically after a reopen (restart).
+    let record = f.reopen().get(&spec().did).await.unwrap().unwrap();
+    assert!(record.quarantined.is_some());
+    assert_ne!(record.view.execution.phase, DispatchPhase::Ended);
+}

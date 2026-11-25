@@ -182,16 +182,31 @@ async fn an_agent_that_can_be_asked_is_asked_instead_of_resent() {
 }
 
 #[tokio::test]
-async fn an_agent_that_does_not_know_the_request_leaves_the_call_unresolved() {
+async fn an_agent_that_does_not_know_the_request_keeps_the_call_as_a_verification_obligation() {
+    // Plan T7 slice 4: the short-term by-request retries answer "not found"
+    // (and then nothing—the script is empty), so the call is handed off to
+    // the verification lane instead of parking an actor on it forever.
+    // Every T6 protection is kept: not found is no licence to resend, the
+    // call stays in its phase, and nothing terminal is invented.
     let mut rig = Rig::new().await;
     let _old = former_holder(&rig, spec_with(|c| c.query_by_request = true), DispatchPhase::Sending).await;
     dead_holders(&mut rig);
     rig.agent.on_request(bcs_service_api::port::dist_agent::QueryOutcome::NotFound);
+    // No verifier lane in this rig: the handoff must free the normal slot.
+    rig.config.max_verifications = 0;
     rig.worker.notify().await;
     let running = rig.start();
-    until("unresolved", || async { running.pending_effects().await == 1 }).await;
+    until("handed off", || async {
+        rig.doc().await["execution"]["verification"].is_object()
+    })
+    .await;
+    until("the normal slot is free", || async { running.active().await == 0 }).await;
     assert_eq!(rig.agent.count("start"), 0, "not found is no licence to resend");
     assert_eq!(rig.phase().await, "sending");
+    assert_eq!(
+        rig.doc().await["execution"]["verification"]["key"]["kind"], "by_request",
+        "the original request identity is the durable query key"
+    );
 }
 
 #[tokio::test]

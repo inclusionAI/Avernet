@@ -39,14 +39,14 @@
 //!   highest reply seq the agent definitely accepted (spec rule B12).
 
 use bcs_dist_model::{
-    DispatchControlState, DispatchExecution, DispatchSpec, DispatchView, InputSeq,
+    DispatchControlState, DispatchExecution, DispatchSpec, DispatchView, InputSeq, TimestampMillis,
 };
 use bcs_dist_store::codec::SCHEMA_VERSION;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_store_api::json::JsonMutation;
 use bcs_store_api::{Version, Versioned};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// Facts only the Connector needs, which `DispatchExecution` has no field for.
 ///
@@ -184,6 +184,50 @@ pub fn connector_write(
         }
     }
     Ok(JsonMutation::Merge(patch))
+}
+
+/// `connector_write`, plus a scheduled `due` obligation. The due is patched
+/// in the same merge as the execution write, so a verifier's re-schedule and
+/// its state changes are one CAS.
+pub fn connector_write_due(
+    old: &DispatchDoc,
+    execution: &DispatchExecution,
+    connector: &ConnectorState,
+    due: TimestampMillis,
+) -> Result<JsonMutation, StoreError> {
+    let JsonMutation::Merge(mut patch) = connector_write(old, execution, connector)? else {
+        // connector_write always merges; anything else is a store bug, and
+        // a write is never half-completed on a guess.
+        return Err(invalid("dispatch_merge"));
+    };
+    // The caller re-checked the current document: the scheduled due is not
+    // a stale overwrite of someone else's settlement.
+    patch.insert("due".into(), Value::from(due.0));
+    Ok(JsonMutation::Merge(patch))
+}
+
+/// The one-merge handoff mutation (plan T7): the execution patch (the
+/// CURRENT holder — the caller re-read it — plus the verification record)
+/// and the pending scheduling obligation (`due`), one merge for a single
+/// claim-fenced CAS. The holder is written unchanged too, so a claim CAS
+/// and a handoff CAS share the same document shape.
+pub fn handoff_write(
+    holder: &bcs_dist_model::Holder,
+    handoff: &bcs_dist_model::VerificationHandoff,
+) -> JsonMutation {
+    let mut patch = serde_json::Map::new();
+    patch.insert(
+        "due".to_owned(),
+        Value::from(handoff.next_due.0),
+    );
+    patch.insert(
+        "execution".to_owned(),
+        json!({
+            "holder": holder,
+            "verification": handoff,
+        }),
+    );
+    JsonMutation::Merge(patch)
 }
 
 /// Builds the merge patch of a claim: `execution.holder` only (plus

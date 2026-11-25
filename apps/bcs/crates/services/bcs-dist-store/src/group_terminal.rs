@@ -361,6 +361,37 @@ impl StoreGroupRoundAdmission {
     }
 }
 
+/// 关闭轮次后的有界压缩 (plan T7): drop the closed round's hot history from
+/// the checkpoint — the retained `group_terminal` authority and the cold
+/// proof this window confirms carry its public truth from now on. Only the
+/// closing license's own task facts move; everything the ledger still owes
+/// stays exactly where it was.
+///
+/// Retained, verbatim:
+/// - the `last_event_id` / `consumed` watermarks (拒绝旧事件),
+/// - the runner state (`group_admission` license + `group_terminal` proof;
+///   the next-generation install condenses it into the per-Tid cold proof),
+/// - every unfinished obligation: all `feed_publications` entries (their
+///   completion is proven by the publication lane, never by this window),
+///   every `dispatch_seq` entry (dispatch supervision watermarks),
+/// - every other task, deadline and view draft (work not closed here).
+///
+/// Dropped, for the closed task alone: its `TaskProgress` (the biggest
+/// per-round artifact — the frozen input payload and finalization record,
+/// whose authority was just sealed into the runner state), its `view_drafts`
+/// entry, and its `deadlines` / `deadline_history` identities.
+pub fn compact_closed_round(checkpoint: &mut Checkpoint, license: &StrictLicense) {
+    let tid = &license.tid;
+    checkpoint.tasks.retain(|task| task.tid != *tid);
+    checkpoint.view_drafts.remove(tid);
+    checkpoint
+        .deadlines
+        .retain(|deadline| !matches!(&deadline.kind, DeadlineKind::Task { tid: closed } if closed == tid));
+    checkpoint.deadline_history.retain(|_, deadline| {
+        !matches!(&deadline.kind, DeadlineKind::Task { tid: closed } if closed == tid)
+    });
+}
+
 /// Build the terminal proof of an open window purely from sealed facts: the
 /// Done task's frozen record, its archived result reference, and the head
 /// the authority CAS will take. The identity is the shared deterministic

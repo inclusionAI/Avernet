@@ -62,6 +62,8 @@ pub fn created() -> DispatchView {
             cancellation: CancelObservation::NotSent,
             outcome: None,
             send_proof: None,
+            verification: None,
+            quarantined: None,
         },
     }
 }

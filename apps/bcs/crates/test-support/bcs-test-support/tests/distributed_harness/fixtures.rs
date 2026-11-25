@@ -278,6 +278,8 @@ pub fn dispatch_view() -> DispatchView {
             cancellation: CancelObservation::NotSent,
             outcome: None,
             send_proof: None,
+            verification: None,
+            quarantined: None,
         },
     }
 }

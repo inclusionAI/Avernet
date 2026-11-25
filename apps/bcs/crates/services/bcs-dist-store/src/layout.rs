@@ -202,6 +202,15 @@ impl KeyLayout {
         format!("{PREFIX}:{}:{}", self.cluster, self.namespace)
     }
 
+    /// The verification queue index (plan T7): one namespace-wide ordered
+    /// set whose members are dispatch ids scored by their next due time.
+    /// A repairable index over the authoritative dispatch state, never an
+    /// ownership source; every key is identical in every provider that
+    /// shares this layout.
+    pub fn verify_queue(&self) -> String {
+        format!("{}:verify-queue", self.namespace_identity())
+    }
+
     /// Stable task listing, ordered lexicographically by immutable tid.
     pub fn tasks(&self, scope: &bcs_dist_model::TaskScope) -> Result<String, StoreError> {
         segment(&scope.tenant.0)?;

@@ -89,6 +89,9 @@ impl InboxProducerPort for Inbox {
 pub struct Board {
     pub inner: Arc<bcs_dist_store::dispatch::StoreDispatch>,
     pub notify_calls: Mutex<Vec<Did>>,
+    /// Verification-mode dispatches routed to the queue index (plan T7):
+    /// (did, due) pairs, recorded instead of a normal notify.
+    pub index_verification_calls: Mutex<Vec<(Did, TimestampMillis)>>,
     pub old_revision: AtomicBool,
     pub always_old_revision: AtomicBool,
     pub reschedule_calls: Mutex<Vec<Revision>>,
@@ -113,6 +116,17 @@ impl DispatchControlPort for Board {
     async fn notify(&self, p: &PoolId, d: &Did) -> Result<(), StoreError> {
         self.notify_calls.lock().unwrap().push(d.clone());
         self.inner.notify(p, d).await
+    }
+    async fn index_verification(
+        &self,
+        d: &Did,
+        due: TimestampMillis,
+    ) -> Result<(), StoreError> {
+        self.index_verification_calls
+            .lock()
+            .unwrap()
+            .push((d.clone(), due));
+        self.inner.index_verification(d, due).await
     }
     async fn get(&self, d: &Did) -> Result<Option<DispatchRecord>, StoreError> {
         let mut record = self.inner.get(d).await?;
@@ -311,6 +325,7 @@ impl Harness {
         let board = Arc::new(Board {
             inner: f.dispatch.clone(),
             notify_calls: Mutex::new(vec![]),
+            index_verification_calls: Mutex::new(vec![]),
             old_revision: AtomicBool::new(false),
             always_old_revision: AtomicBool::new(false),
             reschedule_calls: Mutex::new(vec![]),
