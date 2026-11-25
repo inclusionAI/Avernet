@@ -793,6 +793,8 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-domain",
+ "bcs-edge-permission",
+ "bcs-edge-permission-store",
  "bcs-friend",
  "bcs-group",
  "bcs-relation",
