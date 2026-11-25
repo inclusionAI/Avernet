@@ -39,6 +39,22 @@ codes use `UNAVAILABLE`. OpenClaw failed ACKs keep `error.code` and
 error-code enum that clients must recognize. Normal, aborted and final events,
 other engines, and existing retry/termination timing are unchanged.
 
+### Session runtime observation
+
+`GET /api/sessions/runtime/status?session_id=...` checks session history access
+before reading process-local OpenClaw WebSocket and A2A run records. Both
+transports expose the same run identity, start time, state and event sequence;
+A2A tool, assistant and lifecycle events advance its existing kernel sequence,
+even when replay buffering is exhausted. Queries do not execute or resume work.
+An active run takes precedence over retained terminal records; multiple active
+runs produce `AMBIGUOUS_RUN`. With only terminal records from both transports,
+the most recently started observed run is returned. Terminal records expire
+with their transport's existing retention policy (180 seconds).
+
+Observation remains process-local: `NO_ACTIVE_RUN` is not proof that a session
+has finished, and callers must retain their existing fallback for unavailable,
+missing or ambiguous observations. Callers do not select a transport.
+
 ### Local Skill package publication
 
 An Engine advertising `skills.local_package.parallel_targets.v1` allows

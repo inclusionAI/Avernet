@@ -81,6 +81,9 @@ def test_relay_prompt_forbids_dispatch_for_terminal_and_bbs_plans() -> None:
     assert "S6 只有在 target_node_id 非空且 bbs_publish_pending=false" in prompt
     assert "task_completed=true、task_hung=true 或 bbs_publish_pending=true" in prompt
     assert "不得调用 dispatch" in prompt
+    assert "成功响应中的 data.handoff_display 是当前棒 S6 用户可见交接卡片的数据" in prompt
+    assert "必须按当前 Runtime 支持的会话消息通道一次性投递" in prompt
+    assert "不得在会话回复与旁路消息之间重复发送" in prompt
     assert "HTTP 422 表示契约非法" in prompt
     assert "HTTP 409 表示状态冲突或执行代次失效" in prompt
     assert "禁止换 event_id 或 token" in prompt
