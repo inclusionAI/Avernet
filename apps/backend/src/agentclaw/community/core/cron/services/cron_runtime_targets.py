@@ -28,6 +28,12 @@ VALID_RUNTIME_STAGES = {
 MULTI_INSTANCE_DEVICE_PROVIDERS = {"baas", "teclaw"}
 SINGLE_INSTANCE_DEVICE_PROVIDERS = {"arca", "local"}
 
+
+# 仅 teclaw 在 online 发布成功后保留 verify BaaS bot；default/arca/baas 会销毁
+# verify bot，因此 SUCCESS 发布单上的 verify binding 即使残留 ACTIVE，也不再是
+# 可执行运行态。
+RETAINED_VERIFY_DEVICE_PROVIDERS = frozenset({"teclaw"})
+
 # Cron 查询只等待有限时间；并发数用于限制同步设备请求占用的线程数。
 CRON_READ_TIMEOUT_SECONDS = 10.0
 RUNTIME_DEVICE_QUERY_TIMEOUT_SECONDS = 10.0
