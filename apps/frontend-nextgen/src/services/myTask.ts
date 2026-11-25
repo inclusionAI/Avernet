@@ -16,6 +16,8 @@ export { getTaskBySession } from '@/services/backendApi/tasks/taskController';
 export interface ListMyTaskParams {
   user_id: string;
   status?: string;
+  /** 服务端关键字搜索；空白由服务端归一化为不过滤。 */
+  keyword?: string;
   /** 服务端分页页码(1-based)；与 page_size 同时传 → 走服务端分页。 */
   page?: number;
   /** 每页条数(1-100)；与 page 同时传。 */
