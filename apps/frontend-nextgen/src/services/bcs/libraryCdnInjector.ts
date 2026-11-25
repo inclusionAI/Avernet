@@ -31,6 +31,7 @@ import {
   type BcsManifestBundle,
   type BotRenderScreen,
 } from './bcsManifestController';
+import type { SenderBotRef } from './collabSenderBots';
 
 /** 库名 → CDN URL 的运行时映射（内存态，同步到 window）。 */
 const libraryCdnMap = new Map<string, string>();
@@ -38,8 +39,24 @@ const libraryCdnMap = new Map<string, string>();
 /** BCS manifest 来源的 CDN 配置（低优先级）。 */
 const manifestCdnMap = new Map<string, string>();
 
-/** Bot render screens 来源的 CDN 配置，按 botId 分桶（高优先级）。 */
+/** Bot render screens 来源的 CDN 配置，按 `${botId}:${ownerId}` 复合键分桶（高优先级）。 */
 const botCdnMaps = new Map<string, Map<string, string>>();
+
+/**
+ * 拆复合 bot 标识（形如 `default:146836`）为纯 botId + ownerId。
+ * render-screens 接口按 owner 鉴权且 bot_id 不全局唯一（多 owner 的 default bot 同名），
+ * 存储与清除必须用复合键，纯 botId 键会让不同 owner 的同名 bot 互相覆盖。
+ */
+export function splitScopedBotId(botId: string): { botId: string; ownerId?: string } {
+  const idx = botId.indexOf(':');
+  if (idx < 0) return { botId };
+  return { botId: botId.slice(0, idx), ownerId: botId.slice(idx + 1) };
+}
+
+/** Bot CDN 分桶复合键（owner 缺失用空串段）。 */
+function botBucketKey(botId: string, ownerId?: string): string {
+  return `${botId}:${ownerId ?? ''}`;
+}
 
 /** 库级 CDN 配置条目（统一 manifest bundle 与 bot render screen 两种来源的异名收口）。 */
 export interface LibraryCdnConfig {
@@ -101,7 +118,7 @@ export function storeManifestBundles(bundles: BcsManifestBundle[]): void {
   rebuildLibraryCdnMap();
 }
 
-/** 存储 Bot render screens 拉到的 CDN 配置（按 botId 分桶），触发重建同步。 */
+/** 存储 Bot render screens 拉到的 CDN 配置（按 bot 分桶），触发重建同步。 */
 export function storeCdnConfigs(screens: BotRenderScreen[]): void {
   const screensByBotId = new Map<string, BotRenderScreen[]>();
   for (const screen of screens) {
@@ -111,14 +128,14 @@ export function storeCdnConfigs(screens: BotRenderScreen[]): void {
     screensByBotId.set(botId, list);
   }
   screensByBotId.forEach((botScreens, botId) => {
-    botCdnMaps.set(botId, collectLibraryCdnConfigs(botScreens));
+    botCdnMaps.set(botBucketKey(botId), collectLibraryCdnConfigs(botScreens));
   });
   rebuildLibraryCdnMap();
 }
 
-/** 存储指定 Bot 的 CDN 配置，供不同 API 数据源复用运行时注入能力。 */
-export function storeBotCdnConfigs(botId: string, configs: LibraryCdnConfig[]): void {
-  botCdnMaps.set(botId, collectLibraryCdnConfigs(configs));
+/** 存储指定 Bot 的 CDN 配置（按 `${botId}:${ownerId}` 复合键分桶），供不同 API 数据源复用运行时注入能力。 */
+export function storeBotCdnConfigs(botId: string, ownerId: string | undefined, configs: LibraryCdnConfig[]): void {
+  botCdnMaps.set(botBucketKey(botId, ownerId), collectLibraryCdnConfigs(configs));
   rebuildLibraryCdnMap();
 }
 
@@ -140,10 +157,19 @@ export function clearManifestCdnConfig(): void {
   rebuildLibraryCdnMap();
 }
 
-/** 清空 Bot CDN 配置：传 botId 只清该 Bot，不传全清。 */
-export function clearBotCdnConfig(botId?: string): void {
-  if (botId) botCdnMaps.delete(botId);
-  else botCdnMaps.clear();
+/** Bot CDN 桶是否已存在（含空桶负缓存：已请求过的 bot 会话内不重拉）。 */
+export function hasBotCdnBucket(botId: string, ownerId?: string): boolean {
+  return botCdnMaps.has(botBucketKey(botId, ownerId));
+}
+
+/** 清空 Bot CDN 配置：传 botId 只清该 Bot（支持复合 `botId:ownerId` 形态，或显式传 ownerId），不传全清。 */
+export function clearBotCdnConfig(botId?: string, ownerId?: string): void {
+  if (botId) {
+    const scoped = ownerId === undefined ? splitScopedBotId(botId) : { botId, ownerId };
+    botCdnMaps.delete(botBucketKey(scoped.botId, scoped.ownerId));
+  } else {
+    botCdnMaps.clear();
+  }
   rebuildLibraryCdnMap();
 }
 
@@ -169,17 +195,53 @@ export function hasLibraryCdn(libraryName: string): boolean {
  */
 export async function queryAndRegisterBotLibraryCdn(botId: string): Promise<number> {
   if (!botId) return 0;
+  const { botId: pureBotId, ownerId } = splitScopedBotId(botId);
   try {
     const screens = await listBotRenderScreens(botId);
     if (screens.length === 0) {
-      clearBotCdnConfig(botId);
+      clearBotCdnConfig(pureBotId, ownerId);
       return 0;
     }
-    storeCdnConfigs(screens);
+    storeBotCdnConfigs(pureBotId, ownerId, screens);
     return libraryCdnMap.size;
   } catch {
     return 0;
   }
+}
+
+/**
+ * 批量注册协作群相关 Bot 的 CDN 库映射（迁移老前端 queryAndRegisterMultipleBotCdnPanels 语义）。
+ *
+ * - 按 `${botId}:${ownerId}` 复合键去重（bot_id 不全局唯一，多 owner 的 default 同名）；
+ * - 已有分桶（含请求失败的空桶负缓存）的 Bot 会话内不重拉；
+ * - 并行拉取、单 Bot 失败静默降级为空桶（不阻塞其余 Bot 与调用方）；
+ * - 返回合并后的库映射总数（与单 Bot 注册口径一致，供调试/断言）。
+ */
+export async function registerBotCdnList(bots: SenderBotRef[]): Promise<number> {
+  const pending = new Map<string, SenderBotRef>();
+  for (const bot of bots) {
+    if (!bot?.botId) continue;
+    const key = botBucketKey(bot.botId, bot.ownerId);
+    if (botCdnMaps.has(key)) continue; // 会话内缓存（含负缓存）命中
+    pending.set(key, bot);
+  }
+  if (pending.size === 0) return libraryCdnMap.size;
+  await Promise.allSettled(
+    Array.from(pending.values()).map(async (bot) => {
+      try {
+        const screens = await listBotRenderScreens(bot.botId, bot.ownerId);
+        storeBotCdnConfigs(bot.botId, bot.ownerId, screens);
+      } catch (error: unknown) {
+        // 失败写空桶负缓存：避免 live 消息流每条新消息重拉；报错即该 Bot 库不可解析的真实状态。
+        console.error(
+          `[CollabCdn] Bot 副屏 CDN 配置拉取失败（${bot.botId}${bot.ownerId ? `:${bot.ownerId}` : ''}）:`,
+          error,
+        );
+        storeBotCdnConfigs(bot.botId, bot.ownerId, []);
+      }
+    }),
+  );
+  return libraryCdnMap.size;
 }
 
 let manifestLoadPromise: Promise<number> | null = null;
