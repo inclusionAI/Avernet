@@ -382,39 +382,39 @@ impl CommandFeedPort for Script {
 
 #[async_trait]
 impl DistAgentClientPort for Script {
-    async fn start(&self, target: &AgentBinding, request: StableSendRequest) -> SendOutcome {
-        self.call("DistAgentClientPort::start", (target, request))
+    async fn start(&self, authority: &CallAuthority, request: StableSendRequest) -> SendOutcome {
+        self.call("DistAgentClientPort::start", (authority, request))
     }
 
     async fn send_input(
         &self,
-        target: &AgentBinding,
+        authority: &CallAuthority,
         remote: &RemoteTaskRef,
         request: StableSendRequest,
     ) -> SendOutcome {
-        self.call("DistAgentClientPort::send_input", (target, remote, request))
+        self.call("DistAgentClientPort::send_input", (authority, remote, request))
     }
 
-    async fn query(&self, target: &AgentBinding, query: RemoteQuery) -> QueryOutcome {
-        self.call("DistAgentClientPort::query", (target, query))
+    async fn query(&self, authority: &CallAuthority, query: RemoteQuery) -> QueryOutcome {
+        self.call("DistAgentClientPort::query", (authority, query))
     }
 
     async fn subscribe(
         &self,
-        target: &AgentBinding,
+        authority: &CallAuthority,
         remote: &RemoteTaskRef,
         after: Option<ReplayToken>,
     ) -> Result<RemoteEventStream, AgentReadError> {
-        self.call("DistAgentClientPort::subscribe", (target, remote, after))
+        self.call("DistAgentClientPort::subscribe", (authority, remote, after))
     }
 
     async fn cancel(
         &self,
-        target: &AgentBinding,
+        authority: &CallAuthority,
         remote: &RemoteTaskRef,
         request_id: RequestId,
     ) -> CancelOutcome {
-        self.call("DistAgentClientPort::cancel", (target, remote, request_id))
+        self.call("DistAgentClientPort::cancel", (authority, remote, request_id))
     }
 }
 

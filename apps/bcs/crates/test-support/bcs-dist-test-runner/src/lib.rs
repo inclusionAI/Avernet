@@ -151,6 +151,8 @@ pub fn participant() -> ParticipantBinding {
             subscribe: true,
             resume_events: true,
             cancel: true,
+            isolated_memory: true,
+            persistent_dedupe: true,
         },
     }
 }

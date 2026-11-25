@@ -165,6 +165,7 @@ impl StoreDispatch {
                                     confirmed_input_through: None,
                                     cancellation: CancelObservation::NotSent,
                                     outcome: None,
+                                    send_proof: None,
                                 },
                             },
                             receipts: vec![],

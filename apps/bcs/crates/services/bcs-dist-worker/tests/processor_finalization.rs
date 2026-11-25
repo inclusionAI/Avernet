@@ -25,6 +25,22 @@ use std::{
     time::Duration,
 };
 
+
+/// Fixture send proof: the durable proof written with a send intent. The
+/// store persists and returns it; contents only matter to connector
+/// takeover decisions, which construct their own via the rules.
+fn proof(operation: &SendOperation) -> SendProof {
+    SendProof {
+        dedupe_domain: "fixture-domain".into(),
+        guarantee_deadline: TimestampMillis(i64::MAX),
+        operation: match operation {
+            SendOperation::Start { request_id } => ProofOperation::Start { request_id: request_id.clone() },
+            SendOperation::Input { seq, request_id } => ProofOperation::Input { seq: *seq, request_id: request_id.clone() },
+        },
+        body_digest: Digest("sha256:fixture-body".into()),
+        config_digest: Digest("sha256:fixture-config".into()),
+    }
+}
 #[tokio::test(start_paused = true)]
 async fn partial_committed_cancel_batch_survives_takeover_without_rerunning_or_changing_intents() {
     let runner = Runner::new(Mode::Parallel);
@@ -219,7 +235,7 @@ async fn local_terminal_keeps_sending_or_cancel_unknown_supervised_until_definit
         let operation = SendOperation::Start {
             request_id: RequestId("send".into()),
         };
-        held.begin_send(operation.clone()).await.unwrap();
+        held.begin_send(operation.clone(), proof(&operation)).await.unwrap();
         if accepted {
             held.record_acceptance(AcceptanceEvidence {
                 operation,

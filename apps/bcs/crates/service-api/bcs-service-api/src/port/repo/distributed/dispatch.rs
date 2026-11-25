@@ -185,8 +185,14 @@ pub trait HeldDispatchPort: Send {
     fn view(&self) -> &DispatchView;
     fn holder(&self) -> &Holder;
     async fn refresh(&mut self) -> Result<DispatchView, HolderError>;
-    /// Persist possible-send intent before any network call. Every write fences holder.
-    async fn begin_send(&mut self, operation: SendOperation) -> Result<SendPermit, HolderError>;
+    /// Persist possible-send intent, with the durable proof of exactly
+    /// what the attempt is, before any network call (plan T6). Every write
+    /// fences holder.
+    async fn begin_send(
+        &mut self,
+        operation: SendOperation,
+        proof: SendProof,
+    ) -> Result<SendPermit, HolderError>;
     async fn record_acceptance(
         &mut self,
         evidence: AcceptanceEvidence,

@@ -16,10 +16,22 @@ use std::sync::Arc;
 
 /// A former holder (conn-01) takes the call to `phase` and then dies.
 async fn former_holder(rig: &Rig, spec: DispatchSpec, phase: DispatchPhase) -> Box<dyn HeldDispatchPort> {
-    rig.worker.create_spec(spec).await;
+    rig.worker.create_spec(spec.clone()).await;
     let mut held = acquire(&queue(&rig.store), &instance("conn-01")).await;
     if phase != DispatchPhase::Claimed {
-        held.begin_send(start_op()).await.unwrap();
+        // Plan T6: the durable proof is written exactly as the connector
+        // writes it, so a takeover re-checks the real attempt's semantics.
+        let rules = bcs_dist_connector::rules::DistConnectorRules;
+        let Payload::Inline(body) = &spec.request else {
+            panic!("fixture request must be inline");
+        };
+        let proven = rules.send_proof(
+            &spec,
+            ProofOperation::Start { request_id: start_request_id(&spec) },
+            &serde_json::to_vec(body).unwrap(),
+            rig.config.send_fingerprint(&spec.capabilities),
+        );
+        held.begin_send(start_op(), proven).await.unwrap();
     }
     if phase == DispatchPhase::Accepted {
         held.record_acceptance(accepted(start_op())).await.unwrap();
@@ -31,6 +43,10 @@ fn spec_with(change: impl FnOnce(&mut DownstreamCapabilities)) -> DispatchSpec {
     let mut spec = dispatch_spec(&did());
     change(&mut spec.capabilities);
     spec
+}
+
+fn start_request_id(spec: &DispatchSpec) -> RequestId {
+    RequestId(format!("{}:start", spec.did.0))
 }
 
 fn dead_holders(rig: &mut Rig) {
@@ -130,7 +146,12 @@ async fn a_possibly_sent_call_is_not_resent_without_a_capability() {
 #[tokio::test]
 async fn an_idempotent_start_is_resent_with_the_same_request_id() {
     let mut rig = Rig::new().await;
-    let _old = former_holder(&rig, spec_with(|c| c.idempotent_start = true), DispatchPhase::Sending).await;
+    let _old = former_holder(&rig, spec_with(|c| {
+        c.idempotent_start = true;
+        // Plan T6: a takeover resend relies on the negotiated persistent
+        // dedupe inside the recorded proof window, not on the bare claim.
+        c.persistent_dedupe = true;
+    }), DispatchPhase::Sending).await;
     dead_holders(&mut rig);
     let events = rig.agent.start_stream();
     rig.worker.notify().await;
@@ -188,7 +209,12 @@ async fn an_unknown_first_send_follows_the_same_policy() {
 
     // Idempotent: sent again, same request id, then accepted.
     let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.create_spec(spec_with(|c| {
+        c.idempotent_start = true;
+        // Plan T6: a takeover resend relies on the negotiated persistent
+        // dedupe inside the recorded proof window, not on the bare claim.
+        c.persistent_dedupe = true;
+    })).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Unknown);
     let events = rig.agent.start_stream();
@@ -204,7 +230,12 @@ async fn an_unknown_first_send_follows_the_same_policy() {
 #[tokio::test]
 async fn a_rejected_resend_does_not_fail_a_start_that_may_have_arrived() {
     let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.create_spec(spec_with(|c| {
+        c.idempotent_start = true;
+        // Plan T6: a takeover resend relies on the negotiated persistent
+        // dedupe inside the recorded proof window, not on the bare claim.
+        c.persistent_dedupe = true;
+    })).await;
     rig.worker.notify().await;
     // The first send may have reached the agent; only the resend is refused.
     rig.agent.on_start(Reply::Unknown);
@@ -316,7 +347,12 @@ async fn a_holder_that_lost_the_call_stops_and_writes_nothing() {
 #[tokio::test]
 async fn an_actor_that_dies_is_resumed_under_a_new_generation() {
     let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.create_spec(spec_with(|c| {
+        c.idempotent_start = true;
+        // Plan T6: a takeover resend relies on the negotiated persistent
+        // dedupe inside the recorded proof window, not on the bare claim.
+        c.persistent_dedupe = true;
+    })).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
     let events = rig.agent.start_stream();
@@ -332,7 +368,12 @@ async fn an_actor_that_dies_is_resumed_under_a_new_generation() {
 #[tokio::test]
 async fn a_failed_resume_is_retried_until_it_succeeds() {
     let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.create_spec(spec_with(|c| {
+        c.idempotent_start = true;
+        // Plan T6: a takeover resend relies on the negotiated persistent
+        // dedupe inside the recorded proof window, not on the bare claim.
+        c.persistent_dedupe = true;
+    })).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
     let events = rig.agent.start_stream();
@@ -351,7 +392,12 @@ async fn a_resume_owed_from_a_failure_never_replaces_the_actor_that_settled_it()
     let mut rig = Rig::new().await;
     // Long enough for a hint to arrive between two rounds of the main loop.
     rig.config.receive_timeout = std::time::Duration::from_millis(1000);
-    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.create_spec(spec_with(|c| {
+        c.idempotent_start = true;
+        // Plan T6: a takeover resend relies on the negotiated persistent
+        // dedupe inside the recorded proof window, not on the bare claim.
+        c.persistent_dedupe = true;
+    })).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
     let events = rig.agent.start_stream();
@@ -377,7 +423,12 @@ async fn a_resume_owed_from_a_failure_never_replaces_the_actor_that_settled_it()
 #[tokio::test]
 async fn a_resume_that_landed_without_an_answer_is_resumed_again() {
     let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.create_spec(spec_with(|c| {
+        c.idempotent_start = true;
+        // Plan T6: a takeover resend relies on the negotiated persistent
+        // dedupe inside the recorded proof window, not on the bare claim.
+        c.persistent_dedupe = true;
+    })).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
     let events = rig.agent.start_stream();

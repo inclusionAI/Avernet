@@ -280,6 +280,9 @@ async fn runtime_harnesses_require_draining_state_after_drain() -> ContractResul
 async fn agent_harness_keeps_uncertain_send_and_cancel_distinct_from_failure() -> ContractResult {
     let first = StableSendRequest {
         request_id: RequestId("not-sent".into()),
+        node: NodeId("n2".into()),
+        attempt: 1,
+        frozen_history: None,
         context_id: None,
         payload: payload(),
     };
@@ -298,18 +301,22 @@ async fn agent_harness_keeps_uncertain_send_and_cancel_distinct_from_failure() -
                 code: "timeout".into(),
             }
         };
+        // The harness's own contract authority: the port is asked under the
+        // round, node, attempt and binding of the dispatch it serves.
+        let start = contract_authority(&target());
+        let cancel = contract_authority(&target());
         let script = Script::default()
             .expect(
                 "DistAgentClientPort::start",
-                (target(), &first),
+                (&start, &first),
                 SendOutcome::NotSent {
                     code: "pre-send".into(),
                 },
             )
-            .expect("DistAgentClientPort::start", (target(), &second), response)
+            .expect("DistAgentClientPort::start", (&start, &second), response)
             .expect(
                 "DistAgentClientPort::cancel",
-                (target(), remote(), &cancellation),
+                (&cancel, remote(), &cancellation),
                 CancelOutcome::OutcomeUnknown {
                     code: "timeout".into(),
                 },

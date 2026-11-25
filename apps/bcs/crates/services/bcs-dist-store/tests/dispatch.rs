@@ -105,7 +105,7 @@ async fn unknown_holder_cannot_be_taken_over_and_resume_fences_old_actor() {
         ClaimOutcome::OwnedByMe(_)
     ));
     assert!(matches!(
-        old.begin_send(start()).await,
+        old.begin_send(start(), proof(&start())).await,
         Err(HolderError::Lost)
     ));
     *f.membership.0.lock().unwrap() = Liveness::Dead;
@@ -124,7 +124,7 @@ async fn input_confirmation_requires_send_intent_and_contiguous_acceptance() {
     let two = f.input(3, 2).await;
     f.board.push_input(two).await.unwrap();
     let mut held = f.claim().await;
-    held.begin_send(start()).await.unwrap();
+    held.begin_send(start(), proof(&start())).await.unwrap();
     held.record_acceptance(acceptance(start())).await.unwrap();
     let input = |seq| SendOperation::Input {
         seq: InputSeq(seq),
@@ -135,8 +135,8 @@ async fn input_confirmation_requires_send_intent_and_contiguous_acceptance() {
             .await
             .is_err()
     );
-    assert!(held.begin_send(input(2)).await.is_err());
-    held.begin_send(input(1)).await.unwrap();
+    assert!(held.begin_send(input(2), proof(&input(2))).await.is_err());
+    held.begin_send(input(1), proof(&input(1))).await.unwrap();
     held.confirm_input(InputSeq(1), acceptance(input(1)))
         .await
         .unwrap();
@@ -207,23 +207,23 @@ async fn accepted_operations_never_grant_another_network_send_permit() {
     let input = f.input(2, 1).await;
     f.board.push_input(input).await.unwrap();
     let mut held = f.claim().await;
-    held.begin_send(start()).await.unwrap();
-    held.begin_send(start()).await.unwrap();
+    held.begin_send(start(), proof(&start())).await.unwrap();
+    held.begin_send(start(), proof(&start())).await.unwrap();
     held.record_acceptance(acceptance(start())).await.unwrap();
     assert!(matches!(
-        held.begin_send(start()).await,
+        held.begin_send(start(), proof(&start())).await,
         Err(HolderError::InvalidTransition { .. })
     ));
     let op = SendOperation::Input {
         seq: InputSeq(1),
         request_id: RequestId("input-once".into()),
     };
-    held.begin_send(op.clone()).await.unwrap();
+    held.begin_send(op.clone(), proof(&op)).await.unwrap();
     held.confirm_input(InputSeq(1), acceptance(op.clone()))
         .await
         .unwrap();
     assert!(matches!(
-        held.begin_send(op.clone()).await,
+        held.begin_send(op.clone(), proof(&op)).await,
         Err(HolderError::InvalidTransition { .. })
     ));
     assert_eq!(

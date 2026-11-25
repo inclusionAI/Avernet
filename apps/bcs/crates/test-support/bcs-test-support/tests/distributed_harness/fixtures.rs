@@ -211,6 +211,8 @@ pub fn capabilities() -> DownstreamCapabilities {
         subscribe: true,
         resume_events: true,
         cancel: true,
+        isolated_memory: true,
+        persistent_dedupe: true,
     }
 }
 
@@ -274,6 +276,7 @@ pub fn dispatch_view() -> DispatchView {
             confirmed_input_through: Some(InputSeq(1)),
             cancellation: CancelObservation::NotSent,
             outcome: None,
+            send_proof: None,
         },
     }
 }

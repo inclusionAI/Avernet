@@ -38,6 +38,36 @@ fn unknown_input_variants_do_not_silently_become_user_messages() {
 }
 
 #[test]
+fn old_format_capabilities_fail_closed_on_isolated_memory_default() -> Result<(), serde_json::Error>
+{
+    // DownstreamCapabilities gained `isolated_memory` in 0.1.2 with a
+    // fail-closed serde default: payloads written by 0.1.1 (and earlier) lack
+    // the field and must deserialize as "isolation unverified" (false), never
+    // as inferred-true.
+    let old = json!({
+        "idempotent_start": true,
+        "idempotent_input": true,
+        "query_by_request": true,
+        "query_by_task": true,
+        "subscribe": true,
+        "resume_events": true,
+        "cancel": true,
+    });
+    let caps: DownstreamCapabilities = serde_json::from_value(old)?;
+    assert_eq!(
+        caps.isolated_memory, false,
+        "old payloads must fail closed: missing evidence is not verified isolation"
+    );
+    let reloaded: DownstreamCapabilities = serde_json::from_value(serde_json::to_value(&caps)?)?;
+    assert_eq!(reloaded, caps);
+    let mut verified = caps.clone();
+    verified.isolated_memory = true;
+    let wire = serde_json::to_value(&verified)?;
+    assert_eq!(wire["isolated_memory"], json!(true));
+    Ok(())
+}
+
+#[test]
 fn accepted_cancellation_is_distinct_from_confirmed_cancellation() -> Result<(), serde_json::Error>
 {
     let accepted: CancelObservation = serde_json::from_value(json!({"kind":"request_accepted"}))?;

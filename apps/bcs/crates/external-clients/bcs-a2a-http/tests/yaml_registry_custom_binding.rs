@@ -32,6 +32,18 @@ impl Binding for ExampleRpc {
     }
 }
 
+/// The lookup authority of the custom-binding card test (plan T6).
+fn authority_for_binding(binding: &AgentBinding) -> bcs_service_api::port::dist_agent::CallAuthority {
+    bcs_service_api::port::dist_agent::CallAuthority {
+        round: "registry-round".into(),
+        node: NodeId("n2".into()),
+        attempt: 1,
+        binding: binding.clone(),
+        operation: bcs_service_api::port::dist_agent::CallOperation::Start,
+        remote_ref: None,
+    }
+}
+
 const YAML: &str = r#"
 agents:
   - provider_bot_ref: order-agent-001
@@ -59,11 +71,11 @@ async fn a_custom_binding_card_resolves_to_its_custom_route() {
     bcs_a2a_binding_api::install(Registry::new(vec![Arc::new(ExampleRpc)]).unwrap()).unwrap();
     let registry = YamlAgentResolver::from_yaml(YAML, &OutboundUrlGuard::new(false, true), None, |_| None).unwrap();
     let agent = registry
-        .resolve(&AgentBinding {
+        .resolve(&authority_for_binding(&AgentBinding {
             agent: AgentId("order-agent-001".into()),
             binding_version: BindingVersion("1".into()),
             credential_ref: CredentialRef("none".into()),
-        })
+        }))
         .await
         .unwrap();
     assert_eq!(agent.interface.binding, A2aBinding::Custom);

@@ -25,7 +25,7 @@ async fn a_call_runs_from_hint_to_end_in_the_contract_order() {
     assert_eq!(
         rig.agent.calls()[0],
         format!(
-            "start {DID}:start agent=agent-analyst payload={} phase=sending cancel=not_sent input_sending=null",
+            "start {DID}:start agent=agent-analyst context=None payload={} node=n2 attempt=1 op=Start phase=sending cancel=not_sent input_sending=null",
             json!({"parts": [{"text": "compare"}]})
         )
     );
@@ -214,7 +214,8 @@ async fn an_agent_without_subscribe_is_followed_by_polling() {
     rig.agent.on_start(Reply::Accepted);
     rig.agent.on_task(found(TaskStatus::Working, json!({"task": {"id": "rt-77c2"}})));
     rig.agent.on_task(found(TaskStatus::Working, json!({"task": {"id": "rt-77c2"}})));
-    rig.agent.on_task(found(TaskStatus::Completed, json!({"state": "completed", "artifacts": []})));
+    // Plan T6: a Completed read publishes only a verified complete result.
+    rig.agent.on_task(found(TaskStatus::Completed, json!({"state": "completed", "artifacts": [{"artifactId": "a-1", "parts": [{"text": "done"}]}]})));
     let _running = rig.start();
     until("the call ends", || async { rig.phase().await == "ended" }).await;
     // An unchanged snapshot is reported once.
@@ -244,7 +245,11 @@ async fn large_payloads_go_to_blob_storage_and_requests_are_loaded_from_it() {
 
     let text = "x".repeat(200);
     events.send(delta(&text)).unwrap();
-    events.send(event(AgentEventKind::Final, json!({"state": "completed", "artifacts": [text]}))).unwrap();
+    events.send(event(
+        AgentEventKind::Final,
+        json!({"state": "completed", "artifacts": [{"artifactId": "a-2", "parts": [{"text": text}]}]}),
+    ))
+    .unwrap();
     until("the call ends", || async { rig.phase().await == "ended" }).await;
     let reported = rig.inbox_events().await;
     for (_, event) in &reported {

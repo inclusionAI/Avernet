@@ -126,6 +126,20 @@ pub async fn dist_runtime_control_port_contract_tests(
 }
 
 /// Fixture adapter scripts definite pre-send failure, ambiguous send, cancel timeout.
+/// Every operation goes through its `CallAuthority`: the harness pins the
+/// operation vocabulary, so an adapter cannot drop or fake the call
+/// identity it was asked under.
+pub fn contract_authority(target: &AgentBinding) -> CallAuthority {
+    CallAuthority {
+        round: "contract-round".into(),
+        node: NodeId("contract-node".into()),
+        attempt: 1,
+        binding: target.clone(),
+        operation: CallOperation::Start,
+        remote_ref: None,
+    }
+}
+
 pub async fn dist_agent_client_port_contract_tests(
     client: &dyn DistAgentClientPort,
     target: &AgentBinding,
@@ -134,16 +148,20 @@ pub async fn dist_agent_client_port_contract_tests(
     remote: &RemoteTaskRef,
     cancellation_id: RequestId,
 ) -> ContractResult {
+    let start = contract_authority(target);
     assert!(matches!(
-        client.start(target, not_sent).await,
+        client.start(&start, not_sent).await,
         SendOutcome::NotSent { .. }
     ));
     assert!(matches!(
-        client.start(target, ambiguous).await,
+        client.start(&start, ambiguous).await,
         SendOutcome::OutcomeUnknown { .. }
     ));
+    let mut cancel = start.clone();
+    cancel.operation = CallOperation::Cancel;
+    cancel.remote_ref = Some(remote.clone());
     assert!(matches!(
-        client.cancel(target, remote, cancellation_id).await,
+        client.cancel(&cancel, remote, cancellation_id).await,
         CancelOutcome::OutcomeUnknown { .. }
     ));
     Ok(())

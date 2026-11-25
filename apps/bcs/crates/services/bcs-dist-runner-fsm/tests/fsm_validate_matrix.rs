@@ -92,6 +92,8 @@ fn participant(node: &str) -> ParticipantBinding {
             subscribe: true,
             resume_events: true,
             cancel: true,
+            isolated_memory: true,
+            persistent_dedupe: true,
         },
     }
 }
@@ -313,6 +315,50 @@ fn matrix_rejects_dangling_target() {
         .transitions = complete(&["ghost"]);
     let spec = spec_for(&workflow);
     assert_rejected("dangling target", &workflow, &spec, "transition target ghost not found");
+}
+
+/// A binding whose target cannot return a complete terminal snapshot (neither
+/// `query_by_task` nor `query_by_request`): a status-only / delta-only target
+/// cannot back the full GetTask recovery read that publication promises for
+/// every dispatched node.
+#[test]
+fn matrix_rejects_status_only_recovery_target() {
+    let workflow = serial_workflow();
+    let mut spec = spec_for(&workflow);
+    let start = spec
+        .participants
+        .iter_mut()
+        .find(|p| p.node.0 == "start")
+        .expect("fixture binds the start node");
+    start.capabilities.query_by_task = false;
+    start.capabilities.query_by_request = false;
+    assert_rejected(
+        "status-only recovery target",
+        &workflow,
+        &spec,
+        "complete terminal snapshot",
+    );
+}
+
+/// A binding without memory-isolation evidence is not publishable: shared
+/// global memory across conversations leaks round state, and only verified
+/// isolated memory domains (or disabled shared memory) publish.
+#[test]
+fn matrix_rejects_shared_global_memory_target() {
+    let workflow = serial_workflow();
+    let mut spec = spec_for(&workflow);
+    let start = spec
+        .participants
+        .iter_mut()
+        .find(|p| p.node.0 == "start")
+        .expect("fixture binds the start node");
+    start.capabilities.isolated_memory = false;
+    assert_rejected(
+        "shared global memory target",
+        &workflow,
+        &spec,
+        "isolated memory",
+    );
 }
 
 /// The frozen spec binds every dispatchable node exactly once.

@@ -112,6 +112,8 @@ fn bindings(manifest: &str) -> Vec<ParticipantBinding> {
                 subscribe: true,
                 resume_events: true,
                 cancel: true,
+                isolated_memory: true,
+                persistent_dedupe: true,
             },
         })
         .collect()

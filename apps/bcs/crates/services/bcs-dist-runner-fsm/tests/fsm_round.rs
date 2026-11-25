@@ -83,6 +83,8 @@ fn downstream() -> DownstreamCapabilities {
     DownstreamCapabilities {
         idempotent_start: true, idempotent_input: true, query_by_request: true,
         query_by_task: true, subscribe: true, resume_events: true, cancel: true,
+        isolated_memory: true,
+        persistent_dedupe: true,
     }
 }
 

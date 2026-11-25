@@ -45,7 +45,8 @@ use crate::config::{Backoff, ConnectorConfig, ConnectorPorts};
 use crate::delayed::{self, UnresolvedKind};
 use bcs_dist_model::*;
 use bcs_service_api::core::dist_connector::{ReportCursor, ResumeStep};
-use bcs_service_api::port::dist_agent::RemoteEventStream;
+use bcs_service_api::port::dist_agent::{CallAuthority, CallOperation, RemoteEventStream};
+use crate::send::RemoteRead;
 use bcs_service_api::port::repo::distributed::dispatch::{HeldDispatchPort, HolderError};
 use futures::StreamExt;
 use std::sync::Arc;
@@ -159,6 +160,13 @@ pub(crate) struct Call {
     pub conflicted: bool,
     /// Ticks since a waiting call last looked at its remote task.
     pub waiting_ticks: u32,
+    /// A Completed stop fact is recorded but the product result is not
+    /// verified complete yet: it must be recovered through a task read
+    /// before any Final may be admitted (plan T6).
+    pub completed_stop_seen: bool,
+    /// The recovery task read answered with a definite absence: asking
+    /// again cannot help, so the stop fact waits for the deadline close.
+    pub recovery_gone: bool,
     /// The call was finished in `disp` by this actor: `follow` returns.
     pub ended: bool,
 }
@@ -234,12 +242,41 @@ impl Call {
             blind: false,
             conflicted: false,
             waiting_ticks: 0,
+            completed_stop_seen: false,
+            recovery_gone: false,
             ended: false,
         }
     }
 
     pub fn did(&self) -> &Did {
         &self.held.view().spec.did
+    }
+
+    /// The trusted authority of one downstream operation: the FSM round,
+    /// node, attempt and binding of the dispatch this holder serves (plan
+    /// T6). Built from the held dispatch only, never from client metadata.
+    pub fn authority_now(
+        &self,
+        operation: CallOperation,
+        remote: Option<RemoteTaskRef>,
+        spec: &DispatchSpec,
+    ) -> CallAuthority {
+        CallAuthority {
+            round: crate::identity::round_of(&spec.did).unwrap_or_default(),
+            node: spec.node.clone(),
+            attempt: spec.attempt,
+            binding: spec.target.clone(),
+            operation,
+            remote_ref: remote,
+        }
+    }
+
+    /// Whether a remote task reference is the one this call accepted. A
+    /// `None` known reference accepts the first task an answer binds (a
+    /// start resolution); after acceptance, evidence of any other task is
+    /// fenced out.
+    pub fn owns(&self, remote: &RemoteTaskRef, known: &RemoteTaskRef) -> bool {
+        remote.task_id == known.task_id
     }
 
     pub fn spec(&self) -> &DispatchSpec {
@@ -340,7 +377,10 @@ impl Call {
             let poke = self.poke.clone();
             tokio::select! {
                 event = next_event(&mut self.events) => match event {
-                    Some(Ok(event)) => self.on_event(event.kind, event.event_id, event.payload).await?,
+                    Some(Ok(event)) => {
+                        let remote = event.remote.clone();
+                        self.on_event(event.kind, Some(remote), event.event_id, event.payload).await?;
+                    }
                     // A broken or finished stream is not an agent result.
                     // While a question is open the stream normally ends; the
                     // tick keeps observing the task instead.
@@ -398,6 +438,26 @@ impl Call {
             }
             if self.awaiting_input && self.events.is_none() && !self.polling && !self.ended {
                 self.observe_while_waiting().await?;
+            }
+        }
+        // A Completed stop fact stands but its product is not verified:
+        // the complete result is recovered through the task read — the
+        // only evidence channel for a product Final (plan T6) — until the
+        // dispatch deadline bounds the effort with a clean, evidence-
+        // preserving failure.
+        if self.completed_stop_seen && !self.ended && self.unresolved.is_none() {
+            if self.spec().capabilities.query_by_task && !self.recovery_gone {
+                // A definite absence stops the recovery reads: the stop fact
+                // stays durable and the deadline bounds the open obligation.
+                if self.read_remote().await? == RemoteRead::Gone {
+                    self.recovery_gone = true;
+                }
+            }
+            if !self.ended && self.config.clock.now() >= self.spec().deadline.0 {
+                tracing::warn!(did = %self.did().0, "result recovery deadline exhausted");
+                return self
+                    .end_with_error("failed", "result_incomplete", FinalDispatchOutcome::Failed, "result_incomplete")
+                    .await;
             }
         }
         if !self.ended && !self.input_blocked && self.unresolved.is_none() {
@@ -492,7 +552,11 @@ impl Call {
                 view.execution.cancellation,
                 CancelObservation::NotSent | CancelObservation::Sending | CancelObservation::OutcomeUnknown
             );
-        let stuck = self.unresolved.is_some() || self.input_blocked || self.blind || self.conflicted;
+        let stuck = self.unresolved.is_some()
+            || self.input_blocked
+            || self.completed_stop_seen
+            || self.blind
+            || self.conflicted;
         let pending = stuck || (cancel_open && !self.ended);
         self.status.pending_effect.store(pending, Ordering::SeqCst);
     }

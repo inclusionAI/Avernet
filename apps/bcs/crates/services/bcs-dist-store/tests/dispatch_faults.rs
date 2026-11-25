@@ -552,7 +552,7 @@ async fn encoded_remote_and_terminal_evidence_respect_reserved_capacity() {
     let f = Fixture::new().await;
     f.create().await;
     let mut held = f.claim().await;
-    held.begin_send(start()).await.unwrap();
+    held.begin_send(start(), proof(&start())).await.unwrap();
     let mut remote = acceptance(start());
     remote.remote.task_id = "\u{0001}".repeat(1024);
     assert!(held.record_acceptance(remote).await.is_err());

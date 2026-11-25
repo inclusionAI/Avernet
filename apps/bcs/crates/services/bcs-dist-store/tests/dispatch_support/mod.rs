@@ -226,16 +226,32 @@ pub fn spec() -> DispatchSpec {
             subscribe: true,
             resume_events: true,
             cancel: true,
+            isolated_memory: true,
+            persistent_dedupe: true,
         },
         request: Payload::Inline(serde_json::json!({"prompt":"hello"})),
         deadline: TimestampMillis(60000),
     }
 }
 pub fn start() -> SendOperation {
-    SendOperation::Start {
-        request_id: RequestId("start".into()),
+    SendOperation::Start { request_id: RequestId("start".into()) }
+}
+/// Fixture send proof: the durable proof written with a send intent. The
+/// store persists and returns it; contents only matter to connector
+/// takeover decisions, which construct their own via the rules.
+pub fn proof(operation: &SendOperation) -> SendProof {
+    SendProof {
+        dedupe_domain: "fixture-domain".into(),
+        guarantee_deadline: TimestampMillis(i64::MAX),
+        operation: match operation {
+            SendOperation::Start { request_id } => ProofOperation::Start { request_id: request_id.clone() },
+            SendOperation::Input { seq, request_id } => ProofOperation::Input { seq: *seq, request_id: request_id.clone() },
+        },
+        body_digest: Digest("sha256:fixture-body".into()),
+        config_digest: Digest("sha256:fixture-config".into()),
     }
 }
+
 pub fn acceptance(operation: SendOperation) -> AcceptanceEvidence {
     AcceptanceEvidence {
         operation,

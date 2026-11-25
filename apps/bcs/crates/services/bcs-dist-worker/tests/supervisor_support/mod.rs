@@ -244,6 +244,8 @@ impl Harness {
                 subscribe: true,
                 resume_events: false,
                 cancel: true,
+                isolated_memory: false,
+                persistent_dedupe: false,
             },
             request: Payload::Inline(serde_json::json!("request")),
             deadline: TimestampMillis(60000),

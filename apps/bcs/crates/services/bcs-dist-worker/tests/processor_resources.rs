@@ -542,6 +542,8 @@ async fn invalid_session_or_output_limits_never_create_a_task() {
             subscribe: true,
             resume_events: true,
             cancel: true,
+            isolated_memory: true,
+            persistent_dedupe: true,
         },
     });
     for (case, definition, initial) in [

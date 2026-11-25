@@ -110,17 +110,32 @@ impl std::fmt::Debug for ResolvedAgent {
     }
 }
 
-/// Turns the frozen `AgentBinding` of a dispatch into a callable agent.
+/// Turns the trusted `CallAuthority` of one operation into a callable agent
+/// (plan T6): the resolver re-checks the current authorization of the round,
+/// node, attempt and binding for that operation, and returns the same
+/// approved target. Client metadata and bare `AgentBinding` callbacks are
+/// not substitutes.
 ///
 /// Delayed (walkthrough §17): what resolves `CredentialRef` and what
 /// `BindingVersion` means are not settled. Until then the composition injects
 /// [`YamlAgentResolver`], a static registry read from a YAML file of agent
-/// registrations, keyed by `AgentBinding.agent`.
+/// registrations, keyed by `AgentBinding.agent` (`authority.binding.agent`).
 #[async_trait]
 pub trait DistAgentResolver: Send + Sync {
-    /// The error is a machine code, never a credential or a URL.
-    async fn resolve(&self, target: &AgentBinding) -> Result<ResolvedAgent, String>;
+    /// The error is a machine code, never a credential or a URL: an
+    /// unauthorized target must answer `Err`, never some other agent.
+    async fn resolve(&self, authority: &CallAuthority) -> Result<ResolvedAgent, String>;
 }
+
+/// Negotiated request-id query extension (plan T6): the target keeps a
+/// durable index from an accepted message id to its task, so a start whose
+/// answer was lost can still be found. Declared in an agent's card
+/// extensions; standard A2A profiles do not have it and their lookups
+/// stay `Unsupported`.
+pub const QUERY_BY_REQUEST_EXT: &str = "urn:avernet:a2a:query-by-request:1";
+
+/// The JSON-RPC method of the negotiated index.
+const QUERY_BY_REQUEST_METHOD: &str = "GetTaskByRequest";
 
 /// Longest wait for the first event of a send (or for the unary answer). It is
 /// also the timeout handed to a custom binding's client. When it expires the
@@ -228,28 +243,30 @@ impl A2aDistAgentClient {
         }
     }
 
-    /// Builds the binding client of a target. An error means nothing was sent.
-    /// The `(bool, bool)` says whether tools v1 / v2 were negotiated, i.e.
-    /// whether tool records in the agent's messages are decoded (`events`).
-    async fn client(&self, target: &AgentBinding) -> Result<(BindingClient, (bool, bool)), String> {
-        self.client_and_mode(target).await.map(|(client, tools, _)| (client, tools))
+    /// Builds the binding client of the operation's approved target. An
+    /// error means nothing was sent — a refused authorization never reaches
+    /// an agent. The `(bool, bool)` says whether tools v1 / v2 were
+    /// negotiated, i.e. whether tool records in the agent's messages are
+    /// decoded (`events`).
+    async fn client(&self, authority: &CallAuthority) -> Result<(BindingClient, (bool, bool)), String> {
+        self.client_and_mode(authority).await.map(|(client, tools, _)| (client, tools))
     }
 
-    /// `client` plus the interface's update mode (`Poll` = unary send).
-    /// Resolves the target, then builds the client of its binding; the error
-    /// is a machine code (`custom_client_unavailable`, `grpc_not_configured`,
+    /// The resolved agent together with the binding client and update mode.
+    /// Resolves through the operation's `CallAuthority` (plan T6), then
+    /// builds the client of its binding; the error is a machine code
+    /// (`custom_client_unavailable`, `grpc_not_configured`,
     /// `grpc_route_unavailable`, `credential_invalid`, `extensions_invalid`,
     /// `address_rejected`, or the resolver's own code). Building an HTTP or
     /// gRPC client sends nothing to the agent: the gRPC channel connects
     /// lazily on the first request, and the HTTP check only resolves DNS.
-    async fn client_and_mode(&self, target: &AgentBinding) -> Result<(BindingClient, (bool, bool), A2aUpdateMode), String> {
-        let agent = self.resolver.resolve(target).await?;
-        let tools = (
-            agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION),
-            agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION_V2),
-        );
+    async fn client_and_resolved(
+        &self,
+        authority: &CallAuthority,
+    ) -> Result<(BindingClient, ResolvedAgent, A2aUpdateMode), String> {
+        let agent = self.resolver.resolve(authority).await?;
         let extensions = agent.extensions.join(",");
-        let interface = &agent.interface;
+        let interface = agent.interface.clone();
         let client = match interface.binding {
             A2aBinding::Custom => bcs_a2a_binding_api::registry()
                 .client(
@@ -263,7 +280,7 @@ impl A2aDistAgentClient {
                 .map_err(|_| "custom_client_unavailable".to_owned())?,
             A2aBinding::Grpc => {
                 let mesh = self.grpc.as_ref().ok_or("grpc_not_configured")?;
-                mesh.client_with_optional_bearer(interface, agent.bearer.as_deref(), &extensions)
+                mesh.client_with_optional_bearer(&interface, agent.bearer.as_deref(), &extensions)
                     .map(BindingClient::Grpc)
                     .map_err(|_| "grpc_route_unavailable".to_owned())?
             }
@@ -296,7 +313,20 @@ impl A2aDistAgentClient {
                 }
             }
         };
-        Ok((client, tools, interface.update_mode))
+        Ok((client, agent, interface.update_mode))
+    }
+
+    /// `client` plus the interface's update mode (`Poll` = unary send).
+    async fn client_and_mode(
+        &self,
+        authority: &CallAuthority,
+    ) -> Result<(BindingClient, (bool, bool), A2aUpdateMode), String> {
+        let (client, agent, mode) = self.client_and_resolved(authority).await?;
+        let tools = (
+            agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION),
+            agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION_V2),
+        );
+        Ok((client, tools, mode))
     }
 
     /// One send (start or continue-input); never repeated here.
@@ -308,11 +338,11 @@ impl A2aDistAgentClient {
     /// message then names the stored remote task.
     async fn send(
         &self,
-        target: &AgentBinding,
+        authority: &CallAuthority,
         remote: Option<&RemoteTaskRef>,
         request: StableSendRequest,
     ) -> SendOutcome {
-        let (client, tools, mode) = match self.client_and_mode(target).await {
+        let (client, tools, mode) = match self.client_and_mode(authority).await {
             Ok(client) => client,
             Err(code) => return SendOutcome::NotSent { code },
         };
@@ -389,6 +419,75 @@ impl A2aDistAgentClient {
         let request = serde_json::from_value(json!({ "id": task_id }))
             .map_err(|_| A2AError::invalid_params("task id"))?;
         client.get_task(&request).await
+    }
+
+    /// Resolves a request id to its task through the negotiated index
+    /// extension, then reads and verifies the task's own evidence through
+    /// the standard GetTask (plan T6). Bound to the approved target and the
+    /// original operation's request identity; the protocol and adapter
+    /// version travel in the extension declaration this call is gated on.
+    /// A `NotFound` from a late index stays unknown — it is never a stop
+    /// fact about the remote.
+    async fn query_by_request(&self, authority: &CallAuthority, request_id: RequestId) -> QueryOutcome {
+        let (client, agent) = match self.client_and_resolved(authority).await {
+            Ok((client, agent, _)) => (client, agent),
+            Err(code) => return QueryOutcome::Unavailable { code },
+        };
+        // The extension must be declared by the resolved agent: its URI and
+        // protocol version are the record of which adapter contract answered.
+        if !agent
+            .extensions
+            .iter()
+            .any(|uri| uri == QUERY_BY_REQUEST_EXT)
+        {
+            tracing::debug!(request_id = %request_id.0, "no negotiated request-id index; standard profile");
+            return QueryOutcome::Unsupported;
+        }
+        let BindingClient::JsonRpc(rpc) = &client else {
+            // The extension is negotiated on the JSON-RPC binding only.
+            return QueryOutcome::Unsupported;
+        };
+        tracing::info!(
+            request_id = %request_id.0,
+            extension = QUERY_BY_REQUEST_EXT,
+            protocol = %agent.interface.protocol_version,
+            authority_round = %authority.round,
+            authority_node = %authority.node.0,
+            "request resolved through the negotiated request-id index"
+        );
+        let answer: Result<Value, A2AError> = rpc
+            .call_extension(QUERY_BY_REQUEST_METHOD, &json!({ "requestId": request_id.0 }))
+            .await;
+        let found = match answer {
+            // The agent does not know the request yet: its index may lag.
+            // No proof either way — the call stays unresolved upstream.
+            Err(error) if error.code == a2a::error_code::TASK_NOT_FOUND => {
+                return QueryOutcome::NotFound
+            }
+            Err(error) => return QueryOutcome::Unavailable { code: code_of(&error) },
+            Ok(found) => found,
+        };
+        let task_id = found
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(A2AError::invalid_agent_response);
+        let task_id = match task_id {
+            Ok(task_id) => task_id,
+            Err(error) => return QueryOutcome::Unavailable { code: code_of(&error) },
+        };
+        match self.task(&client, task_id).await {
+            Ok(task) => {
+                let (_, snapshot) = events::task_event(&task);
+                QueryOutcome::Found {
+                    remote: events::remote_of(&task.id, &task.context_id),
+                    status: events::status_of(&task.status.state),
+                    snapshot: Payload::Inline(snapshot),
+                }
+            }
+            Err(error) if error.code == a2a::error_code::TASK_NOT_FOUND => QueryOutcome::NotFound,
+            Err(error) => return QueryOutcome::Unavailable { code: code_of(&error) },
+        }
     }
 }
 
@@ -471,32 +570,35 @@ fn finished(state: &a2a::TaskState) -> Option<FinalDispatchOutcome> {
 #[async_trait]
 impl DistAgentClientPort for A2aDistAgentClient {
     /// Sends the first message of a call; creates the remote task.
-    async fn start(&self, target: &AgentBinding, request: StableSendRequest) -> SendOutcome {
-        self.send(target, None, request).await
+    async fn start(&self, authority: &CallAuthority, request: StableSendRequest) -> SendOutcome {
+        self.send(authority, None, request).await
     }
 
     /// Sends a human reply to the same remote task (B12). Classified exactly
     /// like `start`; an `Accepted` answer may carry a new event stream.
     async fn send_input(
         &self,
-        target: &AgentBinding,
+        authority: &CallAuthority,
         remote: &RemoteTaskRef,
         request: StableSendRequest,
     ) -> SendOutcome {
-        self.send(target, Some(remote), request).await
+        self.send(authority, Some(remote), request).await
     }
 
     /// Reads a remote task once. `NotFound` only for the typed A2A "task not
     /// found" error (a bare HTTP 404 or gRPC 5 is `Unavailable`): a missing
     /// task must be proven, not guessed. The snapshot is the payload of the
     /// event the task's state stands for (see `events::task_event`).
-    async fn query(&self, target: &AgentBinding, query: RemoteQuery) -> QueryOutcome {
+    async fn query(&self, authority: &CallAuthority, query: RemoteQuery) -> QueryOutcome {
         let remote = match query {
-            // A2A has no lookup by message id.
-            RemoteQuery::ByRequest(_) => return QueryOutcome::Unsupported,
+            // A2A has no standard lookup by message id: only the negotiated
+            // request-id index extension answers (plan T6).
+            RemoteQuery::ByRequest(request_id) => {
+                return self.query_by_request(authority, request_id).await
+            }
             RemoteQuery::ByTask(remote) => remote,
         };
-        let client = match self.client(target).await {
+        let client = match self.client(authority).await {
             Ok((client, _)) => client,
             Err(code) => return QueryOutcome::Unavailable { code },
         };
@@ -519,13 +621,13 @@ impl DistAgentClientPort for A2aDistAgentClient {
     /// takeover or a resume. Events may repeat what was already reported.
     async fn subscribe(
         &self,
-        target: &AgentBinding,
+        authority: &CallAuthority,
         remote: &RemoteTaskRef,
         _after: Option<ReplayToken>,
     ) -> Result<RemoteEventStream, AgentReadError> {
         // The bindings expose no replay position, so `after` cannot be used:
         // the stream starts wherever the agent starts it.
-        let (client, tools) = self.client(target).await.map_err(|code| AgentReadError { code })?;
+        let (client, tools) = self.client(authority).await.map_err(|code| AgentReadError { code })?;
         let request = serde_json::from_value(json!({ "id": remote.task_id }))
             .map_err(|_| AgentReadError { code: "task_id_invalid".into() })?;
         let responses = client
@@ -546,9 +648,14 @@ impl DistAgentClientPort for A2aDistAgentClient {
     /// - `OutcomeUnknown`: anything else, including a client that could not be
     ///   built or no connection: the port has no "not sent" for a cancel, and
     ///   the Connector keeps an unknown cancel supervised.
-    async fn cancel(&self, target: &AgentBinding, remote: &RemoteTaskRef, _request_id: RequestId) -> CancelOutcome {
+    async fn cancel(
+        &self,
+        authority: &CallAuthority,
+        remote: &RemoteTaskRef,
+        _request_id: RequestId,
+    ) -> CancelOutcome {
         let unknown = |code: String| CancelOutcome::OutcomeUnknown { code };
-        let client = match self.client(target).await {
+        let client = match self.client(authority).await {
             Ok((client, _)) => client,
             Err(code) => return unknown(code),
         };

@@ -51,12 +51,69 @@ pub(crate) enum Admitted {
     Conflict,
 }
 
+/// The state word of an event payload, empty when absent or by reference.
+fn state_of(payload: &Payload) -> &str {
+    match payload {
+        Payload::Inline(value) => value.get("state").and_then(|s| s.as_str()).unwrap_or(""),
+        Payload::Ref(_) => "",
+    }
+}
+
 impl Call {
-    /// Reports one remote event and, when it is terminal, finishes the call
-    /// (terminal event first, then `finish`, B5). Also keeps `awaiting_input`
-    /// in step: a question sets it; any other event after a question means
-    /// the agent moved on, so the call is followed again.
+    /// Reports one remote event of `remote` — the task this call accepted —
+    /// and, when it is terminal, finishes the call (terminal event first,
+    /// then `finish`, B5). Also keeps `awaiting_input` in step: a question
+    /// sets it; any other event after a question means the agent moved on,
+    /// so the call is followed again.
     pub async fn on_event(
+        &mut self,
+        kind: AgentEventKind,
+        remote: Option<RemoteTaskRef>,
+        remote_event_id: Option<String>,
+        payload: Payload,
+    ) -> Flow {
+        // Evidence of another task is never this call's stop fact (plan
+        // T6): frames, query results and terminal updates of a foreign
+        // task are dropped whole, so the Worker still refuses to release
+        // the call on them.
+        let known = self.held.view().execution.remote.clone();
+        if let Some(remote) = &remote {
+            if let Some(known) = &known {
+                if !self.owns(remote, known) {
+                    tracing::warn!(
+                        did = %self.did().0, task = %remote.task_id,
+                        "evidence of a foreign task ignored"
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        // A Completed status is only a stop fact: it becomes a product
+        // Final through the rules' verified completion alone — normally
+        // the complete task read — and never directly from a stream or an
+        // unverified answer (plan T6).
+        if state_of(&payload) == "completed" {
+            match kind {
+                AgentEventKind::Final => {
+                    return match self.ports.rules.completed_result(&payload) {
+                        Ok(verified) => {
+                            self.on_verified_final(verified, remote_event_id).await
+                        }
+                        Err(code) => self.stop_fact(code, payload).await,
+                    };
+                }
+                AgentEventKind::Error => {}
+                AgentEventKind::Snapshot => {
+                    self.completed_stop_seen = true;
+                }
+                _ => {}
+            }
+        }
+        self.on_key_event(kind, remote_event_id, payload).await
+    }
+
+    /// A key event that is not a gated Completed.
+    async fn on_key_event(
         &mut self,
         kind: AgentEventKind,
         remote_event_id: Option<String>,
@@ -85,6 +142,29 @@ impl Call {
             self.finish(outcome, evidence).await?;
         }
         Ok(())
+    }
+
+    /// The rules verified a complete result: report the product Final and
+    /// end the call on it.
+    async fn on_verified_final(&mut self, verified: Payload, remote_event_id: Option<String>) -> Flow {
+        self.on_key_event(AgentEventKind::Final, remote_event_id, verified).await
+    }
+
+    /// The agent completed, but the payload in hand is not a verified
+    /// complete result: keep the stop fact durable (an appended snapshot
+    /// event with its state) and publish no product Final from it. The
+    /// recovery tick continues until the rules verify a complete result
+    /// or the deadline closes the call with a bounded failure (plan T6).
+    pub async fn stop_fact(&mut self, code: &str, snapshot: Payload) -> Flow {
+        tracing::warn!(
+            did = %self.did().0, code,
+            "completed without a verified complete result; the stop fact stands"
+        );
+        self.completed_stop_seen = true;
+        self.status
+            .pending_effect
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.on_key_event(AgentEventKind::Snapshot, None, snapshot).await
     }
 
     /// Normalizes one event with the rules and writes it to the inbox.

@@ -213,13 +213,17 @@ impl HeldDispatchPort for StoreHeldDispatch {
         Ok(self.view.clone())
     }
 
-    /// Records send intent before any network call to the agent (B3) and
-    /// returns the permit to send.
+    /// Records send intent — with the durable `SendProof` of exactly what
+    /// this attempt is (plan T6) — before any network call to the agent (B3),
+    /// and returns the permit to send. The proof must say the same request
+    /// id (and input seq) as the operation it is written with, or the write
+    /// is refused (`send_proof_mismatch`).
     ///
     /// - `Start` (the first message): `claimed -> sending`. Finding `sending`
-    ///   already gives the permit without a write (intent is durable). A new
-    ///   holder that finds `sending` after its claim must first resolve the
-    ///   start (B15); that decision is the actor's, not this handle's.
+    ///   already gives the permit without a write (intent and proof are
+    ///   durable). A new holder that finds `sending` after its claim must
+    ///   first resolve the start (B15); that decision is the actor's, not
+    ///   this handle's.
     /// - `Input { seq }` (a human reply, B12): allowed only in `accepted`,
     ///   for `seq = confirmed + 1`, while the Worker still has `seq` queued
     ///   in `/control/pending_input`. Writes `/connector/input_sending = seq`.
@@ -229,12 +233,29 @@ impl HeldDispatchPort for StoreHeldDispatch {
     /// seq is not yet confirmed. `!confirmed` keeps a false "maybe sent"
     /// away from an input the agent definitely accepted: such a request is
     /// refused as `input_out_of_order` by the transition instead.
-    async fn begin_send(&mut self, operation: SendOperation) -> Result<SendPermit, HolderError> {
+    async fn begin_send(
+        &mut self,
+        operation: SendOperation,
+        proof: SendProof,
+    ) -> Result<SendPermit, HolderError> {
         let permit = SendPermit {
             did: self.view.spec.did.clone(),
             holder: self.holder.clone(),
             operation: operation.clone(),
         };
+        // The proof is written with the intent it belongs to: request id
+        // (and input seq) must say the same thing as the operation.
+        match (&operation, &proof.operation) {
+            (
+                SendOperation::Start { request_id },
+                ProofOperation::Start { request_id: proved },
+            ) if request_id == proved => {}
+            (
+                SendOperation::Input { seq, request_id },
+                ProofOperation::Input { seq: proved_seq, request_id: proved },
+            ) if seq == proved_seq && request_id == proved => {}
+            _ => return invalid("send_proof_mismatch"),
+        }
         if let SendOperation::Input { seq, .. } = &operation {
             // Intent recorded by a former holder generation: the input may
             // already have reached the agent, so no fresh permit is given.
@@ -259,6 +280,9 @@ impl HeldDispatchPort for StoreHeldDispatch {
                     DispatchPhase::Claimed => {
                         let mut next = execution.clone();
                         next.phase = DispatchPhase::Sending;
+                        // The proof of the first attempt is durable with the
+                        // intent, before any network call (plan T6).
+                        next.send_proof = Some(proof.clone());
                         Ok(Step::Write(Box::new(next), doc.connector.clone(), permit.clone()))
                     }
                     // Intent is already durable: a fenced read is enough.
@@ -284,7 +308,9 @@ impl HeldDispatchPort for StoreHeldDispatch {
                     }
                     let mut connector = doc.connector.clone();
                     connector.input_sending = Some(*seq);
-                    Ok(Step::Write(Box::new(execution.clone()), connector, permit.clone()))
+                    let mut next = execution.clone();
+                    next.send_proof = Some(proof.clone());
+                    Ok(Step::Write(Box::new(next), connector, permit.clone()))
                 }
             }
         })

@@ -14,6 +14,22 @@ use bcs_dist_model::*;
 use bcs_service_api::port::repo::distributed::{common::*, dispatch::*};
 use std::sync::atomic::Ordering;
 use supervisor_support::*;
+
+/// Fixture send proof: the durable proof written with a send intent. The
+/// store persists and returns it; contents only matter to connector
+/// takeover decisions, which construct their own via the rules.
+fn proof(operation: &SendOperation) -> SendProof {
+    SendProof {
+        dedupe_domain: "fixture-domain".into(),
+        guarantee_deadline: TimestampMillis(i64::MAX),
+        operation: match operation {
+            SendOperation::Start { request_id } => ProofOperation::Start { request_id: request_id.clone() },
+            SendOperation::Input { seq, request_id } => ProofOperation::Input { seq: *seq, request_id: request_id.clone() },
+        },
+        body_digest: Digest("sha256:fixture-body".into()),
+        config_digest: Digest("sha256:fixture-config".into()),
+    }
+}
 #[tokio::test(start_paused = true)]
 async fn creation_is_notified_and_retains_the_remote_obligation() {
     let h = Harness::new().await;
@@ -241,9 +257,10 @@ async fn sending_unknown_is_not_reissued_or_failed_when_the_deadline_has_passed(
     use bcs_dist_worker::supervisor::*;
     let h = Harness::new().await;
     let mut held = h.held().await;
-    held.begin_send(SendOperation::Start {
+    let operation = SendOperation::Start {
         request_id: RequestId("send-unknown".into()),
-    })
+    };
+    held.begin_send(operation.clone(), proof(&operation))
     .await
     .unwrap();
     let mut s = DispatchSupervisor::new(
@@ -384,7 +401,7 @@ async fn accepted_dispatch_with_unknown_cancel_keeps_remote_supervision() {
     let operation = SendOperation::Start {
         request_id: RequestId("start".into()),
     };
-    held.begin_send(operation.clone()).await.unwrap();
+    held.begin_send(operation.clone(), proof(&operation)).await.unwrap();
     held.record_acceptance(AcceptanceEvidence {
         operation,
         remote: RemoteTaskRef {

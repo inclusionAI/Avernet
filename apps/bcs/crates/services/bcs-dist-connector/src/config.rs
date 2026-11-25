@@ -17,7 +17,7 @@
 //! control_address    "" (no control endpoint yet)
 //! ```
 
-use bcs_dist_model::{Did, Instance, PoolId};
+use bcs_dist_model::{Digest, Did, DownstreamCapabilities, Instance, PoolId};
 use bcs_service_api::core::dist_connector::DistConnectorCoreService;
 use bcs_service_api::port::dist_agent::DistAgentClientPort;
 use bcs_service_api::port::repo::distributed::dispatch::DispatchQueuePort;
@@ -27,8 +27,26 @@ use bcs_service_api::port::repo::distributed::result::BlobStorePort;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Wall-clock source for deadline and window decisions. Injected so tests
+/// stay deterministic; production reads the system clock.
+pub trait WallClock: Send + Sync {
+    fn now(&self) -> i64;
+}
+
+/// The production clock.
+pub struct SystemWallClock;
+
+impl WallClock for SystemWallClock {
+    fn now(&self) -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_millis() as i64)
+            .unwrap_or_default()
+    }
+}
+
 /// Settings of one Connector process. Nothing is read from the environment.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ConnectorConfig {
     /// This process: node name and incarnation (process start time, epoch ms).
     /// Together they are the holder `instance` written into every claim, and
@@ -73,6 +91,8 @@ pub struct ConnectorConfig {
     /// endpoint exists; the real membership provider refuses an empty or
     /// non-http value (today the Connector runs with the stub membership).
     pub control_address: String,
+    /// Wall-clock source for deadline and dedupe-window decisions.
+    pub clock: Arc<dyn WallClock>,
 }
 
 impl ConnectorConfig {
@@ -91,7 +111,36 @@ impl ConnectorConfig {
             membership_ttl: Duration::from_secs(3),
             membership_renew: Duration::from_secs(1),
             control_address: String::new(),
+            clock: Arc::new(SystemWallClock),
         }
+    }
+
+    /// The digest of the send configuration in force for one dispatch
+    /// (plan T6): the collision of pool, retry policy, inline budget and
+    /// the target's declared capabilities that shaped every attempt of
+    /// the call. A changed valid configuration voids a dedupe proof.
+    pub fn send_fingerprint(&self, capabilities: &DownstreamCapabilities) -> Digest {
+        let flags = [
+            capabilities.idempotent_start,
+            capabilities.idempotent_input,
+            capabilities.query_by_request,
+            capabilities.query_by_task,
+            capabilities.subscribe,
+            capabilities.resume_events,
+            capabilities.cancel,
+            capabilities.isolated_memory,
+            capabilities.persistent_dedupe,
+        ]
+        .iter()
+        .map(|flag| if *flag { b'1' } else { b'0' } as u8)
+        .collect::<Vec<_>>();
+        bcs_dist_encoding::digest_fields(&[
+            b"send-config",
+            self.pool.0.as_bytes(),
+            &self.not_sent_retries.to_be_bytes(),
+            &self.max_inline_bytes.to_be_bytes(),
+            &flags,
+        ])
     }
 
     /// The poll interval of one call, spread over ±20 % by its id so that

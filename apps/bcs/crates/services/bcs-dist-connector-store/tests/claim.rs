@@ -179,7 +179,7 @@ async fn only_a_dead_holder_is_taken_over() {
         let store = store();
         WorkerFixture::new(&store).create().await;
         let mut first = acquire(&queue(&store), &instance("conn-03")).await;
-        first.begin_send(start_op()).await.unwrap();
+        first.begin_send(start_op(), proof(&start_op())).await.unwrap();
         first.record_acceptance(accepted(start_op())).await.unwrap();
 
         let q = queue_with(&store, Arc::new(FixedLiveness(liveness)), config(1));
@@ -258,7 +258,7 @@ async fn resume_owned_advances_the_generation() {
     let me = instance("conn-03");
     let q = queue(&store);
     let mut old = acquire(&q, &me).await;
-    old.begin_send(start_op()).await.unwrap();
+    old.begin_send(start_op(), proof(&start_op())).await.unwrap();
     let previous = old.holder().clone();
     let request = ResumeOwnedDispatch { did: did(), previous: previous.clone(), request_id: RequestId("r-2".into()) };
 
@@ -384,7 +384,7 @@ async fn a_takeover_never_undoes_the_former_holders_last_write() {
     let store = store();
     WorkerFixture::new(&store).create().await;
     let mut first = acquire(&queue(&store), &instance("conn-03")).await;
-    first.begin_send(start_op()).await.unwrap();
+    first.begin_send(start_op(), proof(&start_op())).await.unwrap();
     first.record_acceptance(accepted(start_op())).await.unwrap();
     let (doc, version) = stored(&store).await;
     let mut ended = doc["execution"].clone();
@@ -410,7 +410,7 @@ async fn a_takeover_starts_from_what_is_stored_after_the_claim() {
     let store = store();
     WorkerFixture::new(&store).create().await;
     let mut first = acquire(&queue(&store), &instance("conn-03")).await;
-    first.begin_send(start_op()).await.unwrap();
+    first.begin_send(start_op(), proof(&start_op())).await.unwrap();
     let (doc, version) = stored(&store).await;
     let mut accepted_now = doc["execution"].clone();
     accepted_now["phase"] = serde_json::json!("accepted");

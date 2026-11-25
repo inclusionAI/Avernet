@@ -109,6 +109,8 @@ fn spec(workflow: &StateMachineDefinition) -> SessionSpec {
                     subscribe: true,
                     resume_events: true,
                     cancel: true,
+                    isolated_memory: true,
+                    persistent_dedupe: true,
                 },
             })
             .collect(),

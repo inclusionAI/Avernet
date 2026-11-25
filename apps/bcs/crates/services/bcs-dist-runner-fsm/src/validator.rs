@@ -245,13 +245,37 @@ impl FsmValidatorCoreService for FsmValidator {
         }
 
         // Participant bindings are per node in the frozen spec and must
-        // cover every dispatchable node exactly once.
+        // cover every dispatchable node exactly once. Each binding also
+        // carries the downstream evidence consumed at admission: recovery of
+        // the complete terminal snapshot (any dispatched node may be rebuilt
+        // through the full GetTask read path, not only the final node) and
+        // memory isolation (shared global memory leaks round state across
+        // conversations; only verified isolation publishes). Falseness is the
+        // fail-closed default, so a 0.1.1 payload without the evidence field
+        // rejects here too.
         let mut bound: BTreeMap<String, ()> = BTreeMap::new();
         for participant in &frozen.participants {
             if bound.insert(participant.node.0.clone(), ()).is_some() {
                 return Err(invalid(format!(
                     "node {} has more than one participant binding",
                     participant.node.0
+                )));
+            }
+            if !participant.capabilities.query_by_task
+                && !participant.capabilities.query_by_request
+            {
+                return Err(invalid(format!(
+                    "node {} binding target {} cannot return a complete terminal snapshot: \
+                     query_by_task and query_by_request are both false, so a status-only \
+                     or delta-only target is not publishable",
+                    participant.node.0, participant.target.agent.0
+                )));
+            }
+            if !participant.capabilities.isolated_memory {
+                return Err(invalid(format!(
+                    "node {} binding target {} has no isolated memory evidence: shared \
+                     global memory or unverified memory isolation is not publishable",
+                    participant.node.0, participant.target.agent.0
                 )));
             }
         }

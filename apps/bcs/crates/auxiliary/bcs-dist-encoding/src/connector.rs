@@ -38,6 +38,37 @@ fn key_hex(did: &Did, key: KeyEvent) -> String {
     digest.0.trim_start_matches("sha256:").to_owned()
 }
 
+/// The FSM round identity of a dispatch did: the `<tid>.fsm:<generation>`
+/// prefix of the authoritative format `<tid>.fsm:<generation>:<node>:<attempt>`
+/// (the reducer's `attempt_did`). `None` for any other shape — old
+/// `fsm:{tid}:...` forms and opaque ids carry no round authority.
+pub fn round_of(did: &Did) -> Option<String> {
+    let (prefix, rest) = did.0.split_once(".fsm:")?;
+    let mut parts = rest.split(':');
+    let generation = parts.next()?;
+    let node = parts.next()?;
+    let attempt = parts.next()?;
+    if parts.next().is_some() || generation.is_empty() || node.is_empty() || attempt.is_empty() {
+        return None;
+    }
+    Some(format!("{prefix}.fsm:{generation}"))
+}
+
+/// Canonical dedupe domain of a frozen target binding: agent, binding
+/// version and credential together pin which remote contract a dedupe
+/// guarantee was negotiated for. A rebinding (a new binding version or
+/// credential) is a different domain.
+pub fn dedupe_domain(binding: &bcs_dist_model::AgentBinding) -> String {
+    format!("{}:{}:{}", binding.agent.0, binding.binding_version.0, binding.credential_ref.0)
+}
+
+/// Digest of a send attempt's normalized body: the request id and the
+/// canonical body bytes together, so a proof never matches a different
+/// request semantics.
+pub fn send_body_digest(request_id: &RequestId, canonical_body: &[u8]) -> Digest {
+    digest_fields(&[b"send-body", request_id.0.as_bytes(), canonical_body])
+}
+
 /// Request id (the agent's message id) of the call's start.
 pub fn start_request_id(did: &Did) -> RequestId {
     RequestId(format!("{}:start", did.0))

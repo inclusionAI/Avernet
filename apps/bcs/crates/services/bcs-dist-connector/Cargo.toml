@@ -23,7 +23,9 @@ tracing = { workspace = true }
 bcs-dist-projection = { workspace = true }
 bcs-dist-test-runner = { workspace = true }
 bcs-dist-connector-store = { workspace = true }
+bcs-dist-runner-fsm = { workspace = true }
 bcs-dist-store = { workspace = true }
+bcs-domain = { workspace = true }
 bcs-store-api = { workspace = true }
 bcs-test-support = { workspace = true }
 
