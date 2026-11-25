@@ -5,12 +5,18 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
+from agentclaw.community.core.bot_public_risk.eligibility import (
+    BLOCK_NOTICE,
+    EligibilityCheck,
+    evaluate_eligibility,
+    log_block,
+)
 from agentclaw.community.core.bot_public_risk.notices import stage_notice
 from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository, RiskCheck
 
 
 class RiskApprovalGuard:
-    def __init__(self, repository: RiskRepository, check_h3: Callable[[RiskCheck], bool],
+    def __init__(self, repository: RiskRepository, check_h3: EligibilityCheck,
                  clock: Callable[[], datetime] | None = None):
         self.repo = repository
         self.check_h3 = check_h3
@@ -34,25 +40,27 @@ class RiskApprovalGuard:
                 if (row.phase != "APPROVING" and not recovered_pending) or row.approval_puid != puid:
                     return "DENIED"
                 if workflow.get("approval_target_ready") is True:
-                    event = {"puid": puid, "decision": decision}
-                    claim = workflow.get("callback_claim")
                     if claim:
                         if claim.get("event") != event:
                             return "DENIED"
                         return "ALREADY_APPLIED" if claim.get("status") == "applied" else "DEFERRED"
-                    if self.check_h3(row) is True:
-                        workflow["callback_claim"] = {"event": event, "status": "processing"}
-                        if self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
-                                                    changes={"workflow_json": json.dumps(workflow),
-                                                             "next_action_at": self.clock() + timedelta(minutes=2)}):
-                            return "ALLOW"
-                        continue
-                    workflow["error"] = "INPUT_OR_PERMISSION_INVALID"
-                    changes = {"phase": "NEEDS_ATTENTION", "next_action_at": None}
-                    stage_notice(row, workflow, "INPUT_INVALID", self.clock(), changes)
-                    changes["workflow_json"] = json.dumps(workflow)
-                    self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version, changes=changes)
-                    return "DENIED"
+                    workflow.update(approval_decision=decision, approval_decision_puid=puid)
+                    if decision == "AGREE":
+                        eligibility = evaluate_eligibility(self.check_h3, row)
+                        if not eligibility.ok:
+                            assert eligibility.reason is not None
+                            changes = self._blocked_changes(row, workflow, eligibility.reason)
+                            if self.repo.update_current(env=env, risk_check_id=risk_id,
+                                                        row_version=row.row_version, changes=changes):
+                                log_block(row, eligibility, gate="H3", puid=puid)
+                                return "DENIED"
+                            continue
+                    workflow["callback_claim"] = {"event": event, "status": "processing"}
+                    if self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
+                                                changes={"workflow_json": json.dumps(workflow),
+                                                         "next_action_at": self.clock() + timedelta(minutes=2)}):
+                        return "ALLOW"
+                    continue
             elif (row.phase != "ADVANCING" and not (
                 row.phase == "NEEDS_ATTENTION" and workflow.get("error") == "APPROVAL_OUTCOME_UNKNOWN"
             )) or workflow.get("approval_intent") is not True:
@@ -92,7 +100,8 @@ class RiskApprovalGuard:
             if row.phase != "APPROVING" and not recovered:
                 raise RuntimeError("risk approval is not awaiting its target")
             if recovered:
-                if self.check_h3(row) is not True:
+                pending_decision = (workflow.get("pending_approval") or {}).get("decision")
+                if pending_decision not in {"DISAGREE", "CANCEL"} and not evaluate_eligibility(self.check_h3, row).ok:
                     raise RuntimeError("risk eligibility changed before target recovery")
                 workflow.pop("error", None)
             workflow["approval_target_ready"] = True
@@ -105,6 +114,13 @@ class RiskApprovalGuard:
                 return
         raise RuntimeError("unable to mark approval target ready")
 
+    def _blocked_changes(self, row: RiskCheck, workflow: dict, reason: str) -> dict:
+        workflow["error"] = reason
+        changes = {"phase": "NEEDS_ATTENTION", "next_action_at": None}
+        stage_notice(row, workflow, BLOCK_NOTICE[reason], self.clock(), changes)
+        changes["workflow_json"] = json.dumps(workflow)
+        return changes
+
     def finish(self, env: str, risk_id: str, puid: str, decision: str, success: bool) -> None:
         event = {"puid": puid, "decision": decision}
         for _ in range(3):
@@ -113,32 +129,53 @@ class RiskApprovalGuard:
                 raise RuntimeError("risk callback association lost")
             workflow = json.loads(row.workflow_json)
             claim = workflow.get("callback_claim") or {}
+            if not success and claim.get("event") == event and claim.get("status") == "blocked":
+                return
             if claim.get("event") != event or claim.get("status") != "processing":
                 raise RuntimeError("risk callback claim lost")
-            claim["status"] = "applied" if success else "unknown"
-            changes = {"workflow_json": json.dumps(workflow), "next_action_at": None}
-            if success:
+            workflow.update(approval_decision=decision, approval_decision_puid=puid)
+            blocked = claim.get("block_reason")
+            if not success and blocked in BLOCK_NOTICE:
+                claim["status"] = "blocked"
+                changes = self._blocked_changes(row, workflow, blocked)
+            elif success:
+                claim["status"] = "applied"
                 workflow.pop("error", None)
-                workflow["approval_decision"] = decision
-                changes.update({"phase": "PUBLISHED" if decision == "AGREE" else "CLOSED",
-                                "workflow_json": json.dumps(workflow)})
-            if not success:
+                changes = {"phase": "PUBLISHED" if decision == "AGREE" else "CLOSED",
+                           "next_action_at": None, "workflow_json": json.dumps(workflow)}
+            else:
+                claim["status"] = "unknown"
                 workflow["error"] = "CALLBACK_OUTCOME_UNKNOWN"
-                changes.update({"phase": "NEEDS_ATTENTION", "next_action_at": None,
-                                "workflow_json": json.dumps(workflow)})
+                changes = {"phase": "NEEDS_ATTENTION", "next_action_at": None,
+                           "workflow_json": json.dumps(workflow)}
             if self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version, changes=changes):
                 return
         raise RuntimeError("unable to persist risk callback outcome")
 
     def revalidate_claim(self, env: str, risk_id: str, puid: str, decision: str) -> bool:
-        """Repeat current and input checks immediately before the business write."""
-        row = self.repo.get(env=env, risk_check_id=risk_id)
-        if row is None or row.current_target_key is None or row.phase != "APPROVING" or row.approval_puid != puid:
-            return False
-        claim = json.loads(row.workflow_json).get("callback_claim") or {}
-        if claim.get("status") != "processing" or claim.get("event") != {"puid": puid, "decision": decision}:
-            return False
-        return self.check_h3(row) is True
+        """Recheck the claim and, for agreement, the publish eligibility before applying it."""
+        for _ in range(3):
+            row = self.repo.get(env=env, risk_check_id=risk_id)
+            if row is None or row.current_target_key is None or row.phase != "APPROVING" or row.approval_puid != puid:
+                return False
+            workflow = json.loads(row.workflow_json)
+            claim = workflow.get("callback_claim") or {}
+            if claim.get("status") != "processing" or claim.get("event") != {"puid": puid, "decision": decision}:
+                return False
+            if decision != "AGREE":
+                return True
+            if claim.get("block_reason"):
+                return False
+            eligibility = evaluate_eligibility(self.check_h3, row)
+            if eligibility.ok:
+                return True
+            assert eligibility.reason is not None
+            claim["block_reason"] = eligibility.reason
+            if self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
+                                        changes={"workflow_json": json.dumps(workflow)}):
+                log_block(row, eligibility, gate="prewrite", puid=puid)
+                return False
+        raise RuntimeError("unable to persist prewrite eligibility block")
 
     def replay(self, env: str, risk_id: str, callback: Callable[[str, str], dict]) -> bool:
         row = self.repo.get(env=env, risk_check_id=risk_id)
@@ -151,9 +188,6 @@ class RiskApprovalGuard:
         puid, decision = event.get("puid"), event.get("decision")
         if (row.current_target_key is None or row.phase != "APPROVING" or row.approval_puid != puid
                 or workflow.get("approval_target_ready") is not True):
-            return False
-        if self.check_h3(row) is not True:
-            self.check(env, risk_id, row.owner_id, row.bot_pk, puid, decision, row.public_scope)
             return False
         if not callback(puid, decision).get("success"):
             return False

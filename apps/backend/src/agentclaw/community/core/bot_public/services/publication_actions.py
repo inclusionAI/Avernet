@@ -443,8 +443,10 @@ class PublicationActions:
         if "public_approval" not in ext:
             return
         from datetime import datetime
-        old_approval = ext.pop("public_approval")
-        old_approval["processed_at"] = datetime.now().isoformat()
+        old_approval = dict(ext.pop("public_approval"))
+        if old_approval.get("status") == "PROCESSING":
+            old_approval["status"] = "REPLACED"
+        old_approval.setdefault("processed_at", datetime.now().isoformat())
         history = ext.get("public_approval_history", [])
         history.append(old_approval)
         ext["public_approval_history"] = history[-5:]

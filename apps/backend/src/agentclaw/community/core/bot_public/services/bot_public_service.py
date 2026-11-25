@@ -50,6 +50,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.bot_public.bot_public_service_protocol import BotPublicServiceProtocol
+from agentclaw.community.core.bot_public_risk.eligibility import BLOCK_NOTICE
 from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -388,6 +389,37 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
                 exc,
             )
 
+    def _project_blocked_legacy_approval(self, env: str, risk_id: str, bot_pk: int, puid: str) -> None:
+        row = self._risk_approval_guard.repo.get(env=env, risk_check_id=risk_id)
+        if row is None or row.bot_pk != bot_pk or row.approval_puid != puid:
+            return
+        workflow = json.loads(row.workflow_json)
+        reason = workflow.get("error")
+        if (reason not in BLOCK_NOTICE or workflow.get("approval_decision") != "AGREE"
+                or workflow.get("approval_decision_puid") != puid):
+            return
+        for _ in range(3):
+            bot = self._bot_repository.get_by_pk(bot_pk)
+            if not bot:
+                return
+            ext = bot.get("ext") or {}
+            approval = ext.get("public_approval") or {}
+            if approval.get("puid") != puid or approval.get("status") != "PROCESSING":
+                return
+            updated_approval = {
+                **approval,
+                "status": "BLOCKED",
+                "approval_decision": "AGREE",
+                "block_reason": reason,
+                "processed_at": datetime.now().isoformat(),
+            }
+            if self._bot_repository.compare_and_set_ext(
+                bot_id=bot["bot_id"], owner_id=bot["owner_id"], expected_ext=ext,
+                ext={**ext, "public_approval": updated_approval},
+            ) is not None:
+                return
+        raise BotPublicServiceError("could not record blocked legacy public approval")
+
     def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str, public_scope: str | None = None, *, risk_check_id: str | None = None, _risk_guarded: bool = False, _risk_target: dict | None = None) -> Dict[str, Any]:
         """
         处理 Bot 公开审批回调。
@@ -418,6 +450,8 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
             guard = self._risk_approval_guard
             if guard is None:
                 return {"success": False, "message": "risk callback guard unavailable"}
+            env = get_current_env()
+            decision = (last_operate or "").upper()
             if public_scope:
                 backend_bot_id, separator, entity_id = bot_id.rpartition(":")
                 if not separator or not backend_bot_id or not entity_id:
@@ -425,29 +459,35 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
                 bot = self._bot_repository.get_by_id_and_entity(backend_bot_id, entity_id)
             else:
                 bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
-            if bot and str(bot.get("owner_id")) != owner_id:
-                return {"success": False, "message": "risk callback owner changed"}
+                if not bot:
+                    row = guard.repo.get(env=env, risk_check_id=risk_check_id)
+                    bot = self._bot_repository.get_by_pk(row.bot_pk) if row else None
+                    if bot and bot.get("bot_id") != bot_id:
+                        bot = None
             if not bot:
                 return {"success": False, "message": "risk callback bot unavailable"}
-            result = guard.check(get_current_env(), risk_check_id, owner_id, bot["id"], puid,
-                                 (last_operate or "").upper(), public_scope or "legacy")
+            result = guard.check(env, risk_check_id, owner_id, bot["id"], puid, decision, public_scope or "legacy")
             if result != "ALLOW":
+                if result == "DENIED" and decision == "AGREE" and not public_scope:
+                    self._project_blocked_legacy_approval(env, risk_check_id, bot["id"], puid)
                 return {"success": result in {"DEFERRED", "ALREADY_APPLIED"}, "message": f"risk callback {result.lower()}"}
             try:
-                risk_row = guard.repo.get(env=get_current_env(), risk_check_id=risk_check_id)
+                risk_row = guard.repo.get(env=env, risk_check_id=risk_check_id)
                 if risk_row is None:
                     raise BotPublicServiceError("risk callback record unavailable")
                 risk_target = json.loads(risk_row.target_json)
                 applied = self.handle_public_approval_callback(
-                    bot_id, owner_id, puid, last_operate, public_scope,
+                    bot_id, bot.get("owner_id", owner_id), puid, last_operate, public_scope,
                     risk_check_id=risk_check_id, _risk_guarded=True, _risk_target=risk_target,
                 )
             except Exception:
-                guard.finish(get_current_env(), risk_check_id, puid, (last_operate or "").upper(), False)
+                guard.finish(env, risk_check_id, puid, decision, False)
                 raise
             message = str(applied.get("message", "")).lower()
             success = applied.get("success") is True and not any(word in message for word in ("skipped", "mismatch", "noop"))
-            guard.finish(get_current_env(), risk_check_id, puid, (last_operate or "").upper(), success)
+            guard.finish(env, risk_check_id, puid, decision, success)
+            if not success and decision == "AGREE" and not public_scope:
+                self._project_blocked_legacy_approval(env, risk_check_id, bot["id"], puid)
             return applied if success else {"success": False, "message": "risk callback outcome unavailable"}
         # New-version publish (public_scope non-empty, e.g. "user"/"agent"): the
         # bot's visibility is delegated to BCS, so this callback must NOT flip
@@ -521,6 +561,12 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
         ):
             return {"success": False, "public": None, "message": "risk approval target mismatch"}
         last_operate_upper = last_operate.upper() if last_operate else ""
+        if _risk_guarded and not self._risk_approval_guard.revalidate_claim(
+            get_current_env(), risk_check_id, puid, last_operate_upper
+        ):
+            return {"success": False, "public": None, "message": "risk callback eligibility changed"}
+        ext = dict(ext)
+        public_approval = dict(public_approval)
         if last_operate_upper == "AGREE":
             public_value = public_approval.get("public", bot.get("public", "1"))
             friend_approval_val = public_approval.get('friend_approval', '0')
@@ -530,10 +576,6 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
             ext["permission_owner"] = public_approval['permission_owner']
             ext["friend_approval"] = friend_approval_val
             update_data = {"public": public_value, "modifier_id": public_approval.get("applicant", owner_id), "ext": ext}
-            if _risk_guarded and self._risk_approval_guard.revalidate_claim(
-                get_current_env(), risk_check_id, puid, last_operate_upper
-            ) is not True:
-                return {"success": False, "public": None, "message": "risk callback eligibility changed"}
             updated_bot = self._update_bot_with_notification(bot_id, owner_id, update_data, bot, notify_device=True)
             if not updated_bot:
                 return {"success": False, "public": None, "message": "Failed to update bot"}
@@ -546,7 +588,6 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
             logger.info(f"[bot_service.handle_public_approval_callback] Approval agreed: bot_id={bot_id}, public={public_value}")
             return {"success": True, "public": public_value, "message": "Public status updated"}
         elif last_operate_upper == "DISAGREE":
-            ext = bot.get("ext") or {}
             public_approval["status"] = "DISAGREE"
             public_approval["processed_at"] = datetime.now().isoformat()
             ext["public_approval"] = public_approval
@@ -554,7 +595,6 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
             logger.info(f"[bot_service.handle_public_approval_callback] Approval DISAGREE: bot_id={bot_id}")
             return {"success": True, "public": None, "message": "Approval DISAGREE, public not changed"}
         elif last_operate_upper == "CANCEL":
-            ext = bot.get("ext") or {}
             public_approval["status"] = "CANCEL"
             public_approval["processed_at"] = datetime.now().isoformat()
             ext["public_approval"] = public_approval

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+from agentclaw.community.core.bot_public_risk.eligibility import EligibilityResult
 from agentclaw.community.core.bot_public_risk.repository import RiskCheck
 
 
@@ -58,17 +59,28 @@ def test_pending_callback_replayed_only_after_puid_association_and_h3():
     assert "pending_approval" not in json.loads(changes["workflow_json"])
 
 
-def test_deferred_callback_remains_pending_if_h3_is_unavailable():
+def test_deferred_callback_reuses_the_normal_eligibility_gate():
     row = _record(phase="APPROVING", approval_puid="puid-a", workflow_json=json.dumps({
         "approval_target_ready": True, "pending_approval": {"puid": "puid-a", "decision": "AGREE"}
     }))
     repo = MagicMock()
     repo.get.return_value = row
-    callback = MagicMock()
-    assert RiskApprovalGuard(repo, lambda _: False).replay("dev", "risk-a", callback) is False
-    callback.assert_not_called()
+    repo.update_current.return_value = True
+    guard = RiskApprovalGuard(repo, lambda _: EligibilityResult(ok=False, reason="CONFIG_CHANGED"))
+
+    def deny(puid, decision):
+        result = guard.check("dev", "risk-a", "owner", 42, puid, decision, "user")
+        return {"success": result == "ALLOW"}
+
+    assert guard.replay("dev", "risk-a", deny) is False
     changes = repo.update_current.call_args.kwargs["changes"]
-    assert json.loads(changes["workflow_json"])["pending_approval"]["puid"] == "puid-a"
+    workflow = json.loads(changes["workflow_json"])
+    assert changes["phase"] == "NEEDS_ATTENTION"
+    assert workflow["pending_approval"]["puid"] == "puid-a"
+    assert workflow["error"] == "CONFIG_CHANGED"
+    assert workflow["approval_decision"] == "AGREE"
+    assert workflow["approval_decision_puid"] == "puid-a"
+    assert workflow["notices"]["CONFIG_CHANGED"]["status"] == "pending"
 
 
 def test_h3_input_failure_stages_applicant_notification():
@@ -162,8 +174,12 @@ def test_inline_completed_event_survives_h3_exception_for_recovery():
     guard = RiskApprovalGuard(repo, unavailable, clock=lambda: now)
     assert guard.check("dev", "risk-a", "owner", 42, "puid-a", "AGREE", "user") == "DEFERRED"
     guard.mark_target_ready("dev", "risk-a", "puid-a")
+    def attempt(puid, decision):
+        result = guard.check("dev", "risk-a", "owner", 42, puid, decision, "user")
+        return {"success": result == "ALLOW"}
+
     with pytest.raises(RuntimeError, match="H3 unavailable"):
-        guard.replay("dev", "risk-a", MagicMock())
+        guard.replay("dev", "risk-a", attempt)
     assert json.loads(repo.row.workflow_json)["pending_approval"]["decision"] == "AGREE"
     assert repo.row.next_action_at == now
 
@@ -207,3 +223,46 @@ def test_declined_approval_closes_application_without_claiming_publication(decis
     RiskApprovalGuard(repo, lambda _: True).finish("dev", "risk-a", "puid-a", decision, True)
     assert repo.row.phase == "CLOSED"
     assert json.loads(repo.row.workflow_json)["approval_decision"] == decision
+
+
+@pytest.fixture
+def approval_repo():
+    repo = MagicMock()
+    repo.get.return_value = _record(
+        phase="APPROVING", approval_puid="puid-a", workflow_json='{"approval_target_ready":true}',
+    )
+
+    def save(*, changes, **_):
+        repo.get.return_value = replace(repo.get.return_value, **changes)
+        return True
+
+    repo.update_current.side_effect = save
+    return repo
+
+
+@pytest.mark.parametrize("decision", ["DISAGREE", "CANCEL"])
+def test_negative_decision_closes_without_rechecking_publish_eligibility(approval_repo, decision):
+    h3 = MagicMock(return_value=False)
+    guard = RiskApprovalGuard(approval_repo, h3)
+    assert guard.check("dev", "risk-a", "owner", 42, "puid-a", decision, "user") == "ALLOW"
+    assert guard.revalidate_claim("dev", "risk-a", "puid-a", decision) is True
+    guard.finish("dev", "risk-a", "puid-a", decision, True)
+    assert approval_repo.get.return_value.phase == "CLOSED"
+    workflow = json.loads(approval_repo.get.return_value.workflow_json)
+    assert workflow["approval_decision"] == decision
+    assert workflow["approval_decision_puid"] == "puid-a"
+    h3.assert_not_called()
+
+
+def test_prewrite_eligibility_block_preserves_original_agreement_and_reason(approval_repo):
+    h3 = MagicMock(side_effect=[EligibilityResult(ok=True), EligibilityResult(ok=False, reason="PERMISSION_CHANGED")])
+    guard = RiskApprovalGuard(approval_repo, h3)
+    assert guard.check("dev", "risk-a", "owner", 42, "puid-a", "AGREE", "user") == "ALLOW"
+    assert guard.revalidate_claim("dev", "risk-a", "puid-a", "AGREE") is False
+    guard.finish("dev", "risk-a", "puid-a", "AGREE", False)
+    assert approval_repo.get.return_value.phase == "NEEDS_ATTENTION"
+    workflow = json.loads(approval_repo.get.return_value.workflow_json)
+    assert workflow["approval_decision"] == "AGREE"
+    assert workflow["approval_decision_puid"] == "puid-a"
+    assert workflow["error"] == "PERMISSION_CHANGED"
+    assert workflow["notices"]["PERMISSION_CHANGED"]["status"] == "pending"

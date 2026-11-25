@@ -12,6 +12,8 @@ from agentclaw.community.core.bot_public_risk.repository_protocol import (
 REASONS = {
     "REJECT",
     "INPUT_INVALID",
+    "CONFIG_CHANGED",
+    "PERMISSION_CHANGED",
     "WINDOW_ENDED",
     "CREATION_UNKNOWN",
     "CREATION_FAILED",
@@ -146,6 +148,8 @@ class WorkOrderRiskNoticeSender:
         descriptions = {
             "REJECT": "Bot 公开风险检测未通过，请查看详情并处理。",
             "INPUT_INVALID": "Bot 公开申请的配置或权限已变化，请重新检测。",
+            "CONFIG_CHANGED": "Bot 配置已变更，本次公开未生效。请按当前配置重新申请。",
+            "PERMISSION_CHANGED": "Bot 归属或原申请人管理权限已变更，本次公开未生效。请确认权限后重新申请。",
             "WINDOW_ENDED": "Bot 公开风险检测的自动查询已暂停，可手动刷新。",
             "CREATION_UNKNOWN": "Bot 公开风险检测创建结果未知，请联系管理员处理。",
             "CREATION_FAILED": "Bot 公开风险检测创建失败，请联系管理员处理。",
