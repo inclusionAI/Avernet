@@ -29,7 +29,7 @@ it("does not claim card delivery when disabled, not configured for the control p
   await expect(notifier.notifyOwnerRequest({ task, updateOnly: false })).rejects.toThrow("unknown");
 });
 
-it("updates the single permission button after Owner feedback", async () => {
+it.each(["running", "waiting_owner", "waiting_effect"] as const)("updates feedback controls without displaying task status while %s", async status => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig());
@@ -41,10 +41,10 @@ it("updates the single permission button after Owner feedback", async () => {
   expect(Object.values(initial.cardParamMap).every(value => typeof value === "string")).toBe(true);
   expect(initial.cardParamMap).not.toHaveProperty("config");
 
-  await notifier.notifyOwnerRequest({ task: { ...pending, status: "running", ownerRequest: { ...pending.ownerRequest!, status: "confirmed" } }, updateOnly: true });
+  await notifier.notifyOwnerRequest({ task: { ...pending, status, ownerRequest: { ...pending.ownerRequest!, status: "confirmed" } }, updateOnly: true });
   expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith({
     outTrackId: initial.outTrackId,
-    cardParamMap: { ...initial.cardParamMap, confirm_label: "已处理", confirm_enabled: "false", confirm_status: "disabled", status: "已收到处理反馈，正在核验" },
+    cardParamMap: { ...initial.cardParamMap, confirm_label: "已处理", confirm_enabled: "false", confirm_status: "disabled", status: "" },
   });
   expect(sender.sendCard).toHaveBeenCalledOnce();
 });
@@ -54,7 +54,7 @@ it.each(["completed", "failed", "canceled"] as const)("disables an outstanding b
     findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) }),
   }, "pre", notificationBotConfig());
   await notifier.notifyOwnerRequest({ task: { ...task, status }, updateOnly: true });
-  expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cardParamMap: expect.objectContaining({ confirm_status: "disabled", confirm_enabled: "false" }) }));
+  expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cardParamMap: expect.objectContaining({ confirm_status: "disabled", confirm_enabled: "false", status: "" }) }));
   expect(sender.sendCard).not.toHaveBeenCalled();
 });
 it("clips the original logical session key by UTF-8 bytes without changing the stored request", async () => {
@@ -87,7 +87,7 @@ it.each(["recovered", "not_recovered", "unknown"] as const)("sends an ordinary h
   const sent = sender.sendCard.mock.calls[0][0];
   expect(sent).toMatchObject({ recipientUserId: "123", templateId: "shared-template", outTrackId: "sr-owner-handoff:pre:SR-one",
     cardParamMap: { task_id: "SR-one", request_id: "", control_plane: "pre", bot_id: "bot", session_key: "original",
-      summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
+      summary: handoff.summary, instructions: handoff.instructions, status: "", confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
   expect(sent).not.toHaveProperty("callbackRouteKey");
   expect(sent.cardParamMap).not.toHaveProperty("config");
   expect(sent.cardParamMap.task_url).toContain("recoveryTaskId=SR-one");
@@ -142,7 +142,7 @@ it("links material instructions to the original conversation through the host wi
   await notifier.notify(input);
   expect(resolveSessionUrl).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "123", botId: "bot", sessionKey: "logical" }));
   const card = sender.sendCard.mock.calls[0][0];
-  expect(card.cardParamMap).toMatchObject({ instructions: `${input.handoff.instructions}\n\n[去原会话补材料](${resolveSessionUrl()})`, confirm_visible: "false" });
+  expect(card.cardParamMap).toMatchObject({ instructions: `${input.handoff.instructions}\n\n[去原会话补材料](${resolveSessionUrl()})`, confirm_visible: "false", status: "" });
   expect(card).not.toHaveProperty("callbackRouteKey");
   expect(Object.keys(card.cardParamMap)).toHaveLength(14);
   row.enabled = 0;
