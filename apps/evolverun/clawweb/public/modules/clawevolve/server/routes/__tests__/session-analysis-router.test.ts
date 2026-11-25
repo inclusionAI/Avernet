@@ -30,7 +30,7 @@ async function postJson(router: express.Router, path: string, body: unknown) {
 }
 
 describe("session analysis Router", () => {
-  it("dispatches the compact AIS Base task and preserves the no-LLM choice", async () => {
+  it.each(["ANALYZE_SINGLE", "EXPORT_ALL"])("dispatches %s with the compact AIS Base task and no LLM", async mode => {
     let task: EvolveTaskRow | undefined;
     const repo = {
       resolveAccessibleEvolveBotRuntime: vi.fn().mockResolvedValue({
@@ -84,8 +84,8 @@ describe("session analysis Router", () => {
     const response = await postJson(router, "/", {
       taskName: "只导出目标 Session",
       botId: "20260629_g3xxlxd3",
-      mode: "ANALYZE_SINGLE",
-      sessionId: "8831abfd-5ab9-43a9-8df2-114074125c4a",
+      mode,
+      ...(mode === "ANALYZE_SINGLE" ? { sessionId: "8831abfd-5ab9-43a9-8df2-114074125c4a" } : {}),
       llmAnalysis: false,
     });
     expect(response.status).toBe(202);
@@ -98,10 +98,10 @@ describe("session analysis Router", () => {
     expect(snapshotId).toBe(17);
     const payload = JSON.parse(globalParams["${clawevolve_params}"]);
     expect(payload).toEqual(expect.objectContaining({
-      taskType: "session_analysis",
+      taskType: mode === "ANALYZE_SINGLE" ? "session_analysis" : "session_export",
       attempt: 1,
       input: expect.objectContaining({
-        sessionId: "8831abfd-5ab9-43a9-8df2-114074125c4a",
+        ...(mode === "ANALYZE_SINGLE" ? { sessionId: "8831abfd-5ab9-43a9-8df2-114074125c4a" } : {}),
         llmAnalysis: false,
       }),
       runtime: expect.objectContaining({
