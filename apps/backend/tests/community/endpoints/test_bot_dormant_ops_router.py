@@ -68,6 +68,19 @@ def _seed_activate_error(world) -> None:
     _seed_bot(world, status="PENDING")
 
 
+def _assert_sync_recycle_has_no_queue(response, world):
+    from agentclaw.community.core.repository.protocols.bot.recycle import BotRecycleRepositoryProtocol
+    from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
+    from agentclaw.community.plugin_api.database import DatabasePlugin
+
+    data = response.json()["data"]
+    assert data["operation_id"] is None and data["phase"] is None
+    bot = world.get(BotRecycleRepositoryProtocol).read(_BOT_ID, _OWNER_ID)
+    assert bot["status"] == "RECYCLED" and bot["binding_id"] is None
+    with world.get(DatabasePlugin).orm_session() as session:
+        assert session.query(TaskQueueModel).filter(TaskQueueModel.task_type == "bot.recycle").count() == 0
+
+
 @endpoint_test(
     method="POST",
     path="/api/internal/dormant/recycle-one",
@@ -82,10 +95,12 @@ def _seed_activate_error(world) -> None:
         },
     ),
     seed=_seed_recycle_ok,
-    expect=ExpectSuccess(status=202, json_contains={"ok": True, "data": {"phase": "QUEUED"}}),
+    expect=ExpectSuccess(status=200, json_contains={"ok": True, "data": {
+        "status": "recycled", "operation_id": None, "phase": None}}),
+    extra_assertions=(_assert_sync_recycle_has_no_queue,),
 )
 def recycle_one_ok():
-    """Happy path: ops recycle-one returns the manual recycle result."""
+    """A non-fastdisk Bot completes synchronously without a queue or handle."""
     pass
 
 
@@ -242,3 +257,19 @@ def recycle_operation_ok():
 )
 def recycle_operation_not_found():
     """Replaced or mismatched handles do not expose another operation."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/internal/dormant/recycle-one",
+    scenario="already_queued",
+    input=CaseInput(
+        headers=_AUTH_HEADERS,
+        json_body={"bot_id": _BOT_ID, "owner_id": _OWNER_ID, "dry_run": False},
+    ),
+    seed=_seed_recycle_operation,
+    expect=ExpectSuccess(status=202, json_contains={"ok": True, "data": {
+        "operation_id": "ops-query", "phase": "QUEUED", "changed": False}}),
+)
+def recycle_one_already_queued():
+    """Existing async admission wins over the synchronous fallback on retries."""
