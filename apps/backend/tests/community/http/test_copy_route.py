@@ -397,6 +397,22 @@ def test_submit_copy_team_source_inherits_same_team_space_for_team_quota():
     assert spec["space_kind"] == "team"
 
 
+def test_submit_copy_stringifies_int_space_id_before_resolve_current():
+    # Regression: ``ac_bots.space_id`` is a BigInt column, so the source row
+    # carries an int (or NULL), not the str ``resolve_current`` expects — its
+    # first line is ``header_space_id.strip()``, which AttributeErrors on an int.
+    # submit_copy must stringify on the way in (same as retry_copy), else a team
+    # source crashes before the membership/quota check runs. The mock here only
+    # captures the argument; the assertion pins the int→str contract.
+    mocks = _mocks()
+    bot_repo, _bcr, _script, _ms, _pp, space_context, _rs, _bs, _ss, _cr = mocks
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(space_id=200)  # int, like the DB
+    _call({}, {}, mocks=mocks)
+    passed = space_context.resolve_current.call_args.kwargs["header_space_id"]
+    assert passed == "200"          # str, not the raw int 200
+    assert isinstance(passed, str)  # pins the contract vs resolve_current's .strip()
+
+
 def test_submit_copy_non_member_of_team_source_propagates_space_denial():
     # Same-space rule, cross-space refusal: a team source whose space the caller
     # is not a member of is rejected by ``resolve_current``'s

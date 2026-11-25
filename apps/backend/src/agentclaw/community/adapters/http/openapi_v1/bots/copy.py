@@ -493,8 +493,16 @@ def submit_copy(
     # durable creation spec, so ``create_job``'s downstream ``create_bot`` →
     # ``guard_add`` re-evaluates quota in the *same* scope, never silently
     # re-routing a team copy back to the owner's personal ceiling.
+    #
+    # ``resolve_current`` takes ``header_space_id: str | None`` (it originally
+    # consumes an HTTP header and calls .strip() on it). The bot row's
+    # ``space_id`` is a ``BigInt`` column — an int (or NULL for personal bots),
+    # so it must be stringified on the way in, mirroring retry_copy. Passing the
+    # raw int would AttributeError on the .strip().
+    source_space_id = source.get("space_id")
     current_space = space_context.resolve_current(
-        owner_id=owner_id, header_space_id=source.get("space_id")
+        owner_id=owner_id,
+        header_space_id=str(source_space_id) if source_space_id is not None else None,
     )
     space_id = getattr(current_space, "numeric_id", None)
 
