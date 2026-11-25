@@ -353,6 +353,103 @@ def test_submit_copy_rejects_over_quota_before_passport_or_manifest_side_effects
     bot_script_service.get_body.assert_not_called()
 
 
+def test_submit_copy_personal_source_resolves_caller_personal_space():
+    # Same-space rule, personal case: a source with no recorded space_id (the
+    # legacy personal-bot shape, ``ac_bots.space_id IS NULL``) resolves through
+    # ``resolve_current(header_space_id=None)`` to the caller's own personal
+    # space — so the dst quota preflight and creation spec run in the personal
+    # (entity_type=staff) scope, exactly as the pre-feature behaviour.
+    mocks = _mocks()
+    (bot_repo, _bot_copy_repo, _bot_script_service, _manifest_seam, _passport,
+     space_context, _, bot_service, _, _) = mocks
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()  # no space_id key
+    _call({}, {}, mocks=mocks)
+    assert space_context.resolve_current.call_args.kwargs["header_space_id"] is None
+    # _mocks stubs numeric_id=100 → flows into the preflight as the personal id.
+    assert bot_service.check_create_bot_preflight.call_args.kwargs["space_id"] == 100
+
+
+def test_submit_copy_team_source_inherits_same_team_space_for_team_quota():
+    # Same-space rule, team case: a source in a team space (recorded numeric
+    # ``space_id``) routes that id through ``resolve_current`` verbatim, so the
+    # dst lands in the SAME team space and the quota preflight evaluates the team
+    # (entity_type=space) ceiling — never the caller's personal ceiling. The
+    # membership gate is ``resolve_current``'s own ``_require_member_space``
+    # (tested separately); here we assert the team id is what flows into the
+    # preflight and the durable creation spec the compiler reads.
+    mocks = _mocks()
+    (bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport,
+     space_context, _, bot_service, _, _) = mocks
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(space_id="200")
+    space_context.resolve_current.return_value = SimpleNamespace(
+        numeric_id=200, kind="team"
+    )
+    resp, _ = _call({}, {}, mocks=mocks)
+    assert resp.type == "success"
+    assert space_context.resolve_current.call_args.kwargs["header_space_id"] == "200"
+    # preflight sees the team space, not the caller's personal default
+    assert bot_service.check_create_bot_preflight.call_args.kwargs["space_id"] == 200
+    # the durable spec carries the team space_id + space_kind, so create_job's
+    # downstream create_bot → guard_add re-evaluates quota in team scope rather
+    # than silently re-routing to the owner's personal space.
+    spec = manifest_seam.start_job.call_args.kwargs["spec"]
+    assert spec["space_id"] == 200
+    assert spec["space_kind"] == "team"
+
+
+def test_submit_copy_stringifies_int_space_id_before_resolve_current():
+    # Regression: ``ac_bots.space_id`` is a BigInt column, so the source row
+    # carries an int (or NULL), not the str ``resolve_current`` expects — its
+    # first line is ``header_space_id.strip()``, which AttributeErrors on an int.
+    # submit_copy must stringify on the way in (same as retry_copy), else a team
+    # source crashes before the membership/quota check runs. The mock here only
+    # captures the argument; the assertion pins the int→str contract.
+    mocks = _mocks()
+    bot_repo, _bcr, _script, _ms, _pp, space_context, _rs, _bs, _ss, _cr = mocks
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(space_id=200)  # int, like the DB
+    _call({}, {}, mocks=mocks)
+    passed = space_context.resolve_current.call_args.kwargs["header_space_id"]
+    assert passed == "200"          # str, not the raw int 200
+    assert isinstance(passed, str)  # pins the contract vs resolve_current's .strip()
+
+
+def test_submit_copy_threads_owner_name_as_nick_name_into_creation_spec():
+    # The dst's ``ac_bots.owner_name`` is written by create_bot from the worker's
+    # nick_name (create_flow.py:735 ``spec.get("nick_name", user_id)``). submit_copy
+    # must carry the verified display name (OwnerNameDep) into the durable spec as
+    # ``nick_name`` -- like submit_manifest_creation:513 -- else the dst row is
+    # stamped with the 工号 fallback instead of the real name, diverging from every
+    # ordinary-create bot.
+    mocks = _mocks()
+    (bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport,
+     _space_context, _, _bot_service, _, _) = mocks
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
+    passport = _passport
+    passport.apply_agent_passport.return_value = {"token": "tok"}
+    _call({}, {}, mocks=mocks)
+    spec = manifest_seam.start_job.call_args.kwargs["spec"]
+    assert spec["nick_name"] == "owner"   # the owner_name _call passes through
+
+
+def test_submit_copy_non_member_of_team_source_propagates_space_denial():
+    # Same-space rule, cross-space refusal: a team source whose space the caller
+    # is not a member of is rejected by ``resolve_current``'s
+    # ``_require_member_space`` (the same gate POST /openapi/v1/bots applies to a
+    # team ``body.space_id``). submit_copy must propagate that denial — it does
+    # NOT fall back to the caller's personal space for a team source, because
+    # that would silently turn a cross-team copy into a personal copy and bypass
+    # the same-space contract.
+    from agentclaw.community.core.bot_inventory.errors import BotInventoryPermissionError
+    mocks = _mocks()
+    bot_repo, _bcr, _script, _ms, _pp, space_context, _rs, _bs, _ss, _cr = mocks
+    bot_repo.get_by_id_and_owner.return_value = _source_bot(space_id="200")
+    space_context.resolve_current.side_effect = BotInventoryPermissionError(
+        "business space is not available"
+    )
+    with pytest.raises(BotInventoryPermissionError):
+        _call({}, {}, mocks=mocks)
+
+
 def test_submit_copy_rejects_source_not_found():
     mocks = _mocks()
     bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _, _, _ = mocks
