@@ -93,7 +93,7 @@ def _token(*, with_user: bool) -> str:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def client():
     """The whole public surface, with no services bound.
 
