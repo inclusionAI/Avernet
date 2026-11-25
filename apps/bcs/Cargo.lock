@@ -1795,6 +1795,7 @@ dependencies = [
  "bcs-db-local",
  "bcs-db-mysql",
  "bcs-domain",
+ "bcs-edge-permission",
  "bcs-service-api",
  "bcs-test-support",
  "mysql_async",

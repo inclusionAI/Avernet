@@ -86,3 +86,5 @@ pub mod a2a_card_projection;
 pub mod run_budget;
 
 pub mod catalog_labels;
+
+pub mod agent_invoke;

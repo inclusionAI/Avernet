@@ -165,3 +165,5 @@ pub mod dist_output;
 pub mod dist_runtime;
 
 pub mod provider_request_headers;
+
+pub mod agent_invoke;

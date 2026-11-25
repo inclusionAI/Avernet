@@ -38,3 +38,5 @@ pub(crate) use connect::{
     actor_kind_of, bot_friend_ext_no_check_scope_friend_deps,
     bot_friend_ext_view_scope_agent_friend_deps, bot_friend_ext_view_scope_user_friend_deps,
 };
+
+pub mod agent_invoke;

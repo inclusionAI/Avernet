@@ -3523,7 +3523,7 @@ MySQL `ux_profile_bot_env_default (bot_id,env,is_default,status)` 允许两条 `
 4. 旧 friend request 的 get/approve/reject/cancel/list 仅处理 Connect，并在幂等/approved writeback 之前拦截其他 kind；原好友精确撤销不影响同一对上的 AgentInvoke 边。
 5. 领域结构验证、DB mapping、真实 SQLite 应用回归及 Memory/SQLite 共享 conformance 覆盖新名称与上述隔离；MySQL driver 需要独立空测试库和完整迁移链，ignored 不算实际验证通过。
 
-本次变更仍是读端兼容阶段：**独立管理/申请/审批/撤销 API、审批事务/审计/幂等/失效代次、治理入出度/限额及真正 operation-aware 的调用放行尚未完成**。不得将受信 repo insert/upsert 暴露为这些管理接口，也不得仅凭 canonical shape 启用生产调用。
+本次已继续实现独立的 Rust 管理/运行鉴权契约、纯策略、application 编排和 synthetic 本地生命周期驱动；**持久化 SQL 生命周期、注册 HTTP 管理 API、治理查询和生产调用接入仍未完成**。本地驱动不是真实资格源、SQL 事务或生产放行证据；不得将受信 repo insert/upsert 暴露为管理接口，也不得仅凭 canonical shape 启用生产调用。
 
 ### 架构、存储与验证边界
 
@@ -3532,3 +3532,14 @@ MySQL `ux_profile_bot_env_default (bot_id,env,is_default,status)` 允许两条 `
 通用 admission 保持原来一次 pair 查询的成本，只增加内存 kind 过滤；checked read 为一次 pair/env SQL 加 byte-exact residual，返回该 pair 的候选集合，不是全图治理扫描，也不承诺治理分页的固定行数。真实 MySQL 查询计划、HTTP contract、singlebox E2E、宿主集成与生产验证须独立执行，不能由本地库测试或 lint-only pre-push 推断。
 
 reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型不得回落到旧 grant。实际调用还须核验可信调用者与 originator、目标状态、安全域及当前审批/身份绑定代次。撤销后的历史数据不得改写成其他 grant kind 来兼容旧 reader。
+
+### 后续实现增补：独立契约与本地生命周期
+
+- `application::agent_invoke` 区分 `AgentInvokeGrantManagementService` 与 `AgentInvocationService`；core 的 `AgentInvokePolicyCoreService` 只做纯策略，`AgentInvokeFactsPort` 返回可信、完整且带 fencing 的当前快照，`AgentInvokeCommandRepoPort` 负责一条原子命令。没有新增 HTTP 路由、生产配置开关或默认允许实现。
+- 管理矩阵：source owner/manager 可申请和止损撤销；target owner 可直接授予、批准、拒绝和撤销；target manager 不自动取得审批权。取消仅允许 source owner，或仍有 source 管理权的原申请者。普通 Bot 不自助批准；治理 service 必须具有精确 principal/pair/action 的显式委托。
+- 管理预检只判定当前操作者权限；新申请/授予/批准的资格、原申请者当前 source 权限与代次、终态/expected_version、配额及 fence 必须在同一提交边界重新验证。授权操作者恢复旧回执先于可变资格/状态检查，避免重放旧 key 时重新写入；失败 key 不占用成功回执。
+- 运行决策先验证可信 ingress principal、namespace/env、直接调用 operation 与 originator，再读取当前快照；校验 exact pair、存活/资格/hidden、canonical AgentInvoke 边和双方身份/资格代次。仅返回 `ref_id=edge_id, revision=approval generation`，不是 `grant_ref_id=0`。后续每次调用重新读取，无 positive cache、反向或传递授权，也无 public/default fallback。
+- `local_agent_invoke::LocalAgentInvokeStore` 是**未由 bootstrap 挂载、仅限 synthetic local 的进程内驱动**。事实发布、角色/委托、edge/request、版本、audit 和 receipt 共享一把锁；先完成所有可失败校验再修改状态。资格/绑定改变原子撤销旧批准并推进版本；资格或 requester 权限恢复不能复活旧边/旧申请。它不持久化、不与 legacy 内存表同步，不能替代 SQL 或宿主 provider。
+- 本地支持 request/grant/approve/reject/cancel/revoke、重放历史+当前状态、相同 edge_id 的新代次重授予，以及显式有限正数的 active/pending 入出度限额。reason 限 1..2048 字节且非空白，幂等 key 限 1..128 个可见 ASCII 字节；比较仍 byte-exact，不 trim/case-fold。
+- 契约测试位于 `bcs-test-support::contract::agent_invoke`，local driver 运行同组生命周期、终态、失效、权限代次、旧 key/regrant、approve/cancel、两个 approve/revoke 顺序和争用限额断言。冲突测试在任何写之前取得两个快照，不用 sleep 推断竞争；**它们不等于真实数据库并发/回滚、迁移、HTTP 或 A2A E2E 验证**。
+- 真实持久化接入仍须提供与提交共同 fencing 的身份/资格及 requester 权限版本。现有 `AgentIdentityPort::verify` 只验证并返回 agent_code，`AgentBotRecord` 当前绑定投影也不提供上述完整代次，不可将二者的成功直接解释为新授权有效。

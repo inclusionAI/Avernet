@@ -64,3 +64,6 @@ use mapping::*;
 
 #[cfg(test)]
 mod tests;
+
+/// Synthetic local lifecycle/facts driver; never a production inventory.
+pub mod local_agent_invoke;

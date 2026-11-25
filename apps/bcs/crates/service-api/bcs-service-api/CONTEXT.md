@@ -1067,5 +1067,31 @@ wrapper over the legacy best-effort read. DB and memory implement it. Existing
 vec/bool signatures remain compatible; their results are candidates, not
 operation authorization. Generic admission/context consumers explicitly retain
 profile/rules only, and friend request operations accept Connect only. Downstream
-implementations must implement the checked contract before using the future
-Agent invocation decision; this phase adds no management API or production allow.
+implementations must implement the checked contract before consuming these
+candidates. The independent contracts below do not enable production admission.
+
+
+## Independent Agent invocation contracts
+
+`application::agent_invoke` exposes separate management and per-operation
+invocation Service APIs. `core::agent_invoke::AgentInvokePolicyCoreService`
+is pure; `port::agent_invoke::AgentInvokeFactsPort` is the replaceable business
+facts boundary, not a host SDK or an unverified Card lookup. Its current
+snapshot contract includes isolated namespace/env, exact Bot bindings,
+eligibility generations and the persisted approval generation. Trusted inputs
+and facts deliberately do not derive serde.
+
+`port::repo::agent_invoke::AgentInvokeCommandRepoPort` is the atomic lifecycle
+port: fence/authority recheck, optimistic version, request/grant mutation,
+finite quotas, audit and idempotency receipt share one commit. It must not
+chain legacy insert/decide/revoke calls. Historical and current state are
+separate receipt fields; replay cannot resurrect an edge. Errors are closed,
+credential-free `AgentInvokeError` values; unknown commits are never retried by
+the application. Additive separate modules do not change existing trait methods
+or wire formats; custom downstream implementations opt in explicitly.
+
+Consumer conformance: `bcs-edge-permission::tests::agent_invoke_policy` records
+actual fact/command port hits and failure propagation. Shared lifecycle tests
+are `bcs-test-support::contract::agent_invoke`, currently run by the synthetic
+local driver only. No production provider, SQL lifecycle, HTTP route, SDK or
+runtime dispatch is enabled by these contracts.

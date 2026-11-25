@@ -178,3 +178,27 @@ runs on memory/SQLite; the MySQL driver explicitly requires a disposable empty
 database and the full migration chain, and is not proof of MySQL execution unless
 run. Approval-generation, management transactions and degree queries remain later
 phases; do not enable production writers based on reader compatibility alone.
+
+
+## Synthetic local Agent invocation lifecycle
+
+`local_agent_invoke::LocalAgentInvokeStore` implements the new facts and atomic
+command contracts for an isolated synthetic namespace. It is NOT bootstrap
+wiring, a durable store, a legacy table mirror or a production eligibility
+provider. It consumes only Service API/domain contracts and an injected pure
+policy Core service. All reads/writes/facts share one local mutex; no network
+call, async wait, legacy friend write or profile seed occurs inside it.
+
+It stages fallible work before mutation, scopes keys by principal within the
+bound namespace/env, preserves original receipt state on replay, advances
+approval/request/identity/eligibility/authority generations, and keeps typed
+before/after audit records. Grant/revoke and qualification invalidation cannot
+race within this local driver. Roles/delegations and qualification restoration
+never silently reset epochs. Active/pending limits are explicit finite positive
+values. Local degree checks scan local maps; this is not a SQL aggregate or a
+scalability claim. There is no positive authorization cache.
+
+Conformance driver: `tests/conformance_agent_invoke_local.rs`, sharing the
+application/port harness `bcs-test-support::contract::agent_invoke`. SQL schema,
+atomic rollback/audit failure, query plans, real DB contention, host freshness,
+HTTP routes and restart durability remain separate unverified work.

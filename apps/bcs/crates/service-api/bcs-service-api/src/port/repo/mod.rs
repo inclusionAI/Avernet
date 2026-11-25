@@ -107,3 +107,5 @@ pub use session_file::{
 pub use user_identity::{UserIdentity, UserIdentityRepoPort};
 pub mod collaboration_actor;
 pub mod distributed;
+
+pub mod agent_invoke;
