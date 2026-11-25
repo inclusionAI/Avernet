@@ -118,7 +118,7 @@ Each is a method with its intended signature that returns the code
 | D3 | resolved, no stub: the Worker's supervisor re-posts a hint for every open dispatch (`recheck_interval`, 1 s); a Connector receiving it takes the call over once membership answers `Dead` | — |
 | D8 | resolved, no stub: `drain` stops leftover actors and retires the registration (B20); the D3 path then takes the calls over | — |
 | Membership | register / renew / liveness provider (executor team) | provided by `CoordinationStore`, injected by the composition outside this repository; `PendingMembership` remains for tests and setups without it |
-| Agent resolution | what resolves `CredentialRef` / `BindingVersion` | injected resolver trait; no real implementation shipped |
+| Agent resolution | what resolves `CredentialRef` / `BindingVersion` | MVP: `YamlAgentResolver` (`bcs-a2a-http`), a static YAML registry of agent registrations keyed by `AgentBinding.agent`; the other two fields are not interpreted yet |
 
 ## Non-goals
 
