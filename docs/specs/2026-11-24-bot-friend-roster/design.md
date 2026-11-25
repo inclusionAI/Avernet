@@ -381,6 +381,14 @@ error-notify observer, never a silent toast-only failure.
   policy gate + probable migration far beyond this item). Veto (removal must
   stick) re-opens scope, not a flip of a test default.
 
+- **Confirmed 2026-11-25 by the requester:** all defaults above are accepted —
+  CF-1 yes (external-Bot dialog renders the section), CF-2 Owner-only removal,
+  CF-3 Backend-catalog notification copy, CF-4 the proposed counts labels,
+  CF-5 a removed party may re-request immediately. Implementation may proceed;
+  the plan's per-task gates are satisfied. PR base routing for the
+  implementation: `apps/bcs` changes target `dev`; `apps/backend` and
+  `apps/frontend-nextgen` changes target `REL20261125`, in separate PRs.
+
 ## Left to the builder
 
 - Exact JSX structure/styles of the section, drawer rows, tabs and search
