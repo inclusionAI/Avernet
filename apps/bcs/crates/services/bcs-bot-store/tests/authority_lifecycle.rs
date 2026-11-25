@@ -312,7 +312,7 @@ fn recorded_sql(steps: &[DbTransactionStep]) -> Vec<String> {
             }
             DbTransactionStep::ExecuteChecked {
                 statement, ..
-            } => statement.sql().to_string(),
+            } | DbTransactionStep::QueryChecked { statement, .. } => statement.sql().to_string(),
         })
         .collect()
 }
