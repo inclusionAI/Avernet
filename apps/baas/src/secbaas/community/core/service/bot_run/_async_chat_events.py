@@ -25,11 +25,10 @@ from ._interaction_protocol import (
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import SessionState
 from ._ws_failure import (
-    PendingWsErrorChunk,
     WsErrorChunk,
-    WsFailure,
     WsFrame,
-    failure_for_event,
+    event_error_code,
+    event_matches_ack,
 )
 
 logger = get_logger("core-bot-run")
@@ -156,7 +155,6 @@ class AsyncChatEvents:
         frame: WsFrame,
         source: str,
         state: SessionState,
-        failure: WsFailure | None,
         *,
         pending: bool = False,
     ) -> None:
@@ -166,7 +164,7 @@ class AsyncChatEvents:
             frame.get("errorMessage", ""),
             source,
             error_code=frame.get("errorCode", "") if source != "error" else "",
-            ws_failure=failure,
+            ws_error_code=None if pending else event_error_code(frame),
             pending_frame=frame if pending else None,
         )
 
@@ -178,22 +176,20 @@ class AsyncChatEvents:
     ) -> bool:
         # COSEC: prefer proof of the owning run over the legacy (fuzzy) route.
         # Do not attach a code if more than one live request claims the frame.
-        owned = [
-            (state, failure)
-            for key, state in self._sessions.items()
-            if (failure := failure_for_event(frame, state.ws_ack, key)) is not None
-        ]
-        if len(owned) == 1:
-            state, failure = owned[0]
-            self._deliver_ws_error(frame, source, state, failure)
+        owner = None
+        for key, state in self._sessions.items():
+            if event_matches_ack(frame, state.ws_ack, key):
+                if owner is not None:
+                    return False
+                owner = state
+        if owner is not None:
+            self._deliver_ws_error(frame, source, owner)
             return True
-        if owned:
-            return False
 
         if legacy is not None:
             key, state = legacy
             if key in frame.awaiting_ack:
-                self._deliver_ws_error(frame, source, state, None, pending=True)
+                self._deliver_ws_error(frame, source, state, pending=True)
                 return True
             # Do not let an unrelated send delay this session's existing outcome.
             return False
@@ -224,9 +220,8 @@ class AsyncChatEvents:
                 remaining.append(early)
                 continue
             early.candidates.pop(session_key)
-            failure = failure_for_event(early.frame, ack, session_key)
-            if candidate is state and failure is not None:
-                self._deliver_ws_error(early.frame, early.source, candidate, failure)
+            if candidate is state and event_matches_ack(early.frame, ack, session_key):
+                self._deliver_ws_error(early.frame, early.source, candidate)
             elif early.candidates:
                 remaining.append(early)
         self._early_ws_errors = remaining
@@ -243,7 +238,7 @@ class AsyncChatEvents:
         error_msg: str,
         source: str,
         error_code: str = "",
-        ws_failure: WsFailure | None = None,
+        ws_error_code: str | None = None,
         pending_frame: WsFrame | None = None,
     ) -> None:
         msg = error_msg or f"{source} error"
@@ -264,17 +259,15 @@ class AsyncChatEvents:
             state.state = "error"
             state.error_message = msg
             state.chat_complete.set()
-            state.ws_failure = ws_failure
-            state.ws_pending_error = pending_frame
-            chunk: StreamChunk
-            if ws_failure is not None:
-                chunk = WsErrorChunk(type="error", content=msg, failure=ws_failure)
-            elif pending_frame is not None:
-                chunk = PendingWsErrorChunk(
-                    type="error", content=msg, frame=pending_frame
+            state.ws_error = None
+            if ws_error_code is not None or pending_frame is not None:
+                state.ws_error = WsErrorChunk(
+                    type="error",
+                    content=msg,
+                    error_code=ws_error_code,
+                    pending_frame=pending_frame,
                 )
-            else:
-                chunk = StreamChunk(type="error", content=msg)
+            chunk = state.ws_error or StreamChunk(type="error", content=msg)
             AsyncChatEvents._emit_stream_chunk(state, chunk)
         finally:
             if token is not None:

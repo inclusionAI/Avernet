@@ -48,12 +48,12 @@ from ._bot_run_utils import (
     resolve_bot_id,
 )
 from ._bot_service_selector import BotServiceSelector
-from ._chat_errors import exception_ws_failure
+from ._chat_errors import exception_ws_error_code
 from ._internal_protocols import (
     RequestExecutor,
     SessionLockService,
 )
-from ._ws_failure import FailureUpdate, WsErrorChunk, WsFailure, failure_update
+from ._ws_failure import WsErrorChunk
 
 if TYPE_CHECKING:
     from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
@@ -427,11 +427,21 @@ class BotRunRequestExecutor:
             self._repo.update_timeout(run.run_id, "Task execution timeout")
         except Exception as e:
             logger.exception("[BotRunExecutor] failed run_id=%s: %s", run.run_id, e)
-            self._repo.update_error(
-                run.run_id,
-                str(e),
-                **_queue_failure_update(exception_ws_failure(e), record),
-            )
+            self._update_error(record, str(e), exception_ws_error_code(e))
+
+    def _update_error(
+        self, record: BotRunQueueRecord, error: str, error_code: str | None
+    ) -> None:
+        # Legacy workers have no claim ID, so their errors keep the old write.
+        if error_code is None or not record.claim_id or not record.assigned_worker:
+            self._repo.update_error(record.run_id, error)
+            return
+        self._repo.update_error(
+            record.run_id,
+            error,
+            error_code=error_code,
+            queue_claim=(record.claim_id, record.assigned_worker),
+        )
 
     async def _do_send(
         self,
@@ -604,18 +614,12 @@ class BotRunRequestExecutor:
             )
 
         final_content = ""
-        stream_error: str | None = None
-        ws_failure: WsFailure | None = None
+        error_chunk: StreamChunk | None = None
         last_flush_ts = time.monotonic()
 
         def _handle_chunk(chunk: StreamChunk) -> None:
             """处理单个 chunk，返回后由外层统一判断是否需要 flush。"""
-            nonlocal \
-                final_content, \
-                stream_error, \
-                ws_failure, \
-                pending_bytes, \
-                last_flush_ts
+            nonlocal final_content, error_chunk, pending_bytes, last_flush_ts
             if chunk.type == "delta":
                 pending.append(("delta", chunk.content, chunk.engine_type))
                 pending_bytes += len(chunk.content or "")
@@ -628,8 +632,7 @@ class BotRunRequestExecutor:
                 _write_chunk(chunk)
                 last_flush_ts = time.monotonic()
             elif chunk.type == "error":
-                stream_error = chunk.content or "stream error"
-                ws_failure = chunk.failure if isinstance(chunk, WsErrorChunk) else None
+                error_chunk = chunk
                 _write_chunk(chunk)
                 last_flush_ts = time.monotonic()
             elif chunk.type == "interaction":
@@ -696,11 +699,12 @@ class BotRunRequestExecutor:
         # flush 残留 buffer
         _flush_buffers()
 
-        if stream_error:
-            self._repo.update_error(
-                run.run_id,
-                stream_error,
-                **_queue_failure_update(ws_failure, record),
+        if error_chunk is not None:
+            error_code = None
+            if isinstance(error_chunk, WsErrorChunk):
+                error_code = error_chunk.error_code
+            self._update_error(
+                record, error_chunk.content or "stream error", error_code
             )
         else:
             self._repo.update_result(
@@ -732,15 +736,3 @@ class BotRunRequestExecutor:
             content_long="",
             extra={"session_id": session_id, "injected": "true"},
         )
-
-
-def _queue_failure_update(
-    failure: WsFailure | None, record: BotRunQueueRecord
-) -> FailureUpdate:
-    # A worker started by a legacy queue writer has no verifiable claim ID.
-    if not record.claim_id or not record.assigned_worker:
-        return {}
-    values = failure_update(failure)
-    if values:
-        values["queue_claim"] = (record.claim_id, record.assigned_worker)
-    return values

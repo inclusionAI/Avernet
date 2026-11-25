@@ -370,7 +370,7 @@ async def test_canonical_error_targets_its_run_not_an_overlapping_session():
                 return_exceptions=True,
             )
             assert isinstance(failed, BotSessionError)
-            assert failed.ws_failure is not None and failed.ws_failure.code == CODE
+            assert failed.ws_error_code == CODE
             assert successful == ("", [])
         finally:
             await client.close()
@@ -445,7 +445,7 @@ async def test_legacy_failure_does_not_wait_for_another_sessions_ack():
                 BotSessionError, match="expected legacy failure"
             ) as error:
                 await client.send_message("legacy", session_key="legacy", timeout=0.5)
-            assert error.value.ws_failure is None
+            assert error.value.ws_error_code is None
         finally:
             reply_to_other.set()
             async with asyncio.timeout(2):

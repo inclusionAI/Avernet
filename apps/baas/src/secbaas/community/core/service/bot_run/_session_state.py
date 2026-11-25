@@ -9,7 +9,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from ._ws_failure import WsFailure, WsFrame
+from ._ws_failure import WsErrorChunk, WsFrame
 
 
 @dataclass
@@ -35,5 +35,4 @@ class SessionState:
     # BotSessionError 时透传给调用方，避免只剩 "error state" 外壳。
     error_message: str = ""
     ws_ack: WsFrame | None = field(default=None, repr=False)
-    ws_failure: WsFailure | None = field(default=None, repr=False)
-    ws_pending_error: WsFrame | None = field(default=None, repr=False)
+    ws_error: WsErrorChunk | None = field(default=None, repr=False)

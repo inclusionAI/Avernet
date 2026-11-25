@@ -2,15 +2,13 @@
 
 from secbaas.community.api.bot_runtime import BotServiceError
 
-from ._ws_failure import WsFailure
-
 
 class BotSessionError(Exception):
     """The current chat attempt finished in an error state."""
 
-    def __init__(self, message: str, *, ws_failure: WsFailure | None = None) -> None:
+    def __init__(self, message: str, *, ws_error_code: str | None = None) -> None:
         super().__init__(message)
-        self.ws_failure = ws_failure
+        self.ws_error_code = ws_error_code
 
 
 class ChatRequestError(Exception):
@@ -32,23 +30,23 @@ class ChatRequestError(Exception):
         error_message: str | None = None,
         retryable: bool | None = None,
         *,
-        ws_failure: WsFailure | None = None,
+        ws_error_code: str | None = None,
     ):
         super().__init__(message)
         self.error_code = error_code
         self.error_message = error_message
         self.retryable = retryable
-        self.ws_failure = ws_failure
+        self.ws_error_code = ws_error_code
 
 
 class NotConnectedError(Exception):
     """No usable transport connection is available for the operation."""
 
 
-def exception_ws_failure(error: BaseException) -> WsFailure | None:
+def exception_ws_error_code(error: BaseException) -> str | None:
     """Unwrap only the standard BotService wrapper, not retry/transport chains."""
     if isinstance(error, BotServiceError) and error.__cause__ is not None:
         error = error.__cause__
     if isinstance(error, (ChatRequestError, BotSessionError)):
-        return error.ws_failure
+        return error.ws_error_code
     return None

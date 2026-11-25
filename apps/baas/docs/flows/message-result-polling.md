@@ -28,9 +28,10 @@ over 65,535 UTF-8 bytes are discarded without losing the failure or its error
 text. `DEFAULT` is a response fallback, not a database default or backfill.
 BaaS consumes the code sent by its existing WebSocket peer; it does not add or
 change an engine producer. The [WS reader](../../src/secbaas/community/core/service/bot_run/_bot_websocket_client.py)
-correlates a failed `chat.send` or `chat.inject` response by request ID and
-reads `error.code`. An execution error event contributes `payload.errorCode`
-only if the same socket's successful `started` ACK identifies its `runId`
+correlates the response by request ID. The [code parser](../../src/secbaas/community/core/service/bot_run/_ws_failure.py)
+reads `error.code` from a rejected `chat.send` or `chat.inject` response and passes
+it as a string through the existing failure path. An execution error event
+contributes `payload.errorCode` only if the same socket's successful `started` ACK identifies its `runId`
 and the event matches the request session key, the OpenClaw `agent:main:` form,
 or the explicit session key from that ACK. This lookup precedes legacy fuzzy
 routing. An error received before its own ACK follows its legacy route without
