@@ -83,7 +83,8 @@ def test_relay_prompt_forbids_dispatch_for_terminal_and_bbs_plans() -> None:
     assert "不得调用 dispatch" in prompt
     assert "成功响应中的 data.handoff_display 是当前棒 S6 用户可见交接卡片的数据" in prompt
     assert "当且仅当 source_channel=dingtalk 且 data.handoff_display 非空时" in prompt
-    assert "必须先通过 Runtime message 工具单独投递该模板卡片" in prompt
+    assert "必须先完成本棒 `## 【本棒执行结论】` 普通会话回复" in prompt
+    assert "回复完成后再通过 Runtime message 工具单独投递一次该模板卡片" in prompt
     assert "不调用 message 工具" in prompt
     assert "继续保持普通会话回复逻辑不变" in prompt
     assert "不得在会话回复与旁路消息之间重复发送" in prompt

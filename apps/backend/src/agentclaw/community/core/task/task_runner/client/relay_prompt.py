@@ -131,8 +131,9 @@ def format_relay_execution_instruction(
         "bbs_publish_pending。"
         "成功响应中的 data.handoff_display 是当前棒 S6 用户可见交接卡片的数据；"
         "当且仅当 source_channel=dingtalk 且 data.handoff_display 非空时，"
-        "必须先通过 Runtime message 工具单独投递该模板卡片，"
-        "然后继续输出普通会话回复；source_channel=webchat、unknown 或缺失时，"
+        "必须先完成本棒 `## 【本棒执行结论】` 普通会话回复，"
+        "回复完成后再通过 Runtime message 工具单独投递一次该模板卡片；"
+        "source_channel=webchat、unknown 或缺失时，"
         "不调用 message 工具，也不生成、不外发转协作模板消息，"
         "继续保持普通会话回复逻辑不变。"
         "字段缺失时不得编造，也不得在会话回复与旁路消息之间重复发送。",
