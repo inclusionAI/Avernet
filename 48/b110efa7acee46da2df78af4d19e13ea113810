@@ -1,0 +1,27 @@
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskNodePanelV2.tsx
+  s_885ffb973587a3::t_eaf551a0d4605c 7
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.execution.test.ts
+  s_885ffb973587a3::t_3276fbabacce8b 382,384-389,394-397,399-400,402
+  s_885ffb973587a3::t_eaf551a0d4605c 379
+apps/frontend-nextgen/assets/task-panel/src/panel/taskPanelMapper.ts
+  s_885ffb973587a3::t_eaf551a0d4605c 615-617
+  s_885ffb973587a3::t_63c25d3d2bc157 608
+apps/frontend-nextgen/assets/task-panel/src/panel/DagView.tsx
+  s_885ffb973587a3::t_eaf551a0d4605c 481
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "48b110efa7acee46da2df78af4d19e13ea113810",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
