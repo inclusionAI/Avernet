@@ -90,6 +90,9 @@ from agentclaw.community.core.gateway_principal import (
     VerifiedCaller,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot.collaborator import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -276,6 +279,7 @@ def make_client(bot_grants):
                 binder.bind(UserAppGrantServiceProtocol, to=_UserGrants(*delegating_users))
                 binder.bind(BotServiceProtocol, to=MagicMock())
                 binder.bind(BotRepository, to=MagicMock())
+                binder.bind(CollaboratorRepositoryProtocol, to=MagicMock())
                 binder.bind(PassportPlugin, to=MagicMock())
                 binder.bind(AuthRelationshipPlugin, to=MagicMock())
                 binder.bind(SkillSetServiceFactoryProtocol, to=MagicMock())
