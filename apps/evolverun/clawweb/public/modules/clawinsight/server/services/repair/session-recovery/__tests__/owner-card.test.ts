@@ -16,7 +16,7 @@ it("selects the card route by CW environment even when the Bot is production, an
   expect(sender.sendCard).toHaveBeenCalledOnce();
   expect(sender.sendCard.mock.calls[0][0].cardParamMap).not.toHaveProperty("config");
   expect(sender.updateCard.mock.calls[0][0].cardParamMap).not.toHaveProperty("config");
-  expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", cardParamMap: expect.objectContaining({ request_id: "r2", instructions: "仍缺文档写权限" }) }));
+  expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", cardParamMap: expect.objectContaining({ request_id: "r2", instructions: "仍缺文档写权限", status: "" }) }));
 });
 it("does not claim card delivery when disabled, not configured for the control plane, or rejected by the sender", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn().mockRejectedValue(new Error("unknown")), updateCard: vi.fn() };
@@ -36,7 +36,7 @@ it("updates the single permission button after Owner feedback", async () => {
   const pending: RecoveryStoredTask = { ...task, ownerRequest: { ...task.ownerRequest!, reason: "permission" } };
   await notifier.notifyOwnerRequest({ task: pending, updateOnly: false });
   const initial = sender.sendCard.mock.calls[0][0];
-  expect(initial.cardParamMap).toMatchObject({ confirm_label: "已处理，继续任务", confirm_visible: "true", confirm_status: "normal", confirm_enabled: "true", session_key: "original" });
+  expect(initial.cardParamMap).toMatchObject({ confirm_label: "已处理，继续任务", confirm_visible: "true", confirm_status: "normal", confirm_enabled: "true", session_key: "original", status: "" });
   expect(Object.keys(initial.cardParamMap)).toHaveLength(14);
   expect(Object.values(initial.cardParamMap).every(value => typeof value === "string")).toBe(true);
   expect(initial.cardParamMap).not.toHaveProperty("config");

@@ -48,7 +48,7 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
       summary: ownerCardText(request.summary, "当前任务需要处理权限申请，具体对象和操作请见下方。"),
       instructions: ownerCardText(request.instructions, "请打开任务详情，查看完整的权限对象、处理事项和入口。"), task_url: url.href,
       status: terminal ? task.status === "canceled" ? "任务已停止" : task.judgment?.effect === "recovered" ? "已核验恢复" : "本次处理已结束，详见任务"
-        : request.status === "pending" ? "等待 Owner 处理" : task.status === "waiting_owner" ? "已收到反馈，后续修复方案待另行确认"
+        : request.status === "pending" ? "" : task.status === "waiting_owner" ? "已收到反馈，后续修复方案待另行确认"
         : task.status === "waiting_effect" ? "已保存进度，等待继续核验" : "已收到处理反馈，正在核验",
       confirm_visible: "true", confirm_enabled: String(canConfirm), confirm_status: canConfirm ? "normal" : "disabled",
       confirm_label: request.status === "confirmed" ? "已处理" : "已处理，继续任务" };
