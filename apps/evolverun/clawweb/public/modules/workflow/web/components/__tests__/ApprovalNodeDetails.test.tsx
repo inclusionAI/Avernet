@@ -245,7 +245,13 @@ describe('ApprovalNodeDetails', () => {
     expect(headers.get('Accept')).toBe('application/json')
     expect(headers.has('Authorization')).toBe(false)
     expect(headers.has('X-User-Id')).toBe(false)
-    expect(fetchMock.mock.calls.every(([request]) => !/empId=|authCode=|token=|\/resolve/.test(String(request)))).toBe(true)
+    for (const [request] of fetchMock.mock.calls) {
+      const requestUrl = new URL(String(request), window.location.href)
+      for (const param of ['empId', 'authCode', 'token']) {
+        expect(requestUrl.searchParams.has(param)).toBe(false)
+      }
+      expect(requestUrl.pathname).not.toMatch(/\/resolve(?:\/|$)/)
+    }
   })
 
   it.each([RESOLVED_AT, RESOLVED_AT * 1000])('formats card-level resolvedAt %s using formatTime, not creation time', async (resolvedAt) => {
