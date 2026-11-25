@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
@@ -82,7 +83,9 @@ async def list_containers(
     ),
 ) -> Envelope[ContainerList]:
     """Return the current online instance snapshot for a service Bot."""
-    result = facade.list_containers(
+    # The synchronous facade includes database reads and provider health checks.
+    result = await run_in_threadpool(  # allow-run-in-threadpool
+        facade.list_containers,
         bot_id,
         actor_id=actor_id,
         owner_id=owner_id,
