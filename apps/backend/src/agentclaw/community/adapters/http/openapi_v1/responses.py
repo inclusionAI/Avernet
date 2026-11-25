@@ -55,14 +55,8 @@ from agentclaw.community.core.bot_management.engine_version.errors import (
     EngineVersionStageUnsupportedError, EngineVersionInstanceSelectionError,
 )
 from agentclaw.community.core.bot_management.errors import (
-    BotAddressNotFoundError,
     BotCreationRetainedError,
     BotLookupAmbiguousError,
-)
-from agentclaw.community.core.bot_management.snapshot_guard import (
-    ManagedBotInputError,
-    ManagedSnapshotConflictError,
-    ManagedSnapshotPersistenceError,
 )
 from agentclaw.community.api.bot_startup_script_service import (
     MAX_SCRIPT_BYTES,
@@ -109,14 +103,13 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UnsupportedEngineError,
     UserIdMismatchError,
     BotAccessCheckForbiddenError,
-    BotOperationsForbiddenError,
-    EngineOperationUnsupportedError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_genome import (
     GENOME_ENVELOPE_ERROR_CODES,
     GENOME_ENVELOPE_ERRORS,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors_managed_bots import MANAGED_BOT_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
@@ -447,12 +440,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # asked for; both ids are on the warning line in ``principal.py``.
     UserIdMismatchError: (403, "Forbidden"),
     BotAccessCheckForbiddenError: (403, "Forbidden"),
-    BotOperationsForbiddenError: (403, "Forbidden"),
-    EngineOperationUnsupportedError: (501, 'Not supported for this engine'),
-    BotAddressNotFoundError: (404, 'Not found'),
-    ManagedBotInputError: (400, 'Invalid managed Bot request'),
-    ManagedSnapshotConflictError: (409, 'Template snapshot changed'),
-    ManagedSnapshotPersistenceError: (500, 'Internal error'),
+    **MANAGED_BOT_HTTP_ERRORS,
     SpaceAccessDeniedError: (403, "Forbidden"),
     SpaceNotFoundError: (404, "Not found"),
     SpaceMemberInvalidError: (400, "Invalid space member"),
