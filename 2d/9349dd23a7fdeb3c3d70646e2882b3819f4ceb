@@ -1,0 +1,24 @@
+apps/backend/src/agentclaw/community/core/task/task_context/relay_report.py
+  s_885ffb973587a3::t_66d79eae4eeaf2 618-622,668-672
+  s_885ffb973587a3::t_0361b5bd03e81d 91-92,113,119,149,151,169,171,183-192,195,197-199
+  s_885ffb973587a3::t_9e2d0122ad88a3 193-194,196
+apps/backend/tests/community/core/task/task_context/test_relay_report.py
+  s_885ffb973587a3::t_f3a0b67cc2ca34 294-321
+  s_885ffb973587a3::t_8298dbe2417b5b 278-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d9349dd23a7fdeb3c3d70646e2882b3819f4ceb",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
