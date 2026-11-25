@@ -40,7 +40,9 @@
 //!   variable, read once at load. A card that requires a Bearer scheme needs
 //!   it; an anonymous card should omit it.
 //! - Extensions sent to the agent are the ones its card declares that this
-//!   client implements (today our tools extension, `crate::tools::EXTENSION`).
+//!   client implements (today our tools extension, `crate::tools::EXTENSION`),
+//!   and only for a streaming agent: like registration and the existing
+//!   delivery, the tools extension is streaming-only.
 //! - URLs still pass the outbound guard on every call (`A2aDistAgentClient`).
 
 use super::{DistAgentResolver, ResolvedAgent};
@@ -111,22 +113,30 @@ impl YamlAgentResolver {
     }
 
     /// As `load`, from YAML text, with the environment lookup injected.
-    /// The error names the entry and the reason, never a token or a URL.
+    /// The error names the entry (its position, and its id once that is
+    /// valid) and the reason. It never contains a token, a card URL or a
+    /// value that failed to parse: a YAML error is reported by its position
+    /// only, because the parser's message quotes the offending value.
     pub fn from_yaml(
         text: &str,
         guard: &OutboundUrlGuard,
         grpc: Option<&GrpcMeshConfig>,
         env: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        let file: RegistryFile =
-            serde_yaml::from_str(text).map_err(|error| format!("agent_registry_invalid: {error}"))?;
+        let file: RegistryFile = serde_yaml::from_str(text).map_err(|error| match error.location() {
+            Some(at) => format!("agent_registry_invalid: YAML error at line {} column {}", at.line(), at.column()),
+            None => "agent_registry_invalid: YAML error".to_owned(),
+        })?;
         let mut agents = HashMap::new();
         for (index, entry) in file.agents.into_iter().enumerate() {
-            let id = entry.provider_bot_ref.trim().to_owned();
-            let failed = |reason: &str| format!("agent_registry_invalid: agents[{index}] ({id}): {reason}");
-            if id.is_empty() || id != entry.provider_bot_ref {
-                return Err(failed("provider_bot_ref must be a non-empty id without surrounding spaces"));
+            let id = entry.provider_bot_ref.clone();
+            if id.is_empty() || id.trim() != id {
+                // The id itself is the invalid part: name the position only.
+                return Err(format!(
+                    "agent_registry_invalid: agents[{index}]: provider_bot_ref must be a non-empty id without surrounding spaces"
+                ));
             }
+            let failed = |reason: &str| format!("agent_registry_invalid: agents[{index}] ({id}): {reason}");
             if agents.contains_key(&id) {
                 return Err(failed("duplicate provider_bot_ref"));
             }
@@ -198,7 +208,7 @@ fn resolved(
         .into_iter()
         .flatten()
         .filter_map(|extension| extension.get("uri").and_then(Value::as_str))
-        .filter(|uri| SUPPORTED_EXTENSIONS.contains(uri))
+        .filter(|uri| streaming && SUPPORTED_EXTENSIONS.contains(uri))
         .map(str::to_owned)
         .collect();
     Ok(ResolvedAgent {

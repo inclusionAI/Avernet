@@ -105,11 +105,12 @@ fn invalid_files_fail_the_load() {
     let ok = || entry("a", "JSONRPC", "https://agents.example.com/a", "");
     let cases = [
         (file(&[ok(), ok()]), "duplicate provider_bot_ref"),
-        (file(&[entry("a", "JSONRPC", "https://agents.example.com/a", "    unexpected: 1")]), "unknown field"),
+        (file(&[entry("a", "JSONRPC", "https://agents.example.com/a", "    unexpected: 1")]), "YAML error at line"),
         (file(&[entry("a", "GRPC", "http://grpc.example.com:9000", "")]), "no interface this deployment can call"),
         (file(&[entry("a", "JSONRPC", "ftp://agents.example.com/a", "")]), "agents[0] (a)"),
         (file(&[ok().replace("[text/plain]", "[application/json]")]), "text/plain"),
         ("agents: [".to_owned(), "agent_registry_invalid"),
+        (file(&[entry("' padded'", "JSONRPC", "https://agents.example.com/a", "")]), "agents[0]: provider_bot_ref"),
     ];
     for (yaml, expected) in cases {
         let error = YamlAgentResolver::from_yaml(&yaml, &guard(), None, no_env).unwrap_err();
@@ -143,4 +144,27 @@ async fn the_registry_is_read_from_a_file() {
         "agent_registry_unreadable"
     );
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn errors_never_quote_values_from_the_file() {
+    let secret = "sk-live-XYZ";
+    let cases = [
+        file(&[entry("a", "JSONRPC", "https://agents.example.com/a", "").replace(r#"owners: ["410025"]"#, &format!("owners: {secret}"))]),
+        file(&[entry("a", "JSONRPC", "https://agents.example.com/a", "").replace("visibility: protected", &format!("visibility: {secret}"))]),
+        file(&[entry(&format!("' {secret}'"), "JSONRPC", "https://agents.example.com/a", "")]),
+    ];
+    for yaml in cases {
+        let error = YamlAgentResolver::from_yaml(&yaml, &guard(), None, no_env).unwrap_err();
+        assert!(!error.contains(secret), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn a_non_streaming_agent_gets_no_streaming_only_extension() {
+    let yaml = file(&[entry("a", "JSONRPC", "https://agents.example.com/a", "").replace("streaming: true", "streaming: false")]);
+    let registry = YamlAgentResolver::from_yaml(&yaml, &guard(), None, no_env).unwrap();
+    let agent = registry.resolve(&binding("a")).await.unwrap();
+    assert_eq!(agent.interface.update_mode, A2aUpdateMode::Poll);
+    assert!(agent.extensions.is_empty(), "the tools extension is streaming-only");
 }
