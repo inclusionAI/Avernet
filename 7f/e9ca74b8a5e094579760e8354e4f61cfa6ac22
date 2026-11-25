@@ -1,0 +1,65 @@
+apps/backend/tests/community/adapters/http/task/test_task_internal_dashboard_list.py
+  s_885ffb973587a3::t_dd7a889b94c01b 140-141,144-147,223,232,249,252-265
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_queries.py
+  s_885ffb973587a3::t_0a04edeb86f3de 343-344,346,350-352,362-363,365,370-374
+apps/backend/src/agentclaw/community/core/task/task_service_protocol.py
+  s_885ffb973587a3::t_884c2ffa82e134 75-76,78,87-88,90
+apps/frontend-nextgen/src/pages/MyTask/MyTaskPage.tsx
+  s_885ffb973587a3::t_17f0d26b3e7e5f 40,62,160-161
+apps/backend/src/agentclaw/community/core/task/task_center/task_service.py
+  s_885ffb973587a3::t_0a04edeb86f3de 843-844,846-848,856-857,860-865
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/router.py
+  s_885ffb973587a3::t_6b850717d2ab3c 287-290,309-310,324-327,332-336
+apps/frontend-nextgen/src/pages/MyTask/components/userTaskFilters.ts
+  s_885ffb973587a3::t_17f0d26b3e7e5f 15,34
+apps/frontend-nextgen/src/pages/MyTask/hooks/useMyTaskTasks.ts
+  s_885ffb973587a3::t_17f0d26b3e7e5f 23,56,77
+apps/frontend-nextgen/test/pages/MyTask/useMyTaskTasks.test.tsx
+  s_885ffb973587a3::t_23a6ed9e8439a1 29-46
+apps/backend/src/agentclaw/community/adapters/http/task/task_read_routes.py
+  s_885ffb973587a3::t_42a87a9437aee5 138-141,154-155,168-171,176-180
+apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx
+  s_885ffb973587a3::t_c95e0a13104136 544-549
+  s_885ffb973587a3::t_23a6ed9e8439a1 506,521-522,525-529,532-533,536,540-543,575-576
+  s_885ffb973587a3::t_65c736bce84a5e 531
+apps/backend/src/agentclaw/community/core/repository/protocols/task/core.py
+  s_885ffb973587a3::t_1cd2213219f8fd 68,70,79,85-86
+apps/frontend-nextgen/src/services/myTask.ts
+  s_885ffb973587a3::t_17f0d26b3e7e5f 19-20
+apps/frontend-nextgen/test/pages/MyTask/MyTaskPage.test.tsx
+  s_885ffb973587a3::t_c95e0a13104136 127-129
+  s_885ffb973587a3::t_23a6ed9e8439a1 111
+apps/frontend-nextgen/src/pages/Lab/Tasks/index.tsx
+  s_885ffb973587a3::t_17f0d26b3e7e5f 30,42,109-110
+apps/backend/tests/community/core/task/contracts/test_task_http_adapter.py
+  s_885ffb973587a3::t_f6ac3daa42c027 582-594,616-617
+  s_885ffb973587a3::t_0b3683ce0dbf83 600
+  s_885ffb973587a3::t_54f4399627931c 64-79,85,95,103,107,581,595-599,601-615,618-620
+  s_885ffb973587a3::t_9900c65f062aed 621
+apps/frontend-nextgen/src/pages/MyTask/components/UserTaskTab.tsx
+  s_885ffb973587a3::t_17f0d26b3e7e5f 49-50,73-74,98,107,109,199
+apps/frontend-nextgen/src/services/backendApi/tasks/taskController.ts
+  s_885ffb973587a3::t_17f0d26b3e7e5f 62
+apps/backend/src/agentclaw/community/core/repository/implementations/task/task_info_repository.py
+  s_885ffb973587a3::t_1cd2213219f8fd 9,11,128-152,158,161,170-171,183,188,197-198
+apps/backend/tests/community/repository/task/test_task_info_repository.py
+  s_885ffb973587a3::t_0b3683ce0dbf83 94
+  s_885ffb973587a3::t_a8be75376623d0 1,82-93,95-110
+  s_885ffb973587a3::t_6f48c4ffdbfb8c 111-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7fe9ca74b8a5e094579760e8354e4f61cfa6ac22",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

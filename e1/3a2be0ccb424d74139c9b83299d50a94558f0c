@@ -1,0 +1,26 @@
+apps/backend/src/agentclaw/community/adapters/http/session_resources/router.py
+  s_f364df1c07a1e6::t_a2a79e9563f24f 6,8,32,95-101,114,133-137,139-144
+apps/backend/tests/community/core/session_resources/test_service.py
+  s_f364df1c07a1e6::t_592d13912616df 736,742-749,751-754,757
+apps/backend/src/agentclaw/community/adapters/http/session_resources/schemas.py
+  s_f364df1c07a1e6::t_a2a79e9563f24f 20
+apps/backend/tests/community/adapters/http/session_resources/test_router.py
+  s_f364df1c07a1e6::t_64a4bca238feb7 69-72,118-120,127,152,159-199
+  s_f364df1c07a1e6::t_a2a79e9563f24f 225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e13a2be0ccb424d74139c9b83299d50a94558f0c",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
