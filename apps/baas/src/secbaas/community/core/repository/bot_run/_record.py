@@ -3,7 +3,7 @@
 表示一次 Bot 对话运行的完整状态。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -52,3 +52,4 @@ class BotRunRecord:
     result_extra: dict[str, Any] | None
     error: str | None
     completed_at: datetime | None
+    error_code: str | None = field(default=None, repr=False)

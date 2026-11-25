@@ -9,6 +9,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects import mysql
 
 from secbaas.community.spi.database import Base
 
@@ -34,6 +35,10 @@ class BotRunModel(Base):
     result_content_long = Column(Text, nullable=True)
     result_extra = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
+    error_code = Column(
+        Text().with_variant(mysql.TEXT(charset="utf8mb4"), "mysql", "mariadb"),
+        nullable=True,
+    )
     completed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (UniqueConstraint("run_id", name="uq_baas_bot_run_run_id"),)
@@ -55,6 +60,7 @@ class BotRunModel(Base):
             result_extra=self._parse_result_extra(),
             error=self.error,
             completed_at=self.completed_at,
+            error_code=self.error_code,
         )
 
     def _parse_metadata(self) -> dict | None:

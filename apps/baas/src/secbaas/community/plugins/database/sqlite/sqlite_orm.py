@@ -141,6 +141,17 @@ class SqliteOrmPlugin(DataSourcePlugin):
             else:
                 raise
 
+        # create_all does not upgrade persistent SQLite files. Hold a write
+        # transaction across inspection and ALTER so two workers cannot add
+        # the same column concurrently.
+        with self._sync_session_lock, self._sync_engine.begin() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            columns = connection.exec_driver_sql("PRAGMA table_info(baas_bot_run)")
+            if not any(row[1] == "error_code" for row in columns.all()):
+                connection.exec_driver_sql(
+                    "ALTER TABLE baas_bot_run ADD COLUMN error_code TEXT"
+                )
+
         logger.info("SqliteOrmPlugin: tables created")
 
     def sync_connection(self, datasource_name: str) -> AbstractContextManager[Any]:

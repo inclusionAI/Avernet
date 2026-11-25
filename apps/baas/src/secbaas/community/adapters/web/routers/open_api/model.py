@@ -235,6 +235,22 @@ class MessageResultResponse(ApiResponse[MessageResultResponseData]):
     )
 
 
+class MessagePollResponseData(MessageResultResponseData):
+    """Open API polling result; not used by Gateway."""
+
+    error_code: str | None = Field(
+        description="Original error code or DEFAULT for FAILED; null otherwise"
+    )
+
+
+class MessagePollResponse(ApiResponse[MessagePollResponseData]):
+    """Open API message polling response."""
+
+    data: MessagePollResponseData | None = Field(
+        default=None, description="Message result data"
+    )
+
+
 class SessionQueryResponseData(BaseModel):
     """Session query response data"""
 

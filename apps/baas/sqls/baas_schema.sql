@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS `baas_bot_run` (
   `result_content` text DEFAULT NULL COMMENT 'Bot回复内容',
   `result_extra` text DEFAULT NULL COMMENT '结果额外信息(JSON)',
   `error` text DEFAULT NULL COMMENT '错误信息',
+  `error_code` text CHARACTER SET utf8mb4 NULL COMMENT '引擎原始错误码',
   `completed_at` timestamp NULL DEFAULT NULL COMMENT '完成时间',
   `message_long` mediumtext DEFAULT NULL COMMENT '用户消息(长文本)',
   `result_content_long` mediumtext DEFAULT NULL COMMENT 'Bot回复内容(长文本)',
