@@ -270,7 +270,13 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
   `relay_ledger_runtime.py` 统一入口真实读取 S1、读取当前节点本地账本并输出精简决策。后端已接纳状态优先；
   本地账本负责方法止损、在途等待/对账及细粒度阶段续跑，不上传完整账本，
   不从节点扩展属性消费第二份恢复投影，不保证跨容器恢复。
-  `relay_runtime_monitor.py` 区分 Runtime 失败、终态未上报、active 无消息活动；
+  `TaskRuntimeLivenessProbe` 优先通过 Bot OpenAPI 的 session runtime status 读取事件序号；
+  同一 `run_id + started_at` 下 `last_event_seq` 增长才算 Runtime 活动，`found=true` 的终态不再回退。
+  status 请求/协议失败或 `found=false` 时，使用原有 session messages 检测，来源标记为
+  `openapi_bot.session_fallback`；两条读取路径均失败才返回 `probe_unavailable`，不将探测失败视为 Bot 无进展。
+  Runtime 与消息检测切换时重建基线，不把 cursor 类型变化算作活动。旧消息接口仍无法观测没有消息变化的工具活动。
+  status 日志记录 HTTP status、业务 code 和 Runtime 摘要；fallback 日志记录原因、异常类型和最终来源，不新增完整报文或凭据日志。
+  `relay_runtime_monitor.py` 区分 Runtime 失败、终态未上报、active 无可观测活动；
   active 停滞按最后可观测活动的单调时间计算，默认 5×120 秒（10 分钟）后请求同会话恢复，
   不因探针临时不可用而清零；活动只证明 Runtime/消息变化，不证明业务验收进展。
   run/session 的版本与更新时间变化不单独算活动；当前进程同节点恢复互斥，发送后
