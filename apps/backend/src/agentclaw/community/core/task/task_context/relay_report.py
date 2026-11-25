@@ -88,8 +88,8 @@ def _planned_relay_group_formation(value: Any) -> dict[str, Any]:
     return formation.to_dict()
 
 
-def _search_receipt_for_generation(node: TaskNode, relay_token: str) -> list[str]:
-    """Return candidate ids from the current generation's successful search.
+def _search_receipt_for_generation(node: TaskNode, relay_token: str) -> list[dict]:
+    """Return candidate records from the current generation's successful search.
 
     The search endpoint records the authoritative candidate list in the node's
     action log before Bot-side selection. Keeping the receipt keyed by a token
@@ -110,13 +110,13 @@ def _search_receipt_for_generation(node: TaskNode, relay_token: str) -> list[str
             raise TaskStateError(
                 "successor PLAN_RESULT requires a successful candidate search"
             )
-        candidates: list[str] = []
+        candidates: list[dict] = []
         for item in payload.get("candidates") or []:
             if not isinstance(item, dict):
                 continue
             bot_id = str(item.get("bot_id") or "").strip()
             if bot_id:
-                candidates.append(bot_id)
+                candidates.append(item)
         return candidates
     raise TaskStateError(
         "successor PLAN_RESULT requires a current-generation candidate search"
@@ -146,9 +146,9 @@ def _validate_successor_candidate_origin(
     if mode == "bbs":
         return
     runtime_identities = {
-        _searched_runtime_identity(candidate)
+        _searched_runtime_identity(str(candidate.get("bot_id") or ""))
         for candidate in candidates
-        if str(candidate or "").strip()
+        if str(candidate.get("bot_id") or "").strip()
     }
     if not runtime_identities:
         raise TaskStateError(
@@ -166,9 +166,9 @@ def _validate_successor_candidate_origin(
         return
     if mode == "coop_group":
         candidate_ids = {
-            str(candidate).strip()
+            str(candidate.get("bot_id") or "").strip()
             for candidate in candidates
-            if str(candidate or "").strip()
+            if str(candidate.get("bot_id") or "").strip()
         }
         formation = successor.run_info.extend_props.get("pending_group_formation")
         if not isinstance(formation, dict) or not isinstance(formation.get("bot_ids"), list):
@@ -178,6 +178,23 @@ def _validate_successor_candidate_origin(
                 raise TaskStateError(
                     "successor PLAN_RESULT group members must come from searched candidates"
                 )
+
+
+def _searched_assignee_name(
+    node: TaskNode, relay_token: str, successor: TaskNode
+) -> str | None:
+    """Return the searched Bot name for the selected single-bot successor."""
+    selected = (
+        str(successor.run_info.assignee or "").strip(),
+        str(successor.run_info.extend_props.get("assignee_owner_id") or "").strip()
+        or None,
+    )
+    for candidate in _search_receipt_for_generation(node, relay_token):
+        bot_id = str(candidate.get("bot_id") or "").strip()
+        if _searched_runtime_identity(bot_id) == selected:
+            name = str(candidate.get("name") or "").strip()
+            return name or bot_id
+    return None
 
 
 def _validate_successor_executor_reuse(
@@ -598,6 +615,11 @@ def apply_relay_report(
                     node, command.relay_token, next_node
                 )
                 _validate_successor_executor_reuse(graph, next_node)
+                searched_assignee_name = (
+                    _searched_assignee_name(node, command.relay_token, next_node)
+                    if mode == "single_bot"
+                    else None
+                )
                 max_rounds = int(config.get("MAX_LOOP", 3))
                 node.run_info.progress_reason = command.progress_reason or None
                 node.run_info.end_time = now
@@ -643,6 +665,11 @@ def apply_relay_report(
                             failure_reason=next_node.run_info.failure_reason,
                             extend_props={
                                 **next_node.run_info.extend_props,
+                                **(
+                                    {"assignee_name": searched_assignee_name}
+                                    if searched_assignee_name is not None
+                                    else {}
+                                ),
                                 **(
                                     {"pending_group_formation": planned_group_formation}
                                     if planned_group_formation is not None
