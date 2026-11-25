@@ -1,5 +1,6 @@
 """Public re-exports for the bot_run_queue repository subpackage."""
 
+from ._orm_model import active_queue_claim_exists
 from ._orm_repository import OrmBotRunQueueRepository
 from ._protocol import BotRunQueueRepository
 from ._record import ActiveBot, BotRunQueueRecord, QueueStatus
@@ -10,4 +11,5 @@ __all__ = [
     "BotRunQueueRepository",
     "OrmBotRunQueueRepository",
     "QueueStatus",
+    "active_queue_claim_exists",
 ]

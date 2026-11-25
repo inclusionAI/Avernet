@@ -73,12 +73,21 @@ class BotRunRepository(Protocol):
         """
         ...
 
-    def update_error(self, run_id: str, error: str) -> None:
-        """更新失败信息
+    def update_error(
+        self,
+        run_id: str,
+        error: str,
+        *,
+        error_code: str | None = None,
+        queue_claim: tuple[str, str] | None = None,
+    ) -> None:
+        """Record a failure and its optional original code in one update.
 
-        Args:
-            run_id: 运行ID
-            error: 错误信息
+        Only a trusted caller that has associated the code with this attempt
+        may supply it. A nonblank UTF-8 string of at most 65,535 bytes is
+        stored verbatim; missing or unrepresentable codes are stored as NULL.
+        Queued writers provide the claim ID; a superseded queue claim cannot
+        attach its code. The existing status/text winner is unchanged.
         """
         ...
 

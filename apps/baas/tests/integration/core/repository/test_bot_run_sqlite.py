@@ -301,3 +301,39 @@ class TestBotRunSqliteOrmEquivalence:
         assert r.error == "aborted by chat.abort"
         assert r.completed_at is not None
         assert r.gmt_modified is not None
+
+
+def test_failure_code_roundtrip_and_guard(bot_run_repository: BotRunRepository):
+    repo = bot_run_repository
+    run_id = _generate_uuid()
+    repo.insert_run(
+        run_id=run_id,
+        bot_id=_generate_uuid(),
+        api_key_prefix="sk-",
+        message_long="msg",
+        metadata=None,
+    )
+    repo.update_error(run_id, "original failure", error_code=" 007🐾 ")
+    repo.update_error(run_id, "late failure", error_code="LATE")
+    repo.update_aborted(run_id, "late abort")
+    repo.update_session_id(run_id, "session-1")
+    failed = repo.get_by_run_id(run_id)
+    assert failed is not None
+    assert (failed.status, failed.error, failed.error_code) == (
+        "FAILED",
+        "original failure",
+        " 007🐾 ",
+    )
+
+    repo.update_status(run_id, "RUNNING")
+    reopened = repo.get_by_run_id(run_id)
+    assert reopened is not None
+    assert reopened.error_code is None
+    repo.update_error(run_id, "legacy failure without a code")
+    legacy = repo.get_by_run_id(run_id)
+    assert legacy is not None
+    assert (legacy.status, legacy.error, legacy.error_code) == (
+        "FAILED",
+        "legacy failure without a code",
+        None,
+    )

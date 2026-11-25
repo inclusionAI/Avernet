@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
+from secbaas.community.core.repository.bot_run_queue import active_queue_claim_exists
 from secbaas.community.logger import get_logger
 
 from ._orm_model import BotRunModel
@@ -9,6 +10,21 @@ from ._protocol import BotRunRepository
 from ._record import BotRunRecord
 
 log = get_logger("orm")
+_ERROR_CODE_MAX_BYTES = 65_535  # MySQL/MariaDB TEXT capacity.
+
+
+def _storable_error_code(code: str | None) -> str | None:
+    # 以下为安全注释COSEC：拒绝无法存储的原码，避免影响失败状态落库；不截断或记录原码。
+    if (
+        not isinstance(code, str)
+        or len(code) > _ERROR_CODE_MAX_BYTES
+        or not code.strip()
+    ):
+        return None
+    try:
+        return code if len(code.encode("utf-8")) <= _ERROR_CODE_MAX_BYTES else None
+    except UnicodeEncodeError:
+        return None
 
 
 class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
@@ -63,7 +79,8 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
         from sqlalchemy import func
 
         self._session.query(BotRunModel).filter(BotRunModel.run_id == run_id).update(
-            {"status": status, "gmt_modified": func.now()}, synchronize_session=False
+            {"status": status, "error_code": None, "gmt_modified": func.now()},
+            synchronize_session=False,
         )
         log.info("[bot-run:update_status] result: done")
 
@@ -86,6 +103,7 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
             .update(
                 {
                     "status": "COMPLETED",
+                    "error_code": None,
                     "result_content": content_long[:256] if content_long else "",
                     "result_content_long": content_long,
                     "result_extra": json.dumps(extra, ensure_ascii=False)
@@ -105,9 +123,29 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
             log.info("[bot-run:update_result] result: done")
 
     @with_orm_session
-    def update_error(self, run_id: str, error: str) -> None:
+    def update_error(
+        self,
+        run_id: str,
+        error: str,
+        *,
+        error_code: str | None = None,
+        queue_claim: tuple[str, str] | None = None,
+    ) -> None:
         log.info("update_error: run_id=%s", run_id)
-        from sqlalchemy import func
+        from sqlalchemy import ColumnElement, case, func
+
+        code = _storable_error_code(error_code)
+        persisted_code: str | None | ColumnElement[str] = code
+        if code is not None and queue_claim is not None:
+            # COSEC: verify queue-attempt ownership inside this update (not a
+            # snapshot in the executor); only the new code is gated.
+            claim_id, worker_id = queue_claim
+            owns_claim = active_queue_claim_exists(
+                run_id=run_id,
+                claim_id=claim_id,
+                worker_id=worker_id,
+            )
+            persisted_code = case((owns_claim, code), else_=None)
 
         updated = (
             self._session.query(BotRunModel)
@@ -119,6 +157,7 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
                 {
                     "status": "FAILED",
                     "error": error,
+                    "error_code": persisted_code,
                     "completed_at": func.now(),
                     "gmt_modified": func.now(),
                 },
@@ -146,6 +185,7 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
             .update(
                 {
                     "status": "ABORTED",
+                    "error_code": None,
                     "error": reason,
                     "completed_at": func.now(),
                     "gmt_modified": func.now(),
@@ -174,6 +214,7 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
             .update(
                 {
                     "status": "TIME_OUT",
+                    "error_code": None,
                     "error": error,
                     "completed_at": func.now(),
                     "gmt_modified": func.now(),

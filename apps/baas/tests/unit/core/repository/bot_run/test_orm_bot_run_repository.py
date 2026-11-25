@@ -313,3 +313,43 @@ class TestUpdateAborted:
         repository.update_aborted("run-002", "aborted by chat.abort")
 
         mock_session.query.return_value.filter.return_value.update.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("candidate", "result"),
+    [
+        ("007", "007"),
+        (None, None),
+        (" \n", None),
+        (7, None),
+        ("\ud800", None),
+        ("X" * 65_535, "X" * 65_535),
+        ("X" * 65_536, None),
+        ("🐾" * 16_383 + "XYZ", "🐾" * 16_383 + "XYZ"),
+        ("🐾" * 16_384, None),
+    ],
+    ids=[
+        "code",
+        "missing",
+        "blank",
+        "not-string",
+        "invalid-unicode",
+        "max-ascii",
+        "over-ascii",
+        "max-utf8",
+        "over-utf8",
+    ],
+)
+def test_update_error_stores_only_representable_codes(
+    repository, mock_session, candidate, result
+):
+    update = mock_session.query.return_value.filter.return_value.update
+    update.return_value = 1
+    repository.update_error("run-001", "original failure", error_code=candidate)
+    update.assert_called_once()
+    values = update.call_args.args[0]
+    assert (values["status"], values["error"], values["error_code"]) == (
+        "FAILED",
+        "original failure",
+        result,
+    )

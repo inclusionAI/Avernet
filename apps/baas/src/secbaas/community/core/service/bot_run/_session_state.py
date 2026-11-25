@@ -9,6 +9,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from ._ws_failure import WsErrorChunk, WsFrame
+
 
 @dataclass
 class SessionState:
@@ -32,3 +34,5 @@ class SessionState:
     # "SESSION_CWD_CONFLICT - isolated session cwd ..."）。send_message 抛
     # BotSessionError 时透传给调用方，避免只剩 "error state" 外壳。
     error_message: str = ""
+    ws_ack: WsFrame | None = field(default=None, repr=False)
+    ws_error: WsErrorChunk | None = field(default=None, repr=False)

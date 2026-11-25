@@ -7,6 +7,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    select,
 )
 
 from secbaas.community.spi.database import Base
@@ -32,6 +33,7 @@ class BotRunQueueModel(Base):
     session_id = Column(String(128), nullable=True)
     status = Column(String(32), nullable=False)
     assigned_worker = Column(String(64), nullable=True)
+    claim_id = Column(String(32), nullable=True)
     last_heartbeat = Column(DateTime, nullable=True)
     meta = Column(Text, nullable=True)
     env = Column(String(32), nullable=True)
@@ -57,4 +59,23 @@ class BotRunQueueModel(Base):
             last_heartbeat=self.last_heartbeat,
             meta=_parse_meta_json(self.meta),
             env=self.env,
+            claim_id=self.claim_id,
         )
+
+
+def active_queue_claim_exists(*, run_id: str, claim_id: str, worker_id: str):
+    """Check the current claim in the transaction that writes the failure."""
+    queue = BotRunQueueModel
+    return (
+        select(queue.id)
+        .where(
+            queue.run_id == run_id,
+            queue.status == "RUNNING",
+            queue.claim_id == claim_id,
+            queue.assigned_worker == worker_id,
+        )
+        # InnoDB needs a current (locking) read, not an older MVCC snapshot.
+        # SQLite omits FOR UPDATE; it serializes writes at database level.
+        .with_for_update()
+        .exists()
+    )

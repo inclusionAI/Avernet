@@ -92,3 +92,83 @@ class _FakeDbManager:
 
     def init_plugin(self, p) -> None:
         self._records["plugin"] = p
+
+
+def test_create_all_upgrades_existing_sqlite_file(tmp_path, monkeypatch):
+    import sqlite3
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import closing
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    db_path = tmp_path / "baas.db"
+    with closing(sqlite3.connect(db_path)) as connection, connection:
+        connection.executescript("""
+            CREATE TABLE baas_bot_run (run_id TEXT PRIMARY KEY, status TEXT, error TEXT);
+            INSERT INTO baas_bot_run VALUES ('old-run', 'FAILED', 'existing error');
+        """)
+
+    first = SqliteOrmPlugin(f"sqlite:///{db_path}", seed_data=False)
+    first.create_all()
+    # Simulate two workers upgrading the same fully provisioned old database.
+    with closing(sqlite3.connect(db_path)) as connection, connection:
+        connection.execute("ALTER TABLE baas_bot_run DROP COLUMN error_code")
+        connection.execute("ALTER TABLE baas_bot_run_queue DROP COLUMN claim_id")
+        connection.execute(
+            "INSERT INTO baas_bot_run_queue (run_id, bot_id, status, meta) "
+            "VALUES ('old-run', 'bot', 'PENDING', '{\"example\":1}')"
+        )
+    second = SqliteOrmPlugin(f"sqlite:///{db_path}", seed_data=False)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs = [pool.submit(plugin.create_all) for plugin in (first, second)]
+        for job in jobs:
+            job.result(timeout=15)
+    first.create_all()  # another startup must be a no-op
+    with closing(sqlite3.connect(db_path)) as connection:
+        assert connection.execute("SELECT * FROM baas_bot_run").fetchall() == [
+            ("old-run", "FAILED", "existing error", None)
+        ]
+        cols = connection.execute("PRAGMA table_info(baas_bot_run)").fetchall()
+        assert [(c[2], c[3], c[4]) for c in cols if c[1] == "error_code"] == [
+            ("TEXT", 0, None)
+        ]
+        assert connection.execute(
+            "SELECT run_id, status, meta, claim_id FROM baas_bot_run_queue"
+        ).fetchall() == [("old-run", "PENDING", '{"example":1}', None)]
+        cols = connection.execute("PRAGMA table_info(baas_bot_run_queue)").fetchall()
+        assert [(c[2], c[3], c[4]) for c in cols if c[1] == "claim_id"] == [
+            ("VARCHAR(32)", 0, None)
+        ]
+
+
+def test_create_all_serializes_concurrent_cold_boot(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from sqlalchemy import event, inspect
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    url = f"sqlite:///{tmp_path / 'cold.db'}"
+    plugins = [SqliteOrmPlugin(url, seed_data=False) for _ in range(2)]
+    start = Barrier(len(plugins))
+
+    def boot(plugin):
+        statements = []
+
+        def record(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        event.listen(plugin._sync_engine, "before_cursor_execute", record)
+        start.wait(timeout=5)
+        plugin.create_all()
+        return statements
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs = [pool.submit(boot, plugin) for plugin in plugins]
+        for job in jobs:
+            # Serialize even create_all's checkfirst reads, not just ALTER.
+            assert job.result(timeout=15)[0] == "BEGIN IMMEDIATE"
+
+    columns = inspect(plugins[0]._sync_engine).get_columns("baas_bot_run")
+    assert [
+        column["nullable"] for column in columns if column["name"] == "error_code"
+    ] == [True]

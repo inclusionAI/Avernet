@@ -209,6 +209,7 @@ class A2aChatTransport(ChatTransportBase):
 
             client = self._make_ws_client()
             callbacks = self._event_callbacks()
+            self._bind_ws_ack(client, callbacks)
             for event, handler in callbacks.events.items():
                 client.on_event(event, self._fallback_bridge(client, event, handler))
             client.on_disconnect(

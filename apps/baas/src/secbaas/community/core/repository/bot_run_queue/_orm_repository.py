@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 from sqlalchemy import func
 
@@ -162,6 +163,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
                     {
                         "status": "RUNNING",
                         "assigned_worker": worker_id,
+                        "claim_id": uuid4().hex,
                         "last_heartbeat": now,
                         "gmt_modified": func.now(),
                     },
@@ -209,6 +211,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
                 {
                     "status": "PENDING",
                     "assigned_worker": None,
+                    "claim_id": None,
                     "last_heartbeat": None,
                     "gmt_modified": func.now(),
                 },
@@ -253,7 +256,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
                 BotRunQueueModel.assigned_worker == worker_id,
             )
             .update(
-                {"status": "DONE", "gmt_modified": func.now()},
+                {"status": "DONE", "claim_id": None, "gmt_modified": func.now()},
                 synchronize_session=False,
             )
         )
@@ -290,7 +293,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
                 BotRunQueueModel.status.in_(("PENDING", "RUNNING")),
             )
             .update(
-                {"status": "DONE", "gmt_modified": func.now()},
+                {"status": "DONE", "claim_id": None, "gmt_modified": func.now()},
                 synchronize_session=False,
             )
         )
@@ -316,6 +319,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
                 {
                     "status": "PENDING",
                     "assigned_worker": None,
+                    "claim_id": None,
                     "last_heartbeat": None,
                     "gmt_modified": func.now(),
                 },

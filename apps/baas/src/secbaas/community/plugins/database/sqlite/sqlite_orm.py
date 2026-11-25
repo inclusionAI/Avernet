@@ -126,20 +126,24 @@ class SqliteOrmPlugin(DataSourcePlugin):
                 if str(col.type).upper() == "BIGINT":
                     col.type = Integer()
 
-        try:
-            Base.metadata.create_all(self._sync_engine, tables=baas_tables)
-        except Exception as _exc:  # pragma: no cover - multi-worker cold-start race
-            # sofapy boots several workers that create the schema concurrently; two
-            # can pass checkfirst for the same table and one hits "already exists"
-            # (MySQL/MariaDB 1050; SQLite analogous). The table exists, so succeed.
-            if "already exists" in str(_exc).lower() or "1050" in str(_exc):
-                logger.warning(
-                    "SqliteOrmPlugin: table already exists during concurrent "
-                    "create_all (multi-worker race) — treating as success: %s",
-                    _exc,
+        # Serialize bootstrap as well as inspection and ALTER. A worker must
+        # not observe a half-created schema or race another worker to add a
+        # column to an existing database (create_all does not add columns).
+        with self._sync_session_lock, self._sync_engine.begin() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            Base.metadata.create_all(connection, tables=baas_tables)
+            columns = connection.exec_driver_sql("PRAGMA table_info(baas_bot_run)")
+            if not any(row[1] == "error_code" for row in columns.all()):
+                connection.exec_driver_sql(
+                    "ALTER TABLE baas_bot_run ADD COLUMN error_code TEXT"
                 )
-            else:
-                raise
+            queue_columns = connection.exec_driver_sql(
+                "PRAGMA table_info(baas_bot_run_queue)"
+            )
+            if not any(row[1] == "claim_id" for row in queue_columns.all()):
+                connection.exec_driver_sql(
+                    "ALTER TABLE baas_bot_run_queue ADD COLUMN claim_id VARCHAR(32)"
+                )
 
         logger.info("SqliteOrmPlugin: tables created")
 

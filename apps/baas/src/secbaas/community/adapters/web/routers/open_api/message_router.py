@@ -24,12 +24,12 @@ from secbaas.community.adapters.web.routers.open_api.model import (
     InteractionResolveErrorEnvelope,
     InteractionResolveResponse,
     InteractionResolveSuccessEnvelope,
+    MessagePollResponse,
+    MessagePollResponseData,
     MessageRequest,
     MessageResponse,
     MessageResponseData,
     MessageResultData,
-    MessageResultResponse,
-    MessageResultResponseData,
     StreamMessageRequest,
 )
 from secbaas.community.adapters.web.session_id import extract_response_session_id
@@ -412,7 +412,7 @@ async def resolve_message_interaction(
 
 @router.get(
     "/messages/{message_id}",
-    response_model=MessageResultResponse,
+    response_model=MessagePollResponse,
     summary="Query message result",
     description="Query the processing result of a message delivery by message_id",
     responses={
@@ -426,7 +426,7 @@ async def get_message_result(
     message_id: str,
     api_key_record: APIKeyRecord = Depends(validate_api_key),
     bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
-) -> MessageResultResponse:
+) -> MessagePollResponse:
     """Query message result endpoint
 
     Args:
@@ -435,7 +435,7 @@ async def get_message_result(
         bot_runner: BotRunner instance
 
     Returns:
-        MessageResultResponse: Message result response
+        MessagePollResponse: Message result response
     """
     try:
         logger.info(
@@ -464,7 +464,7 @@ async def get_message_result(
                 f"get_message_result api_key mismatch: message_id={message_id}, "
                 f"expected={api_key_record.api_key_prefix}, actual={message_info.api_key_prefix}"
             )
-            return MessageResultResponse(
+            return MessagePollResponse(
                 code=OpenAPICode.BUSINESS_ERROR,
                 message=f"Message not found: {message_id}",
                 data=None,
@@ -489,10 +489,14 @@ async def get_message_result(
             f"get_message_result success: message_id={message_id}, status={message_info.status}"
         )
 
-        return MessageResultResponse(
+        error_code = None
+        if message_info.status == "FAILED":
+            error_code = message_info.error_code or "DEFAULT"
+
+        return MessagePollResponse(
             code=0,
             message="success",
-            data=MessageResultResponseData(
+            data=MessagePollResponseData(
                 message_id=message_info.run_id,
                 bot_id=message_info.bot_id,
                 session_id=session_id,
@@ -501,6 +505,7 @@ async def get_message_result(
                 completed_at=message_info.completed_at,
                 result=result_data,
                 error=message_info.error,
+                error_code=error_code,
             ),
         )
 

@@ -14,6 +14,7 @@ from typing import Any, Literal, Protocol, cast
 from secbaas.community.api.bot_interaction import InteractionResolution
 
 from ._interaction_protocol import EngineInteractionResolveExchange
+from ._ws_failure import WsFrame
 
 ChatTransportMode = Literal["off", "grey", "on"]
 EventHandler = Callable[..., Any]
@@ -39,6 +40,7 @@ class ChatTransportCallbacks:
     events: Mapping[str, EventHandler]
     on_disconnect: EventHandler
     on_sessions_failed: Callable[[tuple[str, ...], str, str], None]
+    on_ws_send_ack: Callable[[str, WsFrame], None] | None = None
 
 
 class ChatTransport(Protocol):
