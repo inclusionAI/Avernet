@@ -125,11 +125,11 @@ pub(super) fn remote_of(task_id: &str, context_id: &str) -> RemoteTaskRef {
 }
 
 impl Mapper {
-    /// `tools_negotiated`: whether the tools extension was negotiated with
+    /// `v1_negotiated` / `v2_negotiated`: whether tools v1 or v2 were negotiated with
     /// this agent; when not, tool records are dropped.
-    pub fn new(tools_negotiated: bool) -> Self {
+    pub fn new(v1_negotiated: bool, v2_negotiated: bool) -> Self {
         Self {
-            tools: crate::tools::Tools::new(tools_negotiated),
+            tools: crate::tools::Tools::with_versions(v1_negotiated, v2_negotiated),
         }
     }
 
@@ -198,7 +198,8 @@ impl Mapper {
     /// - No marker: one `Thinking` event with the whole message.
     fn message_events(&mut self, message: &a2a::Message) -> Vec<(AgentEventKind, Value)> {
         let raw = serde_json::to_value(message).unwrap_or(Value::Null);
-        let tool_message = raw.get("metadata").and_then(|m| m.get(crate::tools::EXTENSION)).is_some();
+        let tool_message = raw.get("metadata").and_then(|m| m.get(crate::tools::EXTENSION)).is_some()
+            || message.extensions.as_ref().is_some_and(|exts| exts.iter().any(|uri| uri == crate::tools::EXTENSION_V2));
         match self.tools.decode(message) {
             Ok(records) if !records.is_empty() => records
                 .into_iter()
