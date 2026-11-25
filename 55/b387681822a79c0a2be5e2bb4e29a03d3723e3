@@ -1,0 +1,29 @@
+apps/bcs/crates/services/bcs-edge-permission-store/CONTEXT.md
+  s_7d114ded8fc0da::t_7ac4b227fbf721 403-420
+apps/bcs/crates/services/bcs-edge-permission-store/tests/agent_invoke_sql_races.rs
+  s_7d114ded8fc0da::t_5833928c5ed4fd 1-63
+apps/bcs/crates/services/bcs-edge-permission-store/tests/conformance_agent_invoke_mysql.rs
+  s_7d114ded8fc0da::t_eff87df7ca43b5 20-21,75-82
+apps/bcs/crates/services/bcs-edge-permission-store/tests/support/agent_invoke_race_db.rs
+  s_7d114ded8fc0da::t_04e3ddfa0cd124 1-86
+apps/bcs/crates/services/bcs-edge-permission-store/tests/support/agent_invoke_races.rs
+  s_7d114ded8fc0da::t_5fead2b5a6877e 1-350
+apps/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md
+  s_7d114ded8fc0da::t_2f9fc521441c1a 3647-3655,3697
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "55b387681822a79c0a2be5e2bb4e29a03d3723e3",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
