@@ -730,9 +730,12 @@ Agent 若通过 SOFARPC Triple 暴露服务，需要与上述标准 protobuf 服
 
 纯文本 Agent 可以跳过本节。扩展必须先在 Card 声明并通过 A2A-Extensions 协商；不兼容的 required 扩展会拒绝接入，未知可选扩展不会被当作 BCS 工具事件解释。
 
-### 8.1 BCS 工具观察扩展 v1
+### 8.1 BCS 工具观察扩展（v1 / v2）
 
-标识及完整约定：[BCS tools v1](specs/a2a/extensions/tools/v1.md)。这是 BCS 自有的版本化 A2A 扩展，不是 A2A 核心定义的 toolcall 事件，也不使用 Gemini CLI RFC 格式。
+标识及完整约定：[BCS tools v1](specs/a2a/extensions/tools/v1.md)、[BCS tools v2](specs/a2a/extensions/tools/v2.md)。这是 BCS 自有的版本化 A2A 扩展，不是 A2A 核心定义的 toolcall 事件，也不使用 Gemini CLI RFC 格式。
+
+- `v1` URI：`https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v1.md`（使用 `Message.metadata[URI] = {"version":"1"}` 标记，`start` 必填 `args`，`result` 必填 `isError` 与 `result`）
+- `v2` URI：`https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v2.md`（使用 `Message.extensions` 数组标记 URI，`args`、`isError`、`result` 均按需可选，缺失时不伪造，来源信息放在 `Part.metadata`）
 
 Card 增加以下 `capabilities.extensions` 数组项：
 
@@ -899,7 +902,7 @@ Agent 接受请求后，尽早输出含有效 id 的 Task，再继续长时间�
 
 - [A2A 1.0.1 协议规范](https://a2a-protocol.org/v1.0.1/specification/)：标准对象与绑定；BCN 仅实现本文列出的子集。
 - [Provider 管理注册约定](specs/a2a/provider-admin-registration-v1.md)、[最小 Card 注册与刷新约定](specs/a2a/minimal-card-registration-v1.md)。
-- [BCS 工具观察扩展 v1](specs/a2a/extensions/tools/v1.md)、[Structured Input exec profile v1](specs/a2a/structured-input-exec/v1.md)。
+- [BCS 工具观察扩展 v1](specs/a2a/extensions/tools/v1.md)、[BCS 工具观察扩展 v2](specs/a2a/extensions/tools/v2.md)、[Structured Input exec profile v1](specs/a2a/structured-input-exec/v1.md)。
 - BCN 实现合同：[Provider HTTP DTO](../apps/bcs/crates/contracts/bcs-protocol/src/http/provider.rs)、[聊天运行 HTTP DTO](../apps/bcs/crates/contracts/bcs-protocol/src/http/chat_run.rs)。
 - 当前 A2A 下行绑定与文本规则：[REST client](../apps/bcs/crates/external-clients/bcs-a2a-http/src/client.rs)、[gRPC client](../apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_client.rs)、[Artifact 文本转换](../apps/bcs/crates/external-clients/bcs-a2a-http/src/text.rs)。
 

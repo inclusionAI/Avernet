@@ -26,6 +26,7 @@ pub(super) fn build_card_management(
         .with_catalog_changes(catalog_changes.clone()));
     let core = Arc::new(A2aBotCore::new(cards.clone(), bots).with_catalog_changes(catalog_changes));
     let mut fetcher = HttpA2aCardFetcher::new(guard, vec![bcs_a2a_http::tools::EXTENSION.into(),
+        bcs_a2a_http::tools::EXTENSION_V2.into(),
         bcs_a2a_http::delivery::DEDUP_EXTENSION.into(),bcs_a2a_http::structured_exec::EXTENSION.into()]);
     if let Some(grpc)=grpc {fetcher=fetcher.with_grpc_mesh(grpc.clone())?;}
     Ok((

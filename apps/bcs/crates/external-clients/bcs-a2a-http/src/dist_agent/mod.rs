@@ -229,9 +229,9 @@ impl A2aDistAgentClient {
     }
 
     /// Builds the binding client of a target. An error means nothing was sent.
-    /// The `bool` says whether the tools extension was negotiated, i.e.
+    /// The `(bool, bool)` says whether tools v1 / v2 were negotiated, i.e.
     /// whether tool records in the agent's messages are decoded (`events`).
-    async fn client(&self, target: &AgentBinding) -> Result<(BindingClient, bool), String> {
+    async fn client(&self, target: &AgentBinding) -> Result<(BindingClient, (bool, bool)), String> {
         self.client_and_mode(target).await.map(|(client, tools, _)| (client, tools))
     }
 
@@ -242,9 +242,12 @@ impl A2aDistAgentClient {
     /// `address_rejected`, or the resolver's own code). Building an HTTP or
     /// gRPC client sends nothing to the agent: the gRPC channel connects
     /// lazily on the first request, and the HTTP check only resolves DNS.
-    async fn client_and_mode(&self, target: &AgentBinding) -> Result<(BindingClient, bool, A2aUpdateMode), String> {
+    async fn client_and_mode(&self, target: &AgentBinding) -> Result<(BindingClient, (bool, bool), A2aUpdateMode), String> {
         let agent = self.resolver.resolve(target).await?;
-        let tools = agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION);
+        let tools = (
+            agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION),
+            agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION_V2),
+        );
         let extensions = agent.extensions.join(",");
         let interface = &agent.interface;
         let client = match interface.binding {
@@ -441,8 +444,8 @@ fn build_message(
 /// Maps a response stream into remote events; a read failure carries a code only.
 /// `tools`: whether the tools extension was negotiated. One `Mapper` per
 /// stream, so repeated tool records are recognised within this stream only.
-fn remote_events(responses: Responses, tools: bool) -> RemoteEventStream {
-    let mut mapper = Mapper::new(tools);
+fn remote_events(responses: Responses, tools: (bool, bool)) -> RemoteEventStream {
+    let mut mapper = Mapper::new(tools.0, tools.1);
     responses
         .flat_map(move |response| {
             let events: Vec<Result<RemoteEvent, AgentReadError>> = match response {

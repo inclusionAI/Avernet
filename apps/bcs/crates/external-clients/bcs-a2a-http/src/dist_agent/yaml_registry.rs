@@ -57,7 +57,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Extensions this client can take part in; a card may declare more.
-const SUPPORTED_EXTENSIONS: &[&str] = &[crate::tools::EXTENSION];
+const SUPPORTED_EXTENSIONS: &[&str] = &[crate::tools::EXTENSION, crate::tools::EXTENSION_V2];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -161,7 +161,8 @@ impl A2aHttpTransport {
             if credential.disabled || credential.secret_value.trim().is_empty() {return Err(invalid("credential unavailable"));}
             Some(credential.secret_value)
         };
-        let negotiated = record.extensions.iter().filter(|uri|matches!(uri.as_str(),crate::tools::EXTENSION | DEDUP_EXTENSION | crate::structured_exec::EXTENSION))
+        let negotiated = record.extensions.iter().filter(|uri|crate::tools::is_extension(uri.as_str())
+            || matches!(uri.as_str(), DEDUP_EXTENSION | crate::structured_exec::EXTENSION))
             .map(String::as_str).collect::<Vec<_>>().join(",");
         if record.interface.binding == A2aBinding::Custom {
             if record.scope.route_fingerprint != self.route_fingerprint(&record.interface)? {
@@ -333,7 +334,7 @@ impl BotDeliveryPort for A2aHttpTransport {
             interface: interface.clone(), credential_kind: credential_kind.clone(), message_id: cmd.run_id.clone(), request_digest: digest,
             extensions: extensions.iter().filter(|declaration|declaration.uri==DEDUP_EXTENSION
                 || (interface.update_mode==bcs_service_api::types::a2a::A2aUpdateMode::Stream
-                    && (declaration.uri==crate::tools::EXTENSION
+                    && (crate::tools::is_extension(&declaration.uri)
                         || (declaration.uri==crate::structured_exec::EXTENSION
                             && crate::structured_exec::compatible_params(&declaration.params)
                             && self.input_runtime().is_ok()))))
@@ -428,7 +429,10 @@ impl BotDeliveryPort for A2aHttpTransport {
             Some(value) => value,
             None => { self.save(&mut record, A2aRunState::Unknown).await?; return Err(invalid("submission outcome unknown; retry budget exhausted or dedup not negotiated")); }
         };
-        let mut projection = Projection::default().with_tools(record.extensions.iter().any(|uri|uri == crate::tools::EXTENSION));
+        let mut projection = Projection::default().with_tools_versions(
+            record.extensions.iter().any(|uri|uri == crate::tools::EXTENSION),
+            record.extensions.iter().any(|uri|uri == crate::tools::EXTENSION_V2),
+        );
         let finished = match self.apply(&mut record, &mut projection, event).await {
             Ok(value) => value,
             Err(error) => { self.tracking_failed(&mut record).await; return Err(error); }
