@@ -2419,6 +2419,159 @@ async fn owner_remove_requires_a_human_caller_and_a_known_bot() {
     );
 }
 
+// ── 免审批 origin friend removal: real durable stack ─────────────────────
+//
+// Review Focus #7 (Task 5 Step 5): a friendship created under
+// `friend_check_in_strategy=open` (no approval round) lives in the same edge
+// store, shows up in the V1 list, and is removable through the Owner-removal
+// path. Wired the real `DbConnectService` (in-memory edge stores) behind the
+// facade instead of the command-recording fake so the facade → durable
+// service → store path runs end to end.
+
+/// BotActorConfig read that flips every seeded Bot to the no-approval
+/// `open` friend check-in strategy (the in-memory store projects the
+/// product default `APPROVAL`).
+struct OpenStrategyBotConfig {
+    inner: bcs_edge_permission_store::memory::MemoryBotActorConfigStore,
+}
+
+#[async_trait]
+impl bcs_service_api::port::repo::BotActorConfigRepoPort for OpenStrategyBotConfig {
+    async fn get(
+        &self,
+        bot_id: &str,
+        env: &str,
+    ) -> Option<bcs_domain::edge_permission::BotActorConfig> {
+        bcs_service_api::port::repo::BotActorConfigRepoPort::get(&self.inner, bot_id, env)
+            .await
+            .map(|mut cfg| {
+                cfg.friend_check_in_strategy = "open".to_string();
+                cfg
+            })
+    }
+}
+
+#[tokio::test]
+async fn owner_remove_lists_and_revokes_open_strategy_friendships() {
+    use bcs_service_api::application::v1::{
+        DeleteFriendConnection, FriendConnectionActor, FriendConnectionActorType as Kind,
+        FriendConnectionService, ListFriendConnections,
+    };
+    use bcs_service_api::application::{ConnectService, ConnectStatus};
+
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-b").await; // managed Bot, owner staff-2
+    fx.add_bot("bot-a").await; // friend Bot, owner staff-1 (different owner)
+
+    let profiles = Arc::new(bcs_edge_permission_store::memory::MemoryPermissionProfileStore::new());
+    let connect = Arc::new(bcs_edge_permission::DbConnectService::new(
+        Arc::new(bcs_edge_permission_store::memory::MemoryEdgeGrantStore::new(profiles.clone())),
+        profiles,
+        Arc::new(bcs_edge_permission_store::memory::MemoryPermissionRequestStore::new()),
+        Arc::new(OpenStrategyBotConfig {
+            inner: bcs_edge_permission_store::memory::MemoryBotActorConfigStore::new(fx.bots.clone()),
+        }),
+        None,
+        Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+        Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
+        "dev".to_string(),
+    ));
+    // The facade's default `connect` fake is replaced with the real durable
+    // service; both share the fixture's Bot registry + authority wiring.
+    let service = fx.service.with_friend_connection_service(connect.clone());
+
+    // 免审批建友（无审批轮）:human→bot and bot→bot friendships, both
+    // auto-approved by the `open` strategy without any owner decision.
+    let human = connect
+        .create_connect("human_1001", "bot-b", None, None)
+        .await
+        .expect("open strategy auto-approves the human friendship");
+    assert_eq!(human.status, ConnectStatus::Approved);
+    assert_eq!(human.request_ids.len(), 1, "approved request snapshot, no decision needed");
+    let bot = connect
+        .create_connect("bot-b", "bot-a", None, None)
+        .await
+        .expect("open strategy auto-approves the bot friendship");
+    assert_eq!(bot.status, ConnectStatus::Approved);
+
+    // The V1 list (owner acting-as-Bot) shows both open-strategy friends.
+    let page = service
+        .list_friend_connections(ListFriendConnections {
+            caller: Fixture::human_principal("staff-2"),
+            actor: FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "bot-b".into(),
+            },
+            target_type: None,
+            page: 1,
+            page_size: 100,
+        })
+        .await
+        .expect("owner lists the bot's friends");
+    let friends: Vec<(Kind, &str)> = page
+        .items
+        .iter()
+        .map(|view| (view.actor.actor_type, view.actor.id.as_str()))
+        .collect();
+    assert_eq!(page.total, 2, "both 免审批 friends are listed");
+    assert!(friends.contains(&(Kind::Human, "1001")));
+    assert!(friends.contains(&(Kind::Bot, "bot-a")));
+
+    // Owner removal through the new path revokes each friendship exactly
+    // once; a repeat delete is an idempotent deleted:false.
+    for target in [
+        FriendConnectionActor {
+            actor_type: Kind::Human,
+            id: "1001".into(),
+        },
+        FriendConnectionActor {
+            actor_type: Kind::Bot,
+            id: "bot-a".into(),
+        },
+    ] {
+        let deleted = service
+            .delete_friend_connection(DeleteFriendConnection {
+                caller: Fixture::human_principal("staff-2"),
+                actor: Some(FriendConnectionActor {
+                    actor_type: Kind::Bot,
+                    id: "bot-b".into(),
+                }),
+                target_actor: target.clone(),
+                request_auth: None,
+            })
+            .await
+            .expect("owner removes an open-strategy friend");
+        assert!(deleted.deleted, "first owner removal transitions the edge");
+        let again = service
+            .delete_friend_connection(DeleteFriendConnection {
+                caller: Fixture::human_principal("staff-2"),
+                actor: Some(FriendConnectionActor {
+                    actor_type: Kind::Bot,
+                    id: "bot-b".into(),
+                }),
+                target_actor: target,
+                request_auth: None,
+            })
+            .await
+            .expect("repeat removal is an Ok no-op");
+        assert!(!again.deleted, "already removed → deleted:false");
+    }
+    let page = service
+        .list_friend_connections(ListFriendConnections {
+            caller: Fixture::human_principal("staff-2"),
+            actor: FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "bot-b".into(),
+            },
+            target_type: None,
+            page: 1,
+            page_size: 100,
+        })
+        .await
+        .expect("owner lists after the removals");
+    assert_eq!(page.total, 0, "all friendships revoked");
+}
+
 #[tokio::test]
 async fn owner_remove_rejects_a_human_actor_or_empty_bot_id() {
     use bcs_service_api::application::v1::{

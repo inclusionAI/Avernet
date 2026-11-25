@@ -239,8 +239,11 @@ async fn delete_friend_connection(
 ) -> Result<Response, ErrorResponse> {
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let request_auth = request_auth_headers(&header_map);
+    let command = query
+        .into_command(caller, Some(request_auth))
+        .map_err(|message| invalid_request(&request_id, message))?;
     let result = service(&state, &request_id)?
-        .delete_friend_connection(query.into_command(caller, Some(request_auth)))
+        .delete_friend_connection(command)
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((

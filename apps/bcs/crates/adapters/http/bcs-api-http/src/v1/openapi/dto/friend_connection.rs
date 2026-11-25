@@ -124,6 +124,14 @@ impl ListFriendConnectionsQuery {
 pub struct DeleteFriendConnectionQuery {
     pub target_actor_type: bcs_service_api::application::v1::FriendConnectionActorType,
     pub target_actor_id: String,
+    /// Owner-initiated removal: the managed Bot whose friendship is being
+    /// dissolved. Must arrive together with `actor_id` (both-or-none,
+    /// enforced by `into_command`); when both are absent the delete stays a
+    /// caller-side self-removal.
+    #[serde(default)]
+    pub actor_type: Option<bcs_service_api::application::v1::FriendConnectionActorType>,
+    #[serde(default)]
+    pub actor_id: Option<String>,
 }
 
 impl DeleteFriendConnectionQuery {
@@ -131,16 +139,21 @@ impl DeleteFriendConnectionQuery {
         self,
         caller: AuthenticatedCaller,
         request_auth: Option<RequestAuthHeaders>,
-    ) -> DeleteFriendConnection {
-        DeleteFriendConnection {
+    ) -> Result<DeleteFriendConnection, &'static str> {
+        let actor = match (self.actor_type, self.actor_id) {
+            (None, None) => None,
+            (Some(actor_type), Some(id)) => Some(FriendConnectionActor { actor_type, id }),
+            _ => return Err("actor_type and actor_id must be provided together"),
+        };
+        Ok(DeleteFriendConnection {
             caller,
-            actor: None,
+            actor,
             target_actor: FriendConnectionActor {
                 actor_type: self.target_actor_type,
                 id: self.target_actor_id,
             },
             request_auth,
-        }
+        })
     }
 }
 
