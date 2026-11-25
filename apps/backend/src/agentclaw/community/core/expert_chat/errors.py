@@ -38,12 +38,17 @@ class ConnectionError(ExpertChatError):
     def __init__(
         self, message: str, error_code: str = None, original_error: str = None,
         *, caller_device_unavailable: bool = False,
+        caller_bot_gone: bool = False,
     ):
         super().__init__(message)
         self.error_code = error_code
         self.original_error = original_error
         # Only a typed BaaS no-active-device response on the caller path sets this.
         self.caller_device_unavailable = caller_device_unavailable
+        # Only a typed BaaS 404 BOT_NOT_FOUND response (bot record released/
+        # expired and aged out of BaaS) on the caller path sets this; the
+        # provisioning flow re-provisions instead of surfacing the 5001.
+        self.caller_bot_gone = caller_bot_gone
 
 
 class ChatPermissionError(RuntimeError):

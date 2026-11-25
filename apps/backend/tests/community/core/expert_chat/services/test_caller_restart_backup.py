@@ -22,7 +22,7 @@ async def test_caller_upgrade_backup_failure_keeps_target_and_never_upgrades():
 
     with patch('agentclaw.community.core.expert_chat.services.expert_chat_instance_service.prepare_instance_restart', side_effect=guard), pytest.raises(ConnectionError, match='backup failed'):
         await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
-                                     owner_id=OWNER_ID, migration_path='/artifact')
+                                     owner_id=OWNER_ID, user_id='caller1', migration_path='/artifact')
     assert seen == [BOT_UUID]
     build.upgrade_async.assert_not_called()
     build.release_async.assert_not_called()
@@ -50,7 +50,7 @@ async def test_caller_legacy_guard_returns_then_original_upgrade_runs():
     build.upgrade_async = AsyncMock(side_effect=upgrade)
     with patch('agentclaw.community.core.expert_chat.services.expert_chat_instance_service.prepare_instance_restart', side_effect=guard):
         result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
-                                             owner_id=OWNER_ID, migration_path='/artifact')
+                                             owner_id=OWNER_ID, user_id='caller1', migration_path='/artifact')
     assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
     assert order == ['legacy-allowed', 'upgrade']
 
@@ -66,7 +66,7 @@ async def test_real_coding_backup_transport_failure_still_upgrades_caller():
     svc._baas.post_bots_api = Mock(side_effect=RuntimeError('unreachable sandbox'))
     build.upgrade_async = AsyncMock(return_value={'publish_id': 77})
     result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
-                                         owner_id=OWNER_ID, migration_path='/artifact')
+                                         owner_id=OWNER_ID, user_id='caller1', migration_path='/artifact')
     assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
     svc._baas.post_bots_api.assert_called_once()  # Detection fails: skip helper and restart normally.
     build.upgrade_async.assert_awaited_once()
@@ -108,11 +108,11 @@ async def test_confirmed_fastdisk_caller_result_follows_guard(outcome, block_on_
     if block_on_failure and outcome != 'partial_success':
         with pytest.raises(ConnectionError, match='快盘'):
             await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
-                                         owner_id=OWNER_ID, migration_path='/artifact')
+                                         owner_id=OWNER_ID, user_id='caller1', migration_path='/artifact')
         build.upgrade_async.assert_not_called()
     else:
         result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
-                                              owner_id=OWNER_ID, migration_path='/artifact')
+                                              owner_id=OWNER_ID, user_id='caller1', migration_path='/artifact')
         assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
         build.upgrade_async.assert_awaited_once()
     assert svc._baas.post_bots_api.call_count == 2

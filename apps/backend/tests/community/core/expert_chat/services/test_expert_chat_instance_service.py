@@ -27,7 +27,10 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
     BotWsConnectionInfoResponse,
 )
-from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasBotNotFoundError,
+    BaasNoActiveDevicesError,
+)
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
 )
@@ -520,7 +523,7 @@ class TestUpgradeContainer:
         bot_repo.get_by_id_and_owner = MagicMock(return_value=None)
 
         with pytest.raises(ConnectionError) as exc_info:
-            await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path="/nas/path")
+            await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path")
 
         assert exc_info.value.error_code == "5001"
 
@@ -531,7 +534,7 @@ class TestUpgradeContainer:
         _wire_bot_repo(bot_repo)
         bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
 
-        result = await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path="/nas/path")
+        result = await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path")
 
         assert result["bot_uuid"] == BOT_UUID
         assert result["publish_id"] == 999
@@ -545,7 +548,7 @@ class TestUpgradeContainer:
         bot_build_service.upgrade_async = AsyncMock(side_effect=RuntimeError("upgrade failed"))
 
         with pytest.raises(ConnectionError) as exc_info:
-            await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path="/nas/path")
+            await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path")
 
         assert exc_info.value.error_code == "5001"
         assert "upgrade failed" in exc_info.value.original_error
@@ -567,6 +570,7 @@ class TestUpgradeContainer:
             BOT_UUID,
             BOT_ID,
             OWNER_ID,
+            USER_ID,
             migration_path="/nas/path",
             version=3,
             docker_image="registry/arca:v2",
@@ -619,6 +623,7 @@ class TestUpgradeContainer:
             BOT_UUID,
             BOT_ID,
             OWNER_ID,
+            USER_ID,
             migration_path="/nas/path",
             version=3,
             docker_image="registry/arca:v2",
@@ -699,6 +704,222 @@ class TestBuildConnection:
         baas.get_ws_info_by_bot_uuid.assert_called_once_with(
             bot_uuid=BOT_UUID, device_affinity=USER_ID
         )
+
+
+class TestCallerBotGoneSelfHeal:
+    """BOT_GONE (BaaS 404 ``BOT_NOT_FOUND``) self-heal contract.
+
+        Covers the design.md §D4/O6 debt: a caller container that aged out of
+        BaaS must heal within the request (upgrade → structured BOT_GONE →
+        fresh ``create_bot``) instead of surfacing a 5001.
+        """
+
+    NEW_UUID = "uuid-new-002"
+    BOT_GONE_UPGRADE = {
+        "success": False,
+        "error_code": "BOT_NOT_FOUND",
+        "message": "Bot not found",
+        "bot_uuid": BOT_UUID,
+    }
+
+    @staticmethod
+    def _ws_info(bot_uuid):
+        return BotWsConnectionInfoResponse(
+            ws_url="ws://localhost:8890/api/openclaw/ws",
+            token="test-token-abc",
+            target=bot_uuid,
+            expires_at="2099-01-01T00:00:00Z",
+            paas_device_id=bot_uuid,
+            baas_base_url="http://localhost:8890",
+            engine_port=20003,
+            tenant="test_tenant",
+            bot_uuid=bot_uuid,
+        )
+
+    @staticmethod
+    def _gone():
+        return BaasBotNotFoundError(
+            f"BaaS API error: 404 - BOT_NOT_FOUND: bot_uuid={BOT_UUID}"
+        )
+
+    def _wire_selfheal(self, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service):
+        _wire_publish(publish_repo, MockPublishRecord(version=1))
+        _wire_bot_repo(bot_repo)
+        _wire_binding_repo(binding_repo)
+        instance_repo.update_instance = MagicMock(return_value=True)
+        bot_build_service.upgrade_async = AsyncMock(
+            return_value=dict(self.BOT_GONE_UPGRADE)
+        )
+        bot_build_service.release_async = AsyncMock(
+            return_value={"bot_uuid": self.NEW_UUID, "publish_id": 777}
+        )
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        return self.NEW_UUID
+
+    @pytest.mark.asyncio
+    async def test_build_connection_marks_bot_gone(self):
+        """_build_connection maps BaasBotNotFoundError to caller_bot_gone."""
+        svc, _, baas, *_ = _make_service()
+        gone = self._gone()
+        baas.get_ws_info_by_bot_uuid = MagicMock(side_effect=gone)
+
+        with pytest.raises(ConnectionError) as exc_info:
+            svc._build_connection(BOT_UUID, BOT_ID, USER_ID)
+
+        assert exc_info.value.error_code == "5001"
+        assert exc_info.value.caller_bot_gone is True
+        assert exc_info.value.caller_device_unavailable is False
+        assert exc_info.value.__cause__ is gone
+
+    @pytest.mark.asyncio
+    async def test_upgrade_bot_gone_falls_back_to_fresh_create(self):
+        """Structured BOT_GONE upgrade result heals via create_bot."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        new_uuid = self._wire_selfheal(instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service)
+
+        result = await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path")
+
+        assert result == {"bot_uuid": new_uuid, "publish_id": 777, "binding_id": BINDING_ID}
+        bot_build_service.upgrade_async.assert_called_once()
+        bot_build_service.release_async.assert_called_once()
+        # The fallback's fresh binding must be applied by the caller, not the owner.
+        assert binding_repo.insert_binding.call_args.kwargs["applied_by"] == USER_ID
+
+    @pytest.mark.asyncio
+    async def test_upgrade_device_not_found_also_falls_back(self):
+        """DEVICE_NOT_FOUND (same _BOT_GONE_ERROR_CODES) heals identically."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        self._wire_selfheal(instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service)
+        bot_build_service.upgrade_async = AsyncMock(
+            return_value={
+                "success": False,
+                "error_code": "DEVICE_NOT_FOUND",
+                "message": "Device not found",
+                "bot_uuid": BOT_UUID,
+            }
+        )
+
+        result = await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path")
+
+        assert result["bot_uuid"] == self.NEW_UUID
+        bot_build_service.release_async.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fast_path_bot_gone_reprovisions_and_connects(self):
+        """Stale success row + gone bot re-provisions instead of raising 5001."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        new_uuid = self._wire_selfheal(instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service)
+        stale_ext = {"bot_uuid": BOT_UUID, "service_bot_publish_id": 123, "version": 5, "binding_id": 999}
+        fresh_ext = {"bot_uuid": new_uuid, "service_bot_publish_id": 123, "version": 1, "binding_id": BINDING_ID}
+        instance_repo.get_instance = MagicMock(side_effect=[
+            {"id": 1, "status": "success", "ext": stale_ext},
+            {"id": 1, "status": "success", "ext": fresh_ext},
+        ])
+        baas.get_ws_info_by_bot_uuid = MagicMock(
+            side_effect=[self._gone(), self._ws_info(new_uuid)]
+        )
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        assert result["need_poll"] is False
+        assert result["connection"]["bot_uuid"] == new_uuid
+        bot_build_service.upgrade_async.assert_called_once()
+        bot_build_service.release_async.assert_called_once()
+        ext_writes = [c.kwargs.get("ext") for c in instance_repo.update_instance.call_args_list if c.kwargs.get("ext")]
+        assert any(e.get("bot_uuid") == new_uuid and e.get("service_bot_publish_id") == 123 for e in ext_writes)
+        assert any(
+            c.kwargs.get("ext", {}).get("bot_uuid") != BOT_UUID
+            for c in instance_repo.update_instance.call_args_list
+            if c.kwargs.get("ext")
+        )
+
+    @pytest.mark.asyncio
+    async def test_poll_success_but_gone_reprovisions_once(self):
+        """Production-trace scenario: poll reports SUCCESS against a gone bot.
+
+        The publish workflow (ext.baas_publish_id) says SUCCESS but the
+        bot_uuid already aged out of BaaS: one guarded reprovision round
+        reuses the shared flow and persists the fresh instance row.
+        """
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        new_uuid = self._wire_selfheal(instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service)
+        stale_ext = {"bot_uuid": BOT_UUID, "version": 5, "baas_publish_id": 96079, "binding_id": 999}
+        polled_ext = {"bot_uuid": BOT_UUID, "version": 5, "binding_id": 999}
+        fresh_ext = {"bot_uuid": new_uuid, "version": 1, "binding_id": BINDING_ID}
+        instance_repo.get_instance = MagicMock(side_effect=[
+            {"id": 1, "status": "init", "ext": stale_ext},      # entry read
+            {"id": 1, "status": "success", "ext": polled_ext},  # post-poll read
+            {"id": 1, "status": "success", "ext": polled_ext},  # reprovision entry
+            {"id": 1, "status": "success", "ext": fresh_ext},   # reprovision post-poll
+        ])
+        baas.get_ws_info_by_bot_uuid = MagicMock(
+            side_effect=[self._gone(), self._ws_info(new_uuid)]
+        )
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        assert result["need_poll"] is False
+        assert result["connection"]["bot_uuid"] == new_uuid
+        bot_build_service.upgrade_async.assert_called_once()
+        bot_build_service.release_async.assert_called_once()
+        status_writes = [c.kwargs.get("status") for c in instance_repo.update_instance.call_args_list if c.kwargs.get("status")]
+        ext_writes = [c.kwargs.get("ext") or {} for c in instance_repo.update_instance.call_args_list]
+        assert any(
+            c.kwargs.get("status") == "success"
+            and (c.kwargs.get("ext") or {}).get("bot_uuid") == new_uuid
+            for c in instance_repo.update_instance.call_args_list
+        ), "reprovision round must persist success status together with the fresh bot_uuid"
+        assert any(e.get("bot_uuid") == new_uuid for e in ext_writes)
+
+    @pytest.mark.asyncio
+    async def test_poll_success_but_gone_pending_publish_returns_need_poll(self):
+        """Reprovision round with a still-PENDING publish returns need_poll."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        new_uuid = self._wire_selfheal(instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service)
+        stale_ext = {"bot_uuid": BOT_UUID, "version": 5, "baas_publish_id": 96079, "binding_id": 999}
+        polled_ext = {"bot_uuid": BOT_UUID, "version": 5, "binding_id": 999}
+        fresh_ext = {"bot_uuid": new_uuid, "version": 1, "binding_id": BINDING_ID}
+        instance_repo.get_instance = MagicMock(side_effect=[
+            {"id": 1, "status": "init", "ext": stale_ext},
+            {"id": 1, "status": "success", "ext": polled_ext},
+            {"id": 1, "status": "success", "ext": polled_ext},
+            {"id": 1, "status": "init", "ext": fresh_ext},
+        ])
+        baas.get_ws_info_by_bot_uuid = MagicMock(side_effect=[self._gone()])
+        baas.get_publish_progress = MagicMock(
+            side_effect=[{"status": "SUCCESS"}, {"status": "PENDING"}]
+        )
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        assert result["need_poll"] is True
+        assert result["connection"] is None
+        bot_build_service.release_async.assert_called_once()
+        assert baas.get_ws_info_by_bot_uuid.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_second_bot_gone_fails_loudly(self):
+        """A second gone bot inside the guarded retry round fails (status=failed)."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        new_uuid = self._wire_selfheal(instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service)
+        stale_ext = {"bot_uuid": BOT_UUID, "version": 5, "baas_publish_id": 96079, "binding_id": 999}
+        polled_ext = {"bot_uuid": BOT_UUID, "version": 5, "binding_id": 999}
+        fresh_ext = {"bot_uuid": new_uuid, "version": 1, "binding_id": BINDING_ID}
+        instance_repo.get_instance = MagicMock(side_effect=[
+            {"id": 1, "status": "init", "ext": stale_ext},
+            {"id": 1, "status": "success", "ext": polled_ext},
+            {"id": 1, "status": "success", "ext": polled_ext},
+            {"id": 1, "status": "success", "ext": fresh_ext},
+        ])
+        baas.get_ws_info_by_bot_uuid = MagicMock(side_effect=[self._gone(), self._gone()])
+
+        with pytest.raises(ConnectionError) as caught:
+            await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        assert caught.value.caller_bot_gone is True
+        status_writes = [c.kwargs.get("status") for c in instance_repo.update_instance.call_args_list if c.kwargs.get("status")]
+        assert "failed" in status_writes
+        bot_build_service.release_async.assert_called_once()
 
 
 class TestGetCallerConnection:

@@ -228,6 +228,27 @@ def _is_no_active_devices_response(response: httpx.Response) -> bool:
     return isinstance(detail, dict) and detail.get("error") == "NO_ACTIVE_DEVICES"
 
 
+def _is_bot_not_found_response(response: httpx.Response) -> bool:
+    """Recognize the BaaS ``BOT_NOT_FOUND`` structured contract.
+
+    Mirrors :func:`_is_no_active_devices_response`: only a 404 whose JSON
+    body carries ``detail.error == "BOT_NOT_FOUND"`` (the ws-info
+    contract key; see ``http_conn_router.py``) classifies. Any other 404
+    keeps the generic :class:`BaasServiceError` behavior.
+    """
+
+    if response.status_code != 404:
+        return False
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    detail = payload.get("detail")
+    return isinstance(detail, dict) and detail.get("error") == "BOT_NOT_FOUND"
+
+
 @dataclass
 class BotWsConnectionInfoResponse:
     """BAAS WebSocket connection info.
@@ -2143,6 +2164,25 @@ class BaasService:  # pragma: no cover
                 )
                 raise BaasNoActiveDevicesError(
                     status_code=e.response.status_code
+                ) from e
+
+            if _is_bot_not_found_response(e.response):
+                # Static wss contract: 404 + detail.error=BOT_NOT_FOUND means
+                # the bot record itself is gone (released/expired and aged out
+                # of BaaS) — a persistent state, unlike NO_ACTIVE_DEVICES.
+                # Reuse the stable BaasBotNotFoundError contract (already used
+                # by the destroy/recycle flow) so callers can self-heal with a
+                # fresh first release instead of surfacing a 5001 to the user.
+                logger.warning(
+                    "[BaasService.get_ws_info_by_bot_uuid] bot record gone: "
+                    "status=%s bot_uuid=%s tenant=%s device_affinity=%s",
+                    e.response.status_code,
+                    bot_uuid,
+                    effective_tenant,
+                    device_affinity,
+                )
+                raise BaasBotNotFoundError(
+                    f"BaaS API error: 404 - BOT_NOT_FOUND: bot_uuid={bot_uuid}"
                 ) from e
 
             location = e.response.headers.get("location")

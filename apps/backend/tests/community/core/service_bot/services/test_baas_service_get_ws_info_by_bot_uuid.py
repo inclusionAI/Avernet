@@ -21,6 +21,10 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
     BotWsConnectionInfoResponse,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasBotNotFoundError,
+    BaasNoActiveDevicesError,
+)
 
 
 def _make_service_with_response(response_data: dict, status_code: int = 200) -> BaasService:
@@ -399,6 +403,58 @@ class TestGetWsInfoByBotUuid:
 
         assert _ws_info_by_bot_uuid_logged_calls(spy, "warning"), "404 should log at WARNING"
         assert not _ws_info_by_bot_uuid_logged_calls(spy, "error"), "404 must NOT log at ERROR"
+
+    def test_404_bot_not_found_classifies_as_bot_gone(self):
+        """Structured 404 BOT_NOT_FOUND reuses the stable bot-gone contract.
+
+        The ws-info endpoint answers ``detail.error`` (see http_conn_router),
+        so callers can self-heal via a fresh first release (design.md O6).
+        """
+        body = (
+            '{"detail":{"error":"BOT_NOT_FOUND",'
+            '"message":"Bot not found","bot_uuid":"BOT-xyz"}}'
+        )
+        service = _make_service_raising(404, body)
+
+        with pytest.raises(BaasBotNotFoundError) as caught:
+            service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
+
+        assert "BOT_NOT_FOUND" in str(caught.value)
+        assert "BOT-xyz" in str(caught.value)
+
+    def test_404_other_structured_error_stays_generic(self):
+        """Only the BOT_NOT_FOUND contract classifies; other 404s stay generic."""
+        body = (
+            '{"detail":{"error":"SOME_OTHER_ERROR",'
+            '"message":"Nope"}}'
+        )
+        service = _make_service_raising(404, body)
+
+        with pytest.raises(BaasServiceError) as caught:
+            service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
+
+        assert not isinstance(caught.value, BaasBotNotFoundError)
+
+    def test_404_non_json_body_stays_generic(self):
+        """A non-JSON 404 body never classifies as bot-gone."""
+        service = _make_service_raising(404, "<html>gateway noise</html>")
+
+        with pytest.raises(BaasServiceError) as caught:
+            service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
+
+        assert not isinstance(caught.value, BaasBotNotFoundError)
+        assert not isinstance(caught.value, BaasNoActiveDevicesError)
+
+    def test_404_no_active_devices_still_offline_contract(self):
+        """NO_ACTIVE_DEVICES wins over BOT_NOT_FOUND classification on 404."""
+        body = (
+            '{"detail":{"error":"NO_ACTIVE_DEVICES",'
+            '"message":"No active devices available"}}'
+        )
+        service = _make_service_raising(404, body)
+
+        with pytest.raises(BaasNoActiveDevicesError):
+            service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
 
     def test_503_no_active_devices_logs_info_not_warning_or_error(self):
         """Structured NO_ACTIVE_DEVICES is a normal external waiting state."""
