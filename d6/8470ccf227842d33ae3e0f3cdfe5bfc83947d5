@@ -1,0 +1,51 @@
+engine/adapter/src/engine/community/plugins/aicoding/layout_pool.py
+  s_30131f6595b5d5::t_1bcd09a115ba42 9,33-35,44,46,53-62
+apps/backend/tests/community/core/service_bot/services/publish_flow/test_build_stage_layout_probe.py
+  s_7b1b7bb2628d01::t_f35b0bece4a9a7 72,75,80,106,118,132,146-147,149,158
+apps/backend/src/agentclaw/community/core/workspace/skill_layout.py
+  s_30131f6595b5d5::t_711bd4d04f59cf 62
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/build_stage.py
+  s_30131f6595b5d5::t_ec7ce07bd3b592 63,172
+apps/backend/tests/community/core/service_bot/services/deploy/test_service_artifact_fresh_layout.py
+  s_30131f6595b5d5::t_e8a52073ff1eef 292,302,305-313,321,328,331-333,339,343,346,349-370,377,381-382,389
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_layout_probe.py
+  s_30131f6595b5d5::t_6b47c6c3c9d964 19,223
+engine/adapter/src/engine/community/plugins/openclaw/_skills.py
+  s_7b1b7bb2628d01::t_e9706a138bebaa 48-50,138
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/artifact_build_request.py
+  s_7b1b7bb2628d01::t_65bb5d90b96fe6 24,196-204
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_7b1b7bb2628d01::t_aea0c0bdbbb9b6 275
+apps/backend/src/agentclaw/community/core/skills_pool/README.md
+  s_7b1b7bb2628d01::t_e56ad9b71fb715 16,18
+engine/adapter/src/engine/community/plugins/aicoding/tests/test_service_layout_probe.py
+  s_7b1b7bb2628d01::t_89bab8c64249a4 1-41
+engine/adapter/src/engine/community/plugins/openclaw/tests/test_service_layout_probe.py
+  s_7b1b7bb2628d01::t_426b5ff908d082 105
+engine/adapter/src/engine/community/plugins/skills_pool/service_layout_probe.py
+  s_7b1b7bb2628d01::t_f1f01d2f6351d0 1,30,36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d68470ccf227842d33ae3e0f3cdfe5bfc83947d5",
+  "prompts": {},
+  "sessions": {
+    "s_30131f6595b5d5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e7f9-9388-7702-95ad-bebd50450d5d",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    },
+    "s_7b1b7bb2628d01": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b1-ee57-74e3-bb35-6e7830e4a3d8",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
