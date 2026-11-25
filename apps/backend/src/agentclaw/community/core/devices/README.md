@@ -134,10 +134,11 @@ from the retained binding identity.
 
 ## BaaS restart progress logs
 
-The existing restart handler emits INFO `event=bot_restart_progress` with
-`phase=publish_poll`, Bot/binding/request/publish identity, `engine_type`, `env`,
-`status`, `elapsed_s` and `timeout_s`. Values are bounded and single-line; no
-configuration, credentials or provider response is logged. Missing engine
+The existing restart handler directly emits INFO logs with its usual
+`[BaasRestartPublishPollHandler]` prefix and `event=bot_restart_progress`,
+Bot/binding/request/publish identity, `engine_type`, `env`, `status`, `elapsed_s`
+and `timeout_s`. String fields use `%r` to escape line breaks; no configuration,
+credentials or provider response is logged. Missing engine
 metadata is `unknown`. Stale/uncommitted intents emit no progress event.
 
 For slow in-flight publishes, select `ADOPTING`, `PENDING` or `RETRYING` with

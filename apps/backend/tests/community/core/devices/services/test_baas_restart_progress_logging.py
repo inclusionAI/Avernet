@@ -1,6 +1,7 @@
 """Restart telemetry uses the existing clock/identity without changing outcomes."""
 
 import logging
+import shlex
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -48,10 +49,13 @@ def restart(caplog):
 
 def progress(caplog):
     messages = [r.getMessage() for r in caplog.records
-                if r.getMessage().startswith("event=bot_restart_progress ")]
+                if "event=bot_restart_progress " in r.getMessage()]
     assert messages, "A valid restart poll must emit structured progress"
     assert all("<test-token>" not in m for m in messages)
-    return [dict(part.split("=", 1) for part in m.split()) for m in messages]
+    assert all(m.startswith("[BaasRestartPublishPollHandler] event=bot_restart_progress ")
+               for m in messages)
+    assert all("\n" not in m and "\r" not in m for m in messages)
+    return [dict(part.split("=", 1) for part in shlex.split(m)[1:]) for m in messages]
 
 
 @pytest.mark.parametrize("engine", ["aicoding", "claude_code", "openclaw"])
@@ -67,10 +71,10 @@ def test_pending_logs_per_bot_elapsed_and_engine_without_changing_timeout(
 
     event = progress(caplog)[-1]
     assert {k: event[k] for k in (
-        "phase", "bot_id", "binding_id", "publish_id", "request_id",
+        "bot_id", "binding_id", "publish_id", "request_id",
         "engine_type", "env", "status",
     )} == {
-        "phase": "publish_poll", "bot_id": "bot-001", "binding_id": "42",
+        "bot_id": "bot-001", "binding_id": "42",
         "publish_id": "1001", "request_id": "request-001",
         "engine_type": engine, "env": "pre", "status": "PENDING",
     }
@@ -140,7 +144,7 @@ def test_stale_or_uncommitted_intent_emits_no_progress(restart, caplog, stale):
 
     handler.handle(payload)
 
-    assert not any(r.getMessage().startswith("event=bot_restart_progress ")
+    assert not any("event=bot_restart_progress " in r.getMessage()
                    for r in caplog.records)
     baas.poll_publish_once.assert_not_called()
 
@@ -154,8 +158,8 @@ def test_engine_and_identity_cannot_inject_log_fields(restart, caplog):
 
     event = progress(caplog)[-1]
     assert event["status"] == "PENDING"
-    assert event["engine_type"] == "claude_code_status_FAILED"
-    assert event["bot_id"] == "bot-001_engine_type_forged"
+    assert event["engine_type"] == r"claude_code\nstatus=FAILED"
+    assert event["bot_id"] == r"bot-001\nengine_type=forged"
 
 
 def test_repeated_polls_keep_the_persisted_start_time(restart, caplog):
