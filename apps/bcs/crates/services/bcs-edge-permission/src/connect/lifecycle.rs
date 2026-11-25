@@ -642,55 +642,51 @@ impl ConnectService for DbConnectService {
         second: &str,
         request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<Vec<u64>> {
-        let mut revoked: Vec<u64> = Vec::new();
-
-        // Forward: first → second, ref == second's default profile id.
+        // Collect both directions first, then let the storage layer pick the
+        // relation-level winner: the forward edge (first -> second) is the
+        // token when present, otherwise the reverse edge. A caller that loses
+        // the token transitions nothing and returns an empty set, so two
+        // interleaved removals cannot each revoke one direction and both
+        // notify (review 4693070938).
+        let mut candidates: Vec<u64> = Vec::new();
         if let Some(second_default) = self
             .edge_grants
             .get_default_profile_id(second, &self.env)
             .await
         {
-            let forward = self
+            for g in self
                 .edge_grants
                 .list_active_grants(first, second, &self.env)
-                .await;
-            for g in forward {
+                .await
+            {
                 if g.grant_ref_id == second_default && g.grant_kind == GrantKind::PermissionProfile
                 {
-                    if self
-                        .edge_grants
-                        .revoke_grant_if_active(g.edge_id, &self.env)
-                        .await?
-                    {
-                        revoked.push(g.edge_id);
-                    }
+                    candidates.push(g.edge_id);
                 }
             }
         }
-
-        // Reverse: second → first, ref == first's default profile id (only
-        // meaningful for bot↔bot, where first is itself a bot).
         if let Some(first_default) = self
             .edge_grants
             .get_default_profile_id(first, &self.env)
             .await
         {
-            let reverse = self
+            for g in self
                 .edge_grants
                 .list_active_grants(second, first, &self.env)
-                .await;
-            for g in reverse {
+                .await
+            {
                 if g.grant_ref_id == first_default && g.grant_kind == GrantKind::PermissionProfile
                 {
-                    if self
-                        .edge_grants
-                        .revoke_grant_if_active(g.edge_id, &self.env)
-                        .await?
-                    {
-                        revoked.push(g.edge_id);
-                    }
+                    candidates.push(g.edge_id);
                 }
             }
+        }
+        let mut revoked: Vec<u64> = Vec::new();
+        if let Some((primary, others)) = candidates.split_first() {
+            revoked = self
+                .edge_grants
+                .revoke_relation_if_active(*primary, others, &self.env)
+                .await?;
         }
 
         // 11d: best-effort friend-auth-sync revoke trigger (human→bot), same

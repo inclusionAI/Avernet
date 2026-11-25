@@ -79,6 +79,33 @@ pub trait EdgeGrantRepoPort: Send + Sync {
         Ok(true)
     }
 
+    /// Revoke one friendship **relation** atomically. The `primary` edge is
+    /// the relation-level winner token: the durable store performs it as a
+    /// conditional update inside a transaction with stop-on-no-rows, so at
+    /// most one concurrent caller transitions the relation and may emit a
+    /// notice. `others` (the opposite direction, if any) are revoked in the
+    /// same transaction after `primary` transitioned.
+    ///
+    /// Returns the edges THIS call transitioned. The default keeps external
+    /// implementors compiling; it is not atomic across the two directions.
+    async fn revoke_relation_if_active(
+        &self,
+        primary: u64,
+        others: &[u64],
+        env: &str,
+    ) -> ServiceResult<Vec<u64>> {
+        let mut revoked = Vec::new();
+        if self.revoke_grant_if_active(primary, env).await? {
+            revoked.push(primary);
+            for edge_id in others {
+                if self.revoke_grant_if_active(*edge_id, env).await? {
+                    revoked.push(*edge_id);
+                }
+            }
+        }
+        Ok(revoked)
+    }
+
     /// Cached source for friend-edge discrimination: `(bot_id, env) -> default profile_id`.
     async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<u64>;
 }

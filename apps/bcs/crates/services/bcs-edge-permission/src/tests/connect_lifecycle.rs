@@ -561,6 +561,49 @@ use super::*;
     }
 
     #[tokio::test]
+    async fn removed_by_owner_bot_to_bot_concurrent_removals_are_relation_atomic() {
+        // Review 4693070938: bot↔bot has two directed edges. Two interleaved
+        // owner removals must not each revoke one direction and both notify;
+        // the relation-level transaction means exactly one caller transitions
+        // both edges and emits one notice. Repeated rounds make a non-atomic
+        // per-edge implementation fail with high probability.
+        for round in 0..10 {
+            let (eg, pp, rq, bc, db) = assemble().await;
+            seed_bot(&db, "x:managedA", "protected", "protected", "OPEN", "online", Some("85020")).await;
+            seed_bot(&db, "x:friendB", "protected", "protected", "OPEN", "online", Some("85020")).await;
+            let recorder = RecordingFriendConnectNotificationPort::default();
+            let events = recorder.events.clone();
+            let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+            let created = svc
+                .create_connect("x:managedA", "x:friendB", None, None)
+                .await
+                .expect("auto-approved bot friendship");
+            assert_eq!(created.edge_ids.len(), 2, "bot↔bot friendship has two directed edges");
+
+            let (left, right) = tokio::join!(
+                svc.revoke_friend_as_owner("x:managedA", "x:friendB", None),
+                svc.revoke_friend_as_owner("x:managedA", "x:friendB", None),
+            );
+            let mut counts = [left.expect("first removal").len(), right.expect("second removal").len()];
+            counts.sort();
+            assert_eq!(
+                counts,
+                [0, 2],
+                "round {round}: exactly one relation winner transitions both edges {counts:?}"
+            );
+            assert!(
+                !eg.has_friend_edge("x:managedA", "x:friendB", "dev").await,
+                "round {round}: both directions are revoked"
+            );
+            assert_eq!(
+                events.lock().await.len(),
+                1,
+                "round {round}: exactly one notice for the relation"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn list_friends_after_connect() {
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:lf1", "protected", "protected", "OPEN", "online", Some("85020")).await;
