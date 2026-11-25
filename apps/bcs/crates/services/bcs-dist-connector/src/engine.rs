@@ -109,6 +109,10 @@ struct Inner {
     /// permit is stored and the next wait (in the main loop or in
     /// `register`'s retry backoff) returns at once.
     stop: Notify,
+    /// Serializes the end of `drain` (stop the leftover actors, retire). A
+    /// second, concurrent drain must not retire while the first is still
+    /// waiting for the actors it aborted: those may still act until then.
+    stopping: tokio::sync::Mutex<()>,
 }
 
 /// One Connector process: reads the command feed, claims dispatches and runs
@@ -149,6 +153,7 @@ impl ConnectorEngine {
                 claims: AtomicU64::new(0),
                 wake: Notify::new(),
                 stop: Notify::new(),
+                stopping: tokio::sync::Mutex::new(()),
             }),
         })
     }
@@ -696,6 +701,13 @@ impl DistRuntimeControlPort for ConnectorEngine {
         // registration is gone, another Connector may take these calls over,
         // and the dispatch fences only this actor's `disp` writes, not its
         // agent calls or inbox writes.
+        // One drain at a time from here (see `stopping`).
+        let _stopping = inner.stopping.lock().await;
+        // Read before the actors are collected: only the main loop starts
+        // actors, so once it has stopped the set collected below is complete
+        // and retiring is safe. Read later, a claim finishing meanwhile could
+        // start an actor that is neither stopped nor counted.
+        let looping = inner.looping.load(Ordering::SeqCst);
         let leftover: Vec<JoinHandle<()>> = lock(&inner.actors)
             .drain()
             .map(|(_, actor)| actor.task)
@@ -711,7 +723,6 @@ impl DistRuntimeControlPort for ConnectorEngine {
             let _ = task.await;
         }
         let remaining = stopped + lock(&inner.orphans).len();
-        let looping = inner.looping.load(Ordering::SeqCst);
         if !looping {
             self.retire().await;
         }

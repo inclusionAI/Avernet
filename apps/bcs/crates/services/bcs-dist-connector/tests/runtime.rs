@@ -8,6 +8,9 @@ use bcs_dist_connector::ConnectorEngine;
 use bcs_dist_model::*;
 use bcs_service_api::port::dist_runtime::DistRuntimeControlPort;
 use bcs_service_api::port::repo::distributed::common::{Page, PageRequest, StoreError};
+use bcs_service_api::port::repo::distributed::dispatch::{
+    ClaimOutcome, CommandFeedPort, DispatchClaimRequest, DispatchQueuePort, ResumeOwnedDispatch,
+};
 use bcs_service_api::port::repo::distributed::ownership::*;
 use bcs_service_api::types::dist_runtime::DrainOutcome;
 use rig::*;
@@ -342,4 +345,79 @@ async fn a_feed_outage_does_not_let_the_registration_expire() {
     until("renewals continue through the outage", || async { leases.renewals.load(Ordering::SeqCst) >= 4 }).await;
     assert!(!task.is_finished(), "the engine keeps running");
     task.abort();
+}
+
+/// A queue whose claims wait for a permit: holds the main loop inside a
+/// claim for as long as a test needs.
+struct GatedQueue {
+    inner: Arc<dyn DispatchQueuePort>,
+    gate: tokio::sync::Semaphore,
+}
+
+#[async_trait]
+impl DispatchQueuePort for GatedQueue {
+    async fn claim(&self, request: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError> {
+        let _permit = self.gate.acquire().await.unwrap();
+        self.inner.claim(request).await
+    }
+    async fn resume_owned(&self, request: ResumeOwnedDispatch) -> Result<ClaimOutcome, StoreError> {
+        self.inner.resume_owned(request).await
+    }
+    async fn notifications(&self, pool: PoolId, me: Instance) -> Result<Box<dyn CommandFeedPort>, StoreError> {
+        self.inner.notifications(pool, me).await
+    }
+}
+
+#[tokio::test]
+async fn a_drain_whose_deadline_passes_during_a_claim_does_not_retire() {
+    let mut rig = Rig::new().await;
+    let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
+    rig.membership = leases.clone();
+    let _events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let mut ports = rig.ports();
+    let gated = Arc::new(GatedQueue { inner: ports.queue.clone(), gate: tokio::sync::Semaphore::new(0) });
+    ports.queue = gated.clone();
+    let engine = ConnectorEngine::new(rig.config.clone(), ports).unwrap();
+    let looped = engine.clone();
+    let task = tokio::spawn(async move { looped.run().await });
+    until("registered", || async { leases.calls.lock().unwrap().iter().any(|c| c.starts_with("register")) }).await;
+    settle().await;
+
+    // The main loop is held inside the claim past the deadline: it may still
+    // start an actor, so the registration must not be retired.
+    let outcome = engine.drain(Duration::from_millis(60)).await.unwrap();
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 0 });
+    assert!(!leases.calls.lock().unwrap().iter().any(|c| c.starts_with("retire")));
+
+    // The claim then wins and starts an actor; a later drain stops it first
+    // and only then retires.
+    gated.gate.add_permits(1);
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    assert!(task.await.unwrap().is_ok());
+    let outcome = engine.drain(Duration::from_millis(60)).await.unwrap();
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
+    assert_eq!(engine.snapshot().await.unwrap().active_work, 0);
+    assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
+}
+
+#[tokio::test]
+async fn concurrent_drains_both_end_with_every_actor_stopped() {
+    let mut rig = Rig::new().await;
+    let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
+    rig.membership = leases.clone();
+    let _events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let running = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let (first, second) = tokio::join!(
+        running.engine.drain(Duration::from_millis(60)),
+        running.engine.drain(Duration::from_millis(60)),
+    );
+    let outcomes = [first.unwrap(), second.unwrap()];
+    assert!(outcomes.contains(&DrainOutcome::DeadlineReached { remaining: 1 }), "{outcomes:?}");
+    assert_eq!(running.engine.snapshot().await.unwrap().active_work, 0);
+    assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
 }
