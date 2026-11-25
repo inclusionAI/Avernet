@@ -1,0 +1,23 @@
+apps/bcs/crates/bootstrap/bcs/tests/integration_catalog_labels.rs
+  s_94c42a5933ce17::t_ec0821d42b0bde 142
+apps/bcs/crates/bootstrap/bcs/tests/integration_fuse_cards.rs
+  s_94c42a5933ce17::t_dd76d6383c6c81 75,106,190,198,289
+apps/bcs/crates/services/bcs-bot/tests/a2a_discovery.rs
+  s_94c42a5933ce17::t_ec660e323c8516 61-65,70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "57ad84f557ae5f5a9a47fd93bcc20b5f97fbe01e",
+  "prompts": {},
+  "sessions": {
+    "s_94c42a5933ce17": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20d69-010f-7df2-957c-de77c2ec3c63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
