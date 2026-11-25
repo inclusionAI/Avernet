@@ -10,7 +10,7 @@ import pytest
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockModel
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService, validate_activation
-from agentclaw.community.core.bot_dormant.sqlite_models import DormantCheckAudit
+from agentclaw.community.core.bot_dormant.sqlite_models import DormantCheckAudit, DormantNotifyLog
 from agentclaw.community.core.bot_management.engines.restart_contract import (
     RecycleUnavailable,
     journal,
@@ -60,6 +60,7 @@ def case(tmp_path, request):
             BotModel.__table__,
             EntityDeviceBinding.__table__,
             DormantCheckAudit.__table__,
+            DormantNotifyLog.__table__,
             TaskQueueModel.__table__,
             BotRestartLockModel.__table__,
         ],
@@ -171,6 +172,33 @@ def case(tmp_path, request):
 def submit(c):
     result = c.service.submit(bot_id="b1", owner_id="u1", request_id="r1")
     return result, journal(c.store.read("b1", "u1"))
+
+
+def test_sync_admission_skips_queue_after_existing_operation_checks(case):
+    case.service.should_queue = lambda _bot: False
+
+    result, record = submit(case)
+
+    assert result["_synchronous"] is True
+    assert result["operation_id"] is None
+    assert result["phase"] is None
+    assert record == {}
+    with case.db.orm_session() as session:
+        assert session.query(TaskQueueModel).count() == 0
+
+
+def test_existing_async_operation_wins_over_sync_fallback(case):
+    first, _ = submit(case)
+    case.service.should_queue = lambda _bot: False
+
+    second, record = submit(case)
+
+    assert second["operation_id"] == first["operation_id"]
+    assert second["phase"] == "QUEUED"
+    assert second["changed"] is False
+    assert record["phase"] == "QUEUED"
+    with case.db.orm_session() as session:
+        assert session.query(TaskQueueModel).count() == 1
 
 
 def test_admission_is_durable_fast_and_deduplicated(case):
@@ -666,3 +694,86 @@ def test_all_personal_engines_share_recycle_query_and_activation(case):
     case.runtime.submit_release.assert_called_once()
     with case.db.orm_session() as session:
         assert session.query(DormantCheckAudit).count() == 1
+
+
+def test_manual_admission_keeps_first_metadata_and_notifies_only_on_completion(case):
+    first = case.service.submit(bot_id="b1", owner_id="u1", source="manual_ops", reason="first reason")
+    duplicate = case.service.submit(bot_id="b1", owner_id="u1", reason="other entry")
+    assert duplicate["operation_id"] == first["operation_id"]
+    assert duplicate["changed"] is False
+    payload = journal(case.store.read("b1", "u1"))
+    assert payload["source"] == "manual_ops" and payload["reason"] == "first reason"
+    with case.db.orm_session() as session:
+        assert session.query(DormantCheckAudit).count() == 0
+        assert session.query(DormantNotifyLog).count() == 0
+    assert isinstance(case.handler.handle(payload), Complete)
+    assert isinstance(case.handler.handle(payload), Complete)
+    with case.db.orm_session() as session:
+        audit = session.query(DormantCheckAudit).one()
+        assert audit.source == "manual_ops" and audit.check_result == "inactive"
+        assert audit.run_id == first["operation_id"]
+        notice = session.query(DormantNotifyLog).one()
+        assert notice.send_status == "pending" and notice.dry_run == 0
+        assert notice.notify_source == "internal_scan"
+        assert notice.entity_id == notice.owner_id == "u1"
+        assert "Bot 已回收" in notice.content
+        assert session.query(EntityDeviceBinding).one().release_reason == "dormant_recycle"
+
+
+@pytest.mark.parametrize("status,dry_run", [("pending", 1), ("cancelled", 0), ("sent", 0), ("failed", 0)])
+def test_manual_completion_preserves_daily_notification_suppression(case, status, dry_run):
+    from datetime import date
+    with case.db.orm_session() as session:
+        session.add(DormantNotifyLog(bot_id="b1", owner_id="u1", notify_type="recycle",
+                    dt=date.today().strftime("%Y%m%d"), send_status=status, dry_run=dry_run, content="old"))
+    case.service.submit(bot_id="b1", owner_id="u1", source="manual_ops")
+    payload = journal(case.store.read("b1", "u1"))
+    assert isinstance(case.handler.handle(payload), Complete)
+    bot = case.store.read("b1", "u1")
+    assert bot["status"] == "RECYCLED"
+    assert journal(bot)["notification_enqueued"] is False
+    with case.db.orm_session() as session:
+        assert session.query(DormantCheckAudit).count() == 1
+        notice = session.query(DormantNotifyLog).one()
+        assert notice.send_status == status and notice.content == "old" and notice.dry_run == dry_run
+
+
+def test_manual_notification_write_failure_rolls_back_entire_completion(case):
+    case.service.submit(bot_id="b1", owner_id="u1", source="manual_ops")
+    payload = journal(case.store.read("b1", "u1"))
+    def fail(*args):
+        raise RuntimeError("notification database failure")
+    event.listen(DormantNotifyLog, "before_insert", fail)
+    try:
+        assert isinstance(case.handler.handle(payload), Retry)
+        bot = case.store.read("b1", "u1")
+        assert bot["status"] == "ACTIVE" and bot["binding_id"] is not None
+        assert journal(bot)["phase"] == "RELEASING"
+        with case.db.orm_session() as session:
+            assert session.query(DormantCheckAudit).count() == 0
+            assert session.query(EntityDeviceBinding).one().status == "ACTIVE"
+    finally:
+        event.remove(DormantNotifyLog, "before_insert", fail)
+    assert isinstance(case.handler.handle(payload), Complete)
+    case.runtime.submit_release.assert_called_once()
+
+
+def test_manual_backup_failure_never_enqueues_success(case):
+    case.service.submit(bot_id="b1", owner_id="u1", source="manual_ops")
+    payload = journal(case.store.read("b1", "u1"))
+    case.runtime.prepare.side_effect = RecycleBackupBlocked("backup_failed")
+    assert isinstance(case.handler.handle(payload), Fail)
+    with case.db.orm_session() as session:
+        assert session.query(DormantNotifyLog).count() == 0
+        assert session.query(DormantCheckAudit).count() == 0
+    case.runtime.submit_release.assert_not_called()
+
+
+def test_openapi_first_duplicate_does_not_gain_manual_notification(case):
+    first, payload = submit(case)
+    duplicate = case.service.submit(bot_id="b1", owner_id="u1", source="manual_ops", reason="later")
+    assert duplicate["operation_id"] == first["operation_id"]
+    assert isinstance(case.handler.handle(payload), Complete)
+    with case.db.orm_session() as session:
+        assert session.query(DormantNotifyLog).count() == 0
+        assert session.query(DormantCheckAudit).one().source == "openapi"

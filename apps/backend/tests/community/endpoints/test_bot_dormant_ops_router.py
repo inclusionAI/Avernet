@@ -82,7 +82,7 @@ def _seed_activate_error(world) -> None:
         },
     ),
     seed=_seed_recycle_ok,
-    expect=ExpectSuccess(status=200, json_contains={"ok": True}),
+    expect=ExpectSuccess(status=202, json_contains={"ok": True, "data": {"phase": "QUEUED"}}),
 )
 def recycle_one_ok():
     """Happy path: ops recycle-one returns the manual recycle result."""
@@ -195,3 +195,50 @@ def activate_one_ok():
 def activate_one_err():
     """Error path: invalid activation state is surfaced as HTTP 400."""
     pass
+
+
+def _seed_recycle_operation(world):
+    from agentclaw.community.core.repository.protocols.bot.recycle import BotRecycleRepositoryProtocol
+    from agentclaw.community.di.config import TaskQueueConfig
+    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+    from agentclaw.community.utils.env_utils import get_current_env
+
+    _seed_recycle_ok(world)
+    store = world.get(BotRecycleRepositoryProtocol)
+    bot = store.read(_BOT_ID, _OWNER_ID)
+    store.ensure({
+        "bot_id": _BOT_ID, "owner_id": _OWNER_ID, "bot_pk": bot["id"],
+        "operation_id": "ops-query", "app": world.get(TaskQueueConfig).app,
+        "tenant": get_current_avernet_tenant(), "env": get_current_env(),
+        "engine": bot["active_engine"], "source": "manual_ops",
+        "target": {"binding_id": None, "provider": None, "device_id": None},
+    }, 1)
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/internal/dormant/bots/{bot_id}/recycle-operations/{operation_id}",
+    scenario="ok",
+    input=CaseInput(headers=_AUTH_HEADERS,
+                    path_params={"bot_id": _BOT_ID, "operation_id": "ops-query"},
+                    query_params={"owner_id": _OWNER_ID}),
+    seed=_seed_recycle_operation,
+    expect=ExpectSuccess(status=200, json_contains={"ok": True, "data": {
+        "bot_id": _BOT_ID, "operation_id": "ops-query", "phase": "QUEUED"}}),
+)
+def recycle_operation_ok():
+    """The real shared repository supplies the read-only operation projection."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/internal/dormant/bots/{bot_id}/recycle-operations/{operation_id}",
+    scenario="not_found",
+    input=CaseInput(headers=_AUTH_HEADERS,
+                    path_params={"bot_id": _BOT_ID, "operation_id": "old"},
+                    query_params={"owner_id": _OWNER_ID}),
+    seed=_seed_recycle_operation,
+    expect=ExpectError(status=404, json_contains={"detail": "Recycle operation not found"}),
+)
+def recycle_operation_not_found():
+    """Replaced or mismatched handles do not expose another operation."""

@@ -251,6 +251,10 @@ class EngineProvisioningStrategy(ABC):
         """Default engines have no backup policy, probe, helper or configuration read."""
         return None
 
+    def should_async_recycle(self, ctx: BotProvisioningContext, **kwargs) -> bool:
+        """Return whether recycle needs the durable backup/release worker."""
+        return False
+
     def assert_lifecycle_mutable(self, ctx: BotProvisioningContext, bot: dict) -> None:
         """Personal Bots honor the same in-flight recycle operation across engines."""
         if ctx.bot_type != "personal":

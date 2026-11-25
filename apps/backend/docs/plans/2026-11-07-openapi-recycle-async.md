@@ -4,14 +4,14 @@
 
 ## 1. 范围与分层
 
-**2026-11-17 确认：快盘 coding、非快盘 coding、非 coding 的个人 managed-cloud Bot 统一异步回收、同一状态查询和激活。仅快盘 coding 执行备份；非快盘 coding 不读备份开关、不执行 helper，非 coding 连备份探测也不执行。**
+**2026-11-24 修正：只有确认快盘的 `aicoding` / `claude_code` 进入异步回收队列。非 coding、非快盘 coding、快盘探测失败/未知均走原同步回收，不创建 queue/journal 状态；只有异步快盘回收需要状态查询。备份策略仍仅由 AICoding 拥有。**
 
 通用接口保留个人 managed-cloud、OWNER 权限、Teclaw 排除、owner 别名与幂等校验。
 与重启一样，通用调用方只选择引擎策略，不解释快盘配置、备份预算或 provider 状态。
 
 | 层 | 责任 |
 | --- | --- |
-| HTTP / `bot_dormant` | 三类统一提交、查询与激活；复用单个 worker 和 pinned release runtime |
+| HTTP / `bot_dormant` | 按快盘准入结果选择同步回收或单个 worker；异步路径复用查询与激活 |
 | `engines/provisioning.py` / `restart_contract.py` | 中立备份钩子、共享生命周期互斥及既有 operation 状态/契约 |
 | `engines/aicoding/recycle_strategy.py` | 仅拥有 coding 备份配置、探测、预算、凭据与阻断策略 |
 | `core/bot_dormant/recycle_task.py` / `recycle_service.py` | durable handler、operation 阶段、目标验证和窄 provider 适配；搬移而非复制 |
@@ -58,13 +58,13 @@ SDK 适配仍留在 provider 层，不把网络调用细节搬进通用业务代
 | 状态冲突 / 生命周期忙 | 409 |
 | worker 不可用 / 持久准入不能确认 | 503 |
 
-202 对三类均只表示任务已持久化，不表示资源已释放；释放错误在 operation 中查询，不再依赖同步 502。历史扫描/ops 的内部同步 `recycle()` 不改为队列。
+确认快盘的 coding Bot 返回 202，仅表示任务已持久化，不表示资源已释放；释放错误在 operation 中查询。非 coding、非快盘 coding 和探测未知沿用同步 200，成功响应即表示原回收逻辑完成，不产生 operation 查询状态。历史扫描/ops 的内部同步 `recycle()` 不改为队列。
 
 ### 独立查询
 
 `GET /openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}`，不复用 Bot `/status`。
 同样要求 OWNER；校验 Bot、owner、tenant、env、app 和 operation ID。GET 严格只读。
-三类使用同一记录与查询；没有匹配的 operation 时均返回 404。
+异步快盘路径使用同一记录与查询；同步路径没有 operation，不应发起查询。没有匹配的异步 operation 时返回 404。
 
 公开字段为 `bot_id`、`owner_id`、`operation_id`、`bot_status`、`phase`、`error_code`、`message`、安全 `warning`。
 任务 FAILED 仍是成功读取（HTTP 200）。只支持当前/最近一次 operation；被后续 operation 替换后旧 ID 返回 404。
@@ -108,7 +108,7 @@ RECYCLED -> REACTIVATING 由事务领取执行权；线程启动失败撤回尚�
 
 ## 6. 验证与发布
 
-覆盖三类统一异步 202、同一查询/激活、非 coding 不探测备份、非快盘 coding 不读备份开关，以及配置/预算/上下文复用、物理目标变化、响应丢失、并发重投、事务回滚及审计去重。
+覆盖确认快盘 coding 的异步 202、非 coding/非快盘 coding 的同步 200、异步查询/激活、非 coding 不探测备份、非快盘 coding 不读备份开关，以及配置/预算/上下文复用、物理目标变化、响应丢失、并发重投、事务回滚及审计去重。
 结构测试禁止 `bot_dormant` 直接 import AICoding 实现，也禁止向共享 DeviceService 增加 recycle 专用方法。
 宿主 ARCA 测试通过组合根绑定的 transport 消费真实 SandboxRuntimeClient seam，不依赖新增 provider 方法。
 
@@ -129,7 +129,18 @@ RECYCLED -> REACTIVATING 由事务领取执行权；线程启动失败撤回尚�
 
 ## 8. 2026-11-17 统一契约（替代此前默认引擎同步策略）
 
-用户确认三类统一异步回收、查询和激活。复用原任务表、状态和发布顺序；没有增加第二条任务管线。
+历史方案曾统一三类异步回收；2026-11-24 已修正为仅确认快盘 coding 异步，其余走原同步回收。复用原任务表、状态和发布顺序；没有增加第二条任务管线。
 原 coding worker 搬到 `core/bot_dormant/recycle_task.py`；物理释放 runtime 并入既有 `recycle_service.py`；
 状态/窄能力契约并入既有 `restart_contract.py`。ARCA transport 的宿主导入地址保持不变。
 `recycle_strategy.py` 仅保留 coding 备份，通用 worker 不依赖 coding 备份异常或实现。
+
+## 9. 2026-11-24 同步/异步准入修复
+
+`RecycleOperations.submit()` 先完成已有的运行中操作、重复任务、RECYCLED 幂等、生命周期和重启冲突检查，再调用引擎策略的检测-only 准入钩子：
+
+- 默认策略直接返回同步；不探测快盘、不读 `fastdisk_fail_block`。
+- AICoding 复用重启策略的 live fastdisk detector；只确认快盘才入队。
+- 探测失败或未知按非快盘兼容路径同步回收。
+- 已有 `QUEUED` / `BACKING_UP` / `RELEASING` / `NEEDS_CONFIRMATION` 仍优先返回原 operation，不被同步分流绕过。
+
+同步回收返回 `operation_id=null`、`phase=null`；OpenAPI 保留成功审计，internal manual 保留成功审计与通知。

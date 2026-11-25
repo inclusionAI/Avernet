@@ -74,6 +74,48 @@ class DormantOpsService:
             "status": "passport_online",
         }
 
+    def _record_sync_recycle_success(self, *, run_id: str, bot_id: str, owner_id: str) -> None:
+        """Mirror the old manual path after a synchronous recycle succeeds."""
+        with self._dormant_service._db.orm_session() as session:
+            env = get_current_env()
+            bot = (
+                session.query(BotModel)
+                .filter(
+                    BotModel.bot_id == bot_id,
+                    BotModel.owner_id == owner_id,
+                    BotModel.is_delete == 0,
+                    BotModel.env == env,
+                )
+                .order_by(BotModel.gmt_modified.desc(), BotModel.id.desc())
+                .first()
+            )
+            if bot is None:
+                raise ValueError(f"bot not found after recycle: bot_id={bot_id} owner_id={owner_id}")
+            now = datetime.now(UTC).replace(tzinfo=None)
+            gmt_create = getattr(bot, "gmt_create", None) or now
+            candidate = Candidate(
+                bot_id=bot.bot_id,
+                entity_id=bot.entity_id,
+                owner_id=bot.owner_id,
+                bot_name=bot.bot_name,
+                gmt_create=gmt_create,
+            )
+            days_inactive = max((now - gmt_create).days, 0)
+            self._dormant_service._enqueue_recycle(
+                session, candidate, days_inactive, dry_run=False,
+            )
+            self._dormant_service._write_audit(
+                session,
+                run_id=run_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                check_result="inactive",
+                action_taken="recycled",
+                days_inactive=days_inactive,
+                dry_run=False,
+                source="manual_ops",
+            )
+
     def recycle_one(
         self,
         *,
@@ -82,7 +124,29 @@ class DormantOpsService:
         dry_run: bool = True,
         reason: str | None = None,
     ) -> dict:
-        """Recycle exactly one ACTIVE personal bot through the dormant path."""
+        """Preview one Bot, or recycle through the engine-selected path."""
+        if not dry_run:
+            run_id = f"manual-recycle-{uuid.uuid4()}"
+            result = self._recycle_service.submit(
+                bot_id=bot_id, owner_id=owner_id, request_id=run_id,
+                source="manual_ops", reason=reason,
+            )
+            if result["operation_id"] is not None:
+                logger.info(
+                    "[dormant.ops.recycle_one] event=accepted operation_id=%s "
+                    "bot_id=%s owner_id=%s phase=%s changed=%s",
+                    result["operation_id"], bot_id, owner_id, result["phase"], result["changed"],
+                )
+                return {**result, "run_id": result["operation_id"], "dry_run": False}
+            if result["changed"]:
+                self._record_sync_recycle_success(
+                    run_id=run_id, bot_id=bot_id, owner_id=owner_id,
+                )
+            return {
+                **result, "run_id": run_id, "dry_run": False,
+                "status": "recycled" if result["changed"] else result["status"],
+            }
+
         run_id = f"manual-recycle-{uuid.uuid4()}"
         logger.info(
             "[dormant.ops.recycle_one] event=start run_id=%s bot_id=%s "
@@ -145,11 +209,6 @@ class DormantOpsService:
             self._dormant_service._enqueue_recycle(
                 session, candidate, days_inactive, dry_run
             )
-            if not dry_run:
-                self._recycle_service.recycle(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                )
             self._dormant_service._write_audit(
                 session,
                 run_id=run_id,

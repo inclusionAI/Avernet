@@ -25,6 +25,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
+    BotDormantAuditServiceProtocol,
     BotDormantRecycleOperationProtocol,
 )
 from agentclaw.community.di import Injected
@@ -46,7 +47,7 @@ router = APIRouter(
     summary="Recycle a personal managed-cloud Bot",
     responses={
         200: {
-            "description": "An already-recycled idempotent result; no new operation was started.",
+            "description": "A synchronous recycle result, or an already-recycled idempotent result; no durable operation was started.",
             "content": {
                 "application/json": {
                     "example": {
@@ -105,6 +106,9 @@ async def recycle_dormant_bot(
     service: BotDormantRecycleOperationProtocol = Injected(
         BotDormantRecycleOperationProtocol
     ),
+    audit_service: BotDormantAuditServiceProtocol = Injected(
+        BotDormantAuditServiceProtocol
+    ),
 ) -> Envelope[BotRecycleResult]:
     """Recycle an ACTIVE personal managed-cloud Bot; no request body.
 
@@ -113,7 +117,10 @@ async def recycle_dormant_bot(
     422. Missing/inaccessible Bots return 404. Teclaw, desktop and service Bots
     are unsupported; incompatible state or a busy lifecycle returns 409.
 
-    - All supported personal managed-cloud Bots use HTTP 202 to admit a background operation.
+    - Confirmed-fastdisk `aicoding` / `claude_code` Bots use HTTP 202 to admit a
+      background operation. Other supported engines, and coding Bots whose probe
+      is non-fastdisk or unknown, keep the original synchronous path and return
+      HTTP 200 with `operation_id=null` and `phase=null`. For queued operations,
       `data.status` is the current Bot state, not completion. `changed=true`
       means new admission; a duplicate unresolved operation returns the same
       `operation_id` with `changed=false`. Poll
@@ -121,10 +128,12 @@ async def recycle_dormant_bot(
     - An already RECYCLED Bot without an unresolved operation returns HTTP 200
       with `changed=false`, without another backup, release or audit.
 
-    Only `aicoding` / `claude_code` runs the existing fastdisk probe in the worker.
+    Only `aicoding` / `claude_code` runs the existing fastdisk probe during
+    admission and again in the worker.
     Non-coding Bots skip all backup probing, configuration and helper execution.
-    Non-fastdisk coding Bots skip the helper and backup failure switch; all three
-    types share the same recycle operation, status query and activation interface.
+    Non-fastdisk coding Bots skip the helper and backup failure switch. Only
+    confirmed-fastdisk coding Bots create a recycle operation; synchronous paths
+    have no operation to query. Activation and lifecycle guards remain shared.
     AICoding reuses the restart backup policy. Confirmed fastdisk backup has a
     1500-second worker budget. Only enabled boolean `aicoding/fastdisk_fail_block=true`
     blocks on failure; non-fastdisk or an unsuccessful initial probe skips the
@@ -148,6 +157,12 @@ async def recycle_dormant_bot(
         request_id=getattr(request.state, "request_id", "") or "",
     )
     payload = BotRecycleResult(**result)
+    if payload.operation_id is None and payload.changed:
+        audit_service.record_openapi_recycle(
+            request_id=getattr(request.state, "request_id", "") or "",
+            bot_id=payload.bot_id,
+            owner_id=payload.owner_id,
+        )
     if payload.operation_id is not None:
         response.status_code = 202
         return accepted(payload, request)

@@ -79,8 +79,22 @@ def test_dormant_recycle_notification_and_reactivate_live(live_backend):
                 "reason": "singlebox coverage lifecycle",
             },
         )
-        assert recycled.status_code == 200, recycled.text
-        assert recycled.json()["data"]["status"] == "recycled"
+        assert recycled.status_code == 202, recycled.text
+        operation_id = recycled.json()["data"]["operation_id"]
+        deadline = time.monotonic() + 180
+        while True:
+            observed = client.get(
+                f"/api/internal/dormant/bots/{bot_id}/recycle-operations/{operation_id}",
+                headers=INTERNAL_HEADERS, params={"owner_id": owner_id},
+            )
+            assert observed.status_code == 200, observed.text
+            result = observed.json()["data"]
+            assert result["phase"] not in {"FAILED", "NEEDS_CONFIRMATION"}, result
+            if result["phase"] == "SUCCEEDED":
+                break
+            assert time.monotonic() < deadline, result
+            time.sleep(1)
+        assert result["bot_status"] == "RECYCLED", result
 
         pending = client.get(
             "/api/internal/dormant/pending-notifications",

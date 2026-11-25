@@ -12,6 +12,10 @@ class ArcaRecycleTransport:
     def __init__(self, *, destroy=None, is_destroyed=None):
         self.destroy, self.is_destroyed = destroy, is_destroyed
 
+    def check_capabilities(self):
+        if not callable(self.destroy) or not callable(self.is_destroyed):
+            raise RuntimeError("Arca recycle capabilities unavailable")
+
     def submit(self, target, request_id):
         if self.destroy is None or self.destroy(target["sandbox_id"]) is not True:
             raise RuntimeError("Arca recycle release unconfirmed")

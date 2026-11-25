@@ -1353,7 +1353,7 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device); AICoding progress in `ext.aicoding.restart` | `200 Envelope[Bot]`, not completion |
-| POST | `/openapi/v1/bots/{bot_id}/recycle` | Recycle an ACTIVE personal managed-cloud Bot asynchronously | All supported engines: `202 Envelope[BotRecycleResult]`; already RECYCLED: `200` |
+| POST | `/openapi/v1/bots/{bot_id}/recycle` | Recycle an ACTIVE personal managed-cloud Bot; async only for confirmed-fastdisk coding | Confirmed-fastdisk coding: `202 Envelope[BotRecycleResult]`; other supported engines/non-fastdisk coding: `200`; already RECYCLED: `200` |
 | GET | `/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}` | Read the current/latest recycle operation without advancing it | `200 Envelope[BotRecycleOperation]` |
 | POST | `/openapi/v1/bots/{bot_id}/activate` | Start reactivation of a RECYCLED personal managed-cloud Bot | `202 Envelope[BotActivateResult]`, or `200` when already ACTIVE |
 | POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
@@ -1428,18 +1428,22 @@ incompatible states and unresolved recycling return 409.
 
 #### Asynchronous recycle and reactivation
 
-`POST .../recycle` has no body. Fastdisk coding, non-fastdisk coding and non-coding
-personal managed-cloud Bots all use the same `bot.recycle` task and return HTTP
-202 with `bot_id`, `owner_id`, current Bot `status`, `changed`, `operation_id`
-and `phase`. It does not wait for backup or call container destruction in the
-HTTP request. `changed=true` means a new operation was admitted, **not that the
-Bot is already recycled**. A repeated submission returns the same in-progress
-handle with `changed=false`. A fully recycled Bot without an unresolved
-operation still returns 200 / `status=RECYCLED` / `changed=false`, with no new
-backup, release or audit. Incompatible state or a busy lifecycle returns 409;
-a disabled worker or unconfirmed durable admission returns 503.
+`POST .../recycle` has no body. Confirmed-fastdisk `aicoding` / `claude_code`
+Bots use the existing `bot.recycle` task and return HTTP 202 with
+`bot_id`, `owner_id`, current Bot `status`, `changed`, `operation_id` and `phase`.
+The request does not wait for backup or provider destruction. Other supported
+engines, and coding Bots whose read-only probe is non-fastdisk or unknown, use the
+original synchronous path and return HTTP 200 with `operation_id=null` and
+`phase=null`; their resource release is complete when the response succeeds.
+For queued operations, `changed=true` means admission, **not that the Bot is
+already recycled**. A repeated queued submission returns the same handle with
+`changed=false`. A fully recycled Bot returns 200 / `status=RECYCLED` /
+`changed=false`, with no new backup, release or audit. Incompatible state or a
+busy lifecycle returns 409; a disabled worker or unconfirmed durable admission
+returns 503.
 
-For all three types, poll the same dedicated `GET .../recycle-operations/{operation_id}`.
+For a confirmed-fastdisk queued operation, poll the same dedicated
+`GET .../recycle-operations/{operation_id}`.
 A missing or replaced operation handle answers 404. Its data contains
 `bot_id`, `owner_id`, `operation_id`, `bot_status`, `phase`, nullable
 `error_code`, `message`, and `warning` (safe code/message only). HTTP 200 means
@@ -1456,9 +1460,10 @@ QUEUED -> BACKING_UP -> RELEASING -> SUCCEEDED
 ```
 
 Only AICoding (`aicoding` / `claude_code`) runs the existing read-only fastdisk
-probe in the worker. Non-coding Bots skip backup probing, configuration and the
-helper entirely. Non-fastdisk coding skips the helper and failure-switch read.
-Confirmed fastdisk coding reuses its restart strategy and `fastdisk_fail_block`
+probe during admission and again in the worker. Non-coding Bots skip backup
+probing, configuration and the helper entirely. Non-fastdisk or unknown-probe
+coding falls back to synchronous recycle and skips the helper and failure-switch
+read. Confirmed fastdisk coding reuses its restart strategy and `fastdisk_fail_block`
 policy, read once per operation. With blocking enabled, a failed/expired required
 backup ends the **operation** as FAILED: Bot remains ACTIVE, with its old
 binding and Passport unchanged. It does not set Bot.status or startup markers

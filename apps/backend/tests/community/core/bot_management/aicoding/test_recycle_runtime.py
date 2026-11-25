@@ -412,3 +412,17 @@ def test_fastdisk_policy_write_failure_escapes_baas_compatibility_fallback(baas,
         runtime.prepare(bot, record, save)
     assert baas.post_bots_api.call_count == 1  # Only the read-only mount probe.
     baas.destroy_bot.assert_not_called()
+
+
+def test_arca_missing_release_capability_fails_before_backup(monkeypatch):
+    strategy = MagicMock()
+    resolve = MagicMock(return_value=(MagicMock(), strategy))
+    monkeypatch.setattr("agentclaw.community.core.bot_dormant.recycle_service.resolve_restart_strategy", resolve)
+    devices = MagicMock()
+    devices.get_device.return_value = SimpleNamespace(device_id="d1", device_provider="arca", device_props={"sandbox_id": "s1"})
+    runtime = ManagedRecycleRuntime(lambda: devices, MagicMock(), MagicMock(), lambda: ArcaRecycleTransport())
+    bot = {"binding_id": 1}
+    with pytest.raises(RuntimeError, match="capabilit"):
+        runtime.prepare(bot, {"target": runtime.target(bot)}, MagicMock())
+    resolve.assert_not_called()
+    strategy.prepare_recycle.assert_not_called()

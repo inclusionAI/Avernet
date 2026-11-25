@@ -86,13 +86,20 @@ class RecycleOperations:
         app: str,
         worker_enabled: bool,
         is_teclaw,
+        should_queue=None,
         clock=time.time,
     ):
         self.store, self.runtime, self.queue, self.guard = store, runtime, queue, guard
         self.app, self.worker_enabled, self.clock = app, worker_enabled, clock
         self.is_teclaw = is_teclaw
+        # Tests and legacy composition roots default to the durable path. The
+        # production root supplies the engine-owned fastdisk admission hook.
+        self.should_queue = should_queue or (lambda _bot: True)
 
-    def submit(self, *, bot_id, owner_id, owner_name=None, request_id=""):
+    def submit(self, *, bot_id, owner_id, owner_name=None, request_id="",
+               source="openapi", reason=None):
+        if source not in {"openapi", "manual_ops"}:
+            raise ValueError("Unsupported recycle source")
         bot = self.store.read(bot_id, owner_id)
         ensure_supported(bot, self.is_teclaw)
         with self.guard(bot):
@@ -146,6 +153,22 @@ class RecycleOperations:
                 raise BotInvalidLifecycleStateError(
                     bot_id=bot_id, current_status=bot["status"]
                 )
+            try:
+                needs_queue = self.should_queue(bot)
+            except Exception:
+                # A failed/unknown fastdisk probe follows the existing coding
+                # compatibility rule: do not introduce a queue state.
+                needs_queue = False
+            if not needs_queue:
+                return {
+                    "_synchronous": True,
+                    "bot_id": bot_id,
+                    "owner_id": owner_id,
+                    "status": bot["status"],
+                    "changed": True,
+                    "operation_id": None,
+                    "phase": None,
+                }
             if not self.worker_enabled:
                 raise RecycleUnavailable("Recycle worker is disabled")
             payload = {
@@ -159,7 +182,8 @@ class RecycleOperations:
                 "operation_id": uuid.uuid4().hex,
                 "target": self.runtime.target(bot),
                 "created_at": self.clock(),
-                "source": "openapi",
+                "source": source,
+                "reason": reason,
                 "request_id": request_id,
             }
             try:
