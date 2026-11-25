@@ -27,6 +27,7 @@ export default function LabTasksPage() {
   const { identity: humanIdentity } = useHumanIdentity();
   const ownerUserId = humanIdentity?.userId.trim() ?? '';
 
+  const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(DEFAULT_PAGE);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [statusFilter, setStatusFilter] = useState<UserTaskStatusFilter>('all');
@@ -38,6 +39,7 @@ export default function LabTasksPage() {
     pageSize,
     statusFilter,
     Boolean(ownerUserId),
+    keyword,
   );
   const { chatBots, isLoading: ownedBotsLoading } = useOwnedBots(ownerUserId || null, Boolean(ownerUserId));
   const { teamBots, teamLoading: teamBotsLoading } = useConversationTeamDirectory(ownerUserId || null);
@@ -104,6 +106,8 @@ export default function LabTasksPage() {
           loading={loading || ownedBotsLoading || teamBotsLoading}
           error={error}
           statusFilter={statusFilter}
+          keyword={keyword}
+          onKeywordChange={setKeyword}
           onStatusFilterChange={(status) => {
             setStatusFilter(status);
             setPage(DEFAULT_PAGE);
