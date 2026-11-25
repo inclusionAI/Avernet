@@ -18,7 +18,7 @@ import {
   botSessionService,
   resolveChatRuntimeStage,
   resolveUserId,
-  withConversationSubjectParams,
+  withBotSessionScope,
   type ChatBotView,
 } from './botSessionService';
 
@@ -78,6 +78,8 @@ interface BotChatProviderOptions {
   sessionId: string;
   /** 多实例服务 Bot 的实例范围;缺省按后端默认实例解析。 */
   range?: ConversationSessionRequestRange;
+  /** Bot 工坊调试关闭；“对话”栏目缺省开启本人会话主体寻址。 */
+  subjectScoped?: boolean;
   /** 注入 SDK Provider 构造(测试 stub);缺省真实 SDK。 */
   createSdkProvider?: (config: OpenClawProviderConfig) => OpenClawProvider;
   /** 注入 IAM token 拉取(测试 stub);缺省走 /openapi/v1/bots/{bot_id}/iam-token。 */
@@ -246,9 +248,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   }
 
   private async fetchIamToken(): Promise<string> {
-    const params = withConversationSubjectParams(this.options.bot, this.options.userId, {
+    const params = withBotSessionScope(this.options.bot, this.options.userId, {
       user_id: resolveUserId(this.options.userId),
-    });
+    }, this.options.subjectScoped !== false);
     return this.getIamTokenFn(
       this.options.bot.realBotId,
       params.user_id,
@@ -273,12 +275,12 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private async getChatUrl(): Promise<A2aProxyConnection & { url: string }> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
-      withConversationSubjectParams(this.options.bot, this.options.userId, {
+      withBotSessionScope(this.options.bot, this.options.userId, {
         user_id: resolveUserId(this.options.userId),
         owner_id: this.options.bot.ownerId,
         session_id: this.options.sessionId,
         ...(this.options.range ? { device_uuid: this.options.range.deviceUuid } : {}),
-      }),
+      }, this.options.subjectScoped !== false),
     );
     const connectionEngine = resp.data?.engine?.trim().toLowerCase() || null;
     this.setConnectionRuntime({
@@ -639,14 +641,15 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   async loadHistory(): Promise<ChatMessage[]> {
     this.setState({ phase: 'loading-history', error: null });
     try {
-      const page = await botSessionService.listMessagesPage(
-        this.options.bot,
-        this.options.userId,
-        this.options.sessionId,
-        1,
-        BOT_MESSAGE_PAGE_SIZE,
-        this.options.range,
-      );
+      const page = this.options.subjectScoped === false
+        ? await botSessionService.listMessagesPage(
+            this.options.bot, this.options.userId, this.options.sessionId,
+            1, BOT_MESSAGE_PAGE_SIZE, this.options.range, false,
+          )
+        : await botSessionService.listMessagesPage(
+            this.options.bot, this.options.userId, this.options.sessionId,
+            1, BOT_MESSAGE_PAGE_SIZE, this.options.range,
+          );
       this.historyPage = 1;
       this.loadedHistoryRawCount = page.rawCount;
       this.historyTotal = page.total;
@@ -667,14 +670,15 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     this.loadingMoreHistory = true;
     try {
       const nextPage = this.historyPage + 1;
-      const page = await botSessionService.listMessagesPage(
-        this.options.bot,
-        this.options.userId,
-        this.options.sessionId,
-        nextPage,
-        BOT_MESSAGE_PAGE_SIZE,
-        this.options.range,
-      );
+      const page = this.options.subjectScoped === false
+        ? await botSessionService.listMessagesPage(
+            this.options.bot, this.options.userId, this.options.sessionId,
+            nextPage, BOT_MESSAGE_PAGE_SIZE, this.options.range, false,
+          )
+        : await botSessionService.listMessagesPage(
+            this.options.bot, this.options.userId, this.options.sessionId,
+            nextPage, BOT_MESSAGE_PAGE_SIZE, this.options.range,
+          );
       this.historyPage = nextPage;
       this.loadedHistoryRawCount += page.rawCount;
       this.historyTotal = page.total;

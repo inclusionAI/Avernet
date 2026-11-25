@@ -77,14 +77,18 @@ def _persisted_document(manifest_seam: MagicMock) -> dict[str, Any]:
 
 
 def _set_snapshot(mocks: Any, snapshot: SkillSetApplySnapshot) -> None:  # type: ignore[name-defined]
-    """Wire the skill_set_service to yield ``snapshot`` for the source."""
-    mocks[-1].read_apply_snapshot.return_value = snapshot
+    """Wire the skill_set_service to yield ``snapshot`` for the source.
+
+    ``mocks`` is the 10-tuple from ``test_copy_route._mocks``; the
+    skill_set_service is the penultimate element (the last is the
+    collaborator_repository added when copy's access gate moved to it)."""
+    mocks[-2].read_apply_snapshot.return_value = snapshot
 
 
 def _call_submit_copy(mocks: Any, source: Any = None) -> Any:  # type: ignore[name-defined]
     (bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport,
      space_context, render_screen_service, bot_service,
-     skill_set_service) = mocks
+     skill_set_service, _collaborator_repo) = mocks
     # Default to the openclaw source; callers that need a different engine
     # (scenario ④'s non-openclaw refusal) pass their own source and skip the
     # reset so the precondition they set on ``bot_repo`` survives.
@@ -105,6 +109,7 @@ def _call_submit_copy(mocks: Any, source: Any = None) -> Any:  # type: ignore[na
         render_screen_service=render_screen_service,
         bot_service=bot_service,
         skill_set_service=skill_set_service,
+        collaborator_repository=_collaborator_repo,
     )
 
 

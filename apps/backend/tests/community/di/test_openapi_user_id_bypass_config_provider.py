@@ -32,6 +32,9 @@ from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import 
     OpenApiUserIdBypassConfigModule,
     validate_for_environment,
 )
+from agentclaw.community.di.openapi_bot_operations_config import (
+    OpenApiBotOperationsConfig,
+)
 from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig,
 )
@@ -177,6 +180,45 @@ def test_a_dev_profile_boots_with_a_bypass(monkeypatch):
     injector = _boot_with(monkeypatch, {KEY: _ENTRIES}, "dev")
 
     assert injector.get(OpenApiUserIdBypassConfig).user_ids == frozenset(_ENTRIES)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("env", _PROTECTED_SPELLINGS)
+def test_managed_bot_operations_config_does_not_enable_a_user_id_bypass(monkeypatch, env):
+    block = {KEY: [], "bot_operations": {"allowed_apps": []}}
+
+    assert _build(monkeypatch, {BLOCK: block}, env=env).user_ids == frozenset()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("server_env,app_env", [("prepub", "pre"), ("prod", "prod")])
+def test_managed_bot_operations_allowlist_boots_in_protected_environments(monkeypatch, server_env, app_env):
+    block = {
+        KEY: [],
+        "bot_access_check": {"allowed_app_names": ["example-manager"]},
+        "bot_operations": {
+            "allowed_apps": [{"env": app_env, "tenant": "example-tenant", "app_name": "example-manager"}],
+        },
+    }
+
+    injector = _boot_with(monkeypatch, block, server_env)
+
+    assert injector.get(OpenApiUserIdBypassConfig).user_ids == frozenset()
+    operations = injector.get(OpenApiBotOperationsConfig)
+    assert operations.allowed_apps == frozenset({
+        (app_env, "example-tenant", "example-manager"),
+    })
+    assert operations.allows(env=app_env, tenant="example-tenant", app_name="example-manager")
+    assert not operations.allows(env=app_env, tenant="example-tenant", app_name="unapproved-manager")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("env", sorted(PROTECTED_ENVS))
+def test_a_malformed_managed_bot_allowlist_still_fails_the_boot(monkeypatch, env):
+    block = {KEY: [], "bot_operations": {"allowed_apps": "example-manager"}}
+
+    with pytest.raises(ValueError, match="openapi.bot_operations.allowed_apps must be a list"):
+        _boot_with(monkeypatch, block, env)
 
 
 # ── what ships ─────────────────────────────────────────────────────────────

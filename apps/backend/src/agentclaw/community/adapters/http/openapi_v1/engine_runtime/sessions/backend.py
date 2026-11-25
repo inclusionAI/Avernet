@@ -45,7 +45,10 @@ async def resolve_session_backend(
             # operator lookup into an authorization bypass.
             pass
         else:
-            if facts.call_type.casefold() != "caller":
+            if (
+                facts.call_type.casefold() != "caller"
+                or not facts.requires_caller_chat_instance
+            ):
                 return facts
             # ExpertChat's session boundary requires membership in the user's
             # chat list.  The operator gate above is authoritative; this write is
