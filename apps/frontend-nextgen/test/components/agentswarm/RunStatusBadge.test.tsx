@@ -6,11 +6,11 @@ import { RunStatusBadge } from '@/components/agentswarm/RunStatusBadge';
 test.each([
   ['RUNNING', '执行中'],
   ['COMPLETED', '已完成'],
-  ['FAILED', '执行失败'],
+  ['FAILED', '已失败'],
   ['CANCELLED', '已取消'],
-  ['TIMED_OUT', '执行超时'],
-  ['GUARD_KILLED', '已被运行保护机制终止'],
-  ['STUCK', '执行无法继续'],
+  ['TIMED_OUT', '已超时'],
+  ['GUARD_KILLED', '已终止'],
+  ['STUCK', '已卡住'],
 ])('%s renders its own label', (status, label) => {
   render(<RunStatusBadge status={status} />);
   expect(screen.getByText(label)).toBeInTheDocument();

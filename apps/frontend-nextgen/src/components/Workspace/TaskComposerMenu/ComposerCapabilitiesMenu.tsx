@@ -33,7 +33,7 @@ import { MenuRow, SelectionChip } from '@/components/Workspace/TaskComposerMenu/
 import { WorkflowSubPanel, type WorkflowPanelItem } from '@/components/Workspace/TaskComposerMenu/WorkflowSubPanel';
 import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { cn } from '@/utils/cn';
-import { Boxes, FileUp, FolderOpen, ImageDown, Plus, Sparkles, Workflow } from 'lucide-react';
+import { FileUp, FolderOpen, ImageDown, Plus, Sparkles, Workflow } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -51,7 +51,6 @@ function MenuBody({
   onAddImage,
   onManageFiles,
   onDynamic,
-  onAgentCompute,
   onPickWorkflow,
   dynamicTaskEnabled,
   workflowEnabled,
@@ -67,8 +66,6 @@ function MenuBody({
   onAddImage?: () => void;
   onManageFiles?: () => void;
   onDynamic?: () => void;
-  /** Agent Compute 入口：与「任务」「工作流任务」并列；未传入时不渲染该行。 */
-  onAgentCompute?: () => void;
   onPickWorkflow?: (w: WorkflowPanelItem) => void;
   /** 是否安装了 task-intake；未安装时「任务」仅可见、不可选择。 */
   dynamicTaskEnabled: boolean;
@@ -169,22 +166,6 @@ function MenuBody({
           </Popover>
         </>
       ) : null}
-      {/* Agent Compute：与「任务」「工作流任务」并列的入口；入口说明收进悬停提示（PRD v1.3 §1）。 */}
-      {onAgentCompute ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <MenuRow
-                icon={<Boxes className="size-3.5" />}
-                label="计算任务"
-                onClick={onAgentCompute}
-                disabled={disabled}
-              />
-            </TooltipTrigger>
-            <TooltipContent>根据工作目标，定义执行 Agent，启动多个容器协同批量计算</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : null}
       {/* 平台注入的额外菜单行（capability 覆盖式，2026-11-04）：渲染在任务/工作流之后，
           行样式与视觉一致性由注入方负责（复用 MenuRow）。 */}
       {extraMenuRows}
@@ -202,7 +183,6 @@ export function ComposerCapabilitiesMenu({
   selections,
   onWorkflowSelected,
   onDynamicSelected,
-  onAgentCompute,
   onRemoveSelection,
   capabilitySets,
   showTaskEntries = true,
@@ -265,7 +245,6 @@ export function ComposerCapabilitiesMenu({
                 close();
               } : undefined}
               onPickWorkflow={execution && enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
-              onAgentCompute={onAgentCompute ? withClose(onAgentCompute) : undefined}
               dynamicTaskEnabled={execution?.dynamicTaskEnabled ?? true}
               workflowEnabled={enableWorkflow && WORKFLOW_TASK_ENABLED}
               disabled={disabled}

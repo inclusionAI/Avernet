@@ -13,6 +13,10 @@ export interface TaskLoopViewProps extends TaskPanelProps {
   /** Drawer host owns selection presentation, never the task rules. */
   onSelectTask?: (taskId: string) => void;
 }
+// Fallbacks for an absent controller. Declared before the component so the
+// `useSyncExternalStore` call above can reference them.
+const noopSubscribe = () => () => {};
+const emptySnapshot = () => null;
 export function TaskLoopView({ host, controller, onSelectTask, ...props }: TaskLoopViewProps): React.ReactElement {
   const snapshot = useSyncExternalStore(controller?.subscribe ?? noopSubscribe, controller?.getSnapshot ?? emptySnapshot, controller?.getSnapshot ?? emptySnapshot);
   const selectedNav = useMemo(() => controller ? controller.nav(props.taskId) : props.nav, [controller, snapshot?.navByTask, props.taskId, props.nav]);
@@ -80,5 +84,3 @@ export function TaskLoopView({ host, controller, onSelectTask, ...props }: TaskL
     <TaskPanel {...props} taskApiBase={host.taskApiBase ?? props.taskApiBase} userId={host.getViewer()?.userId} nav={selectedNav} switcher={switcher} />
   </TaskPanelHostContext.Provider>;
 }
-const noopSubscribe = () => () => {};
-const emptySnapshot = () => null;

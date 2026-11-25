@@ -27,7 +27,10 @@ class RunRepositoryProtocol(Protocol):
                        error: str) -> bool: ...
 
     def list_page(self, tenant: TenantId, status: RunStatus | None = None,
-                  page: int = 1, page_size: int = 20) -> RunPage: ...
+                  page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None,
+                  sort: str | None = None, order: str | None = None,
+                  keyword: str | None = None) -> RunPage: ...
 
     # Fleet-wide status page for the maintenance reaper (env-bound, no
     # tenant scoping) — 4.1's sweep read.

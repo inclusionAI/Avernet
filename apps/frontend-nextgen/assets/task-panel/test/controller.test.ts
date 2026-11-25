@@ -132,14 +132,16 @@ describe('review: real envelope and origin handoff', () => {
     c.openTask({ id: 'task-t1', type: 'taskPanel.TaskLoopView', title: 'T', params: { taskId: 't1' }, closable: true }, 'explicit');
     h.navigate = vi.fn(async (_target, signal) => {
       await c.enterConversation({ sessionId: 'child', kind: 'group' });
-      expect(signal.aborted).toBe(false); return { status: 'ready' as const };
+      expect(signal.aborted).toBe(false);
+      return { status: 'ready' as const };
     });
-    c.nav('t1').selectNode('n', { sessionId: 'child', kind: 'group' }); await new Promise(r => setTimeout(r, 0));
+    c.nav('t1').selectNode('n', { sessionId: 'child', kind: 'group' }); await new Promise(r => { setTimeout(r, 0); });
     h.restoreOrigin = vi.fn(async (origin, signal) => {
       expect(origin).toBe('origin'); await c.enterConversation({ sessionId: 's1', kind: 'bot' });
-      expect(signal.aborted).toBe(false); return { status: 'ready' as const };
+      expect(signal.aborted).toBe(false);
+      return { status: 'ready' as const };
     });
-    c.nav('t1').selectRootNode('root'); await new Promise(r => setTimeout(r, 0));
+    c.nav('t1').selectRootNode('root'); await new Promise(r => { setTimeout(r, 0); });
     expect(c.getSnapshot().activeTaskId).toBe('t1'); c.dispose();
   });
 });

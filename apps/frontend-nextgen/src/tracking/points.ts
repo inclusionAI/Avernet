@@ -83,6 +83,7 @@ export const Points = {
   lab: {
     openTasks: '实验室-进入任务',
     openCommunity: '实验室-进入社区',
+    openAgentCompute: '实验室-进入计算任务',
     cardsExpo: '实验室-功能卡曝光',
   },
   // —— 智能进化（/evolution-factory/*）——

@@ -6,7 +6,6 @@
 // 交给 CodingBotStageBoundary，本组件只负责普通 OpenClaw Runtime。
 import { ConversationComposerHost } from '@/components/Workspace/ConversationComposerHost';
 import { AgentComputePanel } from '@/components/agentswarm/AgentComputePanel';
-import { useAgentComputePanelStore } from '@/stores/agentComputePanelStore';
 import { ChatPanel } from '@/components/Workspace/ChatPanel';
 import { BotModelSelectorContainer } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
@@ -146,11 +145,6 @@ export function ConversationInteractiveStage(props: {
                   capabilitySets={fileFeature.capabilitySets}
                   /* 平台注入的额外菜单行（capability 覆盖式插槽），如知识库引用入口。 */
                   extraMenuRows={composer.extraMenuRows}
-                  onAgentCompute={
-                    composerSession?.sessionId
-                      ? () => useAgentComputePanelStore.getState().open(composerSession.sessionId)
-                      : undefined
-                  }
                 />
               ) : undefined
             }

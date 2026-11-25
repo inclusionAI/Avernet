@@ -312,11 +312,24 @@ async def list_runs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: RunStatus | None = Query(None),
+    sort: str | None = Query(
+        None,
+        description="Sort column: run_id | status | started_at | ended_at. "
+                    "Unknown values fall back to newest-first.",
+    ),
+    order: str | None = Query(
+        None, description="Sort direction: asc | desc (default desc).",
+    ),
+    keyword: str | None = Query(
+        None,
+        description="Keyword search over the run id and the goal text.",
+    ),
 ):
     # Scoped to the caller: a tenant is a group, not a person, so a tenant-wide
     # list would show one member another's prompts.
     rp = svc.list_runs(tenant, status, page=page, page_size=page_size,
-                       owner_id=user.staffId)
+                       owner_id=user.staffId,
+                       sort=sort, order=order, keyword=keyword)
     return RunListDTO(
         items=[_to_summary(r) for r in rp.items],
         total=rp.total,
@@ -593,6 +606,7 @@ def _goal_excerpt(goal: str) -> str:
 def _to_summary(run) -> RunSummaryDTO:
     return RunSummaryDTO(
         run_id=run.run_id,
+        row_id=run.row_id,
         status=run.status.value,
         termination_reason=run.termination_reason.value if run.termination_reason else None,
         final_answer=run.final_answer,

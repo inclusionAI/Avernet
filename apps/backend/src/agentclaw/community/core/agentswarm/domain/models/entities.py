@@ -43,6 +43,13 @@ class Run:
     error: str | None = None
     active_idempotency_key: IdempotencyKey | None = None
     ended_at: EpochMillis | None = None
+    row_id: int = 0
+    """The stored row's own auto-increment id.
+
+    ``run_id`` is the identifier the gateway and links use; this is the row
+    key, which also happens to be the submission order. Surfaced so a listing
+    can show both, and so "newest first" has a stable column to sort on.
+    """
 
 
 @dataclass

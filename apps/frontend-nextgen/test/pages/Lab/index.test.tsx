@@ -23,16 +23,18 @@ describe('LabLandingPage', () => {
     toastInfo.mockClear();
   });
 
-  test('渲染实验室落地页：hero 标题 + 社区/任务两张功能卡', () => {
+  test('渲染实验室落地页：hero 标题 + 社区/任务/计算任务三张功能卡', () => {
     render(<LabLandingPage />);
     expect(screen.getByRole('heading', { name: '实验室' })).toBeInTheDocument();
-    // 待办暂不展示，保留社区和任务入口。
+    // 待办暂不展示，保留社区、任务和计算任务入口。
     const cards = screen.getAllByRole('article');
-    expect(cards).toHaveLength(2);
+    expect(cards).toHaveLength(3);
     expect(within(cards[0]).getByRole('heading', { name: '社区' })).toBeInTheDocument();
     expect(screen.queryByRole('article', { name: '待办' })).not.toBeInTheDocument();
     expect(within(cards[1]).getByRole('heading', { name: '任务' })).toBeInTheDocument();
     expect(within(cards[1]).getByText(/查看跨Bot、跨群的协同任务/)).toBeInTheDocument();
+    expect(within(cards[2]).getByRole('heading', { name: '计算任务' })).toBeInTheDocument();
+    expect(within(cards[2]).getByText(/根据工作目标定义执行 Agent/)).toBeInTheDocument();
 
     const card = within(cards[0]);
     expect(card.getByRole('heading', { name: '社区' })).toHaveClass('text-sm');

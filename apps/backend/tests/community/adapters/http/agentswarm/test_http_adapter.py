@@ -123,10 +123,13 @@ class StubAgentSwarmService:
 
     def list_runs(self, tenant: str, status: dm.RunStatus | None = None,
                   *, page: int = 1, page_size: int = 20,
-                  owner_id: str | None = None) -> dm.RunPage:
+                  owner_id: str | None = None,
+                  sort: str | None = None, order: str | None = None,
+                  keyword: str | None = None) -> dm.RunPage:
         self.list_calls.append(
             {"tenant": tenant, "status": status, "page": page,
-             "page_size": page_size, "owner_id": owner_id}
+             "page_size": page_size, "owner_id": owner_id,
+             "sort": sort, "order": order, "keyword": keyword}
         )
         return dm.RunPage(items=(self.run,), total=1, page=page, page_size=page_size)
 
@@ -451,6 +454,10 @@ class TestListRuns:
             "page_size": 50,
             # The caller, not the tenant, decides what the list contains.
             "owner_id": "staff-1",
+            # Unset by this request, so they arrive as None.
+            "sort": None,
+            "order": None,
+            "keyword": None,
         }
         body = resp.json()
         assert body["total"] == 1
@@ -466,6 +473,18 @@ class TestListRuns:
         )
         assert resp.status_code == 422
         assert stub.list_calls == []
+
+    def test_sort_order_and_keyword_passthrough(self, client, stub):
+        resp = client.get(
+            "/openapi/v1/agentswarm/runs",
+            params={"tenant": TENANT, "sort": "started_at", "order": "asc",
+                    "keyword": "工时"},
+        )
+        assert resp.status_code == 200
+        (call,) = stub.list_calls
+        assert call["sort"] == "started_at"
+        assert call["order"] == "asc"
+        assert call["keyword"] == "工时"
 
     def test_page_zero_and_oversized_page_size_are_422(self, client, stub):
         assert client.get(

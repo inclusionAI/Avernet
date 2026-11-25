@@ -39,15 +39,18 @@ export function isTerminalStatus(value: unknown): boolean {
 /**
  * Labels for the seven gateway states. A state outside this map is rendered
  * with the gateway's own string rather than a guessed label.
+ *
+ * Every label is exactly three characters so the status column has one fixed
+ * width and never reflows between rows; keep new entries to that budget.
  */
 export const RUN_STATUS_LABELS: Record<RunStatus, string> = {
   RUNNING: '执行中',
   COMPLETED: '已完成',
-  FAILED: '执行失败',
+  FAILED: '已失败',
   CANCELLED: '已取消',
-  TIMED_OUT: '执行超时',
-  GUARD_KILLED: '已被运行保护机制终止',
-  STUCK: '执行无法继续',
+  TIMED_OUT: '已超时',
+  GUARD_KILLED: '已终止',
+  STUCK: '已卡住',
 };
 
 export function runStatusLabel(status: string | null | undefined): string {
@@ -112,6 +115,8 @@ export interface SubmitRunDTO {
 
 export interface RunSummaryDTO {
   run_id: string;
+  /** The stored row key — also the submission order. Shown beside run_id. */
+  row_id?: number;
   status: string;
   termination_reason?: string | null;
   final_answer?: unknown;
@@ -244,4 +249,9 @@ export interface ListRunsQuery {
   page?: number;
   page_size?: number;
   status?: RunStatus;
+  /** Allowlisted server-side sort column; unknown values fall back to newest-first. */
+  sort?: 'id' | 'run_id' | 'status' | 'started_at' | 'ended_at';
+  order?: 'asc' | 'desc';
+  /** Keyword search over the run id and the goal text, server-side. */
+  keyword?: string;
 }

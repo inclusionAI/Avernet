@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AgentswarmRequestError } from '@/services/agentswarm/http';
 import { listRuns } from '@/services/agentswarm/service';
+import type { ListRunsQuery } from '@/services/agentswarm/types';
 import { isTerminalStatus, type RunSummaryDTO } from '@/services/agentswarm/types';
 import { POLL_INTERVAL_MS } from './useRunPolling';
 
@@ -19,6 +20,11 @@ export interface UseRunListOptions {
   page?: number;
   pageSize?: number;
   intervalMs?: number;
+  /** Server-side sort/order; both are sent only when provided. */
+  sort?: ListRunsQuery['sort'];
+  order?: ListRunsQuery['order'];
+  /** Server-side keyword search over run id and goal text. */
+  keyword?: string;
 }
 
 export interface UseRunListResult {
@@ -37,6 +43,9 @@ export function useRunList({
   page = 1,
   pageSize = 20,
   intervalMs = POLL_INTERVAL_MS,
+  sort,
+  order,
+  keyword,
 }: UseRunListOptions): UseRunListResult {
   const [runs, setRuns] = useState<RunSummaryDTO[]>([]);
   const [total, setTotal] = useState(0);
@@ -61,7 +70,14 @@ export function useRunList({
 
     const tick = async () => {
       try {
-        const result = await listRuns(tenant, { page, page_size: pageSize });
+        const result = await listRuns(tenant, {
+          page,
+          page_size: pageSize,
+          // Only send what the caller set, so the query string stays clean.
+          ...(sort ? { sort } : {}),
+          ...(order ? { order } : {}),
+          ...(keyword ? { keyword } : {}),
+        });
         if (cancelled) return;
         setRuns(result.items ?? []);
         setTotal(result.total ?? 0);
@@ -91,7 +107,7 @@ export function useRunList({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [tenant, enabled, page, pageSize, intervalMs, nonce]);
+  }, [tenant, enabled, page, pageSize, intervalMs, sort, order, keyword, nonce]);
 
   return { runs, total, loaded, phase, error, degraded, refresh };
 }

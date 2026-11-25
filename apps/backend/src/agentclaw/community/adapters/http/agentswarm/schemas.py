@@ -173,6 +173,12 @@ class SubmitRunResponseDTO(BaseModel):
 
 class RunSummaryDTO(BaseModel):
     run_id: str
+    row_id: int = 0
+    """The stored row key, shown next to ``run_id`` in listings.
+
+    Defaulted so an older payload (or a run built without a row) still parses;
+    it is not an identity, only the submission order made visible.
+    """
     status: str
     termination_reason: str | None = None
     final_answer: Any = None

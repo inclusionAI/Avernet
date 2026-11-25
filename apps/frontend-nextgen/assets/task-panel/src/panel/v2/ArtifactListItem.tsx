@@ -32,7 +32,7 @@ export interface ArtifactListItemProps {
 /** The row opens the existing reader; hover actions never replace authenticated downloads. */
 export function ArtifactListItem({ artifact, downloading, onPreview, onDownload }: ArtifactListItemProps) {
   const href = artifactViewHref(artifact);
-  const file = artifact.kind === 'file' && artifact.fileRef != null;
+  const file = artifact.kind === 'file' && artifact.fileRef !== null && artifact.fileRef !== undefined;
   const preview = file || artifact.kind === 'text';
   const nodeLabel = artifact.nodeId ? `节点 ${artifact.nodeId}` : null;
   const stage = artifact.isFinalArtifact ? '最终产物' : nodeLabel;

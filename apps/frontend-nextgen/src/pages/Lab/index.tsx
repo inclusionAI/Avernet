@@ -36,6 +36,15 @@ const FEATURES: LabFeature[] = [
     // 任务类别入口:实验室二级页 /lab/tasks(协同任务列表,状态类别筛选 + V2 详情副屏)。
     href: '/lab/tasks',
   },
+  {
+    id: 'agent-compute',
+    title: '计算任务',
+    // 文案对齐 PRD v1.7 §1 的计算任务卡。
+    description: '根据工作目标定义执行 Agent，启动多个容器协同完成批量计算。',
+    // 计算任务入口:独立页 /agent-compute(配置/运行观察)。PRD 规划的
+    // /laboratory/agent-compute 尚未拆分列表·配置·详情三路由,现以既有页承接。
+    href: '/agent-compute',
+  },
 ];
 
 function LabFeatureCard({
@@ -65,6 +74,7 @@ function LabFeatureCard({
           onClick={() => {
             if (feature.id === 'tasks') Tracert.click(Points.lab.openTasks);
             if (feature.id === 'community') Tracert.click(Points.lab.openCommunity);
+            if (feature.id === 'agent-compute') Tracert.click(Points.lab.openAgentCompute);
             history.push(feature.href);
           }}
           rightIcon={<ArrowRight className="size-3.5" aria-hidden />}
