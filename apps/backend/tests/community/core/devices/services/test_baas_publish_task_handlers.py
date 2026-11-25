@@ -748,7 +748,8 @@ def test_restart_poll_completes_when_restart_publish_id_is_stale():
     baas_device_service.poll_publish_once.assert_not_called()
 
 
-def test_restart_poll_reschedules_when_pending():
+def test_restart_poll_reschedules_when_pending(caplog):
+    caplog.set_level("INFO", logger="start")
     repo = MagicMock()
     baas_device_service = MagicMock()
     bot_repository = MagicMock()
@@ -765,6 +766,7 @@ def test_restart_poll_reschedules_when_pending():
         "bot_id": "bot-001",
         "owner_id": "owner-001",
         "template_type": "applicationCoding",
+        "active_engine": "claude_code",
         "ext": {},
     }
     baas_device_service.poll_publish_once.return_value = (
@@ -786,6 +788,12 @@ def test_restart_poll_reschedules_when_pending():
     baas_device_service.poll_publish_once.assert_called_once_with(publish_id=1001)
     bot_repository.update_by_owner.assert_not_called()
     repo.update_status.assert_not_called()
+
+    assert (
+        "[BaasRestartPublishPollHandler] restart progress: bot_id='bot-001' engine_type='claude_code' "
+        "binding_id=42 publish_id=1001 request_id=None env='dev' elapsed_s=76.600"
+    ) in caplog.messages
+    bot_repository.get_by_binding_id.assert_called_once_with(42)
 
 
 def test_restart_poll_marks_active_and_clears_old_baas_failure_ext_on_success():
