@@ -313,14 +313,15 @@ def test_engine_gate_composes_with_the_existing_owner_aspect(monkeypatch):
     from agentclaw.community.adapters.http.openapi_v1.admission import (
         ADMISSION, AdmissionMode,
     )
+    from agentclaw.community.adapters.http.openapi_v1.admission_managed_bot_routes import ENGINE_BOT_DEPENDENCIES
     from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
     async def targets():
         return [{'active_engine': 'aicoding'}]
 
-    monkeypatch.setitem(ADMISSION, ('GET', '/openapi/v1/bots/{bot_id}/status'), AdmissionMode.ENGINE(
-        engines={'aicoding'}, bot_dependency=lambda: targets,
-    ))
+    operation = ('GET', '/openapi/v1/bots/{bot_id}/status')
+    monkeypatch.setitem(ADMISSION, operation, AdmissionMode.ENGINE_CODING)
+    monkeypatch.setitem(ENGINE_BOT_DEPENDENCIES, operation, lambda: targets)
 
     async def handler():
         return {}

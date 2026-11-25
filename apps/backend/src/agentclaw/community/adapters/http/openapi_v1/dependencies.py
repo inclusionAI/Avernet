@@ -257,7 +257,7 @@ def _admits_application(connection: HTTPConnection) -> bool:
     if path is None:
         return False
     method = connection.scope.get("method") or "WEBSOCKET"
-    return admission_for((method, path)).mode in ADMITTING_MODES
+    return admission_for((method, path)) in ADMITTING_MODES
 
 
 async def require_user_and_app_principal(

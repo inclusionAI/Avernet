@@ -991,10 +991,12 @@ keep in step and 43 hand-written ones had already accumulated. If you are
 adding an operation, this is the difference that will surprise you: **there is
 nothing to write on the route.**
 
-ENGINE admission also has a single policy declaration:
-`AdmissionMode.ENGINE(engines={...}, bot_dependency=...)` in `ADMISSION`.
-Its parameters are immutable and isolated per operation; the shared enum member
-is not modified. Other modes remain bare enum members and take no parameters.
+Engine admission also has a single policy declaration:
+`AdmissionMode.ENGINE_CODING` in `ADMISSION`. The enum member carries the shared
+`frozenset({"aicoding", "claude_code"})` allowlist; every inventory entry remains
+a bare enum member. Other modes carry an empty engine set and retain their
+existing behavior. Route-specific authorized Bot dependency providers are wired
+separately in `admission_managed_bot_routes.py`, without an extra rule class.
 `PublicAPIRoute` invokes `admission.apply_admission`
 to attach that check without an engine decorator, and `require_principal` reads
 the same rule to decide application admission. The existing grant/user-mode

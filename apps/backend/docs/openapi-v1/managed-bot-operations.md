@@ -21,21 +21,23 @@ environment and current Owner remain checked on this side. Desktop and separatel
 managed local runtimes are not supported. Published runtimes are read-only.
 
 Restart and batch status accept only Bots whose persisted `active_engine` is
-`claude_code` or `aicoding`. Both operations declare `AdmissionMode.ENGINE` in
-`ADMISSION`, rather than `OPEN`. Each operation uses `AdmissionMode.ENGINE(...)` with
-an engine allowlist and authorized Bot dependency provider, declared in
-`admission_routes.py` in the shared inventory. The route-specific Bot dependency
-providers remain in `admission_managed_bot_routes.py` to avoid importing the
-managed Bot router while the inventory is assembled.
+`claude_code` or `aicoding`. Both operations declare `AdmissionMode.ENGINE_CODING`
+in the shared `ADMISSION` inventory in `admission_routes.py`, rather than `OPEN`.
+The enum member owns the shared engine allowlist; inventory values are always
+bare `AdmissionMode` members. The route-specific authorized Bot dependency
+providers are wired in `admission_managed_bot_routes.py` and resolve lazily to
+avoid importing the managed Bot router while the inventory is assembled.
 No engine decorator or handler metadata is required. `PublicAPIRoute` calls
 `admission.apply_admission` to attach the configured check; the application
 principal guard reads the same policy through `admission_for`.
-ENGINE without a non-empty allowlist or Bot dependency fails startup, as do
-engine parameters on another mode or different rules across one route's methods.
-Each call stores an immutable copy of the allowlist for that operation; it does
-not change the shared enum member. Existing modes such as `OPEN` and `USER_GATED`
-remain parameterless. Extending a route to another engine requires changing its
-`engines` argument, not adding a decorator or a second policy declaration.
+An engine-scoped route without an authorized Bot dependency fails startup, as do
+different modes or Bot dependency providers across one route's methods.
+The allowlist is a `frozenset` shared by all routes using the same enum member.
+Existing modes such as `OPEN` and `USER_GATED` carry empty engine sets.
+Extending the coding policy requires changing `ENGINE_CODING`'s engine tuple.
+A route needing a different range would use a separate named enum member with
+its own engine tuple; the admission gate reads the selected member's engines.
+No wrapper class, callable mode or per-route engine decorator is required.
 Other operations' admission and authorization policies remain unchanged.
 The application trust and stored template scope are checked before engine
 support. Other engines, including missing or unknown engine values, return
