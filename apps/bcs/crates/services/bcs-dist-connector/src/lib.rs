@@ -47,7 +47,7 @@
 //! - [`identity`]: stable request, input and interaction ids (re-exported
 //!   from `bcs_dist_encoding::connector`).
 //! - [`config`]: settings and ports.
-//! - [`delayed`]: explicit stubs of contracts that are not final (D2, D3, D8).
+//! - [`delayed`]: the explicit stub of a contract that is not final (D2).
 //!
 //! The per-call actor lives in the private modules `call`, `send`, `control`
 //! and `report`; they all add methods to the one `Call` type.

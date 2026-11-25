@@ -102,7 +102,9 @@ the held index. Without them the Worker's dispatches reach no agent.
 ### Operations
 
 - B20. `drain` stops claiming and waits up to the grace period; leftovers stay
-  recoverable and are reported as remaining.
+  recoverable and are reported as remaining. At the end it stops the actors
+  still running and retires the registration, so no call of the drained
+  process keeps acting once another Connector may take it over.
 - B21. Startup fails fast when the store lacks a required capability.
 
 ## Delayed contracts (explicit stubs, not designed around)
@@ -113,9 +115,9 @@ Each is a method with its intended signature that returns the code
 | Item | Stub | Meanwhile |
 | --- | --- | --- |
 | D2 | report an unresolved / not-sent call to the Worker | log; the call stays in its phase; `disp` keeps the truth |
-| D3 | re-post a dead Connector's held dispatches | held index is still maintained |
-| D8 | release an in-flight call on drain | drain waits; leftovers recovered via D3 or the Worker's re-post |
-| Membership | register / renew / liveness provider (executor team) | a call held by another instance is `HeldByOther` |
+| D3 | resolved, no stub: the Worker's supervisor re-posts a hint for every open dispatch (`recheck_interval`, 1 s); a Connector receiving it takes the call over once membership answers `Dead` | — |
+| D8 | resolved, no stub: `drain` stops leftover actors and retires the registration (B20); the D3 path then takes the calls over | — |
+| Membership | register / renew / liveness provider (executor team) | provided by `CoordinationStore`, injected by the composition outside this repository; `PendingMembership` remains for tests and setups without it |
 | Agent resolution | what resolves `CredentialRef` / `BindingVersion` | injected resolver trait; no real implementation shipped |
 
 ## Non-goals
