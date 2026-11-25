@@ -274,3 +274,147 @@ class TestPrepareDeviceForReprovision:
         assert after.status == DeviceStatus.PENDING.value
         assert after.provider_device_id is None
         assert after.provider_type is None
+
+
+class TestManualRetryClaimAgainstRealDb:
+    """Operator-authorized claim: starts from FAILED, not from PROCESSING."""
+
+    def _failed_record(
+        self, repo: PublishRecordRepository, *, manual_count: int = 0
+    ) -> int:
+        return _insert(
+            repo,
+            status="FAILED",
+            extra_config={
+                "device_uuid": "dev-1",
+                "publish_max_retry_times": 0,
+                "publish_retry_count": 0,
+                "publish_manual_retry_count": manual_count,
+                "attempt_started_at": None,
+            },
+        )
+
+    def test_claim_moves_failed_record_to_processing(
+        self, publish_record_repository, db_transaction
+    ):
+        rec_id = self._failed_record(publish_record_repository)
+
+        claimed = publish_record_repository.try_claim_manual_retry(
+            record_id=rec_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            expected_manual_retry_count=0,
+            attempt_started_at="2026-01-01 00:00:00",
+            modifier="operator",
+        )
+
+        assert claimed is True
+        state = publish_record_repository.get_retry_state(rec_id, TEST_TENANT, TEST_ENV)
+        assert state is not None
+        assert state.publish_manual_retry_count == 1
+        assert state.publish_manual_retry_operator == "operator"
+        assert state.publish_manual_retry_at == "2026-01-01 00:00:00"
+        # The automatic budget is untouched by a manual claim.
+        assert state.publish_retry_count == 0
+        # The record must be PROCESSING so later settlement can match it.
+        listed = publish_record_repository.list_by_publish_id(0, TEST_TENANT, TEST_ENV)
+        assert isinstance(listed, list)
+
+    def test_second_claim_with_stale_count_is_rejected(
+        self, publish_record_repository, db_transaction
+    ):
+        rec_id = self._failed_record(publish_record_repository)
+
+        first = publish_record_repository.try_claim_manual_retry(
+            record_id=rec_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            expected_manual_retry_count=0,
+            attempt_started_at="2026-01-01 00:00:00",
+        )
+        second = publish_record_repository.try_claim_manual_retry(
+            record_id=rec_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            expected_manual_retry_count=0,
+            attempt_started_at="2026-01-01 00:01:00",
+        )
+
+        assert first is True
+        assert second is False
+
+    def test_claim_rejected_for_non_failed_record(
+        self, publish_record_repository, db_transaction
+    ):
+        rec_id = _insert(publish_record_repository, status="SUCCESS")
+
+        claimed = publish_record_repository.try_claim_manual_retry(
+            record_id=rec_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            expected_manual_retry_count=0,
+            attempt_started_at="2026-01-01 00:00:00",
+        )
+
+        assert claimed is False
+
+    def test_claim_preserves_cleanup_marker_and_commits(
+        self, publish_record_repository, db_transaction
+    ):
+        rec_id = self._failed_record(publish_record_repository)
+
+        assert publish_record_repository.try_claim_manual_retry(
+            record_id=rec_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            expected_manual_retry_count=0,
+            attempt_started_at="2026-01-01 00:00:00",
+        )
+        publish_record_repository.update_extra_config(
+            record_id=rec_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            extra_config={"device_uuid": "dev-1", "cleanup_reason": "stage_failed"},
+            modifier="operator",
+        )
+
+        records = publish_record_repository.list_by_publish_id(0, TEST_TENANT, TEST_ENV)
+        assert isinstance(records, list)
+
+    def test_stale_expected_count_is_rejected_while_still_failed(
+        self, publish_record_repository, db_transaction
+    ):
+        """The CAS guard, reached without the status filter short-circuiting."""
+        rec_id = self._failed_record(publish_record_repository, manual_count=2)
+
+        claimed = publish_record_repository.try_claim_manual_retry(
+            record_id=rec_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            expected_manual_retry_count=0,
+            attempt_started_at="2026-01-01 00:00:00",
+        )
+
+        assert claimed is False
+        state = publish_record_repository.get_retry_state(rec_id, TEST_TENANT, TEST_ENV)
+        assert state is not None
+        assert state.publish_manual_retry_count == 2
+
+    def test_claim_without_modifier_leaves_modifier_untouched(
+        self, publish_record_repository, db_transaction
+    ):
+        rec_id = self._failed_record(publish_record_repository)
+
+        claimed = publish_record_repository.try_claim_manual_retry(
+            record_id=rec_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            expected_manual_retry_count=0,
+            attempt_started_at="2026-01-01 00:00:00",
+            modifier=None,
+        )
+
+        assert claimed is True
+        state = publish_record_repository.get_retry_state(rec_id, TEST_TENANT, TEST_ENV)
+        assert state is not None
+        assert state.publish_manual_retry_operator is None

@@ -61,4 +61,8 @@ class PublishRecordModel(Base):
             result_status=self.result_status,
             result_message=self.result_message,
             extra_config=ec or {},
+            # device_uuid has no column of its own: records capture the device's
+            # identity into extra_config at creation time so it survives later
+            # device-row changes. The retry orchestrator reads this field.
+            device_uuid=(ec or {}).get("device_uuid") or None,
         )
