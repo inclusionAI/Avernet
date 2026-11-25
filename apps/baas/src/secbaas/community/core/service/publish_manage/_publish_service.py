@@ -7,7 +7,6 @@ with approval gates and rolling updates. Per D-01, D-01a, D-07.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -69,7 +68,6 @@ from secbaas.community.core.repository.publish_batch import (
     PublishBatchRepository,
 )
 from secbaas.community.core.repository.publish_record import (
-    PublishRecordExtraConfig,
     PublishRecordRecord,
     PublishRecordRepository,
 )
@@ -78,8 +76,10 @@ from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
 
 from ._publish_retry_orchestrator import (
+    DEFAULT_MAX_MANUAL_RETRIES,
     PublishAttemptOrchestrator,
     _retry_field,
+    is_cleanup_record,
 )
 
 logger = get_logger("core-service")
@@ -995,7 +995,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
 
         Batch Splitting:
         - Each stage can have multiple batches if device_count > batch_capacity
-        - Example: 12 devices with batch_capacity=5 → 3 batches (5, 5, 2)
+        - Example: 250 devices with batch_capacity=100 → 3 batches (100, 100, 50)
 
         Args:
             publish_type: Type of publish operation
@@ -1108,14 +1108,15 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 # SCALE types use total_device_count directly from scale_amount
                 device_count = total_device_count or 0
             else:
-                device_count = stage_cfg.device_count or 1
+                # No replica count and not a scale op: act on a single device.
+                device_count = 1
 
             # Skip batches with zero devices
             if device_count <= 0:
                 continue
 
             # Prioritize config.batch_capacity (caller override) over stage defaults
-            batch_capacity = config.batch_capacity or stage_cfg.batch_capacity or 5
+            batch_capacity = config.batch_capacity or stage_cfg.batch_capacity or 100
             cooldown = stage_cfg.cooldown_seconds
 
             # All types support multiple batches per stage based on batch_capacity
@@ -1150,13 +1151,13 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
            eligible device count, which these ops must cover in full
         1. scale_amount parameter (for SCALE_UP/DOWN) - the delta to add/remove
         2. config.replica_desired (for CREATE/UPDATE)
-        3. Default: 1 (stage device_count defaults are production-scale configs,
-           not actual device counts; summing them would over-generate batches)
+        3. Default: 1 device
 
-        IMPORTANT: Stage default device_counts (e.g., PREPUB=2, GRAY=4) are
-        production-scale batch sizes, NOT target device counts. Summing them
-        would cause auto-compact to malfunction for small bots. When
-        replica_desired is not set, default to 1 to ensure proper auto-compact.
+        Stage configs no longer carry a ``device_count``: it never influenced
+        the pipeline (even distribution from ``replica_desired`` always won), so
+        it was removed rather than left as misleading config. When
+        ``replica_desired`` is unset the publish acts on a single device, which
+        keeps auto-compact working for small bots.
 
         DESTROY and STOP carry no replica_desired: they must act on every
         ACTIVE device, so the caller passes the live count as
@@ -1506,17 +1507,19 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             covered_device_count += len(batch_devices)
 
             for device in batch_devices:
-                extra_config_dict = dataclasses.asdict(
-                    PublishRecordExtraConfig(
-                        device_uuid=device.device_uuid,
-                        provider_device_id=device.provider_device_id,
-                        publish_max_retry_times=(
-                            publish_config.publish_max_retry_times
-                            if publish_config is not None
-                            else 0
-                        ),
-                    )
-                )
+                # Creation-time document keeps its original shape: the manual
+                # retry / cleanup markers are added later, only when used.
+                extra_config_dict = {
+                    "device_uuid": device.device_uuid,
+                    "provider_device_id": device.provider_device_id,
+                    "publish_max_retry_times": (
+                        publish_config.publish_max_retry_times
+                        if publish_config is not None
+                        else 0
+                    ),
+                    "publish_retry_count": 0,
+                    "attempt_started_at": None,
+                }
                 extra_config = (
                     extra_config_dict
                     if extra_config_dict.get("device_uuid") is not None
@@ -2073,6 +2076,223 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         logger.info(f"Publish {publish_id} revoked by {operator}: {reason}")
 
         return await self._refresh_publish_response(tenant, publish_id)
+
+    def _assert_device_retryable(
+        self,
+        *,
+        tenant: str,
+        env: str,
+        publish_id: int,
+        device_uuid: str,
+        max_manual_retries: int,
+    ) -> object:
+        """Validate every precondition for an operator-authorized device retry.
+
+        Returns the target publish record. Raises ValueError prefixed with a
+        stable error code that the HTTP layer maps to a status.
+        """
+        publish = self._publish_repo.get_by_id(publish_id, tenant, env)
+        if publish is None:
+            raise ValueError(f"PUBLISH_NOT_FOUND: publish_id={publish_id}")
+        if publish.status in (
+            PublishStatus.SUCCESS.value,
+            PublishStatus.REVOKED.value,
+            PublishStatus.REJECTED.value,
+        ):
+            raise ValueError(
+                f"PUBLISH_TERMINAL: publish_id={publish_id} is {publish.status}"
+            )
+
+        device = self._device_repo.get_by_device_uuid(
+            device_uuid=device_uuid, tenant=tenant, env=env, status=None
+        )
+        if device is None:
+            raise ValueError(f"DEVICE_NOT_IN_PUBLISH: device_uuid={device_uuid}")
+
+        record = self._publish_record_repo.get_by_device_id_and_publish_id(
+            device.id, publish_id, tenant, env
+        )
+        if record is None:
+            raise ValueError(
+                f"DEVICE_NOT_IN_PUBLISH: device_uuid={device_uuid} "
+                f"has no record in publish_id={publish_id}"
+            )
+        if record.result_status != PublishRecordResult.FAILED.value:
+            raise ValueError(
+                f"RECORD_NOT_FAILED: record_id={record.id} is {record.result_status}"
+            )
+
+        state = self._publish_record_repo.get_retry_state(record.id, tenant, env)
+        if state is not None and not self._provider_supports_retry(record, tenant, env):
+            raise ValueError(
+                f"PROVIDER_RETRY_UNSUPPORTED: device_uuid={device_uuid} "
+                f"provider is not retryable"
+            )
+        if state is not None and state.publish_manual_retry_count >= max_manual_retries:
+            raise ValueError(
+                f"MANUAL_RETRY_EXHAUSTED: record_id={record.id} already retried "
+                f"{state.publish_manual_retry_count} times "
+                f"(limit={max_manual_retries})"
+            )
+        return record
+
+    async def retry_device(
+        self,
+        *,
+        tenant: str,
+        publish_id: int,
+        device_uuid: str,
+        operator: str,
+        max_manual_retries: int = 3,
+    ) -> dict:
+        """Retry one failed device inside an existing publish.
+
+        Unlike :meth:`retry_publish`, which rebuilds the whole publish, this
+        re-provisions a single device through the same per-device orchestrator
+        the automatic retry path uses. Once the device reports success, the
+        publish may be reconciled back to its pre-failure status (see
+        ``_reconcile_failed_stage``).
+
+        Raises ValueError for every precondition violation; the HTTP layer maps
+        the message prefix to a status code.
+        """
+        env = get_current_env()
+        if max_manual_retries is None or max_manual_retries < 1:
+            max_manual_retries = DEFAULT_MAX_MANUAL_RETRIES
+
+        logger.info(
+            f"[retry_device] publish_id={publish_id}, device_uuid={device_uuid}, "
+            f"operator={operator}, max_manual_retries={max_manual_retries}"
+        )
+
+        record = self._assert_device_retryable(
+            tenant=tenant,
+            env=env,
+            publish_id=publish_id,
+            device_uuid=device_uuid,
+            max_manual_retries=max_manual_retries,
+        )
+
+        started = await self._drive_record_attempt(
+            record=record,
+            tenant=tenant,
+            operator=operator,
+            publish_id=publish_id,
+            failure_reason="Operator-authorized device retry",
+            manual=True,
+            max_manual_retries=max_manual_retries,
+        )
+        if not started:
+            raise ValueError(
+                f"MANUAL_RETRY_EXHAUSTED: record_id={record.id} could not be "
+                f"retried (budget exhausted, claim lost, or publish expired)"
+            )
+
+        refreshed = self._publish_record_repo.get_retry_state(record.id, tenant, env)
+        return {
+            "publish_id": publish_id,
+            "device_uuid": device_uuid,
+            "record_id": record.id,
+            "result_status": PublishRecordResult.PROCESSING.value,
+            "publish_manual_retry_count": getattr(
+                refreshed, "publish_manual_retry_count", 0
+            ),
+            "max_manual_retries": max_manual_retries,
+        }
+
+    async def retry_failed_devices(
+        self,
+        *,
+        tenant: str,
+        publish_id: int,
+        operator: str,
+        max_manual_retries: int = 3,
+    ) -> dict:
+        """Retry every failed device of a publish in one call.
+
+        Delegates to :meth:`retry_device` per device so the single-device and
+        bulk paths cannot diverge. A failure on one device never aborts the
+        rest: each outcome is reported individually so the operator can see
+        exactly which devices were accepted and why the others were refused.
+        """
+        env = get_current_env()
+        publish = self._publish_repo.get_by_id(publish_id, tenant, env)
+        if publish is None:
+            raise ValueError(f"PUBLISH_NOT_FOUND: publish_id={publish_id}")
+        if publish.status in (
+            PublishStatus.SUCCESS.value,
+            PublishStatus.REVOKED.value,
+            PublishStatus.REJECTED.value,
+        ):
+            raise ValueError(
+                f"PUBLISH_TERMINAL: publish_id={publish_id} is {publish.status}"
+            )
+
+        failed_records = [
+            r
+            for r in self._publish_record_repo.list_by_publish_id(
+                publish_id, tenant, env
+            )
+            if r.result_status == PublishRecordResult.FAILED.value
+            and not is_cleanup_record(r)
+        ]
+
+        accepted: list[dict] = []
+        skipped: list[dict] = []
+        for record in failed_records:
+            if not record.device_uuid:
+                skipped.append(
+                    {
+                        "record_id": record.id,
+                        "device_uuid": None,
+                        "error_code": "DEVICE_NOT_IN_PUBLISH",
+                        "message": "record carries no device_uuid",
+                    }
+                )
+                continue
+            try:
+                result = await self.retry_device(
+                    tenant=tenant,
+                    publish_id=publish_id,
+                    device_uuid=record.device_uuid,
+                    operator=operator,
+                    max_manual_retries=max_manual_retries,
+                )
+            except ValueError as exc:
+                code, _, detail = str(exc).partition(": ")
+                skipped.append(
+                    {
+                        "record_id": record.id,
+                        "device_uuid": record.device_uuid,
+                        "error_code": code,
+                        "message": detail or code,
+                    }
+                )
+                # A terminal publish cannot take any more retries.
+                if code == "PUBLISH_TERMINAL":
+                    break
+                continue
+            accepted.append(
+                {
+                    "record_id": result["record_id"],
+                    "device_uuid": result["device_uuid"],
+                    "publish_manual_retry_count": result["publish_manual_retry_count"],
+                }
+            )
+
+        logger.info(
+            f"[retry_failed_devices] publish_id={publish_id} operator={operator} "
+            f"accepted={len(accepted)} skipped={len(skipped)}"
+        )
+        return {
+            "publish_id": publish_id,
+            "requested": len(failed_records),
+            "accepted_count": len(accepted),
+            "skipped_count": len(skipped),
+            "accepted": accepted,
+            "skipped": skipped,
+            "max_manual_retries": max_manual_retries,
+        }
 
     async def retry_publish(
         self,
@@ -4247,6 +4467,14 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             batch_id=batch_id,
             publish_id=callback.publish_id,
         )
+        # A retried device reports success here, not through the orchestrator's
+        # inline path, so the inbound path must reconcile too — otherwise the
+        # device ends up SUCCESS while the publish stays FAILED.
+        await self._reconcile_failed_stage(
+            tenant=tenant,
+            publish_id=callback.publish_id,
+            operator="callback",
+        )
 
         return {"status": "processed"}
 
@@ -4332,7 +4560,10 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         )
 
         if stage_failed:
-            # Publish failed
+            # Publish failed. Remember the pre-failure status so a later
+            # reconcile (after the real failure is recovered) knows where to
+            # return the publish to.
+            self._record_failed_from_status(tenant=tenant, publish_id=publish_id)
             publish_repo.update_status(
                 publish_id=publish_id,
                 tenant=tenant,
@@ -4368,6 +4599,9 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                             ),
                             modifier="callback",
                         )
+                        # Durable marker so reconcile can tell "never ran" apart
+                        # from "ran and failed" without parsing the message.
+                        self._mark_stage_cleanup_record(rec, tenant=tenant)
             except Exception as cleanup_err:
                 logger.warning(
                     f"[check_stage_advancement] Failed to cleanup PENDING records "
@@ -4455,6 +4689,31 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             return
 
         # All batches in stage completed successfully — check for next stage
+        await self._advance_after_stage(
+            tenant=tenant,
+            publish_id=publish_id,
+            modifier="callback",
+        )
+
+    async def _advance_after_stage(
+        self,
+        *,
+        tenant: str,
+        publish_id: int,
+        modifier: str,
+    ) -> None:
+        """Move a publish past a fully-completed stage.
+
+        Shared by the normal callback-driven path and the reconcile path so both
+        honour approval gates, cooldowns, auto-compaction and auto-completion
+        identically.
+        """
+        env = get_current_env()
+        publish_repo = self._publish_repo
+        batch_repo = self._publish_batch_repo
+        publish_record = publish_repo.get_by_id(publish_id, tenant, env)
+        if publish_record is None:
+            return
         extra_config = _extra_config_to_publish_config(publish_record.extra_config)
 
         # Use DB-backed batch query instead of static stage_order to handle
@@ -4476,7 +4735,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     tenant=tenant,
                     env=env,
                     status=PublishStatus.APPROVING.value,
-                    modifier="callback",
+                    modifier=modifier,
                 )
                 logger.info(
                     f"Publish {publish_id} → APPROVING (next stage: {next_pending_stage})"
@@ -4495,7 +4754,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     tenant=tenant,
                     env=env,
                     status=PublishStatus.ACTIVE.value,
-                    modifier="callback",
+                    modifier=modifier,
                 )
                 if cooldown > 0:
                     if is_paas_mock_mode():
@@ -4542,6 +4801,152 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 logger.info(
                     f"Publish {publish_id}: all stages complete, auto_complete=False"
                 )
+
+    def _record_failed_from_status(self, *, tenant: str, publish_id: int) -> None:
+        """Persist the publish status that preceded a stage failure.
+
+        Reconcile needs to know where to return the publish to once the real
+        failure is recovered. Best effort: a missing marker only downgrades the
+        restore target to ACTIVE.
+        """
+        env = get_current_env()
+        try:
+            publish = self._publish_repo.get_by_id(publish_id, tenant, env)
+            if publish is None:
+                return
+            raw = getattr(publish, "extra_config", None)
+            config = dict(raw) if isinstance(raw, dict) else {}
+            if config.get("failed_from_status"):
+                return
+            config["failed_from_status"] = publish.status
+            self._publish_repo.update_publish(
+                publish_id=publish_id,
+                tenant=tenant,
+                env=env,
+                extra_config=config,
+                modifier="callback",
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                f"[reconcile] failed to record pre-failure status for "
+                f"publish_id={publish_id}: {exc}"
+            )
+
+    def _mark_stage_cleanup_record(self, record: object, *, tenant: str) -> None:
+        """Tag a never-executed record with ``cleanup_reason`` in extra_config."""
+        env = get_current_env()
+        record_id = getattr(record, "id", None)
+        if record_id is None:
+            return
+        try:
+            raw = getattr(record, "extra_config", None)
+            config = dict(raw) if isinstance(raw, dict) else {}
+            config["cleanup_reason"] = "stage_failed"
+            self._publish_record_repo.update_extra_config(
+                record_id=record_id,
+                tenant=tenant,
+                env=env,
+                extra_config=config,
+                modifier="callback",
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                f"[reconcile] failed to tag cleanup record {record_id}: {exc}"
+            )
+
+    def _stage_failures_recovered(self, *, tenant: str, publish_id: int) -> bool:
+        """Whether every real failure of a publish's stages has been recovered.
+
+        True only when every batch is COMPLETED and no record holds a real
+        failure. Records that merely inherited their stage's failure never ran,
+        so they must not keep the publish failed.
+        """
+        env = get_current_env()
+        batches = self._publish_batch_repo.list_by_publish_id(publish_id, tenant, env)
+        if not batches:
+            return False
+        if any(b.status != BatchStatus.COMPLETED.value for b in batches):
+            return False
+
+        records = self._publish_record_repo.list_by_publish_id(publish_id, tenant, env)
+        return not any(
+            r.result_status == PublishRecordResult.FAILED.value
+            and not is_cleanup_record(r)
+            for r in records
+        )
+
+    @staticmethod
+    def _resolve_reconcile_target(config: dict) -> str:
+        """Status to restore after a failure was recovered.
+
+        Falls back to ACTIVE when the recorded pre-failure status is missing or
+        is itself terminal.
+        """
+        restore_to = config.get("failed_from_status") or PublishStatus.ACTIVE.value
+        terminal = (
+            PublishStatus.FAILED.value,
+            PublishStatus.SUCCESS.value,
+            PublishStatus.REVOKED.value,
+            PublishStatus.REJECTED.value,
+        )
+        return PublishStatus.ACTIVE.value if restore_to in terminal else restore_to
+
+    async def _reconcile_failed_stage(
+        self, *, tenant: str, publish_id: int, operator: str
+    ) -> None:
+        """Revive a FAILED publish once its real failures have all been recovered.
+
+        See :meth:`_stage_failures_recovered` for the recoverability rule and
+        :meth:`_resolve_reconcile_target` for where the publish returns to.
+        """
+        env = get_current_env()
+        try:
+            publish = self._publish_repo.get_by_id(publish_id, tenant, env)
+            if publish is None or publish.status != PublishStatus.FAILED.value:
+                return
+            if not self._stage_failures_recovered(tenant=tenant, publish_id=publish_id):
+                return
+
+            raw = getattr(publish, "extra_config", None)
+            config = raw if isinstance(raw, dict) else {}
+            restore_to = self._resolve_reconcile_target(config)
+
+            # Remove the marker so a future failure records a fresh value.
+            updated_config = {
+                k: v for k, v in config.items() if k != "failed_from_status"
+            }
+            self._publish_repo.update_publish(
+                publish_id=publish_id,
+                tenant=tenant,
+                env=env,
+                extra_config=updated_config,
+                modifier=operator,
+            )
+            won = self._publish_repo.update_status(
+                publish_id=publish_id,
+                tenant=tenant,
+                env=env,
+                status=restore_to,
+                modifier=operator,
+                expected_status=PublishStatus.FAILED.value,
+            )
+            if not won:
+                logger.info(
+                    f"[reconcile] publish_id={publish_id} already reconciled by "
+                    f"another caller"
+                )
+                return
+            logger.warning(
+                f"[reconcile] publish_id={publish_id} FAILED -> {restore_to}: "
+                f"all stage failures recovered"
+            )
+            await self._advance_after_stage(
+                tenant=tenant,
+                publish_id=publish_id,
+                modifier=operator,
+            )
+        except Exception as exc:
+            logger.exception(f"[reconcile] failed for publish_id={publish_id}: {exc}")
 
     async def complete_publish(
         self,
@@ -5111,6 +5516,9 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         rec, "publish_max_retry_times"
                     ),
                     publish_retry_count=_retry_field(rec, "publish_retry_count"),
+                    publish_manual_retry_count=_retry_field(
+                        rec, "publish_manual_retry_count"
+                    ),
                     gmt_create=rec.gmt_create,
                 )
                 batch_devices.append(device_result)
