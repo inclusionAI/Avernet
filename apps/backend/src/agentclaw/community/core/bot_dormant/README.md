@@ -42,7 +42,7 @@ internal_dependencies:
 ### Change impact
 
 Confirmed-fastdisk AICoding Bots use durable `bot.recycle` admission, read-only
-operation queries, physical release confirmation and guarded activation. Non-coding
+operation queries and guarded activation, retaining the existing release success criterion. Non-coding
 Bots and AICoding Bots without confirmed fastdisk use the original synchronous
 recycle path and do not create a queue/journal state.
 `recycle_task.py` is the single worker; `recycle_service.py` owns the facade and
@@ -57,7 +57,9 @@ the existing synchronous `recycle()` path. Real internal ops and OpenAPI request
 share `submit()`, which selects synchronous recycle or durable async admission;
 dry-run remains a preview without queued work.
 
-Backup failure does not mark the serving Bot FAILED. Unresolved releases veto
+Blocking backup failure or release failure changes only the operation to FAILED,
+not the serving Bot state. A successful release call proceeds directly to completion;
+there is no additional physical-status polling. In-flight operations veto
 conflicting lifecycle operations for every engine. Completion/audit atomicity
 belongs to the recycle repository, not HTTP adapters. All three Bot types use the
 same activation claim/rollback while preserving existing provisioning.
@@ -78,12 +80,13 @@ same activation claim/rollback while preserving existing provisioning.
   requires `owner_id` as a query parameter and the same internal authentication.
   Its `{ok: true, data: ...}` uses the shared projection: `bot_id`, `owner_id`,
   `operation_id`, `bot_status`, `phase`, `error_code`, `message`, `warning`.
-  `200` means the read succeeded, including `FAILED` or `NEEDS_CONFIRMATION`;
-  poll until `SUCCEEDED`, `FAILED` or `NEEDS_CONFIRMATION`. The GET never advances
+  `200` means the read succeeded, including `FAILED`; new tasks finish as
+  `SUCCEEDED` or `FAILED`. Legacy `NEEDS_CONFIRMATION` records remain readable
+  but are not replayed or repaired. The GET never advances
   work. Only the latest handle is retained; missing, replaced or out-of-scope
   Bot/owner/environment/tenant handles return `404`.
 - Manual success audit and recycle notification are inserted in the completion
-  transaction, only after release confirmation. Existing content and daily
+  transaction, only after the release call succeeds. Existing content and daily
   suppression are preserved, including suppression by dry-run/cancelled rows.
   Duplicate submissions retain the first submission's source/reason; an
   OpenAPI-started operation does not acquire a manual notification on retry.

@@ -468,16 +468,13 @@ helper and switch. Coding-specific backup vetoes are translated at this boundary
 for the shared worker; backup implementation never moves into generic lifecycle code.
 
 ARCA SDK primitives retain the existing `ArcaRecycleTransport` host import and DI
-seam. BaaS/local release uses the narrow `BaasRecycleRuntime` capability and persisted
-`physical_targets`, including stopped/released inventory rows. Every exact provider
-identity must be confirmed absent or explicitly `DESTROYED` by the physical
-provider. A successful info response must match the pinned sandbox identity;
-logical deletion, successful workflows, empty inventory or stopped containers
-cannot substitute for physical proof. BaaS uses management-plane inspection when
-the sandbox plugin supplies it: connecting requires RUNNING and cannot observe
-a destroyed runtime. The existing
-600-second observation budget ends unresolved release as `NEEDS_CONFIRMATION`,
-without repeating destroy or freezing/unbinding the Bot.
+seam; BaaS/local release retains the existing `BaasRecycleRuntime`. Captured targets
+are rechecked before release so a replacement does not inherit an old task.
+After backup, a successful release call proceeds to transactional completion:
+Bot RECYCLED, binding RELEASED and operation SUCCEEDED. Backup blocking or a release
+failure leaves Bot state unchanged and marks only the operation FAILED. There is
+no extra physical-state confirmation and no new NEEDS_CONFIRMATION result.
+Existing legacy operations are neither automatically replayed nor repaired.
 
 All engines honor the same recycle journal and resource-release/admission lock.
 Deletion holds it across lifecycle recheck, grant withdrawal, release, Passport

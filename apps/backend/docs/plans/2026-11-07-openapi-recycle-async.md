@@ -80,20 +80,21 @@ SDK 适配仍留在 provider 层，不把网络调用细节搬进通用业务代
 ```text
 QUEUED -> BACKING_UP -> RELEASING -> SUCCEEDED
               |              |
-            FAILED    NEEDS_CONFIRMATION
+            FAILED         FAILED
 ```
 
 - 阻断开启时备份失败/超时：operation FAILED，Bot 不改成 FAILED，保留原绑定和 Passport，不写回收成功审计。脚本本身的暂停/归档行为沿用原重启实现，不承诺业务进程零影响。
 - 阻断关闭时：沿原备份策略 best effort，降级保留 warning。目标变化不能降级放行。
-- 只有赢得 RELEASING 条件转换的执行者可以首次提交 destroy；响应丢失只观察，不盲目重发。
-- BaaS 的逻辑状态、受理、任意 404 或空列表都不能单独证明物理释放；ARCA 必须明确证明 captured sandbox 已销毁。
-- 释放/收尾不明时保留占用并进入 NEEDS_CONFIRMATION，不让新恢复、重启、删除、停止绕过。
+- 只有赢得 RELEASING 条件转换的执行者可以提交释放；同一任务不重复调用释放。
+- 备份之后沿用原回收成功判定：释放调用成功就进入收尾，不新增物理状态轮询，也不改 BaaS。
+- 释放/收尾失败记为 FAILED，不主动改变 Bot 状态；这不代表物理资源的副作用已回滚。
+- 新任务不进入 NEEDS_CONFIRMATION；历史记录仍可查询并沿用已有保护，不自动重放或改库。
 
-释放确认后，Passport freeze 保留 best-effort；freeze 结果不明不盲目接管执行权。
+释放调用成功后，Passport freeze 保留 best-effort；freeze 结果不明不盲目接管执行权。
 事务一次性写绑定 RELEASED、Bot RECYCLED、operation SUCCEEDED 与 `source=openapi` 审计（run_id=operation ID）。
 事务失败只补收尾；重复投递不重复成功审计。此路径不 enqueue recycle 钉钉通知。
 
-释放/收尾观察预算 600 秒，间隔 3 秒；队列 deadline 24 小时。
+释放/收尾的并发执行等待预算 600 秒，间隔 3 秒；不查询物理销毁状态，队列 deadline 24 小时。
 这些是 worker 预算，不是 HTTP 超时，也不能硬取消正在进行的 SDK 调用或容器脚本。
 
 ## 5. 恢复与生命周期互斥

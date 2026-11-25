@@ -1456,7 +1456,7 @@ recycle result. This is independent of the existing Bot `/status` response.
 ```text
 QUEUED -> BACKING_UP -> RELEASING -> SUCCEEDED
                 |             |
-              FAILED    NEEDS_CONFIRMATION
+              FAILED         FAILED
 ```
 
 Only AICoding (`aicoding` / `claude_code`) runs the existing read-only fastdisk
@@ -1472,19 +1472,19 @@ confirmed degraded backup is surfaced as a warning. Other engines share the
 same lifecycle state machine, with a no-op backup precondition. Redelivery preserves the backup operation
 ID, first-start budget and already-confirmed fastdisk targets.
 
-Resource release is submitted only after the durable RELEASING fence, followed
-by provider confirmation. Acceptance, a DB-only RELEASED binding, an arbitrary
-404 or an empty inventory is not enough. An ambiguous release is observed, not
-blindly resubmitted. If release/finalization cannot be confirmed, the operation
-ends as NEEDS_CONFIRMATION and blocks new recycle/activate/restart/delete/stop
-requests until an operator verifies the result. There is no new manual-confirm
-or cancel API in this change.
+Resource release is submitted only after the durable RELEASING fence. Keep the
+original recycle success criterion: a successful release call proceeds directly
+to completion, without an additional provider physical-state query. A release
+failure ends the operation as FAILED and leaves Bot state unchanged; the same
+task does not repeat the release call. This does not roll back provider side effects.
+New tasks do not enter NEEDS_CONFIRMATION; existing legacy records remain readable
+and guarded, without automatic repair or replay.
 
-After confirmed release, Passport freeze is best effort; a failure is a warning.
+After successful release, Passport freeze is best effort; a failure is a warning.
 One transaction releases the binding, sets Bot.status=RECYCLED, finishes the
-journal, and inserts one audit (`source=openapi`, `run_id=operation_id`). Retries
-never repeat a confirmed destruction or successful audit. No recycle DingTalk
-notification is enqueued by this path.
+journal as SUCCEEDED, and inserts one audit (`source=openapi`, `run_id=operation_id`).
+Retries never repeat a successful release call or successful audit. No recycle
+DingTalk notification is enqueued by this path.
 
 The existing `POST .../activate` remains asynchronous, with the same response
 shape. Pending recycle / NEEDS_CONFIRMATION returns 409 **before** ACTIVE
@@ -1495,8 +1495,8 @@ endpoint. Backup data restoration still uses the existing provisioning path.
 
 Timing is deliberately separated: confirmed fastdisk backup uses the shared
 restart strategy's 1500s worker budget;
-release/finalization observation is bounded to 600s, polling at 3s; the task
-queue deadline is 24h. These are worker budgets, **not HTTP timeouts or hard
+release/finalization waits for an in-flight delivery are bounded to 600s,
+rescheduled at 3s; there is no physical-status polling. The task queue deadline is 24h. These are worker budgets, **not HTTP timeouts or hard
 cancellation** of an in-flight SDK call/container backup script.
 
 Deployment must enable the existing task worker and keep all worker versions

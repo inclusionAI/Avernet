@@ -6,7 +6,6 @@ Start with [Publish Failures](publish-failures.md) when applicable. Start with t
 | --- | --- | --- |
 | Unexpected provider or plugin | Compare the selected plugin configuration with the registered SPI implementation and bootstrap wiring. | [Reference](../adr/0003-spi-plugin-backend-selection.md) |
 | Bot, device or publish state differs | Compare the observed state and transition with the applicable contract and tests; do not infer a historical transition from the current state. | [Reference](../adr/0004-lifecycle-state-machines.md) |
-| Released device but recycle stays unconfirmed | Compare exact physical identity, management-plane state, and runtime connection errors. | [Lifecycle observation](arca-lifecycle-observation.md) |
 | BCN interaction or SSE fails | Identify the request, interaction and transport stage before inspecting the associated source and tests. | [Reference](../adr/0012-sse-bcn-downlink-interactions.md) |
 
 Keep credentials, private runtime data and raw sessions out of repository knowledge. Add a topic page only when a supported, reusable diagnosis is missing.

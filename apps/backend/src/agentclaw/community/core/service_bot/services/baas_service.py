@@ -1345,14 +1345,14 @@ class BaasService:  # pragma: no cover
     def is_physical_device_destroyed(self, *, provider_device_id: str) -> bool:
         """Read the pinned PaaS resource, including its template/tenant suffix.
 
-        Typed DEVICE_NOT_FOUND or a matching physical DESTROYED state proves
-        release. Stopped resources and logical Bot deletion are not proof.
+        Only typed DEVICE_NOT_FOUND from the physical provider proves absence.
+        A present (even stopped) resource or logical Bot deletion is not proof.
         Authentication, routing, transport and untyped 404 failures propagate.
         """
         if not provider_device_id:
             raise BaasServiceError("Physical device identity is required")
         try:
-            info = self._get_bots_api(
+            self._get_bots_api(
                 path=f"/api/v1/paas/devices/{quote(provider_device_id, safe='')}/info",
                 action="physical_device_info", log_response=False,
             )
@@ -1366,11 +1366,7 @@ class BaasService:  # pragma: no cover
                 if isinstance(detail, dict) and detail.get("error_code") == "DEVICE_NOT_FOUND":
                     return True
             raise
-        return (
-            isinstance(info, dict)
-            and info.get("status") == "DESTROYED"
-            and info.get("sandbox_id") == provider_device_id.rsplit("@", 1)[0]
-        )
+        return False
 
     def get_bot(
         self,

@@ -245,27 +245,46 @@ def test_backup_veto_never_marks_bot_failed_or_releases(case, reason, code):
     case.passport.freeze_agent_passport.assert_not_called()
 
 
-def test_lost_destroy_response_observes_without_replaying(case):
-    _, payload = submit(case)
+@pytest.mark.parametrize("source", ["openapi", "manual_ops"])
+def test_release_failure_keeps_bot_and_binding_without_replaying(case, source):
+    result = case.service.submit(bot_id="b1", owner_id="u1", source=source)
+    payload = journal(case.store.read("b1", "u1"))
     case.runtime.submit_release.side_effect = TimeoutError("secret must not be exposed")
-    assert isinstance(case.handler.handle(payload), Reschedule)
-    assert isinstance(case.handler.handle(payload), Complete)
-    case.runtime.submit_release.assert_called_once()
-    assert journal(case.store.read("b1", "u1"))["phase"] == "SUCCEEDED"
-
-
-def test_unknown_release_protects_bot_until_confirmation(case):
-    _, payload = submit(case)
-    case.runtime.observe_release.return_value = "UNKNOWN"
-    assert isinstance(case.handler.handle(payload), Reschedule)
-    case.clock[0] += 601
     assert isinstance(case.handler.handle(payload), Fail)
-    bot = case.store.read("b1", "u1")
-    assert bot["status"] == "ACTIVE" and journal(bot)["phase"] == "NEEDS_CONFIRMATION"
-    with pytest.raises(BotInvalidLifecycleStateError):
-        case.store.claim_activation("b1", "u1")
+    assert isinstance(case.handler.handle(payload), Fail)
+    public = case.service.get_operation(
+        bot_id="b1", owner_id="u1", operation_id=result["operation_id"],
+    )
+    assert public["phase"] == "FAILED" and public["error_code"] == "RELEASE_FAILED"
+    assert public["bot_status"] == "ACTIVE" and "secret" not in str(public)
+    assert case.store.read("b1", "u1")["binding_id"] == case.target["binding_id"]
+    with case.db.orm_session() as session:
+        assert session.query(EntityDeviceBinding).one().status == "ACTIVE"
+        assert session.query(DormantCheckAudit).count() == 0
+        assert session.query(DormantNotifyLog).count() == 0
     case.runtime.submit_release.assert_called_once()
+    case.runtime.observe_release.assert_not_called()
     case.passport.freeze_agent_passport.assert_not_called()
+
+
+@pytest.mark.parametrize("source", ["openapi", "manual_ops"])
+def test_successful_recycle_does_not_wait_for_physical_status(case, source):
+    result = case.service.submit(bot_id="b1", owner_id="u1", source=source)
+    payload = journal(case.store.read("b1", "u1"))
+    case.runtime.observe_release.side_effect = RuntimeError("physical status unavailable")
+
+    assert isinstance(case.handler.handle(payload), Complete)
+    public = case.service.get_operation(
+        bot_id="b1", owner_id="u1", operation_id=result["operation_id"],
+    )
+    assert public["phase"] == "SUCCEEDED" and public["bot_status"] == "RECYCLED"
+    assert case.store.read("b1", "u1")["binding_id"] is None
+    with case.db.orm_session() as session:
+        assert session.query(EntityDeviceBinding).one().status == "RELEASED"
+        assert session.query(DormantCheckAudit).count() == 1
+        assert session.query(DormantNotifyLog).count() == (source == "manual_ops")
+    case.runtime.submit_release.assert_called_once()
+    case.runtime.observe_release.assert_not_called()
 
 
 def test_same_binding_retargeted_during_backup_is_never_destroyed(case):
@@ -371,7 +390,7 @@ def test_enqueue_before_journal_crash_is_repaired_without_duplicate_task(
         assert session.query(TaskQueueModel).count() == 1
 
 
-def test_lost_finalizer_does_not_repeat_freeze_or_allow_activate(case):
+def test_lost_finalizer_fails_task_without_changing_bot_or_repeating_freeze(case):
     _, payload = submit(case)
     case.store.update(
         payload,
@@ -384,10 +403,11 @@ def test_lost_finalizer_does_not_repeat_freeze_or_allow_activate(case):
     assert isinstance(case.handler.handle(payload), Reschedule)
     case.clock[0] += 601
     assert isinstance(case.handler.handle(payload), Fail)
-    assert journal(case.store.read("b1", "u1"))["phase"] == "NEEDS_CONFIRMATION"
+    bot = case.store.read("b1", "u1")
+    assert journal(bot)["phase"] == "FAILED" and bot["status"] == "ACTIVE"
+    assert journal(bot)["error_code"] == "FINALIZATION_FAILED"
     case.passport.freeze_agent_passport.assert_not_called()
-    with pytest.raises(BotInvalidLifecycleStateError):
-        case.store.claim_activation("b1", "u1")
+    assert case.store.claim_activation("b1", "u1") == ("ACTIVE", False)
 
 
 def test_passport_failure_is_warning_not_failed_recycle(case):
@@ -420,7 +440,7 @@ def test_terminal_queue_with_stale_releasing_journal_is_not_reenqueued(case):
         row = session.query(TaskQueueModel).one()
         row.status, row.active_idempotency_key = "TIMED_OUT", None
     result = case.service.submit(bot_id="b1", owner_id="u1")
-    assert result["phase"] == "NEEDS_CONFIRMATION" and result["changed"] is False
+    assert result["phase"] == "FAILED" and result["changed"] is False
     with case.db.orm_session() as session:
         assert session.query(TaskQueueModel).count() == 1
 
@@ -639,19 +659,24 @@ def test_admitted_recycle_blocks_delete_before_any_side_effect(case, deletion):
     assert journal(case.store.read("b1", "u1"))["phase"] == "QUEUED"
 
 
-def test_observation_consumes_durable_physical_targets_after_lost_response(case):
-    _, payload = submit(case)
+@pytest.mark.parametrize("source", ["openapi", "manual_ops"])
+def test_nonblocking_backup_warning_continues_original_recycle(case, source):
+    result = case.service.submit(bot_id="b1", owner_id="u1", source=source)
+    payload = journal(case.store.read("b1", "u1"))
 
     def prepare(bot, record, save):
-        save(physical_targets=["s1@42", "s2@43"])
+        save(warning={"code": "BACKUP_FAILED", "message": "备份失败，按开关继续回收"})
         return lambda: None
 
     case.runtime.prepare.side_effect = prepare
-    case.runtime.submit_release.side_effect = TimeoutError()
-    assert isinstance(case.handler.handle(payload), Reschedule)
     assert isinstance(case.handler.handle(payload), Complete)
-    case.runtime.observe_release.assert_called_once_with(case.target, None, ["s1@42", "s2@43"])
+    public = case.service.get_operation(
+        bot_id="b1", owner_id="u1", operation_id=result["operation_id"],
+    )
+    assert public["phase"] == "SUCCEEDED" and public["bot_status"] == "RECYCLED"
+    assert public["warning"]["code"] == "BACKUP_FAILED"
     case.runtime.submit_release.assert_called_once()
+    case.runtime.observe_release.assert_not_called()
 
 
 @pytest.mark.parametrize("change", ["type", "engine", "recycle", "status"])
@@ -777,31 +802,3 @@ def test_openapi_first_duplicate_does_not_gain_manual_notification(case):
     with case.db.orm_session() as session:
         assert session.query(DormantNotifyLog).count() == 0
         assert session.query(DormantCheckAudit).one().source == "openapi"
-
-
-def test_destroyed_physical_info_finishes_with_frontend_recycled_status(case):
-    import httpx
-    from agentclaw.community.core.bot_dormant.recycle_service import observe_baas_release
-    from agentclaw.community.core.service_bot.services.baas_service import BaasService
-
-    baas = object.__new__(BaasService)
-    baas._tenant = "test"
-    baas._http = MagicMock()
-    baas._http.get.return_value = httpx.Response(
-        200, request=httpx.Request("GET", "https://example.invalid/info"),
-        json={"code": 0, "data": {"status": "DESTROYED", "sandbox_id": "s1"}},
-    )
-    case.runtime.observe_release.side_effect = lambda *_args: observe_baas_release(
-        baas, physical_targets=["s1@42"]
-    )
-    result, payload = submit(case)
-    assert isinstance(case.handler.handle(payload), Complete)
-    public = case.service.get_operation(
-        bot_id="b1", owner_id="u1", operation_id=result["operation_id"],
-    )
-    assert public["phase"] == "SUCCEEDED"
-    assert public["bot_status"] == "RECYCLED"
-    assert case.store.read("b1", "u1")["binding_id"] is None
-    with case.db.orm_session() as session:
-        assert session.query(EntityDeviceBinding).one().status == "RELEASED"
-    case.runtime.submit_release.assert_called_once()

@@ -196,9 +196,6 @@ class ManagedRecycleRuntime:
     def prepare(self, bot, record, save):
         if self.target(bot) != record["target"]:
             raise RecycleTargetChanged("Recycle target changed")
-        if record["target"]["provider"] == "arca":
-            # Backup may quiesce writes; reject missing release/observation hooks first.
-            self.arca_transport().check_capabilities()
         physical_targets = None
         if record["target"]["provider"] in {"baas", "local"}:
             runtime = _baas_recycle_runtime(self.dependencies)

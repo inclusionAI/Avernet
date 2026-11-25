@@ -29,7 +29,6 @@ from secbaas.community.core.utils.time_utils import format_ttl_expiration_time
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import (
     ArcaSandboxError,
-    ArcaSandboxInfoReader,
     ArcaSandboxNotFoundError,
     ArcaSandboxPlugin,
     ArcaSandboxTimeoutError,
@@ -658,13 +657,8 @@ class ArcaPaasService(PaasService):
         """Synchronous implementation of get_device_info for use in to_thread()."""
         try:
             self._logger.info(f"Getting device info: {paas_device_id}")
-            plugin = self._arca_sandbox_plugin
-            if isinstance(plugin, ArcaSandboxInfoReader):
-                info = plugin.get_sandbox_info(paas_device_id)
-            else:
-                # Keep existing providers compatible; SDK providers must inspect
-                # through their management plane, not connect to a dead runtime.
-                info = plugin.connect_sync_sandbox(paas_device_id).get_info()
+            sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
+            info = sandbox.get_info()
 
             # Convert SDK status enum to string if needed
             status = (

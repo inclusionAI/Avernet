@@ -112,6 +112,9 @@ async def recycle_dormant_bot(
 ) -> Envelope[BotRecycleResult]:
     """Recycle an ACTIVE personal managed-cloud Bot; no request body.
 
+    All supported personal managed-cloud Bots retain the original Bot state
+    machine: successful recycle sets RECYCLED; failures leave Bot status unchanged.
+
     OWNER only. Optional `entity_id` selects the Bot owner, defaulting to the
     caller; deprecated `owner_id` is still accepted. Conflicting values return
     422. Missing/inaccessible Bots return 404. Teclaw, desktop and service Bots
@@ -142,12 +145,15 @@ async def recycle_dormant_bot(
     binding/Passport unchanged, and does not release resources. Nonblocking
     backup failure may continue with a warning.
 
-    The worker backs up, confirms resource release, best-effort freezes Passport,
-    then sets RECYCLED and writes one audit with `source=openapi`. No recycle
-    DingTalk notification is enqueued. Unconfirmed release/finalization becomes
-    NEEDS_CONFIRMATION and blocks conflicting lifecycle requests; do not blindly
-    resubmit destruction. Release errors after HTTP 202 are read from the operation;
-    HTTP 503 means the worker is unavailable or durable admission is unconfirmed.
+    After backup, the worker uses the existing release success criterion, then
+    best-effort freezes Passport. Completion atomically sets RECYCLED, finishes
+    the operation as SUCCEEDED and writes one audit with `source=openapi`.
+    No recycle DingTalk notification is enqueued. Release/finalization failure
+    sets the operation to FAILED without changing Bot status; there is no extra
+    physical-status confirmation or new NEEDS_CONFIRMATION result. Existing
+    legacy NEEDS_CONFIRMATION records are not replayed or repaired by this change.
+    Release errors after HTTP 202 are read from the operation; HTTP 503 means the
+    worker is unavailable or durable admission is unconfirmed.
     """
     result = await run_in_threadpool(  # allow-run-in-threadpool: synchronous Protocol method
         service.submit,
@@ -213,12 +219,12 @@ async def get_recycle_operation(
 ) -> Envelope[BotRecycleOperation]:
     """Read-only query of the current/latest personal Bot recycle operation.
 
-    HTTP 200 means the read succeeded, even for phase FAILED or
-    NEEDS_CONFIRMATION. `bot_status` is independent of the operation phase:
-    QUEUED, BACKING_UP, RELEASING, SUCCEEDED, FAILED or NEEDS_CONFIRMATION.
+    HTTP 200 means the read succeeded, even for phase FAILED. `bot_status` is
+    independent of the operation phase: QUEUED, BACKING_UP, RELEASING, SUCCEEDED
+    or FAILED. Existing legacy NEEDS_CONFIRMATION records remain readable.
     Blocking BACKUP_FAILED / BACKUP_TIMEOUT leaves the Bot ACTIVE and does not
-    release resources. RELEASE_UNCONFIRMED / FINALIZATION_UNCONFIRMED requires
-    operator verification, not an automatic destructive retry. `warning` may
+    release resources. RELEASE_FAILED / FINALIZATION_FAILED leaves Bot status
+    unchanged; the same task does not repeat a release call. `warning` may
     contain BACKUP_FAILED_CONTINUE or PASSPORT_FREEZE_FAILED (code/message).
 
     This GET never advances, retries or repairs work. Only the current/latest
