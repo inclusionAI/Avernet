@@ -3555,3 +3555,17 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 单次 publish 是两个点查（scope、fact）加一个三 statement 事务；正常 read_fact 是两个点查。scope 校验及 publish CAS 会在同域 publisher 间争用，当前无自动重试、后台扫描或正向缓存；此阶段不据 SQLite 小样本声称 MySQL 扩展性。
 - 本地验证只使用真实 SQLite：完整迁移链、重复打开、关闭态与 namespace 冲突、严格解码/身份、有限租约、单调代次、资格丢失/恢复、审计失败整体回滚、确定性并发和文件重启持久化；plugin call 计数验证上述固定成本。MySQL reader/fact gate 显式接入远端 CI 的独立空 MySQL 8.4 数据库，运行完整迁移链；本机不启动 Colima，ignored 不算通过，远端结果必须按提交 SHA 单独报告。
 - SQL grant/request 命令、审批与资格同提交 fencing、治理 GET/list/degree、HTTP/SDK、实际 dispatch 和 host 集成尚未完成。不能以新增 schema、unit 覆盖率或关闭态 fact publisher 代替真实 HTTP→DB→A2A E2E。
+
+
+### 后续实现增补：持久化运行/管理事实快照
+
+- `DbAgentInvokeStore` 现实现 `AgentInvokeFactsPort` 的两种读取。运行快照只用一条精确 pair/scope SQL，在同一 statement 读取 runtime 开关、真实 Bot 注册行、双方已发布资格/绑定代次及 lease、canonical grant 和 approval metadata。只读当前数据库，无正向缓存、profile/rules/public fallback 或逐边外部资格调用。
+- runtime 关闭、事实缺失/过期、DB 错误不返回成功空集合；坏身份/字段/metadata 或重复候选整体失败。真实注册缺失、错误 actor kind、hidden/retired 不能被外部事实中的 true 覆盖。实际 application 经该 store 读取后，仍由原纯策略比较 scope、操作、originator 及当前 binding/eligibility/approval generation，返回真实 edge_id/version。
+- 管理读取为一个六 statement 的只读事务：锁 scope、按 Rust byte-order 分别锁两个 Bot 点、读 pair、读精确请求、读当前严格角色/authority audit epoch。分别点锁而非依赖 combined IN + ORDER BY 推断 InnoDB 加锁顺序。Human 角色只来自 initialized、完整 canonical owner 图和当前存活 Human，无 legacy created_by auto-claim；fence 同时包括实际 Human 注册行 ID，不能把同名重建当同一绑定。
+- 原申请者来自精确 kind/scope/pair 的 permission_request + typed metadata，不借用审批者的 source 权限；Human 原申请者读取当前 source role，Governance 原申请者需要当前 exact principal/pair 的 Request 委托。未知/坏/重复 action、hash 命中但完整 principal 不符整体失败。管理快照中的过期事实投影为 inactive，但不抹掉 target owner 的止损角色。
+- Governance 最多另做两个精确主键查询，再重读 scope revision；发布者必须同事务推进 scope revision，若释放锁到委托读取间发生发布则返回 conflict，不能拼装跨代快照。普通 Human 管理为六个 SQL statement，最坏两类 governance 为九个；正常六 statement 返回 scope 1 + Bot 2 + pair 1 + request 0..1 + authority 1 行。owner COUNT / authority MAX 子查询仍走有界 actor/pair 条件，不等于 MySQL rows-examined/锁竞争或 EXPLAIN 已验证。
+- 共享 snapshot conformance 同时运行 synthetic local 和真实 SQL reader，并调用真实 invocation application；补充确定性 Notify 交错、实际 SQL/返回行数、源资格丢失恢复、原申请者失权、治理委托和注册重建回归。MySQL 同组 snapshot consumer 已加入现有远端独立空库 gate；本地 ignored 不算实际 MySQL 通过。
+- **这些是读取与预检，不是写提交授权，也不是生产 host provider。** 后续 SQL command 必须在写事务重新验证所有 Bot/Human/资格/治理/authority fences、当前 requester 代次和配额，再原子写 edge/request/audit/receipt。宿主必须在绑定/资格变化确认前持久发布失效；仅有注册行或手动 set_enabled 不能替代宿主能力与 reader 清单证明。现有 legacy request creator/decider 宽度等写端存储约束也必须显式解决，不能截断 principal、塞进 message 或修改已提交的 048/050 migration。
+- SQL request/grant/approve/reject/cancel/revoke、治理 GET/list/degree、HTTP/SDK、实际 dispatch 与 host/E2E 仍未完成。当前更强的 SQL reader 和 unit 行覆盖率不能作为这些项目的完成证明。
+
+- 远端 MySQL 回滚 gate 的故障注入改为第三步 audit 的可控唯一键冲突，与 SQLite 共用同一 DML-only fixture；不要求 SUPER、不创建触发器、不修改 binlog 信任配置。两处 bootstrap 迁移断言同步到 v48，并单独保留 v47 archive 的历史断言，不改历史迁移。

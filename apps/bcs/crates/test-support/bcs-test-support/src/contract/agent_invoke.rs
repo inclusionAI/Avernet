@@ -479,7 +479,7 @@ pub async fn agent_invoke_command_repo_port_contract_tests(driver: &dyn AgentInv
     );
 }
 
-pub async fn agent_invoke_facts_port_contract_tests(driver: &dyn AgentInvokeContractDriver) {
+pub async fn run_agent_invoke_requester_authority_contract(driver: &dyn AgentInvokeContractDriver) {
     setup(driver).await;
     let pending = request(driver, "authority-request").await;
     driver.role("human_source", "bot-a", None).await;

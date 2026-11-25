@@ -3,6 +3,8 @@
 //! facts and enables no writer/runtime. Trusted composition owns activation.
 mod facts;
 mod scope;
+mod snapshots;
+mod management_reads;
 
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -80,16 +82,22 @@ impl DbAgentInvokeStore {
     }
 
     async fn read_scope_row(&self) -> AgentInvokeResult<ScopeRow> {
-        let sql = format!(
+        let rows = self.query(self.scope_statement(false)).await?;
+        self.decode_scope_rows(&rows)
+    }
+
+    fn scope_statement(&self, lock: bool) -> DbStatement {
+        let suffix = if lock && self.flavor == DbSqlFlavor::Mysql { " FOR UPDATE" } else { "" };
+        DbStatement::with_params(format!(
             "SELECT *, {} AS db_now_ms FROM agent_invoke_scopes \
-             WHERE namespace = ? AND env = ? AND {} = ? AND {} = ?",
+             WHERE namespace = ? AND env = ? AND {} = ? AND {} = ?{suffix}",
             self.now_ms(), self.exact("namespace"), self.exact("env"),
-        );
-        let rows = self.query(DbStatement::with_params(sql, vec![
-            self.scope.namespace.as_str().into(), self.scope.env.as_str().into(),
-            self.scope.namespace.as_str().into(), self.scope.env.as_str().into(),
-        ])).await?;
-        let row = match rows.as_slice() {
+        ), vec![self.scope.namespace.as_str().into(), self.scope.env.as_str().into(),
+            self.scope.namespace.as_str().into(), self.scope.env.as_str().into()])
+    }
+
+    fn decode_scope_rows(&self, rows: &[DbRow]) -> AgentInvokeResult<ScopeRow> {
+        let row = match rows {
             [row] => row,
             [] => return Err(AgentInvokeError::Unavailable),
             _ => return Err(AgentInvokeError::InvalidState),

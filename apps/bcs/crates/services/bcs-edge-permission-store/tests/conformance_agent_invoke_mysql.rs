@@ -8,6 +8,10 @@ use bcs_test_support::contract::repo::edge_grant::run_agent_invoke_repo_contract
 
 #[path = "../../../test-support/authority_mysql_chain.rs"]
 mod mysql_chain;
+#[path = "support/agent_invoke_snapshots.rs"]
+mod snapshot_fixture;
+#[path = "support/agent_invoke_audit_collision.rs"]
+mod audit_collision;
 
 #[tokio::test]
 #[ignore = "requires BCS_TEST_MYSQL_URL pointing to a disposable EMPTY MySQL database"]
@@ -17,6 +21,9 @@ async fn agent_invoke_repo_contract_mysql() {
     let store = DbEdgeGrantStore::mysql(database.plugin.clone());
     run_agent_invoke_repo_contract(&store, "agent-test", "agent-caller", "agent-target").await;
     durable_fact_contract(database.plugin.clone()).await;
+    let snapshot = snapshot_fixture::Fixture::new_on(database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql,
+        bcs_service_api::types::agent_invoke::AgentInvokeScope { namespace:"mysql-invoke".into(),env:"agent-test".into() }).await;
+    bcs_test_support::contract::agent_invoke_snapshots::agent_invoke_facts_port_contract_tests(&snapshot).await;
     database.close().await;
 }
 
@@ -46,14 +53,7 @@ async fn durable_fact_contract(db: std::sync::Arc<dyn bcs_db_api::DbPlugin>) {
         heartbeat.state.eligibility_generation = NonZeroU64::new(2).unwrap();
         s.publish_fact(&scope, heartbeat).await.unwrap();
     }
-    let before = s.scope_state().await.unwrap();
-    let fact = s.read_fact(&scope, "bot-fact").await.unwrap().unwrap();
-    db.execute(DbStatement::new("CREATE TRIGGER fail_agent_fact_audit BEFORE INSERT ON agent_invoke_audit FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected audit failure'")).await.unwrap();
-    let p = AgentInvokeFactPublication { state: fact.state.clone(), expected_revision: fact.revision.get(), valid_until_ms: s.database_time_ms().await.unwrap() + 30_000 };
-    assert_eq!(s.publish_fact(&scope, p).await, Err(AgentInvokeError::CommitUnknown));
-    assert_eq!(s.scope_state().await.unwrap(), before);
-    assert_eq!(s.read_fact(&scope, "bot-fact").await.unwrap(), Some(fact));
-    db.execute(DbStatement::new("DROP TRIGGER fail_agent_fact_audit")).await.unwrap();
+    audit_collision::audit_collision_rolls_back(db.clone(), &s, &scope, "bot-fact").await;
     let rows = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM agent_invoke_audit")).await.unwrap();
     assert_eq!(bcs_db_api::db_get_column::<i64>(&rows[0], "n").unwrap(), 9);
     bcs_test_support::contract::agent_invoke_facts::agent_invoke_fact_repo_port_contract_tests(&s, scope, s.database_time_ms().await.unwrap() + 30_000).await;

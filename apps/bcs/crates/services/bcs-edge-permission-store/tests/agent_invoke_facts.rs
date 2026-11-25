@@ -265,3 +265,13 @@ async fn corrupt_fact_is_invalid_not_absent() {
     assert_eq!(s.publish_fact(&scope(), p).await, Err(AgentInvokeError::InvalidState));
     assert_eq!(count(db.as_ref(), "agent_invoke_audit").await, 1);
 }
+
+#[path = "support/agent_invoke_audit_collision.rs"]
+mod audit_collision;
+#[tokio::test]
+async fn portable_dml_only_audit_failure_rolls_back() {
+    let (db, store) = fixture().await;
+    let p = publication(&store, "bot", 0).await;
+    store.publish_fact(&scope(), p).await.unwrap();
+    audit_collision::audit_collision_rolls_back(db, &store, &scope(), "bot").await;
+}

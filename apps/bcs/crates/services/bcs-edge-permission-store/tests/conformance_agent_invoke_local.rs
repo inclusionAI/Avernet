@@ -101,7 +101,7 @@ async fn local_fencing() {
 }
 #[tokio::test]
 async fn local_requester_authority() {
-    agent_invoke_facts_port_contract_tests(&Driver::new()).await;
+    run_agent_invoke_requester_authority_contract(&Driver::new()).await;
 }
 #[tokio::test]
 async fn local_limits() {
@@ -203,4 +203,23 @@ async fn local_governance_delegation_is_exact_principal_pair_and_action() {
 #[test]
 fn pure_policy_conformance() {
     bcs_test_support::contract::agent_invoke_facts::agent_invoke_policy_core_service_contract_tests(&AgentInvokePolicy);
+}
+
+#[async_trait]
+impl bcs_test_support::contract::agent_invoke_snapshots::AgentInvokeSnapshotFixture for Driver {
+    fn scope(&self) -> AgentInvokeScope { self.scope.clone() }
+    fn facts(&self) -> &dyn AgentInvokeFactsPort { self.store.as_ref() }
+    fn invocation(&self) -> &dyn AgentInvocationService { &self.service }
+    async fn prepare(&self) {
+        for bot in ["bot-a", "bot-b"] { self.store.register_agent(bot).await.unwrap(); }
+        self.store.set_role("human_source", "bot-a", Some(AgentInvokeRole::Owner)).await.unwrap();
+        self.store.set_role("human_target", "bot-b", Some(AgentInvokeRole::Owner)).await.unwrap();
+        self.service.change(AgentInvokeCommand { principal:AgentInvokePrincipal::Human("human_target".into()), authenticated_scope:self.scope.clone(),
+            pair:AgentInvokePair {from_bot_id:"bot-a".into(),to_bot_id:"bot-b".into()}, change:AgentInvokeChange::Grant {expected_version:0}, idempotency_key:"snapshot-setup".into(), reason:"snapshot conformance".into() }).await.unwrap();
+    }
+    async fn lose_source_qualification(&self) { self.store.publish_agent_state("bot-a",false,true,false,false).await.unwrap(); }
+}
+#[tokio::test]
+async fn local_facts_snapshot_conformance() {
+    bcs_test_support::contract::agent_invoke_snapshots::agent_invoke_facts_port_contract_tests(&Driver::new()).await;
 }

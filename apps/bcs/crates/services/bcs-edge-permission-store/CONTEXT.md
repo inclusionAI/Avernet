@@ -206,8 +206,9 @@ HTTP routes and restart durability remain separate unverified work.
 
 ## Durable Agent invocation foundation (not mounted)
 
-`agent_invoke::DbAgentInvokeStore` implements the trusted `AgentInvokeFactRepoPort`
-and scope initialization/activation only. It consumes `DbPlugin`, uses the new
+`agent_invoke::DbAgentInvokeStore` implements the trusted `AgentInvokeFactRepoPort`,
+`AgentInvokeFactsPort` snapshots and scope initialization/activation, not SQL
+management commands. It consumes `DbPlugin`, uses the new
 SQLite 048 / MySQL 050 schema, and never enables a writer/runtime or invents
 eligible facts during initialization. The legacy tables have no tenant key;
 `UNIQUE(env)` therefore makes each env exclusive to a single physical namespace.
@@ -228,3 +229,37 @@ CAS, deterministic concurrency, audit rollback, file reopen and actual query
 counts. `tests/conformance_agent_invoke_mysql.rs` additionally checks facts and
 rollback on a dedicated EMPTY MySQL database in CI; ignored locally is not a
 pass. Neither suite proves HTTP/dispatch/host E2E or production capability.
+
+
+## Durable Agent invocation snapshot boundary
+
+The same `DbAgentInvokeStore` now implements `AgentInvokeFactsPort`. Runtime
+reads use one exact-pair SQL statement joining configured scope/capability,
+real registrations, published facts/leases and canonical edge/approval metadata.
+The real invocation application still applies its pure operation/lineage and
+current-generation policy. Missing/expired/unavailable/corrupt data never becomes
+a successful default or cached permit. Published true cannot override a missing,
+Human-kind, hidden or retired registration.
+
+Management snapshots use six read-only transaction statements: scope lock, two
+separate Bot point locks in Rust byte order, pair, exact request, strict authority
+projection. Combined IN/ORDER BY is not treated as physical lock-order proof.
+Human roles require live Humans, initialized Bots and canonical single-owner
+integrity. Original-requester authority is separate from approver authority.
+Fences include durable qualification revisions, authority audit epochs and actual
+Human registration IDs; the DB clock alone does not change a fence.
+
+Governance requires exact principal hash plus full identity/pair/action residuals.
+At most two extra point queries and one scope-revision check detect publication
+between lock release and delegation read (publishers must advance scope revision
+atomically). Thus the ordinary Human path has six statements, worst governance
+path nine, with no N+1 loop; aggregate/index/lock costs still need real MySQL
+measurement. This is a prerequisite for write-command fencing, not a substitute
+for revalidation inside a mutating transaction or a production host feed.
+
+`tests/conformance_agent_invoke_snapshots.rs` and the synthetic local conformance
+entry call the same `agent_invoke_facts_port_contract_tests`; the explicit MySQL
+gate uses that harness too. Focused tests additionally record actual plugin SQL
+counts/rows and use Notify handshakes for qualification/delegation races, without
+sleep-based ordering. SQL commands, HTTP/SDK/dispatch and host integration remain
+unimplemented. Test seeding SQL is never production management orchestration.
