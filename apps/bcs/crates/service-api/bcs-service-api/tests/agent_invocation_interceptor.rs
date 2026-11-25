@@ -21,7 +21,8 @@ impl MessageInterceptor for Provider {
     }
 }
 fn invocation() -> AgentInvocationInput {
-    AgentInvocationInput { principal: AgentInvokePrincipal::Agent("a".into()), authenticated_scope: AgentInvokeScope {
+    AgentInvocationInput { authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("a".into()), authenticated_scope: AgentInvokeScope {
         namespace: "isolated".into(), env: "test".into() }, pair: AgentInvokePair { from_bot_id: "a".into(), to_bot_id: "b".into() },
         originator: "a".into(), operation: AgentInvokeOperation::DirectInvocation }
 }

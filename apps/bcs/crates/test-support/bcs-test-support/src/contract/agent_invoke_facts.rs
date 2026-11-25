@@ -31,7 +31,8 @@ pub async fn agent_invoke_fact_repo_port_contract_tests(
 
 pub fn agent_invoke_policy_core_service_contract_tests(policy: &dyn AgentInvokePolicyCoreService) {
     let scope = AgentInvokeScope { namespace: "contract".into(), env: "dev".into() };
-    let mut input = AgentInvocationInput { principal: AgentInvokePrincipal::Agent("bot-a".into()), authenticated_scope: scope.clone(),
+    let mut input = AgentInvocationInput { authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("bot-a".into()), authenticated_scope: scope.clone(),
         pair: AgentInvokePair { from_bot_id: "bot-a".into(), to_bot_id: "bot-b".into() }, originator: "bot-a".into(), operation: AgentInvokeOperation::DirectInvocation };
     assert_eq!(policy.validate_invocation(&scope, &input), Ok(()));
     input.operation = AgentInvokeOperation::ToolInvocation;

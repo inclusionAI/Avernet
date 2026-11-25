@@ -8,7 +8,7 @@ use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
 impl A2aChat {
     pub(crate) async fn prepare_direct(&self, flow: &crate::BcsMessageFlow, row: &PersistedMessageDelivery) -> ServiceResult<PreparedManagedDelivery> {
         let p: DirectProjection = serde_json::from_value(row.semantic_projection_json.clone()).map_err(|_| invalid("invalid direct projection"))?;
-        if !matches!((p.version, p.agent_invocation.is_some()), (1, false) | (2, true))
+        if !match &p.agent_invocation { None => p.version == 1, Some(stored) => p.version == stored.version() }
             || row.flow_kind != DeliveryFlowKind::DirectA2a || !row.group_id.is_empty()
         {
             return Err(invalid("invalid direct projection scope"));

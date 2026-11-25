@@ -298,6 +298,10 @@ impl AgentInvokeFactsPort for DbAgentInvokeStore {
         let rows = self.query(self.pair_statement(pair)).await?;
         let read = self.decode_pair(&rows, pair, true)?;
         Ok(AgentInvokeRuntimeSnapshot {
+            source_registration: AgentInvokeRegistrationBinding {
+                registration_id: positive(&read.row, "source_registration_id")?,
+                identity_revision: positive(&read.row, "source_registration_agent_invoke_identity_revision")?,
+            },
             scope: self.scope.clone(),
             pair: pair.clone(),
             source: read.source,

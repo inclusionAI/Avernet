@@ -1,6 +1,8 @@
 //! Independent Agent invocation management delivery. Authentication is shared
 //! with V1; resource policy stays in the injected application services.
 mod dto;
+mod invoke;
+pub use invoke::AgentInvokeDirectHttpServices;
 mod reads;
 mod writes;
 use super::common::{ApiState, Envelope, RequestId};
@@ -46,6 +48,7 @@ pub(crate) fn protected_router(state: ApiState) -> Router<ApiState> {
         ] {
             r = r.route(suffix, axum::routing::any(handle));
         }
+        r = r.route("/invocations", axum::routing::any(invoke::handle));
         r = r.fallback(|req: Request| async move {
             failure(
                 &RequestId::from_headers(req.headers()),
@@ -61,8 +64,14 @@ pub(crate) fn protected_router(state: ApiState) -> Router<ApiState> {
         ))
         .layer(middleware::from_fn(boundary))
 }
-async fn boundary(req: Request, next: Next) -> Response {
+async fn boundary(mut req: Request, next: Next) -> Response {
     let id = RequestId::from_headers(req.headers());
+    // Pin one canonical ID before authentication. Otherwise an absent client
+    // header produces different IDs in verifier, envelope and response header.
+    if let Ok(value) = HeaderValue::from_str(&id.0) {
+        req.headers_mut().insert("x-request-id", value);
+    }
+    req.extensions_mut().insert(id.clone());
     let mut response = next.run(req).await;
     // All handler errors already use closed envelopes; framework errors never
     // echo malformed user-controlled URL/JSON or credential strings.
@@ -124,6 +133,8 @@ pub(super) fn success(id: &RequestId, status: StatusCode, data: serde_json::Valu
         Json(Envelope::success(
             if status == StatusCode::CREATED {
                 20100
+            } else if status == StatusCode::ACCEPTED {
+                20200
             } else {
                 20000
             },

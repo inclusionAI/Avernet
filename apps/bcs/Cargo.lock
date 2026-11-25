@@ -2264,6 +2264,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-api-http",
  "bcs-app-group",
  "bcs-bot",
  "bcs-bot-store",
@@ -2301,6 +2302,7 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
+ "jsonwebtoken",
  "metrics",
  "regex",
  "serde",

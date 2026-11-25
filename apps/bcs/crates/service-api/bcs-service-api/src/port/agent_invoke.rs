@@ -30,3 +30,14 @@ pub trait AgentInvokeFactsPort: Send + Sync {
         command: &AgentInvokeCommand,
     ) -> AgentInvokeResult<AgentInvokeManagementSnapshot>;
 }
+
+/// Current credential-to-registration resolution. Exactly scoped physical
+/// bot_uuid PLUS verified AgentCode; never a code-only or public auto-claim.
+#[async_trait]
+pub trait AgentInvokeIdentityResolutionPort: Send + Sync {
+    async fn resolve_invocation_source(
+        &self,
+        scope: &AgentInvokeScope,
+        identity: &crate::types::agent_invoke::AgentInvokeVerifiedBot,
+    ) -> AgentInvokeResult<crate::types::agent_invoke::AgentInvokeAuthenticatedSource>;
+}

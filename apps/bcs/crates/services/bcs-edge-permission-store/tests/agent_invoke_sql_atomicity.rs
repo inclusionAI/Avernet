@@ -399,6 +399,7 @@ async fn file_restart_replays_committed_action_and_runtime_permission() {
     assert_eq!(recovered.original_grant, original.original_grant);
     let permit = service
         .authorize_invocation(AgentInvocationInput {
+            authentication: AgentInvocationAuthentication::TrustedInProcess,
             principal: AgentInvokePrincipal::Agent("bot-a".into()),
             authenticated_scope: command.authenticated_scope,
             pair: pair(),
@@ -435,7 +436,8 @@ async fn invocation_reads_remain_one_query_and_management_is_bounded() {
     );
     db.statements.store(0, Ordering::SeqCst);
     app.authorize_invocation(AgentInvocationInput {
-        principal: AgentInvokePrincipal::Agent("bot-a".into()),
+        authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("bot-a".into()),
         authenticated_scope: d.scope.clone(),
         pair: pair(),
         originator: "bot-a".into(),
@@ -467,7 +469,8 @@ async fn registry_change_requires_fresh_generation_and_explicit_reapproval() {
         .unwrap();
     d.sql("UPDATE bcs_bots SET agent_invoke_identity_revision=agent_invoke_identity_revision+1 WHERE bot_uuid='bot-a'",vec![]).await;
     let input = AgentInvocationInput {
-        principal: AgentInvokePrincipal::Agent("bot-a".into()),
+        authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("bot-a".into()),
         authenticated_scope: d.scope.clone(),
         pair: pair(),
         originator: "bot-a".into(),

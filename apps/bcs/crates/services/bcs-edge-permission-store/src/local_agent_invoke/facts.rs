@@ -73,6 +73,7 @@ impl AgentInvokeFactsPort for LocalAgentInvokeStore {
         self.require_scope(scope)?;
         let state = self.state.lock().await;
         Ok(AgentInvokeRuntimeSnapshot {
+            source_registration: AgentInvokeRegistrationBinding { registration_id: NonZeroU64::MIN, identity_revision: NonZeroU64::MIN },
             scope: self.scope.clone(),
             pair: pair.clone(),
             source: state

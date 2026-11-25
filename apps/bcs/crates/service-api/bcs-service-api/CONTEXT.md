@@ -1154,3 +1154,24 @@ send time; its V2 queued projection is private, credential-free and rejected by
 old V1 readers. No wire SDK schema or production capability is implied. The
 shared interceptor harness, API chain/default compatibility tests and real SQL
 Direct A2A runtime conformance cover propagation to existing implementations.
+
+
+## Verified AgentInvoke ingress and physical handoff
+
+AgentInvokeDirectService is a separate application capability for verified
+Bot-only direct-call admission. Its command has no serialized trusted context.
+AgentInvokeIdentityResolutionPort resolves exact scoped UUID+verified AgentCode
+into physical registration/revision and binding/eligibility generations.
+AgentInvocationAuthentication explicitly distinguishes trusted in-process
+identity ownership from a VerifiedSource handoff; public ingress must select the
+latter. AgentInvokeRuntimeSnapshot now carries source physical registration,
+and policy compares all four pin values on every hook. External custom providers
+must propagate these new, unreleased AgentInvoke fields before enabling writers.
+Legacy four-kind contracts and DB plugin signatures remain unchanged.
+
+AgentInvokeDirectLimits requires finite positive default/max timeouts. V3 private
+queue reconstruction preserves the pin; V1/V2 retain previous meanings and do not
+accept a V3 downgrade. Shared identity/direct-service harnesses, physical-binding
+policy tests and signed-router/runtime conformance cover consumers. The original
+spec tracks SDK, separate Run GET/cancel, approved host assembly, inventory,
+Singlebox and rollout as unfinished; this capability does not imply them.

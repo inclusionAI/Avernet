@@ -17,7 +17,7 @@ fn key(headers: &axum::http::HeaderMap) -> AgentInvokeResult<String> {
     }
     Ok(value.to_owned())
 }
-async fn body<T: DeserializeOwned>(req: Request) -> AgentInvokeResult<T> {
+pub(super) async fn body<T: DeserializeOwned>(req: Request) -> AgentInvokeResult<T> {
     let content = req.headers().get_all("content-type");
     if content.iter().count() != 1
         || !content

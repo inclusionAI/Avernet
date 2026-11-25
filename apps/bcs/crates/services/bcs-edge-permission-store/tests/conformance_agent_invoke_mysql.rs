@@ -62,6 +62,14 @@ async fn agent_invoke_repo_contract_mysql() {
     }
     println!("agent-invoke-mysql-gate=governance-query application-and-repo=verified");
 
+    let identity = lifecycle::Driver::new_on(database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql,"identity-ingress").await;
+    use bcs_test_support::contract::agent_invoke::AgentInvokeContractDriver;
+    identity.register("identity-source").await;
+    identity.sql("UPDATE bcs_bots SET agent_code='Code' WHERE env=? AND bot_uuid='identity-source'", vec![identity.scope.env.as_str().into()]).await;
+    agent_invoke_identity_resolution_port_contract_tests(identity.store.as_ref(),identity.scope.clone(),
+        bcs_service_api::types::agent_invoke::AgentInvokeVerifiedBot{bot_id:"identity-source".into(),agent_code:"Code".into()}).await;
+    println!("agent-invoke-mysql-gate=exact-identity-resolution source-epochs=verified");
+
     registry::run(database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql).await;
     database.close().await;
 }

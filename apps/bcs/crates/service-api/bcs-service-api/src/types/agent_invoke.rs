@@ -43,8 +43,42 @@ pub enum AgentInvokeOperation {
     GroupOperation,
 }
 
+/// Physical registration observed at the trusted identity boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInvokeRegistrationBinding {
+    pub registration_id: NonZeroU64,
+    pub identity_revision: NonZeroU64,
+}
+
+/// A verified credential is pinned to this source for one operation. These
+/// facts cannot be asserted by an invocation body or recovered from AgentCode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInvokeAuthenticatedSource {
+    pub registration: AgentInvokeRegistrationBinding,
+    pub binding_generation: NonZeroU64,
+    pub eligibility_generation: NonZeroU64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentInvocationAuthentication {
+    /// Existing trusted in-process callers own identity resolution themselves.
+    /// Public ingress MUST NOT select this mode; there is no serde wire shape.
+    TrustedInProcess,
+    /// Credential-to-physical-Bot handoff, checked anew at every operation hook.
+    VerifiedSource(AgentInvokeAuthenticatedSource),
+}
+
+/// Verified Bot claims from the authentication middleware, never a body DTO.
+/// AgentCode is checked byte-exact alongside bot_uuid, not resolved by itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInvokeVerifiedBot {
+    pub bot_id: String,
+    pub agent_code: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentInvocationInput {
+    pub authentication: AgentInvocationAuthentication,
     pub principal: AgentInvokePrincipal,
     /// Scope of the verified ingress principal, not client-supplied metadata.
     pub authenticated_scope: AgentInvokeScope,
@@ -82,6 +116,7 @@ pub struct AgentInvokeApproval {
 /// cached `eligible=true` facts do not implement this contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentInvokeRuntimeSnapshot {
+    pub source_registration: AgentInvokeRegistrationBinding,
     pub scope: AgentInvokeScope,
     pub pair: AgentInvokePair,
     pub source: AgentInvokeBotState,

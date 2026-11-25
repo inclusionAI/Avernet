@@ -2,12 +2,12 @@
 //! never fall back to this authority. No body credentials or reusable permit.
 use super::*;
 use bcs_service_api::application::agent_invoke::{
-    AgentInvocationInput, AgentInvokeError, AgentInvokeOperation, AgentInvokePair,
+    AgentInvocationInput, AgentInvocationAuthentication, AgentInvokeAuthenticatedSource, AgentInvokeRegistrationBinding, AgentInvokeError, AgentInvokeOperation, AgentInvokePair,
     AgentInvokePrincipal, AgentInvokeScope,
 };
 use serde::{Deserialize, Serialize};
 
-/// Private store-owned V2 projection. V1 readers reject its version; the
+/// Private store-owned V2/V3 projection. Older readers reject V3; the
 /// public trusted input remains non-serde. No positive decision is persisted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,6 +16,18 @@ pub(crate) struct DirectInvocationProjection {
     env: String,
     originator: String,
     operation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verified_source: Option<SourceProjection>,
+}
+
+/// Persisted internal shape only, never a public authentication DTO.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceProjection {
+    registration_id: std::num::NonZeroU64,
+    identity_revision: std::num::NonZeroU64,
+    binding_generation: std::num::NonZeroU64,
+    eligibility_generation: std::num::NonZeroU64,
 }
 
 impl DirectInvocationProjection {
@@ -25,11 +37,30 @@ impl DirectInvocationProjection {
             env: input.authenticated_scope.env.clone(),
             originator: input.originator.clone(),
             operation: "direct_invocation".into(),
+            verified_source: match &input.authentication {
+                AgentInvocationAuthentication::TrustedInProcess => None,
+                AgentInvocationAuthentication::VerifiedSource(source) => Some(SourceProjection {
+                    registration_id: source.registration.registration_id,
+                    identity_revision: source.registration.identity_revision,
+                    binding_generation: source.binding_generation,
+                    eligibility_generation: source.eligibility_generation,
+                }),
+            },
         }
     }
 
+    pub(super) fn version(&self) -> u32 { if self.verified_source.is_some() { 3 } else { 2 } }
+
     pub(super) fn input(&self, source: &str, target: &str) -> AgentInvocationInput {
         AgentInvocationInput {
+            authentication: match &self.verified_source {
+                None => AgentInvocationAuthentication::TrustedInProcess,
+                Some(source) => AgentInvocationAuthentication::VerifiedSource(AgentInvokeAuthenticatedSource {
+                    registration: AgentInvokeRegistrationBinding { registration_id: source.registration_id,
+                        identity_revision: source.identity_revision },
+                    binding_generation: source.binding_generation, eligibility_generation: source.eligibility_generation,
+                }),
+            },
             principal: AgentInvokePrincipal::Agent(source.into()),
             authenticated_scope: AgentInvokeScope {
                 namespace: self.namespace.clone(),
@@ -63,8 +94,8 @@ impl A2aChat {
                 .map_err(|_| queued::invalid("invalid direct projection"))?;
         match (p.version, p.agent_invocation.as_ref()) {
             (1, None) => Ok(()),
-            (2, Some(stored))
-                if row.group_id.is_empty()
+            (2 | 3, Some(stored))
+                if p.version == stored.version() && row.group_id.is_empty()
                     && command.target_bot_id() == row.target_bot_id
                     && row.run_id.as_deref() == Some(command.run_id.as_str()) =>
             {

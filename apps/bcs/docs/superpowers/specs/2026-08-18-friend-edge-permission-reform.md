@@ -3634,9 +3634,19 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 共享 interceptor harness 的真正 discoverable conformance entry、真实 SQL grant/revoke→注册 hook→inline/queued fake transport 回归，覆盖实际发送、缺 code/缺 provider、身份/lineage/operation、scope、Provider 上界、版本损坏、资格/绑定恢复不复活，以及 Notify 控制“inline 初次通过后 revoke 已提交、最终发送检查拒绝”。实际 scheduler 成功路径和 prepare→StartSend CAS→revoke→before_send 拒绝分别验证，不以准备成功代替网络派发。
 - 仍缺 trusted HTTP Bot resolver/入口、SDK、host inventory/generation/capability 与 approved composition、完整争用矩阵、HTTP→DB→A2A Singlebox/changed-line 和 rollout 证明；本轮内部 runtime 注入能力不是生产启用。本机不启动 Colima/MySQL/Singlebox，全部远端检查仍按新 SHA 单独记录。
 
+### 后续实现增补：已签名 Bot 入口、物理身份 handoff 与派发代次 pin（默认未生产装配）
+
+- 新增 `AgentInvokeIdentityResolutionPort`，以可信验证器给出的 `bot_uuid + agent_code` 和 composition scope 进行 byte-exact 当前物理行解析。不是 code-only 查询，不接受 App/owner 展示字段代替 Bot，不 auto-claim/创建身份。SQL 一次 bounded SELECT（6 binds，LIMIT 2）同时读域、唯一物理注册和当前 source facts；拒绝错误 code/环境、安全域、不完整/损坏/过期事实、失资格/hidden/deleted、未启用 runtime 和 DB 错误。AgentCode 仅做已验证身份绑定比较，不构成资格来源。SQLite 有真实 query/row/bind/EXPLAIN 断言；相同共享 conformance 加入既有远端原生 MySQL selector，本机不执行。
+- `AgentInvocationInput` 明确区分既有可信进程内 identity-owned 调用与 `VerifiedSource` handoff，均无 serde。公开新入口必须从 resolver 得到物理 registration ID/revision、binding/eligibility generations 并选择 VerifiedSource；不可退回进程内模式。SQL runtime snapshot 暴露内部 source physical binding，pure policy 在每次 hook 比较四项 pin，不能在身份变化、资格恢复或显式重新批准后把旧凭据 handoff 静默绑定到新主体/代次。既有外部自定义 AgentInvoke fact-provider 源码需传播新字段并验证，未据此声称宿主兼容。
+- private queue V3 携带同一 credential-free source pin；reader 对版本/字段是否匹配严格校验，pickup 和最终 before_send 继续检查原 pin。V1 仍是普通 legacy，V2 仍是原显式可信内部调用；不能把 V3 丢失 pin 当 V2 兼容回落。旧 reader 拒绝 V3，不因此开放 writer。所有已提交 migrations 和 checksum 不变。
+- 新增 transport-independent `AgentInvokeDirectService` application：验证请求、finite timeout/session 后，先解析身份，再只调用 `start_async_agent_invocation`，从可信 Bot 推导 caller/from/channel/originator，固定 DirectInvocation，无 general App、Human-as-Bot、organization、测试用户、转委托或 Provider header 注入。显式 default/max timeout 必须为有限正数且 default≤max≤24h，超范围拒绝，不静默 clamp。
+- 新 V1 `POST /api/v1/collaboration/agent-invoke/invocations` 及 OpenAPI 镜像复用实际认证/CSRF/no-store/request_id 边界，仅接受严格 body 的 `to_bot_id/message` 和可选 session/timeout；body/query 不能提供 source、scope、originator、资格、operation、认证模式或 headers。单独验证的 Human+Bot 复合 principal 仍属来源不明确的 Human-as-Bot/委托场景，显式拒绝；Bot.owner_id 的展示信息本身不等同于单独 Human principal。独立 composition capability 默认 None 返回 503。202/20200 是运行接受（可能 queued），不是完成或 exactly-once；失败不允许自动重试。本次没有新增 Run GET/cancel 资源，不以 Bot UUID-only query 冒充物理身份完整的后续会话授权；不将本操作的接受响应冒称新的 Run 查询/取消合约；原 SDK 任务仍未完成。
+- 使用真实 Gateway HS256/issuer/audience/kid/time 校验的 HTTP→身份 SQL→授权/Run SQL→真实 A2A fake-transport 集成测试，逐项拒绝缺失/伪签名、App/Human、跨 tenant、缺失 UUID/同 code 另一 Bot、错误 code、scope/body/lineage 自报、未批准 public target 和 store error；失败前无 channel/Run/transport effect。Notify 证明身份解析后 publish rebind 已提交且新 grant 已显式批准，旧 handoff 仍拒绝；真实队列另证 V3 pin 在 pickup/StartSend CAS 后仍不能复用。跨层测试放在 message-flow 的 test composition，不给 HTTP adapter 增加禁止的 legacy protocol 依赖，不放宽 boundary gate。
+- 正常公开 async direct 比前一轮多一次身份 SELECT：inline 共 4 次当前身份/授权读，queued 全周期共 6 次；既有 Provider 双 actor 上界读仍单独计算。无外部 inventory N+1、资格正向 cache、新授权事务或事务锁跨网络。此处是进程内公开 Router 集成，不是真实 Singlebox/生产 inventory/capability/rollout；后者仍保持原完整任务范围与关闭态。
+
 ### 原 27 项研发与验收跟踪（保留完整范围）
 
-将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 13/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
+将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 14/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
 
 #### 1. 评审与启用前置
 
@@ -3664,7 +3674,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 
 #### 4. Application、HTTP 与 runtime 集成
 
-- [ ] 4.1 管理矩阵和 scoped governance 已实现；仍需新入口禁止 anonymous/auto-claim、可信 ingress 唯一 scoped bot_uuid resolver 和拒绝自报资格的实际挂载。
+- [x] 4.1 管理矩阵/scoped governance 与独立调用入口已实现；实际签名验证后的唯一 scoped Bot UUID+code resolver、物理/资格 handoff pin、禁止 anonymous/auto-claim/自报资格有真实 HTTP→SQLite→A2A 发送及交错回归。生产 inventory/capability/composition 仍归 1.2/4.5，不凭路由存在启用。
 - [x] 4.2 request/grant/approve/reject/cancel/revoke、receipt/state conflict/error 映射已由 application + 真实 SQLite store 实现；资格预读不持写事务锁，unknown commit 恢复无第二次 mutation。HTTP 挂载/真实 MySQL分别归 4.3/3.5。
 - [ ] 4.3 独立 routes/DTO/OpenAPI 与逐端点验证/响应/鉴权已有真实 V1 router 实现；SDK 尚未补齐，整项不勾选，HTTP 默认不启用生产能力。
 - [x] 4.4 统一 operation-aware interceptor hook 已接入真实 Direct A2A inline/queue 与最终 before_send；exact operation/originator/current qualification generation、Provider 上界和旧 friend/public/organization 隔离有真实 SQL→scheduler/transport 及撤权回归。可信外部 ingress 与生产 composition 仍分别归 4.1/4.5，不以内部入口代替。
@@ -3680,4 +3690,4 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - [ ] 5.6 完整受影响 architecture/boundary/module/HTTP/legacy/authority 与扩展 gates；已通过限定范围检查不代表全架构 baseline 绿灯。
 - [ ] 5.7 reader/SDK/runtime 接收兼容、迁移后 writer 启用、关闭/回滚/保留历史演练，以及 current-SHA CI 和 host 集成记录；未获部署授权不操作生产。
 
-完成条目：1.4、2.1、2.2、2.3、2.4、2.5、3.1、3.3、3.4、4.2、4.4、5.1、5.3。其余原条目均按完整验收范围保留，不重新拆小来增加完成数量。
+完成条目：1.4、2.1、2.2、2.3、2.4、2.5、3.1、3.3、3.4、4.1、4.2、4.4、5.1、5.3。其余原条目均按完整验收范围保留，不重新拆小来增加完成数量。

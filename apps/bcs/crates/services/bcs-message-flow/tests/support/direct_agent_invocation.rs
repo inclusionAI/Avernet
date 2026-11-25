@@ -60,7 +60,8 @@ impl Fixture {
         Self { h, auth }
     }
     fn input(&self) -> AgentInvocationInput {
-        AgentInvocationInput { principal: AgentInvokePrincipal::Agent("bot-driver".into()),
+        AgentInvocationInput { authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("bot-driver".into()),
             authenticated_scope: self.auth.driver.scope.clone(), pair: AgentInvokePair {
                 from_bot_id: "bot-driver".into(), to_bot_id: "bot-observer".into() },
             originator: "bot-driver".into(), operation: AgentInvokeOperation::DirectInvocation }
@@ -327,4 +328,33 @@ async fn final_send_hook_rejects_corrupt_or_downgraded_persisted_operation() {
         assert!(f.preparation().before_send(&bad, &prepared.command).await.is_err());
     }
     assert!(f.h.support.bot_delivery.frames().await.is_empty());
+}
+
+#[tokio::test]
+async fn verified_source_epochs_survive_queue_and_cannot_rebind_after_explicit_reapproval() {
+    use bcs_service_api::port::agent_invoke::AgentInvokeIdentityResolutionPort;
+    for after_prepare in [false, true] {
+        let f = Fixture::new(true, true).await;
+        f.auth.driver.sql("UPDATE bcs_bots SET agent_code='code' WHERE bot_uuid='bot-driver'", vec![]).await;
+        let source = f.auth.driver.store.resolve_invocation_source(&f.auth.driver.scope,
+            &AgentInvokeVerifiedBot { bot_id:"bot-driver".into(), agent_code:"code".into() }).await.unwrap();
+        let mut input = f.input(); input.authentication = AgentInvocationAuthentication::VerifiedSource(source);
+        f.grant().await;
+        f.h.direct.start_async_agent_invocation(f.command(), input).await.unwrap();
+        let row = f.h.row("agent-run").await;
+        assert_eq!(row.semantic_projection_json["version"],3);
+        assert!(row.semantic_projection_json["agent_invocation"]["verified_source"].is_object());
+        let mut prepared = if after_prepare { Some(f.preparation().prepare(&row).await.unwrap()) } else { None };
+        let started = if let Some(prepared) = &mut prepared { Some(f.start(&row, prepared).await) } else { None };
+        f.auth.driver.publish("bot-driver",true,true).await;
+        let rows=f.auth.driver.db.query(DbStatement::new("SELECT version FROM agent_invoke_grants LIMIT 1")).await.unwrap();
+        let version=bcs_db_api::db_get_column::<u64>(&rows[0],"version").unwrap();
+        f.change(AgentInvokeChange::Grant{expected_version:version},"fresh-explicit-approval").await;
+        // Control: current unbound trusted internal operation is legitimately
+        // allowed; only the older authenticated handoff must stay refused.
+        assert!(f.auth.driver.invocation().authorize_invocation(f.input()).await.is_ok());
+        if let (Some(started),Some(prepared))=(started,prepared){assert!(f.preparation().before_send(&started,&prepared.command).await.is_err());}
+        else {assert!(f.preparation().prepare(&row).await.is_err());}
+        assert!(f.h.support.bot_delivery.frames().await.is_empty());
+    }
 }

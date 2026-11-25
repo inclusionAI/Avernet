@@ -24,7 +24,8 @@ pub async fn agent_invoke_facts_port_contract_tests(fixture: &dyn AgentInvokeSna
         to_bot_id: "bot-b".into(),
     };
     let input = AgentInvocationInput {
-        principal: AgentInvokePrincipal::Agent("bot-a".into()),
+        authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("bot-a".into()),
         authenticated_scope: scope.clone(),
         pair: pair.clone(),
         originator: "bot-a".into(),

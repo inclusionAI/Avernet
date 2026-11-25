@@ -249,5 +249,27 @@ endpoint's authentication. Separate recording fault wrappers verify closed
 error mappings/actual application-port hits for all six writes and six reads;
 these are transport tests, not DB atomicity/unknown-commit proof. Full adapter
 regressions retain legacy/A2A/authority behavior and the application-only import
-gate. SDK, production host capabilities, direct operation dispatch and real
+gate. SDK, production host capabilities, complete invocation Run lifecycle and real
 HTTP->DB->A2A Singlebox acceptance remain distinct obligations.
+
+
+## Verified AgentInvoke ingress and physical handoff
+
+POST /api/v1/collaboration/agent-invoke/invocations and its OpenAPI mirror
+use existing principal verification/actual-source CSRF, no-store and request ID
+handling. Only a verified Bot with exact configured tenant is accepted; general
+App credentials or owner display identity cannot substitute. Scope and verified
+UUID/AgentCode go to the application, never through request-body assertions.
+
+Strict JSON (16 KiB) accepts target/message and optional session/timeout only;
+unknown/duplicate body/query fields, originator, qualification, authentication
+mode and Provider-header assertions are rejected. Independent composition
+capability defaults to None (503). 202/20200 means runtime acceptance, not
+completion or exactly-once; automatic retries are forbidden. New invocation
+Run GET/cancel and SDK contracts are not implied by this POST.
+
+OpenAPI contracts describe both prefixes. Real signed-token HTTP -> SQLite ->
+A2A transport tests live in message-flow's test composition; the adapter keeps
+its application-only boundary and no forbidden legacy protocol dependency.
+Physical source/epoch pinning is application/store/runtime responsibility.
+Production inventory/capability injection and Singlebox/rollout remain separate.

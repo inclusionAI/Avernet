@@ -40,6 +40,8 @@ bcs-config = { workspace = true }
 bcs-db-api = { workspace = true }
 
 [dev-dependencies]
+bcs-api-http = { workspace = true }
+jsonwebtoken = { workspace = true }
 bcs-db-migrations = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true, features = ["util"] }

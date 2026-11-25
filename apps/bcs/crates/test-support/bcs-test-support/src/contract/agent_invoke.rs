@@ -36,7 +36,8 @@ fn pair(from: &str, to: &str) -> AgentInvokePair {
 }
 fn input(driver: &dyn AgentInvokeContractDriver, from: &str, to: &str) -> AgentInvocationInput {
     AgentInvocationInput {
-        principal: AgentInvokePrincipal::Agent(from.into()),
+        authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent(from.into()),
         authenticated_scope: driver.scope(),
         pair: pair(from, to),
         originator: from.into(),
@@ -736,4 +737,36 @@ pub async fn run_agent_invoke_atomic_limits_contract(driver: &dyn AgentInvokeCon
     );
     assert_eq!(allowed, 1);
     assert_eq!(driver.audit_count().await, 1);
+}
+
+
+/// Current exact Bot identity handoff; fixture must already register/qualify it.
+pub async fn agent_invoke_identity_resolution_port_contract_tests(
+    repo: &dyn bcs_service_api::port::agent_invoke::AgentInvokeIdentityResolutionPort,
+    scope: AgentInvokeScope, identity: AgentInvokeVerifiedBot,
+) {
+    let first = repo.resolve_invocation_source(&scope, &identity).await.unwrap();
+    assert!(first.registration.registration_id.get() > 0);
+    assert_eq!(repo.resolve_invocation_source(&scope, &identity).await.unwrap(), first);
+    let mut foreign = scope.clone(); foreign.namespace.push_str("-foreign");
+    assert!(repo.resolve_invocation_source(&foreign, &identity).await.is_err());
+    let mut wrong_code = identity.clone(); wrong_code.agent_code.push(' ');
+    assert!(repo.resolve_invocation_source(&scope, &wrong_code).await.is_err());
+    let mut missing = identity; missing.bot_id.push_str("-absent");
+    assert!(repo.resolve_invocation_source(&scope, &missing).await.is_err());
+}
+
+pub async fn agent_invoke_direct_service_contract_tests(
+    service: &dyn bcs_service_api::application::agent_invoke::AgentInvokeDirectService,
+    command: bcs_service_api::application::agent_invoke::AgentInvokeDirectCommand,
+) {
+    let mut wrong_scope = command.clone(); wrong_scope.authenticated_scope.namespace.push_str("-foreign");
+    assert!(service.invoke(wrong_scope).await.is_err());
+    let mut empty = command.clone(); empty.message.clear();
+    assert!(service.invoke(empty).await.is_err());
+    let target = command.to_bot_id.clone();
+    let result = service.invoke(command).await.expect("approved real direct operation");
+    assert_eq!(result.bot_uuid, target);
+    assert!(!result.run_id.is_empty());
+    assert!(!result.session_id.is_empty());
 }

@@ -31,7 +31,8 @@ impl A2aChatRunService for Recording {
     async fn cancel_run(&self, _: ChatRunCancelCommand) -> ServiceResult<A2aRunStatus> { panic!("unused") }
 }
 fn invocation() -> AgentInvocationInput {
-    AgentInvocationInput { principal: AgentInvokePrincipal::Agent("source".into()), authenticated_scope: AgentInvokeScope {
+    AgentInvocationInput { authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("source".into()), authenticated_scope: AgentInvokeScope {
         namespace: "isolated".into(), env: "test".into() }, pair: AgentInvokePair { from_bot_id: "source".into(), to_bot_id: "target".into() },
         originator: "source".into(), operation: AgentInvokeOperation::DirectInvocation }
 }

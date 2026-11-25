@@ -557,3 +557,27 @@ SQLite lifecycle writes, Notify-controlled revocation, and actual scheduler fake
 transport sends. They do not establish multi-worker/load, trusted HTTP ingress,
 production inventory capability, or Singlebox E2E coverage; production assembly
 remains disabled until those separate contracts are satisfied.
+
+
+## Verified AgentInvoke ingress and physical handoff
+
+AgentInvokeDirectApplicationService validates authenticated scope, required Bot
+identity/target/text, direct session and finite timeout, calls the identity port
+once, then invokes only start_async_agent_invocation with trusted caller/from/
+channel/originator. No legacy fallback, App/Human-as-Bot, Provider headers or
+client-chosen authentication mode can enter this facade.
+
+VerifiedSource pins registration ID/revision and binding/eligibility generations;
+private V3 retains these through queue pickup and final before_send. V1 ordinary
+and V2 trusted-internal projections retain their prior meanings. Older readers
+refuse V3; version/pin mismatch never downgrades. A rebind plus explicit fresh
+approval cannot silently retarget an old authenticated handoff. Tests prove that
+with actual SQLite publication/reapproval and current unbound authorization as a
+positive control. Signed HTTP/SQL/A2A transport composition lives in this crate's
+tests, preserving the HTTP adapter's prohibition on legacy protocol dependencies.
+
+The public facade adds one bounded identity query: asynchronous inline uses four
+identity/authz reads and queued lifecycle six, plus the existing two-actor Provider
+checks. No new authorization transaction, cache, N+1 or network-held DB lock.
+Production inventory/assembly, separate V1 Run GET/cancel and SDK, Singlebox and
+rollout remain incomplete; 202 acceptance is not completion or idempotence.

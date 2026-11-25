@@ -13,6 +13,8 @@ info:
     the long-standing Bot identity store fault keeps its 502 /
     bot_identity_unavailable mapping.
 paths:
+  /api/v1/collaboration/agent-invoke/invocations:
+    $ref: ./openapi/agent-invoke-direct.yaml#/InternalInvokePath
   /api/v1/collaboration/agent-invoke/grants:
     $ref: ./openapi/agent-invoke.yaml#/InternalGrantsPath
   /api/v1/collaboration/agent-invoke/requests:

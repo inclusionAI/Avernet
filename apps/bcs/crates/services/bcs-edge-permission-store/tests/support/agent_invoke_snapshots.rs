@@ -31,7 +31,8 @@ pub fn pair() -> AgentInvokePair {
 }
 pub fn input() -> AgentInvocationInput {
     AgentInvocationInput {
-        principal: AgentInvokePrincipal::Agent("bot-a".into()),
+        authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("bot-a".into()),
         authenticated_scope: scope(),
         pair: pair(),
         originator: "bot-a".into(),

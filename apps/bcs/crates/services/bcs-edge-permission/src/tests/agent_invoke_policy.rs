@@ -45,7 +45,8 @@ fn state(id: &str) -> AgentInvokeBotState {
 }
 fn input() -> AgentInvocationInput {
     AgentInvocationInput {
-        principal: AgentInvokePrincipal::Agent("bot-a".into()),
+        authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("bot-a".into()),
         authenticated_scope: scope(),
         pair: pair(),
         originator: "bot-a".into(),
@@ -54,6 +55,7 @@ fn input() -> AgentInvocationInput {
 }
 fn runtime() -> AgentInvokeRuntimeSnapshot {
     AgentInvokeRuntimeSnapshot {
+        source_registration: AgentInvokeRegistrationBinding { registration_id: NonZeroU64::MIN, identity_revision: NonZeroU64::MIN },
         scope: scope(),
         pair: pair(),
         source: state("bot-a"),

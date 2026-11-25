@@ -33,7 +33,8 @@ fn caps(code: Option<&str>) -> BotCapabilities {
 }
 fn input(d: &Driver) -> AgentInvocationInput {
     AgentInvocationInput {
-        principal: AgentInvokePrincipal::Agent("registry-a".into()),
+        authentication: AgentInvocationAuthentication::TrustedInProcess,
+            principal: AgentInvokePrincipal::Agent("registry-a".into()),
         authenticated_scope: d.scope.clone(),
         pair: pair(),
         originator: "registry-a".into(),

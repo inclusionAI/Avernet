@@ -95,6 +95,14 @@ impl AgentInvokePolicyCoreService for AgentInvokePolicy {
         }
         validate_states(&input.pair, &snapshot.source, &snapshot.target)?;
         require_eligible(&snapshot.source, &snapshot.target)?;
+        if let AgentInvocationAuthentication::VerifiedSource(source) = &input.authentication {
+            if source.registration != snapshot.source_registration
+                || source.binding_generation != snapshot.source.binding_generation
+                || source.eligibility_generation != snapshot.source.eligibility_generation
+            {
+                return Err(AgentInvokeError::Forbidden);
+            }
+        }
         let approval = snapshot
             .approval
             .as_ref()

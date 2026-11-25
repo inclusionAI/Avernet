@@ -1,6 +1,7 @@
 //! Durable Agent invocation storage. SQL, time, CAS and audit stay here, never
 //! in the application or a delivery adapter. Installation creates no eligible
 //! facts and enables no writer/runtime. Trusted composition owns activation.
+mod identity;
 mod facts;
 mod scope;
 mod snapshots;

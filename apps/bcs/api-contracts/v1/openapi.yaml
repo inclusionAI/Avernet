@@ -29,6 +29,8 @@ tags:
   - name: Group Context
     description: Versioned, permission-tagged KV store for bot teams within a group.
 paths:
+  /openapi/v1/collaboration/agent-invoke/invocations:
+    $ref: ./openapi/agent-invoke-direct.yaml#/ExternalInvokePath
   /openapi/v1/collaboration/agent-invoke/grants:
     $ref: ./openapi/agent-invoke.yaml#/ExternalGrantsPath
   /openapi/v1/collaboration/agent-invoke/requests:

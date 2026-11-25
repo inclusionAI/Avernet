@@ -380,3 +380,23 @@ historical schema/migration is edited. Additional dependencies on Bot store and
 configuration are dev-only concrete test assembly, not new production edges.
 External inventory/Provider-wide invalidation, host capabilities, trusted HTTP
 ingress, dispatch and E2E are still required before production activation.
+
+
+## Verified AgentInvoke ingress and physical handoff
+
+DbAgentInvokeStore implements AgentInvokeIdentityResolutionPort with one current
+read of configured scope, exact physical Bot and trusted source facts (six binds,
+LIMIT 2, no OFFSET or writes). Verified UUID and AgentCode must both match
+byte-exact; code-only lookup and qualification inference are forbidden. Missing/
+ambiguous registration, actor-kind mismatch, deletion/hidden, bad or expired facts,
+closed runtime capability and DB errors fail closed. The result pins physical ID/
+identity revision plus current binding/eligibility generations.
+
+Runtime snapshots expose source physical registration to policy without adding a
+query or changing schema. Public direct ingress adds this one identity SELECT to
+existing bounded runtime checks; no positive cache, graph scan or transaction is
+introduced. SQLite query/bind/row/EXPLAIN tests and shared resolver conformance
+verify the local path; the same harness is registered in the existing native MySQL
+selector, whose ignored local test is not a MySQL pass. Existing migrations and
+checksums remain frozen. Host inventory/consumer capability and production
+assembly are still required before enabling writers.

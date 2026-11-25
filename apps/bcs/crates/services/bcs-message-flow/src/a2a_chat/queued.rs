@@ -71,7 +71,10 @@ impl A2aChat {
         let snapshot = bcs_config_api::queued_provider_headers::snapshot(&headers, &flow.queue_persistable_headers);
         let rejection = snapshot.as_ref().err().map(|_| bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection::ProviderHeadersUnsupported);
         let projection = DirectProjection {
-            version: if invocation.is_some() { 2 } else { 1 },
+            version: invocation.map_or(1, |input| match input.authentication {
+                bcs_service_api::application::agent_invoke::AgentInvocationAuthentication::TrustedInProcess => 2,
+                bcs_service_api::application::agent_invoke::AgentInvocationAuthentication::VerifiedSource(_) => 3,
+            }),
             agent_invocation: invocation.map(agent_invocation::DirectInvocationProjection::from_input),
             from_bot_id: from.into(), from_actor_id: cmd.from_actor_id.clone().unwrap_or_else(|| from.into()),
             sender_name: self.sender_display_name(from).await, target_tags: cmd.tags.clone(),

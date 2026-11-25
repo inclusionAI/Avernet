@@ -28,6 +28,7 @@ pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub struct ApiState {
+    pub agent_invoke_direct: Option<Arc<crate::v1::agent_invoke::AgentInvokeDirectHttpServices>>,
     pub agent_invoke: Option<Arc<crate::v1::agent_invoke::AgentInvokeHttpServices>>,
     pub a2a_service: Option<Arc<dyn bcs_service_api::application::v1::a2a::A2aService>>,
     pub worker_task_service: Option<Arc<dyn bcs_service_api::application::TaskHandleService>>,
@@ -85,6 +86,7 @@ impl ApiState {
         principal_verifier: Arc<dyn PrincipalVerifier>,
     ) -> Self {
         Self {
+            agent_invoke_direct: None,
             agent_invoke: None,
             a2a_service: None,
             worker_task_service: None,
@@ -118,6 +120,11 @@ impl ApiState {
             principal_verifier,
             trusted_browser_origins: None,
         }
+    }
+
+    pub fn with_agent_invoke_direct(mut self, services: crate::v1::agent_invoke::AgentInvokeDirectHttpServices) -> Self {
+        self.agent_invoke_direct = Some(Arc::new(services));
+        self
     }
 
     pub fn with_agent_invoke(mut self, services: crate::v1::agent_invoke::AgentInvokeHttpServices) -> Self {
