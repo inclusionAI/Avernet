@@ -4,7 +4,11 @@ POST /api/bots/{bot_id}/activate
 POST /api/bots/dormant-whitelist/batch
 """
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Response
+from starlette.concurrency import run_in_threadpool
+
+from agentclaw.community.api.bot_dormant_service import BotDormantRecycleOperationProtocol
+from agentclaw.community.core.bot_management.engines.restart_contract import RecycleUnavailable
 
 from agentclaw.community.adapters.http.bot_dormant.schemas import (
     ActivateBotResponse,
@@ -178,6 +182,7 @@ async def mark_notification_sent(
 @internal_router.post("/recycle-one")
 async def recycle_one(
     body: OpsRecycleOneRequest,
+    response: Response,
     _: None = Depends(verify_dormant_internal_token),
     service: DormantOpsService = Injected(DormantOpsService),
 ) -> dict:
@@ -187,13 +192,22 @@ async def recycle_one(
         body.bot_id, body.owner_id, body.dry_run, body.reason,
     )
     try:
-        data = service.recycle_one(
+        data = await run_in_threadpool(  # allow-run-in-threadpool: synchronous ops admission
+            service.recycle_one,
             bot_id=body.bot_id,
             owner_id=body.owner_id,
             dry_run=body.dry_run,
             reason=body.reason,
         )
+        if data.get("operation_id") is not None:
+            response.status_code = 202
         return {"ok": True, "data": data}
+    except BotNotFoundError as e:
+        raise HTTPException(status_code=404, detail="Bot not found") from e
+    except BotInvalidLifecycleStateError as e:
+        raise HTTPException(status_code=409, detail="Bot lifecycle is busy or incompatible") from e
+    except RecycleUnavailable as e:
+        raise HTTPException(status_code=503, detail="Recycle acceptance unavailable") from e
     except (ValueError, BotOperationNotAllowedError) as e:
         logger.warning(
             "[dormant.ops.recycle_one] rejected bot_id=%s owner_id=%s error=%s",
@@ -206,6 +220,28 @@ async def recycle_one(
             body.bot_id, body.owner_id,
         )
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@internal_router.get("/bots/{bot_id}/recycle-operations/{operation_id}")
+async def get_recycle_operation(
+    bot_id: str,
+    operation_id: str,
+    owner_id: str = Query(...),
+    _: None = Depends(verify_dormant_internal_token),
+    service: BotDormantRecycleOperationProtocol = Injected(BotDormantRecycleOperationProtocol),
+) -> dict:
+    """Read the same latest operation as OpenAPI; HTTP 200 is not task success."""
+    try:
+        data = await run_in_threadpool(  # allow-run-in-threadpool: synchronous Protocol method
+            service.get_operation,
+            bot_id=bot_id, owner_id=owner_id, operation_id=operation_id,
+        )
+        return {"ok": True, "data": data}
+    except BotNotFoundError as e:
+        raise HTTPException(status_code=404, detail="Recycle operation not found") from e
+    except Exception as e:
+        logger.exception("[dormant.ops.get_recycle_operation] failed bot_id=%s", bot_id)
+        raise HTTPException(status_code=500, detail="Unable to read recycle operation") from e
 
 
 @internal_router.post("/unfreeze-passport-one")
