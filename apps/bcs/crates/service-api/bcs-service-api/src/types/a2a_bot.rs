@@ -98,3 +98,23 @@ pub struct A2aRegistrationCard {
 }
 
 pub use bcs_domain::a2a_management;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn presence_aware_agent_identity_round_trips_present_and_sql_values() {
+        let omitted = A2aAgentIdentity::from_present(None);
+        assert_eq!(omitted, A2aAgentIdentity::Omitted);
+        assert_eq!(omitted.as_sql_option(), None);
+
+        let sql_null = A2aAgentIdentity::from_present(Some(None));
+        assert_eq!(sql_null, A2aAgentIdentity::Null);
+        assert_eq!(sql_null.as_sql_option(), Some(None));
+
+        let identity = A2aAgentIdentity::from_present(Some(Some("agent-01".into())));
+        assert_eq!(identity, A2aAgentIdentity::Text("agent-01".into()));
+        assert_eq!(identity.as_sql_option(), Some(Some("agent-01".into())));
+    }
+}
