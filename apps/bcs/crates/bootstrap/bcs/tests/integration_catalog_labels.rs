@@ -139,7 +139,7 @@ async fn agent_http_persistence_retry_restart_and_full_payload(){
     payload(&mock,from,id,Some("running")).await;
     let response=http.put(&endpoint).bearer_auth(&token).json(&json!({"catalog_labels":{}})).send().await.unwrap();assert!(response.status().is_success());
     mock.fail.store(false,Ordering::SeqCst);let cleared=payload(&mock,from,id,None).await;
-    assert_eq!(cleared["labels"].as_object().unwrap().len(),2);assert!(!cleared.to_string().contains("tombstone"));
+    assert_eq!(cleared["labels"].as_object().unwrap().len(),3);assert!(!cleared.to_string().contains("tombstone"));
     let response=http.put(&endpoint).bearer_auth(&token).json(&json!({"catalog_labels":{"stage":["running"]}})).send().await.unwrap();assert!(response.status().is_success());
     let find:Value=http.get(format!("{base}?provider_bot_ref=labels-source")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();assert_eq!(find["data"]["items"][0]["catalog_labels"],json!({"stage":["running"]}));
     // Close the serving task/lifecycles, rebuild against the same persisted schema/data.

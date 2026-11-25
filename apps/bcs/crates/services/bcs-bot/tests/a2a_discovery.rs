@@ -58,10 +58,16 @@ async fn fixture() -> Fixture {
             vec![id.into(),env.clone().into(),format!("BCS {id}").into(),serde_json::to_string(&caps).unwrap().into(),provider.clone().into(),id.into(),visibility.into()])).await.unwrap();
         if id!="legacy" {
             record.bot_uuid=id.into();record.provider_bot_ref=id.into();record.provider_id=provider;
+            record.visibility=match visibility {
+                "public" => bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Public,
+                "private" => bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Private,
+                _ => bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,
+            };
             assert!(cards.compare_and_set(&record,0).await.unwrap());
         }
     }
     record.bot_uuid="card-1".into();record.provider_bot_ref="card-1".into();record.provider_id="provider".into();
+    record.visibility=bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Public;
     let providers=Arc::new(MemoryProviderStore::new());
     let control=Arc::new(BotControlPlaneCore::new(Arc::new(PersistentBotRepo::with_sql_flavor(db.clone(),DbSqlFlavor::Sqlite)),providers.clone(),providers));
     let core=Arc::new(A2aBotCore::new(cards.clone(),Arc::new(DbProviderStore::sqlite(db.clone()))));
