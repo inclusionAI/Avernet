@@ -52,6 +52,9 @@ from agentclaw.community.api.bot_config_manifest_service import (
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot.collaborator import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.di import Injected
 from .config_manifest_support import (
     apply_payload,
@@ -138,6 +141,9 @@ async def update_bot_config_manifest(
         ApplyRunServiceProtocol
     ),
     bot_repo: BotRepository = Injected(BotRepository),
+    collaborator_repository: CollaboratorRepositoryProtocol = Injected(
+        CollaboratorRepositoryProtocol
+    ),
 ) -> Envelope[ConfigManifest | ConfigManifestApply]:
     """Set or replace a bot's configuration manifest, and apply it.
 
@@ -190,7 +196,10 @@ async def update_bot_config_manifest(
     # The Copy endpoint checks this at submission; a plain Manifest PUT reaches
     # the same path without it, so the gate lives here too.
     assert_from_bot_source_access(
-        document=body.document, owner_id=owner_id, bot_repo=bot_repo
+        document=body.document,
+        owner_id=owner_id,
+        bot_repo=bot_repo,
+        collaborator_repository=collaborator_repository,
     )
     result = manifest_service.put(
         entity_id=entity_id,

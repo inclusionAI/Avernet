@@ -82,8 +82,25 @@ class DormantOpsService:
         dry_run: bool = True,
         reason: str | None = None,
     ) -> dict:
-        """Recycle exactly one ACTIVE personal bot through the dormant path."""
+        """Preview one Bot, or recycle through the engine-selected path."""
         run_id = f"manual-recycle-{uuid.uuid4()}"
+        recycle_result = None
+        if not dry_run:
+            recycle_result = self._recycle_service.submit(
+                bot_id=bot_id, owner_id=owner_id, request_id=run_id,
+                source="manual_ops", reason=reason,
+            )
+            if recycle_result["operation_id"] is not None:
+                logger.info(
+                    "[dormant.ops.recycle_one] event=accepted operation_id=%s "
+                    "bot_id=%s owner_id=%s phase=%s changed=%s",
+                    recycle_result["operation_id"], bot_id, owner_id,
+                    recycle_result["phase"], recycle_result["changed"],
+                )
+                return {**recycle_result, "run_id": recycle_result["operation_id"], "dry_run": False}
+            if not recycle_result["changed"]:
+                return {**recycle_result, "run_id": run_id, "dry_run": False}
+
         logger.info(
             "[dormant.ops.recycle_one] event=start run_id=%s bot_id=%s "
             "owner_id=%s dry_run=%s reason=%s",
@@ -110,28 +127,30 @@ class DormantOpsService:
                 )
                 raise ValueError(f"bot not found: bot_id={bot_id} owner_id={owner_id}")
 
-            status = getattr(bot, "status", None)
-            bot_type = getattr(bot, "bot_type", None)
-            if status != "ACTIVE":
-                logger.warning(
-                    "[dormant.ops.recycle_one] event=invalid_status run_id=%s "
-                    "bot_id=%s owner_id=%s status=%s",
-                    run_id, bot_id, owner_id, status,
-                )
-                raise ValueError(
-                    f"only ACTIVE bot can be manually recycled, current: {status}"
-                )
-            if bot_type != "personal":
-                logger.warning(
-                    "[dormant.ops.recycle_one] event=invalid_bot_type run_id=%s "
-                    "bot_id=%s owner_id=%s bot_type=%s",
-                    run_id, bot_id, owner_id, bot_type,
-                )
-                raise ValueError(
-                    f"only personal bot can be manually recycled, current: {bot_type}"
-                )
-            self._recycle_service.ensure_supported(bot.to_dict())
-
+            # Real submissions have already passed shared admission. Dry-run
+            # keeps the old preview validation and has no lifecycle side effects.
+            if dry_run:
+                status = getattr(bot, "status", None)
+                bot_type = getattr(bot, "bot_type", None)
+                if status != "ACTIVE":
+                    logger.warning(
+                        "[dormant.ops.recycle_one] event=invalid_status run_id=%s "
+                        "bot_id=%s owner_id=%s status=%s",
+                        run_id, bot_id, owner_id, status,
+                    )
+                    raise ValueError(
+                        f"only ACTIVE bot can be manually recycled, current: {status}"
+                    )
+                if bot_type != "personal":
+                    logger.warning(
+                        "[dormant.ops.recycle_one] event=invalid_bot_type run_id=%s "
+                        "bot_id=%s owner_id=%s bot_type=%s",
+                        run_id, bot_id, owner_id, bot_type,
+                    )
+                    raise ValueError(
+                        f"only personal bot can be manually recycled, current: {bot_type}"
+                    )
+                self._recycle_service.ensure_supported(bot.to_dict())
             now = datetime.now(UTC).replace(tzinfo=None)
             gmt_create = getattr(bot, "gmt_create", None) or now
             days_inactive = max((now - gmt_create).days, 0)
@@ -145,11 +164,6 @@ class DormantOpsService:
             self._dormant_service._enqueue_recycle(
                 session, candidate, days_inactive, dry_run
             )
-            if not dry_run:
-                self._recycle_service.recycle(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                )
             self._dormant_service._write_audit(
                 session,
                 run_id=run_id,
@@ -162,6 +176,7 @@ class DormantOpsService:
                 source="manual_ops",
             )
         result = {
+            **(recycle_result or {}),
             "run_id": run_id,
             "bot_id": bot_id,
             "owner_id": owner_id,

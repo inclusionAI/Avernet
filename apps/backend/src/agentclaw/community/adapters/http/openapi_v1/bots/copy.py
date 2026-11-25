@@ -74,6 +74,9 @@ from agentclaw.community.core.bot_management.render_screen_service_protocol impo
     RenderScreenServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot.collaborator import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
     BotConfigManifestApplyRepositoryProtocol,
 )
@@ -422,6 +425,7 @@ def submit_copy(
     render_screen_service: RenderScreenServiceProtocol,
     bot_service: BotServiceProtocol,
     skill_set_service: SkillSetManagementServiceProtocol,
+    collaborator_repository: CollaboratorRepositoryProtocol,
 ) -> BotCopyResponse:
     """Validate source + serialize manifest + persist + apply Passport + hand off.
 
@@ -430,7 +434,13 @@ def submit_copy(
     manifest-creation flow (``manifest_seam.start_job`` → ``create_job``) drives
     apply + provision. ``creation.py`` / ``create_job`` are untouched.
     """
-    del owner_name
+    # ``owner_name`` is threaded into the durable creation spec as ``nick_name``
+    # (matching ``submit_manifest_creation`` at create_flow.py:513) so the worker
+    # path ``create_job → complete_bot_authorization`` resolves the dst's
+    # ``owner_name`` from the verified display name rather than the user_id
+    # fallback (create_flow.py:735 ``spec.get("nick_name", user_id)``). Without
+    # this the copy's dst bot would persist ``ac_bots.owner_name = <工号>``,
+    # diverging from every ordinary-create bot which carries the real name.
     # bot_id 非全局唯一(共享 bot_id 如 `default` 每用户一行):裸 get_by_id 的
     # .first() 会回取环境内任一 live 行,owner_id 错配 → 误判 no-edit-permission 403。
     # 按 bot_id + source_owner_id + env 精确定位源行(BotRepository.get_by_id_and_owner,
@@ -452,8 +462,19 @@ def submit_copy(
             status_code=409,
             detail=f"source bot status {source.get('status')} not copyable",
         )
-    actions = source.get("actions") or []
-    if source.get("owner_id") != owner_id and "edit" not in actions:
+    # Access gate (shared with the manifest ``from_bot`` source check in
+    # ``source_bot_access.assert_from_bot_source_access``): the caller passes as
+    # the source Bot's owner, or as a collaborator on it (any role —
+    # ``ac_bot_collaborator`` row keyed by the source's ``ac_bots.id``). The
+    # earlier ``"edit" not in actions`` test was unreachable — ``bot_repo``'s row
+    # has no ``actions`` column (actions are listing-time, per-caller), so only
+    # owners ever passed; explicit collaborators were wrongly refused.
+    if source.get("owner_id") != owner_id and (
+        collaborator_repository.get_by_bot_and_user(
+            int(source["id"]), owner_id, get_current_env()
+        )
+        is None
+    ):
         raise HTTPException(status_code=403, detail="no edit permission on source bot")
 
     operation_id = _generate_operation_id()
@@ -467,7 +488,28 @@ def submit_copy(
 
     dst_bot_id = generate_bot_id(owner_id, bot_repo)
 
-    current_space = space_context.resolve_current(owner_id=owner_id, header_space_id=None)
+    # Copy is same-space only: the dst lands in the source's business space, not
+    # the caller's personal default. Routing ``source.space_id`` through
+    # ``resolve_current`` (the same resolver the plain create route uses for its
+    # ``body.space_id``) gives both the membership enforcement and the quota
+    # scope split for free — a team ``space_id`` resolves to a team scope (the
+    # caller must be a member, else ``_require_member_space`` raises), and a
+    # NULL/``personal:<owner>`` value resolves to the caller's personal space.
+    # The resolved ``space_id`` then flows into the quota preflight below and the
+    # durable creation spec, so ``create_job``'s downstream ``create_bot`` →
+    # ``guard_add`` re-evaluates quota in the *same* scope, never silently
+    # re-routing a team copy back to the owner's personal ceiling.
+    #
+    # ``resolve_current`` takes ``header_space_id: str | None`` (it originally
+    # consumes an HTTP header and calls .strip() on it). The bot row's
+    # ``space_id`` is a ``BigInt`` column — an int (or NULL for personal bots),
+    # so it must be stringified on the way in, mirroring retry_copy. Passing the
+    # raw int would AttributeError on the .strip().
+    source_space_id = source.get("space_id")
+    current_space = space_context.resolve_current(
+        owner_id=owner_id,
+        header_space_id=str(source_space_id) if source_space_id is not None else None,
+    )
     space_id = getattr(current_space, "numeric_id", None)
 
     # Pre-flight platform validation (quota / reserved-engine / name) before
@@ -602,6 +644,9 @@ def submit_copy(
         ),
         "request_detail": body.request_detail,
         "source_bot_id": source["bot_id"],
+        # See the ``owner_name`` note above: this is the verified display name
+        # the worker reads at create_flow.py:735 to fill ``ac_bots.owner_name``.
+        "nick_name": owner_name,
     }
 
     passport_result = passport_plugin.apply_agent_passport(
@@ -725,8 +770,19 @@ def retry_copy(
     # bot fields; PUBLIC + CLOUD mirror the public OpenAPI surface. Copy is
     # openclaw-only, so a missing engine on a still-partial dst falls back to
     # openclaw rather than a None BotCreateSpec.engine_type would reject.
+    # ``header_space_id`` seeds ``resolve_current`` from the dst's recorded
+    # space_id so a retry of a copy-into-team-space preserves team scope/kind,
+    # and a NULL dst space_id resolves to the owner's real personal Space. The
+    # spec's ``space_id`` then comes from ``retry_space.numeric_id`` (not the raw
+    # ``dst.get("space_id")``) -- same translator submit_copy uses -- so a
+    # personal retry on a NULL dst row is promoted to the real personal numeric
+    # id and ``guard_add`` counts both ``space_id IS NULL`` and ``space_id ==
+    # <real personal id>`` bots; passing the raw None here would under-count and
+    # diverge from submit_copy's first-write form.
+    dst_space_id = dst.get("space_id")
     retry_space = space_context.resolve_current(
-        owner_id=row.dst_owner_id, header_space_id=None
+        owner_id=row.dst_owner_id,
+        header_space_id=str(dst_space_id) if dst_space_id is not None else None,
     )
     payload_spec: dict[str, Any] = {
         **creation_spec_to_payload(
@@ -736,7 +792,7 @@ def retry_copy(
                 bot_type=dst.get("bot_type") or "personal",
                 bot_name=dst.get("bot_name"),
                 bot_desc=dst.get("bot_desc"),
-                space_id=dst.get("space_id"),
+                space_id=getattr(retry_space, "numeric_id", None),
                 template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
             ),
             BotCreateContext(
@@ -747,6 +803,14 @@ def retry_copy(
         ),
         "request_detail": row.request_detail,
         "source_bot_id": row.source_bot_id,
+        # Threading ``nick_name`` here keeps a retry's re-write of the dst row
+        # consistent with submit_copy's first write: read the name the first
+        # write already persisted on the dst bot row (``ac_bots.owner_name``),
+        # falling back to the owner id if the dst record is still partial (first
+        # submit failed before the row was written) -- same fallback shape the
+        # worker applies at create_flow.py:735. This avoids the worker's
+        # ``user_id`` fallback re-stamping a real-name dst with the 工号.
+        "nick_name": dst.get("owner_name") or row.dst_owner_id,
     }
     manifest_seam.start_job(
         bot_id=row.dst_bot_id,
@@ -791,6 +855,9 @@ async def copy_bot(
     skill_set_service: SkillSetManagementServiceProtocol = Injected(
         SkillSetManagementServiceProtocol
     ),
+    collaborator_repository: CollaboratorRepositoryProtocol = Injected(
+        CollaboratorRepositoryProtocol
+    ),
 ) -> Envelope[BotCopyResponse]:
     """Copy an openclaw bot to a new dst bot (v1, Route B manifest-reuse)."""
     del caller
@@ -807,6 +874,7 @@ async def copy_bot(
         render_screen_service=render_screen_service,
         bot_service=bot_service,
         skill_set_service=skill_set_service,
+        collaborator_repository=collaborator_repository,
     )
     return envelope(result, request)
 

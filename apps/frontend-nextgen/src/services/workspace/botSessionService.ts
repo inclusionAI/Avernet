@@ -108,6 +108,18 @@ export interface BotModelView {
   badge?: BotModelBadge;
 }
 
+export interface BotSessionScopeOptions {
+  /** “对话”本人会话使用 subject scope；Bot 工坊运维链路显式关闭。 */
+  subjectScoped?: boolean;
+}
+
+export interface BotSessionCreateOptions extends BotSessionScopeOptions {
+  friendlyErrors?: boolean;
+  /** Caller 首次分配已受理时，在同一幂等创建链路内等待运行时就绪。 */
+  waitForCallerRuntime?: boolean;
+  signal?: AbortSignal;
+}
+
 const COMPOUND_ID_RE = /^.+:.+$/;
 
 export function splitBotId(botId: string): { realBotId: string; ownerId?: string } {
@@ -171,6 +183,49 @@ export function withConversationSubjectParams<T extends { user_id: string; owner
     ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
     f_user_id: resolveUserId(userId),
   };
+}
+
+/** 按产品入口选择运行时参数；关闭 subject scope 时仍保留服务 Bot 的阶段寻址。 */
+export function withBotSessionScope<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
+  bot: ChatBotView,
+  userId: string,
+  params: T,
+  subjectScoped = true,
+): Omit<T, 'stage'> & { stage?: BotIamTokenStage; f_user_id?: string } {
+  if (subjectScoped) return withConversationSubjectParams(bot, userId, params);
+  const { stage: requestedStage, ...baseParams } = params;
+  return {
+    ...baseParams,
+    ...(bot.botType === 'service'
+      ? { stage: requestedStage ?? resolveChatRuntimeStage(bot) }
+      : {}),
+  };
+}
+
+const CALLER_RUNTIME_PREPARING_CODE = 409113;
+const CALLER_RUNTIME_POLL_INTERVAL_MS = 3_000;
+const CALLER_RUNTIME_POLL_TIMEOUT_MS = 150_000;
+
+function isCallerRuntimePreparing(error: unknown): error is BackendRequestError {
+  if (!(error instanceof BackendRequestError) || error.status !== 409) return false;
+  const code = (error.data as { code?: unknown } | null)?.code;
+  return Number(code) === CALLER_RUNTIME_PREPARING_CODE;
+}
+
+function waitForCallerRuntime(signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, CALLER_RUNTIME_POLL_INTERVAL_MS);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function toDomainError(e: unknown): DomainError {
@@ -427,14 +482,18 @@ export const botSessionService = {
       return { ok: false, error: toDomainError(e) };
     }
   },
-  async listSessions(bot: ChatBotView, userId: string): Promise<DomainResult<BotChatSessionView[]>> {
+  async listSessions(
+    bot: ChatBotView,
+    userId: string,
+    subjectScoped = true,
+  ): Promise<DomainResult<BotChatSessionView[]>> {
     try {
-      const params = withConversationSubjectParams(bot, userId, {
+      const params = withBotSessionScope(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
         page: 1,
         page_size: 50,
-      });
+      }, subjectScoped);
       const resp = await listBotSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId));
       return { ok: true, data: items };
@@ -446,16 +505,36 @@ export const botSessionService = {
     bot: ChatBotView,
     userId: string,
     title: string = '新会话',
-    options?: { friendlyErrors?: boolean },
+    options?: BotSessionCreateOptions,
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
-      const params = withConversationSubjectParams(bot, userId, {
+      const params = withBotSessionScope(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
-      });
-      const resp = options?.friendlyErrors
-        ? await createBotSession(bot.realBotId, params, { title }, undefined, '创建会话失败，请稍后重试')
-        : await createBotSession(bot.realBotId, params, { title });
+      }, options?.subjectScoped !== false);
+      const startedAt = Date.now();
+      let resp;
+      while (true) {
+        try {
+          resp = options?.friendlyErrors || options?.signal || options?.waitForCallerRuntime
+            ? await createBotSession(
+                bot.realBotId,
+                params,
+                { title },
+                options?.signal,
+                options?.friendlyErrors ? '创建会话失败，请稍后重试' : undefined,
+              )
+            : await createBotSession(bot.realBotId, params, { title });
+          break;
+        } catch (error) {
+          const canPoll = options?.waitForCallerRuntime === true
+            && isCallerRuntimePreparing(error)
+            && Date.now() - startedAt + CALLER_RUNTIME_POLL_INTERVAL_MS <= CALLER_RUNTIME_POLL_TIMEOUT_MS;
+          if (!canPoll) throw error;
+          if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
+          await waitForCallerRuntime(options.signal);
+        }
+      }
       const s = resp.data;
       if (!s) throw new Error('创建会话失败');
       return { ok: true, data: toSessionView(s, bot.botId) };
@@ -532,12 +611,17 @@ export const botSessionService = {
       return { ok: false, error: toDomainError(e) };
     }
   },
-  async clearContext(bot: ChatBotView, userId: string, sessionId: string): Promise<DomainResult<null>> {
+  async clearContext(
+    bot: ChatBotView,
+    userId: string,
+    sessionId: string,
+    subjectScoped = true,
+  ): Promise<DomainResult<null>> {
     try {
       await deleteBotSessionMessages(
         bot.realBotId,
         sessionId,
-        withConversationSubjectParams(bot, userId, { user_id: resolveUserId(userId) }),
+        withBotSessionScope(bot, userId, { user_id: resolveUserId(userId) }, subjectScoped),
       );
       return { ok: true, data: null };
     } catch (e) {
@@ -626,14 +710,18 @@ export const botSessionService = {
     return page.messages;
   },
 
-  async listModels(bot: ChatBotView, userId: string): Promise<DomainResult<BotModelView[]>> {
+  async listModels(
+    bot: ChatBotView,
+    userId: string,
+    subjectScoped = true,
+  ): Promise<DomainResult<BotModelView[]>> {
     try {
-      const params = withConversationSubjectParams(bot, userId, {
+      const params = withBotSessionScope(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
         page: 1,
         page_size: 50,
-      });
+      }, subjectScoped);
       const resp = await listBotModels(bot.realBotId, params);
       return { ok: true, data: (resp.data?.items ?? []).map(toModelView) };
     } catch (e) {
@@ -646,9 +734,12 @@ export const botSessionService = {
     userId: string,
     sessionId: string,
     model: string,
+    subjectScoped = true,
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
-      const params = withConversationSubjectParams(bot, userId, { user_id: resolveUserId(userId) });
+      const params = withBotSessionScope(
+        bot, userId, { user_id: resolveUserId(userId) }, subjectScoped,
+      );
       const resp = await updateBotSession(bot.realBotId, sessionId, params, { model });
       if (!resp.data) throw new Error('更新会话模型失败');
       return { ok: true, data: toSessionView(resp.data, bot.botId) };

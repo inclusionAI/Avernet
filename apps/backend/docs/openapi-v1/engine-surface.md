@@ -233,6 +233,21 @@ Example: `GET /openapi/v1/bots/example/sessions?owner_id=owner&user_id=reader&st
   or 501 to `EngineUpstreamError` — the request is safely refused, but the
   status under-describes it. Narrowing that mapping is a separate change.
   _Decided 2026-09-03._
+- **A conversation subject selects an engine strategy, not an engine-name
+  branch.** When `f_user_id` is present on an online Caller-mode service Bot,
+  engines whose registered provisioning strategy requires an independent
+  Caller runtime (OpenClaw, Hermes and the default strategy) route the session
+  to that Human's instance. Engines that isolate callers inside the published
+  service runtime (TeClaw) stay on the stage binding and use their registered
+  session-key codec. This same capability projection applies to every session
+  operation, so create, list, detail, messages, models and files cannot drift
+  into different routing rules.
+- **A first independent Caller runtime may still be provisioning.** In that
+  case `POST …/{bot_id}/sessions` returns HTTP `409`, envelope code `409113`,
+  message `Caller runtime is preparing`, and `Retry-After: 3`. The request has
+  not created a session and can be retried safely. Clients should poll with a
+  bounded wait; ordinary device-not-ready failures retain the existing
+  `409000` contract and must not be treated as this transition.
 
 ### engine (4) — engine `/api/engine`
 

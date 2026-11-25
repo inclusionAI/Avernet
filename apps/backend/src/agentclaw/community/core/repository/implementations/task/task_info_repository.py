@@ -129,19 +129,18 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
     def _keyword_filter(keyword: Optional[str]):
         """Build one case-insensitive substring filter over list-search fields.
 
-        A blank keyword disables the filter. Title matches come from the two
-        supported task-spec title paths, not the whole task-spec text.
+        A blank keyword disables the filter. The searchable fields are task_id,
+        owner_bot_id, and the user-facing task summary text in TaskSpec.
         """
-        normalized = (keyword or "").strip()
+        normalized = str(keyword or "").strip()
         if not normalized:
             return None
         safe_task_spec = SafeJsonDocument(TaskInfoModel.task_spec)
         field_values = (
             TaskInfoModel.task_id,
-            TaskInfoModel.source_type,
             TaskInfoModel.owner_bot_id,
             JsonText(safe_task_spec, "$.context.title"),
-            JsonText(safe_task_spec, "$.metadata.title"),
+            JsonText(safe_task_spec, "$.goal.objective"),
         )
         return or_(
             *(
