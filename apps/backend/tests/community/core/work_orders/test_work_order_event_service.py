@@ -280,6 +280,49 @@ def test_auto_mode_is_rejected_for_notice_events() -> None:
     repository.create_work_order_event.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("event_type", "recipients", "title"),
+    [
+        (
+            "HUMAN2BOT_FRIEND_REMOVED",
+            ["1001"],
+            "你已被移出 Bot 好友名单",
+        ),
+        (
+            "BOT2BOT_FRIEND_REMOVED",
+            ["86300"],
+            "你的 Bot 已被移出好友名单",
+        ),
+    ],
+)
+def test_friend_removed_notice_events_reach_repository(
+    event_type: str, recipients: list[str], title: str
+) -> None:
+    """Owner-initiated friend removal: the NOTICE intake accepts both removal
+    event types (registered in the catalog) and forwards them verbatim."""
+    service, repository, _, _, _ = _service()
+
+    service.create_work_order_event(
+        event_category=NotificationCategory.NOTICE,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-remove-1",
+        event_type=event_type,
+        applicant_user_id=None,
+        approver_user_ids=[],
+        recipient_user_ids=recipients,
+        title=title,
+        content={"text": "Bot「x」的管理者已解除好友关系。"},
+        apply_reason=None,
+        biz_data={"request_ids": ["42"]},
+        actor_id="owner-1",
+    )
+
+    call = repository.create_work_order_event.call_args.kwargs
+    assert call["event_type"] == event_type
+    assert call["biz_type"] == WorkOrderBizType.BOT_FRIEND.value
+    assert call["recipient_user_ids"] == recipients
+
+
 def test_create_group_mention_notice_event_reaches_repository() -> None:
     service, repository, _, _, _ = _service()
 
