@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from urllib.parse import urlencode
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -154,6 +155,14 @@ def _handoff_entry_url(delivered, planned, graph, frontend_url: str) -> str | No
     return f"{base}/workspace/chat?{query}"
 
 
+_HANDOFF_ASSIGNEE_NOTE = re.compile(r"[（(][^（）()]*承接[）)]$")
+
+
+def _display_subject(raw_subject: str) -> str:
+    """Remove display-only assignee notes while preserving the business topic."""
+    return _HANDOFF_ASSIGNEE_NOTE.sub("", raw_subject).strip()
+
+
 def build_dispatch_handoff_display(
     delivered, planned, graph, frontend_url: str
 ) -> RelayHandoffDisplayDTO:
@@ -169,7 +178,7 @@ def build_dispatch_handoff_display(
         if task_id:
             subject = task_id
     return RelayHandoffDisplayDTO(
-        subject=f"{datetime.now().strftime('%m%d')}:{subject}",
+        subject=f"{datetime.now().strftime('%m%d')}:{_display_subject(subject)}",
         collaborator_name=_target_collaborator_name(delivered, planned),
         entry_url=_handoff_entry_url(delivered, planned, graph, frontend_url),
     )

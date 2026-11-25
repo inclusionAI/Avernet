@@ -135,6 +135,18 @@ def test_subject_title_and_task_id_fallbacks(delivered, planned, subject):
     assert display.subject == f"{datetime.now().strftime('%m%d')}:{subject}"
 
 
+@pytest.mark.parametrize("title,expected", [
+    ("UCT failure（UCT2.0值班助手承接）", "UCT failure"),
+    ("UCT failure(UCT20 helper承接)", "UCT failure"),
+    ("UCT failure（内部事实）", "UCT failure（内部事实）"),
+])
+def test_subject_removes_display_only_assignee_note(title, expected):
+    display = build_dispatch_handoff_display(
+        _node(title=title), None, _graph(), "https://workbench.test"
+    )
+    assert display.subject == f"{datetime.now().strftime('%m%d')}:{expected}"
+
+
 @pytest.mark.parametrize("field", ["task_id", "target_node_id", "origin_node_id", "relay_token"])
 def test_dispatch_request_rejects_whitespace_identity(field):
     from pydantic import ValidationError
