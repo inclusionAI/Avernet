@@ -74,6 +74,9 @@ from agentclaw.community.core.bot_management.render_screen_service_protocol impo
     RenderScreenServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot.collaborator import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
     BotConfigManifestApplyRepositoryProtocol,
 )
@@ -422,6 +425,7 @@ def submit_copy(
     render_screen_service: RenderScreenServiceProtocol,
     bot_service: BotServiceProtocol,
     skill_set_service: SkillSetManagementServiceProtocol,
+    collaborator_repository: CollaboratorRepositoryProtocol,
 ) -> BotCopyResponse:
     """Validate source + serialize manifest + persist + apply Passport + hand off.
 
@@ -452,8 +456,19 @@ def submit_copy(
             status_code=409,
             detail=f"source bot status {source.get('status')} not copyable",
         )
-    actions = source.get("actions") or []
-    if source.get("owner_id") != owner_id and "edit" not in actions:
+    # Access gate (shared with the manifest ``from_bot`` source check in
+    # ``source_bot_access.assert_from_bot_source_access``): the caller passes as
+    # the source Bot's owner, or as a collaborator on it (any role —
+    # ``ac_bot_collaborator`` row keyed by the source's ``ac_bots.id``). The
+    # earlier ``"edit" not in actions`` test was unreachable — ``bot_repo``'s row
+    # has no ``actions`` column (actions are listing-time, per-caller), so only
+    # owners ever passed; explicit collaborators were wrongly refused.
+    if source.get("owner_id") != owner_id and (
+        collaborator_repository.get_by_bot_and_user(
+            int(source["id"]), owner_id, get_current_env()
+        )
+        is None
+    ):
         raise HTTPException(status_code=403, detail="no edit permission on source bot")
 
     operation_id = _generate_operation_id()
@@ -791,6 +806,9 @@ async def copy_bot(
     skill_set_service: SkillSetManagementServiceProtocol = Injected(
         SkillSetManagementServiceProtocol
     ),
+    collaborator_repository: CollaboratorRepositoryProtocol = Injected(
+        CollaboratorRepositoryProtocol
+    ),
 ) -> Envelope[BotCopyResponse]:
     """Copy an openclaw bot to a new dst bot (v1, Route B manifest-reuse)."""
     del caller
@@ -807,6 +825,7 @@ async def copy_bot(
         render_screen_service=render_screen_service,
         bot_service=bot_service,
         skill_set_service=skill_set_service,
+        collaborator_repository=collaborator_repository,
     )
     return envelope(result, request)
 
