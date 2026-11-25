@@ -81,28 +81,83 @@ def test_list_records_returns_full_records_and_filters(db):
 
 def test_list_records_keyword_filters_search_fields(db):
     repo = TaskInfoRepository(db)
-    repo.insert(replace(_record("T-1"), task_spec={"context": {"title": "security report"}}))
-    repo.insert(replace(_record("T-2"), task_spec={"metadata": {"title": "security guide"}}))
+    repo.insert(
+        replace(
+            _record("T-1"),
+            task_spec={
+                "context": {"title": "security report"},
+                "goal": {"objective": "keep objective"},
+            },
+        )
+    )
+    repo.insert(
+        replace(
+            _record("T-2"),
+            task_spec={
+                "context": {"title": "finance report"},
+                "goal": {"objective": "security guide"},
+            },
+        )
+    )
     repo.insert(
         replace(
             _record("T-3"),
             source_type="api",
-            task_spec={"context": {"title": "finance report"}},
+            task_spec={
+                "context": {"title": "finance report"},
+                "goal": {"objective": "finance audit"},
+            },
         )
     )
 
     assert [record.task_id for record in repo.list_records(keyword="SECURITY")] == ["T-2", "T-1"]
-    assert [record.task_id for record in repo.list_records(keyword="T-3")] == ["T-3"]
-    assert [record.task_id for record in repo.list_records(keyword="api")] == ["T-3"]
+    assert [record.task_id for record in repo.list_records(keyword="FINANCE")] == ["T-3", "T-2"]
+    assert [record.task_id for record in repo.list_records(keyword="keep")] == ["T-1"]
+    assert [record.task_id for record in repo.list_records(keyword="audit")] == ["T-3"]
     assert repo.list_records(keyword="missing") == []
+    assert [record.task_id for record in repo.list_records(keyword="T-3")] == ["T-3"]
+    assert {record.task_id for record in repo.list_records(keyword="B-1")} == {"T-3", "T-2", "T-1"}
+    assert repo.list_records(keyword="api") == []
     assert [record.task_id for record in repo.list_records(keyword="  ")] == ["T-3", "T-2", "T-1"]
+
+
+def test_list_records_keyword_matches_unescaped_json_text(db):
+    repo = TaskInfoRepository(db)
+    repo.insert(
+        replace(
+            _record("T-1"),
+            task_spec={
+                "context": {"title": "特征计算NPE报错排查"},
+                "goal": {"objective": "排查 SimpleEL 脚本 1216130231 特征计算 NPE 报错的根因"},
+            },
+        )
+    )
+
+    assert [record.task_id for record in repo.list_records(keyword="特征计算")] == ["T-1"]
+    assert [record.task_id for record in repo.list_records(keyword="SimpleEL")] == ["T-1"]
+    assert [record.task_id for record in repo.list_records(keyword="处理建议")] == []
 
 
 def test_list_records_page_keyword_filters_before_pagination(db):
     repo = TaskInfoRepository(db)
-    repo.insert(replace(_record("T-1"), task_spec={"context": {"title": "primary report"}}))
-    repo.insert(replace(_record("T-2"), task_spec={"metadata": {"title": "primary guide"}}))
-    repo.insert(replace(_record("T-3"), task_spec={"context": {"title": "finance report"}}))
+    repo.insert(
+        replace(
+            _record("T-1"),
+            task_spec={"context": {"title": "primary report"}, "goal": {"objective": "x"}},
+        )
+    )
+    repo.insert(
+        replace(
+            _record("T-2"),
+            task_spec={"context": {"title": "x"}, "goal": {"objective": "primary guide"}},
+        )
+    )
+    repo.insert(
+        replace(
+            _record("T-3"),
+            task_spec={"context": {"title": "finance report"}, "goal": {"objective": "x"}},
+        )
+    )
 
     records, total = repo.list_records_page(page=1, page_size=1, keyword="primary")
 
