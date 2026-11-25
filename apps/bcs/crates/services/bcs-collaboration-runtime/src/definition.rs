@@ -305,9 +305,18 @@ pub fn validate_definition(
             StateMachineNodeKind::HumanInput => {
                 match (&node.notification, &node.assignee) {
                     (None, None) => {}
-                    (None, Some(_)) => {
+                    // A frontend node may be pinned to one Present Human so that
+                    // pending lists, prompts and submissions are scoped to them.
+                    (None, Some(StateMachineAssignee::RuntimeActor { actor }))
+                        if !actor.trim().is_empty() => {}
+                    (None, Some(StateMachineAssignee::RuntimeActor { .. })) => {
                         return invalid(format!(
-                            "frontend human_input node {node_id} must not define assignee"
+                            "human_input node {node_id} assignee actor must not be empty"
+                        ));
+                    }
+                    (None, Some(StateMachineAssignee::BotBinding { .. })) => {
+                        return invalid(format!(
+                            "frontend human_input node {node_id} assignee must be runtime_actor"
                         ));
                     }
                     (
@@ -695,6 +704,12 @@ fn ensure_human_inputs_are_ordered(
 
     for (index, left) in human_nodes.iter().enumerate() {
         for right in human_nodes.iter().skip(index + 1) {
+            // Concurrent waits are unambiguous when each node is pinned to a
+            // different Human: pending lists and submissions are keyed by
+            // node_id and filtered by assignee.
+            if human_assignees_differ(&nodes[*left], &nodes[*right]) {
+                continue;
+            }
             if !node_reaches(nodes, left, right) && !node_reaches(nodes, right, left) {
                 return invalid(format!(
                     "human_input nodes {left} and {right} may wait concurrently; MVP requires HumanInput nodes to have an explicit dependency order"
@@ -703,6 +718,19 @@ fn ensure_human_inputs_are_ordered(
         }
     }
     Ok(())
+}
+
+fn human_assignees_differ(
+    left: &bcs_domain::StateMachineNodeDefinition,
+    right: &bcs_domain::StateMachineNodeDefinition,
+) -> bool {
+    match (&left.assignee, &right.assignee) {
+        (
+            Some(StateMachineAssignee::RuntimeActor { actor: left }),
+            Some(StateMachineAssignee::RuntimeActor { actor: right }),
+        ) => left.trim() != right.trim(),
+        _ => false,
+    }
 }
 
 fn node_reaches(

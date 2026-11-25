@@ -782,18 +782,38 @@ fn rejects_fixed_group_human_input_without_fixed_group_channel() {
 }
 
 #[test]
-fn rejects_frontend_human_input_with_assignee() {
+fn accepts_frontend_human_input_with_runtime_actor_assignee() {
     let mut definition = human_review_definition();
     let review = human_node_mut(&mut definition);
     review.notification = None;
 
-    let error =
-        validate_definition(definition).expect_err("frontend HumanInput has no fixed assignee");
+    validate_definition(definition)
+        .expect("frontend HumanInput may be pinned to one runtime actor");
+}
+
+#[test]
+fn rejects_frontend_human_input_with_bot_or_empty_assignee() {
+    let mut bot = human_review_definition();
+    let review = human_node_mut(&mut bot);
+    review.notification = None;
+    review.assignee = Some(bcs_domain::StateMachineAssignee::BotBinding {
+        binding: "driver".to_string(),
+    });
+    let error = validate_definition(bot).expect_err("frontend HumanInput cannot target a Bot");
     assert!(
         error
             .to_string()
-            .contains("frontend human_input node review must not define assignee")
+            .contains("frontend human_input node review assignee must be runtime_actor")
     );
+
+    let mut empty = human_review_definition();
+    let review = human_node_mut(&mut empty);
+    review.notification = None;
+    review.assignee = Some(bcs_domain::StateMachineAssignee::RuntimeActor {
+        actor: "  ".to_string(),
+    });
+    let error = validate_definition(empty).expect_err("empty actor must be rejected");
+    assert!(error.to_string().contains("assignee actor must not be empty"));
 }
 
 #[test]
