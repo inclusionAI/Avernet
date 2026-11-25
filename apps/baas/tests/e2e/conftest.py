@@ -510,23 +510,25 @@ async def create_paas_device(
     template_uuid: str = DEFAULT_TEMPLATE_UUID,
     detail_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a PaaS device via POST /api/v1/paas/devices."""
+    """Create a PaaS device via in-process PaasServiceFacade.create_device.
+
+    Migrated from HTTP POST /api/v1/paas/devices to direct in-process call.
+    Signature and return dict shape preserved for zero-change at 112 call sites.
+    """
+    from secbaas.community.bootstrap import get_container
+
     if detail_config is None:
         detail_config = {
             "name": f"e2e-device-{unique_id}",
             "ttl_in_minutes": 60,
         }
-    response = await api.client.post(
-        api.paas_device_url(),
-        params=api.params(),
-        json={
-            "tenant_name": api.tenant,
-            "device_template_uuid": template_uuid,
-            "detail_config": detail_config,
-        },
+    facade = get_container().services.paas_facade()
+    result = await facade.create_device(
+        tenant_name=api.tenant,
+        device_template_uuid=template_uuid,
+        detail_config=detail_config,
     )
-    response.raise_for_status()
-    return response.json()["data"]
+    return result.model_dump()
 
 
 async def destroy_paas_device(
