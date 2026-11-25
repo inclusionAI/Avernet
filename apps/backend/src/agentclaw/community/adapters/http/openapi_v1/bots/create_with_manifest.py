@@ -94,6 +94,9 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     generate_bot_id,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot.collaborator import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.task_queue.types import (
     TERMINAL_STATUSES,
     TaskRecord,
@@ -158,6 +161,9 @@ async def create_bot_with_manifest(
     principal: Annotated[Principal, Depends(require_principal)],
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
+    collaborator_repository: CollaboratorRepositoryProtocol = Injected(
+        CollaboratorRepositoryProtocol
+    ),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     skill_set_factory: SkillSetServiceFactoryProtocol = Injected(
         SkillSetServiceFactoryProtocol
@@ -210,6 +216,7 @@ async def create_bot_with_manifest(
         caller=caller, permission_subject=manifest_creation_subject(caller, principal), bot_service=bot_service, bot_repo=bot_repo,
         passport_plugin=passport_plugin, skill_set_factory=skill_set_factory,
         space_context=space_context, manifest_seam=manifest_seam,
+        collaborator_repository=collaborator_repository,
     )
 
 
@@ -254,6 +261,7 @@ async def submit_manifest_creation(
     caller, permission_subject: str | None = None, bot_service: BotServiceProtocol, bot_repo: BotRepository,
     passport_plugin: PassportPlugin, skill_set_factory: SkillSetServiceFactoryProtocol,
     space_context: BusinessSpaceContextProtocol, manifest_seam: ManifestCreationSeam,
+    collaborator_repository: CollaboratorRepositoryProtocol,
 ) -> Envelope[BotCreateWithManifestAccepted]:
     """Map an ordinary Manifest request into the existing Bot creation flow."""
     # Before a bot is created or a manifest stored: a ``from: from_bot`` local
@@ -261,7 +269,10 @@ async def submit_manifest_creation(
     # Copy endpoint checks this at submission; create-with-manifest reaches the
     # same path without it, so the gate lives here too.
     assert_from_bot_source_access(
-        document=body.config_manifest, owner_id=owner_id, bot_repo=bot_repo
+        document=body.config_manifest,
+        owner_id=owner_id,
+        bot_repo=bot_repo,
+        collaborator_repository=collaborator_repository,
     )
     bot_id, spec, context = prepare_manifest_creation(
         body=body, owner_id=owner_id, bot_repo=bot_repo, space_context=space_context,
