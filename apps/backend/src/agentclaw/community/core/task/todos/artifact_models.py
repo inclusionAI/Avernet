@@ -39,6 +39,10 @@ class TodoExecutionRecord:
     created_at: datetime
     updated_at: datetime
     stage_instance_id: str | None = None
+    generation: int = 1
+    is_current: bool = True
+    invalidated_by_interaction_id: str | None = None
+    replaced_by_execution_id: str | None = None
 
 
 @dataclass(frozen=True)

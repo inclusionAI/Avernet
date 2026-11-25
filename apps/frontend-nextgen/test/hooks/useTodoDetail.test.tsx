@@ -44,6 +44,8 @@ function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent 
     actorType: 'bot',
     content: `事件 ${eventSeq}`,
     executionId: 'execution-1',
+    isLatest: true,
+    replyable: true,
     contextVersion: 1,
     status: 'in_progress',
     createdAt: `2026-11-10T02:0${eventSeq}:00Z`,
@@ -163,7 +165,7 @@ test('B 事件接口失败时不阻断 A 的详情和互动加载', async () => 
   expect(result.current.eventsError).toBe('事件服务暂不可用');
 });
 
-test('事件时序可独立重试且按 eventSeq 排序', async () => {
+test('事件时序可独立重试并保留服务端跨 Context 顺序', async () => {
   mockedService.loadTodoEvents
     .mockRejectedValueOnce(new Error('事件服务暂不可用'))
     .mockResolvedValueOnce([event(2), event(1)]);
@@ -176,7 +178,7 @@ test('事件时序可独立重试且按 eventSeq 排序', async () => {
   });
 
   expect(result.current.eventsError).toBeNull();
-  expect(result.current.events.map((item) => item.eventSeq)).toEqual([1, 2]);
+  expect(result.current.events.map((item) => item.eventSeq)).toEqual([2, 1]);
 });
 
 test('待验收互动保留稳定回复和结构化 mention，只修剪 message', async () => {
@@ -202,6 +204,60 @@ test('待验收互动保留稳定回复和结构化 mention，只修剪 message'
     mentions: [{ actorType: 'bot', actorId: 'bot-review' }],
   });
   expect(mockedService.startTodoRun).not.toHaveBeenCalled();
+});
+
+test('已完成模板 Todo 可针对最新节点提交重跑互动', async () => {
+  const completedTemplateTodo: TodoRecord = {
+    ...runningTodo,
+    templateId: 'template-1',
+    status: 'completed',
+  };
+  mockedService.loadTodo.mockResolvedValue(completedTemplateTodo);
+  mockedService.addTodoInteraction.mockResolvedValue(event(3, { eventType: 'user_interaction.posted' }));
+
+  const { result } = renderHook(() => useTodoDetail('todo-1'));
+  await waitFor(() => expect(result.current.selectedTodo).toEqual(completedTemplateTodo));
+
+  await act(async () => {
+    expect(
+      await result.current.interact({
+        message: ' 从第三个节点重跑 ',
+        replyToEventId: 'event-stage-3',
+        targetExecutionId: 'todoexec-stage-3-v1',
+        targetStageInstanceId: 'stage-3',
+      }),
+    ).toBe(true);
+  });
+
+  expect(mockedService.addTodoInteraction).toHaveBeenCalledWith('todo-1', {
+    message: '从第三个节点重跑',
+    replyToEventId: 'event-stage-3',
+    targetExecutionId: 'todoexec-stage-3-v1',
+    targetStageInstanceId: 'stage-3',
+  });
+});
+
+test('模板 Todo 缺少节点版本目标时拒绝提交', async () => {
+  const completedTemplateTodo: TodoRecord = {
+    ...runningTodo,
+    templateId: 'template-1',
+    status: 'completed',
+  };
+  mockedService.loadTodo.mockResolvedValue(completedTemplateTodo);
+
+  const { result } = renderHook(() => useTodoDetail('todo-1'));
+  await waitFor(() => expect(result.current.selectedTodo).toEqual(completedTemplateTodo));
+
+  await act(async () => {
+    expect(
+      await result.current.interact({
+        message: '从第三个节点重跑',
+        replyToEventId: 'event-stage-3',
+      }),
+    ).toBe(false);
+  });
+
+  expect(mockedService.addTodoInteraction).not.toHaveBeenCalled();
 });
 
 test('空间 Bot 候选加载失败不阻断待办详情和互动历史', async () => {

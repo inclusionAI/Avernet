@@ -19,6 +19,7 @@ export interface TodoDto extends BackendUnknownRecord {
   description?: string;
   bot_id?: string;
   bot_name?: string;
+  template_id?: string;
   status?: string;
   collab_context_id?: string;
   created_at?: string;
@@ -35,6 +36,12 @@ export interface TodoEventDto extends BackendUnknownRecord {
   actor_type?: string;
   content?: string;
   execution_id?: string;
+  todo_execution_id?: string | null;
+  stage_instance_id?: string | null;
+  generation?: number | null;
+  is_latest?: boolean;
+  replyable?: boolean;
+  reply_disabled_reason?: string | null;
   context_version?: number | null;
   status?: string | null;
   created_at?: string;
@@ -187,6 +194,8 @@ export function listTodoInteractions(todoId: string) {
 export function createTodoInteraction(todoId: string, input: CreateTodoInteractionInput) {
   const data: BackendUnknownRecord = { message: input.message };
   if (input.replyToEventId) data.reply_to_event_id = input.replyToEventId;
+  if (input.targetExecutionId) data.target_execution_id = input.targetExecutionId;
+  if (input.targetStageInstanceId) data.target_stage_instance_id = input.targetStageInstanceId;
   if (input.mentions?.length) {
     data.mentions = input.mentions.map((mention) => ({
       actor_type: mention.actorType,

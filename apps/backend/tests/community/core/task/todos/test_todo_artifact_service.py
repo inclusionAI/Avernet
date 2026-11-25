@@ -143,13 +143,34 @@ class _ArtifactRepository:
         collab_context_id: str,
         token_hash: str,
         executor_id: str,
+        stage_instance_id: str | None = None,
     ) -> TodoExecutionRecord:
-        for execution_id, row in tuple(self.executions.items()):
-            if row.todo_id == todo_id and row.status is TodoExecutionStatus.ACTIVE:
-                self.executions[execution_id] = replace(
-                    row, status=TodoExecutionStatus.REPLACED, updated_at=NOW
-                )
+        stage_rows = [
+            row
+            for row in self.executions.values()
+            if row.todo_id == todo_id
+            and row.stage_instance_id == stage_instance_id
+        ]
+        generation = max((row.generation for row in stage_rows), default=0) + 1
         execution_id = f"todoexec_{len(self.executions) + 1}"
+        for prior_execution_id, row in tuple(self.executions.items()):
+            if (
+                row.todo_id != todo_id
+                or row.stage_instance_id != stage_instance_id
+                or not row.is_current
+            ):
+                continue
+            self.executions[prior_execution_id] = replace(
+                row,
+                status=(
+                    TodoExecutionStatus.REPLACED
+                    if row.status is TodoExecutionStatus.ACTIVE
+                    else row.status
+                ),
+                is_current=False,
+                replaced_by_execution_id=execution_id,
+                updated_at=NOW,
+            )
         row = TodoExecutionRecord(
             execution_id=execution_id,
             todo_id=todo_id,
@@ -158,6 +179,9 @@ class _ArtifactRepository:
             token_hash=token_hash,
             status=TodoExecutionStatus.ACTIVE,
             executor_id=executor_id,
+            stage_instance_id=stage_instance_id,
+            generation=generation,
+            is_current=True,
             created_at=NOW,
             updated_at=NOW,
         )
@@ -166,6 +190,23 @@ class _ArtifactRepository:
 
     def get_execution(self, *, execution_id: str) -> TodoExecutionRecord:
         return self.executions[execution_id]
+
+    def list_executions(self, *, todo_id: str) -> tuple[TodoExecutionRecord, ...]:
+        return tuple(row for row in self.executions.values() if row.todo_id == todo_id)
+
+    def get_current_execution(
+        self, *, todo_id: str, stage_instance_id: str
+    ) -> TodoExecutionRecord:
+        return max(
+            (
+                row
+                for row in self.executions.values()
+                if row.todo_id == todo_id
+                and row.stage_instance_id == stage_instance_id
+                and row.is_current
+            ),
+            key=lambda row: row.generation,
+        )
 
     def bind_run_id(self, *, execution_id: str, run_id: str) -> TodoExecutionRecord:
         row = replace(self.executions[execution_id], run_id=run_id, updated_at=NOW)
@@ -672,3 +713,16 @@ def test_retry_heals_artifact_persisted_before_transient_event_failure():
 
     assert len(artifacts.artifacts) == 1
     assert collaboration.context.events[0].payload["artifact_id"] == record.artifact_id
+
+
+def test_superseded_execution_token_is_rejected_even_if_status_is_stale_active() -> None:
+    service, artifacts, _, _, credential, _ = _service()
+    execution = artifacts.get_execution(execution_id=credential.execution_id)
+    artifacts.executions[credential.execution_id] = replace(
+        execution,
+        status=TodoExecutionStatus.ACTIVE,
+        is_current=False,
+    )
+
+    with pytest.raises(TodoExecutionAuthError):
+        _report(service, credential)

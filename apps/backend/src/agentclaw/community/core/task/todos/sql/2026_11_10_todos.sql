@@ -111,6 +111,10 @@ CREATE TABLE IF NOT EXISTS `ac_todo_execution` (
     `collab_context_id` varchar(256) NOT NULL,
     `run_id` varchar(256) DEFAULT NULL,
     `stage_instance_id` varchar(64) DEFAULT NULL COMMENT '执行凭证所属阶段实例',
+    `generation` int(11) NOT NULL DEFAULT 1 COMMENT '阶段内单调递增执行代次',
+    `is_current` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否为该阶段当前可互动版本',
+    `invalidated_by_interaction_id` varchar(256) DEFAULT NULL COMMENT '使本代及后续失效的互动事件',
+    `replaced_by_execution_id` varchar(64) DEFAULT NULL COMMENT '替代本代的新执行标识',
     `token_hash` varchar(64) NOT NULL COMMENT 'SHA-256; plaintext token is never persisted',
     `status` varchar(32) NOT NULL COMMENT 'active/replaced/completed',
     `executor_id` varchar(256) NOT NULL,
@@ -120,7 +124,9 @@ CREATE TABLE IF NOT EXISTS `ac_todo_execution` (
     `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_todo_execution_tenant_env_id` (`avernet_tenant`, `env`, `execution_id`),
-    KEY `idx_todo_execution_active` (`avernet_tenant`, `env`, `todo_id`, `status`, `gmt_create`, `id`)
+    KEY `idx_todo_execution_active` (`avernet_tenant`, `env`, `todo_id`, `status`, `gmt_create`, `id`),
+    KEY `idx_todo_execution_stage_generation` (`avernet_tenant`, `env`, `todo_id`, `stage_instance_id`, `generation`, `id`),
+    KEY `idx_todo_execution_current` (`avernet_tenant`, `env`, `todo_id`, `is_current`, `stage_instance_id`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Todo Bot execution credentials';
 
 CREATE TABLE IF NOT EXISTS `ac_todo_artifact` (

@@ -6,6 +6,7 @@ import json
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Index,
@@ -347,6 +348,10 @@ class TodoExecutionModel(Base):
     status = Column(String(32), nullable=False)
     executor_id = Column(String(256), nullable=False)
     stage_instance_id = Column(String(64), nullable=True)
+    generation = Column(Integer, nullable=False, default=1, server_default="1")
+    is_current = Column(Boolean, nullable=False, default=True, server_default="1")
+    invalidated_by_interaction_id = Column(String(256), nullable=True)
+    replaced_by_execution_id = Column(String(64), nullable=True)
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
@@ -355,6 +360,24 @@ class TodoExecutionModel(Base):
     __table_args__ = (
         UniqueConstraint("avernet_tenant", "env", "execution_id", name="uk_todo_execution_tenant_env_id"),
         Index("idx_todo_execution_active", "avernet_tenant", "env", "todo_id", "status", "gmt_create", "id"),
+        Index(
+            "idx_todo_execution_stage_generation",
+            "avernet_tenant",
+            "env",
+            "todo_id",
+            "stage_instance_id",
+            "generation",
+            "id",
+        ),
+        Index(
+            "idx_todo_execution_current",
+            "avernet_tenant",
+            "env",
+            "todo_id",
+            "is_current",
+            "stage_instance_id",
+            "id",
+        ),
     )
 
     def to_record(self) -> TodoExecutionRecord:
@@ -367,6 +390,10 @@ class TodoExecutionModel(Base):
             status=TodoExecutionStatus(self.status),
             executor_id=self.executor_id,
             stage_instance_id=self.stage_instance_id,
+            generation=self.generation,
+            is_current=bool(self.is_current),
+            invalidated_by_interaction_id=self.invalidated_by_interaction_id,
+            replaced_by_execution_id=self.replaced_by_execution_id,
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
         )

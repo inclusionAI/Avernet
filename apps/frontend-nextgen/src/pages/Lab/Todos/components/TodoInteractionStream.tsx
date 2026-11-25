@@ -7,9 +7,10 @@ import { TodoInteractionArtifactEntry } from './TodoInteractionArtifactEntry';
 import {
   formatInteractionTime,
   interactionContent,
-  replyToEventId,
   rejectionQuote,
   rejectionTargets,
+  replyDisabledLabel,
+  replyToEventId,
   targetKey,
   type InteractionEntry,
   type InteractionReplyReference,
@@ -66,26 +67,32 @@ function ReplyQuote({ reference }: { reference?: InteractionReplyReference }) {
 }
 
 function ReplyAction({
-  floor,
-  disabled,
+  reference,
+  enabled,
   onClick,
 }: {
-  floor: number;
-  disabled: boolean;
+  reference: InteractionReplyReference;
+  enabled: boolean;
   onClick: () => void;
 }) {
+  const disabledByVersion = !reference.replyable;
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      className="mt-2 h-7 rounded-md px-2 text-xs text-muted-foreground"
-      aria-label={`回复 f${floor}`}
-      disabled={disabled}
-      onClick={onClick}
-      leftIcon={<Reply className="size-3.5" aria-hidden />}
-    >
-      回复
-    </Button>
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        variant="ghost"
+        className="h-7 rounded-md px-2 text-xs text-muted-foreground"
+        aria-label={`回复 f${reference.floor}`}
+        disabled={!enabled || disabledByVersion}
+        onClick={onClick}
+        leftIcon={<Reply className="size-3.5" aria-hidden />}
+      >
+        回复
+      </Button>
+      {disabledByVersion ? (
+        <span className="text-xs text-muted-foreground">{replyDisabledLabel(reference.replyDisabledReason)}</span>
+      ) : null}
+    </div>
   );
 }
 
@@ -187,12 +194,10 @@ export function TodoInteractionStream({
           entry.kind === 'message'
             ? replyReferences.get(entry.event.eventId)
             : entry.event
-              ? replyReferences.get(entry.event.eventId)
-              : undefined;
+            ? replyReferences.get(entry.event.eventId)
+            : undefined;
         const persistedReplyEventId = entry.kind === 'message' ? replyToEventId(entry.event) : undefined;
-        const persistedReplyReference = persistedReplyEventId
-          ? replyReferences.get(persistedReplyEventId)
-          : undefined;
+        const persistedReplyReference = persistedReplyEventId ? replyReferences.get(persistedReplyEventId) : undefined;
         return (
           <li
             key={entry.id}
@@ -231,8 +236,8 @@ export function TodoInteractionStream({
                   />
                   {replyReference ? (
                     <ReplyAction
-                      floor={floor}
-                      disabled={!replyEnabled}
+                      reference={replyReference}
+                      enabled={replyEnabled}
                       onClick={() => onReply(replyReference)}
                     />
                   ) : null}
@@ -252,8 +257,8 @@ export function TodoInteractionStream({
                 {replyReference ? (
                   <div className="pl-[52px]">
                     <ReplyAction
-                      floor={floor}
-                      disabled={!replyEnabled}
+                      reference={replyReference}
+                      enabled={replyEnabled}
                       onClick={() => onReply(replyReference)}
                     />
                   </div>

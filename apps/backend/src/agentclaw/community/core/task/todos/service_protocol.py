@@ -81,6 +81,8 @@ class TodoServiceProtocol(Protocol):
         author_name: str | None,
         message: str,
         reply_to_event_id: str | None = None,
+        target_execution_id: str | None = None,
+        target_stage_instance_id: str | None = None,
         mentions: tuple[TodoInteractionMention, ...] = (),
         env: str | None = None,
     ) -> TodoEventRecord: ...

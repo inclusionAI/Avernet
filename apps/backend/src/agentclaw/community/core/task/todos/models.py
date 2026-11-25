@@ -136,3 +136,9 @@ class TodoEventRecord:
     artifacts: tuple[TodoArtifactRecord, ...]
     created_at: str
     payload: dict[str, object] = field(default_factory=dict)
+    todo_execution_id: str | None = None
+    stage_instance_id: str | None = None
+    generation: int | None = None
+    is_latest: bool = True
+    replyable: bool = False
+    reply_disabled_reason: str | None = None

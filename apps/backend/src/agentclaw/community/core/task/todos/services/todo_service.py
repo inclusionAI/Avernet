@@ -10,11 +10,15 @@ from injector import inject
 
 from agentclaw.community.core.errors import ValidationError
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.task.todo_artifacts import (
+    TodoArtifactRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
 )
 from agentclaw.community.core.spaces.models import SpaceRecord
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.core.task.todos.artifact_models import MAX_EXECUTION_ID_LENGTH
 from agentclaw.community.core.task.todos.bot_scope import (
     require_todo_bot_owner_id,
     resolve_todo_bot,
@@ -43,7 +47,6 @@ from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
     TodoAcceptanceTarget,
     TodoAcceptanceTargetKind,
-    TodoArtifactRecord as TodoEventArtifactRecord,
     TodoEventRecord,
     TodoInteractionMention,
     TodoInteractionMentionActorType,
@@ -53,6 +56,14 @@ from agentclaw.community.core.task.todos.models import (
 )
 from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
+from agentclaw.community.core.task.todos.services.todo_interaction_projection import (
+    INTERACTION_EVENT_TYPES,
+    REPLYABLE_INTERACTION_EVENT_TYPES,
+    interaction_payload,
+    project_event_record,
+    project_event_records,
+    select_projection_executions,
+)
 from agentclaw.community.core.task.todos.source_models import (
     MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
     MAX_TODO_SOURCE_ITEM_ID_LENGTH,
@@ -71,17 +82,8 @@ _HUMAN_INTERACTION_EVENT = "user_interaction.posted"
 _TASK_COMPLETED_EVENT = "task.completed"
 _TASK_ACCEPTED_EVENT = "task.accepted"
 _TASK_REJECTED_EVENT = "task.rejected"
-_ARTIFACT_REPORTED_EVENT = "artifact.reported"
-_INTERACTION_EVENT_TYPES = {
-    "task.created",
-    _HUMAN_INTERACTION_EVENT,
-    _TASK_COMPLETED_EVENT,
-    _TASK_REJECTED_EVENT,
-    _ARTIFACT_REPORTED_EVENT,
-}
-_REPLYABLE_INTERACTION_EVENT_TYPES = _INTERACTION_EVENT_TYPES - {
-    _TASK_COMPLETED_EVENT,
-}
+_INTERACTION_EVENT_TYPES = INTERACTION_EVENT_TYPES
+_REPLYABLE_INTERACTION_EVENT_TYPES = REPLYABLE_INTERACTION_EVENT_TYPES
 
 
 class TodoService(TodoServiceProtocol):
@@ -95,12 +97,14 @@ class TodoService(TodoServiceProtocol):
         bot_repository: BotRepository,
         collaboration: TodoCollaborationPort,
         execution: TodoExecutionServiceProtocol,
+        artifact_repository: TodoArtifactRepositoryProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access
         self._bot_repository = bot_repository
         self._collaboration = collaboration
         self._execution = execution
+        self._artifacts = artifact_repository
 
     def list_todos(
         self,
@@ -214,13 +218,7 @@ class TodoService(TodoServiceProtocol):
         todo, normalized_actor_id = self._load_todo(
             todo_id=todo_id, actor_id=actor_id, env=env
         )
-        if not todo.collab_context_id:
-            return ()
-        context = self._collaboration.get_context(
-            collab_context_id=todo.collab_context_id,
-            actor_id=normalized_actor_id,
-        )
-        return self._to_event_records(context.events)
+        return self._list_event_records(todo=todo, actor_id=normalized_actor_id)
 
     def list_interactions(
         self, *, todo_id: str, actor_id: str, env: str | None = None
@@ -228,15 +226,12 @@ class TodoService(TodoServiceProtocol):
         todo, normalized_actor_id = self._load_todo(
             todo_id=todo_id, actor_id=actor_id, env=env
         )
-        if not todo.collab_context_id:
-            return ()
-        context = self._collaboration.get_context(
-            collab_context_id=todo.collab_context_id,
-            actor_id=normalized_actor_id,
-        )
         return tuple(
             event
-            for event in self._to_event_records(context.events)
+            for event in self._list_event_records(
+                todo=todo,
+                actor_id=normalized_actor_id,
+            )
             if event.event_type in _INTERACTION_EVENT_TYPES
         )
 
@@ -248,6 +243,8 @@ class TodoService(TodoServiceProtocol):
         author_name: str | None,
         message: str,
         reply_to_event_id: str | None = None,
+        target_execution_id: str | None = None,
+        target_stage_instance_id: str | None = None,
         mentions: tuple[TodoInteractionMention, ...] = (),
         env: str | None = None,
     ) -> TodoEventRecord:
@@ -261,7 +258,37 @@ class TodoService(TodoServiceProtocol):
         normalized_reply_to_event_id = self._optional_text(
             reply_to_event_id, "reply_to_event_id", MAX_EVENT_ID_LENGTH
         )
+        normalized_target_execution_id = self._optional_text(
+            target_execution_id,
+            "target_execution_id",
+            MAX_EXECUTION_ID_LENGTH,
+        )
+        normalized_target_stage_instance_id = self._optional_text(
+            target_stage_instance_id,
+            "target_stage_instance_id",
+            MAX_TODO_ID_LENGTH,
+        )
         normalized_mentions = self._interaction_mentions(mentions)
+        for mention in normalized_mentions:
+            resolve_todo_bot(
+                bot_repository=self._bot_repository,
+                space=space,
+                actor_id=normalized_actor_id,
+                bot_id=mention.actor_id,
+            )
+
+        if todo.template_id:
+            return self._create_template_interaction(
+                todo=todo,
+                actor_id=normalized_actor_id,
+                author_name=normalized_author_name,
+                message=normalized_message,
+                reply_to_event_id=normalized_reply_to_event_id,
+                target_execution_id=normalized_target_execution_id,
+                target_stage_instance_id=normalized_target_stage_instance_id,
+                mentions=normalized_mentions,
+            )
+
         if todo.status is not TodoStatus.PENDING_ACCEPTANCE:
             raise TodoStateConflictError("Interactions require pending acceptance")
         context_id = self._require_context(todo)
@@ -273,14 +300,6 @@ class TodoService(TodoServiceProtocol):
             context.events,
             reply_to_event_id=normalized_reply_to_event_id,
         )
-        for mention in normalized_mentions:
-            resolve_todo_bot(
-                bot_repository=self._bot_repository,
-                space=space,
-                actor_id=normalized_actor_id,
-                bot_id=mention.actor_id,
-            )
-
         # Claim the interaction synchronously before delivering it to B. This
         # closes the product-state window where a persisted Human event can
         # still be followed by another create-interaction request.
@@ -289,19 +308,12 @@ class TodoService(TodoServiceProtocol):
             expected_status=TodoStatus.PENDING_ACCEPTANCE,
             new_status=TodoStatus.IN_PROGRESS,
         )
-        payload: dict[str, Any] = {"content": normalized_message}
-        if normalized_author_name is not None:
-            payload["author_name"] = normalized_author_name
-        if normalized_reply_to_event_id is not None:
-            payload["reply_to_event_id"] = normalized_reply_to_event_id
-        if normalized_mentions:
-            payload["mentions"] = [
-                {
-                    "actor_type": mention.actor_type.value,
-                    "actor_id": mention.actor_id,
-                }
-                for mention in normalized_mentions
-            ]
+        payload = interaction_payload(
+            message=normalized_message,
+            author_name=normalized_author_name,
+            reply_to_event_id=normalized_reply_to_event_id,
+            mentions=normalized_mentions,
+        )
         event = self._collaboration.append_event(
             collab_context_id=context_id,
             request=TodoCollaborationEventRequest(
@@ -317,7 +329,7 @@ class TodoService(TodoServiceProtocol):
         )
         # A claimed interaction is durable work for the scheduler. Returning
         # before executor delivery is intentional and is required by contract.
-        return self._to_event_record(event)
+        return project_event_record(event, interaction_allowed=False)
 
     def submit_acceptance(
         self,
@@ -464,33 +476,132 @@ class TodoService(TodoServiceProtocol):
             raise TodoNotFoundError("Todo collaboration Context is missing")
         return todo.collab_context_id
 
-    def _to_event_records(
-        self, events: Iterable[TodoCollaborationEvent]
+    def _list_event_records(
+        self,
+        *,
+        todo: TodoRecord,
+        actor_id: str,
     ) -> tuple[TodoEventRecord, ...]:
-        return tuple(self._to_event_record(event) for event in events)
+        if todo.template_id:
+            return self._list_template_event_records(todo=todo, actor_id=actor_id)
+        if not todo.collab_context_id:
+            return ()
+        context = self._collaboration.get_context(
+            collab_context_id=todo.collab_context_id,
+            actor_id=actor_id,
+        )
+        return project_event_records(
+            context.events,
+            interaction_allowed=todo.status is TodoStatus.PENDING_ACCEPTANCE,
+        )
 
-    @staticmethod
-    def _to_event_record(event: TodoCollaborationEvent) -> TodoEventRecord:
-        return TodoEventRecord(
-            event_id=event.event_id,
-            event_seq=event.event_seq,
-            event_type=event.event_type,
-            actor_id=event.actor_id,
-            actor_type=event.actor_type,
-            content=event.content,
-            execution_id=event.execution_id,
-            context_version=event.context_version,
-            status=event.status,
-            artifacts=tuple(
-                TodoEventArtifactRecord(
-                    artifact_id=artifact.artifact_id or None,
-                    name=artifact.name,
-                    url=artifact.url,
+    def _list_template_event_records(
+        self,
+        *,
+        todo: TodoRecord,
+        actor_id: str,
+    ) -> tuple[TodoEventRecord, ...]:
+        stage_order = {
+            stage.stage_instance_id: stage.stage_order
+            for stage in self._repository.list_stages(todo_id=todo.todo_id)
+        }
+        executions = select_projection_executions(
+            self._artifacts.list_executions(todo_id=todo.todo_id),
+            stage_order=stage_order,
+        )
+        records: list[TodoEventRecord] = []
+        for execution in executions:
+            context = self._collaboration.get_context(
+                collab_context_id=execution.collab_context_id,
+                actor_id=actor_id,
+            )
+            records.extend(
+                project_event_records(
+                    context.events,
+                    execution=execution,
+                    interaction_allowed=todo.status is not TodoStatus.CANCELLED,
                 )
-                for artifact in event.artifacts
+            )
+        return tuple(records)
+
+    def _create_template_interaction(
+        self,
+        *,
+        todo: TodoRecord,
+        actor_id: str,
+        author_name: str | None,
+        message: str,
+        reply_to_event_id: str | None,
+        target_execution_id: str | None,
+        target_stage_instance_id: str | None,
+        mentions: tuple[TodoInteractionMention, ...],
+    ) -> TodoEventRecord:
+        if (
+            reply_to_event_id is None
+            or target_execution_id is None
+            or target_stage_instance_id is None
+        ):
+            raise ValidationError(
+                "Template interactions require reply and target execution fields"
+            )
+        if todo.status is TodoStatus.CANCELLED:
+            raise TodoStateConflictError("Cancelled Todo cannot be replied to")
+
+        execution = self._artifacts.get_execution(
+            execution_id=target_execution_id
+        )
+        if execution.todo_id != todo.todo_id:
+            raise TodoStateConflictError(
+                "Todo execution does not belong to the target Todo"
+            )
+        if execution.stage_instance_id != target_stage_instance_id:
+            raise TodoStateConflictError(
+                "Todo execution does not belong to the target stage"
+            )
+        if not execution.is_current:
+            raise TodoStateConflictError(
+                "Historical Todo execution cannot be replied to"
+            )
+
+        context = self._collaboration.get_context(
+            collab_context_id=execution.collab_context_id,
+            actor_id=actor_id,
+        )
+        self._validate_interaction_reply(
+            context.events,
+            reply_to_event_id=reply_to_event_id,
+        )
+        event = self._collaboration.append_event(
+            collab_context_id=execution.collab_context_id,
+            request=TodoCollaborationEventRequest(
+                expected_version=context.context_version,
+                event_kind=_HUMAN_INTERACTION_EVENT,
+                primitive_type="Message",
+                actor_id=actor_id,
+                actor_type="human",
+                parent_event=reply_to_event_id,
+                visibility="workspace",
+                payload=interaction_payload(
+                    message=message,
+                    author_name=author_name,
+                    reply_to_event_id=reply_to_event_id,
+                    target_execution_id=target_execution_id,
+                    target_stage_instance_id=target_stage_instance_id,
+                    mentions=mentions,
+                ),
             ),
-            created_at=event.created_at,
-            payload=dict(event.payload),
+        )
+        self._repository.rerun_from_execution(
+            todo_id=todo.todo_id,
+            execution_id=target_execution_id,
+            stage_instance_id=target_stage_instance_id,
+            invalidated_by_interaction_id=event.event_id,
+        )
+        return project_event_record(
+            event,
+            execution=execution,
+            interaction_allowed=False,
+            is_latest_override=False,
         )
 
     @classmethod

@@ -8,7 +8,7 @@ import type {
   TodoEvent,
 } from '@/domain/todos/models';
 import { MessageSquarePlus } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { TodoInteractionComposer } from './TodoInteractionComposer';
 import { TodoInteractionStream } from './TodoInteractionStream';
 import {
@@ -29,6 +29,7 @@ interface TodoInteractionPanelProps {
   humanName?: string;
   humanAvatarUrl?: string;
   enabled: boolean;
+  requiresReplyTarget: boolean;
   loading: boolean;
   mentionBots: TodoBotOption[];
   mentionBotsLoading: boolean;
@@ -53,6 +54,7 @@ export function TodoInteractionPanel({
   humanName = '我',
   humanAvatarUrl,
   enabled,
+  requiresReplyTarget,
   loading,
   mentionBots,
   mentionBotsLoading,
@@ -75,16 +77,29 @@ export function TodoInteractionPanel({
     () => buildInteractionEntries(interactions, events, artifacts, resolvedBotName),
     [artifacts, events, interactions, resolvedBotName],
   );
-  const selectedTargetKeys = useMemo(
-    () => new Set(selectedTargets.map(targetKey)),
-    [selectedTargets],
-  );
+  const selectedTargetKeys = useMemo(() => new Set(selectedTargets.map(targetKey)), [selectedTargets]);
   const entryByTarget = useMemo(() => indexEntriesByTarget(entries), [entries]);
   const replyReferences = useMemo(
     () => indexReplyReferences(entries, resolvedBotName, humanName),
     [entries, humanName, resolvedBotName],
   );
   const floors = selectedFloors(selectedTargets);
+
+  useEffect(() => {
+    if (!replyTarget) return;
+    const current = replyReferences.get(replyTarget.eventId);
+    if (!current?.replyable) {
+      setReplyTarget(null);
+      return;
+    }
+    if (
+      current.targetExecutionId !== replyTarget.targetExecutionId ||
+      current.targetStageInstanceId !== replyTarget.targetStageInstanceId
+    ) {
+      setReplyTarget(current);
+    }
+  }, [replyReferences, replyTarget]);
+
   const openFileArtifact = async (artifact: Extract<TodoArtifact, { kind: 'file' }>) => {
     setBusyArtifactId(artifact.artifactId);
     setArtifactError(null);
@@ -174,6 +189,7 @@ export function TodoInteractionPanel({
         ) : enabled ? (
           <TodoInteractionComposer
             replyTarget={replyTarget}
+            requiresReplyTarget={requiresReplyTarget}
             loading={loading}
             mentionBots={mentionBots}
             mentionBotsLoading={mentionBotsLoading}
@@ -182,7 +198,7 @@ export function TodoInteractionPanel({
             onSubmit={onSubmit}
           />
         ) : (
-          <p className="m-0 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">仅待验收状态可以互动。</p>
+          <p className="m-0 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">当前状态不可互动。</p>
         )}
       </div>
     </section>

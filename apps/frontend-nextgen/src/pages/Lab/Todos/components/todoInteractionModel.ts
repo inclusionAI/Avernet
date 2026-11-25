@@ -12,6 +12,10 @@ export interface InteractionReplyReference {
   floor: number;
   label: string;
   content: string;
+  targetExecutionId?: string;
+  targetStageInstanceId?: string;
+  replyable: boolean;
+  replyDisabledReason?: string;
 }
 
 export interface ArtifactPresentation {
@@ -89,11 +93,6 @@ export function selectedFloors(targets: TodoAcceptanceTarget[]): string {
     .join('、');
 }
 
-function compareEvents(left: TodoEvent, right: TodoEvent): number {
-  if (left.eventSeq !== right.eventSeq) return left.eventSeq - right.eventSeq;
-  return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
-}
-
 export function buildInteractionEntries(
   interactions: TodoEvent[],
   events: TodoEvent[],
@@ -109,7 +108,7 @@ export function buildInteractionEntries(
   const renderedArtifactIds = new Set<string>();
   const entries: InteractionEntry[] = [];
 
-  [...stream.values()].sort(compareEvents).forEach((item) => {
+  [...stream.values()].forEach((item) => {
     const key = eventKey(item);
     if (
       item.eventType === 'task.created' ||
@@ -236,16 +235,23 @@ export function indexReplyReferences(
     indexed.set(eventId, {
       eventId,
       floor: index + 1,
-      label:
-        entry.kind === 'artifact'
-          ? '产物'
-          : entry.event.actorType === 'bot'
-            ? botName
-            : humanName,
+      label: entry.kind === 'artifact' ? '产物' : entry.event.actorType === 'bot' ? botName : humanName,
       content: replyContent(entry),
+      targetExecutionId: entry.kind === 'message' ? entry.event.todoExecutionId : entry.event?.todoExecutionId,
+      targetStageInstanceId: entry.kind === 'message' ? entry.event.stageInstanceId : entry.event?.stageInstanceId,
+      replyable: entry.kind === 'message' ? entry.event.replyable : entry.event?.replyable === true,
+      replyDisabledReason:
+        entry.kind === 'message' ? entry.event.replyDisabledReason : entry.event?.replyDisabledReason,
     });
   });
   return indexed;
+}
+
+export function replyDisabledLabel(reason?: string): string {
+  if (reason === 'superseded') return '历史版本不可回复';
+  if (reason === 'event_not_replyable') return '该事件不可回复';
+  if (reason === 'todo_not_replyable') return '当前待办不可回复';
+  return '当前不可回复';
 }
 
 export function rejectionQuote(

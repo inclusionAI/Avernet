@@ -131,6 +131,18 @@ class TodoRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def rerun_from_execution(
+        self,
+        *,
+        todo_id: str,
+        execution_id: str,
+        stage_instance_id: str,
+        invalidated_by_interaction_id: str,
+    ) -> TodoRecord:
+        """Invalidate the current target generation and all later stages."""
+        ...
+
+    @abstractmethod
     def cancel_todo(self, *, todo_id: str, reason: str | None = None) -> TodoRecord:
         """Cancel a Todo under a row lock."""
         ...

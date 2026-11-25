@@ -96,6 +96,7 @@ export interface TodoRecord {
   description: string;
   botId: string;
   botName?: string;
+  templateId?: string;
   status: TodoStatus;
   collabContextId?: string;
   createdAt: string;
@@ -112,6 +113,12 @@ export interface TodoEvent {
   actorType: TodoActorType;
   content: string;
   executionId: string;
+  todoExecutionId?: string;
+  stageInstanceId?: string;
+  generation?: number;
+  isLatest: boolean;
+  replyable: boolean;
+  replyDisabledReason?: string;
   contextVersion?: number;
   status?: string;
   createdAt: string;
@@ -139,6 +146,8 @@ export interface CreateTodoInput {
 export interface CreateTodoInteractionInput {
   message: string;
   replyToEventId?: string;
+  targetExecutionId?: string;
+  targetStageInstanceId?: string;
   mentions?: TodoInteractionMention[];
 }
 

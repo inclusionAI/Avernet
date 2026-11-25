@@ -232,6 +232,8 @@ describe('todoController', () => {
     await createTodoInteraction('todo/1', {
       message: '@复核助手 请确认价格来源',
       replyToEventId: 'event-3',
+      targetExecutionId: 'todoexec-stage-3-v1',
+      targetStageInstanceId: 'stage-3',
       mentions: [{ actorType: 'bot', actorId: 'bot-review' }],
     });
 
@@ -241,6 +243,8 @@ describe('todoController', () => {
       data: {
         message: '@复核助手 请确认价格来源',
         reply_to_event_id: 'event-3',
+        target_execution_id: 'todoexec-stage-3-v1',
+        target_stage_instance_id: 'stage-3',
         mentions: [{ actor_type: 'bot', actor_id: 'bot-review' }],
       },
       operation: 'create-todo-interaction',

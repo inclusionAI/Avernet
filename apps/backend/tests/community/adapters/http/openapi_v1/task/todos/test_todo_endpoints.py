@@ -83,6 +83,12 @@ def _event() -> TodoEventRecord:
         artifacts=(_artifact(),),
         created_at="2026-11-10T08:00:00Z",
         payload={"content": "done", "result_kind": "text"},
+        todo_execution_id="todoexec_1",
+        stage_instance_id="todostage_1",
+        generation=2,
+        is_latest=False,
+        replyable=False,
+        reply_disabled_reason="superseded",
     )
 
 
@@ -120,6 +126,12 @@ def _interaction_event() -> TodoEventRecord:
         artifacts=(),
         created_at="2026-11-10T07:55:00Z",
         payload={"content": "Please revise section 2"},
+        todo_execution_id="todoexec_2",
+        stage_instance_id="todostage_1",
+        generation=3,
+        is_latest=True,
+        replyable=True,
+        reply_disabled_reason=None,
     )
 
 
@@ -363,6 +375,12 @@ async def test_events_and_interactions_project_b_event_records():
     assert events.data[0].status == "pending_acceptance"
     assert events.data[0].artifacts[0].name == "report.docx"
     assert events.data[0].artifacts[0].url == "/files/report.docx"
+    assert events.data[0].todo_execution_id == "todoexec_1"
+    assert events.data[0].stage_instance_id == "todostage_1"
+    assert events.data[0].generation == 2
+    assert events.data[0].is_latest is False
+    assert events.data[0].replyable is False
+    assert events.data[0].reply_disabled_reason == "superseded"
     assert "payload" not in events.data[0].model_dump()
     assert service.calls == [
         {"op": "list_events", "todo_id": "todo_1", "actor_id": "human_1"},
@@ -371,6 +389,12 @@ async def test_events_and_interactions_project_b_event_records():
     assert history.code == 200000
     assert history.data[0].event_type == "user_interaction.posted"
     assert history.data[0].payload == {"content": "Please revise section 2"}
+    assert history.data[0].todo_execution_id == "todoexec_2"
+    assert history.data[0].stage_instance_id == "todostage_1"
+    assert history.data[0].generation == 3
+    assert history.data[0].is_latest is True
+    assert history.data[0].replyable is True
+    assert history.data[0].reply_disabled_reason is None
 
 
 @pytest.mark.asyncio
@@ -404,6 +428,8 @@ async def test_create_interaction_uses_message_only_and_returns_created_event():
             "author_name": None,
             "message": "Please include the rollback plan",
             "reply_to_event_id": None,
+            "target_execution_id": None,
+            "target_stage_instance_id": None,
             "mentions": (),
         }
     ]
@@ -419,6 +445,8 @@ async def test_create_interaction_maps_reply_and_structured_mentions():
         body=CreateTodoInteractionRequest(
             message="Please review this floor",
             reply_to_event_id="event_2",
+            target_execution_id="todoexec_2",
+            target_stage_instance_id="todostage_1",
             mentions=[{"actor_type": "bot", "actor_id": "bot_2"}],
         ),
         request=_request(
@@ -432,6 +460,8 @@ async def test_create_interaction_maps_reply_and_structured_mentions():
 
     call = service.calls[0]
     assert call["reply_to_event_id"] == "event_2"
+    assert call["target_execution_id"] == "todoexec_2"
+    assert call["target_stage_instance_id"] == "todostage_1"
     assert len(call["mentions"]) == 1
     assert call["mentions"][0].actor_type.value == "bot"
     assert call["mentions"][0].actor_id == "bot_2"

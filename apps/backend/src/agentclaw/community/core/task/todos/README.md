@@ -53,6 +53,30 @@ should model human review as an explicit Human stage rather than relying on an
 implicit acceptance step. Legacy acceptance events and routes remain documented
 below only for compatibility.
 
+
+### Versioned stage interactions
+
+Every Bot-stage execution has a stage-local, monotonically increasing
+`generation`. Exactly one execution per stage is `is_current`; this A-owned flag
+is the authority for whether its events may be replied to. The frontend's
+reply-disabled state is only a presentation projection, and interaction creation
+rechecks the target execution under repository locking.
+
+Replying to the current execution of stage N keeps earlier current stages
+unchanged, invalidates stage N and every later current execution, resets stage N
+to `in_progress`, resets later stages to `not_started`, and schedules a fresh
+Context/execution from stage N. The replacement executions use the next
+generation for their stage. Historical Contexts and events remain visible, but
+their events are projected with `is_latest=false`, `replyable=false`, and
+`reply_disabled_reason=superseded`. Thus a rerun from stage 3 leaves stages 1
+and 2 replyable while only the new generations of stages 3 and later accept
+replies.
+
+A completed template Todo may be reopened by replying to one of its current
+stage executions. A cancelled template Todo is terminal and rejects replies.
+Completion gates join artifacts to current executions, so artifacts from a
+superseded generation cannot satisfy the replacement generation's gate.
+
 A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter explicitly requests event payloads for its richer interaction projection. ContextCollab execution is a Task-core executor, not a deployment Plugin. New Todo runs reuse Task's existing `OpenApiBotPort` and owner-granted BaaS `allowed-bots` authorization without modifying `TaskExecutor` or introducing a shared Task/Todo abstraction. Optional BCS ports are retained only to resume and inspect historical group-backed Todo Contexts.
 
 `TodoCollaborationPort` is an internal Task/Todo consumer boundary, not a globally replaceable Plugin API. `InProcessTodoCollaborationAdapter` is the production composition and delegates to the same-process `ContextCollabServiceProtocol`; it is fixed by `TaskTodoBindings` rather than selected by deployment Profile. The deterministic fake lives under Todo tests and is not shipped or registered as a local plugin.

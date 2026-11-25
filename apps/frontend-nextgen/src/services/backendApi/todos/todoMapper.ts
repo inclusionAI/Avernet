@@ -24,6 +24,7 @@ function statusValue(value: unknown): TodoStatus {
 
 export function mapTodoDto(dto: TodoDto): TodoRecord {
   const collabContextId = stringValue(dto.collab_context_id);
+  const templateId = stringValue(dto.template_id);
   return {
     todoId: stringValue(dto.todo_id ?? dto.id),
     spaceId: numberValue(dto.space_id),
@@ -31,6 +32,7 @@ export function mapTodoDto(dto: TodoDto): TodoRecord {
     description: stringValue(dto.description),
     botId: stringValue(dto.bot_id),
     botName: stringValue(dto.bot_name) || undefined,
+    templateId: templateId || undefined,
     status: statusValue(dto.status),
     collabContextId: collabContextId || undefined,
     createdAt: stringValue(dto.created_at ?? dto.gmt_create),
@@ -57,6 +59,9 @@ export function mapTodoEventDto(dto: TodoEventDto): TodoEvent {
         .filter((item): item is TodoEvent['artifacts'][number] => item !== null)
     : [];
   const status = stringValue(dto.status);
+  const todoExecutionId = stringValue(dto.todo_execution_id);
+  const stageInstanceId = stringValue(dto.stage_instance_id);
+  const replyDisabledReason = stringValue(dto.reply_disabled_reason);
   return {
     eventId: stringValue(dto.event_id),
     eventSeq: numberValue(dto.event_seq),
@@ -65,6 +70,12 @@ export function mapTodoEventDto(dto: TodoEventDto): TodoEvent {
     actorType: stringValue(dto.actor_type).toLowerCase() || 'human',
     content: stringValue(dto.content),
     executionId: stringValue(dto.execution_id),
+    todoExecutionId: todoExecutionId || undefined,
+    stageInstanceId: stageInstanceId || undefined,
+    generation: dto.generation === null || dto.generation === undefined ? undefined : numberValue(dto.generation),
+    isLatest: dto.is_latest === undefined ? true : dto.is_latest === true,
+    replyable: dto.replyable === true,
+    replyDisabledReason: replyDisabledReason || undefined,
     contextVersion:
       dto.context_version === null || dto.context_version === undefined ? undefined : numberValue(dto.context_version),
     status: status || undefined,

@@ -17,10 +17,6 @@ import { useTodoMentionBots } from './useTodoMentionBots';
 
 const RUNNING_POLL_INTERVAL_MS = 5_000;
 
-function sortEvents<T extends { eventSeq: number }>(events: T[]): T[] {
-  return [...events].sort((left, right) => left.eventSeq - right.eventSeq);
-}
-
 export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promise<void> | void) {
   const storedSelectedTodo = useTodoStore((state) => state.selectedTodo);
   const storedInteractions = useTodoStore((state) => state.interactions);
@@ -57,8 +53,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
   const interactions = hasCurrentDetail ? storedInteractions : [];
   const events = hasCurrentDetail ? storedEvents : [];
   const artifacts = hasCurrentDetail ? storedArtifacts.filter((item) => item.todoId === todoId) : [];
-  const error =
-    hasCurrentDetail || detailLoading || loadedTodoIdRef.current === todoId ? storedError : null;
+  const error = hasCurrentDetail || detailLoading || loadedTodoIdRef.current === todoId ? storedError : null;
   const loading = detailLoading || Boolean(todoId && !hasCurrentDetail && !error);
 
   const refreshEvents = useCallback(async () => {
@@ -68,7 +63,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     setEventsError(null);
     try {
       const todoEvents = await loadTodoEvents(todoId);
-      if (requestId === eventRequestRef.current) setEvents(sortEvents(todoEvents));
+      if (requestId === eventRequestRef.current) setEvents(todoEvents);
     } catch (cause) {
       if (requestId !== eventRequestRef.current) return;
       setEvents([]);
@@ -109,13 +104,10 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     void refreshEvents();
     void refreshArtifacts();
     try {
-      const [todo, todoInteractions] = await Promise.all([
-        loadTodo(todoId),
-        loadTodoInteractions(todoId),
-      ]);
+      const [todo, todoInteractions] = await Promise.all([loadTodo(todoId), loadTodoInteractions(todoId)]);
       if (requestId !== requestRef.current) return;
       setSelectedTodo(todo);
-      setInteractions(sortEvents(todoInteractions));
+      setInteractions(todoInteractions);
     } catch (cause) {
       if (requestId !== requestRef.current) return;
       setError(cause instanceof Error ? cause.message : '待办详情加载失败');
@@ -148,8 +140,20 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
 
   const interact = useCallback(
     async (input: CreateTodoInteractionInput) => {
-      if (!todoId || !selectedTodo || !canInteractWithTodo(selectedTodo.status)) {
+      const interactionAllowed = Boolean(
+        selectedTodo &&
+          (canInteractWithTodo(selectedTodo.status) ||
+            (selectedTodo.templateId && selectedTodo.status === 'completed')),
+      );
+      if (!todoId || !selectedTodo || !interactionAllowed) {
         safeReportError(new Error('当前状态不允许互动'), { title: '互动失败' });
+        return false;
+      }
+      if (
+        selectedTodo.templateId &&
+        (!input.replyToEventId || !input.targetExecutionId || !input.targetStageInstanceId)
+      ) {
+        safeReportError(new Error('请选择最新版本的互动后再发送'), { title: '互动失败' });
         return false;
       }
       const text = input.message.trim();

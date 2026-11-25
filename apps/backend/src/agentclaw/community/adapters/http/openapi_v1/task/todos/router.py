@@ -514,7 +514,7 @@ async def create_todo_interaction(
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
 ) -> Envelope[TodoInteractionResponse]:
-    """Append one Human interaction event while the Todo awaits acceptance."""
+    """Append one Human interaction event to a backend-approved reply target."""
     actor_id = call_user(user_id=user_id, principal=principal)
     event = await service.create_interaction(
         todo_id=todo_id,
@@ -522,6 +522,8 @@ async def create_todo_interaction(
         author_name=None,
         message=body.message,
         reply_to_event_id=body.reply_to_event_id,
+        target_execution_id=body.target_execution_id,
+        target_stage_instance_id=body.target_stage_instance_id,
         mentions=tuple(
             TodoInteractionMention(
                 actor_type=TodoInteractionMentionActorType(mention.actor_type),

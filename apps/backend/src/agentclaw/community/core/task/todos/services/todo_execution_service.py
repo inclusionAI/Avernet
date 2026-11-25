@@ -426,7 +426,6 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         )
         bot = resolve_todo_bot(
             bot_repository=self._bot_repository,
-            catalog_metadata=self._catalog_metadata,
             space=space,
             actor_id=todo.created_by,
             bot_id=stage.executor_subject_id,

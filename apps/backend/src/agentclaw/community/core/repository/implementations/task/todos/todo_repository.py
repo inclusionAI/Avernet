@@ -21,6 +21,7 @@ from agentclaw.community.core.repository.implementations.task.todos.models impor
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
 )
+from agentclaw.community.core.task.todos.artifact_models import TodoExecutionStatus
 from agentclaw.community.core.task.todos.errors import (
     TodoNotFoundError,
     TodoSourceAlreadyImportedError,
@@ -531,6 +532,129 @@ class TodoRepository(TodoRepositoryProtocol):
             db.refresh(todo)
             return todo.to_record()
 
+    def rerun_from_execution(
+        self,
+        *,
+        todo_id: str,
+        execution_id: str,
+        stage_instance_id: str,
+        invalidated_by_interaction_id: str,
+    ) -> TodoRecord:
+        with self._transaction() as db:
+            todo = self._require_todo(db, todo_id=todo_id, lock=True)
+            if not todo.template_id:
+                raise TodoStateConflictError(
+                    "Execution-scoped reruns require a templated Todo"
+                )
+            if todo.status == TodoStatus.CANCELLED.value:
+                raise TodoStateConflictError("Cancelled Todo cannot be rerun")
+
+            execution = (
+                db.query(TodoExecutionModel)
+                .filter(
+                    TodoExecutionModel.execution_id == execution_id,
+                    TodoExecutionModel.todo_id == todo_id,
+                    TodoExecutionModel.env == get_current_env(),
+                    TodoExecutionModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if execution is None:
+                raise TodoNotFoundError(
+                    f"Todo execution {execution_id} not found for Todo {todo_id}"
+                )
+            if execution.stage_instance_id != stage_instance_id:
+                raise TodoStateConflictError(
+                    "Todo execution does not belong to the target stage"
+                )
+            if not execution.is_current:
+                raise TodoStateConflictError(
+                    "Historical Todo execution cannot be replied to"
+                )
+
+            target_stage = (
+                self._stage_query(
+                    db,
+                    todo_id=todo_id,
+                    stage_instance_id=stage_instance_id,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if target_stage is None:
+                raise TodoNotFoundError(
+                    f"Todo stage {stage_instance_id} not found for Todo {todo_id}"
+                )
+
+            affected_stages = (
+                db.query(TodoStageInstanceModel)
+                .filter(
+                    TodoStageInstanceModel.todo_id == todo_id,
+                    TodoStageInstanceModel.env == get_current_env(),
+                    TodoStageInstanceModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                    TodoStageInstanceModel.stage_order >= target_stage.stage_order,
+                )
+                .order_by(
+                    asc(TodoStageInstanceModel.stage_order),
+                    asc(TodoStageInstanceModel.id),
+                )
+                .with_for_update()
+                .all()
+            )
+            stage_ids = [stage.stage_instance_id for stage in affected_stages]
+            executions = (
+                db.query(TodoExecutionModel)
+                .filter(
+                    TodoExecutionModel.todo_id == todo_id,
+                    TodoExecutionModel.env == get_current_env(),
+                    TodoExecutionModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                    TodoExecutionModel.stage_instance_id.in_(stage_ids),
+                    TodoExecutionModel.is_current.is_(True),
+                )
+                .with_for_update()
+                .all()
+            )
+            if not any(row.execution_id == execution_id for row in executions):
+                raise TodoStateConflictError(
+                    "Historical Todo execution cannot be replied to"
+                )
+            for row in executions:
+                row.is_current = False
+                row.invalidated_by_interaction_id = invalidated_by_interaction_id
+                if row.status == TodoExecutionStatus.ACTIVE.value:
+                    row.status = TodoExecutionStatus.REPLACED.value
+
+            now = datetime.now(timezone.utc)
+            for stage in affected_stages:
+                stage.collab_context_id = None
+                stage.pending_action_kind = None
+                stage.state_reason = None
+                stage.requested_action = None
+                stage.last_outcome_key = None
+                stage.completed_at = None
+                if stage.stage_instance_id == stage_instance_id:
+                    stage.status = TodoStageStatus.IN_PROGRESS.value
+                    stage.started_at = now
+                else:
+                    stage.status = TodoStageStatus.NOT_STARTED.value
+                    stage.started_at = None
+
+            todo.current_stage_instance_id = stage_instance_id
+            todo.status = TodoStatus.IN_PROGRESS.value
+            todo.collab_context_id = None
+            todo.pending_action_kind = None
+            todo.state_reason = None
+            todo.requested_action = None
+            todo.bot_id = target_stage.executor_subject_id
+            todo.bot_name = target_stage.executor_subject_name
+            db.flush()
+            db.refresh(todo)
+            return todo.to_record()
+
     def cancel_todo(self, *, todo_id: str, reason: str | None = None) -> TodoRecord:
         with self._transaction() as db:
             todo = self._require_todo(db, todo_id=todo_id, lock=True)
@@ -698,6 +822,7 @@ class TodoRepository(TodoRepositoryProtocol):
                 TodoExecutionModel.env == get_current_env(),
                 TodoExecutionModel.avernet_tenant == get_current_avernet_tenant(),
                 TodoExecutionModel.stage_instance_id == stage.stage_instance_id,
+                TodoExecutionModel.is_current.is_(True),
             )
             .all()
         )

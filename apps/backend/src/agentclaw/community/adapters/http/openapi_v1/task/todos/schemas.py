@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 from agentclaw.community.core.task.todos.artifact_models import (
+    MAX_EXECUTION_ID_LENGTH,
     TodoArtifactKind,
     TodoArtifactRecord,
 )
@@ -31,6 +32,7 @@ from agentclaw.community.core.task.todos.models import (
     MAX_INTERACTION_MENTIONS,
     MAX_MESSAGE_LENGTH,
     MAX_TITLE_LENGTH,
+    MAX_TODO_ID_LENGTH,
     TodoEventRecord,
     TodoRecord,
 )
@@ -427,6 +429,18 @@ class CreateTodoInteractionRequest(BaseModel):
         max_length=MAX_EVENT_ID_LENGTH,
         description="Stable interaction event being replied to; floor numbers are presentation-only.",
     )
+    target_execution_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_EXECUTION_ID_LENGTH,
+        description="Todo execution generation being replied to for a template Todo.",
+    )
+    target_stage_instance_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_TODO_ID_LENGTH,
+        description="Expanded Todo stage owning the target execution generation.",
+    )
     mentions: list[TodoInteractionMentionRequest] = Field(
         default_factory=list,
         max_length=MAX_INTERACTION_MENTIONS,
@@ -555,6 +569,24 @@ class TodoEventResponse(BaseModel):
     created_at: str = Field(
         description="B event creation timestamp in ISO-8601 format."
     )
+    todo_execution_id: str | None = Field(
+        description="A-side Todo execution generation that owns this Context."
+    )
+    stage_instance_id: str | None = Field(
+        description="Expanded Todo stage that owns this event, when templated."
+    )
+    generation: int | None = Field(
+        description="Monotonic execution generation inside the owning stage."
+    )
+    is_latest: bool = Field(
+        description="Whether this event belongs to the current execution generation."
+    )
+    replyable: bool = Field(
+        description="Whether the backend currently accepts a reply to this event."
+    )
+    reply_disabled_reason: str | None = Field(
+        description="Stable reason replies are disabled, when not replyable."
+    )
 
     @classmethod
     def from_record(cls, record: TodoEventRecord) -> "TodoEventResponse":
@@ -577,6 +609,12 @@ class TodoEventResponse(BaseModel):
                 for item in record.artifacts
             ],
             created_at=record.created_at,
+            todo_execution_id=record.todo_execution_id,
+            stage_instance_id=record.stage_instance_id,
+            generation=record.generation,
+            is_latest=record.is_latest,
+            replyable=record.replyable,
+            reply_disabled_reason=record.reply_disabled_reason,
         )
 
 

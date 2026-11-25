@@ -42,6 +42,9 @@ export default function TodoDetailPage() {
   const approvalDecisionId = useRef<string | null>(null);
   const detail = useTodoDetail(todoId || null);
   const todo = detail.selectedTodo;
+  const interactionEnabled = Boolean(
+    todo && (canInteractWithTodo(todo.status) || (todo.templateId && todo.status === 'completed')),
+  );
 
   useEffect(() => {
     setRejectionMode(false);
@@ -229,7 +232,8 @@ export default function TodoDetailPage() {
                     botName={todo.botName || todo.botId}
                     humanName={humanIdentity?.displayName || '我'}
                     humanAvatarUrl={humanIdentity?.avatarUrl}
-                    enabled={canInteractWithTodo(todo.status)}
+                    enabled={interactionEnabled}
+                    requiresReplyTarget={Boolean(todo.templateId)}
                     loading={detail.mutationLoading}
                     mentionBots={detail.mentionBots}
                     mentionBotsLoading={detail.mentionBotsLoading}

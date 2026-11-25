@@ -362,6 +362,7 @@ class TodoArtifactService:
             raise TodoExecutionAuthError("Invalid Todo execution credential") from exc
         valid = (
             execution.status is TodoExecutionStatus.ACTIVE
+            and execution.is_current
             and execution.todo_id == todo_id
             and bool(token)
             and hmac.compare_digest(execution.token_hash, self._token_hash(token))

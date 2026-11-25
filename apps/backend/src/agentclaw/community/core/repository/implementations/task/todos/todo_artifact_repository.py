@@ -58,21 +58,57 @@ class TodoArtifactRepository(TodoArtifactRepositoryProtocol):
         stage_instance_id: str | None = None,
     ) -> TodoExecutionRecord:
         with self._transaction() as db:
-            todo = self._scope(db.query(TodoModel), TodoModel).filter(
-                TodoModel.todo_id == todo_id
-            ).one_or_none()
+            todo = (
+                self._scope(db.query(TodoModel), TodoModel)
+                .filter(TodoModel.todo_id == todo_id)
+                .with_for_update()
+                .one_or_none()
+            )
             if todo is None:
                 raise TodoNotFoundError(f"Todo {todo_id} not found")
             if todo.collab_context_id != collab_context_id:
                 raise TodoStateConflictError(
                     "Todo execution Context does not match the current bound Context"
                 )
-            self._scope(db.query(TodoExecutionModel), TodoExecutionModel).filter(
-                TodoExecutionModel.todo_id == todo_id,
-                TodoExecutionModel.status == TodoExecutionStatus.ACTIVE.value,
-            ).update({TodoExecutionModel.status: TodoExecutionStatus.REPLACED.value})
+
+            stage_filter = (
+                TodoExecutionModel.stage_instance_id.is_(None)
+                if stage_instance_id is None
+                else TodoExecutionModel.stage_instance_id == stage_instance_id
+            )
+            prior_rows = (
+                self._scope(db.query(TodoExecutionModel), TodoExecutionModel)
+                .filter(
+                    TodoExecutionModel.todo_id == todo_id,
+                    stage_filter,
+                )
+                .order_by(
+                    TodoExecutionModel.generation.desc(),
+                    TodoExecutionModel.id.desc(),
+                )
+                .with_for_update()
+                .all()
+            )
+            generation = (
+                max((int(row.generation or 1) for row in prior_rows), default=0) + 1
+            )
+            execution_id = f"todoexec_{uuid.uuid4().hex}"
+            replacement_source = (
+                prior_rows[0]
+                if prior_rows and prior_rows[0].replaced_by_execution_id is None
+                else None
+            )
+            for prior in prior_rows:
+                if not prior.is_current:
+                    continue
+                prior.is_current = False
+                if prior.status == TodoExecutionStatus.ACTIVE.value:
+                    prior.status = TodoExecutionStatus.REPLACED.value
+            if replacement_source is not None:
+                replacement_source.replaced_by_execution_id = execution_id
+
             row = TodoExecutionModel(
-                execution_id=f"todoexec_{uuid.uuid4().hex}",
+                execution_id=execution_id,
                 todo_id=todo_id,
                 collab_context_id=collab_context_id,
                 run_id=None,
@@ -80,6 +116,10 @@ class TodoArtifactRepository(TodoArtifactRepositoryProtocol):
                 status=TodoExecutionStatus.ACTIVE.value,
                 executor_id=executor_id,
                 stage_instance_id=stage_instance_id,
+                generation=generation,
+                is_current=True,
+                invalidated_by_interaction_id=None,
+                replaced_by_execution_id=None,
                 env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
             )
@@ -99,6 +139,7 @@ class TodoArtifactRepository(TodoArtifactRepositoryProtocol):
                 TodoExecutionModel.todo_id == todo_id,
                 TodoExecutionModel.collab_context_id == collab_context_id,
                 TodoExecutionModel.status == TodoExecutionStatus.ACTIVE.value,
+                TodoExecutionModel.is_current.is_(True),
             ).update(
                 {TodoExecutionModel.status: TodoExecutionStatus.COMPLETED.value}
             )
@@ -110,6 +151,42 @@ class TodoArtifactRepository(TodoArtifactRepositoryProtocol):
             ).one_or_none()
             if row is None:
                 raise TodoNotFoundError(f"Todo execution {execution_id} not found")
+            return row.to_record()
+
+    def list_executions(self, *, todo_id: str) -> tuple[TodoExecutionRecord, ...]:
+        with self._db.orm_session() as db:
+            rows = (
+                self._scope(db.query(TodoExecutionModel), TodoExecutionModel)
+                .filter(TodoExecutionModel.todo_id == todo_id)
+                .order_by(
+                    asc(TodoExecutionModel.gmt_create),
+                    asc(TodoExecutionModel.id),
+                )
+                .all()
+            )
+            return tuple(row.to_record() for row in rows)
+
+    def get_current_execution(
+        self, *, todo_id: str, stage_instance_id: str
+    ) -> TodoExecutionRecord:
+        with self._db.orm_session() as db:
+            row = (
+                self._scope(db.query(TodoExecutionModel), TodoExecutionModel)
+                .filter(
+                    TodoExecutionModel.todo_id == todo_id,
+                    TodoExecutionModel.stage_instance_id == stage_instance_id,
+                    TodoExecutionModel.is_current.is_(True),
+                )
+                .order_by(
+                    TodoExecutionModel.generation.desc(),
+                    TodoExecutionModel.id.desc(),
+                )
+                .first()
+            )
+            if row is None:
+                raise TodoNotFoundError(
+                    f"Current Todo execution for stage {stage_instance_id} not found"
+                )
             return row.to_record()
 
     def bind_run_id(self, *, execution_id: str, run_id: str) -> TodoExecutionRecord:

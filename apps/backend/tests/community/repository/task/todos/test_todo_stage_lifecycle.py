@@ -9,6 +9,10 @@ import pytest
 from agentclaw.community.core.repository.implementations.task.todos.todo_repository import (
     TodoRepository,
 )
+from agentclaw.community.core.repository.implementations.task.todos.todo_artifact_repository import (
+    TodoArtifactRepository,
+)
+from agentclaw.community.core.task.todos.artifact_models import TodoArtifactKind
 from agentclaw.community.core.task.todos.errors import TodoStateConflictError
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.core.task.todos.stage_models import (
@@ -91,7 +95,12 @@ def _todo(todo_id: str, stage_id: str, status: TodoStatus) -> TodoRecord:
     )
 
 
-def _create(repo: TodoRepository, *, kinds: tuple[str, ...]) -> TodoRecord:
+def _create(
+    repo: TodoRepository,
+    *,
+    kinds: tuple[str, ...],
+    gates: tuple[dict | None, ...] | None = None,
+) -> TodoRecord:
     todo_id = f"todo_{uuid4().hex}"
     stages = tuple(
         _stage(
@@ -104,6 +113,7 @@ def _create(repo: TodoRepository, *, kinds: tuple[str, ...]) -> TodoRecord:
                 if index == 0
                 else TodoStageStatus.NOT_STARTED
             ),
+            gate=gates[index] if gates is not None else None,
         )
         for index, kind in enumerate(kinds)
     )
@@ -113,6 +123,43 @@ def _create(repo: TodoRepository, *, kinds: tuple[str, ...]) -> TodoRecord:
         participant_bindings=(),
         stages=stages,
     )
+
+
+def _complete_all_bot_stages(
+    repo: TodoRepository,
+    artifact_repo: TodoArtifactRepository,
+    *,
+    todo: TodoRecord,
+) -> tuple:
+    executions = []
+    for stage in repo.list_stages(todo_id=todo.todo_id):
+        context_id = f"ctx_{stage.stage_instance_id}_v1"
+        repo.bind_stage_context(
+            todo_id=todo.todo_id,
+            stage_instance_id=stage.stage_instance_id,
+            collab_context_id=context_id,
+        )
+        execution = artifact_repo.create_execution(
+            todo_id=todo.todo_id,
+            collab_context_id=context_id,
+            token_hash=f"{stage.stage_order + 1:064d}",
+            executor_id=stage.executor_subject_id,
+            stage_instance_id=stage.stage_instance_id,
+        )
+        artifact_repo.complete_active_execution(
+            todo_id=todo.todo_id,
+            collab_context_id=context_id,
+        )
+        repo.apply_stage_outcome(
+            outcome=_outcome(
+                todo,
+                stage.stage_instance_id,
+                TodoStageOutcomeKind.COMPLETED,
+                key=execution.execution_id,
+            )
+        )
+        executions.append(execution)
+    return tuple(executions)
 
 
 def _outcome(
@@ -269,3 +316,224 @@ def test_stage_outcome_is_idempotent_and_stale_stage_is_rejected(db) -> None:
                 key="different_key",
             )
         )
+
+
+def test_rerun_from_third_stage_invalidates_only_target_and_later_generations(db) -> None:
+    repo = TodoRepository(db)
+    artifact_repo = TodoArtifactRepository(db)
+    todo = _create(repo, kinds=("bot", "bot", "bot", "bot", "bot"))
+    original_stages = repo.list_stages(todo_id=todo.todo_id)
+    original_executions = _complete_all_bot_stages(
+        repo,
+        artifact_repo,
+        todo=todo,
+    )
+    target_stage = original_stages[2]
+
+    rerun = repo.rerun_from_execution(
+        todo_id=todo.todo_id,
+        execution_id=original_executions[2].execution_id,
+        stage_instance_id=target_stage.stage_instance_id,
+        invalidated_by_interaction_id="event_feedback_1",
+    )
+
+    assert rerun.status is TodoStatus.IN_PROGRESS
+    assert rerun.current_stage_instance_id == target_stage.stage_instance_id
+    assert rerun.collab_context_id is None
+    rerun_stages = repo.list_stages(todo_id=todo.todo_id)
+    assert [stage.status for stage in rerun_stages] == [
+        TodoStageStatus.COMPLETED,
+        TodoStageStatus.COMPLETED,
+        TodoStageStatus.IN_PROGRESS,
+        TodoStageStatus.NOT_STARTED,
+        TodoStageStatus.NOT_STARTED,
+    ]
+    assert [stage.collab_context_id for stage in rerun_stages] == [
+        f"ctx_{original_stages[0].stage_instance_id}_v1",
+        f"ctx_{original_stages[1].stage_instance_id}_v1",
+        None,
+        None,
+        None,
+    ]
+
+    invalidated = {
+        row.execution_id: row
+        for row in artifact_repo.list_executions(todo_id=todo.todo_id)
+    }
+    assert [
+        invalidated[execution.execution_id].is_current
+        for execution in original_executions
+    ] == [True, True, False, False, False]
+    assert [
+        invalidated[execution.execution_id].invalidated_by_interaction_id
+        for execution in original_executions
+    ] == [None, None, "event_feedback_1", "event_feedback_1", "event_feedback_1"]
+
+    replacements = []
+    for stage, original_execution in zip(
+        original_stages[2:], original_executions[2:], strict=True
+    ):
+        current_todo = repo.get_todo(todo_id=todo.todo_id)
+        assert current_todo.current_stage_instance_id == stage.stage_instance_id
+        context_id = f"ctx_{stage.stage_instance_id}_v2"
+        repo.bind_stage_context(
+            todo_id=todo.todo_id,
+            stage_instance_id=stage.stage_instance_id,
+            collab_context_id=context_id,
+        )
+        replacement = artifact_repo.create_execution(
+            todo_id=todo.todo_id,
+            collab_context_id=context_id,
+            token_hash=f"{stage.stage_order + 101:064d}",
+            executor_id=stage.executor_subject_id,
+            stage_instance_id=stage.stage_instance_id,
+        )
+        replacements.append(replacement)
+        assert replacement.generation == 2
+        assert replacement.is_current is True
+        assert (
+            artifact_repo.get_execution(
+                execution_id=original_execution.execution_id
+            ).replaced_by_execution_id
+            == replacement.execution_id
+        )
+        artifact_repo.complete_active_execution(
+            todo_id=todo.todo_id,
+            collab_context_id=context_id,
+        )
+        repo.apply_stage_outcome(
+            outcome=_outcome(
+                todo,
+                stage.stage_instance_id,
+                TodoStageOutcomeKind.COMPLETED,
+                key=replacement.execution_id,
+            )
+        )
+
+    completed = repo.get_todo(todo_id=todo.todo_id)
+    assert completed.status is TodoStatus.COMPLETED
+    assert completed.current_stage_instance_id is None
+    assert [row.generation for row in replacements] == [2, 2, 2]
+    assert [
+        artifact_repo.get_current_execution(
+            todo_id=todo.todo_id,
+            stage_instance_id=stage.stage_instance_id,
+        ).generation
+        for stage in original_stages
+    ] == [1, 1, 2, 2, 2]
+
+
+def test_rerun_rejects_a_historical_execution(db) -> None:
+    repo = TodoRepository(db)
+    artifact_repo = TodoArtifactRepository(db)
+    todo = _create(repo, kinds=("bot", "bot", "bot"))
+    stages = repo.list_stages(todo_id=todo.todo_id)
+    executions = _complete_all_bot_stages(repo, artifact_repo, todo=todo)
+
+    repo.rerun_from_execution(
+        todo_id=todo.todo_id,
+        execution_id=executions[1].execution_id,
+        stage_instance_id=stages[1].stage_instance_id,
+        invalidated_by_interaction_id="event_feedback_1",
+    )
+
+    with pytest.raises(TodoStateConflictError, match="Historical"):
+        repo.rerun_from_execution(
+            todo_id=todo.todo_id,
+            execution_id=executions[1].execution_id,
+            stage_instance_id=stages[1].stage_instance_id,
+            invalidated_by_interaction_id="event_feedback_2",
+        )
+
+
+def test_completion_gate_ignores_artifacts_from_superseded_generation(db) -> None:
+    repo = TodoRepository(db)
+    artifact_repo = TodoArtifactRepository(db)
+    gate = {
+        "required_artifacts": [
+            {"type": "text", "state": "created", "min_count": 1}
+        ]
+    }
+    todo = _create(repo, kinds=("bot",), gates=(gate,))
+    stage = repo.list_stages(todo_id=todo.todo_id)[0]
+    context_v1 = f"ctx_{stage.stage_instance_id}_v1"
+    repo.bind_stage_context(
+        todo_id=todo.todo_id,
+        stage_instance_id=stage.stage_instance_id,
+        collab_context_id=context_v1,
+    )
+    execution_v1 = artifact_repo.create_execution(
+        todo_id=todo.todo_id,
+        collab_context_id=context_v1,
+        token_hash="1" * 64,
+        executor_id=stage.executor_subject_id,
+        stage_instance_id=stage.stage_instance_id,
+    )
+    artifact_repo.create_artifact(
+        todo_id=todo.todo_id,
+        collab_context_id=context_v1,
+        execution_id=execution_v1.execution_id,
+        artifact_name="first result",
+        artifact_kind=TodoArtifactKind.TEXT,
+        content={"artifact_type": "text", "artifact_state": "created"},
+        content_hash="a" * 64,
+        creator=stage.executor_subject_id,
+    )
+    repo.apply_stage_outcome(
+        outcome=_outcome(
+            todo,
+            stage.stage_instance_id,
+            TodoStageOutcomeKind.COMPLETED,
+            key=execution_v1.execution_id,
+        )
+    )
+    repo.rerun_from_execution(
+        todo_id=todo.todo_id,
+        execution_id=execution_v1.execution_id,
+        stage_instance_id=stage.stage_instance_id,
+        invalidated_by_interaction_id="event_feedback_1",
+    )
+
+    context_v2 = f"ctx_{stage.stage_instance_id}_v2"
+    repo.bind_stage_context(
+        todo_id=todo.todo_id,
+        stage_instance_id=stage.stage_instance_id,
+        collab_context_id=context_v2,
+    )
+    execution_v2 = artifact_repo.create_execution(
+        todo_id=todo.todo_id,
+        collab_context_id=context_v2,
+        token_hash="2" * 64,
+        executor_id=stage.executor_subject_id,
+        stage_instance_id=stage.stage_instance_id,
+    )
+
+    with pytest.raises(TodoStateConflictError, match="requires artifact"):
+        repo.apply_stage_outcome(
+            outcome=_outcome(
+                todo,
+                stage.stage_instance_id,
+                TodoStageOutcomeKind.COMPLETED,
+                key=execution_v2.execution_id,
+            )
+        )
+
+    artifact_repo.create_artifact(
+        todo_id=todo.todo_id,
+        collab_context_id=context_v2,
+        execution_id=execution_v2.execution_id,
+        artifact_name="replacement result",
+        artifact_kind=TodoArtifactKind.TEXT,
+        content={"artifact_type": "text", "artifact_state": "created"},
+        content_hash="b" * 64,
+        creator=stage.executor_subject_id,
+    )
+    completed = repo.apply_stage_outcome(
+        outcome=_outcome(
+            todo,
+            stage.stage_instance_id,
+            TodoStageOutcomeKind.COMPLETED,
+            key=execution_v2.execution_id,
+        )
+    )
+    assert completed.status is TodoStatus.COMPLETED

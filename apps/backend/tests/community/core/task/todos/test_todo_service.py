@@ -14,6 +14,10 @@ from agentclaw.community.core.task.todos.errors import (
     TodoBotScopeError,
     TodoStateConflictError,
 )
+from agentclaw.community.core.task.todos.artifact_models import (
+    TodoExecutionRecord,
+    TodoExecutionStatus,
+)
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
     TodoAcceptanceTarget,
@@ -25,6 +29,10 @@ from agentclaw.community.core.task.todos.models import (
     TodoStatus,
 )
 from agentclaw.community.core.task.todos.services.todo_service import TodoService
+from agentclaw.community.core.task.todos.stage_models import (
+    TodoStageRecord,
+    TodoStageStatus,
+)
 from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationArtifact,
@@ -66,6 +74,67 @@ def _todo(**overrides: Any) -> TodoRecord:
     }
     values.update(overrides)
     return TodoRecord(**values)
+
+
+def _stage(
+    *,
+    stage_instance_id: str = "stage_1",
+    todo_id: str = "todo_1",
+    stage_order: int = 1,
+    status: TodoStageStatus = TodoStageStatus.COMPLETED,
+) -> TodoStageRecord:
+    return TodoStageRecord(
+        stage_instance_id=stage_instance_id,
+        todo_id=todo_id,
+        template_version_id="todo_tplv_1",
+        stage_key=f"stage_{stage_order}",
+        stage_order=stage_order,
+        stage_name=f"Stage {stage_order}",
+        purpose=f"Purpose {stage_order}",
+        stage_kind="bot",
+        executor_binding_key=f"executor_{stage_order}",
+        executor_subject_type="bot",
+        executor_subject_id=f"bot_{stage_order}",
+        executor_subject_name=f"Bot {stage_order}",
+        owner_binding_key="owner",
+        owner_user_id="user_1",
+        owner_user_name="User One",
+        completion_gate_json='{"required_artifacts": []}',
+        status=status,
+        collab_context_id=f"context_{stage_instance_id}",
+        pending_action_kind=None,
+        state_reason=None,
+        requested_action=None,
+        started_at=NOW,
+        completed_at=NOW if status is TodoStageStatus.COMPLETED else None,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+
+def _execution(
+    *,
+    execution_id: str = "todoexec_1",
+    todo_id: str = "todo_1",
+    stage_instance_id: str = "stage_1",
+    collab_context_id: str = "context_stage_1",
+    generation: int = 1,
+    is_current: bool = True,
+) -> TodoExecutionRecord:
+    return TodoExecutionRecord(
+        execution_id=execution_id,
+        todo_id=todo_id,
+        collab_context_id=collab_context_id,
+        run_id=f"run_{generation}",
+        token_hash="token-hash",
+        status=TodoExecutionStatus.COMPLETED,
+        executor_id="bot_1",
+        stage_instance_id=stage_instance_id,
+        generation=generation,
+        is_current=is_current,
+        created_at=NOW,
+        updated_at=NOW,
+    )
 
 
 def _event(seq: int, event_type: str, **overrides: Any) -> TodoCollaborationEvent:
@@ -123,8 +192,13 @@ class FakeBots:
 
 
 class FakeTodos:
-    def __init__(self, todos: tuple[TodoRecord, ...]) -> None:
+    def __init__(
+        self,
+        todos: tuple[TodoRecord, ...],
+        stages: tuple[TodoStageRecord, ...] = (),
+    ) -> None:
         self.todos = {todo.todo_id: todo for todo in todos}
+        self.stages = stages
         self.calls: list[dict[str, Any]] = []
 
     def _record(self, operation: str, **kwargs: Any) -> None:
@@ -184,6 +258,22 @@ class FakeTodos:
         self.todos[todo.todo_id] = todo
         return todo
 
+    def list_stages(self, *, todo_id: str) -> tuple[TodoStageRecord, ...]:
+        self._record("list_stages", todo_id=todo_id)
+        return tuple(stage for stage in self.stages if stage.todo_id == todo_id)
+
+    def rerun_from_execution(self, **kwargs) -> TodoRecord:
+        self._record("rerun_from_execution", **kwargs)
+        todo = self.todos[kwargs["todo_id"]]
+        updated = replace(
+            todo,
+            status=TodoStatus.IN_PROGRESS,
+            current_stage_instance_id=kwargs["stage_instance_id"],
+            collab_context_id=None,
+        )
+        self.todos[todo.todo_id] = updated
+        return updated
+
 
 class FakeExecution:
     def __init__(self, result: TodoRecord | None = None) -> None:
@@ -208,6 +298,44 @@ class FakeExecution:
         if self.result is None:
             return _todo(status=TodoStatus.IN_PROGRESS)
         return self.result
+
+
+class FakeArtifacts:
+    def __init__(
+        self, executions: tuple[TodoExecutionRecord, ...] = ()
+    ) -> None:
+        self.executions = {row.execution_id: row for row in executions}
+        self.calls: list[dict[str, Any]] = []
+
+    def list_executions(self, *, todo_id: str) -> tuple[TodoExecutionRecord, ...]:
+        self.calls.append({"operation": "list_executions", "todo_id": todo_id})
+        return tuple(
+            row for row in self.executions.values() if row.todo_id == todo_id
+        )
+
+    def get_execution(self, *, execution_id: str) -> TodoExecutionRecord:
+        self.calls.append(
+            {"operation": "get_execution", "execution_id": execution_id}
+        )
+        return self.executions[execution_id]
+
+    def get_current_execution(
+        self, *, todo_id: str, stage_instance_id: str
+    ) -> TodoExecutionRecord:
+        self.calls.append(
+            {
+                "operation": "get_current_execution",
+                "todo_id": todo_id,
+                "stage_instance_id": stage_instance_id,
+            }
+        )
+        return next(
+            row
+            for row in self.executions.values()
+            if row.todo_id == todo_id
+            and row.stage_instance_id == stage_instance_id
+            and row.is_current
+        )
 
 
 class FakeCollaboration:
@@ -260,22 +388,26 @@ def _service(
     rows: list[dict[str, Any]] | None = None,
     space=None,
     todos: tuple[TodoRecord, ...] | None = None,
+    stages: tuple[TodoStageRecord, ...] = (),
+    executions: tuple[TodoExecutionRecord, ...] = (),
     contexts: tuple[TodoCollaborationContext, ...] = (),
     execution_result: TodoRecord | None = None,
 ):
-    repository = FakeTodos(todos or (_todo(),))
+    repository = FakeTodos(todos or (_todo(),), stages)
     access = FakeSpaceAccess(space)
     bots = FakeBots(rows or [])
     collaboration = FakeCollaboration(contexts)
     execution = FakeExecution(execution_result)
+    artifacts = FakeArtifacts(executions)
     service = TodoService(
         repository,
         access,
         bots,
         collaboration,
         execution,
+        artifacts,
     )
-    return service, repository, access, bots, collaboration, None
+    return service, repository, access, bots, collaboration, artifacts
 
 
 def _team_bot(
@@ -706,6 +838,8 @@ async def test_create_interaction_persists_event_and_claim_without_execution():
         "author_name": "User One",
     }
     assert repository.todos["todo_1"].status is TodoStatus.IN_PROGRESS
+    assert event.replyable is False
+    assert event.reply_disabled_reason == "todo_not_replyable"
     assert execution.calls == []
 
 
@@ -1196,3 +1330,231 @@ async def test_start_todo_rejects_non_pending_before_execution_dispatch():
         await service.start_todo(todo_id="todo_1", actor_id="user_1")
 
     assert service._execution.calls == []
+
+
+def test_template_interactions_keep_prior_stages_replyable_and_mark_superseded_versions():
+    stages = (
+        _stage(stage_instance_id="stage_1", stage_order=1),
+        _stage(stage_instance_id="stage_3", stage_order=3),
+        _stage(stage_instance_id="stage_4", stage_order=4),
+    )
+    executions = (
+        _execution(
+            execution_id="todoexec_stage_1_v1",
+            stage_instance_id="stage_1",
+            collab_context_id="context_stage_1_v1",
+        ),
+        _execution(
+            execution_id="todoexec_stage_3_v1",
+            stage_instance_id="stage_3",
+            collab_context_id="context_stage_3_v1",
+            is_current=False,
+        ),
+        _execution(
+            execution_id="todoexec_stage_3_v2",
+            stage_instance_id="stage_3",
+            collab_context_id="context_stage_3_v2",
+            generation=2,
+        ),
+        _execution(
+            execution_id="todoexec_stage_4_v1",
+            stage_instance_id="stage_4",
+            collab_context_id="context_stage_4_v1",
+            is_current=False,
+        ),
+    )
+    contexts = tuple(
+        _context(
+            context_id=execution.collab_context_id,
+            events=(
+                _event(
+                    1,
+                    "artifact.reported",
+                    event_id=f"event_{execution.execution_id}",
+                    actor_type="bot",
+                    content=execution.execution_id,
+                ),
+            ),
+        )
+        for execution in executions
+    )
+    todo = _todo(
+        template_id="todo_tpl_1",
+        template_version_id="todo_tplv_1",
+        status=TodoStatus.IN_PROGRESS,
+        current_stage_instance_id="stage_3",
+    )
+    service, _, _, _, collaboration, _ = _service(
+        todos=(todo,),
+        stages=stages,
+        executions=executions,
+        contexts=contexts,
+    )
+
+    result = service.list_interactions(todo_id=todo.todo_id, actor_id="user_1")
+
+    assert [event.todo_execution_id for event in result] == [
+        "todoexec_stage_1_v1",
+        "todoexec_stage_3_v1",
+        "todoexec_stage_3_v2",
+        "todoexec_stage_4_v1",
+    ]
+    assert [event.generation for event in result] == [1, 1, 2, 1]
+    assert [event.is_latest for event in result] == [True, False, True, False]
+    assert [event.replyable for event in result] == [True, False, True, False]
+    assert [event.reply_disabled_reason for event in result] == [
+        None,
+        "superseded",
+        None,
+        "superseded",
+    ]
+    assert collaboration.get_calls == [
+        ("context_stage_1_v1", "user_1"),
+        ("context_stage_3_v1", "user_1"),
+        ("context_stage_3_v2", "user_1"),
+        ("context_stage_4_v1", "user_1"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_completed_template_todo_can_reply_to_current_execution_and_rerun():
+    stage = _stage(stage_instance_id="stage_3", stage_order=3)
+    execution = _execution(
+        execution_id="todoexec_stage_3_v1",
+        stage_instance_id=stage.stage_instance_id,
+        collab_context_id="context_stage_3_v1",
+    )
+    reply = _event(
+        2,
+        "artifact.reported",
+        event_id="event_stage_3_result",
+        actor_type="bot",
+    )
+    todo = _todo(
+        template_id="todo_tpl_1",
+        template_version_id="todo_tplv_1",
+        status=TodoStatus.COMPLETED,
+        current_stage_instance_id=None,
+        collab_context_id=None,
+    )
+    service, repository, _, _, collaboration, artifacts = _service(
+        todos=(todo,),
+        stages=(stage,),
+        executions=(execution,),
+        contexts=(_context(context_id=execution.collab_context_id, events=(reply,)),),
+    )
+
+    event = await service.create_interaction(
+        todo_id=todo.todo_id,
+        actor_id="user_1",
+        author_name="User One",
+        message="Please rerun this stage",
+        reply_to_event_id=reply.event_id,
+        target_execution_id=execution.execution_id,
+        target_stage_instance_id=stage.stage_instance_id,
+    )
+
+    assert event.event_type == "user_interaction.posted"
+    assert event.todo_execution_id == execution.execution_id
+    assert event.stage_instance_id == stage.stage_instance_id
+    assert event.is_latest is False
+    assert event.replyable is False
+    assert event.reply_disabled_reason == "superseded"
+    assert repository.todos[todo.todo_id].status is TodoStatus.IN_PROGRESS
+    assert (
+        repository.todos[todo.todo_id].current_stage_instance_id
+        == stage.stage_instance_id
+    )
+    assert collaboration.append_calls[0][1].payload == {
+        "content": "Please rerun this stage",
+        "author_name": "User One",
+        "reply_to_event_id": reply.event_id,
+        "target_execution_id": execution.execution_id,
+        "target_stage_instance_id": stage.stage_instance_id,
+    }
+    assert repository.calls[-1] == {
+        "operation": "rerun_from_execution",
+        "todo_id": todo.todo_id,
+        "execution_id": execution.execution_id,
+        "stage_instance_id": stage.stage_instance_id,
+        "invalidated_by_interaction_id": event.event_id,
+    }
+    assert artifacts.calls == [
+        {"operation": "get_execution", "execution_id": execution.execution_id}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_template_interaction_rejects_superseded_execution_before_append():
+    stage = _stage(stage_instance_id="stage_3", stage_order=3)
+    execution = _execution(
+        execution_id="todoexec_stage_3_v1",
+        stage_instance_id=stage.stage_instance_id,
+        collab_context_id="context_stage_3_v1",
+        is_current=False,
+    )
+    todo = _todo(
+        template_id="todo_tpl_1",
+        template_version_id="todo_tplv_1",
+        status=TodoStatus.IN_PROGRESS,
+        current_stage_instance_id=stage.stage_instance_id,
+    )
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(todo,),
+        stages=(stage,),
+        executions=(execution,),
+    )
+
+    with pytest.raises(TodoStateConflictError, match="Historical"):
+        await service.create_interaction(
+            todo_id=todo.todo_id,
+            actor_id="user_1",
+            author_name=None,
+            message="Reply to an old version",
+            reply_to_event_id="event_old",
+            target_execution_id=execution.execution_id,
+            target_stage_instance_id=stage.stage_instance_id,
+        )
+
+    assert collaboration.append_calls == []
+    assert all(
+        call["operation"] != "rerun_from_execution" for call in repository.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_template_todo_cannot_rerun():
+    stage = _stage(stage_instance_id="stage_3", stage_order=3)
+    execution = _execution(
+        execution_id="todoexec_stage_3_v1",
+        stage_instance_id=stage.stage_instance_id,
+        collab_context_id="context_stage_3_v1",
+    )
+    todo = _todo(
+        template_id="todo_tpl_1",
+        template_version_id="todo_tplv_1",
+        status=TodoStatus.CANCELLED,
+        current_stage_instance_id=stage.stage_instance_id,
+    )
+    service, repository, _, _, collaboration, artifacts = _service(
+        todos=(todo,),
+        stages=(stage,),
+        executions=(execution,),
+    )
+
+    with pytest.raises(TodoStateConflictError, match="Cancelled"):
+        await service.create_interaction(
+            todo_id=todo.todo_id,
+            actor_id="user_1",
+            author_name=None,
+            message="Try to rerun",
+            reply_to_event_id="event_old",
+            target_execution_id=execution.execution_id,
+            target_stage_instance_id=stage.stage_instance_id,
+        )
+
+    assert collaboration.append_calls == []
+    assert artifacts.calls == []
+    assert all(
+        call["operation"] != "rerun_from_execution" for call in repository.calls
+    )

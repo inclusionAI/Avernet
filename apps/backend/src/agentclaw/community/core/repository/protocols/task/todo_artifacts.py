@@ -30,6 +30,14 @@ class TodoArtifactRepositoryProtocol(Protocol):
     def get_execution(self, *, execution_id: str) -> TodoExecutionRecord: ...
 
     @abstractmethod
+    def list_executions(self, *, todo_id: str) -> tuple[TodoExecutionRecord, ...]: ...
+
+    @abstractmethod
+    def get_current_execution(
+        self, *, todo_id: str, stage_instance_id: str
+    ) -> TodoExecutionRecord: ...
+
+    @abstractmethod
     def bind_run_id(self, *, execution_id: str, run_id: str) -> TodoExecutionRecord: ...
 
     @abstractmethod

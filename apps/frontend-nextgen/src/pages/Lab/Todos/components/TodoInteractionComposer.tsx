@@ -9,6 +9,7 @@ import type { InteractionReplyReference } from './todoInteractionModel';
 
 interface TodoInteractionComposerProps {
   replyTarget: InteractionReplyReference | null;
+  requiresReplyTarget: boolean;
   loading: boolean;
   mentionBots: TodoBotOption[];
   mentionBotsLoading: boolean;
@@ -19,6 +20,7 @@ interface TodoInteractionComposerProps {
 
 export function TodoInteractionComposer({
   replyTarget,
+  requiresReplyTarget,
   loading,
   mentionBots,
   mentionBotsLoading,
@@ -28,6 +30,9 @@ export function TodoInteractionComposer({
 }: TodoInteractionComposerProps) {
   const [message, setMessage] = useState('');
   const [selectedMentionIds, setSelectedMentionIds] = useState<string[]>([]);
+  const hasRequiredReplyTarget =
+    !requiresReplyTarget ||
+    Boolean(replyTarget?.replyable && replyTarget.targetExecutionId && replyTarget.targetStageInstanceId);
   const selectedMentionBots = useMemo(
     () => selectedMentionIds.flatMap((id) => mentionBots.find((bot) => bot.botId === id) ?? []),
     [mentionBots, selectedMentionIds],
@@ -47,8 +52,13 @@ export function TodoInteractionComposer({
   };
 
   const submit = async () => {
+    if (!hasRequiredReplyTarget) return;
     const input: CreateTodoInteractionInput = { message };
-    if (replyTarget) input.replyToEventId = replyTarget.eventId;
+    if (replyTarget) {
+      input.replyToEventId = replyTarget.eventId;
+      input.targetExecutionId = replyTarget.targetExecutionId;
+      input.targetStageInstanceId = replyTarget.targetStageInstanceId;
+    }
     if (selectedMentionIds.length) {
       input.mentions = selectedMentionIds.map((actorId) => ({ actorType: 'bot', actorId }));
     }
@@ -153,12 +163,15 @@ export function TodoInteractionComposer({
           className="h-8 rounded-lg px-4 text-xs"
           onClick={() => void submit()}
           loading={loading}
-          disabled={!message.trim()}
+          disabled={!message.trim() || !hasRequiredReplyTarget}
           leftIcon={<Send className="size-4" aria-hidden />}
         >
           发送互动
         </Button>
       </div>
+      {requiresReplyTarget && !hasRequiredReplyTarget ? (
+        <p className="m-0 text-xs text-muted-foreground">请选择最新版本的互动后再发送。</p>
+      ) : null}
       {mentionBotsError ? (
         <p className="m-0 text-xs text-muted-foreground">空间 Bot 暂不可用，本次仍可发送普通互动。</p>
       ) : null}

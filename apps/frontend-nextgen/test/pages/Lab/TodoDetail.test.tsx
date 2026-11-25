@@ -119,6 +119,8 @@ function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent 
     actorType: 'bot',
     content: `事件 ${eventSeq}`,
     executionId: 'execution-1',
+    isLatest: true,
+    replyable: true,
     contextVersion: 1,
     status: 'in_progress',
     createdAt: `2026-11-08T0${eventSeq}:12:00Z`,
@@ -300,9 +302,7 @@ describe('TodoDetailPage', () => {
     expect(within(interactionView).getAllByText('风太').length).toBeGreaterThan(0);
     expect(within(interactionView).getByText('数据分析助手 开始处理')).toBeInTheDocument();
     expect(within(interactionView).getByText('转为待处理，等待发起人验收')).toBeInTheDocument();
-    expect(
-      within(interactionView).getByText('已完成三款产品的定价对比。'),
-    ).toBeInTheDocument();
+    expect(within(interactionView).getByText('已完成三款产品的定价对比。')).toBeInTheDocument();
     expect(within(interactionView).getByText('定价与功能矩阵.xlsx')).toBeInTheDocument();
     expect(within(interactionView).getByText('产品官网')).toBeInTheDocument();
     expect(await within(interactionView).findByText('请补充价格来源')).toBeInTheDocument();
@@ -351,6 +351,122 @@ describe('TodoDetailPage', () => {
     expect(mockedService.addTodoInteraction).toHaveBeenLastCalledWith('todo-1', {
       message: '这次不引用楼层',
     });
+  });
+
+  it('已完成模板 Todo 只能选择最新节点版本后提交重跑互动', async () => {
+    mockedService.loadTodo.mockResolvedValue({
+      ...todo,
+      templateId: 'template-1',
+      status: 'completed',
+    });
+    const latestStageEvent = event(1, {
+      eventId: 'event-stage-3-v1',
+      eventType: 'artifact.reported',
+      content: '第三个节点的最新结果',
+      todoExecutionId: 'todoexec-stage-3-v1',
+      stageInstanceId: 'stage-3',
+      generation: 1,
+      isLatest: true,
+      replyable: true,
+    });
+    mockedService.loadTodoInteractions.mockResolvedValue([latestStageEvent]);
+    mockedService.loadTodoEvents.mockResolvedValue([latestStageEvent]);
+    mockedService.loadTodoArtifacts.mockResolvedValue([]);
+
+    render(<TodoDetailPage />);
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    const sendButton = within(interactionView).getByRole('button', { name: '发送互动' });
+    expect(sendButton).toBeDisabled();
+    expect(within(interactionView).getByText('请选择最新版本的互动后再发送。')).toBeInTheDocument();
+
+    const latestFloor = within(interactionView).getByText('第三个节点的最新结果').closest('li') as HTMLElement;
+    fireEvent.click(within(latestFloor).getByRole('button', { name: '回复 f1' }));
+    fireEvent.change(within(interactionView).getByPlaceholderText('告诉 Bot 需要补充或修改的内容'), {
+      target: { value: '请从第三个节点重新生成' },
+    });
+    expect(sendButton).toBeEnabled();
+    fireEvent.click(sendButton);
+
+    await waitFor(() =>
+      expect(mockedService.addTodoInteraction).toHaveBeenCalledWith('todo-1', {
+        message: '请从第三个节点重新生成',
+        replyToEventId: 'event-stage-3-v1',
+        targetExecutionId: 'todoexec-stage-3-v1',
+        targetStageInstanceId: 'stage-3',
+      }),
+    );
+  });
+
+  it('模板 Todo 的历史节点版本保留展示但不可回复', async () => {
+    mockedService.loadTodo.mockResolvedValue({
+      ...todo,
+      templateId: 'template-1',
+      status: 'completed',
+    });
+    const historicalEvent = event(1, {
+      eventId: 'event-stage-3-v1',
+      eventType: 'artifact.reported',
+      content: '第三个节点的历史结果',
+      todoExecutionId: 'todoexec-stage-3-v1',
+      stageInstanceId: 'stage-3',
+      generation: 1,
+      isLatest: false,
+      replyable: false,
+      replyDisabledReason: 'superseded',
+    });
+    const latestEvent = event(1, {
+      eventId: 'event-stage-3-v2',
+      eventType: 'artifact.reported',
+      content: '第三个节点的新结果',
+      todoExecutionId: 'todoexec-stage-3-v2',
+      stageInstanceId: 'stage-3',
+      generation: 2,
+      isLatest: true,
+      replyable: true,
+      createdAt: '2026-11-08T08:12:00Z',
+    });
+    mockedService.loadTodoInteractions.mockResolvedValue([historicalEvent, latestEvent]);
+    mockedService.loadTodoEvents.mockResolvedValue([historicalEvent, latestEvent]);
+    mockedService.loadTodoArtifacts.mockResolvedValue([]);
+
+    render(<TodoDetailPage />);
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    const historicalFloor = within(interactionView).getByText('第三个节点的历史结果').closest('li') as HTMLElement;
+    expect(within(historicalFloor).getByRole('button', { name: '回复 f1' })).toBeDisabled();
+    expect(within(historicalFloor).getByText('历史版本不可回复')).toBeInTheDocument();
+    const latestFloor = within(interactionView).getByText('第三个节点的新结果').closest('li') as HTMLElement;
+    expect(within(latestFloor).getByRole('button', { name: '回复 f2' })).toBeEnabled();
+  });
+
+  it('跨节点 Context 的重复 eventSeq 保留后端投影顺序', async () => {
+    const stageThree = event(1, {
+      eventId: 'event-stage-3',
+      eventType: 'user_interaction.posted',
+      content: '第三节点先展示',
+      createdAt: '2026-11-08T09:00:00Z',
+    });
+    const stageFour = event(1, {
+      eventId: 'event-stage-4',
+      eventType: 'user_interaction.posted',
+      content: '第四节点后展示',
+      createdAt: '2026-11-08T08:00:00Z',
+    });
+    mockedService.loadTodoInteractions.mockResolvedValue([stageThree, stageFour]);
+    mockedService.loadTodoEvents.mockResolvedValue([stageThree, stageFour]);
+    mockedService.loadTodoArtifacts.mockResolvedValue([]);
+
+    render(<TodoDetailPage />);
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    expect(screen.getByText('第三节点先展示').closest('li')).toHaveAttribute('data-floor', '1');
+    expect(screen.getByText('第四节点后展示').closest('li')).toHaveAttribute('data-floor', '2');
   });
 
   it('展示刷新后持久化的回复引用', async () => {
