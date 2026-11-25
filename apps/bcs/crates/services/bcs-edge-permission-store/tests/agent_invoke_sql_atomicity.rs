@@ -147,7 +147,7 @@ impl DbPlugin for ObservedDb {
         self.inner.health_check().await
     }
 }
-fn app(d: &Driver, db: Arc<ObservedDb>) -> AgentInvokeApplicationService {
+fn app(d: &Driver, db: Arc<dyn DbPlugin>) -> AgentInvokeApplicationService {
     let one = std::num::NonZeroU32::MIN;
     let store = Arc::new(
         bcs_edge_permission_store::agent_invoke::DbAgentInvokeStore::new(
@@ -582,4 +582,60 @@ async fn governance_permission_is_explicit_scoped_and_rechecked_on_replay() {
     assert!(recovered.replayed);
     assert_eq!(recovered.action_id, original.action_id);
     assert_eq!(count(&d, "agent_invoke_receipts").await, 1);
+}
+
+#[tokio::test]
+#[allow(clippy::unwrap_used, reason = "real SQL audit rollback consumer assertions")]
+async fn native_audit_rollback_is_definite_and_does_not_consume_the_receipt_key() {
+    for change in [AgentInvokeChange::Request,AgentInvokeChange::Grant {expected_version:0}] {
+        let d=Driver::new().await;
+        setup(&d).await;
+        let before=d.store.scope_state().await.unwrap();
+        d.db.execute(DbStatement::new("CREATE TRIGGER fail_native_audit BEFORE INSERT ON agent_invoke_audit BEGIN SELECT RAISE(ABORT,'native audit failure'); END")).await.unwrap();
+        let principal=if matches!(change,AgentInvokeChange::Request) {"human_source"}else{"human_target"};
+        let c=cmd(&d,principal,"native-rollback",change);
+        assert_eq!(d.management().change(c.clone()).await,Err(AgentInvokeError::Unavailable));
+        assert_eq!(d.store.scope_state().await.unwrap(),before);
+        for table in ["agent_invoke_receipts","agent_invoke_grants","agent_invoke_requests","agent_invoke_pending_pairs"] {
+            assert_eq!(count(&d,table).await,0,"{table}");
+        }
+        assert_eq!(d.audit_count().await,0);
+        d.db.execute(DbStatement::new("DROP TRIGGER fail_native_audit")).await.unwrap();
+        assert!(!d.management().change(c).await.unwrap().replayed);
+        assert_eq!(count(&d,"agent_invoke_receipts").await,1);
+    }
+}
+
+struct LostDetailedAck { inner:Arc<dyn DbPlugin>, writes:AtomicUsize }
+#[async_trait]
+impl DbPlugin for LostDetailedAck {
+    async fn query(&self,s:DbStatement)->DbResult<Vec<DbRow>> {self.inner.query(s).await}
+    async fn execute(&self,s:DbStatement)->DbResult<DbExecuteResult> {self.inner.execute(s).await}
+    async fn transaction(&self,s:Vec<DbTransactionStep>)->DbResult<Vec<DbTransactionStepResult>> {self.inner.transaction(s).await}
+    async fn transaction_with_options(&self,s:Vec<DbTransactionStep>,o:DbTransactionOptions)->DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction_with_options(s,o).await
+    }
+    async fn transaction_with_outcome(&self,s:Vec<DbTransactionStep>,o:DbTransactionOptions)->DbTransactionResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction_with_outcome(s,o).await?;
+        self.writes.fetch_add(1,Ordering::SeqCst);
+        Err(DbTransactionFailure::unknown(DbError::Backend("lost detailed commit acknowledgement".into())))
+    }
+    async fn health_check(&self)->DbResult<DbHealth> {self.inner.health_check().await}
+}
+#[tokio::test]
+#[allow(clippy::unwrap_used, reason = "durable receipt recovery consumer assertions")]
+async fn detailed_unknown_ack_recovers_without_a_second_mutation() {
+    let d=Driver::new().await;
+    setup(&d).await;
+    let db=Arc::new(LostDetailedAck {inner:d.db.clone(),writes:AtomicUsize::new(0)});
+    let service=app(&d,db.clone());
+    let c=cmd(&d,"human_target","detailed-unknown",AgentInvokeChange::Grant {expected_version:0});
+    assert_eq!(service.change(c.clone()).await,Err(AgentInvokeError::CommitUnknown));
+    assert_eq!(db.writes.load(Ordering::SeqCst),1,"no blind retry after unknown commit");
+    assert_eq!(count(&d,"agent_invoke_receipts").await,1);
+    assert_eq!(d.audit_count().await,1);
+    let recovered=service.change(c).await.unwrap();
+    assert!(recovered.replayed);
+    assert_eq!(db.writes.load(Ordering::SeqCst),1,"recovery reads the durable receipt");
+    assert_eq!(d.audit_count().await,1);
 }

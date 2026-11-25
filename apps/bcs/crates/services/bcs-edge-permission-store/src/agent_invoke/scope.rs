@@ -55,7 +55,7 @@ impl DbAgentInvokeStore {
         let row = self.read_scope_row().await?;
         if row.revision != expected_revision { return Err(AgentInvokeError::Conflict); }
         let revision = advance(row.revision.get())?;
-        self.db.transaction_with_options(vec![DbTransactionStep::ExecuteChecked {
+        self.db.transaction_with_outcome(vec![DbTransactionStep::ExecuteChecked {
             statement: DbStatement::with_params(
                 "UPDATE agent_invoke_scopes SET revision = ?, writer_enabled = ?, runtime_enabled = ? WHERE id = ? AND revision = ?",
                 vec![revision.get().into(), (writer as i64).into(), (runtime as i64).into(), row.id.into(), row.revision.get().into()],

@@ -224,8 +224,9 @@ two directed invalidation ranges (overflow guard/audit/metadata/edge per range),
 then publication audit. Changed/expired qualification requires advancing
 eligibility generation. Binding/revision changes require newer binding or
 eligibility generations. Stale incident approvals are durably revoked and
-versioned in the same transaction. Opaque backend errors remain commit-unknown and are never blindly
-retried; explicit DbPlugin deadline failures guarantee rollback. Reads return
+versioned in the same transaction. Native outcome-aware transaction failures distinguish acknowledged rollback
+from unknown commit. Legacy opaque errors remain unknown and are never blindly
+retried; deadline causes alone do not override an unknown outcome. Reads return
 expired facts for publisher recovery, not runtime authorization. No public
 HTTP endpoint or bootstrap selects these stores. Host identity resolution and
 automatic identity-revision advancement in registry lifecycle writers are still
@@ -307,8 +308,17 @@ plus governance-feed conformance. Atomicity tests cover audit rollback, lost
 commit acknowledgement/replay, role changes between precheck and commit,
 requester/delegation/registration ABA fences, file reopen and actual plan cost.
 The independent empty-MySQL CI gate now runs these lifecycle scenarios too.
-A local ignored MySQL test is never a passing real-MySQL result. Opaque backend
-errors are conservatively CommitUnknown until the DB abstraction supplies
-typed transaction phase/outcome information. Writer/runtime activation must
+A local ignored MySQL test is never a passing real-MySQL result. The outcome-aware DB method now supplies typed transaction certainty.
+Confirmed rollback maps to closed conflict/unavailable errors; any unknown
+outcome remains CommitUnknown, even for duplicate/timeout-looking causes.
+Legacy/custom plugins retain a conservative fallback and must not pretend
+to have native commit/rollback acknowledgement. Writer/runtime activation must
 remain disabled in production until registry producers, trusted ingress,
 governance query APIs, HTTP/SDK, dispatch and real E2E integration are complete.
+
+Outcome regression tests use actual SQLite audit failure to prove rollback
+does not consume the receipt key, and a recording wrapper loses the detailed
+commit acknowledgement after a real commit to prove recovery returns the old
+receipt without a second mutation. Existing legacy-wrapper ambiguity tests stay
+independent. No transaction retry, statement-count increase, schema change or
+production activation is added by the typed-outcome increment.

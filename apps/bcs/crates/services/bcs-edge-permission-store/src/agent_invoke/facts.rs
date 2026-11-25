@@ -249,7 +249,7 @@ impl AgentInvokeFactRepoPort for DbAgentInvokeStore {
             expected_affected_rows: 1,
         });
         self.db
-            .transaction_with_options(steps, self.transaction_options())
+            .transaction_with_outcome(steps, self.transaction_options())
             .await
             .map_err(write_error)?;
         Ok(published)

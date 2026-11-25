@@ -3581,5 +3581,63 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 当前 publish 成本是 **2 次外部 SELECT + 12-step transaction**：scope CAS、注册点锁、fact CAS、outbound/inbound 各四步（overflow guard / audit / metadata / edge）、publication audit。失效分两个定向索引范围，MySQL 使用 FORCE INDEX/STRAIGHT_JOIN，SQLite 使用 INDEXED BY/CROSS JOIN，不做全 scope 双向 OR 扫描。工作量随 incident approved edges 增长；小图与 statement 数上界不能证明大图成本或 MySQL EXPLAIN。普通 snapshot 仍六条、最坏 governance 九条；command 测试约束总 statement ≤48、write plan ≤32 step、每 statement ≤512 binds，runtime 仍一条 pair SQL。
 - trusted `AgentInvokeGovernanceRepoPort` 在一条事务中发布 scoped delegation、scope/delegation revision 和 audit。issuer 是 trusted publisher，不将 subject 伪装成自发委托 issuer；无公共 serde/HTTP 入口。delegation 移除恢复不能恢复旧 pending request 的 requester epoch。
 - 真实 SQLite 共享 local driver 的十组 lifecycle scenarios，并增加治理 feed contract；原子性测试覆盖 grant/request audit failure 全回滚、commit ack 丢失恢复、预检后失权被事务 guard 阻断、Human/registration/delegation ABA、文件重启、实际 SQL/binds 上界。远端独立空 MySQL gate 复用相同十组生命周期和治理 feed，运行完整迁移链到 v51；本机不启动 Colima/MySQL，ignored 不算通过。
-- **仍未完成且不能启用生产 writer 的研发内容**：现有 registry 的绑定/hidden/retire/restore 等写端自动推进 identity revision 和 trusted fact 发布、host capability proof、typed DB definite rollback/unknown commit outcome、治理 GET/list/degree 与 keyset/access authorization、HTTP DTO/routes/OpenAPI/SDK、trusted ingress 唯一 Bot identity resolution、operation-aware dispatch hook、真实 HTTP→DB→A2A fake E2E 和 Singlebox changed-line gate。测试中手动推进 revision 不是生产接入证据；普通 online/offline、owner transfer、无关 metadata 不应盲目触发资格撤权。
-- opaque `DbError::Backend` 暂保守返回 CommitUnknown，明确保证 rollback 的 plugin deadline 返回 Unavailable；都不自动重试。尚不能声称 typed outcome 区分已完整实现。默认 writer/runtime 保持关闭，不将本轮 SQL core、单测覆盖率或 lint-only hook 等同于研发整体完成、生产放行或 E2E 验收。
+- **仍未完成且不能启用生产 writer 的研发内容**：现有 registry 的绑定/hidden/retire/restore 等写端自动推进 identity revision 和 trusted fact 发布、host capability proof、治理 GET/list/degree 与 keyset/access authorization、HTTP DTO/routes/OpenAPI/SDK、trusted ingress 唯一 Bot identity resolution、operation-aware dispatch hook、真实 HTTP→DB→A2A fake E2E 和 Singlebox changed-line gate。测试中手动推进 revision 不是生产接入证据；普通 online/offline、owner transfer、无关 metadata 不应盲目触发资格撤权。
+- SQL core 阶段最初对 opaque `DbError::Backend` 保守返回 CommitUnknown；后续 typed outcome 契约与 bundled executor 实现见下文。默认 writer/runtime 保持关闭，不将本轮 SQL core、单测覆盖率或 lint-only hook 等同于研发整体完成、生产放行或 E2E 验收。
+
+
+### 后续实现增补：typed transaction outcome（不启用生产 writer）
+
+- 新增向后兼容的 `DbPlugin::transaction_with_outcome` 和独立 `DbTransactionFailure` / `DbTransactionOutcome`，不新增 `DbError` enum variant，不改变旧方法签名或历史 migration。新方法提供默认实现，不要求现有 plugin 强制新增方法；外部宿主仍须独立编译/接入验证。默认 fallback 仅相信旧契约明确保证回滚的 ConditionFailed/Timeout，opaque Backend/Conversion 等错误不凭字符串猜测 phase。
+- bundled SQLite/MySQL 单独观察 setup、step execution、显式 rollback acknowledgement 与 commit。NotCommitted 只用于未执行任何 step 或确认 rollback；commit 失败、rollback 未确认、SQLite blocking-task 等不透明失败均保守返回 CommitUnknown。取消等待没有返回 outcome，仍需 application receipt 恢复。两类结果都不允许自动重试。
+- 新方法只接受单条、无 SQL comment 的 SELECT/INSERT/UPDATE/DELETE，拒绝 DDL、脚本和 transaction control，且在执行任何前缀之前完成验证；数据中的 comment/semicolon 使用绑定参数。caller 还必须保证表/函数/trigger 的效果均可事务回滚，无非事务或外部副作用。它不是 migration executor，MySQL implicit-commit DDL 仍走旧 API。
+- legacy 与 typed 路径共用相同 step/binding/deadline/early-prefix 执行器。AgentInvoke command、fact/delegation publication、activation 改用 typed 方法：已确认回滚的条件/唯一键失败映射 Conflict，其他已确认回滚映射 Unavailable；任何 unknown outcome 均是 CommitUnknown，不能因为 cause 像 duplicate/Timeout 就误报 Conflict/Unavailable。没有新增 SQL、连接、重试或 schema。
+- native 共享 conformance 在 memory/file SQLite 与远端现有 MySQL text/prepared gate 上运行，校验成功/QueryResult binding、SQL/duplicate/checked/binding failure 的真实前缀回滚、deadline、early success 与禁止 DDL 的前置拒绝。SQLite 另用 deferred FK 和 RAISE(ROLLBACK) 触发真实 commit/rollback-ack failure；consumer 用真实 audit failure 证明 receipt key 未消费，用 commit 后丢失 detailed ack 的 recording wrapper 证明同 key 恢复且没有第二次 mutation。legacy fallback 的 unknown-commit 回归单独保留。
+- 本机仍不启动 Colima/MySQL/Singlebox；本地通过/ignored 与新 SHA 的真实 MySQL、Singlebox、宿主/生产证明分别记录。typed outcome 的实现不补齐 registry/host、治理查询、HTTP/SDK、trusted ingress、统一 dispatch 和 E2E 等剩余研发。
+
+### 原 27 项研发与验收跟踪（保留完整范围）
+
+将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 9/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
+
+#### 1. 评审与启用前置
+
+- [ ] 1.1 完整审批矩阵/NULL-only/单向非传递范围评审记录；命名已按用户要求改为 AgentInvoke，但不将命名修正等同于其余评审。
+- [ ] 1.2 确认 trusted inventory、binding/eligibility generation 与新鲜度/失效契约，以及 public local fake 和宿主 provider owners；端口/关闭态 durable feed 已有，生产 producer/capability 尚缺。
+- [ ] 1.3 完整评审域隔离、配额、审计留存与 HTTP 暴露面；当前 UNIQUE(env) 独占物理 namespace、显式有限限额已实现，不能声称所有部署场景和留存策略已确认。
+- [x] 1.4 实施时 fetch/note authoritative origin/dev、feature HEAD 与实际 reader/kind/route/test driver 基线，不将 feature 或旧 SHA 测试当成生产/current-head 证明。
+
+#### 2. 纯契约与安全读端（默认关闭 writer）
+
+- [x] 2.1 AgentInvoke 新 kind、稳定 serde/DB 字符串、canonical shape 和版本语义；旧四类 round-trip 与坏形状回归保留。
+- [ ] 2.2 独立管理/operation-aware invocation/core/facts/DTO/errors 完整契约；当前写/运行/publisher 契约已实现，治理查询与 HTTP DTO 仍缺，整项不勾选。
+- [x] 2.3 精确 kind 候选集和 fallible checked read，未知 kind/坏行/DB error 整体失败，Memory/SQLite 共享 conformance；MySQL 执行验收归 3.5/5.2。
+- [x] 2.4 旧 admission/build_authz_context 隔离新 kind；新 invocation application 返回 ref=edge_id、revision=approval generation，已有真实 SQL consumer 回归；统一 dispatch 挂载仍归 4.4。
+- [x] 2.5 friend request/list/approve/revoke/通知/writeback 与 owner/manager kind 隔离，未开放旧 API 写新 kind，保留 legacy 回归。
+
+#### 3. Store、事务与治理
+
+- [x] 3.1 typed request/approval version/idempotency/audit 存储与原子 command port；metadata 独立持久化，不塞进 message/rules，不重写历史 migration。
+- [ ] 3.2 SQLite/MySQL 六类原子 command core 与事务内 guards 已实现；完整真实 MySQL 当前 SHA 验收、所有生命周期 writer 共同 fencing 尚未充分证明，整项不勾选。
+- [x] 3.3 保持五列唯一键、单 approved owner 与 byte-exact/no-pad 身份；同一 edge ID 重授予推进版本，旧 key 不复活；对应共享 SQL/regrant/legacy 回归已有。
+- [ ] 3.4 出入边 keyset page、scoped aggregate/pending count、atomic degree 与批量展示完整接口；配额 aggregate/CAS 已有，治理 query/page/batch 未实现。
+- [ ] 3.5 完整 upgrade/populated fixture 的当前 SHA SQLite/真实 MySQL、复合索引预算和真实 EXPLAIN/rows-examined，以及宿主兼容 DB 验收；SQLite/静态预算不能替代其他证据。
+- [ ] 3.6 durable invalidation/reapproval 已实现，但 registry 生命周期 producer、多 worker/缓存的撤销确认后 freshness 证明和 host 接入仍缺。
+
+#### 4. Application、HTTP 与 runtime 集成
+
+- [ ] 4.1 管理矩阵和 scoped governance 已实现；仍需新入口禁止 anonymous/auto-claim、可信 ingress 唯一 scoped bot_uuid resolver 和拒绝自报资格的实际挂载。
+- [x] 4.2 request/grant/approve/reject/cancel/revoke、receipt/state conflict/error 映射已由 application + 真实 SQLite store 实现；资格预读不持写事务锁，unknown commit 恢复无第二次 mutation。HTTP 挂载/真实 MySQL分别归 4.3/3.5。
+- [ ] 4.3 D6 独立 routes/DTO/OpenAPI、逐端点验证/响应/鉴权和 SDK；不能以 internal service method 当成已注册 HTTP endpoint。
+- [ ] 4.4 统一 operation-aware authz dispatch hook、originator/qualification generation 与一般 admission/friend/public/collaboration 旧语义隔离；独立 invocation application 的通过不等同于真正 dispatch 接入。
+- [ ] 4.5 composition roots 注入真实/假身份资格源、validated limits、consumer capability 与默认关闭 writer；当前 stores 未生产挂载，不伪造 host capability。
+
+#### 5. 分层回归与发布证据
+
+- [x] 5.1 纯类型/shape/policy/identity/state 单元测试，包含旧四 kind、坏输入和 requester/资格恢复不复活；当前 scoped unit run 已覆盖，非 whole-workspace/E2E 声明。
+- [ ] 5.2 完整管理/运行 consumer 与 repo conformance、Memory/SQLite/真实 MySQL 同语义及实际 port 命中；已有共享 lifecycle/facts/snapshot 和 native DB outcome harness，真实 MySQL与未实现 query consumer 仍需补齐。
+- [ ] 5.3 每个新 GET/create/request/approve/reject/cancel/revoke/list/degree endpoint 独立 HTTP contract，覆盖 401/403/404/400/409/429/503 和 legacy 不变。
+- [ ] 5.4 真实 DB + Notify/barrier 覆盖 approve/cancel、approve/revoke、旧 key/regrant、并发配额和 commit-unknown 全矩阵；已有部分确定性交错和真实 rollback/recovery，不把顺序 harness 等同于完整争用证明。
+- [ ] 5.5 production-domain synthetic Singlebox HTTP→application→DB→A2A fake-target E2E 与 changed-line gate；不以单测调用 domain 方法冒充 E2E。
+- [ ] 5.6 完整受影响 architecture/boundary/module/HTTP/legacy/authority 与扩展 gates；已通过限定范围检查不代表全架构 baseline 绿灯。
+- [ ] 5.7 reader/SDK/runtime 接收兼容、迁移后 writer 启用、关闭/回滚/保留历史演练，以及 current-SHA CI 和 host 集成记录；未获部署授权不操作生产。
+
+完成条目：1.4、2.1、2.3、2.4、2.5、3.1、3.3、4.2、5.1。其余原条目均按完整验收范围保留，不重新拆小来增加完成数量。

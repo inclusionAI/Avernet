@@ -178,7 +178,7 @@ impl AgentInvokeCommandRepoPort for DbAgentInvokeCommandStore {
         let results = self
             .store
             .db
-            .transaction_with_options(steps, self.store.transaction_options())
+            .transaction_with_outcome(steps, self.store.transaction_options())
             .await
             .map_err(write_error)?;
         let Some(DbTransactionStepResult::Rows(rows)) = results.last() else {

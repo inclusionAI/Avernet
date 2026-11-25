@@ -47,8 +47,8 @@ pub fn isolated(action: impl FnOnce()) {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", name, "--nocapture"])
             .env(CHILD, name).output().unwrap();
-        assert!(output.status.success(), "isolated test failed:\n{}\n{}",
-            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "isolated test failed ({}):\n{}\n{}",
+            output.status, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
         return;
     }
     tracing::log::set_logger(&CAPTURE).unwrap();

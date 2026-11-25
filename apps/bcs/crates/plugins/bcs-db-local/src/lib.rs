@@ -15,6 +15,8 @@ use bcs_db_api::{
 use rusqlite::types::{Value as SqliteValue, ValueRef};
 use rusqlite::{Connection, params_from_iter};
 
+mod transaction_outcome;
+
 fn profile_start() -> Option<std::time::Instant> {
     tracing::enabled!(target: "bcs_reply_profile", tracing::Level::DEBUG).then(std::time::Instant::now)
 }
@@ -259,7 +261,6 @@ impl DbPlugin for LocalSqliteDbPlugin {
         options: DbTransactionOptions,
     ) -> DbResult<Vec<DbTransactionStepResult>> {
         steps.iter().try_for_each(DbTransactionStep::validate)?;
-        let deadline = options.deadline();
         self.with_connection(move |connection| {
         let transaction_started = profile_start();
         // Reserve the write lock before any reads to avoid DEFERRED transaction
@@ -276,72 +277,19 @@ impl DbPlugin for LocalSqliteDbPlugin {
             .transaction_with_behavior(behavior)
             .map_err(|err| DbError::Backend(format!("begin sqlite transaction: {}", err)))?;
         profile_elapsed("sqlite.begin", transaction_started);
-        let transaction_started = profile_start();
-        let deadline_started = std::time::Instant::now();
-        let mut results = Vec::with_capacity(steps.len());
-
-        for (step_index, step) in steps.into_iter().enumerate() {
-            match step {
-                DbTransactionStep::Query(statement) => {
-                    let params = statement.resolve_transaction_params(&results, step_index)?;
-                    results.push(DbTransactionStepResult::Rows(query_with_connection_params(
-                        &tx,
-                        statement.sql(),
-                        &params,
-                    )?));
-                }
-                DbTransactionStep::Execute(statement) => {
-                    let params = statement.resolve_transaction_params(&results, step_index)?;
-                    let result = execute_with_connection_params(&tx, statement.sql(), &params)?;
-                    let stop = statement.stops_transaction_on_no_rows() && result.affected_rows == 0;
-                    results.push(DbTransactionStepResult::Executed(result));
-                    if stop {
-                        // Early success skips the REMAINING steps
-                        // only; the pre-commit deadline check below
-                        // still gates this commit path like any other.
-                        break;
-                    }
-                }
-                DbTransactionStep::ExecuteChecked { statement, expected_affected_rows } => {
-                    let params = statement.resolve_transaction_params(&results, step_index)?;
-                    let result = execute_with_connection_params(&tx, statement.sql(), &params)?;
-                    if result.affected_rows != expected_affected_rows {
-                        return Err(DbError::ConditionFailed {
-                            expected: expected_affected_rows, actual: result.affected_rows,
-                        });
-                    }
-                    results.push(DbTransactionStepResult::Executed(result));
-                }
-            }
-            // Between-step deadline check (Task-0 方案 A): stop
-            // before the next step, roll the whole transaction
-            // back through the Err path. A single statement that
-            // is still running is not interruptible — the overrun
-            // is only observable here, after it finished.
-            if let Some(deadline) = deadline {
-                if deadline_started.elapsed() > deadline {
-                    return Err(DbError::Timeout);
-                }
-            }
-        }
-        // Pre-commit deadline check (plugin contract: "between
-        // two steps and before commit"): every success path —
-        // including a stop-on-no-rows early exit — commits only
-        // inside the deadline, otherwise the whole transaction
-        // rolls back through the Err path.
-        if let Some(deadline) = deadline {
-            if deadline_started.elapsed() > deadline {
-                return Err(DbError::Timeout);
-            }
-        }
-
-        profile_elapsed("sqlite.transaction_steps", transaction_started);
+        let results = transaction_outcome::execute_steps(&tx, steps, options)?;
         let commit_started = profile_start();
         tx.commit()
             .map_err(|err| DbError::Backend(format!("commit sqlite transaction: {}", err)))?;
         profile_elapsed("sqlite.commit", commit_started);
         Ok(results)
         }).await
+    }
+
+    async fn transaction_with_outcome(
+        &self, steps: Vec<DbTransactionStep>, options: DbTransactionOptions,
+    ) -> bcs_db_api::DbTransactionResult<Vec<DbTransactionStepResult>> {
+        self.transaction_with_outcome_inner(steps, options).await
     }
 
     async fn health_check(&self) -> DbResult<DbHealth> {

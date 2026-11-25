@@ -9,6 +9,10 @@
   by noop tests and the bootstrap Prometheus adapter's rendered-series tests.
 
 - Shared contract-test harnesses for BCS service and plugin boundaries.
+- Opt-in native DB transaction-outcome conformance: actual committed prefixes,
+  acknowledged rollback, bindings, deadlines and forbidden-control rejection.
+  SQLite memory/file and MySQL text/prepared drivers supply concrete plugins;
+  the shared harness has no concrete plugin dependency or production selection.
 - Bot-owned Provider metadata, binding-projection and authorized deletion
   contracts; consumers supply Memory/SQL repositories or Core implementations.
 - Reusable fixtures and helpers for local conformance testing.

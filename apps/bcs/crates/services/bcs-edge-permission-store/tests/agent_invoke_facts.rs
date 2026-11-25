@@ -143,7 +143,7 @@ async fn audit_failure_rolls_back_scope_fact_and_update() {
     let initial = s.scope_state().await.unwrap();
     db.execute(DbStatement::new("CREATE TRIGGER fail_fact_audit BEFORE INSERT ON agent_invoke_audit BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END")).await.unwrap();
     let p = publication(&s, "bot", 0).await;
-    assert_eq!(s.publish_fact(&scope(), p.clone()).await, Err(AgentInvokeError::CommitUnknown));
+    assert_eq!(s.publish_fact(&scope(), p.clone()).await, Err(AgentInvokeError::Unavailable));
     assert_eq!(s.scope_state().await.unwrap(), initial); assert_eq!(s.read_fact(&scope(), "bot").await.unwrap(), None);
     assert_eq!(count(db.as_ref(), "agent_invoke_audit").await, 0);
     db.execute(DbStatement::new("DROP TRIGGER fail_fact_audit")).await.unwrap();
@@ -151,7 +151,7 @@ async fn audit_failure_rolls_back_scope_fact_and_update() {
     db.execute(DbStatement::new("CREATE TRIGGER fail_fact_audit BEFORE INSERT ON agent_invoke_audit BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END")).await.unwrap();
     let initial = s.scope_state().await.unwrap();
     let p = publication(&s, "bot", 1).await;
-    assert_eq!(s.publish_fact(&scope(), p).await, Err(AgentInvokeError::CommitUnknown));
+    assert_eq!(s.publish_fact(&scope(), p).await, Err(AgentInvokeError::Unavailable));
     assert_eq!(s.scope_state().await.unwrap(), initial); assert_eq!(s.read_fact(&scope(), "bot").await.unwrap(), Some(original));
     assert_eq!(count(db.as_ref(), "agent_invoke_audit").await, 1);
 }

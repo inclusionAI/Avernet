@@ -138,7 +138,7 @@ impl DbAgentInvokeStore {
             },
         ];
         self.db
-            .transaction_with_options(steps, self.transaction_options())
+            .transaction_with_outcome(steps, self.transaction_options())
             .await
             .map_err(write_error)?;
         Ok(revision)

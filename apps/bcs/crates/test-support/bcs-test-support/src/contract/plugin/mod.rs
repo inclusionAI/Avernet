@@ -1,5 +1,7 @@
 //! Plugin contract harnesses.
 
+pub mod db_transaction_outcome;
+
 pub mod store;
 
 use bcs_cache_api::CachePlugin;

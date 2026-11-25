@@ -58,3 +58,26 @@ Consumers and third-party implementations must coordinate support for the option
 
 Statement and transaction types live in `src/transaction.rs` and retain root
 re-exports. See [idle polling spec](../../../specs/2026-09-15-eventing-idle-polling/spec.md).
+
+## Transaction outcome capability (additive API v1 extension)
+
+`DbPlugin::transaction_with_outcome` returns `DbTransactionFailure` with an
+independent `DbTransactionOutcome`. NotCommitted means no steps ran or explicit
+rollback was acknowledged. Commit/rollback acknowledgement failure remains
+CommitUnknown; neither outcome is an automatic retry instruction. Cancellation
+returns no outcome and must use application receipt recovery. `DbError` and
+legacy methods/variants remain unchanged, preserving custom-plugin source
+compatibility. The default delegates to legacy execution and only trusts its
+explicit ConditionFailed/Timeout rollback contracts; opaque causes stay unknown,
+even if they resemble a duplicate-key error.
+
+This opt-in method rejects scripts, DDL, control statements and commented SQL
+before executing any prefix. Callers own transactional tables/functions/triggers
+and must not include nontransactional or external side effects. It is not a
+general-purpose migration executor. Bundled plugins observe execution, explicit
+rollback and commit separately. Shared native capability conformance lives in
+`bcs-test-support::contract::plugin::db_transaction_outcome`; this additional
+capability is not fabricated by legacy plugins passing the older DB contract.
+
+Repository implementations and test adapters compile with the default method;
+this is not an external host build or capability certification.

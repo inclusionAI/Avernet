@@ -34,6 +34,7 @@ async fn conformance_mysql_db_plugin_for_text_and_prepared_protocols() {
             .expect("create MySQL contract manager");
         let plugin = MysqlDbPlugin::new(manager.clone(), "bcs");
         bcs_test_support::contract::plugin::db_plugin_contract_tests(&plugin).await;
+        bcs_test_support::contract::plugin::db_transaction_outcome::db_transaction_outcome_contract_tests(&plugin).await;
         binary_collation_text_round_trip(&plugin).await;
         manager.close().await;
     }

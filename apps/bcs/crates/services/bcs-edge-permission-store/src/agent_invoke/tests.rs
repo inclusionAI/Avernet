@@ -30,12 +30,17 @@ fn booleans_and_byte_strings_are_decoded_strictly() {
 
 #[test]
 fn errors_are_closed_and_unknown_commits_are_never_classified_retryable() {
-    for error in [DbError::InvalidInput("private".into()), DbError::Conversion("private".into()), DbError::Unsupported("private".into()), DbError::Timeout] {
-        assert_eq!(write_error(error), AgentInvokeError::Unavailable);
+    for error in [DbError::InvalidInput("private".into()), DbError::Conversion("private".into()),
+        DbError::Unsupported("private".into()), DbError::Timeout, DbError::Backend("private".into())] {
+        assert_eq!(write_error(DbTransactionFailure::not_committed(error)),AgentInvokeError::Unavailable);
     }
-    assert_eq!(write_error(DbError::ConditionFailed { expected: 1, actual: 0 }), AgentInvokeError::Conflict);
-    assert_eq!(write_error(DbError::Backend("UNIQUE constraint failed".into())), AgentInvokeError::Conflict);
-    assert_eq!(write_error(DbError::Backend("private".into())), AgentInvokeError::CommitUnknown);
+    for error in [DbError::ConditionFailed {expected:1,actual:0}, DbError::Backend("UNIQUE constraint failed".into())] {
+        assert_eq!(write_error(DbTransactionFailure::not_committed(error)),AgentInvokeError::Conflict);
+    }
+    for error in [DbError::Backend("UNIQUE constraint failed".into()), DbError::Timeout,
+        DbError::ConditionFailed {expected:1,actual:0}, DbError::Backend("private".into())] {
+        assert_eq!(write_error(DbTransactionFailure::unknown(error)),AgentInvokeError::CommitUnknown);
+    }
 }
 
 #[test]

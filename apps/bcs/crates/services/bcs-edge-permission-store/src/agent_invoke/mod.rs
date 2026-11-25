@@ -14,7 +14,7 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionOptions, DbValue};
+use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionOptions, DbTransactionFailure, DbTransactionOutcome, DbValue};
 use bcs_service_api::types::agent_invoke::*;
 
 pub struct DbAgentInvokeStore {
@@ -161,15 +161,16 @@ fn advance(version: u64) -> AgentInvokeResult<NonZeroU64> {
     version.checked_add(1).filter(|v| *v <= i64::MAX as u64)
         .and_then(NonZeroU64::new).ok_or(AgentInvokeError::InvalidState)
 }
-fn write_error(error: DbError) -> AgentInvokeError {
-    match error {
+fn write_error(failure: DbTransactionFailure) -> AgentInvokeError {
+    // Certainty comes from the executor, never from a duplicate/timeout-looking
+    // driver message. An unknown commit must be recovered by receipt, not retried.
+    if failure.outcome() != DbTransactionOutcome::NotCommitted {
+        return AgentInvokeError::CommitUnknown;
+    }
+    match failure.error() {
         DbError::ConditionFailed { .. } => AgentInvokeError::Conflict,
         error if error.is_duplicate_key() => AgentInvokeError::Conflict,
-        DbError::InvalidInput(_) | DbError::Unsupported(_) | DbError::Conversion(_) | DbError::Timeout => AgentInvokeError::Unavailable,
-        // The present DbPlugin vocabulary does not distinguish an execution
-        // backend error from a lost commit acknowledgement. Never retry a write
-        // on that ambiguity. The full lifecycle recovers using its receipt key.
-        DbError::Backend(_) => AgentInvokeError::CommitUnknown,
+        _ => AgentInvokeError::Unavailable,
     }
 }
 

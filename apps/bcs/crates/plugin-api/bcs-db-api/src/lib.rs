@@ -31,6 +31,12 @@ use thiserror::Error;
 mod sql_script;
 pub use sql_script::split_sql_statements;
 
+mod transaction_outcome;
+pub use transaction_outcome::{
+    DbTransactionFailure, DbTransactionOutcome, DbTransactionResult,
+    validate_transaction_outcome_steps,
+};
+
 mod transaction;
 pub use transaction::{
     DbExecuteResult, DbStatement, DbTransactionOptions, DbTransactionParam,
@@ -493,6 +499,29 @@ pub trait DbPlugin: Send + Sync + 'static {
     ) -> DbResult<Vec<DbTransactionStepResult>> {
         let _ = options;
         self.transaction(steps).await
+    }
+
+    /// Opt-in outcome reporting for transaction-safe DML/query steps. Success
+    /// retains normal transaction semantics, including early prefix commits.
+    /// NotCommitted requires no executed effects or acknowledged rollback;
+    /// commit/rollback acknowledgement failures must be CommitUnknown.
+    /// Neither outcome authorizes automatic retries. Caller cancellation has
+    /// no returned outcome and must be recovered through application receipts.
+    ///
+    /// The SQL subset excludes scripts, DDL, transaction control and comments.
+    /// Callers must also use transactional tables and no nontransactional
+    /// functions/triggers/external effects. The default preserves legacy plugin
+    /// compatibility, classifying opaque errors conservatively; bundled SQL
+    /// plugins override it to observe actual execution/rollback/commit phases.
+    async fn transaction_with_outcome(
+        &self,
+        steps: Vec<DbTransactionStep>,
+        options: DbTransactionOptions,
+    ) -> DbTransactionResult<Vec<DbTransactionStepResult>> {
+        validate_transaction_outcome_steps(&steps)
+            .map_err(DbTransactionFailure::not_committed)?;
+        self.transaction_with_options(steps, options).await
+            .map_err(DbTransactionFailure::from_legacy)
     }
 
     /// Return whether this plugin can reach its backend.
