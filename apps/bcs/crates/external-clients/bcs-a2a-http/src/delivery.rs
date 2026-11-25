@@ -304,6 +304,7 @@ impl BotDeliveryPort for A2aHttpTransport {
         let submission_header = cmd.a2a_test_user.as_ref().map(|selection|
             test_user_header(self.inner.test_user.as_ref(), selection, &cmd.target)
         ).transpose()?;
+        let test_submission = submission_header.is_some();
         let mut parts = Vec::new();
         for block in message.content {
             if block.block_type != "text" || block.url.is_some() { return Ok(rejected_input(bot_id,"nontext input unsupported")); }
@@ -390,7 +391,24 @@ impl BotDeliveryPort for A2aHttpTransport {
                 let event = stream.next().await.ok_or_else(||a2a::A2AError::internal("submission ended before first Task"))??;
                 Ok::<_, a2a::A2AError>((stream, event))
             };
-            match tokio::time::timeout(Duration::from_millis(budget), first).await {
+            let first_result = tokio::time::timeout(Duration::from_millis(budget), first).await;
+            if test_submission {
+                let (outcome, error_code) = match &first_result {
+                    Ok(Ok(_)) => ("first_event_received", None),
+                    Ok(Err(error)) => (crate::test_response::submission_failure(error), Some(error.code)),
+                    Err(_) => ("first_event_timeout", None),
+                };
+                tracing::info!(
+                    log_class = "business_key",
+                    event_code = "a2a.test_submission",
+                    run_id = %record.run_id,
+                    attempt = attempt + 1,
+                    outcome,
+                    a2a_error_code = error_code,
+                    "A2A test submission finished waiting for the first event"
+                );
+            }
+            match first_result {
                 Ok(Ok(value)) => { received = Some(value); break; }
                 Ok(Err(error)) => {
                     if let Some(message) = crate::http_client::identity_failure(&error) {

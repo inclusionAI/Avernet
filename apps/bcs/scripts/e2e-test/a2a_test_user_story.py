@@ -111,6 +111,7 @@ def run_story(binary, root):
                   secret={"provider": "env", "providers": {"env": {"prefix": "A2A_E2E_"}}},
                   llm={"type": "none"}, bcsfuse={"enabled": False}, bots_base_dir=str(root / "bots"))
     config["logging"].update(console=True, default_level="warn")
+    config["logging"].setdefault("modules", {})["bcs_a2a_http::delivery"] = "info"
     config["session_files"]["backend"] = {"data_dir": str(root / "files")}
     config["collaboration"]["templates"]["base_dir"] = str(root / "templates")
     env = dict(os.environ, SERVER_ENV="pre", BCS_DEBUG="false",
@@ -190,6 +191,13 @@ def run_story(binary, root):
             assert terminal(ordinary, token)["state"] == "completed"
             assert observed[2:] == [("SendStreamingMessage", 0, False), ("GetTask", 0, False)], observed
 
+            for mode in ("short_error", "unexpected_content_type", "incomplete_sse"):
+                with peer.lock:
+                    peer.mode = mode
+                previous_calls = len(observed)
+                story.request("POST", chat_path, body, token=token, status=400)
+                assert observed[previous_calls:] == [("SendStreamingMessage", 1, True)], observed
+
             updated_card = copy.deepcopy(peer.card)
             updated_card["name"] = "Coverage target"
             updated_card["supportedInterfaces"][0]["url"] = endpoint + "?changed=1"
@@ -198,6 +206,15 @@ def run_story(binary, root):
             previous_calls = len(observed)
             story.request("POST", chat_path, body, token=token, status=403)
             assert len(observed) == previous_calls, "The changed endpoint received a request"
+
+        lines = (root / "server.log").read_text().splitlines()
+        responses = [line for line in lines if "a2a.test_response" in line]
+        assert any("body_bytes_seen=88" in line and "DENIED" in line and "[redacted]" in line
+                   for line in responses), "The short JSON error was missing or unredacted"
+        assert any("unstructured" in line for line in responses)
+        assert all("unstructured response fixture" not in line for line in responses)
+        assert all(credential not in line for credential in peer.identity_values for line in responses)
+        assert any("a2a.test_submission" in line and "incomplete_sse_event" in line for line in lines)
     finally:
         peer.close()
     print(f"A2A test-user E2E: {story.checks} live boundary checks passed")
