@@ -64,6 +64,9 @@
 //! established is kept by `crate::transport_error`.
 
 mod events;
+mod yaml_registry;
+
+pub use yaml_registry::YamlAgentResolver;
 
 use crate::binding_client::BindingClient;
 use crate::client::bind_rest_client;
@@ -110,9 +113,9 @@ impl std::fmt::Debug for ResolvedAgent {
 /// Turns the frozen `AgentBinding` of a dispatch into a callable agent.
 ///
 /// Delayed (walkthrough §17): what resolves `CredentialRef` and what
-/// `BindingVersion` means are not settled, so no implementation ships here;
-/// the composition injects one. Nothing outside this crate's tests builds an
-/// `A2aDistAgentClient` yet.
+/// `BindingVersion` means are not settled. Until then the composition injects
+/// [`YamlAgentResolver`], a static registry read from a YAML file of agent
+/// registrations, keyed by `AgentBinding.agent`.
 #[async_trait]
 pub trait DistAgentResolver: Send + Sync {
     /// The error is a machine code, never a credential or a URL.

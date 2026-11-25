@@ -12,7 +12,7 @@ workspace = true
 
 [features]
 # The distributed Connector's agent client; not part of the `bcs` binary yet.
-dist-agent = ["dep:bcs-dist-model"]
+dist-agent = ["dep:bcs-dist-model", "dep:serde_yaml"]
 
 [dependencies]
 bcs-app-identity-api.workspace = true
@@ -29,6 +29,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 percent-encoding = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true, optional = true }
 futures = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
