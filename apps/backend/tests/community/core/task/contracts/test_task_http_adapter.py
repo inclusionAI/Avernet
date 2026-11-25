@@ -61,11 +61,28 @@ class _MemoryTaskInfoRepository:
         self._records[task_id] = replace(record, status=status)
         return True
 
+    @staticmethod
+    def _keyword_matches(record: TaskInfoRecord, keyword: str | None) -> bool:
+        normalized = (keyword or "").strip().lower()
+        if not normalized:
+            return True
+        task_spec = record.task_spec or {}
+        context_title = task_spec.get("context", {}).get("title", "")
+        metadata_title = task_spec.get("metadata", {}).get("title", "")
+        return normalized in (
+            record.task_id.lower(),
+            record.source_type.lower(),
+            record.owner_bot_id.lower(),
+            context_title.lower(),
+            metadata_title.lower(),
+        )
+
     def list_records(
         self,
         status: Sequence[Status] | None = None,
         *,
         owner_user_id: str | None = None,
+        keyword: str | None = None,
     ) -> list[TaskInfoRecord]:
         records = list(self._records.values())
         if status:
@@ -75,6 +92,7 @@ class _MemoryTaskInfoRepository:
                 record for record in records
                 if record.owner_user_id == owner_user_id
             ]
+        records = [record for record in records if self._keyword_matches(record, keyword)]
         return sorted(records, key=lambda record: record.id, reverse=True)
 
     def list_records_page(
@@ -82,10 +100,11 @@ class _MemoryTaskInfoRepository:
         status: Sequence[Status] | None = None,
         *,
         owner_user_id: str | None = None,
+        keyword: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[TaskInfoRecord], int]:
-        records = self.list_records(status, owner_user_id=owner_user_id)
+        records = self.list_records(status, owner_user_id=owner_user_id, keyword=keyword)
         total = len(records)
         start = (page - 1) * page_size
         return records[start : start + page_size], total
@@ -558,6 +577,47 @@ class TestTaskList:
         )
         assert r.status_code == 200, r.text
         assert isinstance(r.json()["data"], list)
+
+    def test_list_keyword_searches_before_pagination(self, client):
+        c, inj = client
+        inj.get(TaskInfoRepositoryProtocol).insert(
+            TaskInfoRecord(
+                id=0,
+                task_id="keyword-task",
+                source_type="bot",
+                owner_user_id="owner_user",
+                owner_bot_id="owner_bot",
+                execution_config={},
+                task_spec={"context": {"title": "storage due diligence"}},
+                status=Status.PENDING,
+            )
+        )
+
+        matched = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={
+                "user_id": "owner_user",
+                "keyword": "keyword-task",
+                "page": 1,
+                "page_size": 2,
+            },
+        )
+        missed = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={
+                "user_id": "owner_user",
+                "keyword": "missing-keyword",
+                "page": 1,
+                "page_size": 2,
+            },
+        )
+
+        assert matched.status_code == 200, matched.text
+        assert matched.json()["data"]["total"] == 1
+        assert [item["task_id"] for item in matched.json()["data"]["items"]] == ["keyword-task"]
+        assert missed.status_code == 200, missed.text
+        assert missed.json()["data"]["total"] == 0
+        assert missed.json()["data"]["items"] == []
 
     def test_list_with_page_params_returns_page(self, client):
         c, _ = client

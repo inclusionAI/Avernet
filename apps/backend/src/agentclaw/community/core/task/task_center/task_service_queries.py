@@ -340,12 +340,16 @@ def list_tasks(
     self,
     status: str | None = None,
     owner_user_id: str | None = None,
+    *,
+    keyword: str | None = None,
 ) -> list[TaskInfoRecord]:
-    """列持久化 ``task_info`` 记录,可选按状态(逗号分隔的运行时态集合)和 owner 过滤。"""
+    """列持久化 ``task_info`` 记录,可选按状态、owner 和关键字过滤。"""
     if self._task_info_repo is None:
         return []
     statuses = parse_status_filter(status)
-    records = self._task_info_repo.list_records(statuses, owner_user_id=owner_user_id)
+    records = self._task_info_repo.list_records(
+        statuses, owner_user_id=owner_user_id, keyword=keyword
+    )
     return self._enrich_task_owner_display(records)
 
 
@@ -355,13 +359,19 @@ def list_tasks_page(
     owner_user_id: str | None = None,
     page: int = 1,
     page_size: int = 20,
+    *,
+    keyword: str | None = None,
 ) -> tuple[list[TaskInfoRecord], int]:
-    """列持久化 ``task_info`` 记录的一页(1-based),可选按状态(逗号分隔的运行时态集合)和 owner 过滤。"""
+    """列持久化 ``task_info`` 记录的一页(1-based),可选按状态、owner 和关键字过滤。"""
     if self._task_info_repo is None:
         return [], 0
     statuses = parse_status_filter(status)
     records, total = self._task_info_repo.list_records_page(
-        statuses, owner_user_id=owner_user_id, page=page, page_size=page_size
+        statuses,
+        owner_user_id=owner_user_id,
+        keyword=keyword,
+        page=page,
+        page_size=page_size,
     )
     return self._enrich_task_owner_display(records), total
 
