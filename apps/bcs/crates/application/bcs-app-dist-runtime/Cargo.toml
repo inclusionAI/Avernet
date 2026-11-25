@@ -1,6 +1,6 @@
 [package]
 name = "bcs-app-dist-runtime"
-description = "Application facade for distributed Worker control"
+description = "Application facades for distributed Worker and Connector control"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,7 @@ bcs-service-api.workspace = true
 bcs-dist-model.workspace = true
 
 [dev-dependencies]
+bcs-test-support.workspace = true
 tokio.workspace = true
 
 [lints]

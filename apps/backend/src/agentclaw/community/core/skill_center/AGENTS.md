@@ -121,7 +121,7 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - Bot MCP override 独立于 SkillSet 生命周期：普通集增删 MCP、启停、删除、Default exclusion、Installation 对账及能力 restore 均保留当前配置；暂时无有效供应不是孤儿清理依据。Direct MCP 显式卸载、明确配置操作与 Bot 删除仍可清配置。重新供应读取当前值；能力补偿只恢复能力事实，不回写配置快照。
 - Manifest bulk Set 替换把提交前后受影响的 MCP 同时作为 claim/release 候选，Runtime Projector 按提交后有效供应保护仍有来源的配置，并删除已退出的设备配置；它不删除 Bot override。Manifest 后续 MCP Replace 清除仅剩 override 时，updated code 同样作为 release 候选；仍由 Skill 依赖供应的 code 只刷新继承配置。
 - 普通 Default 恢复仅在实际成员或当前 policy 重新供应时检查 Direct/普通集占用；冲突保留 exclusion，过期 exclusion 清理不抢占现有供应。MCP 恢复命令必须显式接收调用方解析的当前 platform policy。
-- Apply 恢复 Default MCP 时，个人调用权限被拒绝不阻止有效供应、Installation 和投影；目录、配置、投递资格和权限服务异常仍须报错。普通 Set 和 Direct 显式 MCP 继续检查个人权限；调用时仍由原有鉴权链控制。
+- Manifest Apply 的 Default、普通 Set 和 Direct MCP 安装检查目录、配置与投递资格，不以个人调用权限阻断；确认下发后才可按可信用户身份提示明确缺权。Dry-run 与平台托管 TeClaw 首次创建不查询个人权限。非 Manifest 入口保留各自的权限检查，实际调用仍由网关或服务端鉴权。
 - `services/bot_capability_state_reader.py` 在读有效态前同步 Installation，然后只从 Installation 读取有效身份。Center 资产在返回前由 `SkillVersionResolver` 解析到精确 PUBLISHED Version。
 - Reader 的 `InstallationReadConfig` 从 `ac_common_config` 按规范化环境读取 `business_code=skill_installation`、`param_code=default_sync_only`。每个环境有独立记录，缺失、禁用、读取失败或非布尔值均 fail-safe 为 `false`（完整同步）；该值在每次 Effective Read 动态读取，因此验收某环境完整 backfill 后可将其单独设为 `true`，也可仅通过 DB 立即回退。旧 YAML 和 `SC_INSTALLATION_DEFAULT_SYNC_ONLY` 环境变量均不生效。该模式仍同步 Default/exclusion，不等于完全取消 DB 补齐。运维 backfill 和新 Bot 的 `initialize_installations` 始终完整执行，不受此读侧配置影响。
 - 普通 Asset、Draft、Version 查询不应为方便而触发 Bot flush。需要回答“Bot 当前应有哪些有效能力”时才使用 Reader。
@@ -183,6 +183,7 @@ Apply snapshot 包括 Bot Local 资产的全部持久 Set ID 引用映射；计�
 - Local、Draft 和 Center 完整包只以唯一包根 `SKILL.md`（或单层 transport wrapper 内的直属 manifest）确定身份；根 manifest 明确时，嵌套的 `capability/.../SKILL.md` 等文档按普通内容逐字保留，不独立安装，也不改写引用。无唯一包根、并列 Skill 或根 manifest 大小写冲突继续拒绝。Local 保留历史大小写和 YAML 兼容，Draft/Center 根 manifest 仍须使用 `SKILL.md` 和 YAML frontmatter。Engine package apply 已按唯一根 manifest 校验，仍需验证真实文件保留。
 - Git 来源 Draft 的选定根目录是完整包边界，快照包含其所有嵌套目录（含嵌套 `SKILL.md`），不包含根目录之外的并列 Skill；发布前应检查选定目录中的所有内容。
 - Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义；AICoding Legacy 可将同 Bot、同 Skill 的历史 Claude Code Host/NAS 或 Engine-view locator 解析到当前 Runtime Package Location；OpenClaw Legacy 也接受固定的 `/home/admin/.openclaw/workspace/skills/skills-local/<skill_name>` 历史 Engine-view locator，并将其映射到已授权 Bot 的当前 canonical Local 包地址。两者均只兼容读取记录中的旧 locator，`git_path` 不改写；设备操作仍绑定当前 Bot。Pool、Teclaw、其他 Engine、跨 Bot/Skill 及任意目录前缀继续在写入前拒绝。包根是目录，存在性判定必须使用 `list_dir`，不得用 `read_file` 读取目录进行探测。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `apps/backend/`）。
+- 已有设备 Bot 的 Manifest Apply 启用 `manifest_apply.defer_capability_projection` 时，Local 包先完成全部校验并按资产去重。在一个 Bot 编辑租约内发布不同目标，首个失败后停止派发、收齐在途结果并跳过后续能力写入。手工上传和删除沿用同一编辑守卫。Legacy Bot 使用进程内互斥，参与 Pool 布局的 Bot 沿用既有分布式编辑锁。布局前滚使用既有迁移 claim。设备须明确声明 `skills.local_package.parallel_targets.v1` 才可使用配置 `manifest_apply.local_skill_parallelism`（1 到 4，默认 1）。旧逐文件、未声明能力和 TeClaw 设备串行。OpenClaw 包替换成功提交后加入本次技能域投递。TeClaw 包内容随上传生效。
 - Local 上传或替换的四条成功路径统一在 `LocalSkillUploadService` 持有 edit guard 时，把本次校验的 canonical ZIP 交给 `LocalSkillSecurityUploadHook`。公共部署默认 Noop；仅显式启用的企业装配使用真实观察服务，先保存不可变快照，再绑定 `tc:<uuid>` 身份、冻结本次名称与描述、登记独立观察记录，并为扫描和资产同步分别入队。该后置链路故障需记录可定位证据和可补报状态，不能把已成功的同步上传改判为失败；后台任务不得从可变 Runtime 目录重建旧包。当前观察结果不拦截 Skill 使用。
 - 观察交接有期限；超时后释放 edit guard、记录上传 ID/摘要/精确快照 locator 和 handoff-failure 事实。晚返线程受取消栅栏约束，不能把旧包选为当前。补报必须先读回原快照并核对摘要；数据库不可用时至少输出含阶段与归属的结构化日志。完整原包不可得时不能冒称可补扫。
 - `HANDOFF_TIMEOUT` 中已有完整冻结元数据和持久上传顺序的记录也可恢复：慢写入的快照暂未出现时继续等待，出现后才读回核对摘要并补建观察；若观察记录已写入、只是超时清除了当前与同步目标指针，补报要在同一上传顺序栅栏下恢复这些指针和 handoff 阶段。旧上传仍不能覆盖更新包，不能仅凭超时后的短暂 `NOT_FOUND` 把它判为永久缺包。
@@ -204,7 +205,7 @@ Apply snapshot 包括 Bot Local 资产的全部持久 Set ID 引用映射；计�
 - `ac_skill.package_url` 用于发布 staged package；Attempt 的 `frozen_draft_locator` 固定本次内容，不能用可变 Draft 替换进行中的发布输入。
 - Grant 的 Owner/Manager 与 Space Membership 分别校验。编辑租约无 TTL/renew；Team 写入校验 holder/fencing token，修订冲突由 revision CAS 处理。发布入口由 Repository 在事务中协调租约和冻结，不能凭旧讨论给 Router 增加未实现的 token 参数。
 - 发布成功后清除当前 Draft；升级从精确 Published Version 创建后继 Draft。`published_version_draft.py` 优先读取 Canonical Store，缺失时按 SC 精确版本恢复。
-- 删除 Draft 使用现有 Repository 分支及 `deleted_scope`：Version、非 FAILED Attempt、成员/Installation、编辑工单等外部事实存在时仅清除 Draft；没有这些事实时清理自身关联并删除 Skill，允许清除仅剩 FAILED Attempt 的首次草稿。FROZEN Draft 不能删除。不要绕开检查直接删 `ac_skill`。
+- 删除 Draft 使用现有 Repository 分支及 `deleted_scope`：Version、Publication Attempt（含 FAILED）、成员/Installation 或编辑工单存在时只清除 Draft。没有这些事实时删除 Skill 及其自身关联。放弃首发 Draft 后，普通空间列表排除没有 Draft、已发布 Version、活跃 Attempt 或下线记录的 Skill，保留直接查询和发布历史。FROZEN Draft 不能删除。不要绕开检查直接删 `ac_skill`。
 - Editor Request 创建 `SKILL_COLLABORATOR` Work Order；`skill_collaborator_approval_handler.py` 在人工审批时重新验证并写 Manager Grant。直接添加 Manager 不创建工单。按 Skill 的 `editor-approval-policy` 允许有效 Team Space 成员读取，仅当前 Skill Owner 可修改，默认关闭；非成员、个人空间和已下线 Skill 拒绝。申请入口先由 Skill Repository 校验申请人与绑定，关闭时沿用人工待办，开启时在内部调用 WorkOrder AUTO（`approver_user_ids=[]`、`recipient_user_ids=[applicant_user_id]`；无人工审批人、仅申请人收结果）。AUTO 创建事务先调用 Skill-owned `admit_auto_skill_editor_request(session, ...)`：锁定绑定并复核资格、开关、已有 Grant 及 `PENDING/PROCESSING` 工单，成功后才插入工单；前置 `inspect_editor_request` 不跨事务持锁。完成事务再调用 `apply_auto_skill_editor_request(session, work_order_id, env)`：复核未下线 Skill、团队成员及绑定开关，仅写 Manager Grant；工单终态与申请人通知由 WorkOrder 在同一事务内完成。公开通用 events 路由允许 AUTO，但仍拒绝 Skill APPROVAL（MANUAL/AUTO）；Skill 申请必须走专用入口。
 
 发布链路读 `services/space_skill_publication_service.py`、`services/space_skill_publication_task.py`、`publication_contract.py` 及 Publication Repository：
@@ -215,7 +216,7 @@ Apply snapshot 包括 Bot Local 资产的全部持久 Set ID 引用映射；计�
                      已知失败 → FAILED；外部结果不确定 → RESULT_UNKNOWN
 ```
 
-`recovery.state/kind` 决定是否自动重试或允许恢复；使用同一 Attempt 的 retry API，不把不确定的 SC 提交当成安全重发。SC accepted 不等于发布成功；Canonical 精确版本可读并持久化 PUBLISHED 后才完成发布。Track Latest 的异步投影不阻塞这一步成功。
+`recovery.state/kind` 决定是否自动重试或允许恢复；使用同一 Attempt 的 retry API，不把不确定的 SC 提交当成安全重发。Center 受理之后继续轮询发布结果。安全检查失败映射为 `SC_SECURITY_CHECK_FAILED`，公开响应使用固定提示；普通列表为当前可编辑 Draft revision 提供 `draft_publication_error_code`。Canonical 精确版本可读并持久化 PUBLISHED 后才完成发布。Track Latest 的异步投影不阻塞这一步成功。
 
 DB 冻结/Attempt 创建与 `TaskQueueService.enqueue()` 当前不是一个跨模块事务。保留现有幂等重放和 ensure-task 恢复语义，不声称已具有 transactional outbox 或全局串行锁。
 
@@ -419,4 +420,35 @@ CommunityDatabase 的 operator-managed SQLite（`create_schema=false`）在启�
 
 ## 数字员工共享凭证保护
 
-已绑定数字员工的服务 Bot 在完整能力投影更新 AgentPass 前，通过数字员工服务申请非公开 MCP 权限，并保留历史 MCP 授权与草稿期望范围的并集。删除仅影响草稿 Runtime 配置；审批通过的发布流程在最终上线时收敛凭证范围。未绑定 Bot 的投影语义保持不变。
+已绑定数字员工的服务 Bot 在完整能力投影更新 AgentPass 前，通过数字员工服务申请非公开 MCP 权限，并保留历史 MCP 授权与草稿期望范围的并集。草稿的 Passport 读取、合并和覆盖写入与审批发布的范围收敛共用源 Bot 数据库行锁，避免旧快照覆盖并发写入；锁仅围绕共享凭证更新。删除仅影响草稿 Runtime 配置；审批通过的发布流程在最终上线时收敛凭证范围。未绑定 Bot 的投影语义保持不变。
+
+## Existing-Bot Manifest capability delivery
+
+The deferred Manifest path collects the domains changed by successful commits
+and sends one projection to the current Runtime. Concurrent projections may
+reach the Runtime out of commit order. If synchronization fails, the Apply
+report preserves its result and any unresolved retirement candidates. An
+explicit Apply can send the current desired state again with no configuration
+diff. Retirement requires the same physical device, no current supply for the
+target, and an exact identity check by the Runtime.
+
+Keep superseded mapping identities in retry evidence until Skill delivery
+converges. Only send retirement identities for names without current supply.
+With combined capability delivery enabled, an incomplete standalone delivery
+leaves unresolved Local identities and MCP release codes in the current
+binding's private metadata for the next projection of the affected domain.
+Record known standalone releases before dispatch. If post-commit plan
+resolution fails, retain the Local candidates from the pre-mutation snapshot
+and check current supply before retiring them.
+A receipt can clear only the evidence read by its own delivery.
+Existing Desktop Skill recovery uses the same binding checks and evidence.
+
+The edit lease protects package operations while a request is active. An
+unconfirmed package receipt remains `UNKNOWN`, and a later request can compete
+for the lease. A timed-out device request can still complete after lease release.
+
+Deploy Backend with the two retired tables present or absent. In environments
+where they already exist, keep `ac_bot_capability_projection` and
+`ac_local_skill_package_dispatch` until older Workers are stopped, their recovery
+tasks are drained or cancelled, and the rollback window closes. Operations
+removes the tables separately after those conditions hold.

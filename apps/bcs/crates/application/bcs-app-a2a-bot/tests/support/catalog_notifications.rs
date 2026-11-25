@@ -18,7 +18,7 @@ async fn writes_notify_once_and_failures_never_notify() {
     let changes = Arc::new(Changes::default());
     let (chain, service, fetcher, _) = fixture_with_catalog(Some(changes.clone())).await;
     chain.db.execute(DbStatement::new("UPDATE bcs_providers SET slug='orders' WHERE provider_id='provider-a'")).await.unwrap();
-    let mut invalid_card = bcs_service_api::application::a2a_bot::RegisterAgentCommand {
+    let mut invalid_card = bcs_service_api::application::a2a_bot::RegisterAgentCommand { catalog_labels:Default::default(),
         provider_bot_ref:"invalid".into(), visibility:Default::default(), provider_admin_token:"test-admin".into(),
         owners:Some(vec!["delegated-owner".into()]), summary:None, source:A2aCardSource::Inline(json!({})), now_ms:1000,
     };
@@ -52,7 +52,7 @@ async fn writes_notify_once_and_failures_never_notify() {
     assert!(changes.take().is_empty());
     fetcher.fail.store(false, Ordering::SeqCst);
 
-    service.configure(ConfigureA2aBotCommand { provider_id:"provider-a".into(), provider_admin_token:"test-admin".into(),
+    service.configure(ConfigureA2aBotCommand { catalog_labels:Default::default(), provider_id:"provider-a".into(), provider_admin_token:"test-admin".into(),
         bot_uuid:id.clone(), source:A2aCardSource::Inline(validated().raw), expected_revision:None, now_ms:1000 }).await.unwrap();
     assert_eq!(changes.take(), vec![id.clone()]);
     assert!(service.refresh_agent_by_id("test-admin", &id).await.is_err(), "inline Card cannot refresh");
@@ -97,7 +97,7 @@ async fn committed_registration_notifies_even_if_response_readback_fails() {
     let service=A2aBotManagement::new(fetcher.providers.clone(),
         Arc::new(A2aBotCore::new(Arc::new(ReadbackFailure),chain.provider_repo.clone())),fetcher)
         .with_registration(registration,chain.registry_core.clone());
-    let result=service.register_agent(bcs_service_api::application::a2a_bot::RegisterAgentCommand {
+    let result=service.register_agent(bcs_service_api::application::a2a_bot::RegisterAgentCommand { catalog_labels:Default::default(),
         provider_bot_ref:"committed".into(),visibility:Default::default(),provider_admin_token:"test-admin".into(),
         owners:Some(vec!["delegated-owner".into()]),summary:None,source:A2aCardSource::Inline(validated().raw),now_ms:1000,
     }).await;

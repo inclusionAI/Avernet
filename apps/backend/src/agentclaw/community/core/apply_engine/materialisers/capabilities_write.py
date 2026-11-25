@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import ExitStack
 
 from agentclaw.community.core.apply_engine.capabilities import Category
 from agentclaw.community.core.apply_engine.outcomes import EntryOutcome, EntryResult
 from agentclaw.community.core.apply_engine.registry import (
+    CapabilityWriteError,
     CategoryWriteResult,
     ConfirmedPartialWriteError,
+)
+from agentclaw.community.core.devices.services.device_context import expect_runtime_binding
+from agentclaw.community.core.ports.skill_package_upload_port import (
+    BatchSkillPackageUploadPort,
+    LocalSkillPackageReceipt,
+    PackagePublication,
 )
 from agentclaw.community.core.skill_center.errors import ApplyDesiredStateCommittedError
 from agentclaw.community.core.skill_center.skill_set_apply import ResolvedSkillSetWrite
@@ -60,6 +68,14 @@ def _combined_outcome(*outcomes):
 async def write_capabilities(owner, ctx, plan):
     resolved = plan.resolved
     snapshot = resolved.snapshot
+    candidates = ctx.capability_state.manifest_mcp_candidates
+    candidates.update({"mcp/" + code: frozenset({code}) for code, _ in resolved.mcp})
+    candidates.update({
+        "skill_sets/" + group.name: frozenset(group.mcp)
+        for group in resolved.sets if group.is_active
+    })
+    if resolved.default_enabled:
+        candidates["skill_sets/default"] = resolved.default_mcp_codes
     who = dict(bot_id=ctx.bot_id, owner_id=ctx.entity_id, actor_id=ctx.actor_id)
     confirmed = False
     results = {
@@ -72,12 +88,16 @@ async def write_capabilities(owner, ctx, plan):
         for e in plan.entries
     }
     removals = set()
+    pending_asset_cleanup = set()
+    completed = set()
     prepared = {}
     uploaded = {}
+    package_receipts: tuple[LocalSkillPackageReceipt, ...] = ()
     scope = access_scope(ctx)
     all_skills = tuple(resolved.direct) + tuple(
         s for group in resolved.sets for s in group.skills
     )
+    binding_scope = ExitStack()
     try:
         # Complete every shared publication before the first Bot Local write.
         for skill in all_skills:
@@ -122,19 +142,42 @@ async def write_capabilities(owner, ctx, plan):
                 prepared[skill.key] = str(result["skill"]["id"])
             elif skill.package is None:
                 prepared[skill.key] = skill.skill_id
-        for skill in all_skills:
-            if skill.package is None or skill.key in prepared:
-                continue
-            upload = await owner._uploads.upload_local_skill(
-                **who, package=skill.package
+        local_packages = {
+            skill.key: (skill.name, skill.package)
+            for skill in all_skills
+            if skill.package is not None and skill.key not in prepared
+        }
+        if local_packages and ctx.defer_capability_projection:
+            if not isinstance(owner._uploads, BatchSkillPackageUploadPort):
+                raise TypeError("This capability delivery requires a device Local Skill batch port")
+            batch = await owner._uploads.upload_local_skill_batch(
+                **who, packages=tuple(local_packages.values()),
             )
-            # Upload alone can replace live contents; claim/UoW has not yet run.
-            confirmed = True
+            package_receipts = tuple(item.receipt for item in batch)
+            confirmed = any(
+                receipt.publication is PackagePublication.PUBLISHED
+                for receipt in package_receipts
+            )
+            if any(item.upload is None for item in batch):
+                raise CapabilityWriteError(
+                    "Local Skill package batch did not finish; later capability writes were skipped",
+                    local_skill_packages=package_receipts, confirmed_partial=confirmed,
+                )
+            uploads = [item.upload for item in batch]
+            if batch and batch[0].target is not None:
+                binding_scope.enter_context(expect_runtime_binding(batch[0].target))
+        else:
+            uploads = []
+            for _, package in local_packages.values():
+                uploads.append(await owner._uploads.upload_local_skill(**who, package=package))
+                confirmed = True
+        for key, upload in zip(local_packages, uploads, strict=True):
+            assert upload is not None
             operation = upload["operation"]
-            uploaded[skill.key] = EntryOutcome(
+            uploaded[key] = EntryOutcome(
                 "updated" if operation == "replaced" else operation
             )
-            prepared[skill.key] = str(upload["skill"]["id"])
+            prepared[key] = str(upload["skill"]["id"])
         if plan.set_write:
             result = await owner._sets.replace_apply_skill_sets(
                 scope=snapshot.scope,
@@ -152,8 +195,13 @@ async def write_capabilities(owner, ctx, plan):
                 remove_names=plan.remove_sets,
                 default_change=resolved.default_change,
                 platform_default_codes=snapshot.platform_default_codes,
+                retry_mcp_codes=frozenset().union(*(
+                    codes for identity, codes in candidates.items()
+                    if identity.startswith("skill_sets/")
+                )),
             )
             confirmed = confirmed or result.changed
+            ctx.capability_state.delivered_mcp_codes.update(result.delivered_mcp_codes)
             removals.update("skill_sets/" + n for n in result.removed)
             member_uploads = {
                 group.name: tuple(uploaded[s.key] for s in group.skills if s.key in uploaded)
@@ -174,6 +222,7 @@ async def write_capabilities(owner, ctx, plan):
                             {"runtime_projection": result.runtime_projection}
                         ),
                     )
+                    completed.add(identity)
             if result.default_removed:
                 removals.add("skill_sets/default")
             if resolved.default_enabled and "skill_sets/default" in results:
@@ -187,6 +236,7 @@ async def write_capabilities(owner, ctx, plan):
                         {"runtime_projection": result.runtime_projection}
                     ),
                 )
+                completed.add("skill_sets/default")
         for skill in resolved.direct:
             identity = "skills/" + skill.name
             entry = next(e for e in plan.entries if e.intent.identity == identity)
@@ -204,6 +254,7 @@ async def write_capabilities(owner, ctx, plan):
             results[identity] = EntryResult(
                 Category.CAPABILITIES, identity, outcome, note=note
             )
+            completed.add(identity)
         # Names, not stale IDs, define Direct removal scope too.
         actual = await asyncio.to_thread(owner._snapshot, ctx)
         catalog = assets(actual)
@@ -217,6 +268,8 @@ async def write_capabilities(owner, ctx, plan):
             if _confirmed_mutation(result):
                 confirmed = True
                 removals.add("skills/" + asset["name"])
+                if sid in plan.cleanup_ids:
+                    pending_asset_cleanup.add("skills/" + asset["name"])
         # Re-observe actual effective supply after all Skill commands. No predicted context handoff.
         actual = await asyncio.to_thread(owner._snapshot, ctx)
         set_ids, supplied_mcps = effective_sets(actual)
@@ -240,6 +293,10 @@ async def write_capabilities(owner, ctx, plan):
                 result = await owner._activation.claim_apply_mcp(
                     **who, server_code=code, config=config, apply_id=ctx.apply_id
                 )
+                if isinstance(result, dict):
+                    ctx.capability_state.delivered_mcp_codes.update(
+                        result.get("_manifest_delivered_mcp_codes", ())
+                    )
                 confirmed = confirmed or _confirmed_mutation(result)
                 results["mcp/" + code] = EntryResult(
                     Category.CAPABILITIES,
@@ -247,6 +304,7 @@ async def write_capabilities(owner, ctx, plan):
                     _claim_outcome(result),
                     note=_projection_note(result),
                 )
+                completed.add("mcp/" + code)
             candidates = (
                 (set(direct_codes) | overrides | set(plan.remove_mcps))
                 - supplied_mcps
@@ -272,6 +330,7 @@ async def write_capabilities(owner, ctx, plan):
                         EntryOutcome.UPDATED,
                         note="explicit MCP supply and Bot override are removed; the server remains available as a final Skill dependency",
                     )
+                    completed.add(identity)
                 else:
                     removals.add(identity)
                     results.pop(identity, None)
@@ -294,20 +353,27 @@ async def write_capabilities(owner, ctx, plan):
                 await owner._uploads.delete_local_skill(
                     **who, skill_id=str(sid), name=asset["name"]
                 )
+                pending_asset_cleanup.discard("skills/" + asset["name"])
                 confirmed = True
                 if asset["name"] not in {skill.name for skill in resolved.final_skills}:
                     removals.add("skills/" + asset["name"])
     except Exception as exc:
-        if isinstance(exc, ConfirmedPartialWriteError):
+        if isinstance(exc, (ConfirmedPartialWriteError, CapabilityWriteError)):
             raise
-        if confirmed or isinstance(exc, ApplyDesiredStateCommittedError):
-            raise ConfirmedPartialWriteError(
-                "Capability replacement stopped after a durable Bot write"
+        if package_receipts or confirmed or isinstance(exc, ApplyDesiredStateCommittedError):
+            raise CapabilityWriteError(
+                "Capability replacement stopped after starting Bot writes",
+                local_skill_packages=package_receipts,
+                confirmed_partial=confirmed or isinstance(exc, ApplyDesiredStateCommittedError),
+                entries=tuple(results[key] for key in sorted(completed)),
+                removals=tuple(sorted(removals - pending_asset_cleanup)),
             ) from None
         # No Bot write is confirmed: an earlier shared publication may still remain.
         raise RuntimeError(
             "Capability write failed; shared preparation may remain, Bot writes are not confirmed"
         ) from exc
+    finally:
+        binding_scope.close()
     ordered = tuple(
         results[e.intent.identity] for e in plan.entries if e.intent.identity in results
     )
@@ -315,4 +381,4 @@ async def write_capabilities(owner, ctx, plan):
         results[k]
         for k in sorted(set(results) - {e.intent.identity for e in plan.entries})
     )
-    return CategoryWriteResult(ordered + extra, tuple(sorted(removals)))
+    return CategoryWriteResult(ordered + extra, tuple(sorted(removals)), package_receipts)

@@ -44,6 +44,7 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
     ProjectionScope,
+    RuntimeProjectionResult,
 )
 from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
     DesktopSkillRecoveryServiceProtocol,
@@ -511,6 +512,9 @@ class SkillSetManagementService(
         scope_from_result: Callable[[DesiredStateMutation], ProjectionScope]
         | None = None,
         skip_projection_when_unchanged: bool = False,
+        on_committed: Callable[[DesiredStateMutation], None] | None = None,
+        on_projection: Callable[[RuntimeProjectionResult], None] | None = None,
+        record_projection_when_unchanged: bool = False,
     ) -> dict:
         """Apply one desired-state mutation and synchronously reconcile runtime.
 
@@ -533,6 +537,9 @@ class SkillSetManagementService(
             scope=scope,
             scope_from_result=scope_from_result,
             skip_projection_when_unchanged=skip_projection_when_unchanged,
+            on_committed=on_committed,
+            on_projection=on_projection,
+            record_projection_when_unchanged=record_projection_when_unchanged,
         )
         self._audit(
             bot_id=bot_id,

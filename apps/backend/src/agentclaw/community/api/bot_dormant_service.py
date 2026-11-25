@@ -12,10 +12,12 @@ from agentclaw.community.core.bot_dormant.bot_dormant_service_protocol import (
     BotDormantActivateServiceProtocol,
     BotDormantAuditServiceProtocol,
     BotDormantRecycleServiceProtocol,
+    BotDormantRecycleOperationProtocol,
 )
 
 __all__ = [
     "BotDormantActivateServiceProtocol",
     "BotDormantAuditServiceProtocol",
     "BotDormantRecycleServiceProtocol",
+    "BotDormantRecycleOperationProtocol",
 ]

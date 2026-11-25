@@ -40,8 +40,6 @@ export interface UseBotSessionFilePreviewParams {
   stage?: BotRuntimeStage;
   /** 多实例选中实例(openspec add-session-files-device-uuid 扩展段),缺省不携带 */
   deviceUuid?: string;
-  /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
-  callerRuntimeTarget?: 'service' | 'caller_instance';
   /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
   friendUserId?: string;
 }
@@ -53,7 +51,7 @@ export function useBotSessionFilePreview(
   const [state, setState] = useState<BotSessionFilePreviewState>(initialState);
   const resourceId = file?.resourceId ?? null;
   const name = file?.displayName ?? '';
-  const { botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget, friendUserId } = params;
+  const { botId, sessionId, userId, ownerId, stage, deviceUuid, friendUserId } = params;
 
   useEffect(() => {
     if (!resourceId || !botId || !sessionId || !userId) {
@@ -75,7 +73,6 @@ export function useBotSessionFilePreview(
       'inline',
       stage,
       deviceUuid,
-      callerRuntimeTarget,
       friendUserId,
     );
     if (kind === 'text') {
@@ -92,7 +89,6 @@ export function useBotSessionFilePreview(
           'inline',
           stage,
           deviceUuid,
-          callerRuntimeTarget,
           friendUserId,
         )
         .then(async (result) => {
@@ -120,7 +116,7 @@ export function useBotSessionFilePreview(
       };
     }
     setState({ ...initialState, kind, status: 'ready', contentUrl });
-  }, [resourceId, name, botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget, friendUserId]);
+  }, [resourceId, name, botId, sessionId, userId, ownerId, stage, deviceUuid, friendUserId]);
 
   return state;
 }

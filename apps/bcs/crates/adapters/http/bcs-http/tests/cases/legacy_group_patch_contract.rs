@@ -81,7 +81,7 @@ impl GroupService for RecordingGroupService {
 }
 
 fn group_detail() -> GroupDetail {
-    GroupDetail::Collaboration(CollaborationGroupDetail {
+    GroupDetail::Collaboration(CollaborationGroupDetail { catalog_labels:Default::default(),
         group_id: "group-1".into(),
         version: 2,
         name: Some("Renamed".into()),

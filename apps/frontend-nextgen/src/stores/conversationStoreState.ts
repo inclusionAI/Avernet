@@ -76,6 +76,8 @@ export interface ConversationState {
     options?: { preserveSelection?: boolean },
   ): void;
   setSessionKeyFilter(botId: string, sessionKey: string): void;
+  /** 失效该 Bot 的会话列表缓存(managed/others 好友分组一并)并递增过滤代次,由列表 Hook 重拉。供外部建聊(协作广场等)后强制刷新侧栏列表。 */
+  invalidateBotSessionList(botId: string): void;
   /** 写入多实例服务 Bot 的选中实例(device UUID);实际变化时失效该 Bot 列表缓存并递增过滤代次。 */
   setBotInstanceSelection(botId: string, instanceUuid: string): void;
   setFriendBotScope(botId: string, scope: ConversationSessionScope): void;
@@ -104,6 +106,7 @@ export type ConversationInitialData = Omit<
   | 'setManagedBotOrigin'
   | 'setManagedBotScope'
   | 'setSessionKeyFilter'
+  | 'invalidateBotSessionList'
   | 'setBotInstanceSelection'
   | 'setFriendBotScope'
   | 'removeFriendBotState'

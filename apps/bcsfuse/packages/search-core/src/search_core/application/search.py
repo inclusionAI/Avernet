@@ -52,9 +52,11 @@ class CatalogSearchApplication:
         request_timeout: float = 4.0,
         emergency: EmergencyControl | None = None,
         trace_id_provider: Callable[[], str] | None = None,
+        empty_search_fallback=None,
     ):
         if not math.isfinite(request_timeout) or request_timeout <= 0:
             raise ValueError("positive finite request timeout required")
+        self._empty_search_fallback = empty_search_fallback
         self._trace_id_provider = trace_id_provider
         self._budget = request_timeout
         self._retrieval = retrieval
@@ -189,7 +191,9 @@ class CatalogSearchApplication:
                     effective=EffectiveSearch(
                         limit=command.limit,
                         retrieval=(
-                            EffectiveRetrieval(**snapshot.policy.retrieval.model_dump())
+                            EffectiveRetrieval(
+                                **snapshot.policy.retrieval.pipeline_switches()
+                            )
                             if snapshot is not None
                             else None
                         ),
@@ -212,11 +216,17 @@ class CatalogSearchApplication:
         return await self._execute(command)
 
     async def _execute(self, command):
-        result = await self._retrieval.retrieve(
-            RetrievalRequest(
-                command.query,
-                command.limit,
-                dict(command.filters),
+        request = RetrievalRequest(command.query, command.limit, dict(command.filters))
+        result = await self._retrieval.retrieve(request)
+        if (
+            command.operation == "search"
+            and not result.items
+            and self._empty_search_fallback is not None
+            and "default_candidates" not in result.reasons
+            and (
+                self._emergency is None
+                or self._emergency.snapshot().policy.retrieval.empty_result_fallback_enabled
             )
-        )
+        ):
+            result = await self._empty_search_fallback(request, result)
         return replace(result, items=result.items[: command.limit])

@@ -55,6 +55,7 @@ from agentclaw.community.di.local_skill_security_config import (
     LocalSkillSecurityObservationConfig,
     require_observation_capabilities,
 )
+from agentclaw.community.di.manifest_apply_config import ManifestApplyConfig
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -114,6 +115,7 @@ class LocalSkillUploadBindings:
         runtime_reconciler: BotRuntimeProjectorProtocol,
         package_runtime: LocalSkillPackageRuntime,
         security_config: LocalSkillSecurityObservationConfig,
+        manifest_apply_config: ManifestApplyConfig,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,
@@ -127,4 +129,5 @@ class LocalSkillUploadBindings:
             package_runtime,
             lambda: injector.get(LocalSkillSecurityUploadHook),
             security_config.enabled,
+            local_skill_parallelism=manifest_apply_config.local_skill_parallelism,
         )

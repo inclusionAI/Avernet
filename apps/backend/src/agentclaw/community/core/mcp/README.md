@@ -23,6 +23,8 @@ provides:
   - "HeaderGroup"
   - "URLRule"
   - "ScopedMCPConfig"
+  - "BotMCPConfigPatch"
+  - "BotMCPConfigUpdate"
   - "MCPScopedConfigServiceProtocol"
   - "read_scoped_config"
   - "write_scoped_config"
@@ -63,6 +65,8 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.config
   - agentclaw.community.core.devices
+  - agentclaw.community.core.skill_center.capability_projection_reconcile
+  - agentclaw.community.core.skill_center.runtime_projection_contract
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
   - agentclaw.community.log
@@ -121,3 +125,37 @@ LOCAL/stdio MCP configuration is unchanged. Downstream services decide how to
 consume the Header; it provides context, not proof of authorization. Existing
 runtime configurations acquire it on their next configuration sync/reprojection;
 no database migration, new setting, or alternate Header name is introduced.
+
+## Bot MCP configuration OpenAPI
+
+Use `GET /openapi/v1/bots/{bot_id}/mcps/{server_code}/config` to read the
+addressed Bot's explicit Header names and URL presence. Header values and a
+present URL are shown as `****`. A missing URL is `null`. An empty result says
+only that the Bot has no Header or URL overrides. The endpoint requires MEMBER
+access.
+
+`PUT` on the same path requires explicit ADMIN access and the Bot's edit lock
+when applicable. Applications also require a live grant for the addressed Bot.
+Use the shared Bot address parameters `entity_id` or its deprecated alias
+`owner_id`. For an App call, `user_id` identifies the delegating user.
+
+For example, `{"headers":{"X-Region":"cn"},"url":null}` sets one Header and
+clears the Bot URL. Omitted fields and Header names retain their stored values.
+Names match case-insensitively. A null Header value clears that single override
+and restores inheritance. An empty string is a Header value, and an empty
+`headers` map leaves all Headers unchanged. A custom HTTP(S) URL can be staged
+before the server is registered. The write touches only the addressed Bot's
+overrides. Manifest Apply can later replace or clear those overrides.
+
+The response reports `desired_state.status` as `COMMITTED` or `UNCHANGED`.
+`runtime_projection.status` is `CONVERGED` when delivery succeeds, `SKIPPED`
+when the MCP is not effective, or `DEGRADED` when delivery fails. A failed
+delivery leaves the saved override available to GET. Repeat the PUT to retry
+projection for that Bot and MCP. A successful projection confirms delivery,
+while MCP reachability requires a separate check. Staging overrides does not
+install the MCP.
+
+**A URL change can redirect user-explicit Headers**, including a user-supplied
+`Authorization` Header. Bot and inherited user Header rules apply to the new
+URL. Center-bound legacy API keys, platform default Headers and managed
+credentials are excluded by the existing custom URL rules. See [ADR 0016](../../../../../../../docs/adr/0016-mcp-url-and-explicit-headers-are-independent.md).

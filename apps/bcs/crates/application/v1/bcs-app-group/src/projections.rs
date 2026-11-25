@@ -5,8 +5,30 @@ use super::*;
 impl GroupServiceImpl {
     pub(crate) async fn project_detail_with_state_machine(
         &self,
+        group: DomainGroup,
+        state_machine_override: Option<StateMachineConfiguration>,
+    ) -> Result<GroupDetail, ApplicationError> {
+        let snapshot = self.detail_snapshot(group).await?;
+        self.project_detail_with_labels(snapshot.group, state_machine_override, snapshot.catalog_labels).await
+    }
+
+    pub(crate) async fn detail_snapshot(
+        &self, group: DomainGroup,
+    ) -> Result<bcs_service_api::types::GroupMutationSnapshot, ApplicationError> {
+        if group.group_kind == GroupKind::Normal
+            && matches!(group.group_strategy, GroupStrategy::ManagerWorker | GroupStrategy::StateMachine)
+        {
+            return self.groups.read_detail_snapshot(&group.id).await.map_err(map_service_error)?
+                .ok_or_else(|| ApplicationError::not_found("group_not_found", "Group was removed during detail read"));
+        }
+        Ok(bcs_service_api::types::GroupMutationSnapshot { group, catalog_labels: Default::default() })
+    }
+
+    pub(crate) async fn project_detail_with_labels(
+        &self,
         mut group: DomainGroup,
         state_machine_override: Option<StateMachineConfiguration>,
+        catalog_labels: bcs_service_api::types::catalog_labels::CatalogLabels,
     ) -> Result<GroupDetail, ApplicationError> {
         bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
         let mut participants = group
@@ -43,6 +65,7 @@ impl GroupServiceImpl {
                 )));
             }
             return Ok(GroupDetail::DirectMessage(DirectMessageGroupDetail {
+                catalog_labels,
                 group_id: common.group_id,
                 version: common.version,
                 name: common.name,
@@ -84,6 +107,7 @@ impl GroupServiceImpl {
         let (driver_bot_owner, driver_bot_owner_name) =
             self.resolve_driver_bot_owner(&group.driver_bot).await;
         Ok(GroupDetail::Collaboration(CollaborationGroupDetail {
+            catalog_labels,
             group_id: common.group_id,
             version: common.version,
             name: common.name,

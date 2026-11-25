@@ -2,6 +2,20 @@
 
 ## Provides
 
+- `read_detail_snapshot` forwards the repository's bounded uncached Group/labels
+  version-fenced read. Legacy details and label/status/visibility responses use
+  that complete persisted version while retaining operation/session-only output
+  fields. See [detail consistency](../../../docs/catalog-labels.md#detail-response-consistency)
+  for the three-read normal path, nine-read retry bound and isolation limits.
+
+- `mutate_with_snapshot` returns a Group PATCH's version-fenced metadata and
+  labels together. SQL captures at most one indexed Card row inside the existing
+  transaction (a current locking read on MySQL); Memory captures under its Group
+  write guard. Legacy `mutate` keeps its result and SQL read cost unchanged.
+  No-op PATCH does not write/increment the version: its strict Card snapshot
+  must still match the metadata version, or the operation returns Conflict.
+  Neither path constructs a successful response using a post-commit label read.
+
 - Optional post-commit catalog change notifications for Group creation, provisioning, metadata, visibility and deletion.
 
 - `GroupCoreService::read_card_snapshot` delegates the strict, environment-scoped
@@ -64,6 +78,13 @@ The crate owns group session business rules and lifecycle decisions. It does not
 
 ## Tests
 
+- `python3 apps/bcs/scripts/e2e-test/group_card_story.py --binary apps/bcs/target/debug/bcs`
+  launches an isolated real HTTP server. ManagerWorker and StateMachine PATCH
+  responses are checked against read-only SQLite metadata/Card rows for label
+  replacement, omission, no-op version/timestamp preservation, clear, restore,
+  per-key deletion, and rejection without partial mutation. It preserves the
+  caller's LLVM profile path and also runs in the Singlebox story inventory.
+
 - `cargo test --package bcs-group --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-group --all-targets --manifest-path src/bcs/Cargo.toml`
 
@@ -89,3 +110,29 @@ Group policy and Session callback columns, indexes and values remain unchanged;
 runtime stores no longer read or write those fields. This retirement adds no
 schema migration. Stop old binaries to prevent legacy scanners and callbacks
 from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+## Configured catalog labels
+
+The [BCS label contract](../../../docs/catalog-labels.md) owns dictionary,
+omission, atomic persistence, refresh fencing and complete-publication semantics.
+Service API 7.0.0 adds typed metadata and explicit preserve/replace commands;
+external Rust consumers rebuild together. Labels are not raw Card or authorization
+state. Bootstrap loads the independent policy file once; no environment overlay
+or request can extend it. See the change validation record for actual test and
+release evidence; local code is not a published or deployed revision.
+
+
+## Atomic creation and post-commit Card notifications
+
+Legacy normal-Group admission uses `create_with_catalog_labels`: an existing
+explicit identity conflicts atomically, never becoming an unauthorized upsert.
+Memory checks under its Group write lock; SQL relies on the existing unique key
+inside the Group/template/label transaction. Authorized updates remain PATCH;
+DM reuse and trusted internal upserts are unchanged. The new Core/repo method
+fails closed when an implementation has not supplied atomic create support.
+Versioned SQL mutations return the fenced candidate after successful commit,
+without a fallible response read that could suppress Core catalog notification.
+The cache remains invalidated. Creation adds no query. Versioned mutation moves
+the two normal Group/participant reads before commit; the warm Core query count
+is unchanged (direct cold repo calls save two reads). SQL response timestamps and
+participant projection are preserved; write failures still abort without notifying.

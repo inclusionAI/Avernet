@@ -48,6 +48,8 @@ Here, both sides can import it and neither owns it.
 
 ## Contents
 
+- `manifest_delivery.py` — `ManifestDeliveryReceipt`: the confirmed MCP codes
+  sent in a whole artifact, distinct from unbound, failed, or unknown delivery.
 - `activation_port.py` — `ActivationPort`: per-bot skill and MCP activation
   writes, without the projection choice.
 - `mcp_config.py` — `McpConfigWriteIntent`: the shared
@@ -112,9 +114,12 @@ These in-process actions add no YAML or Genome fields.
 ```yaml
 purpose: Outbound ports — the narrow contracts core states for what it calls out to, owned by the caller and published where both caller and implementer can reach them.
 provides:
+  - ManifestDeliveryReceipt
+  - ManifestDeliveryStatus
   - ActivationPort
   - McpConfigWriteIntent
   - SkillPackageUploadPort
+  - RuntimeBindingTarget
   - IdentityFilePort
   - ResourceFilePort
   - SharedSkillPort  # and SharedSkillNotFound, SharedSkillAmbiguous; implemented by core.skill_center SkillQueryService

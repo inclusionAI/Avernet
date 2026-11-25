@@ -11,6 +11,9 @@ from __future__ import annotations
 from typing import Any, Optional, Sequence
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
+    RuntimeProjectionResult,
+)
 from agentclaw.community.api.apply_run_service import (
     ApplyReport,
     ApplyRunServiceProtocol,
@@ -184,6 +187,7 @@ def start_put_apply(
     owner_id: str,
     actor_id: str,
     audit: str,
+    permission_subject: str | None = None,
 ) -> ConfigManifestApplyStarted:
     """Start the apply a ``PUT`` owes, and say whether it started (spec D-8).
 
@@ -198,6 +202,7 @@ def start_put_apply(
             bot=bot,
             owner_id=owner_id,
             actor_id=actor_id,
+            permission_subject=permission_subject,
             audit_actor=audit,
             state=MANIFEST_STATE,
             trigger=PUT_TRIGGER,
@@ -257,6 +262,7 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
     that drifted would be the one nobody was reading.
     """
     payload = report.as_payload()
+    projection = payload.get("runtime_projection")
     return ConfigManifestApply(
         apply_id=payload["apply_id"],
         bot_id=payload["bot_id"],
@@ -274,6 +280,9 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
         entries=[ConfigManifestApplyEntry(**entry) for entry in payload["entries"]],
         notes=list(payload.get("notes") or ()),
         state=ConfigManifestApplyState(**payload["state"]),
+        runtime_projection=(
+            RuntimeProjectionResult.model_validate(projection) if projection is not None else None
+        ),
     )
 
 

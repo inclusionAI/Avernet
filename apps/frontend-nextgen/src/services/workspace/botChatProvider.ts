@@ -1,3 +1,4 @@
+import { createBotA2aFetch, type A2aProxyConnection } from './botA2aFetch';
 import {
   isSendBannedForSession,
   revertA2AChoice,
@@ -8,7 +9,6 @@ import {
 import type { CancelOutcome } from '@avernet/a2a-chat-client';
 import { getBotConnection } from '@/services/backendApi/bots/privateBotSessionController';
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';
-import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { OpenClawProvider, type ConnectionStatusEvent, type OpenClawProviderConfig } from '@tc-chat/adapters';
 import type { ChatMessage, ChatProvider, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { installCompleteFallback } from './botChatCompleteFallback';
@@ -129,8 +129,6 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   /** disconnect() 递增；异步 connect 在每个 await 后校验，过期连接静默清理。 */
   private connectionEpoch = 0;
   private readonly getIamTokenFn: typeof getBotIamToken;
-  /** Caller 判据探测(单飞缓存):首次换签后结果定格,null=尚未发起。 */
-  private callerRuntimeTargetPromise: Promise<'service' | 'caller_instance' | undefined> | null = null;
   private iamToken = '';
   private directDesktop = false;
   private desktopReconnectTimer?: ReturnType<typeof setTimeout>;
@@ -147,6 +145,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private a2aBaseUrl: string | null = null;
   /** 用户灰度负结果（服务端 a2a_withheld）——bootstrap 拦截推导/探测/构造 */
   private a2aWithheld = false;
+  private a2aFetchImpl: typeof fetch | undefined;
   /** R6 禁令作用域：bot+owner+stage 键前缀——registry 是 app 级单例而
    * sessionKey 跨 bot 不唯一（不同 OpenClaw 实例的同名会话），scope 把
    * 挂禁/查询/核销限定在本 bot/runtime 域内，杜绝跨 bot 串联误封。 */
@@ -169,35 +168,6 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       options.bot.realBotId, options.bot.ownerId,
       resolveChatRuntimeStage(options.bot),
     ].join(' ');
-    // Caller 判据探测随构造即发,与连接握手(getBotConnection)并行,保证首次换签
-    // 前已有结论、不串行加时延;desktop 直连不走云端换签,不探测。
-    if (options.bot.botType !== 'desktop') void this.resolveCallerRuntimeTarget();
-  }
-
-  /** Caller 模式判据运行时化(2026-11-19 需求变更,与文件链 useBotSessionFilesFeature
-   *  同款判据/取值):新版目录接口族不下发 call_type,静态 options.bot.callType 恒
-   *  undefined(判据死参数事故的根因);改探测 GET /openapi/v1/bots/{id}/caller-context
-   *  (stage=draft,聚合 bot_call_type 存量存于 Bot 行,与运行 stage 无关)。
-   *  取值:我管理的/我协作的 → service(服务实例池,实例仍由 stage/device_uuid 定位);
-   *  好友 Bot → caller_instance(当前用户独立 Caller 实例)。
-   *  三轮勘误(2026-11-19):好友探测照旧发起——gateway 契约本接口仅授权 Bot 的
-   *  owner/collaborator,好友视角探测预期失败,但无论成败 caller_runtime_target
-   *  电文均可能无法落地,不再据此裁剪请求面;探测失败/非 caller 一律静默降级不带
-   *  且零提示(请求层 suppressErrorNotification 不投 httpClient 默认错误 toast,
-   *  契约安全:f_user_id 路由自明)。
-   *  单飞缓存:结果跨多次换签定格,失效面(改调用身份)随 provider 重建刷新。 */
-  private resolveCallerRuntimeTarget(): Promise<'service' | 'caller_instance' | undefined> {
-    if (this.options.bot.botType === 'desktop') return Promise.resolve(undefined);
-    this.callerRuntimeTargetPromise ??= botEditorService
-      .getCallerContext(this.options.bot.realBotId, this.options.bot.ownerId, {
-        suppressErrorNotification: true,
-      })
-      .then((ctx) =>
-        ctx.botCallType === 'caller'
-          ? (this.options.bot.isFriendBot ? ('caller_instance' as const) : ('service' as const))
-          : undefined)
-      .catch(() => undefined);
-    return this.callerRuntimeTargetPromise;
   }
 
   get isConnected(): boolean {
@@ -279,8 +249,6 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     const params = withFriendBotRequestParams(this.options.bot, this.options.userId, {
       user_id: resolveUserId(this.options.userId),
     });
-    // IAM 与文件链同规则(2026-11-19 勘误):判据与取值同 resolveCallerRuntimeTarget 单点收口。
-    const callerRuntimeTarget = await this.resolveCallerRuntimeTarget();
     return this.getIamTokenFn(
       this.options.bot.realBotId,
       params.user_id,
@@ -299,16 +267,11 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         ...(this.options.range?.deviceUuid
           ? { deviceUuid: this.options.range.deviceUuid }
           : {}),
-        ...(callerRuntimeTarget
-          ? { callerRuntimeTarget }
-          : {}),
       },
     );
   }
 
-  private async getChatUrl(): Promise<{
-    url: string; a2aBaseUrl: string | null; a2aWithheld: boolean;
-  }> {
+  private async getChatUrl(): Promise<A2aProxyConnection & { url: string }> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
       withFriendBotRequestParams(this.options.bot, this.options.userId, {
@@ -333,7 +296,8 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     this.directDesktop = resp.data?.transport_mode === 'direct';
     // B17：服务端签发的 A2A base 原样收下（签发方承诺浏览器可达）；
     // 缺席 = null = 既有 ws 推导兜底，不做任何本地代填。
-    const a2aBase = resp.data?.sockets?.find((s) => s.kind === 'a2a')?.url;
+    const a2aSocket = resp.data?.sockets?.find((s) => s.kind === 'a2a');
+    const a2aBase = a2aSocket?.url;
     // 用户灰度负结果（服务端治理后明确拒绝）：与"没有地址"是两个语义——
     // 明确拒绝禁止推导/探测/缓存命中构造，见 A2aBootstrapConfig.a2aWithheld。
     const a2aWithheld = resp.data?.a2a_withheld === true;
@@ -341,6 +305,8 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       url: socketUrl,
       a2aBaseUrl: a2aBase ? String(a2aBase) : null,
       a2aWithheld,
+      a2aHeaders: a2aSocket?.headers,
+      expiresAt: resp.data?.expires_at ?? '',
     };
   }
 
@@ -357,10 +323,12 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private async initialize(): Promise<OpenClawProvider> {
     this.setState({ phase: 'preparing', error: null });
     this.setConnectionRuntime({ resolved: false, engine: null });
-    const { url, a2aBaseUrl, a2aWithheld } = await this.getChatUrl();
+    const connection = await this.getChatUrl();
+    const { url, a2aBaseUrl, a2aWithheld } = connection;
     this.wsUrl = url;
     this.a2aBaseUrl = a2aBaseUrl;
     this.a2aWithheld = a2aWithheld;
+    this.a2aFetchImpl = createBotA2aFetch(connection, () => this.getChatUrl());
     // 连接凭证(URL query token,管 WS 握手)与请求身份凭证(x-iam-token,管 chat.send 帧)是两套:
     // URL 已内含握手凭证;此处须单独拉取 IAM token 并注入 SDK,否则发送会被服务端拒(身份不明)。
     this.iamToken = this.directDesktop
@@ -372,7 +340,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     // v3 构造行 `new OpenClawProvider(cfg)` 保持逐字不变（零改动红线，钉板
     // test/services/workspace/botChatProvider.a2a.seam.test.ts）。
     const factory = this.options.createSdkProvider ?? ((cfg) => {
-      const a2aProvider = takeCachedA2AProvider(cfg as A2aBootstrapConfig);
+      const a2aProvider = takeCachedA2AProvider(
+        cfg as A2aBootstrapConfig, this.a2aFetchImpl ? { fetchImpl: this.a2aFetchImpl } : undefined,
+      );
       if (a2aProvider) {
         // B12 取消四态播报转发（宿主 toast 消费面在 useBotChat；文案单源 CANCEL_UI_TEXT）。
         // IAM 凭证刷新沿用本类既有通道：request() 的 updateProviderIamToken 直写
@@ -578,7 +548,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       ...(this.sendBanScopeId ? { sendBanScopeId: this.sendBanScopeId } : {}),
       sessionKey: this.options.sessionId,
     } as A2aBootstrapConfig;
-    if (takeCachedA2AProvider(probeCfg)) return;    // 当下选择仍 A2A——复用
+    if (takeCachedA2AProvider(
+      probeCfg, this.a2aFetchImpl ? { fetchImpl: this.a2aFetchImpl } : undefined,
+    )) return;    // 当下选择仍 A2A——复用
     const retired = this.inner as OpenClawProvider;
     this.parkOrDisposeRetiredA2a(retired);
     this.inner = null;

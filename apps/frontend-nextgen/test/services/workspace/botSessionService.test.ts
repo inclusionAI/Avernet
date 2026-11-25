@@ -2,7 +2,13 @@
 import type { IdentityView } from '@/domain/collaboration';
 import * as botCtrl from '@/services/backendApi/bots/botController';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
-import { botSessionService, listChatBots, splitBotId } from '@/services/workspace/botSessionService';
+import {
+  botSessionService,
+  extractSessionUuidFromSessionId,
+  listChatBots,
+  mapBotSessionSummary,
+  splitBotId,
+} from '@/services/workspace/botSessionService';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { describe, expect, it, jest } from '@jest/globals';
@@ -637,5 +643,86 @@ describe('instance session lookup error notifications', () => {
     }));
     await botSessionService.getSessionDetail(bot, '1', 's');
     expect(useErrorNotifyStore.getState().queue[0].cancelled).not.toBe(true);
+  });
+});
+
+// OpenSpec fix-session-title-auto-rename §session-title-normalization：
+// adapter 写引擎 label 有两种后缀形态（create `_<裸uuid>` / update `_<完整id>`），
+// mapBotSessionSummary 的剥除判据必须锚定本会话自身标识，宁漏剥不误剥。
+describe('mapBotSessionSummary 标题后缀剥除（锚定本会话）', () => {
+  const uuid = '9a4cadce-44a7-41de-8826-749b3b0b79f7';
+  const base = {
+    title: '',
+    message_count: 0,
+    gmt_modified: '',
+    gmt_create: '',
+  };
+
+  it('update 形态 `_<完整 session_id>`：照旧剥净', () => {
+    const sessionId = `agent:main:session:${uuid}:user:900003`;
+    expect(
+      mapBotSessionSummary({ ...base, session_id: sessionId, title: `标题A_${sessionId}` }).title,
+    ).toBe('标题A');
+  });
+
+  it('create 形态 `_<裸uuid>`：锚定本会话 id 补齐剥净（完整 AID 与裸 key 两种 id 形态）', () => {
+    expect(
+      mapBotSessionSummary({
+        ...base,
+        session_id: `agent:main:session:${uuid}:user:900003`,
+        title: `新会话_${uuid}`,
+      }).title,
+    ).toBe('新会话');
+    expect(
+      mapBotSessionSummary({
+        ...base,
+        session_id: `session:${uuid}:user:900003`,
+        title: `新对话_${uuid}`,
+      }).title,
+    ).toBe('新对话');
+  });
+
+  it('人类标题自带下划线尾巴不误剥（teclaw 回归锚点）', () => {
+    expect(
+      mapBotSessionSummary({
+        ...base,
+        session_id: `agent:main:session:${uuid}:user:900003`,
+        title: '技能回放-ODPS_APPROVAL-100008',
+      }).title,
+    ).toBe('技能回放-ODPS_APPROVAL-100008');
+  });
+
+  it('尾段 uuid 非本会话自己：宁漏剥，原样保留', () => {
+    expect(
+      mapBotSessionSummary({
+        ...base,
+        session_id: 'solo-id',
+        title: `报告_77777777-7777-4777-8777-777777777777`,
+      }).title,
+    ).toBe(`报告_77777777-7777-4777-8777-777777777777`);
+  });
+
+  it('幂等：干净标题重复映射为 no-op；空 title 仍回退「新会话」', () => {
+    const sessionId = `agent:main:session:${uuid}:user:900003`;
+    expect(mapBotSessionSummary({ ...base, session_id: sessionId, title: '新会话' }).title).toBe('新会话');
+    expect(mapBotSessionSummary({ ...base, session_id: sessionId, title: '' }).title).toBe('新会话');
+  });
+});
+
+describe('extractSessionUuidFromSessionId', () => {
+  const uuid = '9a4cadce-44a7-41de-8826-749b3b0b79f7';
+
+  it('裸 key `session:<uuid>:user:<id>` 提取 uuid', () => {
+    expect(extractSessionUuidFromSessionId(`session:${uuid}:user:1`)).toBe(uuid);
+  });
+
+  it('完整 AID `agent:<provider>:session:<uuid>:user:<id>` 提取 uuid', () => {
+    expect(extractSessionUuidFromSessionId(`agent:main:session:${uuid}:user:1`)).toBe(uuid);
+  });
+
+  it('未知形态返回 null（宁漏剥不误剥）', () => {
+    expect(extractSessionUuidFromSessionId('solo-id')).toBeNull();
+    expect(extractSessionUuidFromSessionId('')).toBeNull();
+    expect(extractSessionUuidFromSessionId(undefined)).toBeNull();
   });
 });

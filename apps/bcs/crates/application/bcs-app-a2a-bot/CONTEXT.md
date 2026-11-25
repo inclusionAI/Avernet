@@ -19,8 +19,10 @@ public Card validation. It never creates an ordinary webhook Bot first or
 mutates persistence directly. Core repeats Provider admission after the fetch
 and commits the existing ownership/Card composite atomically, recording the
 Provider principal. A2A duplicates conflict. Explicit updates without an expected
-revision replace the complete Card atomically; legacy supplied revisions retain
-CAS behavior. Refreshes always retain internal CAS protection.
+revision retry local CAS conflicts at most three times; legacy supplied revisions retain
+single-attempt CAS behavior. Omitted labels are preserved from the latest record on
+each attempt, while explicit label objects replace the collection. Card fetches
+are performed once outside the retry loop. Refreshes always retain internal CAS protection.
 Registration wiring also requires `BotRegistryCoreService`. After the atomic
 ownership/Card registration succeeds, URL and inline registrations apply an
 explicit avatar Set or Clear through `update_avatar_existing`; Keep issues no
@@ -90,3 +92,22 @@ chat-run dependency. Legacy chat/run handling is unchanged.
 
 `tests/conformance_a2a_v1.rs` covers all six management operations, Provider-admin
 credential forwarding, Card source/visibility forwarding and machine errors.
+
+## Configured catalog labels
+
+The [BCS label contract](../../../docs/catalog-labels.md) owns dictionary,
+omission, atomic persistence, refresh fencing and complete-publication semantics.
+Service API 7.0.0 adds typed metadata and explicit preserve/replace commands;
+external Rust consumers rebuild together. Labels are not raw Card or authorization
+state. Bootstrap loads the independent policy file once; no environment overlay
+or request can extend it. See the change validation record for actual test and
+release evidence; local code is not a published or deployed revision.
+
+Provider authentication and name resolution are read-only. Public/named registration,
+updates and refresh validate Card capability projections before name reservation;
+invalid owner/ref/target/Card inputs do not newly pin a mutable slug. Successful
+get/find results validate their view before reservation; an empty find performs no
+reservation. Updates pin at most once across CAS retries, while the store's slug
+comparison fences concurrent renames. Store projection validation remains defense
+in depth. No transaction spans Card fetching; a later DB/CAS failure is not a
+rollback guarantee for the separate Provider reservation.

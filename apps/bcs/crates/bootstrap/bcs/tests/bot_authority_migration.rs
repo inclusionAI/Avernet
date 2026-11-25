@@ -264,10 +264,13 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
         .find(|row| row.get("version") == Some(&DbValue::I64(43)))
         .expect("delivery_session_lookup present");
     assert_eq!(delivery_lookup.get("name"), Some(&DbValue::String("delivery_session_lookup".into())));
-    assert_eq!(
-        history.last().expect("chain tail present").get("name"),
-        Some(&DbValue::String("message_activity_indexes".into()))
-    );
+    let activity_indexes = history.iter()
+        .find(|row| row.get("version") == Some(&DbValue::I64(45)))
+        .expect("message_activity_indexes present");
+    assert_eq!(activity_indexes.get("name"), Some(&DbValue::String("message_activity_indexes".into())));
+    let tail = history.last().expect("chain tail present");
+    assert_eq!(tail.get("version"), Some(&DbValue::I64(46)));
+    assert_eq!(tail.get("name"), Some(&DbValue::String("configured_catalog_labels".into())));
     assert!(history.iter().any(|row| row.get("name") == Some(&DbValue::String("auth_session_version".into()))), "session version migration recorded");
     assert!(history.iter().any(|row| row.get("name") == Some(&DbValue::String("group_agent_cards".into()))), "Group Card migration recorded");
     assert!(history.iter().any(|row| row.get("name") == Some(&DbValue::String("bot_avatar".into()))), "avatar migration recorded");

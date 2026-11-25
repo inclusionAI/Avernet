@@ -57,17 +57,18 @@ fn mysql_v20_prefix_upgrade_reports_the_complete_pending_tail() -> Result<()> {
     let prefix = records.iter().filter(|record| record.version <= 20).cloned().collect();
     let before = build_mysql_migration_report("bcs".into(), plans.clone(), prefix, true)?;
     assert_eq!(before.current_version, Some(20));
-    assert_eq!(before.target_version, Some(47));
+    assert_eq!(before.target_version, Some(48));
     assert_eq!(before.pending_versions.iter().map(|plan| plan.version).collect::<Vec<_>>(),
-        (21..=47).collect::<Vec<_>>());
+        (21..=48).collect::<Vec<_>>());
 
     let after = build_mysql_migration_report("bcs".into(), plans, records, true)?;
     let report = format_mysql_apply_report(&after, &before.pending_versions);
-    assert!(report.contains("applied_versions=27\npending_versions=0"), "{report}");
+    assert!(report.contains("applied_versions=28\npending_versions=0"), "{report}");
     assert!(report.contains("- 044 actor_identity_no_pad checksum="), "{report}");
     assert!(report.contains("- 045 delivery_session_lookup checksum="), "{report}");
     assert!(report.contains("- 046 group_context_preset checksum="), "{report}");
     assert!(report.contains("- 047 message_activity_indexes checksum="), "{report}");
+    assert!(report.contains("- 048 configured_catalog_labels checksum="), "{report}");
     let repeated = format_mysql_apply_report(&after, &[]);
     assert!(repeated.contains("applied_versions=0\npending_versions=0"), "{repeated}");
     Ok(())
@@ -140,6 +141,10 @@ async fn full_mysql_migration_chain_applies_and_preserves_history() -> Result<()
     bcs_config.database.database_type = DatabaseType::Mysql;
     bcs_config.database.mysql = config.clone();
     fs::write(&config_file, serde_json::to_vec(&bcs_config)?)?;
+    // Config loading requires the catalog label policy file next to the
+    // config file; stage the repository dictionary into the sandbox.
+    fs::copy(bcs_root().join("configs").join("catalog-labels.toml"),
+        temp.path().join("catalog-labels.toml"))?;
     let global = MigrateGlobalArgs { config_dir: None, config_file: Some(config_file) };
     let manager = MysqlDbManager::new(config).await?;
     let db: Arc<dyn DbPlugin> = Arc::new(MysqlDbPlugin::new(manager.clone(), "bcs"));
@@ -184,9 +189,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=47\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=48\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=47).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=48).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
@@ -330,7 +335,7 @@ async fn chain_history(db: &dyn DbPlugin) -> Result<Vec<(i64, String)>> {
 async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
     for (table, columns) in [
         ("bcs_providers", vec!["env", "provider_id", "slug"]),
-        ("bcs_group_agent_cards", vec!["id", "gmt_create", "gmt_modified", "env", "group_id", "card_template"]),
+        ("bcs_group_agent_cards", vec!["id", "gmt_create", "gmt_modified", "env", "group_id", "card_template", "catalog_labels"]),
         ("bcs_collaboration_drafts", vec!["draft_id", "owner_bot_id", "head_revision", "created_at", "deleted"]),
         ("bcs_collaboration_draft_revisions", vec!["draft_id", "revision", "payload_json", "revoked"]),
         ("bcs_session_registry", vec!["env", "session_id", "session_type", "current_msg_seq"]),
@@ -339,7 +344,7 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         ("bcs_state_machine_node_runs", vec!["outcome", "responded_by", "failure_action"]),
         ("bcs_group_participants", vec!["tags_json", "message_view_scope"]),
         ("bcs_groups", vec!["human_mention_notify_mode", "service_spec"]),
-        ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "ownership_version", "avatar_url"]),
+        ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "ownership_version", "avatar_url", "catalog_labels"]),
         ("bcs_state_machine_runs", vec!["root_run_id", "rerun_of", "session_activation_count", "opening_message_override_json"]),
         ("bcs_group_sessions", vec!["message_visibility_version", "activation_count", "completed_at", "callback_status", "callback_lease_owner", "callback_lease_token", "callback_lease_until_ms"]),
         ("bcs_state_machine_definition_snapshots", vec!["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"]),

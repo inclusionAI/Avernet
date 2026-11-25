@@ -1,75 +1,59 @@
+import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { Empty } from '@/components/ui/Empty';
-import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Switch } from '@/components/ui/Switch';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { notifyError, notifySuccess } from '@/components/ui/notify';
-import { useBotBrowseConfig } from '@/hooks/useBotBrowseConfig';
-import { BROWSE_NOTE_MAX_LENGTH } from '@/services/lab';
+import { getBotEngineLabel } from '@/domain/botEngine';
+import { useBotBrowseConfig, type BotBrowseRow } from '@/hooks/useBotBrowseConfig';
 import { RefreshCw } from 'lucide-react';
 
-interface BotRowProps {
-  botName: string;
-  botId: string;
-  note: string;
-  enabled: boolean;
-  saving: boolean;
-  onToggle: (on: boolean) => void;
-  onNoteBlur: (note: string) => void;
-}
-
-/** 列表行：Bot 名称 + 真实 id 旁注、周期性逛社区开关、备注（仅已开启时可编辑，blur 保存）。
- *  备注输入采用 defaultValue + onBlur 的非受控模式（行 key 稳定），避免每键写入引发整表重渲染。 */
-function BotRow({ botName, botId, note, enabled, saving, onToggle, onNoteBlur }: BotRowProps) {
+function BotRow({ row, onToggle }: { row: BotBrowseRow; onToggle: (on: boolean) => void }) {
+  const engineLabel = getBotEngineLabel(row.engine);
   return (
-    <div className="rounded-lg border border-border bg-card p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-foreground">{botName}</div>
+    <div className="flex min-h-[50px] items-center justify-between gap-3 rounded-lg border border-border bg-card px-2.5 py-2">
+      <div className="flex min-w-0 items-center gap-2">
+        <BotDisplayAvatar botId={row.botId} name={row.botName} avatarUrl={row.avatarUrl} size={32} />
+        <div className="flex min-w-0 items-center gap-1">
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="truncate text-xs text-muted-foreground" tabIndex={0}>
-                  {botId}
-                </div>
+                <span className="truncate text-[13px] font-medium leading-[18px] text-foreground">
+                  {row.botName}
+                </span>
               </TooltipTrigger>
-              <TooltipContent>{botId}</TooltipContent>
+              <TooltipContent>{row.botName}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          {engineLabel ? (
+            <Badge tone="outline" className="h-[18px] shrink-0 rounded px-2 py-0 text-xs font-normal leading-4 text-muted-foreground">
+              {engineLabel}
+            </Badge>
+          ) : null}
         </div>
-        <Switch
-          aria-label={`${botName} 周期性逛社区`}
-          checked={enabled}
-          disabled={saving}
-          loading={saving}
-          onCheckedChange={(on) => void onToggle(on)}
-        />
       </div>
-      <Input
-        className="mt-3"
-        defaultValue={note}
-        placeholder={enabled ? '备注（可选，保存于该 Bot 的定时任务）' : '开启后可填写备注'}
-        maxLength={BROWSE_NOTE_MAX_LENGTH}
-        disabled={!enabled || saving}
-        aria-label={`${botName} 备注`}
-        onBlur={(event) => {
-          if (enabled) onNoteBlur(event.currentTarget.value);
-        }}
+      <Switch
+        aria-label={`${row.botName} 周期性逛社区`}
+        checked={row.enabled}
+        disabled={row.saving}
+        loading={row.saving}
+        onCheckedChange={onToggle}
       />
     </div>
   );
 }
 
-/** 「Bot 访问社区配置」面板：列出当前用户拥有的 Bot，逐个开关周期性逛社区与备注。 */
+/** 头像、名称、引擎与订阅开关；备注不在此弹窗编辑，已有备注仍由服务保留。 */
 export function BotBrowseConfigPanel() {
-  const { rows, loading, error, gated, reload, toggle, saveNote } = useBotBrowseConfig();
+  const { rows, loading, error, gated, reload, toggle } = useBotBrowseConfig();
 
   if (loading) {
     return (
-      <div role="status" className="space-y-3" aria-busy="true" aria-label="加载社区配置">
+      <div role="status" className="space-y-2" aria-busy="true" aria-label="加载社区配置">
         {[0, 1, 2].map((key) => (
-          <Skeleton.Block key={key} className="h-20 w-full rounded-lg" />
+          <Skeleton.Block key={key} className="h-[50px] w-full rounded-lg" />
         ))}
       </div>
     );
@@ -85,7 +69,7 @@ export function BotBrowseConfigPanel() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {error ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3">
           <span className="text-sm text-destructive">{error}</span>
@@ -94,26 +78,17 @@ export function BotBrowseConfigPanel() {
           </Button>
         </div>
       ) : null}
-      {rows.length === 0 ? (
+      {rows.length === 0 && !error ? (
         <Empty title="暂无 Bot" description="当前用户没有可配置的 Bot；创建 Bot 后可在此开启周期性逛社区。" />
       ) : (
         rows.map((row) => (
           <BotRow
             key={row.botId}
-            botName={row.botName}
-            botId={row.botId}
-            note={row.note}
-            enabled={row.enabled}
-            saving={row.saving}
+            row={row}
             onToggle={(on) =>
               void toggle(row.botId, on)
                 .then(() => notifySuccess(on ? '已开启周期性逛社区' : '已关闭周期性逛社区'))
                 .catch(() => notifyError(on ? '开启失败，请稍后重试' : '关闭失败，请稍后重试'))
-            }
-            onNoteBlur={(note) =>
-              void saveNote(row.botId, note)
-                .then(() => notifySuccess('备注已保存'))
-                .catch(() => notifyError('保存备注失败，请稍后重试'))
             }
           />
         ))

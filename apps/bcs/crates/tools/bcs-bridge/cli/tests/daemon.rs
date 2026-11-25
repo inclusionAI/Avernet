@@ -196,9 +196,20 @@ async fn failed_start_releases_lock_and_does_not_report_success() {
     assert!(diagnostic(&output).contains("bridge.log"), "{}", diagnostic(&output));
     assert!(diagnostic(&fixture.output(&["status"]).await).contains("stopped"));
     assert!(!fixture.runtime("bridge.pid.json").exists());
-    drop(occupied);
+    // Keep the conflicting listener alive: releasing and rebinding its ephemeral
+    // port races concurrent fixtures/client connections on macOS. Recovery must
+    // prove the instance lock was released, not win a second port-allocation race.
+    let config = fs::read_to_string(&fixture.config).unwrap().replace(&fixture.address, "127.0.0.1:0");
+    fs::write(&fixture.config, config).unwrap();
     success(&fixture.daemon("--daemon").await);
+    let status = fixture.output(&["status", "--json"]).await;
+    success(&status);
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["state"], "running");
+    assert_eq!(status["health"], "ready");
+    assert_eq!(status["bots"][0]["state"], "listening");
     success(&fixture.output(&["stop"]).await);
+    drop(occupied);
 }
 
 #[tokio::test]

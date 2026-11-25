@@ -15,6 +15,13 @@ describe('todoController task API path', () => {
       const { TODO_ENDPOINTS } = require('@/services/backendApi/todos/todoController');
       expect(TODO_ENDPOINTS.list).toBe('/api/v1/collaboration/tasks/todos');
       expect(TODO_ENDPOINTS.run('todo/1')).toBe('/api/v1/collaboration/tasks/todos/todo%2F1/run');
+      expect(TODO_ENDPOINTS.dimaProjects).toBe('/api/v1/collaboration/tasks/todos/sources/dima/projects');
+      expect(TODO_ENDPOINTS.dimaWorkItems('P/1')).toBe(
+        '/api/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items',
+      );
+      expect(TODO_ENDPOINTS.dimaWorkItem('P/1', 'work/1')).toBe(
+        '/api/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items/work%2F1',
+      );
     });
   });
 });

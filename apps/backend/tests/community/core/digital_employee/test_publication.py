@@ -1,4 +1,5 @@
 import copy
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -21,6 +22,7 @@ def s():
     bots, records, reader, platform, passport, history = [Mock() for _ in range(6)]
     reader.read_published.side_effect = lambda _bot, pub: copy.deepcopy(pub.ext["digital_employee_snapshot"])
     bots.get_bot.return_value = bot
+    bots.serialize_passport_scope.side_effect = lambda _bot: nullcontext()
     records.get_by_id.return_value = record
 
     def save(*, publish_id, expected_ext, ext):
@@ -65,6 +67,7 @@ def test_wait_then_finalize_exact_scope(s):
     assert s.service.handle_approval_result(event(s)) == (42, "owner")
     assert s.service.prepare_online(42, "owner")
     s.service.finalize_scope(42)
+    s.bots.serialize_passport_scope.assert_called_once_with(s.bot)
     scope = s.passport.update_passport.call_args.kwargs["resource_scope"]
     assert scope["mcp_codes"] == ["keep"]
     assert scope["mcp_items"][0]["identity_mode"] == "caller"

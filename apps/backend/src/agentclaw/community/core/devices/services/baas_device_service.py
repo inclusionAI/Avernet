@@ -35,6 +35,7 @@ from agentclaw.community.core.devices.services.baas_container_init import (
 )
 from agentclaw.community.core.devices.services.baas_exec_shell import execute_baas_shell_command
 from agentclaw.community.core.devices.services import baas_publish_lifecycle
+from agentclaw.community.core.devices.services.a2a_proxy_connection import resolve_proxy_face
 from agentclaw.community.core.devices.services.baas_template_resolver import (
     BaasTemplateResolveError,
     BaasTemplateResolverProtocol,
@@ -883,8 +884,9 @@ class BaasDeviceService(DeviceService):
 
         engine_type = (bot.get("active_engine") if bot else None) or self._default_engine
 
-        gated_face, a2a_withheld = self._gated_a2a_base_url(
-            ws_info.a2a_base_url, operator, caller_id
+        gated_face, a2a_withheld, a2a_proxy_token = resolve_proxy_face(
+            ws_info, engine_type=engine_type, connection_type=conn_type,
+            gray_decision=self._gated_a2a_base_url(ws_info.a2a_base_url, operator, caller_id),
         )
 
         result = DeviceConnectionInfo(
@@ -905,6 +907,7 @@ class BaasDeviceService(DeviceService):
             # 空串与 withheld 是两个语义：前者是旧服务端，后者是明确拒绝。
             a2a_base_url=gated_face,
             a2a_withheld=a2a_withheld,
+            a2a_proxy_token=a2a_proxy_token,
             # 服务端签发；ttl 入参本层忽略，caller 自行推算必然与真 token 不符。
             # 本链路 token 就是 ws token，故不另填 ws_*（留空即"用 token"）。
             expires_at=ws_info.expires_at,

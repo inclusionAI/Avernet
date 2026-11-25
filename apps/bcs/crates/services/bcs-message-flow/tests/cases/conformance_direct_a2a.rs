@@ -118,7 +118,7 @@ impl Harness {
 fn caller() -> CallerContext { CallerContext::Bot(BotActor { bot_uuid: "bot-driver".into() }) }
 
 #[tokio::test]
-async fn test_user_selection_survives_queue_and_rejects_transport_downgrade() {
+async fn test_user_dispatches_without_persisting_a_queue_row() {
     use bcs_service_api::a2a_test_user::A2aTestUserSelection;
     use bcs_service_api::types::a2a_bot::{A2aBinding, A2aInterface, A2aUpdateMode};
 
@@ -134,9 +134,7 @@ async fn test_user_selection_survives_queue_and_rejects_transport_downgrade() {
             bearer: RedactedToken::new("fixture-token"), card_revision: 1, extensions: vec![],
         };
         h.support.registry.set_delivery_target("bot-observer", target).await;
-        let selection = A2aTestUserSelection {
-            alias: "weather-smoke".into(), binding_ref: "fixture-v1".into(), caller_bot_id: "bot-driver".into(),
-        };
+        let selection = A2aTestUserSelection::new("bot-driver".into(), "12345678".into()).unwrap();
         let command = AsyncA2aChatCommand {
             a2a_test_user: Some(selection.clone()), caller: caller(),
             target_bot_id: "bot-observer".into(), message: "check weather".into(),
@@ -145,27 +143,19 @@ async fn test_user_selection_survives_queue_and_rejects_transport_downgrade() {
             timeout_ms: 60_000, client: None, tags: vec![], response_mode: ChatResponseMode::Full,
             caller_wait_mode: None, organization_code: None, provider_bypass_headers: vec![],
         };
-        h.policy.snapshot.write().await.policy.flow_enabled.direct_a2a = false;
-        assert!(matches!(h.direct.start_async_chat(command.clone()).await, Err(ServiceError::Conflict(_))));
-        assert!(h.direct.run_store().get("fixture-run").await.is_none());
-        h.policy.snapshot.write().await.policy.flow_enabled.direct_a2a = true;
-
-        let accepted = h.direct.start_async_chat(command).await.unwrap();
-        let row = h.row(&accepted.run_id).await;
-        assert_eq!(row.semantic_projection_json["a2a_test_user"], serde_json::to_value(&selection).unwrap());
-        assert_eq!(row.semantic_projection_json["version"], 2);
-        let runtime = h.runtime();
-        let mut downgraded = row.clone();
-        downgraded.semantic_projection_json["version"] = json!(1);
-        assert!(runtime.preparation.prepare(&downgraded).await.is_err());
-        let prepared = runtime.preparation.prepare(&row).await.unwrap();
-        assert_eq!(prepared.command.a2a_test_user, Some(selection));
-        assert!(prepared.command.provider_bypass_headers.is_empty());
+        let accepted = h.direct.start_async_chat(command.clone()).await.unwrap();
+        assert!(h.service.lookup(DeliveryLookup::Id(accepted.run_id)).await.unwrap().is_empty());
+        let frames = h.support.bot_delivery.frames().await;
+        assert_eq!(frames.len(), 1);
+        assert!(!format!("{frames:?}").contains("12345678"));
         assert!(matches!(h.submit("ordinary", &accepted.session_id).await, Err(ServiceError::InvalidOperation { .. })));
 
         h.support.registry.set_delivery_target("bot-observer", support::FakeRegistryService::provider_target("bot-observer")).await;
-        assert!(runtime.preparation.prepare(&row).await.is_err());
-        assert!(h.support.bot_delivery.frames().await.is_empty());
+        let mut wrong_target = command;
+        wrong_target.run_id = "non-a2a".into();
+        wrong_target.session_key = "a2a-test:non-a2a".into();
+        assert!(matches!(h.direct.start_async_chat(wrong_target).await, Err(ServiceError::Forbidden(_))));
+        assert_eq!(h.support.bot_delivery.frames().await.len(), 1);
     }
 }
 

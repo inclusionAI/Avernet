@@ -540,6 +540,7 @@ impl BcsServerState {
                 session_management.clone(),
                 system_message.clone(),
             )
+            .with_catalog_label_policy(config.catalog_label_policy.clone())
             .with_channel_binding_cleanup(channel_binding_cleanup.clone())
             .with_participant_view_bindings(frontend_connections.clone())
             .with_bot_runtime(bot_use_cases.clone())

@@ -23,6 +23,7 @@ from agentclaw.community.core.bot_management.owner_handoff.contracts import (
 from agentclaw.community.core.bot_management.owner_handoff.models import (
     OwnerHandoffModel,
 )
+from agentclaw.community.core.bot_management.owner_handoff.owner_identity import owner_user_id
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
     WorkOrderApproverModel,
@@ -131,7 +132,10 @@ class OwnerHandoffRepository(OwnerHandoffRepositoryProtocol):
             ).one_or_none()
             if prior is None:
                 return None
-            if prior.actor_id != actor_id or prior.new_owner_id != new_owner_id:
+            if (
+                prior.actor_id != actor_id
+                or owner_user_id(prior.new_owner_id) != owner_user_id(new_owner_id)
+            ):
                 raise HandoffError("IDEMPOTENCY_CONFLICT")
             return _dict(prior)
 
@@ -156,7 +160,10 @@ class OwnerHandoffRepository(OwnerHandoffRepositoryProtocol):
                 .one_or_none()
             )
             if prior is not None:
-                if prior.actor_id != actor_id or prior.new_owner_id != new_owner_id:
+                if (
+                    prior.actor_id != actor_id
+                    or owner_user_id(prior.new_owner_id) != owner_user_id(new_owner_id)
+                ):
                     raise HandoffError("IDEMPOTENCY_CONFLICT")
                 return _dict(prior)
             if actor_id != bot.owner_id and actor_id not in administrators:

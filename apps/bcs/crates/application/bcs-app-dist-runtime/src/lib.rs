@@ -11,6 +11,10 @@ use bcs_service_api::{
     types::dist_runtime::*,
 };
 use std::{sync::Arc, time::Duration};
+
+mod connector;
+pub use connector::ConnectorRuntimeFacade;
+
 pub struct WorkerRuntimeApplication {
     control: Arc<dyn DistRuntimeControlPort>,
 }

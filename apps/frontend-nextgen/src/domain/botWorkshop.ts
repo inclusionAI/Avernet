@@ -6,6 +6,11 @@ export type BotDeployment = 'local' | 'cloud';
 export type BotServiceMode = 'non-service' | 'service';
 export type BotLifecycle = 'draft' | 'deploying' | 'prestable' | 'running' | 'offline' | 'failed' | 'unknown';
 export type BotRuntimeStage = 'draft' | 'verify' | 'online';
+export const serviceBotStageLabel: Record<BotRuntimeStage, string> = {
+  draft: '草稿',
+  verify: '试运行',
+  online: '正式运行',
+};
 export type BotCompleteness = 'complete' | 'partial';
 
 export interface BotLock {
@@ -68,7 +73,7 @@ export interface BotDomain {
   healthyInstances?: number;
   totalInstances?: number;
   lock?: BotLock;
-  /** 服务 Bot 草稿态发起评测入口是否可见；随评测门禁白名单实时查询结果刷新。 */
+  /** 服务 Bot 评测入口是否可见；随评测门禁白名单实时查询结果刷新，同时控制发起评测和历史评测记录入口。 */
   evalGateVisible?: boolean;
   /** 当前用户是否有该服务 Bot 的编辑权限；控制历史评测记录入口。 */
   canOpenEvalHistory?: boolean;
@@ -261,8 +266,12 @@ export type BotCopyResult =
 export type BotCopyAuthorization = BotCreateAuthorization;
 
 /**
- * 复制入口可用性。默认仅 openclaw 引擎、且当前用户为 Owner 或协作者含 edit 权限时显示;
- * PRD §状态前置:草稿/运行中/预发/下线/待预发发布可复制,部署中/失败/未知阻断(可见但禁用并给原因)。
+ * 复制入口可用性。openclaw 引擎一律展示复制按钮,按权限与生命周期区分可用性:
+ * - 非 openclaw 引擎:不展示(与后端 `_COPYABLE_ENGINES={"openclaw"}` 一致)。
+ * - 无 edit 权限(非 owner 且 actions 不含 edit):展示但置灰,tooltip 用后端 `disabled_actions.edit`
+ *   直给文案(典型「Bot editor permission required」,与 edit disabled action 一致);缺失走兜底「当前不可复制」。
+ * - 有权限但 lifecycle 处于 deploying/failed/unknown:展示但置灰,给现有中文阻断原因。
+ * - 其余(draft/prestable/running/offline):展示且可点击。
  */
 export function canCopyBot(
   bot: BotDomain,
@@ -276,12 +285,19 @@ export function canCopyBot(
   const canEdit = Boolean(
     currentUserId && (bot.ownerId === currentUserId || bot.actions.includes('edit')),
   );
-  if (!engineAllowsCopy || !canEdit) return { visible: false, enabled: false };
+  if (!engineAllowsCopy) return { visible: false, enabled: false };
   const blockedReasons: Partial<Record<BotLifecycle, string>> = {
     deploying: 'Bot 部署中,无法复制',
     failed: 'Bot 创建失败,无法复制',
     unknown: 'Bot 状态未知,无法复制',
   };
+  if (!canEdit) {
+    return {
+      visible: true,
+      enabled: false,
+      disabledReason: bot.disabledActions?.edit ?? '当前不可复制',
+    };
+  }
   const reason = blockedReasons[bot.lifecycle];
   return reason ? { visible: true, enabled: false, disabledReason: reason } : { visible: true, enabled: true };
 }
@@ -320,8 +336,8 @@ export type BotPublishRestartStage = 'prestable' | 'online';
 
 /** 重启发布阶段 → 用户可读环境名。 */
 export const restartPublishStageLabel: Record<BotPublishRestartStage, string> = {
-  prestable: '预发',
-  online: '线上',
+  prestable: serviceBotStageLabel.verify,
+  online: serviceBotStageLabel.online,
 };
 
 /**

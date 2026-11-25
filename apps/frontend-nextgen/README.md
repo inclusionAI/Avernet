@@ -232,7 +232,14 @@ and its [file ownership manifest](specs/2026-11-18-task-escort-readonly/ownershi
 ## Conversation session origins
 
 The conversation sidebar uses Backend `sessions?source=mine|others` for managed
-and collaborating Bots. Both sources render flat lists ordered by the loaded
+and collaborating Bots. AgentCoding Bots are the engine-specific exception:
+their mine/others/collab lists request the raw paginated sessions and classify
+each session in the frontend with the same ID rules as AgentCoding (member-task
+is `collab`, BCS-CLI is `others`, a missing creator is `mine`, and recognized
+other creators are `others`). This avoids applying the generic source backend's
+different compatibility rules to AgentCoding's synthetic IDs. Other engines
+continue to use Backend source windows.
+Both sources render flat lists ordered by the loaded
 sessions' modified time descending (creation time is the fallback). Later
 windows are merged, deduplicated by session ID and sorted again; this is not a
 global sort over sessions that have not been loaded.
@@ -411,3 +418,55 @@ authorization succeeds. An empty submitted architecture-domain value is ignored.
 Only the whitelist actions for the architectural ext request are supported; the
 creation flow does not emit workspace or cron initialization. Regression tests
 cover action resolution, the ext request, and the authorization-completion path.
+
+## Community followed-author view
+
+The [follow list](src/components/Community/CommunityPersonalCenter/FollowList.tsx)
+separates followed Humans and Bots into compact identity cards. Selecting one
+keeps its profile and server-supplied statistics in a desktop sidebar beside
+its topics. The profile column is 200px and the topic column takes the remaining
+width; when the content area is narrower than 640px, they stack. Topic rows omit
+redundant author avatars. “返回我的关注列表” restores the identity cards and their
+pagination. The community search and publish controls remain visible in “我的”;
+Enter on a nonempty topic search opens the topic list.
+The [topic header](src/components/Community/CommunityTopicDetail/TopicDetailHeader.tsx)
+places delete/close controls on the title row below the breadcrumb. The detail
+header omits topic tags and the decorative poll icon; status and poll results
+remain visible. Delete confirmation uses the primary “确定” button; cancel does not delete.
+Regression coverage is in [PersonalCenter.test.tsx](test/components/Community/PersonalCenter.test.tsx)
+and [CommunityTopicDetail.test.tsx](test/components/Community/CommunityTopicDetail.test.tsx).
+
+## Community replies
+
+[Topic details](src/components/Community/CommunityTopicDetail/index.tsx) load
+adjacent batches at the scroll edges instead of showing page-navigation buttons.
+Previously loaded floors stay visible. A link to a specific reply opens its
+batch, and scrolling up can load earlier floors without displacing the current
+reading position. A failed batch can be retried without losing loaded floors.
+The community's top-level tabs reuse the Bot Management tab component.
+The reply counter uses the topic's total (including nested replies) when known.
+With no cached total it counts the server's root-floor total plus loaded nested
+replies. A successful direct or nested reply increments the displayed count;
+failed submissions do not change it.
+The interaction bar is outside the scrolling area. Closing replies does not
+hide likes, favorites or the reply count. Notice topics have no extra badge in
+the detail header and support direct replies, not nested replies.
+“我的回帖” lists the signed-in user's replied-to topics using the same row as
+“All Posts”. Browsing History and the other activity lists use the same
+borderless row layout. “我的回帖” collapses multiple replies to the same topic on each activity
+page; the activity API still paginates reply records. Rows open the topic itself.
+
+## Optional Coding Bot restart preparation
+
+`AppCapabilities.prepareCodingBotRestart` is an optional asynchronous preparation
+hook for ordinary cloud Coding Bot restart. It receives bot, owner and caller
+identities and returns extra restart configuration; rejection prevents submission.
+A deployment that returns a `template_config` must also provide
+`submitCodingBotRestart`, which routes the engine-owned `extra_configs` envelope to a
+backend contract that persists it before restart. Rejection aborts without a
+fallback restart. Both hooks must not poll themselves, bypass identity permissions,
+or target published service instances. Local restart, non-Coding engines,
+engine-only refresh and restart-publication are excluded. Without an extension,
+confirmation-only restart behavior is unchanged. See
+[capability types](src/capabilities/types.ts) and
+[workshop service](src/services/botWorkshop/botWorkshopService.ts).

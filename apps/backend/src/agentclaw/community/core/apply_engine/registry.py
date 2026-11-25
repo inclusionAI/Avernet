@@ -95,8 +95,30 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 
 
+from agentclaw.community.core.ports.skill_package_upload_port import LocalSkillPackageReceipt
+
+
 class ConfirmedPartialWriteError(RuntimeError):
     """A materialiser knows an earlier durable step committed before failure."""
+
+
+class CapabilityWriteError(RuntimeError):
+    """A capability write stopped after observing independently committed facts."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        confirmed_partial: bool,
+        local_skill_packages: tuple[LocalSkillPackageReceipt, ...] = (),
+        entries: tuple[EntryResult, ...] = (),
+        removals: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.local_skill_packages = local_skill_packages
+        self.confirmed_partial = confirmed_partial
+        self.entries = entries
+        self.removals = removals
 
 
 @dataclass(frozen=True)
@@ -105,6 +127,7 @@ class CategoryWriteResult:
 
     entries: tuple[EntryResult, ...]
     removals: tuple[str, ...]
+    local_skill_packages: tuple[LocalSkillPackageReceipt, ...] = ()
 
 
 @dataclass(frozen=True)

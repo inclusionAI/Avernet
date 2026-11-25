@@ -20,12 +20,10 @@ async fn create_group_authorizes_human_caller_with_any_driver() {
     assert_eq!(created.driver_bot_id, "driver");
 
     // Non-owner human can also designate any bot as driver
+    let mut independent=create_cmd(Some("human_bob"),"other-bot",vec![participant("other-bot",Some("driver"))]);
+    independent.group_id=Some("other-group".into());
     let created2 = service
-        .create_group(create_cmd(
-            Some("human_bob"),
-            "other-bot",
-            vec![participant("other-bot", Some("driver"))],
-        ))
+        .create_group(independent)
         .await
         .expect("any human should be authorized to designate any bot as driver");
     assert_eq!(created2.driver_bot_id, "other-bot");
@@ -80,12 +78,10 @@ async fn create_group_human_caller_with_ownerless_driver_ok() {
     assert_eq!(created.driver_bot_id, "driver");
 
     // Bot as itself still works
+    let mut independent=create_cmd(Some("driver"),"driver",vec![participant("driver",Some("driver"))]);
+    independent.group_id=Some("other-group".into());
     let created2 = service
-        .create_group(create_cmd(
-            Some("driver"),
-            "driver",
-            vec![participant("driver", Some("driver"))],
-        ))
+        .create_group(independent)
         .await
         .expect("driver bot should still be authorized as itself");
     assert_eq!(created2.driver_bot_id, "driver");
@@ -374,4 +370,27 @@ async fn create_group_enforces_member_limits() {
         .await
         .expect_err("group is over max member limit");
     assert!(matches!(err, GroupUseCaseError::InvalidProposal(_)));
+}
+
+
+#[tokio::test]
+async fn explicit_creation_cannot_replace_a_group_that_caller_cannot_manage() {
+    let fixture=Fixture::new().with_bot("owner","Owner","public",None).with_bot("stranger","Stranger","public",None);
+    let service=fixture.service_with_limits(5,10,10);
+    let mut original=create_cmd(Some("owner"),"owner",vec![participant("owner",Some("manager"))]);
+    original.group_strategy=Some(GroupStrategy::ManagerWorker);original.create_initial_session=false;
+    let labels=serde_json::from_value(serde_json::json!({"stage":["trial"]})).unwrap();
+    original.catalog_labels=Some(labels);
+    service.create_group(original).await.unwrap();
+    let before=fixture.group.try_get("group-under-test").await.unwrap().unwrap();
+    let snapshot=fixture.group.read_card_snapshot("group-under-test").await.unwrap().unwrap();
+    assert!(matches!(service.update_label(GroupUpdateLabelCommand {caller_actor_id:"stranger".into(),group_id:before.id.clone(),label:Some("stolen".into())}).await,
+        Err(GroupUseCaseError::Forbidden(_))));
+    let mut replacement=create_cmd(Some("stranger"),"stranger",vec![participant("stranger",Some("manager"))]);
+    replacement.group_strategy=Some(GroupStrategy::ManagerWorker);replacement.create_initial_session=false;
+    replacement.catalog_labels=Some(serde_json::from_value(serde_json::json!({"stage":["running"]})).unwrap());
+    assert!(matches!(service.create_group(replacement).await,Err(GroupUseCaseError::Conflict(_))));
+    let after=fixture.group.try_get(&before.id).await.unwrap().unwrap();
+    assert_eq!(serde_json::to_value(&after).unwrap(),serde_json::to_value(&before).unwrap());
+    assert_eq!(fixture.group.read_card_snapshot(&before.id).await.unwrap().unwrap().catalog_labels,snapshot.catalog_labels);
 }

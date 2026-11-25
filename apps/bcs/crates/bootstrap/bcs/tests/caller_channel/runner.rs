@@ -4,6 +4,8 @@ mod cache_fixture;
 mod network_tracing;
 mod custom_binding;
 mod request_headers;
+#[path = "../a2a_http_identity/plugin.rs"]
+mod app_identity;
 
 #[derive(clap::Parser)]
 struct Args {

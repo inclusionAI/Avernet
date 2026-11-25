@@ -1,5 +1,5 @@
 //! Provider-name registration and named chat; Card management uses stable Bot IDs.
-use axum::{Json,extract::{Path,Query,State},http::{HeaderMap,StatusCode},response::{IntoResponse,Response}};
+use axum::{Json,extract::{Path,Query,State,rejection::JsonRejection},http::{HeaderMap,StatusCode},response::{IntoResponse,Response}};
 use serde::Deserialize;
 use serde_json::{json,Value};
 use bcs_service_api::{ServiceError,application::a2a_bot::{NamedA2aCard,RegisterNamedA2aBotCommand},types::a2a_bot::A2aCardSource};
@@ -8,6 +8,8 @@ use crate::state::HttpAppState;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Registration {
+    #[serde(default,deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    pub catalog_labels:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     pub provider_bot_ref:String,
     pub owners:Vec<String>,pub summary:Option<String>,pub agent_card_url:Option<String>,pub agent_card:Option<Value>,
 }
@@ -30,23 +32,25 @@ fn source(url:Option<String>,card:Option<Value>)->Result<A2aCardSource,Response>
     A2aCardSource::from_parts(url,card).map_err(error)?.ok_or_else(||error(ServiceError::InvalidOperation {message:"Card source required".into(),request_id:None}))
 }
 fn view(card:NamedA2aCard)->Value {
-    json!({"provider_bot_ref":card.provider_bot_ref,"bot_id":card.bot_id,"provider_name":card.provider_name,"bot_name":card.bot_name,"agent_card_url":card.agent_card_url,"agent_card":card.agent_card})
+    json!({"provider_bot_ref":card.provider_bot_ref,"bot_id":card.bot_id,"provider_name":card.provider_name,"bot_name":card.bot_name,"catalog_labels":card.catalog_labels,"agent_card_url":card.agent_card_url,"agent_card":card.agent_card})
 }
 fn now_ms()->i64 {std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value|value.as_millis().min(i64::MAX as u128) as i64).unwrap_or(0)}
 fn unavailable()->Response {(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"A2A management unavailable"}))).into_response()}
 
-pub async fn register(State(state):State<HttpAppState>,Path(provider_name):Path<String>,headers:HeaderMap,Json(body):Json<Registration>)->Response {
+pub async fn register(State(state):State<HttpAppState>,Path(provider_name):Path<String>,headers:HeaderMap,body:Result<Json<Registration>,JsonRejection>)->Response {
+    let Json(body)=match body {Ok(body)=>body,Err(error)=>return super::catalog_label_errors::rejection_response(error)};
     let token=match token(&headers) {Ok(token)=>token,Err(error)=>return error};
     let Some(service)=&state.services.a2a_bot_management else {return unavailable()};
     let source=match source(body.agent_card_url,body.agent_card) {Ok(source)=>source,Err(error)=>return error};
-    match service.register_named(RegisterNamedA2aBotCommand {provider_bot_ref:body.provider_bot_ref,provider_name,provider_admin_token:token,owners:body.owners,summary:body.summary,source,now_ms:now_ms()}).await {
+    match service.register_named(RegisterNamedA2aBotCommand {catalog_labels:body.catalog_labels.unwrap_or_default(),provider_bot_ref:body.provider_bot_ref,provider_name,provider_admin_token:token,owners:body.owners,summary:body.summary,source,now_ms:now_ms()}).await {
         Ok(result)=>{let mut value=view(result.card);if let Some(token)=result.bot_runtime_token {value["bot_runtime_token"]=json!(token);}(StatusCode::CREATED,Json(value)).into_response()},
         Err(failure)=>error(failure),
     }
 }
 #[derive(Deserialize)]
 pub struct NamedChatRequest {
-    test_user_ref: Option<String>,
+    #[serde(alias = "test_user_ref")]
+    user_id: Option<String>,
     #[serde(flatten)]
     chat: super::bot_chat::ChatRequest,
 }
@@ -63,29 +67,28 @@ pub async fn chat(State(state):State<HttpAppState>,Path((provider_name,provider_
         Ok(caller) => caller,
         Err(failure) => return chat_error(failure.into_response().status(), "Caller authentication required"),
     };
-    let admission = if let Some(alias) = body.test_user_ref.as_deref() {
+    let selection = if let Some(user_id) = body.user_id {
         let Some(admission) = &state.a2a_test_user_admission else {
             return chat_error(StatusCode::FORBIDDEN, "A2A test user selection unavailable");
         };
-        if admission.selection.caller_bot_id != caller {
+        if admission.caller_bot_id != caller {
             return chat_error(StatusCode::FORBIDDEN, "A2A test user selection denied");
         }
-        if !bcs_config_api::a2a_test_user::valid_ref(alias) || alias != admission.selection.alias
-            || body.chat.session_id.is_some()
-        {
-            return chat_error(StatusCode::BAD_REQUEST, "Invalid A2A test user selection");
-        }
-        Some(admission)
+        let selection = match bcs_config_api::a2a_test_user::A2aTestUserSelection::new(caller, user_id) {
+            Ok(selection) if body.chat.session_id.is_none() => selection,
+            _ => return chat_error(StatusCode::BAD_REQUEST, "Invalid A2A test user selection"),
+        };
+        Some((selection, admission))
     } else {
         None
     };
     let target=match service.resolve_provider_ref_target(&provider_name,&provider_bot_ref).await {
         Ok(target)=>target,Err(failure)=>return error(failure),
     };
-    if admission.is_some_and(|admission| admission.target_bot_id != target) {
+    if selection.as_ref().is_some_and(|(_, admission)| admission.target_bot_id != target) {
         return chat_error(StatusCode::FORBIDDEN, "A2A test user selection denied");
     }
-    let selection = admission.map(|admission| admission.selection.clone());
+    let selection = selection.map(|(selection, _)| selection);
     match super::bot_chat::submit_async_chat(state, target, headers, uri, body.chat, selection).await {
         Ok((status,Json(result)))=>(status,Json(json!({"provider_name":provider_name,"provider_bot_ref":provider_bot_ref,
             "run_id":result["run_id"],"session_id":result["session_id"],"status":result["status"],

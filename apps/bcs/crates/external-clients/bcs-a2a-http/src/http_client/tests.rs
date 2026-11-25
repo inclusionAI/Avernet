@@ -107,6 +107,13 @@ async fn identity_is_per_request_in_both_bindings_and_failures_send_nothing() {
     let other = HttpClient::new(transport.clone()).with_identity(policy.clone(), "other".into());
     rest_client(other, origin.clone(), None).get_task(&get).await.unwrap();
     rest_client(HttpClient::new(transport.clone()), origin.clone(), None).get_task(&get).await.unwrap();
+    for http in [
+        HttpClient::new(transport.clone()),
+        HttpClient::new(transport.clone()).with_identity(policy.clone(), "other".into()),
+    ] {
+        let error = rest_client(http.require_identity(), origin.clone(), None).get_task(&get).await.unwrap_err();
+        assert_eq!(identity_failure(&error), Some(CREDENTIAL_UNAVAILABLE));
+    }
     for (allowed_origin, header, expected) in [
         ("https://different.invalid", "x-fixture-identity", DESTINATION_REJECTED),
         (origin.as_str(), "authorization", INVALID_CREDENTIAL),
@@ -123,5 +130,40 @@ async fn identity_is_per_request_in_both_bindings_and_failures_send_nothing() {
         .chain([None, None]).collect();
     assert_eq!(*calls.lock().unwrap(), expected);
     assert_eq!(policy.calls.load(Ordering::SeqCst), 10);
+    server.abort();
+}
+
+#[tokio::test]
+async fn identity_and_user_id_are_sent_without_authorization_on_streaming_request() {
+    async fn peer(headers: HeaderMap, Json(rpc): Json<Value>) -> Response {
+        assert!(!headers.contains_key("authorization"));
+        assert_eq!(headers["x-one-id"], "fixture-0");
+        assert_eq!(headers["x-example-agent-user"], "12345678");
+        assert_eq!(rpc["method"], "SendStreamingMessage");
+        let event = json!({"jsonrpc":"2.0","id":rpc["id"],"result":{"task":{
+            "id":"task","contextId":"context","status":{"state":"TASK_STATE_COMPLETED"}
+        }}});
+        ([("content-type", "text/event-stream")], format!("data: {event}\n\n")).into_response()
+    }
+
+    use futures::StreamExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, Router::new().fallback(peer)).await.unwrap(); });
+    let policy = Arc::new(Policy {
+        origin: origin.clone(), header: "x-one-id", calls: AtomicUsize::new(0),
+    });
+    let mut headers = HeaderMap::new();
+    headers.insert("x-example-agent-user", HeaderValue::from_static("12345678"));
+    let transport = ClientWithDefaults::new(reqwest::Client::builder().no_proxy().build().unwrap(), headers);
+    let http = HttpClient::new(transport).with_identity(policy, "enabled".into()).require_identity();
+    let rpc = JsonRpcClient::with_http(http, format!("{origin}/rpc"), None);
+    let send = serde_json::from_value(
+        json!({"message":{"messageId":"m","role":"ROLE_USER","parts":[{"text":"hello"}]}}),
+    ).unwrap();
+    let mut stream = rpc.send_streaming_message(&send).await.unwrap();
+    let Some(Ok(a2a::StreamResponse::Task(task))) = stream.next().await else { panic!("expected a Task") };
+    assert_eq!(task.status.state, a2a::TaskState::Completed);
+    assert!(stream.next().await.is_none());
     server.abort();
 }

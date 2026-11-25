@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+)
 from agentclaw.community.kernel.device_dto import ResourceSpecification
 
 
@@ -52,6 +55,16 @@ class PublishFlowServiceProtocol(Protocol):
         environment; 1 preserves prior behavior and provider-defined upper limits
         still apply.
         """
+        ...
+
+    def compose_eval_delivery(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        default_tag: str,
+        device_provider: str,
+    ) -> Any:
+        """Compose the final EVAL delivery artifact for one evaluation instance."""
         ...
 
     def get_baas_publish_progress(

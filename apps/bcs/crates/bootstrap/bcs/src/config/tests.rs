@@ -12,15 +12,11 @@ fn a2a_test_user_fixture_requires_pre_release_and_a_scoped_header() {
     let mut config = BcsConfig::default();
     assert!(validate_loaded_config_for_environment(&config, Environment::Prod).is_ok());
     config.a2a_test_user = Some(toml::from_str(r#"
-        accept_new = true
-        alias = "weather-smoke"
-        binding_ref = "fixture-v1"
         caller_bot_id = "test-caller"
         provider_id = "test-provider"
         target_bot_id = "test-target"
         interface_url = "https://agent.example.test/weather"
         header_name = "x-example-agent-user"
-        user_id_secret = "fixture-ref"
     "#).unwrap());
     assert!(validate_loaded_config_for_environment(&config, Environment::Pre).is_ok());
     assert!(validate_loaded_config_for_environment(&config, Environment::Prod).is_err());
@@ -107,6 +103,7 @@ fn safe_remove_var(key: &str) {
 fn from_file_expands_env_references_in_string_fields() {
     safe_set_var("BCS_TEST_FROM_FILE_TOKEN", "expanded-via-from-file");
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     let path = dir.path().join("bcs-config.toml");
     std::fs::write(
         &path,
@@ -126,6 +123,7 @@ botchat_url = "${BCS_TEST_FROM_FILE_TOKEN}"
 fn from_file_errors_when_a_required_env_reference_is_unset() {
     safe_remove_var("BCS_TEST_FROM_FILE_MISSING");
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     let path = dir.path().join("bcs-config.toml");
     std::fs::write(
         &path,
@@ -151,6 +149,7 @@ fn from_file_unknown_ext_json_with_unset_env_reports_env_error_not_toml() {
     // `_` (unknown extension) branch swallowing expansion errors.
     safe_remove_var("BCS_TEST_UNKNOWN_EXT_VAR");
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     let path = dir.path().join("bcs-config"); // no extension -> unknown-ext branch
     std::fs::write(
         &path,
@@ -238,6 +237,7 @@ fn group_session_ws_signing_key_secret_can_be_configured() {
 #[test]
 fn blank_group_session_ws_signing_key_secret_is_rejected() {
     let tmp = tempfile::TempDir::new().expect("temp config dir");
+    std::fs::write(tmp.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     std::fs::write(
         tmp.path().join("bcs-config.toml"),
         r#"
@@ -853,8 +853,10 @@ url = "https://cdn.example.com/bcs-panel/1.0.0/index.js"
 #[test]
 fn test_config_loader_resolves_local_paths_relative_to_config_root() {
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     let config_dir = dir.path().join("configs");
     std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(config_dir.join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     std::fs::write(
         config_dir.join("bcs-config.toml"),
         r#"
@@ -892,8 +894,10 @@ file = "assets/panel/dist/index.umd.js"
 #[test]
 fn test_config_loader_resolves_local_paths_relative_to_custom_config_dir() {
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     let config_dir = dir.path().join("bcs-config");
     std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(config_dir.join("catalog-labels.toml"),include_str!("../../../../../configs/catalog-labels.toml")).unwrap();
     std::fs::write(
         config_dir.join("bcs-config.toml"),
         r#"

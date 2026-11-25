@@ -20,6 +20,14 @@ class RetrievalSwitches(BaseModel):
     keyword_enabled: StrictBool
     vector_enabled: StrictBool
     rerank_enabled: StrictBool
+    empty_result_fallback_enabled: StrictBool = True
+
+    def pipeline_switches(self) -> dict[str, bool]:
+        return {
+            "keyword_enabled": self.keyword_enabled,
+            "vector_enabled": self.vector_enabled,
+            "rerank_enabled": self.rerank_enabled,
+        }
 
     @model_validator(mode="after")
     def has_recall(self):
@@ -115,7 +123,7 @@ class EmergencyControl:
     def _compile(self, policy):
         encoded = json.dumps(policy.model_dump(), sort_keys=True).encode()
         variants = self._build_variants(policy) if self._build_variants else {}
-        key = tuple(policy.retrieval.model_dump().values())
+        key = tuple(policy.retrieval.pipeline_switches().values())
         retrieval = variants[key] if variants else self._build(policy)
         return EmergencySnapshot(
             policy, hashlib.sha256(encoded).hexdigest()[:12], retrieval, variants
@@ -123,20 +131,21 @@ class EmergencyControl:
 
     def for_request(self, overrides):
         snapshot = self.snapshot()
+        configured = snapshot.policy.retrieval.pipeline_switches()
         switches = {
             name: enabled and overrides.get(name, True)
-            for name, enabled in snapshot.policy.retrieval.model_dump().items()
+            for name, enabled in configured.items()
         }
         # No recall means default TopK; there is nothing to rerank.
         if not switches["keyword_enabled"] and not switches["vector_enabled"]:
             switches["rerank_enabled"] = False
-        if switches == snapshot.policy.retrieval.model_dump():
+        if switches == configured:
             return snapshot
         retrieval = snapshot.variants.get(tuple(switches.values()))
         if retrieval is None:
             raise UnsupportedSearchOption("request retrieval switches unavailable")
         policy = snapshot.policy.model_copy(
-            update={"retrieval": RetrievalSwitches.model_validate(switches)}
+            update={"retrieval": snapshot.policy.retrieval.model_copy(update=switches)}
         )
         return replace(snapshot, policy=policy, retrieval=retrieval)
 

@@ -52,3 +52,39 @@ class TodoArtifactStorageNotConfiguredError(InternalError):
 
 class TodoArtifactStorageError(InternalError):
     """The configured object store failed an operation."""
+
+
+class TodoSourceAuthError(Unauthorized):
+    """The Human request cannot obtain a usable source credential."""
+
+
+class TodoSourceUnavailableError(InternalError):
+    """The configured source service or MCP endpoint is unavailable."""
+
+
+class TodoSourceResponseError(InternalError):
+    """The source returned a response that cannot be normalized safely."""
+
+
+class TodoSourceWorkItemNotFoundError(NotFound):
+    """The selected source work item is absent or no longer visible."""
+
+
+class TodoSourceAlreadyImportedError(Conflict):
+    """The external work item already belongs to a Todo in this Space."""
+
+    def __init__(self, existing_todo_id: str) -> None:
+        super().__init__("Dima work item already imported")
+        self.existing_todo_id = existing_todo_id
+
+
+class TodoTemplateValidationError(ValidationError):
+    """A Todo template definition violates the supported product contract."""
+
+
+class TodoTemplateNotFoundError(NotFound):
+    """The requested Todo template or version is outside the current scope."""
+
+
+class TodoTemplateStateConflictError(Conflict):
+    """The requested Todo template mutation is illegal in its current state."""

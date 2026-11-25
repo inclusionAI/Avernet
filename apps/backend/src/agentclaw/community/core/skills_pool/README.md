@@ -198,6 +198,7 @@ consumes:
   - "DatabasePlugin (through Skills Pool layout, operational and rollout repositories)"
   - "SkillsPoolRuntimeProtocol"
   - "SkillsPoolSkillRepositoryProtocol"
+  - "SkillRepository (pending Local Skill package requests before layout changes)"
   - "skills-pool-mapping-v2/v3 capability and Engine locator evidence"
   - "DeviceBindingRepository"
   - "TaskQueueService and HandlerRegistry"

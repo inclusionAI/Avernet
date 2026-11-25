@@ -53,7 +53,7 @@ async fn update_opening_message_preserves_patch_states_and_strategy_scopes() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: Some("StateMachine".into()),
@@ -220,7 +220,7 @@ async fn create_rejects_duplicate_participant_actor_ids() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
@@ -267,7 +267,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
@@ -298,7 +298,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
@@ -355,7 +355,7 @@ async fn human_principal_creates_legacy_actor_with_current_display_name_priority
             .service
             .create(CreateGroup {
                 caller: human_principal_with_profile(staff_no, username, display_name, full_name),
-                group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                     name: Some("Human and B".into()),
                     context: None,
                     target_actor_id: "bot-b".into(),
@@ -402,7 +402,7 @@ async fn human_principal_preserves_existing_legacy_actor_display_name() {
                 Some("Changed Name"),
                 None,
             ),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                 name: Some("Human and B".into()),
                 context: None,
                 target_actor_id: "bot-b".into(),
@@ -425,7 +425,7 @@ async fn dm_create_outcome_reports_when_the_existing_pair_is_reused() {
     fixture.add_public_bot("bot-b").await;
     let command = || CreateGroup {
         caller: bot_principal("bot-a"),
-        group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+        group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
             name: Some("A and B".into()),
             context: Some("original context".into()),
             target_actor_id: "bot-b".into(),
@@ -463,7 +463,7 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup { catalog_labels:Default::default(),
                 human_mention_notify_mode: Default::default(),
                 originator: None,
                 name: None,
@@ -499,7 +499,7 @@ async fn human_caller_does_not_require_a_same_named_bot() {
         .service
         .create(CreateGroup {
             caller: bot_principal("missing-caller"),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                 name: None,
                 context: None,
                 target_actor_id: "target".into(),
@@ -518,7 +518,7 @@ async fn deleting_dm_maps_the_legacy_rejection_to_contract_conflict() {
         .service
         .create(CreateGroup {
             caller: bot_principal("driver"),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup { catalog_labels:Default::default(),
                 name: None,
                 context: None,
                 target_actor_id: "peer".into(),

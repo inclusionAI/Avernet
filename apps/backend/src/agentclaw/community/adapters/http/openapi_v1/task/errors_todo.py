@@ -12,6 +12,11 @@ from agentclaw.community.core.task.todos.errors import (
     TodoExecutionAuthError,
     TodoNotFoundError,
     TodoStateConflictError,
+    TodoSourceAuthError,
+    TodoSourceAlreadyImportedError,
+    TodoSourceResponseError,
+    TodoSourceUnavailableError,
+    TodoSourceWorkItemNotFoundError,
 )
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationError,
@@ -30,6 +35,11 @@ TODO_HTTP_ERRORS: dict[type[Exception], tuple[int, str]] = {
     TodoArtifactStorageNotConfiguredError: (503, "Todo artifact storage unavailable"),
     TodoArtifactStorageError: (502, "Todo artifact storage operation failed"),
     TodoCollaborationError: (503, "Todo collaboration service unavailable"),
+    TodoSourceAuthError: (401, "Dima authorization is unavailable"),
+    TodoSourceAlreadyImportedError: (409, "Dima work item already imported"),
+    TodoSourceUnavailableError: (503, "Dima source is unavailable"),
+    TodoSourceResponseError: (502, "Dima source returned an invalid response"),
+    TodoSourceWorkItemNotFoundError: (404, "Not found"),
 }
 
 __all__ = ["TODO_HTTP_ERRORS"]

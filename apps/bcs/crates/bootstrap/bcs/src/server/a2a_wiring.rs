@@ -13,6 +13,7 @@ pub(super) fn build_card_management(
     db: Arc<dyn DbPlugin>, flavor:bcs_db_api::DbSqlFlavor, bots: Arc<dyn BotProviderRepoPort>,
     providers: Arc<dyn ProviderCoreService>, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>,
     registry_repo: Arc<bcs_bot_store::PersistentBotRepo>,
+    policy: Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>,
     guard: OutboundUrlGuard, grpc: Option<&bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
     catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
 ) -> crate::Result<(
@@ -28,7 +29,7 @@ pub(super) fn build_card_management(
         bcs_a2a_http::delivery::DEDUP_EXTENSION.into(),bcs_a2a_http::structured_exec::EXTENSION.into()]);
     if let Some(grpc)=grpc {fetcher=fetcher.with_grpc_mesh(grpc.clone())?;}
     Ok((
-        Arc::new(A2aBotManagement::new(providers, core.clone(), Arc::new(fetcher)).with_registration(registration, registry)),
+        Arc::new(A2aBotManagement::new(providers, core.clone(), Arc::new(fetcher)).with_catalog_label_policy(policy).with_registration(registration, registry)),
         core,
         cards,
     ))

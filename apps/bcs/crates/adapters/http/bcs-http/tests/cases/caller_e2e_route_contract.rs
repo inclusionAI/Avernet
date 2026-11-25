@@ -150,7 +150,7 @@ impl bcs_service_api::GroupQueryService for FakeGroupQuery {
             .get(&cmd.group_id)
             .await
             .ok_or_else(|| GroupUseCaseError::Forbidden(cmd.group_id.clone()))?;
-        Ok(bcs_service_api::GroupDetailResult {
+        Ok(bcs_service_api::GroupDetailResult { catalog_labels:Default::default(),
             group_id: group.id.clone(),
             label: group.label.clone(),
             status: group.status.clone(),

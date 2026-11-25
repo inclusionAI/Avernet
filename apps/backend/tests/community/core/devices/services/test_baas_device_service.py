@@ -373,6 +373,7 @@ class TestGetDeviceConnection:
         # Explicit: a MagicMock attr would otherwise answer a truthy Mock and
         # turn "the provider issued nothing" into a fake socket upstream.
         info.a2a_base_url = ""
+        info.a2a_auth = ""
         return info
 
     def test_returns_baas_connection_with_bot_engine(self):

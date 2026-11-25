@@ -147,7 +147,7 @@ async fn failed_card_or_profile_write_rolls_back_entire_registration() {
 #[tokio::test]
 async fn provider_a2a_registration_core_conformance() {
     let (chain,_,_,core)=fixture().await;let c=command();let fetched=validated();
-    let card=A2aRegistrationCard {
+    let card=A2aRegistrationCard { catalog_labels:Default::default(),
                 visibility: Default::default(),agent_card_url:Some("https://example.org/card.json".into()),agent_card:fetched.raw,interface:fetched.interface,
         registered_at_ms:1000,};
     let params=RegisterProviderBotParams {webhook_url:None,bot_name:card.agent_card["name"].as_str().unwrap().into(),summary:c.summary,owners:c.owners,
@@ -191,7 +191,7 @@ async fn human_and_provider_atomic_entrypoints_reject_the_wrong_principal() {
     let bot=BotProviderRecord {bot_uuid:"test-bot".into(),provider_id:"provider-a".into(),provider_bot_ref:"remote".into(),
         connection_mode:ProviderBotConnectionMode::Gateway,webhook_url:None,is_deleted:false};
     let v=validated();
-    let card=A2aBotRecord {bot_uuid:bot.bot_uuid.clone(),provider_id:bot.provider_id.clone(),provider_bot_ref:bot.provider_bot_ref.clone(),
+    let card=A2aBotRecord { catalog_labels:Default::default(),bot_uuid:bot.bot_uuid.clone(),provider_id:bot.provider_id.clone(),provider_bot_ref:bot.provider_bot_ref.clone(),
         agent_card_url:Some("https://example.org/card.json".into()),agent_card:v.raw,revision:1,};
     let initialization=|actor| OwnershipInitialization {initial_manager_user_ids: Vec::new(),
                 owner_user_id:"delegated-owner".into(),
@@ -325,7 +325,7 @@ async fn named_registration_returns_stable_id_for_public_card_management() {
     let (chain,service,_,_)=fixture().await;
     chain.db.execute(DbStatement::new("UPDATE bcs_providers SET slug='orders' WHERE provider_id='provider-a'")).await.unwrap();
     let mut raw=validated().raw;raw["name"]=json!("订单助手");
-    let result=service.register_named(RegisterNamedA2aBotCommand {provider_bot_ref:"remote".into(),provider_name:"orders".into(),
+    let result=service.register_named(RegisterNamedA2aBotCommand { catalog_labels:Default::default(),provider_bot_ref:"remote".into(),provider_name:"orders".into(),
         provider_admin_token:"test-admin".into(),owners:vec!["delegated-owner".into()],summary:None,
         source:A2aCardSource::Inline(raw.clone()),now_ms:1000}).await.unwrap();
     assert_eq!(result.card.bot_name,"订单助手");assert_eq!(result.card.provider_name,"orders");
@@ -369,7 +369,7 @@ async fn renamed_card_invalidates_warm_metadata_before_partial_provider_patch() 
     chain.bot_repo.register(id.clone(),caps).await.unwrap();
     assert_eq!(chain.bot_repo.try_get(&id).await.unwrap().unwrap().capabilities.name.as_deref(),Some("Remote"));
     let mut raw=validated().raw;raw["name"]=json!("Renamed Agent");
-    service.configure(ConfigureA2aBotCommand {provider_id:"provider-a".into(),provider_admin_token:"test-admin".into(),
+    service.configure(ConfigureA2aBotCommand { catalog_labels:Default::default(),provider_id:"provider-a".into(),provider_admin_token:"test-admin".into(),
         bot_uuid:id.clone(),source:A2aCardSource::Inline(raw),expected_revision:None,now_ms:2000}).await.unwrap();
     let result=fetcher.providers.update_provider_bot("provider-a","test-admin","remote",None,
         Some("New summary".into()),None,None,None,Some("public".into())).await.unwrap();

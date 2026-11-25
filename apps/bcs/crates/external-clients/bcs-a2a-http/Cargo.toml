@@ -10,8 +10,13 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+# The distributed Connector's agent client; not part of the `bcs` binary yet.
+dist-agent = ["dep:bcs-dist-model"]
+
 [dependencies]
 bcs-app-identity-api.workspace = true
+bcs-dist-model = { workspace = true, optional = true }
 bcs-a2a-binding-api.workspace = true
 bcs-tracing-api.workspace = true
 bcs-network-tracing = { workspace = true, features = ["reqwest13"] }
@@ -35,6 +40,9 @@ hex = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# Its own tests always include the distributed agent client.
+bcs-a2a-http = { path = ".", features = ["dist-agent"] }
+bcs-dist-model = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-interaction = { workspace = true }
 bcs-message-store = { workspace = true }

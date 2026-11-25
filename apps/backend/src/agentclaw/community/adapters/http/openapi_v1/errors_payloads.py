@@ -26,10 +26,15 @@ from agentclaw.community.core.skill_center.errors import (
     SkillAssetInUseError,
     SkillOfflineBlockedError,
 )
+from agentclaw.community.core.task.todos.errors import (
+    TodoSourceAlreadyImportedError,
+)
 
 
 def error_data(exc: Exception) -> object | None:
     """Return caller-actionable error data for explicitly admitted types."""
+    if isinstance(exc, TodoSourceAlreadyImportedError):
+        return {"existing_todo_id": exc.existing_todo_id}
     if isinstance(exc, LocalSkillInvalidPackageError):
         reasons = {
             "invalid_package",

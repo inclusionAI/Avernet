@@ -222,7 +222,7 @@ async def test_real_identity_module_injects_auth_plugin_into_orchestrator():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", [
-    {}, {"caller_runtime_target": "service"}, {"caller_runtime_target": "caller_instance"},
+    {}, {"device_uuid": ""}, {"caller_runtime_target": "service"}, {"caller_runtime_target": "caller_instance"},
     {"device_uuid": "DEVICE-02"}, {"device_uuid": " 副本/a:b "}, {"device_uuid": "DEVICE-02", "caller_runtime_target": "service"},
 ])
 async def test_jit_reads_selectors_after_unchanged_caller_refresh(selection):
@@ -232,26 +232,27 @@ async def test_jit_reads_selectors_after_unchanged_caller_refresh(selection):
     assert await service.get_iam_token(**request) is caller.outcome
     assert caller.requests == [request]
     context, = pipeline.contexts
-    assert context.caller_runtime_target == selection.get("caller_runtime_target")
-    assert context.device_uuid == selection.get("device_uuid")
+    assert context.friend_user_id is None
+    assert not hasattr(context, "caller_runtime_target")
+    assert context.device_uuid == (selection.get("device_uuid") or None)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", [
-    {"caller_runtime_target": ""}, {"caller_runtime_target": "AUTO"},
     {"device_uuid": ""},
 ])
-async def test_invalid_jit_selectors_preserve_caller_without_fallback(selection):
+async def test_empty_jit_uuid_is_omitted_without_changing_caller(selection):
     service, caller, pipeline = _service(_Auth())
     request = _request(auth_request=AuthRequestContext(query_params=selection))
     assert await service.get_iam_token(**request) is caller.outcome
     assert caller.requests == [request]
-    assert pipeline.contexts == []
+    assert len(pipeline.contexts) == 1
+    assert pipeline.contexts[0].device_uuid is None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("selection", [{"caller_runtime_target": "wrong"}, {"device_uuid": ""}])
-async def test_http_invalid_selection_preserves_caller_response(selection):
+@pytest.mark.parametrize("selection", [{"device_uuid": ""}])
+async def test_http_empty_uuid_preserves_caller_response_and_omits_jit_selector(selection):
     from httpx import ASGITransport, AsyncClient
     from tests.community.api.test_dingtalk_iam_token import _app
 
@@ -267,19 +268,21 @@ async def test_http_invalid_selection_preserves_caller_response(selection):
     }
     assert len(caller.requests) == 1
     assert {"caller_runtime_target", "device_uuid"}.isdisjoint(caller.requests[0])
-    assert pipeline.contexts == []
+    assert len(pipeline.contexts) == 1
+    assert pipeline.contexts[0].device_uuid is None
 
 
 @pytest.mark.asyncio
-async def test_jit_selector_failure_preserves_original_caller_exception():
+async def test_empty_jit_uuid_preserves_original_caller_exception():
     caller_error = RuntimeError("caller refresh failed")
     service, caller, pipeline = _service(_Auth(), caller_error=caller_error)
-    request = _request(auth_request=AuthRequestContext(query_params={"caller_runtime_target": "invalid"}))
+    request = _request(auth_request=AuthRequestContext(query_params={"device_uuid": ""}))
     with pytest.raises(RuntimeError) as exc:
         await service.get_iam_token(**request)
     assert exc.value is caller_error
     assert caller.requests == [request]
-    assert pipeline.contexts == []
+    assert len(pipeline.contexts) == 1
+    assert pipeline.contexts[0].device_uuid is None
 
 
 @pytest.mark.asyncio
@@ -291,4 +294,29 @@ async def test_verified_friend_keeps_requested_runtime_for_target_authorization(
     ))
     assert await service.get_iam_token(**request) is caller.outcome
     assert caller.requests == [request]
-    assert [ctx.caller_runtime_target for ctx in pipeline.contexts] == [target]
+    assert [ctx.friend_user_id for ctx in pipeline.contexts] == ["friend-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_target", ["service", "caller_instance", "invalid"])
+async def test_legacy_iam_route_ignores_removed_runtime_target(legacy_target):
+    from httpx import ASGITransport, AsyncClient
+    from tests.community.api.test_dingtalk_iam_token import _app
+
+    service, caller, pipeline = _service(_Auth())
+    app = _app(service)
+    parameters = app.openapi()["paths"]["/api/v1/token/iam"]["get"]["parameters"]
+    assert "caller_runtime_target" not in {parameter["name"] for parameter in parameters}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/v1/token/iam", params={
+            "bot_id": "bot-1", "entity_id": "resource-E", "stage": "draft",
+            "caller_runtime_target": legacy_target,
+        })
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "iam_token": caller.outcome.iam_token}
+    assert len(caller.requests) == 1
+    assert "caller_runtime_target" not in caller.requests[0]
+    context, = pipeline.contexts
+    assert context.stage == "draft"
+    assert context.friend_user_id is None
+    assert not hasattr(context, "caller_runtime_target")

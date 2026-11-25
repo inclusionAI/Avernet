@@ -19,7 +19,9 @@ impl OutboundAppIdentity for LoopbackIdentity {
         &self,
         target: &OutboundTarget<'_>,
     ) -> Result<Option<SensitiveHeader>, CredentialError> {
-        if !target.origin.starts_with("http://127.0.0.1:") {
+        if !target.origin.starts_with("http://127.0.0.1:")
+            && !target.origin.starts_with("https://127.0.0.1:")
+        {
             return Ok(None);
         }
         let sequence = self.0.fetch_add(1, Ordering::Relaxed);

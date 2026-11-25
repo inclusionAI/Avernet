@@ -25,6 +25,8 @@ from agentclaw.community.core.repository.protocols.identity import (
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from tests.community.factories.bot_collaborator import make_bot
+
+
 def _service_bot(world, *, bot_id: str = "employee-repository-bot") -> dict:
     return make_bot(
         world,
@@ -93,7 +95,11 @@ def test_employee_binding_is_persisted_and_advances_atomically(world) -> None:
         bot["id"], "AI00000124", "REISSUING", "ACTIVE"
     ) is True
 
-    stored = repository.get_bot(bot["id"])["ext"]["digital_employee"]
+    active_bot = repository.get_bot(bot["id"])
+    with pytest.raises(DigitalEmployeeError, match="绑定已变化"):
+        with repository.serialize_passport_scope({**active_bot, "owner_id": "stale-owner"}):
+            pytest.fail("stale Bot acquired the shared Passport scope guard")
+    stored = active_bot["ext"]["digital_employee"]
     assert stored["phase"] == "ACTIVE"
     assert stored["status"] == "ACTIVE"
 

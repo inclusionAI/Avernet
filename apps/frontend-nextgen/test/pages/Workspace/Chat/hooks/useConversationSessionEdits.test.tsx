@@ -107,6 +107,26 @@ describe('useConversationSessionEdits renameSessionOnFirstMessage', () => {
     expect((console.warn as jest.Mock).mock.calls[0]?.[0]).toContain('首条消息自动重命名失败');
   });
 
+  // OpenSpec fix-session-title-auto-rename §session-first-message-title：
+  // 幂等语义＝成功才入集。此前失败也先 add → 一次网络失败后该会话永久放弃自动命名。
+  it('失败后可重试:幂等集仅在成功后生效', async () => {
+    seedMineCache();
+    updateSessionTitle
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'X', friendlyMessage: '网络错误', canRetry: true },
+      })
+      .mockResolvedValueOnce({ ok: true, data: { sessionId: 's1', title: 'hello' } });
+
+    const { result } = renderEdits();
+    // 第一次调用:失败,不进幂等集
+    await expect(result.current.renameSessionOnFirstMessage(bot, baseSession, 'first')).resolves.toBe(false);
+    // 第二次调用:仍可发起并成功
+    await expect(result.current.renameSessionOnFirstMessage(bot, baseSession, 'second')).resolves.toBe(true);
+    expect(updateSessionTitle).toHaveBeenCalledTimes(2);
+    expect(seededSession().title).toBe('hello');
+  });
+
   it('同一(bot, session)只自动重命名一次', async () => {
     seedMineCache();
     updateSessionTitle.mockResolvedValue({ ok: true, data: { sessionId: 's1', title: 'hello' } });

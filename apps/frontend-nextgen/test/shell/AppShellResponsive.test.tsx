@@ -3,7 +3,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import React from 'react';
 
 const mockHistoryPush = jest.fn();
@@ -154,6 +154,22 @@ describe('AppShell responsive off-canvas nav (一级)', () => {
     renderShell();
     expect(screen.getByTestId('app-sidebar')).toBeInTheDocument();
     expect(screen.queryByTestId('drawer-content')).not.toBeInTheDocument();
+  });
+});
+
+describe('AppShell <lg 导航抽屉底部用户区', () => {
+  it('抽屉渲染与内流侧栏共用的底部用户区：账号身份与「更多」入口随抽屉可达', () => {
+    mockViewport.desktop = false;
+    renderShell();
+    fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
+
+    const drawerContent = screen.getByTestId('drawer-content');
+    // 用户行整区（SidebarUserFooter）随抽屉渲染：此前抽屉只有导航列表，底部入口在窄屏不可达。
+    expect(within(drawerContent).getByRole('button', { name: '未登录' })).toBeInTheDocument();
+    expect(within(drawerContent).getByRole('button', { name: '更多' })).toBeInTheDocument();
+    // Open Core 无「返回旧版 / 新版助手」能力：capability null → 入口不渲染、零占位。
+    expect(within(drawerContent).queryByRole('button', { name: '返回旧版' })).not.toBeInTheDocument();
+    expect(within(drawerContent).queryByRole('button', { name: '新版助手' })).not.toBeInTheDocument();
   });
 });
 

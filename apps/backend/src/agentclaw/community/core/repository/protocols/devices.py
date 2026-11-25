@@ -9,6 +9,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
@@ -103,11 +104,18 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def mutate_device_property(
+        self, *, binding_id: int, device_id: str, key: str,
+        mutate: Callable[[Any], Any],
+    ) -> None:
+        # Update one property under the write lock of the expected binding.
+        ...
+
+    @abstractmethod
     def update_device_props(self, *, binding_id: int, props: dict[str, Any]) -> None:
         """合并 ``props`` 到绑定的 device_props（保留其它键）。
 
-        Caller 可以只传新 key（如 ``{"publish_id": ...}``），其它已有 key
-        会被保留；亦支持 caller 自己做完整合并后整字典传入（幂等）。
+        仅传入本次修改的 key（如 ``{"publish_id": ...}``），由仓储保留其它 key。
         用于刷新 teclaw 绑定上的 baas ``publish_id`` 状态读取句柄，以及
         singlebox 回填 adapter_port 等 BaaS 解析到的值。绑定不存在时静默忽略。
         """

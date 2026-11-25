@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import uuid
-from threading import Event
-from collections.abc import Mapping, Sequence
+from time import perf_counter
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, replace
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
 
@@ -21,16 +22,26 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 from agentclaw.community.core.bot_management.addressing import BotAddressResolver, stable_resource_owner_id
 from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceContext,
+    RuntimeBindingChangedError,
+    RuntimeBindingTarget,
+    expect_runtime_binding,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillRepository,
 )
+from agentclaw.community.core.skill_center.capability_projection_intent import capability_projection_intent
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
     LocalSkillEditBusyError,
     LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
     LocalSkillInvalidPackageError,
+    LocalSkillNotFoundError,
+    LocalSkillPackageOutcomeUnknownError,
+    LocalSkillRuntimeUnavailableError,
     LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
     LocalSkillStorageError,
@@ -38,6 +49,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillTooLargeError,
 )
 from agentclaw.community.core.skill_center.factories import (
+    LocalSkillPackageLocation,
     SkillServiceFactory,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
@@ -49,6 +61,7 @@ from agentclaw.community.core.skill_center.services.local_skill_upload_dst_asset
     LocalSkillUploadDstAssetMixin,
 )
 from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+    LocalSkillPackageDestination,
     LocalSkillPackageRuntime,
     LocalSkillPackageRuntimeResult,
 )
@@ -75,6 +88,22 @@ from agentclaw.community.core.skill_center.local_skill_upload_service_protocol i
     LocalSkillUploadServiceProtocol,
 )
 
+from agentclaw.community.core.ports.skill_package_upload_port import (
+    LocalSkillPackageReceipt,
+    LocalSkillPackageWriteResult,
+    PackageMetadata,
+    PackagePublication,
+)
+from agentclaw.community.core.skill_center.services.local_skill_security_handoff import (
+    handoff_local_skill_security,
+)
+from agentclaw.community.core.skill_center.services.local_skill_batch import (
+    PreparedLocalSkill,
+    dispatch_local_skill_batch,
+    package_result,
+    prepare_local_skill_packages,
+)
+
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
@@ -83,6 +112,21 @@ if TYPE_CHECKING:
 logger = get_logger()
 SECURITY_HANDOFF_TIMEOUT_SECONDS = 2.0
 SECURITY_FAILURE_RECORD_TIMEOUT_SECONDS = 0.25
+
+
+@dataclass(frozen=True, slots=True)
+class _LocalSkillEdit:
+    bot_id: str
+    owner_id: str
+    actor_id: str
+    bot: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class _LocalSkillTarget:
+    skill: PreparedLocalSkill
+    location: LocalSkillPackageLocation
+    existing: dict[str, Any] | None
 
 
 class LocalSkillUploadService(
@@ -104,6 +148,7 @@ class LocalSkillUploadService(
         package_runtime: LocalSkillPackageRuntime,
         security_observer_provider: Callable[[], LocalSkillSecurityUploadHook],
         security_observation_enabled: bool,
+        local_skill_parallelism: int = 1,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
@@ -117,6 +162,9 @@ class LocalSkillUploadService(
         self._package_runtime = package_runtime
         self._security_observer_provider = security_observer_provider
         self._security_observation_enabled = security_observation_enabled
+        if type(local_skill_parallelism) is not int or not 1 <= local_skill_parallelism <= 4:
+            raise ValueError("Local Skill batch parallelism must be an integer from 1 to 4")
+        self._local_skill_parallelism = local_skill_parallelism
 
     async def installed_package_digest(
         self,
@@ -139,8 +187,6 @@ class LocalSkillUploadService(
         classes the entry for a full write and the write path restores the
         package while it is in hand.
         """
-        import hashlib
-
         try:
             _, storage = self._skill_service_factory.local_skill_package_storage(
                 entity_id=str(bot["entity_id"]),
@@ -194,10 +240,42 @@ class LocalSkillUploadService(
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
     ) -> dict[str, Any]:
+        async with self._edit(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id) as edit:
+            skill = PreparedLocalSkill.from_package(self._validate_zip(package))
+            context = self._device_context(bot_id=bot_id, owner_id=edit.owner_id)
+            is_teclaw = context.provider == "teclaw"
+            binding = RuntimeBindingTarget(
+                bot_id, str(edit.bot["owner_id"]), edit.owner_id, context.binding_id, context.device_id,
+            )
+            try:
+                with expect_runtime_binding(binding):
+                    target = self._target(edit, skill, is_teclaw=is_teclaw)
+                    runtime_result = await self._package_runtime.apply(
+                        bot_id=bot_id, owner_id=edit.owner_id, skill_name=skill.package.name,
+                        layout=target.location.layout, package=skill.package.canonical_zip,
+                    )
+                    result = await self._persist_package(
+                        edit, target, runtime_result, is_teclaw=is_teclaw
+                    )
+            except RuntimeBindingChangedError as exc:
+                raise LocalSkillRuntimeUnavailableError() from exc
+            await self._observe_package(edit, skill, result)
+        # Capability delivery and Apply use a common send boundary. Enter it
+        # after releasing the package lease to keep their lock order acyclic.
+        if target.existing is not None:
+            projection = await self._sync_runtime(edit.owner_id, bot_id)
+            result["runtime_projection"] = projection.to_dict()
+        return result
+
+    @asynccontextmanager
+    async def _edit(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+    ) -> AsyncIterator[_LocalSkillEdit]:
         # The pre-lock read exists only to address the distributed lock.  Every
         # authoritative decision is deliberately repeated after acquisition.
         initial_bot = self._authorize(bot_id, owner_id, actor_id)
         scope = self._scope_for(initial_bot, bot_id)
+        lock_started = perf_counter()
         try:
             lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
         except SkillsPoolEditBusyError as exc:
@@ -208,207 +286,202 @@ class LocalSkillUploadService(
             raise LocalSkillEditLockUnavailableError() from exc
         except SkillsPoolEditPausedError as exc:
             raise LocalSkillEditPausedError() from exc
+        logger.info(
+            "Local Skill edit acquired bot_id=%s lock_wait_ms=%.3f",
+            bot_id, (perf_counter() - lock_started) * 1000,
+        )
         try:
             bot = self._authorize(bot_id, owner_id, actor_id)
             if self._scope_for(bot, bot_id) != scope:
-                from agentclaw.community.core.skill_center.errors import (
-                    LocalSkillNotFoundError,
-                )
-
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            owner_id = stable_resource_owner_id(bot)
-            validated = self._validate_zip(package)
-            is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
-            # Re-read same-name candidates, owner, readiness and default state
-            # under the edit lock.  Uploader identity is intentionally absent.
-            matches = self._same_name_matches(
-                bot_id=bot_id, owner_id=owner_id, name=validated.name
-            )
-            if len(matches) > 1:
-                raise LocalSkillDuplicateError()
-            observation_id = str(uuid.uuid4())
-            digest = "sha256:" + hashlib.sha256(validated.canonical_zip).hexdigest()
-            observe = self._security_observation_enabled
-            location = self._skill_service_factory.local_skill_package_location(
-                entity_id=str(bot["entity_id"]),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=str(bot.get("entity_type") or "staff"),
-                is_desktop=bot.get("bot_type") == "desktop",
-                is_teclaw=is_teclaw,
-                name=validated.name,
-            )
-            runtime_result = await self._package_runtime.apply(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                skill_name=validated.name,
-                layout=location.layout,
-                package=validated.canonical_zip,
-            )
-            if runtime_result is not None:
-                if matches:
-                    result = await self._commit_runtime_replace(
-                        skill=matches[0],
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        actor_id=actor_id,
-                        description=validated.description,
-                        runtime_result=runtime_result,
-                    )
-                else:
-                    result = self._commit_runtime_create(
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        actor_id=actor_id,
-                        name=validated.name,
-                        description=validated.description,
-                        directory=location.directory,
-                        runtime_result=runtime_result,
-                    )
-            elif matches:
-                result = await self._replace(
-                    skill=matches[0],
-                    bot=bot,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    actor_id=actor_id,
-                    name=validated.name,
-                    description=validated.description,
-                    files=list(validated.files),
-                    is_teclaw=is_teclaw,
-                )
-            else:
-                result = await self._create(
-                    bot=bot,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    actor_id=actor_id,
-                    name=validated.name,
-                    description=validated.description,
-                    files=list(validated.files),
-                    is_teclaw=is_teclaw,
-                )
-            request_cancelled = False
-            handoff_cancelled = Event()
-            if not observe:
-                return result
-            try:
-                observer = self._security_observer_provider()
-                # Formal persistence has succeeded and the Bot edit lock is
-                # still held. A failed identity bind skips observation only.
-                incarnation_id = observer.current_incarnation_id(
-                    bot_id=bot_id, owner_id=owner_id,
-                    skill_id=int(result["skill"]["id"]),
-                )
-                if incarnation_id is None:
-                    raise ValueError("formal Local Skill security UUID is unavailable")
-                handoff = asyncio.create_task(
-                    asyncio.to_thread(
-                        observer.observe,
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        actor_id=actor_id,
-                        skill_id=int(result["skill"]["id"]),
-                        operation=result["operation"],
-                        name=validated.name,
-                        description=validated.description,
-                        canonical_zip=validated.canonical_zip,
-                        observation_id=observation_id,
-                        incarnation_id=incarnation_id,
-                        cancelled=handoff_cancelled,
-                    )
-                )
-                deadline = (
-                    asyncio.get_running_loop().time() + SECURITY_HANDOFF_TIMEOUT_SECONDS
-                )
-                while (
-                    not handoff.done() and asyncio.get_running_loop().time() < deadline
-                ):
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.shield(handoff),
-                            timeout=max(
-                                0.0, deadline - asyncio.get_running_loop().time()
-                            ),
-                        )
-                    except asyncio.TimeoutError:
-                        break
-                    except asyncio.CancelledError:
-                        request_cancelled = True
-                if handoff.done():
-                    handoff.result()
-                else:
-                    handoff_cancelled.set()
-                    logger.error(
-                        "Local Skill security handoff failed stage=TIMEOUT "
-                        "bot_id=%s owner_id=%s actor_id=%s skill_id=%s "
-                        "observation_id=%s operation=%s digest=%s",
-                        bot_id,
-                        owner_id,
-                        actor_id,
-                        result["skill"]["id"],
-                        observation_id,
-                        result["operation"],
-                        digest,
-                    )
-                    failure_record = asyncio.create_task(
-                        asyncio.to_thread(
-                            observer.record_handoff_timeout,
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            actor_id=actor_id,
-                            skill_id=int(result["skill"]["id"]),
-                            observation_id=observation_id,
-                            digest=digest,
-                            incarnation_id=incarnation_id,
-                            name=validated.name,
-                            description=validated.description,
-                            creator_id=actor_id if result["operation"] == "created" else None,
-                        )
-                    )
-                    failure_record.add_done_callback(self._log_late_security_handoff)
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.shield(failure_record),
-                            timeout=SECURITY_FAILURE_RECORD_TIMEOUT_SECONDS,
-                        )
-                    except asyncio.TimeoutError:
-                        pass
-                    except asyncio.CancelledError:
-                        request_cancelled = True
-                    # Completion is deliberately detached. A late OSS result
-                    # cannot publish a current observation once cancelled.
-                    handoff.add_done_callback(self._log_late_security_handoff)
-            except Exception:
-                logger.exception(
-                    "[LocalSkillUploadService] security observation handoff failed "
-                    "bot_id=%s owner_id=%s actor_id=%s skill_id=%s "
-                    "observation_id=%s operation=%s digest=%s",
-                    bot_id,
-                    owner_id,
-                    actor_id,
-                    result["skill"]["id"],
-                    observation_id,
-                    result["operation"],
-                    digest,
-                )
-            if request_cancelled:
-                raise asyncio.CancelledError
-            return result
+            yield _LocalSkillEdit(bot_id, stable_resource_owner_id(bot), actor_id, bot)
         finally:
             self._edit_guard.release(lease)
 
-    @staticmethod
-    def _log_late_security_handoff(task: asyncio.Task[None]) -> None:
-        try:
-            task.result()
-        except asyncio.CancelledError:
+    def _target(
+        self, edit: _LocalSkillEdit, skill: PreparedLocalSkill, *, is_teclaw: bool,
+    ) -> _LocalSkillTarget:
+        bot = edit.bot
+        name = skill.package.name
+        matches = self._same_name_matches(bot_id=edit.bot_id, owner_id=edit.owner_id, name=name)
+        if len(matches) > 1:
+            raise LocalSkillDuplicateError()
+        location = self._skill_service_factory.local_skill_package_location(
+            entity_id=str(bot["entity_id"]),
+            owner_id=edit.owner_id,
+            bot_id=edit.bot_id,
+            engine_type=bot.get("active_engine"),
+            entity_type=str(bot.get("entity_type") or "staff"),
+            is_desktop=bot.get("bot_type") == "desktop",
+            is_teclaw=is_teclaw,
+            name=name,
+        )
+        return _LocalSkillTarget(skill, location, matches[0] if matches else None)
+
+    async def _persist_package(
+        self, edit: _LocalSkillEdit, target: _LocalSkillTarget,
+        runtime_result: LocalSkillPackageRuntimeResult | None, *,
+        is_teclaw: bool,
+    ) -> dict[str, Any]:
+        validated = target.skill.package
+        who = dict(bot_id=edit.bot_id, owner_id=edit.owner_id, actor_id=edit.actor_id)
+        if runtime_result is not None:
+            if target.existing is not None:
+                return self._commit_runtime_replace(
+                    **who, skill=target.existing, description=validated.description,
+                    runtime_result=runtime_result,
+                )
+            return self._commit_runtime_create(
+                **who, name=validated.name, description=validated.description,
+                directory=target.location.directory, runtime_result=runtime_result,
+            )
+        if target.existing is not None:
+            return await self._replace(
+                **who, skill=target.existing, bot=edit.bot, name=validated.name,
+                description=validated.description, files=list(validated.files),
+                is_teclaw=is_teclaw,
+            )
+        return await self._create(
+            **who, bot=edit.bot, name=validated.name, description=validated.description,
+            files=list(validated.files), is_teclaw=is_teclaw,
+        )
+
+    async def _observe_package(
+        self, edit: _LocalSkillEdit, skill: PreparedLocalSkill, result: dict[str, Any],
+    ) -> None:
+        if not self._security_observation_enabled:
             return
+        await handoff_local_skill_security(
+            observer_provider=self._security_observer_provider,
+            bot_id=edit.bot_id, owner_id=edit.owner_id, actor_id=edit.actor_id,
+            skill=skill, skill_id=int(result["skill"]["id"]), operation=result["operation"],
+            handoff_timeout_seconds=SECURITY_HANDOFF_TIMEOUT_SECONDS,
+            record_timeout_seconds=SECURITY_FAILURE_RECORD_TIMEOUT_SECONDS,
+        )
+
+    async def upload_local_skill_batch(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        packages: Sequence[tuple[str, bytes]],
+    ) -> tuple[LocalSkillPackageWriteResult, ...]:
+        if not packages:
+            return ()
+        async with self._edit(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id) as edit:
+            started = perf_counter()
+            prepared, unattempted = await prepare_local_skill_packages(packages, validate=self._validate_zip)
+            logger.info(
+                "Local Skill batch prepared bot_id=%s package_count=%d prepare_ms=%.3f",
+                bot_id, len(packages), (perf_counter() - started) * 1000,
+            )
+            if len(prepared) != len(packages):
+                return unattempted
+            destination = await self._package_runtime.destination(
+                bot_id=bot_id, owner_id=edit.owner_id
+            )
+            targets: list[_LocalSkillTarget] = []
+            directories: set[str] = set()
+            for index, skill in enumerate(prepared):
+                try:
+                    target = self._target(edit, skill, is_teclaw=destination.is_teclaw)
+                    directory = target.location.directory.casefold()
+                    if directory in directories:
+                        raise LocalSkillDuplicateError()
+                except (LocalSkillDuplicateError, LocalSkillStorageError):
+                    results = list(unattempted)
+                    results[index] = package_result(
+                        skill.package.name, skill.digest, PackagePublication.FAILED,
+                    )
+                    return tuple(results)
+                directories.add(directory)
+                targets.append(target)
+
+            async def publish(
+                target: _LocalSkillTarget, is_stopped: Callable[[], bool],
+            ) -> LocalSkillPackageWriteResult:
+                return await self._publish_batch_package(edit, destination, target, is_stopped)
+
+            results = await dispatch_local_skill_batch(
+                targets, unattempted, publish=publish,
+                window=self._local_skill_parallelism if destination.supports_parallel_targets else 1,
+            )
+            if all(item.upload is not None for item in results) and not await self._package_runtime.is_destination_current(
+                bot_id=edit.bot_id, owner_id=edit.owner_id, destination=destination,
+            ):
+                return tuple(replace(item, upload=None) for item in results)
+            return results
+
+    async def _publish_batch_package(
+        self, edit: _LocalSkillEdit, destination: LocalSkillPackageDestination,
+        target: _LocalSkillTarget, is_stopped: Callable[[], bool],
+    ) -> LocalSkillPackageWriteResult:
+        skill = target.skill
+        name = skill.package.name
+        publication = PackagePublication.NOT_DISPATCHED
+        metadata = PackageMetadata.NOT_ATTEMPTED
+        try:
+            context = await self._package_runtime.resolve(bot_id=edit.bot_id, owner_id=edit.owner_id)
+            if is_stopped():
+                return package_result(name, skill.digest, PackagePublication.NOT_DISPATCHED)
+            if not destination.matches(context):
+                raise LocalSkillRuntimeUnavailableError()
+            runtime_result = None
+            started = perf_counter()
+            if destination.supports_package_apply:
+                try:
+                    runtime_result = await self._package_runtime.publish(
+                        context, bot_id=edit.bot_id, skill_name=name,
+                        layout=target.location.layout, package=skill.package.canonical_zip,
+                    )
+                except LocalSkillPackageOutcomeUnknownError:
+                    return package_result(name, skill.digest, PackagePublication.UNKNOWN)
+                publication = PackagePublication.PUBLISHED
+                logger.info(
+                    "Local Skill package published bot_id=%s skill_name=%s upload_ms=%.3f",
+                    edit.bot_id, name, (perf_counter() - started) * 1000,
+                )
+            else:
+                # A legacy command can fail after writing a subset of the files.
+                publication = PackagePublication.UNKNOWN
+            started = perf_counter()
+            metadata = PackageMetadata.UNKNOWN
+            binding = RuntimeBindingTarget(
+                edit.bot_id, str(edit.bot["owner_id"]), edit.owner_id, context.binding_id, context.device_id,
+            )
+            with expect_runtime_binding(binding):
+                result = await self._persist_package(
+                    edit, target, runtime_result, is_teclaw=destination.is_teclaw,
+                )
+            if target.existing is not None and not destination.is_teclaw:
+                intent = capability_projection_intent(bot_id=edit.bot_id, entity_id=edit.owner_id)
+                if intent is not None:
+                    intent.record(ProjectionScope(skills=True))
+            publication, metadata = PackagePublication.PUBLISHED, PackageMetadata.COMMITTED
+            logger.info(
+                "Local Skill package committed bot_id=%s skill_name=%s %s=%.3f",
+                edit.bot_id, name,
+                "metadata_ms" if destination.supports_package_apply else "legacy_upload_and_metadata_ms",
+                (perf_counter() - started) * 1000,
+            )
+            started = perf_counter()
+            await self._observe_package(edit, skill, result)
+            logger.info(
+                "Local Skill package observation stage bot_id=%s skill_name=%s enabled=%s observation_ms=%.3f",
+                edit.bot_id, name, self._security_observation_enabled, (perf_counter() - started) * 1000,
+            )
+        except RuntimeBindingChangedError:
+            return package_result(name, skill.digest, publication, PackageMetadata.FAILED)
         except Exception:
-            logger.exception("Local Skill late security handoff failed")
+            logger.exception(
+                "Local Skill batch package did not complete bot_id=%s skill_name=%s",
+                edit.bot_id, name,
+            )
+            if publication is PackagePublication.NOT_DISPATCHED:
+                publication = PackagePublication.FAILED
+            return package_result(name, skill.digest, publication, metadata)
+        return LocalSkillPackageWriteResult(
+            LocalSkillPackageReceipt(name, skill.digest, publication, metadata), result, binding,
+        )
 
     def _commit_runtime_create(
         self,
@@ -437,6 +510,8 @@ class LocalSkillUploadService(
                     "source_type": "upload",
                 }
             )
+        except RuntimeBindingChangedError:
+            raise
         except Exception as exc:
             logger.error(
                 "[LocalSkillUploadService] post-apply persistence failed "
@@ -454,7 +529,7 @@ class LocalSkillUploadService(
             "actor_id": actor_id,
         }
 
-    async def _commit_runtime_replace(
+    def _commit_runtime_replace(
         self,
         *,
         skill: dict[str, Any],
@@ -478,7 +553,8 @@ class LocalSkillUploadService(
             )
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")
-            runtime_projection = await self._sync_runtime(owner_id, bot_id)
+        except RuntimeBindingChangedError:
+            raise
         except Exception as exc:
             logger.error(
                 "[LocalSkillUploadService] post-apply persistence failed "
@@ -499,7 +575,6 @@ class LocalSkillUploadService(
                 "user_id": owner_id,
             },
             "actor_id": actor_id,
-            "runtime_projection": runtime_projection.to_dict(),
         }
 
     async def upload_local_skill_files(
@@ -573,7 +648,7 @@ class LocalSkillUploadService(
                 "skill": {**skill, "active": False},
                 "actor_id": actor_id,
             }
-        except (LocalSkillInvalidPackageError, LocalSkillDuplicateError):
+        except (LocalSkillInvalidPackageError, LocalSkillDuplicateError, RuntimeBindingChangedError):
             raise
         except Exception as exc:  # details remain internal; public mapper is fixed
             # Compensation must continue after a failed rollback step: a failed
@@ -663,7 +738,6 @@ class LocalSkillUploadService(
             "user_id": skill.get("user_id"),
         }
         switched = False
-        runtime_sync_attempted = False
         canonical_published = False
         try:
             await staged.write(files)
@@ -697,21 +771,18 @@ class LocalSkillUploadService(
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
-            runtime_sync_attempted = True
-            runtime_projection = await self._sync_runtime(owner_id, bot_id)
+        except RuntimeBindingChangedError:
+            raise
         except Exception as exc:
             if switched or canonical_published:
                 await self._restore_replacement(
                     skill=skill,
                     old_metadata=old_metadata,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
                     staged=staged,
                     canonical=canonical,
                     backup=backup,
                     canonical_published=canonical_published,
                     switched=switched,
-                    runtime_sync_attempted=runtime_sync_attempted,
                 )
             else:
                 if backup is not None:
@@ -729,14 +800,11 @@ class LocalSkillUploadService(
                 await self._restore_replacement(
                     skill=skill,
                     old_metadata=old_metadata,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
                     staged=staged,
                     canonical=canonical,
                     backup=backup,
                     canonical_published=canonical_published,
                     switched=switched,
-                    runtime_sync_attempted=runtime_sync_attempted,
                 )
             except Exception as rollback_exc:
                 raise LocalSkillStorageError() from rollback_exc
@@ -750,7 +818,6 @@ class LocalSkillUploadService(
                 "user_id": owner_id,
             },
             "actor_id": actor_id,
-            "runtime_projection": runtime_projection.to_dict(),
         }
 
     async def _restore_replacement(
@@ -758,14 +825,11 @@ class LocalSkillUploadService(
         *,
         skill: dict[str, Any],
         old_metadata: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
         staged,
         canonical,
         backup,
         canonical_published: bool,
         switched: bool,
-        runtime_sync_attempted: bool,
     ) -> None:
         if canonical_published:
             try:
@@ -778,8 +842,6 @@ class LocalSkillUploadService(
             restored = self._skill_repo.update(skill["id"], old_metadata)
             if restored is None:
                 raise LocalSkillStorageError()
-            if runtime_sync_attempted:
-                await self._sync_runtime(owner_id, bot_id)
         if backup is not None:
             await self._discard(backup)
         await self._discard(staged)
@@ -793,13 +855,13 @@ class LocalSkillUploadService(
             raise LocalSkillStorageError()
 
     def _is_teclaw(self, *, bot_id: str, owner_id: str) -> bool:
+        return self._device_context(bot_id=bot_id, owner_id=owner_id).provider == "teclaw"
+
+    def _device_context(self, *, bot_id: str, owner_id: str) -> DeviceContext:
         try:
-            context = self._device_context_resolver_provider().resolve_for_bot(
-                bot_id, owner_id
-            )
+            return self._device_context_resolver_provider().resolve_for_bot(bot_id, owner_id)
         except Exception as exc:
             raise LocalSkillStorageError() from exc
-        return context.provider == "teclaw"
 
     def _same_name_matches(
         self, *, bot_id: str, owner_id: str, name: str
@@ -866,10 +928,6 @@ class LocalSkillUploadService(
                 bot_id=bot_id, legacy_owner_id=owner_id
             ).bot
         except BotAddressNotFoundError:
-            from agentclaw.community.core.skill_center.errors import (
-                LocalSkillNotFoundError,
-            )
-
             raise LocalSkillNotFoundError()
         current_owner = str(bot["owner_id"])
         if actor_id != current_owner:
@@ -882,10 +940,6 @@ class LocalSkillUploadService(
                 bot_id, current_owner, actor_id, PermissionLevel.MEMBER, explicit=True
             )
             if not permission.get("has_permission"):
-                from agentclaw.community.core.skill_center.errors import (
-                    LocalSkillNotFoundError,
-                )
-
                 raise LocalSkillNotFoundError()
         return bot
 

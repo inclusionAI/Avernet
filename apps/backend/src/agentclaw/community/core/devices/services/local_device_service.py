@@ -384,11 +384,11 @@ class LocalDeviceService(DeviceService):
             device_id=device_id, token=token, skip_token_check=skip_token_check
         )
         try:
-            props = dict(record.device_props or {})
-            if "adapter_port" not in props:
+            if "adapter_port" not in (record.device_props or {}):
                 ws = self._baas_service.get_ws_info(bind_id=record.id)
-                props["adapter_port"] = ws.engine_port
-                self._repo.update_device_props(binding_id=record.id, props=props)
+                self._repo.update_device_props(
+                    binding_id=record.id, props={"adapter_port": ws.engine_port},
+                )
                 logger.info("[report_device_alive] 回填 adapter_port=%s bind=%s", ws.engine_port, record.id)
         except Exception as e:
             logger.warning("[report_device_alive] adapter_port 回填失败 bind=%s: %s", getattr(record, "id", "?"), e)

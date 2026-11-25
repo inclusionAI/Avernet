@@ -60,6 +60,9 @@ from agentclaw.community.core.repository.implementations.skill_center.bot_skills
     CENTER_MEMBERSHIP_IDENTITY_MISSING,
     center_membership_skill_uuid,
 )
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import (
+    verify_runtime_binding_for_write,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -659,6 +662,11 @@ class SkillRepository(
 
     def create(self, skill_data: dict) -> dict:
         with self._db.orm_session() as db:
+            if skill_data.get("source_type") == "upload":
+                verify_runtime_binding_for_write(
+                    db, bot_id=skill_data.get("bolt_id") or "default",
+                    entity_id=_format_user_id(skill_data.get("user_id")) or "",
+                )
             tags = skill_data.get("tags")
             risk_tags = skill_data.get("risk_tags")
             mcp_deps = skill_data.get("mcp_dependencies")
@@ -941,6 +949,7 @@ class SkillRepository(
             raise ValueError("Local Skill replacement cannot change git_path")
 
         with self._db.transactional_orm_session() as db:
+            verify_runtime_binding_for_write(db, bot_id=bot_id, entity_id=owner_id)
             skill = (
                 db.query(self.Skill)
                 .filter(
@@ -973,6 +982,7 @@ class SkillRepository(
         from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.transactional_orm_session() as db:
+            verify_runtime_binding_for_write(db, bot_id=bot_id, entity_id=owner_id)
             skill = (
                 db.query(self.Skill)
                 .filter(

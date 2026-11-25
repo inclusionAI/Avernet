@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 from collections.abc import Callable
 from enum import StrEnum
+from functools import partial
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skills_pool import (
@@ -16,6 +17,9 @@ from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import
 )
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionIdentity,
+)
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionCompetitionProtocol,
 )
 from agentclaw.community.core.skill_center.center_content_distribution import (
     CenterContentDistribution,
@@ -200,12 +204,14 @@ class DesktopSkillRecoveryTaskHandler:
         distribution: CenterContentDistribution,
         layouts: SkillsPoolLayoutRepositoryProtocol,
         env_provider: Callable[[], str] = get_current_env,
+        delivery: CapabilityProjectionCompetitionProtocol | None = None,
     ) -> None:
         self._bots = bots
         self._projector = projector
         self._distribution = distribution
         self._layouts = layouts
         self._env_provider = env_provider
+        self._delivery = delivery
 
     @property
     def task_type(self) -> str:
@@ -319,11 +325,16 @@ class DesktopSkillRecoveryTaskHandler:
                 list(latest_plan.projection.skill_mappings),
             )
         )
-        projection = await self._projector.apply_plan(
-            plan=latest_plan,
-            retired_mappings=retired_mappings,
-            scope=scope,
+        deliver = partial(
+            self._projector.apply_plan, plan=latest_plan, retired_mappings=retired_mappings, scope=scope,
         )
+        if self._delivery is None:
+            projection = await deliver()
+        else:
+            projection = await self._delivery.project_competing_change(
+                bot_id=bot_id, owner_id=owner_id, entity_id=latest_bot.get("entity_id"),
+                scope=scope, retired_mappings=retired_mappings, legacy=deliver, desktop_recovery=True,
+            )
         projection = self._preserve_permanent_prepare_issues(
             projection,
             permanent_by_name=permanent_by_name,

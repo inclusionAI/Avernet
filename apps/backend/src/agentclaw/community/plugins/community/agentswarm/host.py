@@ -19,6 +19,8 @@ bind-agentswarm-host-bot-platform):
   scope here, and the unit tests pin every branch of the narrow table.
   A creation Apply still marked RUNNING stays PROVISIONING until its terminal
   report decides readiness or failure, even when the container is already UP.
+  A terminal pre-container report also waits while the creation job is live:
+  it does not prove that the post-container phase has started or finished.
 - delete is phase-aware and best-effort: discard the pending creation when no
   bot exists, soft-delete the bot when one does, and never raise in
   teardown once a per-call owner is present — teardown must not change
@@ -578,15 +580,18 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
         if report is not None and report.trigger in _CREATION_TRIGGERS:
             if report.status is ApplyStatus.RUNNING:
                 return BotState.PROVISIONING.value
-            # The creation's own apply outranks job liveness: the
-            # post-container phase runs while the job is still live, so
+            # A pre-container verdict cannot finish a live creation: the
+            # container may be ACTIVE before the next phase is even enqueued.
+            # Record-first creation has no next phase, but its job completes
+            # after provisioning, so it can then use the pre-container verdict.
+            if (report.trigger == CREATE_PRE_CONTAINER_TRIGGER
+                    and job.status not in TERMINAL_STATUSES):
+                return BotState.PROVISIONING.value
+            # The post-container apply outranks job liveness: it can run
+            # while the job is still live, so
             # READY/APPLY_FAILED are answerable from the report even then
             # (a later explicit apply — "how is the bot configured now" —
             # is not read here).
-            if report.status is ApplyStatus.RUNNING:
-                # An active container can precede its post-container apply.
-                # Keep polling instead of killing a still-provisioning bot.
-                return BotState.PROVISIONING.value
             if report.status is ApplyStatus.SUCCEEDED:
                 if bot_status_ in _BOT_UP:
                     return BotState.READY.value

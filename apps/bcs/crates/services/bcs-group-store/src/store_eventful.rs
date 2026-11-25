@@ -63,6 +63,14 @@ impl MySqlGroupStore {
         &self,
         command: CommitGroupEventfulMutation,
     ) -> ServiceResult<Group> {
+        Ok(self.commit_eventful_mutation_snapshot_sql(command, false).await?.group)
+    }
+
+    pub(crate) async fn commit_eventful_mutation_snapshot_sql(
+        &self,
+        command: CommitGroupEventfulMutation,
+        capture_labels: bool,
+    ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
         if let Some(event) = command.event.as_ref()
             && (event.env != self.env
                 || event.event.scope.group_id.as_deref() != Some(command.group_id.as_str()))
@@ -88,17 +96,27 @@ impl MySqlGroupStore {
             .as_ref()
             .map(|stored_json| parse_stored_routing_policy_json(stored_json.as_deref()))
             .transpose()?;
-        let current = self
-            .try_get(&command.group_id)
-            .await?
-            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
+        // Move the former post-commit Group/participant read before the write.
+        // A cached Group can contain display-only fields and timestamps that
+        // differ from persistence; it must not become the committed response.
+        // Delete never needed a post-commit read, so keep its existing path.
+        let current = if deleting {
+            self.try_get(&command.group_id).await?
+        } else {
+            self.load_group_from_mysql(&command.group_id).await?
+        };
+        let Some(current) = current else {
+            self.cache.write().await.remove(&command.group_id);
+            return Err(ServiceError::GroupNotFound(command.group_id.clone()));
+        };
         if current.version != command.expected_version {
+            self.cache.write().await.remove(&command.group_id);
             return Err(ServiceError::Conflict(format!(
                 "Group '{}' expected version {}, found {}",
                 command.group_id, command.expected_version, current.version
             )));
         }
-        let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
         if deleting && command.event.is_some() {
             return Err(ServiceError::InvalidOperation {
                 message: "Group deletion is not part of the public Event Catalog".to_string(),
@@ -109,8 +127,37 @@ impl MySqlGroupStore {
         if let Some(policy) = authoritative_routing_policy {
             terminal.routing_policy = policy;
         }
-        apply_db_group_mutation_candidate(&mut terminal, &command.mutation, command.mutated_at_ms)?;
-        let mutated_at = db_timestamp_from_millis(command.mutated_at_ms)?;
+        // Group metadata is read at whole-second precision in both SQL
+        // dialects. Persist the same precision we return (also avoiding MySQL
+        // fractional-second rounding); public Event timestamps retain millis.
+        // Delete already returned its terminal candidate before this change.
+        let persisted_at_ms = if deleting {
+            command.mutated_at_ms
+        } else {
+            command.mutated_at_ms / 1000 * 1000
+        };
+        apply_db_group_mutation_candidate(&mut terminal, &command.mutation, persisted_at_ms)?;
+        if let GroupEventfulMutation::PatchMutableFields(patch) = &command.mutation {
+            if let Some(delivery) = patch.default_bot_final_delivery {
+                // The SQL patch materializes a default policy even when only
+                // another field changed and the requested delivery is default.
+                terminal.routing_policy.get_or_insert_with(Default::default)
+                    .default_bot_final_delivery = delivery;
+            }
+        }
+        if let GroupEventfulMutation::AddParticipant { participant, .. } = &command.mutation {
+            // Match this path's existing INSERT/read projection: names are
+            // display-only, kind/mode are normalized, and tags are not inserted.
+            if let Some(inserted) = terminal.participants.iter_mut()
+                .find(|stored| stored.bot_uuid == participant.bot_uuid)
+            {
+                inserted.bot_name = None;
+                inserted.kind = Some(ParticipantKind::Bot);
+                inserted.mode = Some(inserted.effective_mode());
+                inserted.tags.clear();
+            }
+        }
+        let mutated_at = db_timestamp_from_millis(persisted_at_ms)?;
         let routing_policy_guard = match self.flavor {
             DbSqlFlavor::Mysql if routing_policy_snapshot.is_some() => {
                 " AND routing_policy_json <=> ?"
@@ -155,6 +202,7 @@ impl MySqlGroupStore {
 
         match &command.mutation {
             GroupEventfulMutation::PatchMutableFields(patch) => {
+                validate_catalog_labels(&terminal,patch.catalog_labels.as_ref())?;
                 let mut assignments = Vec::new();
                 let mut params = Vec::new();
                 if let Some(label) = &patch.label {
@@ -194,7 +242,7 @@ impl MySqlGroupStore {
                         Self::human_mention_notify_mode_to_str(mode),
                     ));
                 }
-                if assignments.is_empty() {
+                if assignments.is_empty() && patch.catalog_labels.is_none() {
                     return Err(ServiceError::Conflict(
                         "Group mutation contains no changed fields".to_string(),
                     ));
@@ -213,9 +261,10 @@ impl MySqlGroupStore {
                         params,
                     ),
                 ));
-                if patch.label.is_some() || patch.context.is_some() {
+                if patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some() {
                     steps.push(self.card_template_upsert_step(&command.group_id)?);
                 }
+                if let Some(labels)=&patch.catalog_labels { steps.push(self.catalog_labels_step(&command.group_id,labels)?); }
             }
             GroupEventfulMutation::UpdateStatus(status) => {
                 steps.push(DbTransactionStep::Execute(
@@ -461,28 +510,54 @@ impl MySqlGroupStore {
             ));
             steps.push(self.card_template_delete_step(group_id));
         }
-        if let Err(error) = self.db.plugin().transaction(steps).await {
-            if provider_scope_guard::public_scope_denied(&error, guard_step) {
-                return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
-            }
-            if (cas_step == 0 && transaction_lock_row_is_missing(&error))
-                || provider_scope_guard::public_scope_denied(&error, Some(cas_step)) {
-                self.cache.write().await.remove(&command.group_id);
-                return Err(ServiceError::Conflict(format!(
-                    "Group '{}' version or routing policy changed concurrently",
-                    command.group_id
+        // The Group CAS lock is held until COMMIT. One indexed optional Card
+        // row captures explicit, empty and omitted labels at that same version.
+        let labels_step = if capture_labels && !deleting {
+            let index = steps.len();
+            let sql = match self.flavor {
+                DbSqlFlavor::Mysql => "SELECT catalog_labels FROM bcs_group_agent_cards WHERE env = ? AND group_id = ? FOR UPDATE",
+                DbSqlFlavor::Sqlite => "SELECT catalog_labels FROM bcs_group_agent_cards WHERE env = ? AND group_id = ?",
+            };
+            steps.push(DbTransactionStep::Query(DbStatement::with_params(
+                sql,
+                vec![Value::from(self.env.as_str()), Value::from(command.group_id.as_str())],
+            )));
+            Some(index)
+        } else { None };
+        let results = match self.db.plugin().transaction(steps).await {
+            Ok(results) => results,
+            Err(error) => {
+                if provider_scope_guard::public_scope_denied(&error, guard_step) {
+                    return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
+                }
+                if (cas_step == 0 && transaction_lock_row_is_missing(&error))
+                    || provider_scope_guard::public_scope_denied(&error, Some(cas_step)) {
+                    self.cache.write().await.remove(&command.group_id);
+                    return Err(ServiceError::Conflict(format!(
+                        "Group '{}' version or routing policy changed concurrently",
+                        command.group_id
+                    )));
+                }
+                return Err(ServiceError::InternalError(format!(
+                    "Eventful Group mutation failed: {error}"
                 )));
             }
-            return Err(ServiceError::InternalError(format!(
-                "Eventful Group mutation failed: {error}"
-            )));
-        }
+        };
+        let catalog_labels = match labels_step {
+            Some(index) => match results.get(index) {
+                Some(DbTransactionStepResult::Rows(rows)) => {
+                    let raw = rows.first().map(|row| db_get_column_opt::<String>(row, "catalog_labels"))
+                        .transpose().map_err(|e| ServiceError::InternalError(e.to_string()))?.flatten();
+                    bcs_service_api::types::catalog_labels::CatalogLabels::from_storage(raw.as_deref())?
+                }
+                _ => return Err(ServiceError::InternalError("Group label transaction result missing".into())),
+            },
+            None => Default::default(),
+        };
         self.cache.write().await.remove(&command.group_id);
-        if deleting {
-            return Ok(terminal);
-        }
-        self.try_get(&command.group_id)
-            .await?
-            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id))
+        // The version-fenced candidate is the state just committed. A second
+        // read can fail after COMMIT and prevent Core from notifying the catalog.
+        // Keep the cache invalidated; later reads load current authoritative data.
+        Ok(bcs_service_api::types::GroupMutationSnapshot { group: terminal, catalog_labels })
     }
 }

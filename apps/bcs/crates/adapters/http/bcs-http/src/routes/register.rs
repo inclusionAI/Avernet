@@ -94,6 +94,8 @@ pub struct RegisterQuery {
 #[derive(Default,serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RegisterBody {
+    #[serde(default,deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    catalog_labels:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     agent_card:Option<serde_json::Value>,
     agent_card_url:Option<String>,
     #[serde(alias="bot-name")]
@@ -161,7 +163,7 @@ pub async fn register_bot(
                 token_str, &state.invite_token_secret,
             ).is_ok() =>
         {
-            return scoped::register_bot(&state, &uri, token_str.to_string(), bot_name,source).await;
+            return scoped::register_bot(&state, &uri, token_str.to_string(), bot_name,source,body.catalog_labels).await;
         }
         Err(e) => {
             let message = match &e {
@@ -199,7 +201,7 @@ pub async fn register_bot(
         ));
     };
     match service
-        .register_bot(RegisterBot {
+        .register_bot(RegisterBot { catalog_labels:body.catalog_labels,
             // Legacy v1 tolerance: mode/provider_bot_ref/
             // webhook_url are ignored and never forwarded,
             // even when they cannot parse as the Provider

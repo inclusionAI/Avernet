@@ -6,7 +6,7 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/scripts/ci"
 cp "$script_dir/../check-store-boundaries.sh" "$fixture/scripts/ci/"
-for crate in bot group friend relation; do
+for crate in bot group friend relation dist-connector; do
   mkdir -p "$fixture/crates/services/bcs-$crate/src"
 done
 checker="$fixture/scripts/ci/check-store-boundaries.sh"

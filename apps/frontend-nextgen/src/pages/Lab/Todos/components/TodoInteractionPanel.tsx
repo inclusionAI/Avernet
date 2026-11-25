@@ -1,14 +1,23 @@
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
-import type { TodoAcceptanceTarget, TodoArtifact, TodoEvent } from '@/domain/todos/models';
-import { MessageSquarePlus, Send } from 'lucide-react';
+import type {
+  CreateTodoInteractionInput,
+  TodoAcceptanceTarget,
+  TodoArtifact,
+  TodoBotOption,
+  TodoEvent,
+} from '@/domain/todos/models';
+import { MessageSquarePlus } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { TodoInteractionComposer } from './TodoInteractionComposer';
 import { TodoInteractionStream } from './TodoInteractionStream';
 import {
   buildInteractionEntries,
   indexEntriesByTarget,
+  indexReplyReferences,
   selectedFloors,
   targetKey,
+  type InteractionReplyReference,
 } from './todoInteractionModel';
 
 interface TodoInteractionPanelProps {
@@ -21,6 +30,9 @@ interface TodoInteractionPanelProps {
   humanAvatarUrl?: string;
   enabled: boolean;
   loading: boolean;
+  mentionBots: TodoBotOption[];
+  mentionBotsLoading: boolean;
+  mentionBotsError: string | null;
   rejectionMode: boolean;
   selectedTargets: TodoAcceptanceTarget[];
   rejectionMessage: string;
@@ -29,7 +41,7 @@ interface TodoInteractionPanelProps {
   onCancelRejection: () => void;
   onSubmitRejection: () => Promise<void> | void;
   onReadArtifact: (artifactId: string, disposition: 'inline' | 'attachment') => Promise<Blob>;
-  onSubmit: (message: string) => Promise<boolean>;
+  onSubmit: (input: CreateTodoInteractionInput) => Promise<boolean>;
 }
 
 export function TodoInteractionPanel({
@@ -42,6 +54,9 @@ export function TodoInteractionPanel({
   humanAvatarUrl,
   enabled,
   loading,
+  mentionBots,
+  mentionBotsLoading,
+  mentionBotsError,
   rejectionMode,
   selectedTargets,
   rejectionMessage,
@@ -52,7 +67,7 @@ export function TodoInteractionPanel({
   onReadArtifact,
   onSubmit,
 }: TodoInteractionPanelProps) {
-  const [message, setMessage] = useState('');
+  const [replyTarget, setReplyTarget] = useState<InteractionReplyReference | null>(null);
   const [busyArtifactId, setBusyArtifactId] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
   const resolvedBotName = botName?.trim() || botId || 'Bot';
@@ -65,12 +80,11 @@ export function TodoInteractionPanel({
     [selectedTargets],
   );
   const entryByTarget = useMemo(() => indexEntriesByTarget(entries), [entries]);
+  const replyReferences = useMemo(
+    () => indexReplyReferences(entries, resolvedBotName, humanName),
+    [entries, humanName, resolvedBotName],
+  );
   const floors = selectedFloors(selectedTargets);
-
-  const submit = async () => {
-    const success = await onSubmit(message);
-    if (success) setMessage('');
-  };
   const openFileArtifact = async (artifact: Extract<TodoArtifact, { kind: 'file' }>) => {
     setBusyArtifactId(artifact.artifactId);
     setArtifactError(null);
@@ -111,7 +125,10 @@ export function TodoInteractionPanel({
         humanName={humanName}
         humanAvatarUrl={humanAvatarUrl}
         busyArtifactId={busyArtifactId}
+        replyReferences={replyReferences}
+        replyEnabled={enabled && !rejectionMode}
         onToggleTarget={onToggleTarget}
+        onReply={setReplyTarget}
         onOpenFile={(artifact) => void openFileArtifact(artifact)}
       />
 
@@ -155,26 +172,15 @@ export function TodoInteractionPanel({
             </div>
           </div>
         ) : enabled ? (
-          <div className="space-y-2">
-            <Textarea
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              placeholder="告诉 Bot 需要补充或修改的内容"
-              rows={4}
-              disabled={loading}
-            />
-            <div className="flex justify-end">
-              <Button
-                className="h-8 rounded-lg px-4 text-xs"
-                onClick={() => void submit()}
-                loading={loading}
-                disabled={!message.trim()}
-                leftIcon={<Send className="size-4" aria-hidden />}
-              >
-                发送互动
-              </Button>
-            </div>
-          </div>
+          <TodoInteractionComposer
+            replyTarget={replyTarget}
+            loading={loading}
+            mentionBots={mentionBots}
+            mentionBotsLoading={mentionBotsLoading}
+            mentionBotsError={mentionBotsError}
+            onClearReply={() => setReplyTarget(null)}
+            onSubmit={onSubmit}
+          />
         ) : (
           <p className="m-0 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">仅待验收状态可以互动。</p>
         )}

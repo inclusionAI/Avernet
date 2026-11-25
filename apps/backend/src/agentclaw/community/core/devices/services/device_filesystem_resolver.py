@@ -20,7 +20,14 @@ from agentclaw.community.core.repository.protocols.devices import DeviceBindingR
 from agentclaw.community.core.devices.services.baas_invoke_transport import (
     build_desktop_client,
 )
-from agentclaw.community.core.devices.services.device_context import UnknownProviderError
+from agentclaw.community.core.devices.models import DeviceBindingContext
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.services.device_context import (
+    RuntimeBindingChangedError,
+    UnknownProviderError,
+    expected_runtime_binding,
+    verify_runtime_binding,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
@@ -149,15 +156,14 @@ class DefaultDeviceFileSystemResolver:
             )
 
         if provider == "local":
-            # ``"local"`` provider 经 resolver 出口 → 走 LocalDeviceFileSystem。
-            # 本期 resolver 已带 binding_id;但 LocalDeviceFileSystem 的
-            # BaaS-mode 需要 ``DeviceBindingContext`` (adapter_port + tenant),
-            # 走旧 _build_binding_ctx 路径仍是单一构建源(Step 3 重构再合并)。
             from agentclaw.community.core.devices.services.local_device_filesystem import (
                 LocalDeviceFileSystem,
             )
 
-            binding_ctx = self._build_binding_ctx(ctx.bot_id, ctx.user_id)
+            if expected_runtime_binding(ctx.bot_id, ctx.user_id) is None:
+                binding_ctx = self._build_binding_ctx(ctx.bot_id, ctx.user_id)
+            else:
+                binding_ctx = self._build_verified_binding_ctx(ctx)
             logger.info(
                 "[DEVICE-PLUGIN-DEBUG] → LocalDeviceFileSystem(provider=%r, baas_mode=%s)",
                 provider, binding_ctx is not None,
@@ -189,7 +195,24 @@ class DefaultDeviceFileSystemResolver:
             "resolver has no ARCA runtime"
         )
 
-    def _build_binding_ctx(self, bot_id: str, user_id: str):
+    def _build_verified_binding_ctx(self, ctx: DeviceContext) -> DeviceBindingContext | None:
+        """Keep the filesystem on the same destination as the authorized write."""
+        try:
+            binding = self._binding_repo.get_active_by_bot_and_owner(ctx.bot_id, ctx.user_id)
+        except Exception as exc:
+            raise RuntimeBindingChangedError("Local filesystem Runtime binding could not be verified") from exc
+        if binding is None or (
+            binding.id != ctx.binding_id or binding.device_id != ctx.device_id
+            or binding.device_provider != ctx.provider
+        ):
+            raise RuntimeBindingChangedError("Local filesystem Runtime binding changed before delivery")
+        verify_runtime_binding(
+            bot_id=ctx.bot_id, user_id=ctx.user_id,
+            binding_id=binding.id, device_id=binding.device_id,
+        )
+        return self._binding_context(binding)
+
+    def _build_binding_ctx(self, bot_id: str, user_id: str) -> DeviceBindingContext | None:
         """从 bot_id+user_id 提取 DeviceBindingContext；找不到返 None（pathlib fallback）.
 
         Any lookup failure (missing bot, missing binding, DB error, missing
@@ -198,8 +221,6 @@ class DefaultDeviceFileSystemResolver:
         try/except avoids bringing down unrelated routes on a binding-lookup
         hiccup.
         """
-        from agentclaw.community.core.devices.models import DeviceBindingContext
-
         try:
             bot = self._bot_repo.get_by_id_and_owner(bot_id, user_id)
         except Exception as e:
@@ -225,6 +246,10 @@ class DefaultDeviceFileSystemResolver:
             return None
         if binding is None:
             return None
+        return self._binding_context(binding)
+
+    @staticmethod
+    def _binding_context(binding: DeviceBindingRecord) -> DeviceBindingContext | None:
         props = binding.device_props or {}
         # 要求 device_props 显式带 adapter_port 才算 BaaS-managed binding。
         # 现 LocalDeviceService._do_allocate 落地的 binding 都会写入此字段

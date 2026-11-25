@@ -1,35 +1,57 @@
 # Todo workbench
 
 This context owns the user-facing Todo product lifecycle, Space/Bot eligibility,
-automatic dispatch, acceptance decisions, and the public event/interaction view.
-Todo state is persisted by A as `pending`, `in_progress`,
-`pending_acceptance`, or `completed`; it is not recomputed during reads from B.
-The unfiltered workbench list is paged in its visible group order—`pending`,
-`in_progress`, `pending_acceptance`, then `completed`—and remains oldest-first
-inside each group. A status-filtered list is oldest-first within that state.
-This keeps dispatchable work on the first “全部” page without changing the
-scheduler's independent oldest-first status scans.
+automatic dispatch, template stages, and the public event/interaction view. Todo
+state is persisted by A as the six product states `not_started`, `in_progress`,
+`interrupted`, `pending_action`, `completed`, or `cancelled`; it is not
+recomputed during reads from B. The compatibility names `pending` and
+`pending_acceptance` map to `not_started` and `pending_action` respectively;
+they are not additional product states.
 
-Creating a Todo only persists `pending`. `TodoScheduler` periodically scans A-owned rows while holding a distributed lease. It processes `pending` first, then `pending_acceptance`, then `in_progress`:
+The unfiltered workbench list follows the visible group order
+`not_started`, `in_progress`, `pending_action`, `interrupted`, `completed`, then
+`cancelled`, and remains oldest-first inside each group. A status-filtered list
+is oldest-first within that state. `TodoScheduler` scans `not_started` and
+`in_progress` rows for dispatch/refresh while preserving the product state
+projection. Template Todos with `pending_action` are never sent through the
+legacy acceptance-reconciliation path.
 
-1. `pending`: create, bind, and run the B Context, then advance A to `in_progress`.
-2. `pending_acceptance`: repair an acceptance decision that was durably appended in B but whose A-side projection failed.
-3. `in_progress`: refresh the B runtime; if durable Human work is waiting behind a completed Context, resume the original Bot session.
+A template Todo is pinned to an immutable published template version. Its
+ordered stage instances are the product workflow:
 
-A confirmed runtime `COMPLETED` result or the active Bot execution's authenticated
-`POST /api/v1/collaboration/tasks/todos/{todo_id}/complete` call appends
-`task.completed` and makes the Context `done`. The existing scheduler remains
-the only owner of completing the active execution credential and advancing the
-Todo to `pending_acceptance`; the completion endpoint does not mutate A-owned
-Todo state directly. Runtime failure states stay visible in B and leave the
-Todo `in_progress` for inspection or recovery.
+- A Bot stage runs in `in_progress`; the Bot reports its artifacts through
+  `/report` and signals execution completion through `/complete`. The complete
+  request may carry a human-readable `summary` and Skill-defined structured
+  `result`.
+- `/complete` advances the current stage only after its configured hard artifact
+  gates pass. A next Bot stage keeps the Todo in `in_progress`; a next Human
+  stage enters `pending_action` with `planned_human_stage`; the last completed
+  stage enters `completed`. Stage advancement is an internal Backend projection
+  from the execution binding, not a separate Bot-facing stage outcome API.
+- Runtime or domain logic may project a blocked condition into `pending_action`
+  with `blocked`, preserving the reason and requested action. It does not
+  advance the stage.
+- `failed` is an execution-attempt result, not a Todo product state. Runtime
+  recovery may retry it while the Todo remains `in_progress`; after recovery is
+  exhausted, the runtime/domain integration may project `interrupted`, which is
+  explicitly resumable.
+- A Human stage is completed only by its bound Human or a Space administrator.
+  A planned Human stage cannot be bypassed by the generic resume operation.
+- Explicit cancel enters `cancelled`; completed and cancelled Todos cannot be
+  resumed.
 
-Acceptance is event-first. The client supplies a stable `decision_id`; A first finds or appends one immutable Human `task.accepted` or `task.rejected` event in B, then persists the same decision in A. Each acceptance round permits exactly one decision: reusing the same ID and payload is idempotent within that round, while a second ID or a changed verdict, content, actor, Todo, or targets conflicts. Repair considers the first valid decision appended after the latest `task.completed`; an older rejection can never be replayed against a later completed round. This ordering lets the scheduler repair B-success/A-failure without inventing or replacing a decision.
+`not_started` is only the never-dispatched initial state. Once the first stage
+has started, a Bot-to-Bot transition never regresses the Todo to `not_started`.
+The detailed execution policy—retry count, Bot replacement, knowledge lookup,
+Skill behavior, and notification delivery—is runtime/platform behavior rather
+than template configuration. The template only declares stages, purpose,
+participants, responsible owner, and deterministic hard artifact gates.
 
-- Approval appends `task.accepted`, advances the Todo from `pending_acceptance` to `completed`, leaves the completed Context unchanged, and does not start another Bot run.
-- Rejection requires full Human rework content and at least one stable event/artifact target. It appends `task.rejected`, advances the Todo from `pending_acceptance` to `in_progress`, and initially leaves the Context `done`. On the next scheduler refresh, that rejection is recognized as unstarted Human work; B resumes the previous executor session, appends `task.started`, changes the Context to `in_progress`, and delivers the rework instruction to the original Bot. A later completed run returns the Todo to `pending_acceptance`.
-
-Target IDs are durable references. `floor` is presentation metadata captured from the interaction view and is not used as a domain identity. The event retains the full Human instruction and selected targets so the interaction timeline can reconstruct the rejection even after a refresh or retry.
+The legacy non-template Todo API remains compatible for existing clients. Its
+`pending_acceptance` flow is not the template lifecycle: new product flows
+should model human review as an explicit Human stage rather than relying on an
+implicit acceptance step. Legacy acceptance events and routes remain documented
+below only for compatibility.
 
 A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter explicitly requests event payloads for its richer interaction projection. ContextCollab execution is a Task-core executor, not a deployment Plugin. New Todo runs reuse Task's existing `OpenApiBotPort` and owner-granted BaaS `allowed-bots` authorization without modifying `TaskExecutor` or introducing a shared Task/Todo abstraction. Optional BCS ports are retained only to resume and inspect historical group-backed Todo Contexts.
 
@@ -38,6 +60,17 @@ A and B run in the same process in the production composition root, so the adapt
 The Todo Events endpoint stays compact and event-centric: it returns normalized event metadata and concise primary content, but not the complete event payload. Every successfully persisted product artifact appends one durable `artifact.reported` event, so this view can say what was produced in chronological order. Text uses a whitespace-normalized 20-character preview; file, link, and code events use `artifact_name` as the concise display title. File rows fall back to the sanitized file name when a legacy caller omits `artifact_name`. `task.completed` remains a separate run-completion notice and never substitutes for the artifact events.
 
 The Interactions endpoint is actor/content-centric and richer: it includes the Human objective in `task.created`, Human messages and rejection instructions, selected rejection floors from the full payload, and `artifact.reported` payloads. The client resolves each artifact event by its stable `artifact_id`, displays complete text and complete file/link/code details at the event's exact position, and uses the reporting Bot as the actor. The Artifacts endpoint remains the complete persisted inventory and content source.
+
+An interaction may persist `reply_to_event_id` and structured `mentions` in the
+same `user_interaction.posted` event payload. The reply ID must identify a
+replyable event already visible in the same Context; the UI floor is derived
+presentation metadata and is never accepted as identity. Mentions currently
+support Bot actors only, and each mentioned Bot must satisfy the same live
+Bot/Space eligibility policy as Todo creation. Arbitrary `@text` has no
+authority without the structured Bot ID. Persisting a mention does not wake the
+mentioned Bot, create another run, or change orchestration: the existing Human
+interaction transition and scheduler resume continue to target the Todo's
+original executor. No interaction table or schema migration is introduced.
 
 New single-Bot Todo delivery calls the BaaS Open API directly with the exact
 `bot_id:owner_id` identity. It does not create a synthetic one-Bot BCS group and
@@ -59,6 +92,25 @@ point; the ordinary frontend neither edits Todos nor exposes manual Run.
 While a Todo is `pending_acceptance`, posting a normal Human interaction atomically claims A as `pending_acceptance -> in_progress`, then append-only records `user_interaction.posted` in B. Rejection uses the same resume mechanism after its B-first acceptance event and A-side state projection. Status refresh keeps A `in_progress` while B is still `done` and the latest Human-work event has not yet been followed by `task.started`. The scheduler then resumes B from that event and reuses the previous executor session.
 
 Resume retries are idempotent. Once B is `in_progress` or a later `task.started` exists, no additional resume is dispatched; the ContextCollab executor uses the triggering event ID as the BCS session-chat idempotency key. A delivery failure leaves the claimed Todo `in_progress` and fails closed rather than reopening the interactive state during uncertain delivery.
+
+## Imported source identity
+
+Imported Todos keep product-owned source metadata in
+`ac_todo_source_binding`; manually created Todos have no source binding. Dima
+imports use the stable work-item identity rather than editable title or
+description content. Within one `avernet_tenant`, runtime `env`, TeamClaw
+`space_id`, `source_type`, and `source_item_id`, only one Todo may exist. The
+Dima project ID is retained as `source_container_id` metadata but does not
+change that identity, so moving a work item between Dima projects cannot create
+a duplicate Todo in the same TeamClaw Space. The same source item may be
+imported independently into another TeamClaw Space.
+
+Todo and source binding are inserted in one database transaction. A friendly
+pre-check returns the existing Todo ID for ordinary retries, while the database
+unique constraint closes concurrent-import races; an import conflict returns
+`409` with `data.existing_todo_id`. This binding is an import snapshot only. It
+does not introduce automatic Dima synchronization, status write-back, or a
+periodic import job.
 
 ## Bot execution and artifact reporting contract
 
@@ -113,10 +165,14 @@ artifact persistence.
 After at least one artifact is reported successfully, the Bot calls the
 generation-scoped Complete endpoint with `todo_execution_id` and the same
 `X-Todo-Execution-Token`. The endpoint appends one idempotent `task.completed`
-event for that execution. It intentionally leaves the execution credential and
-Todo row unchanged; the existing scheduler observes the resulting Context
+event for that execution and may persist the caller's `summary` and structured
+`result` as completion content. It intentionally leaves the execution credential
+and Todo row unchanged; the existing scheduler observes the resulting Context
 `done` state, invalidates the active credential, and projects the Todo from
-`in_progress` to `pending_acceptance`.
+`in_progress` to `pending_acceptance` for legacy Todos. For template Todos, the
+Backend uses the execution's stage binding to advance the current stage after the
+completion event is durable. There is no separate Bot-facing stage outcome
+endpoint.
 
 Artifact persistence and Context event storage are separate stores. The service
 therefore persists the artifact first and appends `artifact.reported` only after
@@ -132,7 +188,7 @@ event.
 ## Context Boundary
 
 ```yaml
-purpose: Own persisted Todo lifecycle, automatic Context dispatch, runtime refresh, interactions, and acceptance.
+purpose: Own persisted Todo lifecycle, imported-source identity, automatic Context dispatch, runtime refresh, interactions, and acceptance.
 provides:
   - TodoServiceProtocol
   - TodoService
@@ -143,6 +199,9 @@ provides:
   - TodoPage
   - TodoEventRecord
   - TodoCollaborationPort
+  - TodoSourceServiceProtocol
+  - TodoSourceService
+  - TodoSourceInput
   - InProcessTodoCollaborationAdapter
 consumes:
   - TodoRepositoryProtocol
@@ -151,6 +210,10 @@ consumes:
   - CachePlugin
   - TodoCollaborationPort
   - TodoArtifactServiceProtocol
+  - TodoSourceClientProtocol
+  - MCPAuthPlugin
+  - MCPCenterPlugin
+  - HttpClient
 internal_dependencies:
   - agentclaw.community.core.errors
   - agentclaw.community.core.repository.protocols
@@ -164,11 +227,12 @@ internal_dependencies:
 
 ### Change impact
 
-Changes affect Todo create/read, automatic scheduling, the compensation Run
-endpoint, event and interaction projection, and acceptance. Repository state
+Changes affect Todo create/read, imported-source identity and duplicate
+prevention, automatic scheduling, the compensation Run endpoint, event and
+interaction projection, and acceptance. Repository state
 transitions are compare-and-set operations so duplicate schedulers or operator
 retries cannot move a Todo backwards. Context creation and Todo persistence are
 not one cross-store transaction; dispatch therefore resumes from an already
 bound Context when retrying. A does not own an interaction table: Human
 interaction events and executor progress remain in B, while Human acceptance
-and the four product states remain in A.
+and the six product states remain in A; runtime attempt states remain in B.

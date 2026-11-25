@@ -240,3 +240,9 @@ coverage gate alongside the shared stack's v1 scenarios. Run it directly with:
 ```sh
 python3 apps/bcs/scripts/e2e-test/fuse_cards_story.py --binary apps/bcs/target/debug/bcs
 ```
+
+## Configured catalog metadata
+
+See [configured catalog labels](catalog-labels.md) for the shared dictionary,
+operation-specific omission table, atomic persistence and complete custom-plus-system
+labels. Payload completeness does not prove downstream stale-key removal.

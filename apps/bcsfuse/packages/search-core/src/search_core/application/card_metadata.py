@@ -44,9 +44,12 @@ class CardMetadataRetrieval:
 
     async def retrieve(self, request):
         result = await self.retrieval.retrieve(request)
+        return await self.enrich(result)
+
+    async def enrich(self, result, *, allow_timeout_projection=True):
         with stage_timing("card_metadata") as stage:
             stage["input_count"] = len(result.items)
-            enriched = await self._enrich(result, stage)
+            enriched = await self._enrich(result, stage, allow_timeout_projection)
             stage["result_count"] = len(enriched.items)
             if "card_metadata_unavailable" in enriched.reasons:
                 stage["outcome"] = "unavailable"
@@ -54,7 +57,7 @@ class CardMetadataRetrieval:
                 stage["outcome"] = "missing"
             return enriched
 
-    async def _enrich(self, result, stage):
+    async def _enrich(self, result, stage, allow_timeout_projection):
         if not result.items:
             return result
         revision = self.state.metadata_revision()
@@ -97,7 +100,7 @@ class CardMetadataRetrieval:
                 reasons=tuple(dict.fromkeys(reasons)),
             )
         timeout_items = {}
-        if timed_out and self.project_timeout is not None:
+        if allow_timeout_projection and timed_out and self.project_timeout is not None:
             timeout_items = await self._project_timeouts(
                 [item for item in result.items if item.item_id in timed_out]
             )
