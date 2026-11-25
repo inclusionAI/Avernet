@@ -1,0 +1,34 @@
+apps/backend/tests/community/core/task/task_runner/integration/test_dispatch_single_bot.py
+  s_885ffb973587a3::t_3b100c08b765b1 390-421
+apps/backend/src/agentclaw/community/adapters/http/task/schemas.py
+  s_885ffb973587a3::t_295afa9f291509 147-153
+apps/backend/src/agentclaw/community/core/task/task_runner/client/prompt_formatter.py
+  s_885ffb973587a3::t_295afa9f291509 49,72
+  s_885ffb973587a3::t_022dc20cf45055 189-192,225
+apps/backend/tests/community/adapters/http/task/test_schemas.py
+  s_885ffb973587a3::t_3b100c08b765b1 8-9,12-13,76-94
+  s_885ffb973587a3::t_12c68484c8ea81 95-96
+apps/backend/src/agentclaw/community/core/task/task_runner/client/relay_prompt.py
+  s_885ffb973587a3::t_295afa9f291509 13,23,37-38,133-137
+apps/backend/tests/community/core/task/task_runner/test_relay_prompt.py
+  s_885ffb973587a3::t_022dc20cf45055 87,287
+  s_885ffb973587a3::t_3b100c08b765b1 85-86,255-286,288-303
+apps/backend/src/agentclaw/community/core/task/task_runner/task_runner.py
+  s_885ffb973587a3::t_567f716783c36f 171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "67af7b3352b0507cf9a3f4a82f910997e063c983",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
