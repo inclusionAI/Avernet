@@ -86,13 +86,20 @@ class RecycleOperations:
         app: str,
         worker_enabled: bool,
         is_teclaw,
+        should_queue=None,
         clock=time.time,
     ):
         self.store, self.runtime, self.queue, self.guard = store, runtime, queue, guard
         self.app, self.worker_enabled, self.clock = app, worker_enabled, clock
         self.is_teclaw = is_teclaw
+        # Tests and legacy composition roots default to the durable path. The
+        # production root supplies the engine-owned fastdisk admission hook.
+        self.should_queue = should_queue or (lambda _bot: True)
 
-    def submit(self, *, bot_id, owner_id, owner_name=None, request_id=""):
+    def submit(self, *, bot_id, owner_id, owner_name=None, request_id="",
+               source="openapi", reason=None):
+        if source not in {"openapi", "manual_ops"}:
+            raise ValueError("Unsupported recycle source")
         bot = self.store.read(bot_id, owner_id)
         ensure_supported(bot, self.is_teclaw)
         with self.guard(bot):
@@ -108,16 +115,15 @@ class RecycleOperations:
                 and existing.status in TERMINAL_STATUSES
             ):
                 # Repair a failed on_give_up write only on a mutating request;
-                # GET remains strictly read-only. Never replay an uncertain release.
+                # GET remains strictly read-only. Do not silently restart failed work.
                 record = self.store.update(
                     record,
                     RUNNING,
-                    phase="NEEDS_CONFIRMATION"
-                    if record["phase"] == "RELEASING"
-                    else "FAILED",
+                    phase="FAILED",
                     error_code="TASK_INTERRUPTED",
                     message="回收任务已结束，请核对本次操作结果",
                 )
+                return self._accepted(bot, record, False)
             if record.get("phase") in BLOCKING:
                 if record.get("app") != self.app:
                     raise BotInvalidLifecycleStateError(
@@ -146,6 +152,22 @@ class RecycleOperations:
                 raise BotInvalidLifecycleStateError(
                     bot_id=bot_id, current_status=bot["status"]
                 )
+            try:
+                needs_queue = self.should_queue(bot)
+            except Exception:
+                # A failed/unknown fastdisk probe follows the existing coding
+                # compatibility rule: do not introduce a queue state.
+                needs_queue = False
+            if not needs_queue:
+                return {
+                    "_synchronous": True,
+                    "bot_id": bot_id,
+                    "owner_id": owner_id,
+                    "status": bot["status"],
+                    "changed": True,
+                    "operation_id": None,
+                    "phase": None,
+                }
             if not self.worker_enabled:
                 raise RecycleUnavailable("Recycle worker is disabled")
             payload = {
@@ -159,7 +181,8 @@ class RecycleOperations:
                 "operation_id": uuid.uuid4().hex,
                 "target": self.runtime.target(bot),
                 "created_at": self.clock(),
-                "source": "openapi",
+                "source": source,
+                "reason": reason,
                 "request_id": request_id,
             }
             try:
@@ -324,29 +347,23 @@ class RecycleHandler:
                     record["target"], payload["operation_id"], payload["owner_id"]
                 )
             except Exception:
-                # A lost response is ambiguous: observation, NOT another destroy.
-                return Reschedule(POLL_SECONDS)
-            record = store.update(payload, {"RELEASING"}, release=release)
-        return self._observe(payload, record)
-
-    def _observe(self, payload, record):
-        service, store = self.service, self.service.store
-        try:
-            status = service.runtime.observe_release(
-                record["target"], record.get("release"), record.get("physical_targets")
+                self._fail(payload, record, "RELEASE_FAILED", "资源释放失败，未完成本次回收")
+                return Fail("Release failed")
+            # Keep the original recycle success criterion: a successful release
+            # call proceeds to completion, without a second physical-status poll.
+            record = store.update(
+                payload, {"RELEASING"}, release=release, release_confirmed=True,
             )
-        except Exception:
-            status = "UNKNOWN"
-        if status != "RELEASED":
+        return self._finish(payload, record)
+
+    def _finish(self, payload, record):
+        store = self.service.store
+        # Another delivery may arrive while the release call is still running.
+        # It must neither repeat that call nor finalize it before it returns.
+        if not record.get("release_confirmed"):
             if self.clock() - record["release_started_at"] >= RELEASE_TIMEOUT:
-                store.update(
-                    payload,
-                    {"RELEASING"},
-                    phase="NEEDS_CONFIRMATION",
-                    error_code="RELEASE_UNCONFIRMED",
-                    message="资源释放结果待确认，请勿重复回收或恢复",
-                )
-                return Fail("Release needs confirmation")
+                self._fail(payload, record, "RELEASE_FAILED", "资源释放未完成，本次回收失败")
+                return Fail("Release failed")
             return Reschedule(POLL_SECONDS)
         if not record.get("finalizer"):
             finalizer = uuid.uuid4().hex
@@ -381,17 +398,16 @@ class RecycleHandler:
             store.update(
                 payload,
                 {"RELEASING"},
-                phase="NEEDS_CONFIRMATION",
-                error_code="FINALIZATION_UNCONFIRMED",
-                message="回收收尾结果待确认，暂不可恢复",
+                phase="FAILED",
+                error_code="FINALIZATION_FAILED",
+                message="回收收尾未完成，本次回收失败",
             )
-            return Fail("Finalization needs confirmation")
+            return Fail("Finalization failed")
         return Reschedule(POLL_SECONDS)
 
     def _fail(self, payload, record, code, message):
-        phase = "NEEDS_CONFIRMATION" if record["phase"] == "RELEASING" else "FAILED"
         self.service.store.update(
-            payload, RUNNING, phase=phase, error_code=code, message=message
+            payload, RUNNING, phase="FAILED", error_code=code, message=message
         )
 
     def on_give_up(self, task):

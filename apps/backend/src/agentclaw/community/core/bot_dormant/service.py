@@ -28,7 +28,7 @@ from agentclaw.community.core.bot_dormant.baas_client import (
 )
 from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.bot_dormant.datetime_utils import max_datetime, parse_dt
-from agentclaw.community.core.bot_dormant.notify_log import commit_notify_log_idempotent
+from agentclaw.community.core.bot_dormant.notify_log import commit_notify_log_idempotent, recycle_notification
 from agentclaw.community.core.bot_dormant.scan_policy import (
     DEFAULT_INACTIVE_THRESHOLD_DAYS,
     DEFAULT_RECYCLE_GRACE_DAYS,
@@ -294,25 +294,10 @@ class DormantBotService:
         dry_run 透传到 notify_log 字段，预发联调时也能看到「真实模式下本应发的
         recycle 文案」，但 pending-notifications 默认不会拉到 dry_run=1 行。
         """
-        from agentclaw.community.core.bot_dormant.templates import render_recycle
-
-        dt_str = date.today().strftime("%Y%m%d")
-        content = render_recycle(
-            bot_name=candidate.bot_name or candidate.bot_id,
-            bot_id=candidate.bot_id,
-            action_link_pattern=self._action_link_pattern,
-        )
-        log_row = DormantNotifyLog(
-            bot_id=candidate.bot_id,
-            owner_id=candidate.owner_id,
-            entity_id=candidate.owner_id,
-            notify_type="recycle",
-            notify_target=candidate.owner_id,
-            notify_source="internal_scan",
-            content=content,
-            dt=dt_str,
-            send_status="pending",
-            dry_run=1 if dry_run else 0,
+        log_row = recycle_notification(
+            bot_id=candidate.bot_id, owner_id=candidate.owner_id,
+            bot_name=candidate.bot_name,
+            action_link_pattern=self._action_link_pattern, dry_run=dry_run,
         )
         log_row, created = commit_notify_log_idempotent(session, log_row)
         logger.info(
