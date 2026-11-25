@@ -1,0 +1,57 @@
+apps/bcs/crates/application/v1/bcs-app-group/CONTEXT.md
+  s_eb6bd30f028bec::t_a40f5d314e6227 5-11
+apps/bcs/crates/application/v1/bcs-app-group/src/projections.rs
+  s_eb6bd30f028bec::t_f42a3ed4b222f6 7-14,18,33
+apps/bcs/crates/application/v1/bcs-app-group/src/update.rs
+  s_eb6bd30f028bec::t_4cec0e64d13d07 104,113
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service.rs
+  s_eb6bd30f028bec::t_b98018dd69ea74 216-224,920-922
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/catalog_labels.rs
+  s_eb6bd30f028bec::t_88f466a6e48633 3,11
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/catalog_snapshot.rs
+  s_eb6bd30f028bec::t_6051d00a6a6e5f 1-118
+apps/bcs/crates/service-api/bcs-service-api/src/core/group.rs
+  s_eb6bd30f028bec::t_b9283fc40bec85 196-202
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/group.rs
+  s_eb6bd30f028bec::t_fdc3fa15a681f2 100-108
+apps/bcs/crates/service-api/bcs-service-api/src/types/mod.rs
+  s_eb6bd30f028bec::t_38caefb736f444 32,42-49
+apps/bcs/crates/services/bcs-fusion/src/core/card_sync.rs
+  s_eb6bd30f028bec::t_85fbb4931e0603 267
+apps/bcs/crates/services/bcs-group-store/src/card_snapshot.rs
+  s_eb6bd30f028bec::t_f75bc09e14bf17 9,32
+apps/bcs/crates/services/bcs-group-store/src/memory.rs
+  s_eb6bd30f028bec::t_5311c536546361 54-146,193,252-253,255-259
+apps/bcs/crates/services/bcs-group-store/src/store_eventful.rs
+  s_eb6bd30f028bec::t_17046ce5dd8694 66-73,513-542,545-556,561
+apps/bcs/crates/services/bcs-group-store/src/store_repo.rs
+  s_eb6bd30f028bec::t_4a13dbe8fdf8a8 31-37
+apps/bcs/crates/services/bcs-group-store/tests/conformance_mutation_snapshot.rs
+  s_eb6bd30f028bec::t_8844c8115fb991 1-17
+apps/bcs/crates/services/bcs-group/CONTEXT.md
+  s_eb6bd30f028bec::t_b2044eea96b90f 5-12
+apps/bcs/crates/services/bcs-group/src/core/group_core.rs
+  s_eb6bd30f028bec::t_b06bcbdcc63b2d 35-120,253-260,262
+apps/bcs/crates/services/bcs-group/tests/catalog_commit.rs
+  s_eb6bd30f028bec::t_a8311cfb70fc6b 555-602
+apps/bcs/crates/test-support/bcs-test-support/src/contract/group_mutation_snapshot.rs
+  s_eb6bd30f028bec::t_dc7aef03a47373 1-46
+apps/bcs/crates/test-support/bcs-test-support/src/contract/mod.rs
+  s_eb6bd30f028bec::t_b1762576993c8c 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5252208c726b7d16d0993bece77e742264828e10",
+  "prompts": {},
+  "sessions": {
+    "s_eb6bd30f028bec": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f293-4675-7482-9279-64ba3e6e1384",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

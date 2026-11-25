@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/strategy.py
+  s_3d36bb45bb2a35::t_c0174490baa230 910-916,945
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ee2457f9a6085a35dc003740b6145c5ea5f6bae1",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

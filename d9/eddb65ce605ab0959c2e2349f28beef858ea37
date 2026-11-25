@@ -1,0 +1,55 @@
+engine/adapter/src/engine/community/plugins/openclaw/service_layout_probe.py
+  s_5537f9229000c2::t_1f1b4955c405c2 1-42,45-68
+  s_5537f9229000c2::t_ab6fae75e4ca06 43-44
+apps/backend/tests/community/core/service_bot/services/deploy/test_service_artifact_fresh_layout.py
+  s_5537f9229000c2::t_ab6fae75e4ca06 21,289-358
+engine/adapter/src/engine/community/plugins/openclaw/tests/test_service_layout_probe.py
+  s_5537f9229000c2::t_e4465b215b8663 1-56
+apps/backend/src/agentclaw/community/core/skills_pool/README.md
+  s_5537f9229000c2::t_450748a367e3c0 16-17
+  s_5537f9229000c2::t_81716130f91404 18-23
+engine/adapter/src/engine/community/plugins/openclaw/_skills.py
+  s_5537f9229000c2::t_317e72804dbcf6 35,130-141
+engine/adapter/src/engine/community/api/skills/schemas.py
+  s_5537f9229000c2::t_317e72804dbcf6 89
+  s_5537f9229000c2::t_450748a367e3c0 118-121
+engine/adapter/src/engine/community/core/adapters/openclaw/skills.py
+  s_5537f9229000c2::t_a1e86520ae797e 244
+apps/backend/src/agentclaw/community/core/skill_center/runtime_layout_probe_service_protocol.py
+  s_5537f9229000c2::t_317e72804dbcf6 23
+engine/adapter/src/engine/community/api/skills/router.py
+  s_5537f9229000c2::t_317e72804dbcf6 314
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/build_stage.py
+  s_5537f9229000c2::t_317e72804dbcf6 171
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/artifact_build_request.py
+  s_5537f9229000c2::t_450748a367e3c0 188-192
+  s_5537f9229000c2::t_1f1b4955c405c2 14
+  s_5537f9229000c2::t_317e72804dbcf6 58,116-118,148,185-187,193-195,217
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/service_skills_manifest.py
+  s_5537f9229000c2::t_317e72804dbcf6 264-268
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_layout_probe.py
+  s_5537f9229000c2::t_450748a367e3c0 70,221
+  s_5537f9229000c2::t_317e72804dbcf6 109,127,152-154,204,223-224,230
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_5537f9229000c2::t_450748a367e3c0 274-275
+apps/backend/tests/community/core/service_bot/services/publish_flow/test_build_stage_layout_probe.py
+  s_5537f9229000c2::t_317e72804dbcf6 157
+engine/adapter/src/engine/community/core/skills/models.py
+  s_5537f9229000c2::t_317e72804dbcf6 286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d9eddb65ce605ab0959c2e2349f28beef858ea37",
+  "prompts": {},
+  "sessions": {
+    "s_5537f9229000c2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f35d-34fc-72c1-9411-b41c276a7a11",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

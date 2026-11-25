@@ -1,0 +1,42 @@
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a.py
+  h_059e888e5e4e82 1-182
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_auth.py
+  h_059e888e5e4e82 1-23
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_schemas.py
+  h_059e888e5e4e82 1-198
+apps/backend/src/agentclaw/community/adapters/http/task/translator_commission_open_a2a.py
+  h_059e888e5e4e82 1-130
+apps/backend/src/agentclaw/community/core/gateway_principal/README.md
+  h_059e888e5e4e82 45,119-127
+apps/backend/src/agentclaw/community/core/gateway_principal/__init__.py
+  h_059e888e5e4e82 48,75
+apps/backend/src/agentclaw/community/core/gateway_principal/verifier.py
+  h_059e888e5e4e82 44-45,354-378
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/a2a_wire.py
+  h_059e888e5e4e82 1-273
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/bridge.py
+  h_059e888e5e4e82 1-84
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/common.py
+  h_059e888e5e4e82 1-382
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/delivery.py
+  h_059e888e5e4e82 1-279
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/envelope.py
+  h_059e888e5e4e82 1-144
+apps/gateway/configs/application.yaml
+  h_059e888e5e4e82 198-200,549-555
+apps/gateway/tests/unit/core/authn/test_route_security.py
+  h_059e888e5e4e82 642-655
+apps/gateway/tests/unit/core/forwarding/test_commission_a2a_routing.py
+  h_059e888e5e4e82 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "28cc1cc7d21a1915ca793abaa5dea71ca0a12e63",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

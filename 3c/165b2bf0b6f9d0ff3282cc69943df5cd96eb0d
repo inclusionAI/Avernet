@@ -1,0 +1,105 @@
+apps/bcsfuse/scripts/generate_discover_contract.sh
+  s_9e428ec8192673::t_489107583e99d3 6
+apps/bcsfuse/tests/alipay/test_resource_cards.py
+  s_9e428ec8192673::t_a0df0d137d4080 225-227
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/search_request.py
+  s_9e428ec8192673::t_546b387194c1f7 14-15,41
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/search_response.py
+  s_9e428ec8192673::t_301ae92692700e 46-48
+  s_9e428ec8192673::t_546b387194c1f7 15,49-51
+apps/bcsfuse/tests/alipay/test_tr_server.py
+  s_9e428ec8192673::t_47d7454009d6a1 84-87
+  s_9e428ec8192673::t_a0df0d137d4080 19,112-114
+  s_9e428ec8192673::t_c7d03444c9e05c 82-83,88
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_9e428ec8192673::t_a0df0d137d4080 46-58,167-168,176
+apps/bcsfuse/tr/README.md
+  s_9e428ec8192673::t_78cd8b956a4277 1-22
+apps/bcsfuse/tests/alipay/test_discovery_input_cards.py
+  s_9e428ec8192673::t_45d197ad95c087 201-230
+  s_9e428ec8192673::t_301ae92692700e 77,239-253,255-257,263-265,273-276,290-292
+  s_9e428ec8192673::t_3c3cf38237b664 31,44-47,88,185-200,231-238,254,258-262,266-272,277-289,293-296
+  s_9e428ec8192673::t_a0df0d137d4080 11,173-178
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_9e428ec8192673::t_ef6a28d63bf438 140
+  s_9e428ec8192673::t_2f7696c42d2d9c 68
+  s_9e428ec8192673::t_9d236674178774 88,101,109,139
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_card.py
+  s_9e428ec8192673::t_90580acadbfbc6 1-20,31-35,39,43-47,54-56,60,64,68
+  s_9e428ec8192673::t_301ae92692700e 21-30,36-38,40-42,48-53,57-59,61-63,65-67
+apps/bcsfuse/docs/architecture/examples/discovery/search-agent-response.json
+  s_9e428ec8192673::t_f219c5a789162d 32-40,80-81
+apps/bcsfuse/docs/architecture/alipay-discover-contract-pending.md
+  s_9e428ec8192673::t_88306e82ff024a 2,4,9
+  s_9e428ec8192673::t_f219c5a789162d 1,3,5-6,10
+  s_9e428ec8192673::t_2f7696c42d2d9c 7
+  s_9e428ec8192673::t_ef6a28d63bf438 8
+apps/bcsfuse/scripts/generate_discover_contract.cjs
+  s_9e428ec8192673::t_489107583e99d3 1-36
+apps/bcsfuse/docs/architecture/examples/discovery/search-group-response.json
+  s_9e428ec8192673::t_ed7cd67da65d08 12-13,52-145,148,170,173-174,177-178,182,185-186,188
+  s_9e428ec8192673::t_f219c5a789162d 189-190
+apps/bcsfuse/docs/architecture/examples/discovery/search-tr-mixed-response.json
+  s_9e428ec8192673::t_ed7cd67da65d08 95-96,135-228,231,274-450
+  s_9e428ec8192673::t_f219c5a789162d 35-43,83-84,272-273,452-453
+  s_9e428ec8192673::t_b9998721379eb9 451
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_9e428ec8192673::t_546b387194c1f7 33,35,55,128-129
+apps/bcsfuse/internal/zbcsfuse_internal/application/card_metadata.py
+  s_9e428ec8192673::t_546b387194c1f7 36
+  s_9e428ec8192673::t_eae90c01c13790 15,22
+apps/bcsfuse/tr/rpc.proto
+  s_9e428ec8192673::t_afd58f2db0e727 3,19,22,28,32,67-69,72-84,86-121
+  s_9e428ec8192673::t_b49133234dae82 85
+  s_9e428ec8192673::t_2423b179a0dd86 70-71
+  s_9e428ec8192673::t_a2838037cba4f6 1
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_9e428ec8192673::t_ed7cd67da65d08 1,3,7-9,21,52,66,68,112-121,123-131,141-158,161,163-178,182,202,204,206,208,210,212,214-220,222-246,254-264,266,268,270-274,277-280
+  s_9e428ec8192673::t_60147935e04771 5,19,34,56-62,106,201,203,205,207,209,211,213,267,269,282
+  s_9e428ec8192673::t_f219c5a789162d 36,43,46,84-85,89-104,122,132-140,159-160,162,180,221,247,251-253,265,275-276,281
+  s_9e428ec8192673::t_2f7696c42d2d9c 28,30,44-45,50-51,248-250
+  s_9e428ec8192673::t_c79b360e33d71d 6,20,32,105,179,181
+apps/bcsfuse/internal/zbcsfuse_internal/application/resource_result.py
+  s_9e428ec8192673::t_546b387194c1f7 13,16,27
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/search_context.py
+  s_9e428ec8192673::t_546b387194c1f7 1-2,4-7
+  s_9e428ec8192673::t_2423b179a0dd86 3,8-9
+apps/bcsfuse/internal/zbcsfuse_internal/generated/AgentDiscoverFacade.py
+  s_9e428ec8192673::t_a83a4d7ba1a247 39-210,278-279,286,288,295,305,314-425,465,469,478,482,484,495
+apps/bcsfuse/tr/java/pom.xml
+  s_9e428ec8192673::t_b595ddb9927fc9 9
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/AgentItem.java
+  s_9e428ec8192673::t_fc2b1ebff7db4e 20,28-29,46,50,77-84
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/CardCapabilities.java
+  s_9e428ec8192673::t_cf0b96ce1b44ac 1-45
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/CardExtension.java
+  s_9e428ec8192673::t_e30e785287ebf4 1-55
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/CardInterface.java
+  s_9e428ec8192673::t_55526b83208fcc 1-55
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/CardSecurityScheme.java
+  s_9e428ec8192673::t_51cb929085428c 1-55
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/CardSkill.java
+  s_9e428ec8192673::t_a29362170ee9d2 1-55
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/DiscoverRequest.java
+  s_9e428ec8192673::t_d7981786c65af6 23,30-31,71-78
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/ResourceCard.java
+  s_9e428ec8192673::t_bbf478b6a7ada5 1-169
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/SearchContext.java
+  s_9e428ec8192673::t_44057cfc2abf91 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3c165b2bf0b6f9d0ff3282cc69943df5cd96eb0d",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

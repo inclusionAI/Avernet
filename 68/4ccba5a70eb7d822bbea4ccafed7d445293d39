@@ -1,0 +1,57 @@
+apps/bcs-internal/bcn-configs/agentbase-sofarpc.toml
+  s_cc6f48e2a8273e::t_5bdd484c88643a 18-19
+apps/bcs-internal/configs/agentbase-sofarpc.toml
+  s_cc6f48e2a8273e::t_1b86bda175ec79 18-19
+apps/bcs-internal/contracts/alipayagentbase/README.md
+  s_cc6f48e2a8273e::t_dc78e8a890660d 1,3-5,7,9,11-20,22-23,25-73
+apps/bcs-internal/contracts/alipayagentbase/SOURCE-BASELINE.md
+  s_cc6f48e2a8273e::t_3ccc4b3ed0fd2b 5,7-14,17-21
+apps/bcs-internal/contracts/alipayagentbase/contract-lock.json
+  s_cc6f48e2a8273e::t_e7d8a2277de2fe 100-103,105,213,223-224
+apps/bcs-internal/contracts/alipayagentbase/contract-lock.schema.json
+  s_cc6f48e2a8273e::t_bb93bea6498476 7,20,107,110-111
+apps/bcs-internal/contracts/alipayagentbase/wire/.gitignore
+  s_cc6f48e2a8273e::t_ba6a7855de99c9 1-2
+apps/bcs-internal/contracts/alipayagentbase/wire/README.md
+  s_cc6f48e2a8273e::t_ec40620165f88c 3,32-34,37-38,46-48,51-62
+apps/bcs-internal/contracts/alipayagentbase/wire/capture/CaptureMain.java
+  s_cc6f48e2a8273e::t_55e35d1e8552f1 6
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_cc6f48e2a8273e::t_cb95ac61c35d81 347-349
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/README.md
+  s_cc6f48e2a8273e::t_c7b3248f7e81b2 47-49,57-63,66-71,94
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  s_cc6f48e2a8273e::t_a6385f4557a624 235-236,242,344,385,907-909,1017,1024,1036,1039,1057-1090,1826-1828,1830-1832,1835,2110,2129
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/config.rs
+  s_cc6f48e2a8273e::t_a1892914159de1 6-7,54,68,76-77,100,162-180,203-204,234-239,241-242,278-281,283-285,309,327
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/contract.rs
+  s_cc6f48e2a8273e::t_15c569da40b299 20-21,71,73,117,130-137,161,182,185
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/identity.rs
+  s_cc6f48e2a8273e::t_130e33d1318bd7 4-6,196-198,200
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/config_fail_closed.rs
+  s_cc6f48e2a8273e::t_88e9e8d8b5546a 23,77-78,93-128,312-313,315
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/identity_pins.rs
+  s_cc6f48e2a8273e::t_66dc0dfc264b58 7-8,11-17
+apps/bcs-internal/docs/sofa-rpc/alipayagentbase-a2a-remote-server-contract.md
+  s_cc6f48e2a8273e::t_314fdbde7c4ce2 1,10,20,22,25-31,77
+apps/bcs-internal/scripts/check-agentbase-contract.py
+  s_cc6f48e2a8273e::t_7f2b03f587c55b 72-73,579-587,593-610,981,1041-1042,1058-1065,1290,1293-1294,1301-1302,1324-1333
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_cc6f48e2a8273e::t_59d449139254b1 313-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "684ccba5a70eb7d822bbea4ccafed7d445293d39",
+  "prompts": {},
+  "sessions": {
+    "s_cc6f48e2a8273e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4b9-052c-73e1-aceb-b6b395cd56fe",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

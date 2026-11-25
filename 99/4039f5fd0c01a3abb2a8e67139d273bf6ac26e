@@ -1,0 +1,49 @@
+apps/backend/src/agentclaw/community/core/mcp/README.md
+  s_3d36bb45bb2a35::t_fb2fd0679aba86 68-69
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_fb2fd0679aba86 148-157,164
+apps/backend/tests/community/core/skill_center/_test_skill_set_management_service_support.py
+  s_3d36bb45bb2a35::t_fb2fd0679aba86 86-88
+apps/backend/src/agentclaw/community/core/skill_center/runtime_projection_contract.py
+  s_3d36bb45bb2a35::t_4e31b48689a420 230-234
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/scoped_mcp_config.py
+  s_3d36bb45bb2a35::t_4e31b48689a420 60,160
+  s_3d36bb45bb2a35::t_d717132c81f0db 12-14,59,61,71-72,116,151-159,161-164,168,174-175,219-224
+apps/backend/src/agentclaw/community/core/mcp/scoped_config_flow.py
+  s_3d36bb45bb2a35::t_d717132c81f0db 13-20,227,303-304,309-310,320,324,352-358,360-374,406,415,450,515,524-551
+  s_3d36bb45bb2a35::t_4e31b48689a420 305-308,323,359,496-510
+apps/backend/src/agentclaw/community/di/modules/runtime_projection_recovery_module.py
+  s_3d36bb45bb2a35::t_d717132c81f0db 24,103-108
+  s_3d36bb45bb2a35::t_fb2fd0679aba86 13-15,17-19,45,59-74
+  s_3d36bb45bb2a35::t_a1d2f134376c65 75,109-110
+apps/backend/src/agentclaw/community/di/modules/mcp_module.py
+  s_3d36bb45bb2a35::t_d717132c81f0db 65-67,208-216
+  s_3d36bb45bb2a35::t_4a40ba017d1d18 217
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_reconcile.py
+  s_3d36bb45bb2a35::t_d717132c81f0db 39-41
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/mcp.py
+  s_3d36bb45bb2a35::t_4e31b48689a420 98,103
+  s_3d36bb45bb2a35::t_d717132c81f0db 97,99-102,104,111
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_9238cb2e95513d 182-227
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_desired_state.py
+  s_3d36bb45bb2a35::t_fb2fd0679aba86 109-111,113,123
+apps/backend/tests/community/repository/bot/test_scoped_mcp_config.py
+  s_3d36bb45bb2a35::t_e449b9c48c9b98 352-385
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "994039f5fd0c01a3abb2a8e67139d273bf6ac26e",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

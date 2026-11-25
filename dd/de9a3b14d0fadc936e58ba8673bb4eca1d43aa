@@ -1,0 +1,27 @@
+apps/backend/tests/community/api/bot_management/test_passport_missing.py
+  s_2e7a63cb20f938::t_2ba0f6d849a1b3 12,120-128
+  s_2e7a63cb20f938::t_6dcb4c231ff99c 13,27-30,98,101
+  s_2e7a63cb20f938::t_d939e27e23fcb4 47
+  s_2e7a63cb20f938::t_ce4fce69ce8508 1,3-6,14-26,31-34,39-40,45-46,48,57-64,87-94,99-100,102-104,109-119
+  s_2e7a63cb20f938::t_b8480dbfaf0ebd 2,7-9,35-38,41-44,49,52,54-56,65,68,70-86,105-108
+  s_2e7a63cb20f938::t_6176b33d71ef4b 10-11,50-51,53,66-67,69
+  s_2e7a63cb20f938::t_b51a3a2111823e 95-97
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  s_2e7a63cb20f938::t_f5d999ead39e8f 1603-1606
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ddde9a3b14d0fadc936e58ba8673bb4eca1d43aa",
+  "prompts": {},
+  "sessions": {
+    "s_2e7a63cb20f938": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ef3e-fdd6-7e90-ae97-ac5ea00763b5",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

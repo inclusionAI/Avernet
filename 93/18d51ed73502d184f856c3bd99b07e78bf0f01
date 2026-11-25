@@ -1,0 +1,26 @@
+apps/evolverun/clawweb/docs/workflow-overview-analytics.md
+  s_85976bab9c700d::t_7f60b8fe1ad38f 126-130,135-137,153-160
+  s_85976bab9c700d::t_c8bd4bb8ef9994 143-152,161
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/monitoring-runtime.ts
+  s_85976bab9c700d::t_87140614e1dc79 33-34
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/session-recovery-runtime.test.ts
+  s_85976bab9c700d::t_09faa79c8474e8 148-151,154,162-179,216-222
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/monitoring-runtime.test.ts
+  s_85976bab9c700d::t_87140614e1dc79 4,6-9,81,95,101,104,108-124,130,137-140,154-156,208,211,215-217,224,227-248,255,261,263-265,268-269,276,281-282,289,298-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9318d51ed73502d184f856c3bd99b07e78bf0f01",
+  "prompts": {},
+  "sessions": {
+    "s_85976bab9c700d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e37d-9fb9-7890-9945-a04d3e863f19",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,82 @@
+apps/frontend-nextgen/README.md
+  h_bb3ca6fb13c5df 308-318
+apps/frontend-nextgen/src/hooks/taskEscortParity/useEditorVisualHistory.ts
+  h_bb3ca6fb13c5df 1-41
+apps/frontend-nextgen/src/hooks/taskEscortParity/useWorkflowCreation.ts
+  h_bb3ca6fb13c5df 45,50-52
+apps/frontend-nextgen/src/pages/TaskEscort/Navigation.tsx
+  h_bb3ca6fb13c5df 4-5,67,69-72,97,104
+apps/frontend-nextgen/src/pages/TaskEscort/parity/WorkflowCreationDialog.tsx
+  h_bb3ca6fb13c5df 14,21-22
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorAuthoringToolbar.tsx
+  h_bb3ca6fb13c5df 1-49
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorAuthoringYaml.tsx
+  h_bb3ca6fb13c5df 6,22,32,35,39
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorGraph.tsx
+  h_bb3ca6fb13c5df 2-4,8-15,17-19
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorInspector.tsx
+  h_bb3ca6fb13c5df 3-7,9-59,61-64,68-173,175-178,183-184,188-197,199-206
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorWorkspaceBody.tsx
+  h_bb3ca6fb13c5df 1-59
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/WorkflowEditorPage.tsx
+  h_bb3ca6fb13c5df 9-10,14-16,37-40,44,59,64-91,97,99,152-162,168,176,180-181
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/CanvasHint.tsx
+  h_bb3ca6fb13c5df 1-14
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/CanvasPresentation.ts
+  h_bb3ca6fb13c5df 1-64
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/EditorCanvasToolbar.tsx
+  h_bb3ca6fb13c5df 1-133
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/EditorFlowNode.tsx
+  h_bb3ca6fb13c5df 1-139
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/FlowNodeIcon.tsx
+  h_bb3ca6fb13c5df 1-65
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/NodePalette.tsx
+  h_bb3ca6fb13c5df 1-113
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/VisualCanvas.tsx
+  h_bb3ca6fb13c5df 1-294
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/contracts.ts
+  h_bb3ca6fb13c5df 1-70
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/graph.ts
+  h_bb3ca6fb13c5df 1-339
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/model.ts
+  h_bb3ca6fb13c5df 1-56
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/nodeCatalog.ts
+  h_bb3ca6fb13c5df 1-76
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/editor-workspace.css
+  h_bb3ca6fb13c5df 1-81
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/inspector/Fields.tsx
+  h_bb3ca6fb13c5df 1-164
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/inspector/SettingsDraft.tsx
+  h_bb3ca6fb13c5df 1-79
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/inspector/validation.ts
+  h_bb3ca6fb13c5df 1-113
+apps/frontend-nextgen/src/pages/TaskEscort/styles.css
+  h_bb3ca6fb13c5df 27-28,50,55,57,405-406,498,562-593
+apps/frontend-nextgen/src/pages/TaskEscort/useSidebarResize.ts
+  h_bb3ca6fb13c5df 1-121
+apps/frontend-nextgen/test/mocks/reactFlowGeometry.ts
+  h_bb3ca6fb13c5df 1-63
+apps/frontend-nextgen/test/taskEscortParity/editorAuthoring.test.tsx
+  h_bb3ca6fb13c5df 14,33-37,382-403
+apps/frontend-nextgen/test/taskEscortParity/editorPage.test.tsx
+  h_bb3ca6fb13c5df 8,15-19,106-111,117-120,174-176,259
+apps/frontend-nextgen/test/taskEscortParity/editorProperties.test.tsx
+  h_bb3ca6fb13c5df 1-211
+apps/frontend-nextgen/test/taskEscortParity/editorVisualCanvas.test.tsx
+  h_bb3ca6fb13c5df 1-254
+apps/frontend-nextgen/test/taskEscortParity/editorVisualHistory.test.tsx
+  h_bb3ca6fb13c5df 1-42
+apps/frontend-nextgen/test/taskEscortWorkspace/sidebar.test.tsx
+  h_bb3ca6fb13c5df 1-181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a0e672a3ab1dc2dd862bb1377ec0b2d7d3aa7194",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

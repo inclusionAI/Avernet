@@ -1,0 +1,42 @@
+apps/bcsfuse/tests/alipay/test_mysql_catalog_schema.py
+  s_f9448a67993c61::t_3e4b96883ed3e4 450-521
+  s_f9448a67993c61::t_8f3148dbfa15d9 447-449
+apps/bcsfuse/tests/alipay/test_document_catalog.py
+  s_f9448a67993c61::t_f2bb89554eccc5 165-168,187
+apps/bcsfuse/tests/alipay/test_index_sync_policy.py
+  s_f9448a67993c61::t_9ca95e55c5ab7d 91
+apps/bcsfuse/tests/alipay/test_central_preparation.py
+  s_f9448a67993c61::t_3e4b96883ed3e4 312,314-316,347-348
+apps/bcsfuse/scripts/sql/init_bcsfuse_agent_cards.sql
+  s_f9448a67993c61::t_9d6c25b31b3033 45-46
+apps/bcsfuse/scripts/sql/init_alipay_agent_cards.sql
+  s_f9448a67993c61::t_e8345207c8d6cd 23-24
+apps/bcsfuse/scripts/sql/add_card_changes_index.sql
+  s_f9448a67993c61::t_b2c157c5649505 1-5
+apps/bcsfuse/docs/architecture/alipay-index-rebuild-minimal.md
+  s_f9448a67993c61::t_13abe11f81923a 31-32,69,85
+apps/bcsfuse/tests/alipay/test_index_build_http.py
+  s_f9448a67993c61::t_3e4b96883ed3e4 43-45,51-55
+apps/bcsfuse/tests/alipay/test_catalog_updates.py
+  s_f9448a67993c61::t_000410f202eb01 121-125,139-141
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_f9448a67993c61::t_9dc30ffafacd5a 172,176,178-180,305-319
+submodules/avernet
+  s_f9448a67993c61::t_31aea66b04a23c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8e5f8e06c75f15bd96b590ecefaff28b19fb2ee3",
+  "prompts": {},
+  "sessions": {
+    "s_f9448a67993c61": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c37b-a948-7d12-8346-7160e12ca8b0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

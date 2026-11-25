@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ApprovalNodeDetails.test.tsx
+  h_bb3ca6fb13c5df 248-254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "62060caf368d860caccff34401c97d8a4f4fa26d",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

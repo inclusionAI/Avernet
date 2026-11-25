@@ -1,0 +1,35 @@
+apps/backend/src/agentclaw/community/core/services/resource_file_service.py
+  s_415e3c9e89448e::t_f98b406dee751f 41,298-301,314-319
+apps/backend/tests/community/endpoints/test_runtime_unavailability.py
+  s_415e3c9e89448e::t_b6afc78209bad5 76-77,79-81,84-89,91-94
+  s_415e3c9e89448e::t_f992626cbae287 50-63
+  s_415e3c9e89448e::t_4733fcf4c78469 67-75,82-83,90
+  s_415e3c9e89448e::t_8705a046977fa7 64-66
+  s_415e3c9e89448e::t_8b9d3589d0b5c3 78
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_415e3c9e89448e::t_f98b406dee751f 37,2160-2161
+  s_415e3c9e89448e::t_a7482a2a0e3730 2162
+apps/backend/src/agentclaw/community/plugin_api/sandbox_runtime.py
+  s_415e3c9e89448e::t_ff1b9bc866b522 54
+apps/backend/src/agentclaw/community/core/service_bot/baas_service_errors.py
+  s_415e3c9e89448e::t_32a33f11677d42 14-17,37
+apps/backend/src/agentclaw/community/adapters/http/channel/router.py
+  s_415e3c9e89448e::t_063c9c922ecd47 323
+  s_415e3c9e89448e::t_f98b406dee751f 27-28,311-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "170a12f9241839243f31dd46110de19f79676afc",
+  "prompts": {},
+  "sessions": {
+    "s_415e3c9e89448e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20cce-7e0f-7113-90e5-442450306709",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

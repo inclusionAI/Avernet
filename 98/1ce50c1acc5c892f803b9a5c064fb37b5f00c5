@@ -1,0 +1,78 @@
+apps/evolverun/clawweb/docs/pack-scripts-browser-auth.md
+  h_bb3ca6fb13c5df 12-17,34,40-42
+apps/evolverun/clawweb/docs/run-evidence-authorization.md
+  h_bb3ca6fb13c5df 1-32
+apps/evolverun/clawweb/docs/workflow-overview-analytics.md
+  h_bb3ca6fb13c5df 8,45-48,50-53,56-81
+apps/evolverun/clawweb/internal/adapters/server/__tests__/bot-directory.test.ts
+  h_bb3ca6fb13c5df 70-100
+apps/evolverun/clawweb/internal/adapters/server/repositories/bot-directory.ts
+  h_bb3ca6fb13c5df 4,27,32,53,55-56,58
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/dashboard-scope.test.ts
+  h_bb3ca6fb13c5df 1-46
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/repair-publication.test.ts
+  h_bb3ca6fb13c5df 19,26,67-73
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/repair-trial.test.ts
+  h_bb3ca6fb13c5df 18-19,43,64-65,136-152
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-guard.test.ts
+  h_bb3ca6fb13c5df 23,36-38,55,96,99,108,117,119-120,122,128,133,176,180-200,203,217
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-list-guard.test.ts
+  h_bb3ca6fb13c5df 56-57,61,66,82,86,91-92,94-95,107,113,116,144,155,160-161,163,170,172,174,189-190,193,195,200,206,214-215,222-223,227,236,238,240,291,298,300-307,311,320,322,326,329,335,338,341,348-350,388,390-391,395,399,439,464
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-permissions.test.ts
+  h_bb3ca6fb13c5df 18,22,38
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-routes.test.ts
+  h_bb3ca6fb13c5df 2,5-10,13,29,43,57,65-257,259,262,280,299,304,333
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-workflow-types.test.ts
+  h_bb3ca6fb13c5df 16,35-36,39,45,48-50,53,55,61-73,76-80,82-85,87-89,91-93,96-97,101-102,104
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/subworkflow-observability.test.ts
+  h_bb3ca6fb13c5df 7,47,52,94-96,98,102
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-browser-analytics.test.ts
+  h_bb3ca6fb13c5df 14-15,47,80-82,138,140-141,168-169,171,179,190-191,196
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-browser-reads.test.ts
+  h_bb3ca6fb13c5df 84-85,95-96,118,126-128,135-162,186-187,193,198-208,210,272-273,277,281,283,285-289,293-296,298,307
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-stats.test.ts
+  h_bb3ca6fb13c5df 7-8,35-40,46,52-54
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_bb3ca6fb13c5df 73,93,530,548-552,557,559,563,661,854-855
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/repair-publication.ts
+  h_bb3ca6fb13c5df 15,17,30,34,50,66-70,91,93-95,99,103
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/repair-trial.ts
+  h_bb3ca6fb13c5df 12-13,22,25-27
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/repair-workbench-runtime.ts
+  h_bb3ca6fb13c5df 5-6,13-14,16
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-guard.ts
+  h_bb3ca6fb13c5df 9,11-18,20-27,29-31,34-40,43-44,46,48,60-64,66-76,78
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-list-guard.ts
+  h_bb3ca6fb13c5df 6,43-49,52,63-67,73-74,78-82,84-95,98,101,103-111,114
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-principal.ts
+  h_bb3ca6fb13c5df 2,22-34
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-scan.ts
+  h_bb3ca6fb13c5df 4-6,10-15,59-70,72-86
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-workflow-types.ts
+  h_bb3ca6fb13c5df 5,14-15,17-18,20,27-36,38,44,48,52-56,58,63,68,73,78
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/subworkflow-observability.ts
+  h_bb3ca6fb13c5df 13-17
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-browser-reads.ts
+  h_bb3ca6fb13c5df 1,4,9-10,21,23-25,42,55-111,121,127,131,136-137,139-172,185
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-stats.ts
+  h_bb3ca6fb13c5df 8-12
+apps/evolverun/clawweb/internal/modules/archive/server/repositories/hallucination-check-repository.ts
+  h_bb3ca6fb13c5df 8-11,108,110,130,132
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/run-archives-security.test.ts
+  h_bb3ca6fb13c5df 19,49,59-62
+apps/evolverun/clawweb/internal/modules/archive/server/routes/run-archives.ts
+  h_bb3ca6fb13c5df 8,24,26-83,133,135,141-143,150,152,159-161,214-227,305,334-335,340-341,347-357,362,378-382,390-391,397-405,419-421,428,535-538,556-558
+apps/evolverun/docs/clawweb-internal-development-guide.md
+  h_bb3ca6fb13c5df 16-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "981ce50c1acc5c892f803b9a5c064fb37b5f00c5",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

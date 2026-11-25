@@ -1,0 +1,21 @@
+.gitmodules
+  s_7e2b32e8bf8305::t_cdc826f6524a04 4
+src/backend/specs/rel20261117-on-dev/001-plan.md
+  s_7e2b32e8bf8305::t_0461d4943d370f 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3ffff297f3551d877e86062d8a00575df1572840",
+  "prompts": {},
+  "sessions": {
+    "s_7e2b32e8bf8305": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e9f7-3ee6-7642-9ee1-6a5e7213ac36",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

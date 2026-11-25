@@ -1,0 +1,47 @@
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/lib.rs
+  s_c6f186a0e9db90::t_4e774406685634 47-51
+apps/bcs-internal/crates/plugins/bcs-theta/src/lib.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 110
+apps/bcs-internal/specs/2026-11-12-sofa-business-log-correlation/README.md
+  s_c6f186a0e9db90::t_adf6ccf3f47e8d 152-172,178-180,186-187
+  s_c6f186a0e9db90::t_972edf302a63c2 121,151
+  s_c6f186a0e9db90::t_911c50320f7898 1-2,4-64,66-81,83-91,94-120,122-126,128-150
+  s_c6f186a0e9db90::t_656f1bb14d8f75 3,174-176,181-182,184-185
+  s_c6f186a0e9db90::t_a67543562160b1 82,92-93,127
+  s_c6f186a0e9db90::t_296ac6a3ea1fcf 173
+  s_c6f186a0e9db90::t_882f5390270182 65
+  s_c6f186a0e9db90::t_a42b78e538505a 177,183
+apps/bcs-internal/crates/plugins/bcs-security-gateway-agentpass/src/client.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 90
+apps/bcs-internal/specs/2026-11-12-sofa-business-log-correlation/selection.md
+  s_c6f186a0e9db90::t_972edf302a63c2 3,65
+  s_c6f186a0e9db90::t_a67543562160b1 25,28,42,54
+  s_c6f186a0e9db90::t_911c50320f7898 1-2,4-24,26-27,29-41,43-53,55-64,66-71
+apps/bcs-internal/specs/README.md
+  s_c6f186a0e9db90::t_972edf302a63c2 13
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/trace_chain.rs
+  s_c6f186a0e9db90::t_1133e764d5421b 668
+  s_c6f186a0e9db90::t_c70bfa5ea4ae01 664-667,669-692
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/CONTEXT.md
+  s_c6f186a0e9db90::t_82b0df5a87154b 7-10
+apps/bcs-internal/docs/observability-logging.md
+  s_c6f186a0e9db90::t_25e5c9f3b24752 13-17
+apps/bcs-internal/docs/sofa-tracer.md
+  s_c6f186a0e9db90::t_1d06b58d29819f 121,178-208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9290515df360508d5e0b7df545ac8e592b6bb796",
+  "prompts": {},
+  "sessions": {
+    "s_c6f186a0e9db90": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce58-f8f5-7010-9226-98a33c7ac8ca",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}
