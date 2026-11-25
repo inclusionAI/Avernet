@@ -1,5 +1,8 @@
 # `/openapi/v1` Public API + Tenant Isolation — Team Handoff
 
+Trusted application draft restart, snapshot and batch status contracts are in
+[Managed Bot operations](managed-bot-operations.md).
+
 Bot public-risk operations use the full `bot_id:entity_id` path identity. They
 reuse the declaration-driven explicit ADMIN check and the existing addressed-Bot
 application grant. An app-only caller names its delegating `user_id`; its live
@@ -980,13 +983,25 @@ else** — `openapi_v1/authorization.py`. A handler declares nothing. The router
 class reads the row and attaches what it calls for.
 
 This is a deliberate **reversal** of the convention its neighbour
-`admission.py` follows, where a route also names its own dependency and
+`admission.py`'s existing grant/user modes follow, where a route also names its own dependency and
 `test_admission_inventory.py` holds the two in step. That redundancy is
 valuable: a mislabelled table entry still refuses at the route. It was traded
 for a single source, because two declarations for one fact is two things to
 keep in step and 43 hand-written ones had already accumulated. If you are
 adding an operation, this is the difference that will surprise you: **there is
 nothing to write on the route.**
+
+Engine admission also has a single policy declaration:
+`AdmissionMode.ENGINE_CODING` in `ADMISSION`. The enum member carries the shared
+`frozenset({"aicoding", "claude_code"})` allowlist; every inventory entry remains
+a bare enum member. Other modes carry an empty engine set and retain their
+existing behavior. Route-specific authorized Bot dependency providers are wired
+separately in `admission_managed_bot_routes.py`, without an extra rule class.
+`PublicAPIRoute` invokes `admission.apply_admission`
+to attach that check without an engine decorator, and `require_principal` reads
+the same rule to decide application admission. The existing grant/user-mode
+dependencies and the independent `AUTHORIZATION` decision remain unchanged.
+See [Managed Bot operations](managed-bot-operations.md) for the configured routes.
 
 What replaces the lost redundancy is that omission is not survivable:
 
@@ -1225,6 +1240,7 @@ literals the routes actually publish:
 all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  copy  collaborations  connection  engine  identity
 loadtest  local  logs  market  metadata  mcp  models  resources  routines  service-envs  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
+template-queries  template-config-for-others  restart-for-others  status-for-others
 ```
 
 Eight of those twenty-seven — `approvals`, `connection`, `engine`, `identity`,
@@ -1237,6 +1253,7 @@ list is the nineteen that remain:
 ```text
 all  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  loadtest  local  logs  market  metadata  mcp  skills
 source-credentials  spaces  with-manifest  work-order-notifications  work-orders
+template-queries  template-config-for-others  restart-for-others  status-for-others
 ```
 
 They are still reserved today, and the list above is the accurate one: a bot

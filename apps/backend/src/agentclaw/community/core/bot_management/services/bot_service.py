@@ -4990,7 +4990,6 @@ class BotService(BotServiceProtocol):
         from agentclaw.community.core.bot_management.engines import (
             resolve_provisioning,
         )
-
         ctx, strategy = resolve_provisioning(
             bot_id=bot_id,
             owner_id=str(bot.get("owner_id") or ""),
@@ -5012,6 +5011,8 @@ class BotService(BotServiceProtocol):
             # An intentional write rejection must not become a successful restart.
             raise
         except Exception as exc:
+            if strategy.restart_config_error_is_fatal(exc) is True:
+                raise
             # Optional engine extensions must never block the existing restart path.
             logger.warning(
                 "[bot_service.restart_bot] applying restart extra configs failed; "
@@ -5020,7 +5021,6 @@ class BotService(BotServiceProtocol):
                 exc,
                 exc_info=True,
             )
-
         env = get_current_env()
         entity_id = bot.get("entity_id")
         if not entity_id:
