@@ -761,12 +761,15 @@ def retry_copy(
     # bot fields; PUBLIC + CLOUD mirror the public OpenAPI surface. Copy is
     # openclaw-only, so a missing engine on a still-partial dst falls back to
     # openclaw rather than a None BotCreateSpec.engine_type would reject.
-    # ``header_space_id`` is the dst's recorded space_id (not None) so a retry of
-    # a copy-into-team-space preserves the team scope/space_kind — falling back
-    # to None here would re-resolve the owner's personal space and re-route the
-    # downstream ``create_bot`` → ``guard_add`` quota check away from the
-    # original target. A missing/NULL dst space_id keeps the personal fallback
-    # (matches submit_copy's personal branch).
+    # ``header_space_id`` seeds ``resolve_current`` from the dst's recorded
+    # space_id so a retry of a copy-into-team-space preserves team scope/kind,
+    # and a NULL dst space_id resolves to the owner's real personal Space. The
+    # spec's ``space_id`` then comes from ``retry_space.numeric_id`` (not the raw
+    # ``dst.get("space_id")``) -- same translator submit_copy uses -- so a
+    # personal retry on a NULL dst row is promoted to the real personal numeric
+    # id and ``guard_add`` counts both ``space_id IS NULL`` and ``space_id ==
+    # <real personal id>`` bots; passing the raw None here would under-count and
+    # diverge from submit_copy's first-write form.
     dst_space_id = dst.get("space_id")
     retry_space = space_context.resolve_current(
         owner_id=row.dst_owner_id,
@@ -780,7 +783,7 @@ def retry_copy(
                 bot_type=dst.get("bot_type") or "personal",
                 bot_name=dst.get("bot_name"),
                 bot_desc=dst.get("bot_desc"),
-                space_id=dst.get("space_id"),
+                space_id=getattr(retry_space, "numeric_id", None),
                 template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
             ),
             BotCreateContext(
