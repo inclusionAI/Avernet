@@ -177,6 +177,7 @@ from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
+from .managed_bots.router import router as managed_bots_router
 from .bots.classification import router as classification_router
 from .bots.overview import router as bot_overview_router
 from .bot_access_check import router as bot_access_check_router
@@ -321,6 +322,7 @@ _MIXED_GROUPS = [
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
 _OPEN_SUBGROUPS = [
+    managed_bots_router,
     classification_router,
     # Transitional, undocumented (include_in_schema=False) app-only access check.
     bot_access_check_router,
