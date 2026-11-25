@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use bcs_service_api::port::NewEvent;
 use bcs_service_api::port::repo::{
-    AppendEventRecord, CreateEventSubscriptionRecord, EventSubscriptionRecord,
+    AppendEventRecord, CreateEventSubscriptionRecord, EventRepoError, EventSubscriptionRecord,
     EventSubscriptionRevisionRecord,
 };
 use bcs_service_api::types::{
@@ -91,5 +91,14 @@ pub fn actor() -> EventActor {
         actor_type: EventActorType::App,
         id: "contract-app".to_string(),
         display_name: None,
+    }
+}
+
+/// Returns the `InvalidInput` message and fails on any other outcome, so a
+/// validation-order regression cannot pass as a message mismatch.
+pub fn invalid_message<T: std::fmt::Debug>(result: Result<T, EventRepoError>) -> String {
+    match result {
+        Err(EventRepoError::InvalidInput(message)) => message,
+        other => panic!("expected InvalidInput, got {other:?}"),
     }
 }

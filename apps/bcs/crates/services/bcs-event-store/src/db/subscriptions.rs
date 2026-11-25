@@ -1,5 +1,6 @@
 //! SQL persistence for Event subscriptions.
 
+use crate::validation::{validate_new_subscription, validate_replacement};
 use super::*;
 
 impl DbEventStore {
