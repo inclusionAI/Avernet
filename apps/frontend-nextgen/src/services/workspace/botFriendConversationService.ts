@@ -8,6 +8,7 @@ import {
   type CollaborationBotDto,
 } from '@/services/backendApi/collaboration/collaborationBotController';
 import {
+  deleteFriendConnection,
   listFriendConnections,
   type FriendConnectionActorType,
   type FriendConnectionDto,
@@ -248,6 +249,26 @@ export const botFriendConversationService = {
   },
 
   loadSection,
+
+  async removeFriend(
+    botIdentityId: string,
+    friend: { actorType: BotFriendActorType; actorId: string },
+  ): Promise<DomainResult<{ deleted: boolean }>> {
+    try {
+      const response = await deleteFriendConnection({
+        actor_type: 'bot',
+        actor_id: botIdentityId,
+        target_actor_type: friend.actorType,
+        target_actor_id: friend.actorId,
+      });
+      return { ok: true, data: { deleted: response.data?.deleted ?? false } };
+    } catch {
+      return {
+        ok: false,
+        error: toDomainError('BOT_FRIEND_REMOVE_FAILED', '移除好友失败，请稍后重试。'),
+      };
+    }
+  },
 
   async listSessionsPage(
     botIdentityId: string,
