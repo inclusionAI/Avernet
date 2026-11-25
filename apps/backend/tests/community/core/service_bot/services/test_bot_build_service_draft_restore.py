@@ -109,6 +109,154 @@ def test_run_local_command_reports_timeout(monkeypatch):
         )
 
 
+def test_run_local_command_retries_transient_nfs_rsync_failure(monkeypatch):
+    svc = object.__new__(BotBuildService)
+    cmd = ["sudo", "rsync", "-av", "src/", "tgt/"]
+    attempt_results = [
+        subprocess.CompletedProcess(
+            cmd,
+            23,
+            "",
+            "rsync: mkstemp failed: Transport endpoint is not connected (107)",
+        ),
+        subprocess.CompletedProcess(cmd, 0, "", ""),
+    ]
+    monkeypatch.setattr(module.subprocess, "run", MagicMock(side_effect=attempt_results))
+    sleeps: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    result = svc._run_local_command(
+        cmd=cmd,
+        command_name="rsync draft restore",
+        error_message="restore draft workspace failed",
+        timeout_seconds=1800,
+    )
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert sleeps == [0.5]
+
+
+def test_run_local_command_retries_transient_nfs_rsync_failure_exhausted(monkeypatch):
+    svc = object.__new__(BotBuildService)
+    trans = subprocess.CompletedProcess(
+        ["rsync"],
+        23,
+        "",
+        "rsync: mkstemp failed: Transport endpoint is not connected (107)",
+    )
+    mock_run = MagicMock(return_value=trans)
+    monkeypatch.setattr(module.subprocess, "run", mock_run)
+    sleeps: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    with pytest.raises(
+        module.BotBuildMigrationError,
+        match="rsync failed:.*Transport endpoint is not connected"
+    ):
+        svc._run_local_command(
+            cmd=["rsync"],
+            command_name="rsync",
+            error_message="rsync failed",
+        )
+    assert mock_run.call_count == module._TRANSIENT_RSYNC_ATTEMPTS
+    assert sleeps == [0.5, 1.0]
+
+
+def test_rsync_command_recognition_rejects_empty_command():
+    assert module._is_rsync_command([]) is False
+
+
+def test_run_local_command_retry_preserves_command_not_found(monkeypatch):
+    svc = object.__new__(BotBuildService)
+    failed = subprocess.CompletedProcess(
+        ["rsync"],
+        23,
+        "",
+        "rsync: mkstemp failed: Transport endpoint is not connected (107)",
+    )
+    monkeypatch.setattr(
+        module.subprocess, "run", MagicMock(side_effect=[failed, FileNotFoundError()])
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    with pytest.raises(module.BotBuildMigrationError, match="rsync command not found"):
+        svc._run_local_command(
+            cmd=["rsync"],
+            command_name="rsync",
+            error_message="rsync failed",
+        )
+    assert sleeps == [0.5]
+
+
+def test_run_local_command_retry_preserves_timeout(monkeypatch):
+    svc = object.__new__(BotBuildService)
+    failed = subprocess.CompletedProcess(
+        ["rsync"],
+        23,
+        "",
+        "rsync: mkstemp failed: Transport endpoint is not connected (107)",
+    )
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        MagicMock(
+            side_effect=[failed, subprocess.TimeoutExpired(cmd=["rsync"], timeout=1800)]
+        ),
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    with pytest.raises(
+        module.BotBuildMigrationError,
+        match="restore draft workspace failed: command timed out after 1800 seconds",
+    ):
+        svc._run_local_command(
+            cmd=["rsync"],
+            command_name="rsync draft restore",
+            error_message="restore draft workspace failed",
+            timeout_seconds=1800,
+        )
+    assert sleeps == [0.5]
+
+
+def test_run_local_command_retries_transient_nfs_failure_pending(monkeypatch):
+    svc = object.__new__(BotBuildService)
+    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 23, "", "boom"))
+    monkeypatch.setattr(module.subprocess, "run", mock_run)
+    sleeps: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    with pytest.raises(module.BotBuildMigrationError, match="failed: boom"):
+        svc._run_local_command(
+            cmd=["ls", "/tmp/does-not-exist"],
+            command_name="local ls",
+            error_message="local ls failed",
+            timeout_seconds=1,
+        )
+    assert mock_run.call_count == 1
+    assert sleeps == []
+
+
+def test_run_local_command_retries_transient_nfs_failure_pending_after_moves(monkeypatch):
+    svc = object.__new__(BotBuildService)
+    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 23, "", "exit 1"))
+    monkeypatch.setattr(module.subprocess, "run", mock_run)
+    sleeps: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    with pytest.raises(module.BotBuildMigrationError, match="failed: exit 1"):
+        svc._run_local_command(
+            cmd=["autocmd", "up"],
+            command_name="local autocmd",
+            error_message="local autocmd failed",
+            timeout_seconds=1,
+        )
+    assert mock_run.call_count == 1
+    assert sleeps == []
+
+
 @pytest.mark.asyncio
 async def test_restore_teclaw_draft_submits_then_checks_progress_one_step_at_a_time(
     monkeypatch,
