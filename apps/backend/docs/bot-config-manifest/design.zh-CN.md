@@ -325,9 +325,10 @@ compose 时按 `McpServerRef` 既有机制内联。Manifest 可以为已登记 `
 | --- | --- |
 | `GET /openapi/v1/bots/{bot_id}/config-manifest` | 读整份配置清单文档（manifest + script） |
 | `PUT /openapi/v1/bots/{bot_id}/config-manifest` | 整体替换；校验 schema、逐类别能力、限额；对不支持的部分整体拒绝（400/422 带逐条原因），不部分写入 |
+| `PUT /openapi/v1/bots/{bot_id}/config-manifest?dry_run=true` | 同步预览请求中的清单；不保存、不写入 Apply 历史，可能拉取并缓存源 |
 | `DELETE /openapi/v1/bots/{bot_id}/config-manifest` | 清除。已由 manifest 落成的实体**保留但摘除 managed 标记**（变回手工实体），不级联删除——删除声明 ≠ 删除资产 |
 | `GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities` | 该 bot 的逐类别支持表 |
-| `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` | 显式 apply（可带 `dry_run=true` 返回计划不执行） |
+| `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` | 显式 apply（可带 `dry_run=true` 预览已保存的清单，不执行） |
 | `GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply` | 最近一次 apply report |
 | `PUT /openapi/v1/bots/source-credentials/{name}` | 写入/轮换租户级命名凭证：单一 body schema，判别键 `type`（v1 仅 `header`：`header_name` + `secret`）+ `allowed_prefixes`，§4.5。**一个端点覆盖 git / URL / OSS**。租户级路径：凭证不属于单个 bot |
 | `GET /openapi/v1/bots/source-credentials[/{name}]` | 列表 / 单个，仅掩码元数据，**永不返回 secret** |
