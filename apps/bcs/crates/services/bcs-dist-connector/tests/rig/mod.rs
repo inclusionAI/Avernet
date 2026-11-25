@@ -11,17 +11,15 @@
 pub mod store;
 
 use async_trait::async_trait;
-use bcs_dist_connector::delayed::HeldCallRecovery;
 use bcs_dist_connector::rules::DistConnectorRules;
 use bcs_dist_connector::{ConnectorConfig, ConnectorEngine, ConnectorPorts};
-use bcs_dist_connector_store::delayed;
 use bcs_dist_connector_store::membership::PendingMembership;
 use bcs_dist_model::*;
 use bcs_dist_store::codec::decode_inbox_entry;
 use bcs_dist_store::inbox::{InboxProducerConfig, StoreInboxProducer};
 use bcs_service_api::port::dist_agent::*;
 use bcs_service_api::port::dist_runtime::DistRuntimeControlPort;
-use bcs_service_api::port::repo::distributed::common::{IdempotentWrite, Page, PageRequest, StoreError};
+use bcs_service_api::port::repo::distributed::common::{IdempotentWrite, StoreError};
 use bcs_service_api::port::repo::distributed::ownership::MembershipPort;
 use bcs_service_api::port::repo::distributed::result::BlobStorePort;
 use bcs_store_api::json::JsonStorePlugin;
@@ -281,29 +279,11 @@ impl BlobStorePort for MemoryBlobs {
     }
 }
 
-/// The thin composition wrapper over the store crate's D3/D8 stubs.
-#[derive(Default)]
-pub struct StubRecovery {
-    pub released: Mutex<Vec<Did>>,
-}
-
-#[async_trait]
-impl HeldCallRecovery for StubRecovery {
-    async fn repost_held(&self, dead: &Instance, page: PageRequest) -> Result<Page<Did>, StoreError> {
-        delayed::repost_held(dead, page).await
-    }
-    async fn release(&self, did: &Did, holder: &Holder) -> Result<(), StoreError> {
-        self.released.lock().unwrap().push(did.clone());
-        delayed::release(did, holder).await
-    }
-}
-
 pub struct Rig {
     pub store: Arc<Recorder>,
     pub worker: WorkerFixture,
     pub agent: Arc<ScriptedAgent>,
     pub blobs: Arc<MemoryBlobs>,
-    pub recovery: Arc<StubRecovery>,
     pub membership: Arc<dyn MembershipPort>,
     pub config: ConnectorConfig,
 }
@@ -343,7 +323,6 @@ impl Rig {
             worker: WorkerFixture::new(&store),
             agent: Arc::new(ScriptedAgent::new(&store)),
             blobs: Arc::new(MemoryBlobs::default()),
-            recovery: Arc::new(StubRecovery::default()),
             membership: Arc::new(PendingMembership),
             config,
             store,
@@ -382,7 +361,6 @@ impl Rig {
             agent: self.agent.clone(),
             membership: self.membership.clone(),
             blobs: self.blobs.clone(),
-            recovery: self.recovery.clone(),
             rules: Arc::new(DistConnectorRules),
         }
     }

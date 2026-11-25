@@ -46,11 +46,11 @@ provider or agent resolver exists yet. Not deployed.
 | B12 replies | `control.rs`: reply, second round, unknown, idempotent, rejected, former holder's input |
 | B13, B14 cancels and polling | `control.rs`: confirmed, accepted, unknown, unsupported, already finished, before send, on the wire, re-notification |
 | B15–B19 recovery | `recovery.rs`; `held.rs`: stale holder; `claim.rs`: takeover tests |
-| B20 drain | `runtime.rs`: `drain_stops_claiming_and_leaves_running_calls_held`, `drain_returns_as_soon_as_held_calls_end` |
+| B20 drain | `runtime.rs`: `drain_stops_claiming_and_stops_calls_still_running_at_the_deadline`, `drain_returns_as_soon_as_held_calls_end`, `a_drain_that_stops_calls_retires_after_they_stopped`, `the_connector_registers_renews_and_marks_draining` |
 | B21 capabilities | `claim.rs`: `startup_fails_without_a_required_capability` |
 | every `disp` write with a lost response and a definite failure | `held.rs`: `every_write_survives_a_lost_response`, `every_write_reports_a_definite_failure`, `a_write_that_did_not_land_is_made_again`; `claim.rs`: the claim equivalents |
 | port harnesses | `conformance_dispatch_board.rs`, `conformance_rules.rs`, `conformance_runtime_control.rs`, `conformance_dist_agent_client.rs`, `conformance_connector_runtime.rs` |
-| stubs return `need_contract_not_implemented` | D2 `recovery.rs`; D3, D8 `stubs.rs`; membership `claim.rs` |
+| stubs return `need_contract_not_implemented` | D2 `recovery.rs`; membership `claim.rs` (D3 and D8 resolved, see "Follow-up: drain and recovery") |
 
 ## Deviations from the plan
 
@@ -175,8 +175,10 @@ drain is checked before every attempt.
 
 ## Known limits
 
-- Until D3 exists, an ACCEPTED call whose holder died is picked up again only
-  if the Worker re-posts or cancels it at its deadline.
+- A call whose holder died is taken over one call at a time, when the
+  Worker's supervisor re-posts its hint after membership answers `Dead`
+  (about 3–5 s after the death). Batched takeover by partition is a recorded
+  follow-up.
 - Two different input-required events before a confirmed reply share one
   identity; the second is dropped.
 - `query(ByRequest)` has no A2A equivalent: a plain A2A agent without
@@ -191,3 +193,16 @@ drain is checked before every attempt.
   contract (`HeldDispatchPort`); deferred to a follow-up by the owner.
 - An unresolved, blind or conflicted call occupies one of `max_active_calls`
   until the Worker cancels it or another holder takes it.
+
+## Follow-up: drain and recovery (after the merge)
+
+- D3 resolved by the Worker: its supervisor already re-posts a hint for every
+  open dispatch whose holder is `Alive` or `Dead`, so the `repost_held` stub
+  was removed.
+- D8 replaced: `drain` now aborts and awaits the actors still running at the
+  end of the grace period, then retires the registration (only once the main
+  loop has stopped). Calls stay held in `disp` and are taken over through the
+  D3 path. The `release` stub, the `HeldCallRecovery` trait and
+  `ConnectorPorts::recovery` were removed; the composition drops its
+  `recovery` field.
+
