@@ -332,7 +332,7 @@ describe('移除好友动线', () => {
 
     expect(
       await screen.findByText(
-        '移除后双方好友关系将同步解除,对方将在通知中心收到系统消息。确定移除好友「风太」吗?',
+        '移除后双方好友关系将同步解除，对方将在通知中心收到系统消息。确定移除好友「风太」吗？',
       ),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '确定移除' }));
@@ -389,7 +389,7 @@ describe('移除好友动线', () => {
     fireEvent.click(screen.getByRole('button', { name: '移除' }));
 
     expect(
-      await screen.findByText(/该 Bot 的 Owner 将在通知中心收到系统消息。确定移除好友 Bot「协作小助」吗/),
+      await screen.findByText(/该 Bot 的 Owner 将在通知中心收到系统消息。确定移除好友 Bot「协作小助」吗？/),
     ).toBeInTheDocument();
   });
 });
