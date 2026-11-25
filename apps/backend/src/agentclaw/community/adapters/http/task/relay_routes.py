@@ -126,11 +126,10 @@ async def dispatch_relay_node(
     node = await service.dispatch_node(body.task_id, body.target_node_id)
     # Dispatch persistence writes the target session/run facts into the graph;
     # read that projection before building the user-facing entry URL.
-    delivered = _require_graph_node(
-        service.get_task_dashboard(body.task_id), body.target_node_id
-    )
+    dispatched_graph = service.get_task_dashboard(body.task_id)
+    delivered = _require_graph_node(dispatched_graph, body.target_node_id)
     handoff = build_dispatch_handoff_display(
-        delivered, target, frontend_url_provider.get()
+        delivered, target, dispatched_graph, frontend_url_provider.get()
     )
     return envelope(
         TaskDispatchResultDTO(

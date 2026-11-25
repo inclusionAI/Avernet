@@ -153,6 +153,7 @@ class _StubService:
         self._node_profiles: dict[tuple[str, str], dict] = {}
         self.dispatch_result = None
         self.intake_result: TaskIntakeResult | None = None
+        self.owner_user_id: str | None = None
 
     def set_node_status(self, task_id, node_id, status) -> None:
         self._node_status[(task_id, node_id)] = status
@@ -167,11 +168,14 @@ class _StubService:
         self._node_profiles[(task_id, node_id)] = profile
 
     def get_task_dashboard(self, task_id, node_id=None) -> TaskExecutionGraph:
+        graph_extend_props = {"execution_config": self._execution_config}
+        if self.owner_user_id:
+            graph_extend_props["owner_user_id"] = self.owner_user_id
         g = TaskExecutionGraph(
             run_id=1,
             loop_round=0,
             status=Status.PENDING,
-            extend_props={"execution_config": self._execution_config},
+            extend_props=graph_extend_props,
         )
         for (tid, nid), st in list(self._node_status.items()):
             if tid == task_id:
