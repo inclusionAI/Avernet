@@ -119,17 +119,18 @@ jobs:
           --health-timeout 5s
           --health-retries 20
       # Agent invocation contracts own a separate EMPTY full-chain database.
+      # Disposable, workflow-local credentials; never a retained runtime secret.
       mysql_agent_invoke:
         image: mysql:8.4
         env:
           MYSQL_DATABASE: bcs_agent_invoke
           MYSQL_USER: bcs
-          MYSQL_PASSWORD: bcs_test_only
-          MYSQL_ROOT_PASSWORD: root_test_only
+          MYSQL_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+          MYSQL_ROOT_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
         ports:
           - 3312:3306
         options: >-
-          --health-cmd "mysqladmin ping -h localhost -uroot -proot_test_only"
+          --health-cmd "mysqladmin ping -h localhost -uroot -p${{ github.run_id }}-${{ github.run_attempt }}"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -297,7 +298,7 @@ jobs:
       - name: Run Agent invocation MySQL reader and durable facts contracts
         if: steps.changes.outputs.skip-bcs != 'true'
         env:
-          BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3312/bcs_agent_invoke
+          BCS_TEST_MYSQL_URL: mysql://bcs:${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:3312/bcs_agent_invoke
         run: python3 scripts/ci_contract_test.py --package bcs-edge-permission-store --binary conformance_agent_invoke_mysql --test agent_invoke_repo_contract_mysql
 
       - name: Run MySQL Eventing migration contract
