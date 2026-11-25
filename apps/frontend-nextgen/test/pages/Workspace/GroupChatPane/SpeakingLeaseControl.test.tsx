@@ -65,6 +65,17 @@ describe('SpeakingLeaseControl', () => {
     unmount();
   });
 
+  it('drops the top radius when stacked under the speech-mode cap strip', () => {
+    // 堆叠态（上方有「用户发言模式」帽条）：方角密接，避免接缝处圆角缺口。
+    const { getByTestId, unmount } = render(
+      <SpeakingLeaseControl status="held" topRounded={false} onAcquire={jest.fn()} onPreempt={jest.fn()} onRelease={jest.fn()} />,
+    );
+    const root = getByTestId('speaking-lease-control');
+    expect(root.className).toContain('rounded-none');
+    expect(root.className).not.toContain('rounded-t-xl');
+    unmount();
+  });
+
   it('shows the held lease countdown and exposes release', () => {
     const onRelease = jest.fn();
     const { container } = render(
@@ -145,5 +156,21 @@ describe('SpeakingLeaseStrip', () => {
     expect(container.textContent).toContain('已获取caller身份发言');
     expect(container.textContent).toContain('剩余 1分20秒');
     expect(mockButtons[0].children).toContain('释放');
+  });
+
+  it('forwards topRounded=false so the strip butts flush against the cap strip above', () => {
+    const model: GroupSpeakingLeaseModel = {
+      speakingMode: 'lease_required',
+      speakingLease: heldLease,
+      speakingLeaseStatus: 'held',
+      isUpdatingSpeakingLease: false,
+      leaseNowMs: 100_000,
+      acquireSpeakingLease: jest.fn(),
+      releaseSpeakingLease: jest.fn(),
+      refreshSpeakingLease: jest.fn(),
+      composeSender: jest.fn(),
+    };
+    const { getByTestId } = render(<SpeakingLeaseStrip model={model} topRounded={false} />);
+    expect(getByTestId('speaking-lease-control').className).toContain('rounded-none');
   });
 });
