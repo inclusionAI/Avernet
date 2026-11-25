@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS evolution_run (
   binding_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, body_hash TEXT NOT NULL,
   strategy TEXT NOT NULL, strategy_version TEXT NOT NULL,
   parent_ref TEXT NOT NULL, parent_revision TEXT NOT NULL,
-  allowed_genes TEXT NOT NULL, verification_profile TEXT NOT NULL,
+  allowed_genes TEXT NOT NULL, verification_profile TEXT NOT NULL, auto_promote_ceiling TEXT,
   params TEXT NOT NULL, budget_max TEXT NOT NULL, granted TEXT NOT NULL,
   agent_definitions TEXT NOT NULL, status TEXT NOT NULL, attempt INTEGER NOT NULL,
   max_attempts INTEGER NOT NULL, budget_used TEXT NOT NULL, candidate_count INTEGER NOT NULL,
@@ -90,11 +90,6 @@ CREATE INDEX IF NOT EXISTS evolution_charge_run ON evolution_budget_charge (run_
 CREATE TABLE IF NOT EXISTS evolution_trigger_firing (
   binding_id TEXT NOT NULL, fire_key TEXT NOT NULL, status TEXT NOT NULL,
   reason TEXT, PRIMARY KEY (binding_id, fire_key));
-CREATE TABLE IF NOT EXISTS evolution_verdict (
-  candidate_id TEXT NOT NULL, profile TEXT NOT NULL, run_id TEXT,
-  status TEXT NOT NULL, body TEXT NOT NULL, updated_at TEXT NOT NULL,
-  PRIMARY KEY (candidate_id, profile));
-CREATE INDEX IF NOT EXISTS evolution_verdict_run ON evolution_verdict (run_id);
 CREATE TABLE IF NOT EXISTS evolution_candidate_risk (
   candidate_id TEXT PRIMARY KEY, risk_tier TEXT NOT NULL, recorded_at TEXT NOT NULL);
 """
@@ -117,6 +112,10 @@ class EvolutionStore(JobStoreMixin):
                 "ALTER TABLE evolution_run_candidate ADD COLUMN "
                 "submission_complete INTEGER NOT NULL DEFAULT 0"
             )
+        if "auto_promote_ceiling" not in {
+            row["name"] for row in self.conn.execute("PRAGMA table_info(evolution_run)")
+        }:
+            self.conn.execute("ALTER TABLE evolution_run ADD COLUMN auto_promote_ceiling TEXT")
         self.conn.commit()
 
     def put_artifact(self, run_id: str, name: str, content: bytes) -> str:
@@ -282,6 +281,7 @@ class EvolutionStore(JobStoreMixin):
             "parent_revision": run.parent_revision,
             "allowed_genes": _json(run.allowed_genes),
             "verification_profile": run.verification_profile,
+            "auto_promote_ceiling": run.auto_promote_ceiling,
             "params": _json(run.params),
             "budget_max": _json(run.budget_max),
             "granted": _json(run.granted),
@@ -498,6 +498,24 @@ class EvolutionStore(JobStoreMixin):
             (run_id, candidate_id, revision, seq, verdict),
         )
         self.conn.commit()
+
+    def record_candidate_verdict(self, run_id: str, candidate_id: str, verdict: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE evolution_run_candidate SET verdict=? WHERE run_id=? AND candidate_id=?",
+                (verdict, run_id, candidate_id),
+            )
+
+    def get_candidate(self, run_id: str, candidate_id: str) -> RunCandidate | None:
+        row = self.conn.execute(
+            "SELECT revision, seq, verdict FROM evolution_run_candidate WHERE run_id=? AND candidate_id=?",
+            (run_id, candidate_id),
+        ).fetchone()
+        return (
+            None
+            if row is None
+            else RunCandidate(run_id, candidate_id, row["revision"], row["seq"], row["verdict"])
+        )
 
     def find_candidate(self, candidate_id: str) -> dict[str, Any] | None:
         row = self.conn.execute(

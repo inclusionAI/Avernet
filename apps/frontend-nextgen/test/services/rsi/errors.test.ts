@@ -25,3 +25,12 @@ test.each([[401, '登录凭证'], [403, 'Bot'], [409, '操作冲突']])(
     expect(message).not.toContain('private upstream detail');
   },
 );
+
+test('inaccessible Bot is distinguished from a missing Genome baseline', () => {
+  const error = (code: string) => Object.assign(new Error('private upstream detail'), {
+    status: 409,
+    data: { error: { code } },
+  });
+  expect(rsiErrorMessage(error('evolution_app_not_granted'), 'fallback')).toContain('检查 evolution 应用');
+  expect(rsiErrorMessage(error('no_genome_baseline'), 'fallback')).toContain('没有基因组基线');
+});

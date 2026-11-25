@@ -145,7 +145,7 @@ def _promotion() -> Promotion:
 # -- the surface -----------------------------------------------------------------------------------
 
 
-def test_the_fourteen_operations_are_mounted_once_in_the_right_order() -> None:
+def test_the_fifteen_operations_are_mounted_once_in_the_right_order() -> None:
     app = FastAPI()
     app.include_router(router)
     paths = app.openapi()["paths"]
@@ -154,6 +154,7 @@ def test_the_fourteen_operations_are_mounted_once_in_the_right_order() -> None:
         ("GET", f"{_GENOME}/revisions"),
         ("POST", f"{_GENOME}/revisions"),
         ("POST", f"{_GENOME}/revisions:capture"),
+        ("POST", f"{_GENOME}/baseline:initialize"),
         ("GET", f"{_GENOME}/revisions/{{rev}}/diff"),
         ("GET", f"{_GENOME}/revisions/{{rev}}"),
         ("PUT", f"{_GENOME}/policy"),
@@ -211,6 +212,7 @@ def test_wildcard_paths_route_candidate_refs_without_swallowing_the_suffixes() -
         ("GET", "/revisions", PermissionLevel.MEMBER, None),
         ("POST", "/revisions", PermissionLevel.ADMIN, None),
         ("POST", "/revisions:capture", PermissionLevel.ADMIN, None),
+        ("POST", "/baseline:initialize", PermissionLevel.ADMIN, None),
         ("GET", "/revisions/{rev:path}/diff", PermissionLevel.MEMBER, None),
         ("GET", "/revisions/{rev:path}", PermissionLevel.MEMBER, None),
         ("PUT", "/policy", PermissionLevel.OWNER, None),

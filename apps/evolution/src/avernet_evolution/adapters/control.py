@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException
 
 from ..control_contract import BindingsBody, CancelBody, ReviewBody, RunBody
 from ..core.evolution_run.api import error_envelope
+from ..core.evolution_run.data_scope import DataScope, data_scope
 
 BASE = "/openapi/v1/bots/{bot_id}/evolution"
 
@@ -69,6 +70,7 @@ def install_errors(app: FastAPI):
     from ..core.evolution_run import errors
 
     for name in (
+        "EvolutionAppNotGranted",
         "GenomeBaselineMissing",
         "BindingCheckFailed",
         "PreconditionFailed",
@@ -76,6 +78,7 @@ def install_errors(app: FastAPI):
         "CeilingExceeded",
         "BindingBusy",
         "IdempotencyKeyReused",
+        "CandidateAmbiguous",
         "RunNotFound",
         "RunAlreadyEnded",
         "BudgetExhausted",
@@ -122,9 +125,15 @@ def build_control_router(runtime, *, backend_access=None) -> APIRouter:
             return response(request, status=428)
         if len(tag) < 2 or not (tag.startswith('"') and tag.endswith('"')):
             return response(request, status=412)
-        data = await runtime.api.put_bindings(
-            access.bot, payload.bindings, expected_etag=tag[1:-1] or None, actor=access.actor
-        )
+        operator = access.operator_user_id
+        with data_scope(DataScope(access.bot, operator) if operator is not None else None):
+            data = await runtime.api.put_bindings(
+                access.bot,
+                payload.bindings,
+                expected_etag=tag[1:-1] or None,
+                actor=access.actor,
+                operator_user_id=operator,
+            )
         return response(request, data, headers={"ETag": f'"{data["etag"]}"'})
 
     @router.post(BASE + "/runs", status_code=202)
@@ -133,9 +142,14 @@ def build_control_router(runtime, *, backend_access=None) -> APIRouter:
         key = request.headers.get("idempotency-key", "")
         if not key.strip() or len(key) > 200:
             return response(request, status=400)
-        data = await runtime.api.submit_run(
-            access.bot, {**payload.model_dump(exclude_none=True), "idempotency_key": key}, actor=access.actor
-        )
+        operator = access.operator_user_id
+        with data_scope(DataScope(access.bot, operator) if operator is not None else None):
+            data = await runtime.api.submit_run(
+                access.bot,
+                {**payload.model_dump(exclude_none=True), "idempotency_key": key},
+                actor=access.actor,
+                operator_user_id=operator,
+            )
         return response(request, data, status=202)
 
     @router.get(BASE + "/runs")
@@ -171,7 +185,9 @@ def build_control_router(runtime, *, backend_access=None) -> APIRouter:
     @router.get(BASE + "/candidates/{candidate_id}")
     async def candidate_report(request: Request, bot_id: str, candidate_id: str):
         access = await grant(request, bot_id)
-        return response(request, await runtime.api.candidate_report(access.bot, candidate_id))
+        operator = access.operator_user_id
+        with data_scope(DataScope(access.bot, operator) if operator is not None else None):
+            return response(request, await runtime.api.candidate_report(access.bot, candidate_id))
 
     @router.get(BASE + "/review-queue")
     async def review_queue(

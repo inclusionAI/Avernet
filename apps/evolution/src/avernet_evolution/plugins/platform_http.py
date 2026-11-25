@@ -1,15 +1,15 @@
-"""Bot-scoped public HTTP boundary; deployment supplies service credentials.
+"""Bot-scoped HTTP for application delegation or signed built-in callbacks.
 
-No principal headers are synthesized here. Request credentials never become
-background credentials. Redirects are refused. Deployment must disable ambient proxies; this adapter
-refuses client cookie jars to prevent credentials leaking between scopes.
+Browser credentials never become background credentials. Deployment must
+supply the service trust material and disable ambient proxies. The adapter
+refuses redirects and client cookie jars to avoid leaking credentials.
 """
 
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 from avernet_genome.canonical import revision_id, sha256_digest
@@ -25,6 +25,9 @@ from avernet_genome.models import (
 from avernet_genome.spec_models import GenomePolicy, GenomeSpec
 from avernet_genome.tree import decode_tree_bytes
 
+from avernet_evolution.adapters.backend_access import fingerprint
+from avernet_evolution.adapters.backend_data import HEADER, PREFIX, issue_data_proof
+from avernet_evolution.core.evolution_run.data_scope import current_data_scope
 from avernet_evolution.core.evolution_run.errors import CandidateRejected, CandidateRejectionCode
 
 
@@ -56,14 +59,36 @@ class PlatformHttpError(RuntimeError):
 
 
 class BotHttp:
-    def __init__(self, client: httpx.AsyncClient, credentials: Credentials):
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        credentials: Credentials,
+        *,
+        data_origin: str = "",
+        data_key: str = "",
+        data_tenant: str = "",
+    ):
         if client.cookies:
             raise ValueError("platform client must not contain ambient cookies")
+        if data_origin:
+            origin = urlsplit(data_origin)
+            if (
+                origin.scheme not in {"http", "https"}
+                or not origin.hostname
+                or origin.username is not None
+                or origin.password is not None
+                or origin.path not in {"", "/"}
+                or origin.query
+                or origin.fragment
+                or len(data_key.encode()) < 32
+                or not data_tenant.strip()
+            ):
+                raise ValueError("invalid built-in Evolution Backend data configuration")
         self.client, self.credentials = client, credentials
+        self._data_origin, self._data_key, self._data_tenant = data_origin.rstrip("/"), data_key, data_tenant
 
     async def request(self, bot, method, suffix, *, params=None, body=None, raw=False):
-        # suffix is adapter-owned, never a caller-supplied URL. Encode identities
-        # so no Bot/Session selector can escape the authorized route prefix.
+        # suffix is adapter-owned, never a caller-supplied URL.
         if (
             (suffix and not suffix.startswith("/"))
             or "?" in suffix
@@ -73,28 +98,49 @@ class BotHttp:
             raise ValueError("invalid platform route")
         if self.client.cookies:
             raise PlatformHttpError("platform client acquired ambient cookies")
-        url = f"/openapi/v1/bots/{quote(bot.bot_id, safe='')}{suffix}"
-        credential = await self.credentials(bot)
-        if not isinstance(credential, PlatformCredential) or not credential.acting_user_id.strip():
-            raise PlatformHttpError("platform delegation is not configured")
-        try:
-            async with self.client.stream(
+        target = f"/{quote(bot.bot_id, safe='')}{suffix}"
+        scope = current_data_scope.get()
+        safe_params = {
+            k: v for k, v in (params or {}).items() if k not in {"user_id", "owner_id", "entity_id"}
+        }
+        if scope is not None:
+            if scope.bot != bot or not self._data_origin:
+                raise PermissionError("built-in Backend data access is unavailable")
+            # Build independently from the public client defaults: no app
+            # auth, ambient Cookie, Gateway principal, or default query params.
+            request = httpx.Request(
+                method, self._data_origin + PREFIX + target, params=safe_params, json=body
+            )
+            request.headers[HEADER] = issue_data_proof(
+                self._data_key,
+                self._data_tenant,
+                scope,
+                fingerprint(
+                    method, request.url.path, request.url.query.decode(), request.content, request.headers
+                ),
+            )
+        else:
+            credential = await self.credentials(bot)
+            if not isinstance(credential, PlatformCredential) or not credential.acting_user_id.strip():
+                raise PlatformHttpError("platform delegation is not configured")
+            request = self.client.build_request(
                 method,
-                url,
+                "/openapi/v1/bots" + target,
                 headers=dict(credential.headers),
-                params={
-                    **{
-                        k: v
-                        for k, v in (params or {}).items()
-                        if k not in {"user_id", "owner_id", "entity_id"}
-                    },
-                    "user_id": credential.acting_user_id,
-                    "entity_id": bot.entity_id,
-                },
+                params={**safe_params, "user_id": credential.acting_user_id, "entity_id": bot.entity_id},
                 json=body,
+            )
+        try:
+            response = await self.client.send(
+                request,
+                stream=True,
                 follow_redirects=False,
-            ) as response:
+                **({"auth": None} if scope is not None else {}),
+            )
+            try:
                 if response.status_code >= 300:
+                    if scope is not None and response.status_code == 403:
+                        raise PermissionError("built-in Backend data access is unavailable")
                     # Only this documented refusal is translated to a domain
                     # error. Do not expose arbitrary messages, reasons or paths.
                     if method == "POST" and suffix == "/genome/revisions" and response.status_code == 422:
@@ -110,6 +156,8 @@ class BotHttp:
                         raise PlatformHttpError("platform response exceeds bound")
                     chunks.append(chunk)
                 content = b"".join(chunks)
+            finally:
+                await response.aclose()
         except httpx.HTTPError:
             raise PlatformHttpError("platform transport unavailable") from None
         if raw:
@@ -147,6 +195,9 @@ class HttpGenome:
     async def drift(self, bot):
         if self._drift is not None:
             return await self._drift(bot)
+        return await self._read_scoped_drift(bot)
+
+    async def _read_drift(self, bot) -> Drift | None:
         data = await self.http.request(bot, "GET", "/genome/drift")
         if not isinstance(data, dict) or "drift" not in data:
             raise PlatformHttpError("invalid drift response")
@@ -155,6 +206,8 @@ class HttpGenome:
             # `null` means no observed drift OR no active revision. A caller that
             # needs a baseline resolves `active` itself; do not invent one here.
             return None
+        if not isinstance(payload, dict):
+            raise PlatformHttpError("invalid drift response")
         active, observed = payload.get("active"), payload.get("observed")
         if not isinstance(active, str) or not isinstance(observed, str) or not active or not observed:
             raise PlatformHttpError("invalid drift response")
@@ -164,9 +217,8 @@ class HttpGenome:
         try:
             data = await self.http.request(bot, "GET", "/genome/revisions/" + quote(ref, safe=""))
         except PlatformHttpError as exc:
-            # `active` 不存在 = 这个 Bot 还没有基因组基线，是可解释的领域状态，
-            # 不是服务故障；交给调用方映射成 409 no_genome_baseline。
-            if exc.status == 404 and ref == "active":
+            # A real, equally scoped read must succeed before diagnosing a missing baseline.
+            if exc.status == 404 and ref == "active" and await self._read_scoped_drift(bot) is None:
                 from avernet_evolution.core.evolution_run.errors import GenomeBaselineMissing
 
                 raise GenomeBaselineMissing(bot.bot_id) from None
@@ -200,6 +252,16 @@ class HttpGenome:
             spec,
             policy,
         )
+
+    async def _read_scoped_drift(self, bot) -> Drift | None:
+        try:
+            return await self._read_drift(bot)
+        except PlatformHttpError as probe:
+            if probe.status == 404 and current_data_scope.get() is None:
+                from avernet_evolution.core.evolution_run.errors import EvolutionAppNotGranted
+
+                raise EvolutionAppNotGranted(bot.bot_id) from None
+            raise
 
     async def read_content(self, bot, digest):
         data = await self.http.request(bot, "GET", "/genome/content/" + quote(digest, safe=""), raw=True)

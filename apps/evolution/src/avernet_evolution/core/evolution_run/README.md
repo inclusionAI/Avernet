@@ -41,10 +41,11 @@ regressions. Preserve wire compatibility; do not restore Backend-owned execution
 | `bindings.py` | §2.2、§3、§4 | `Binding`、`BotBindings`、触发器与五字段 cron 校验 |
 | `records.py` | §2.4–§2.8 | `Run`、`Job`、`Operation`、`Workspace`、`RunCandidate` |
 | `ports.py` | §13、01–08 | 本服务依赖的端口（Genome、StrategyRegistry、Verifier、Promotion、Ledger、Experience、KillSwitches、Governance） |
+| `data_scope.py` | 内置手动 RSI | 从已验证回执或持久 Run 恢复任务局部操作人，不向 Worker 暴露服务凭据 |
 | `events.py` | 运行可观测性 | SQLite 元数据事件日志，按 run/job/worker/sandbox 关联，不存任意日志正文 |
 | `store.py` | §12 | SQLite 持久化：绑定、运行、幂等键、作业、操作、工作区、候选、费用、触发记录 |
 | `bindings_service.py` | §3.2、§13 | 八项绑定检查、PUT/GET 的 ETag 语义 |
-| `run_service.py` | §5、§6、§13 | 提交（漂移检查、冻结输入、预留预算）、幂等、查询、取消、候选 |
+| `run_service.py` | §5、§6、§13 | 提交（漂移检查、冻结验证配置及所属 Binding 的晋升上限、预留预算）、幂等、查询、取消、候选 |
 | `job_service.py` | §7、§13 | 认领、心跳、完成、失败、租约过期重派发、宿主兜底重派发（不校验 fencing token） |
 | `operation_service.py` | §8、§13 | 幂等启动、按 id 查询、取消、结束回填与计费 |
 | `budget_service.py` | §11、§13 | 预留的上下限检查、计费累计与 `budget_exhausted` |
@@ -58,7 +59,7 @@ regressions. Preserve wire compatibility; do not restore Backend-owned execution
 | `job_protocol.py` | §7 | 作业协议：HMAC 令牌认领、心跳、文件、提交、判定、完成/失败（传输无关） |
 | `job_wire.py` | §7 | 与框架无关的作业协议负载编码（文件字节 base64），供路由与 worker 客户端共用 |
 | `worker.py` | §7、§10 | 容器内 worker：经作业协议认领作业，用本地工作区执行策略并回写 |
-| `runner.py` | §10 | 执行循环：`Lifecycle` 参与者，每轮「回收过期租约 → `scheduler.tick()` → `host.run_once()`」，消费进化作业队列（由独立服务配置控制） |
+| `runner.py` | §10 | 执行循环：`Lifecycle` 参与者，每轮「补齐已落定但下游缺写的判定 → 回收过期租约 → `scheduler.tick()` → `host.run_once()`」，消费进化作业队列（由独立服务配置控制） |
 
 `api.py` 是传输无关的公共 API 门面 + 错误信封（§14、09）。
 
@@ -83,6 +84,13 @@ regressions. Preserve wire compatibility; do not restore Backend-owned execution
   通道方法映射成路由。
 - `rootfs_readonly` 在规格里声明，但 Backend 平台的 `SandboxRuntimeClient.create_sandbox` 没有
   逐沙箱开关，只读根文件系统依赖镜像/模板策略（ARCA 侧）保证。
+
+### 内置手动 Run 的操作人恢复
+
+启用内置数据通道时，持久 Run 与触发信息一起记录经 Backend 验证的操作人。
+作业取文件、取会话、交候选和待验证恢复都从 Run 设置作用域，而不是从 Worker 请求、
+浏览器 Cookie 或 Bot owner 推断操作人。旧 Run 无此字段，保留原平台委托；不会回填，
+定时/事件触发也不沿用某个历史操作人。Backend 对每个回调重新检查权限。
 
 ### 候选提交的持久化恢复
 

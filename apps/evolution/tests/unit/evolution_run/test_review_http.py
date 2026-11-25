@@ -9,21 +9,17 @@ import pytest
 from fastapi import FastAPI
 
 from avernet_evolution.adapters.control import BASE, build_control_router, install_errors
+from avernet_evolution.core.evolution_promote import RiskTier
+from avernet_evolution.plugin_api import AccessGrant
 
 from .conftest import BOT
 from .test_review_api import CANDIDATE, _stack
 
 
-class _Access:
-    def __init__(self, bot, actor: str = "user_17") -> None:
-        self.bot = bot
-        self.actor = actor
-
-
 class _AccessPort:
     async def authorize(self, *, bot_id, owner_hint, credentials, write):
         del bot_id, owner_hint, credentials, write
-        return _Access(BOT)
+        return AccessGrant(BOT, "user_17")
 
 
 def _client(api) -> httpx.AsyncClient:
@@ -36,8 +32,8 @@ def _client(api) -> httpx.AsyncClient:
 
 @pytest.mark.asyncio
 async def test_report_and_queue_over_http(services) -> None:
-    api, promotion, _run_id = await _stack(services)
-    await promotion.decide(BOT, CANDIDATE)
+    api, promotion, run_id = await _stack(services)
+    await promotion.decide(BOT, CANDIDATE, run_id=run_id, profile="default@1", ceiling=RiskTier.T1)
 
     async with _client(api) as client:
         report = await client.get(f"{BASE.format(bot_id=BOT.bot_id)}/candidates/{CANDIDATE}")
@@ -63,13 +59,22 @@ async def test_unknown_candidate_is_404_not_found(services) -> None:
 
 @pytest.mark.asyncio
 async def test_approve_then_retry_with_same_key(services) -> None:
-    api, promotion, _run_id = await _stack(services)
-    await promotion.decide(BOT, CANDIDATE)
+    api, promotion, run_id = await _stack(services)
+    await promotion.decide(BOT, CANDIDATE, run_id=run_id, profile="default@1", ceiling=RiskTier.T1)
     url = f"{BASE.format(bot_id=BOT.bot_id)}/candidates/{CANDIDATE}:approve"
 
     async with _client(api) as client:
         first = await client.post(url, json={"reason": "diff reviewed"}, headers={"Idempotency-Key": "k1"})
         again = await client.post(url, json={"reason": "diff reviewed"}, headers={"Idempotency-Key": "k1"})
+        mismatches = [
+            (url, "diff reviewed "),
+            (url.replace(":approve", ":reject"), "diff reviewed"),
+            (url.replace(CANDIDATE, "sha256:another"), "diff reviewed"),
+        ]
+        for target, reason in mismatches:
+            conflict = await client.post(target, json={"reason": reason}, headers={"Idempotency-Key": "k1"})
+            assert conflict.status_code == 409
+            assert conflict.json()["error"]["code"] == "idempotency_key_reused"
 
     assert first.status_code == 200
     assert first.json()["data"]["review"]["status"] == "approved"
@@ -80,8 +85,8 @@ async def test_approve_then_retry_with_same_key(services) -> None:
 
 @pytest.mark.asyncio
 async def test_reject_requires_a_reason(services) -> None:
-    api, promotion, _run_id = await _stack(services)
-    await promotion.decide(BOT, CANDIDATE)
+    api, promotion, run_id = await _stack(services)
+    await promotion.decide(BOT, CANDIDATE, run_id=run_id, profile="default@1", ceiling=RiskTier.T1)
     url = f"{BASE.format(bot_id=BOT.bot_id)}/candidates/{CANDIDATE}:reject"
 
     async with _client(api) as client:

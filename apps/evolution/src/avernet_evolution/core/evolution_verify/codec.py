@@ -80,7 +80,7 @@ def verdict_from_json(text: str) -> Verdict:
         candidate=payload["candidate"],
         bot_owner_id=payload["bot_owner_id"],
         bot_id=payload["bot_id"],
-        run_id=payload.get("run_id"),
+        run_id=payload["run_id"],
         revision=payload.get("revision"),
         parent_revision=payload["parent_revision"],
         profile=payload["profile"],

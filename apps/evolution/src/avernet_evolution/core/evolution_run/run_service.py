@@ -182,6 +182,9 @@ class RunService:
             parent_revision=parent_revision,
             allowed_genes=list(binding.allowed_genes),
             verification_profile=binding.verification_profile,
+            auto_promote_ceiling=(
+                binding.auto_promote_ceiling.name if binding.auto_promote_ceiling is not None else None
+            ),
             params=params,
             budget_max={
                 "max_usd": budget.max_usd,

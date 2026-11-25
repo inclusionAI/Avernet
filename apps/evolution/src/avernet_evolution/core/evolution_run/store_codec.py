@@ -56,6 +56,7 @@ def _trigger_json(trigger: TriggerRecord) -> dict:
         "fire_time": _iso(trigger.fire_time),
         "event_id": trigger.event_id,
         "requested_by": trigger.requested_by,
+        "operator_user_id": trigger.operator_user_id,
     }
 
 
@@ -65,6 +66,7 @@ def _trigger_record(data: dict) -> TriggerRecord:
         fire_time=_parse(data.get("fire_time")),
         event_id=data.get("event_id"),
         requested_by=data.get("requested_by"),
+        operator_user_id=data.get("operator_user_id"),
     )
 
 
@@ -88,6 +90,7 @@ def _run_from_row(row: sqlite3.Row) -> Run:
         parent_revision=row["parent_revision"],
         allowed_genes=_load(row["allowed_genes"]),
         verification_profile=row["verification_profile"],
+        auto_promote_ceiling=row["auto_promote_ceiling"],
         params=_load(row["params"]),
         budget_max=_load(row["budget_max"]),
         granted=_load(row["granted"]),

@@ -95,26 +95,26 @@ async def test_service_decides_once_and_refuses_to_apply() -> None:
     )
     store.set_candidate_risk("sha256:c1", RiskTier.T2.value)
 
-    async def ceiling(bot):
-        return RiskTier.T1
-
-    service = LocalPromotionService(
-        verdicts=verdicts, store=GateDecisionStore(store.conn), ceiling_for=ceiling
+    service = LocalPromotionService(verdicts=verdicts, store=GateDecisionStore(store.conn))
+    decision = await service.decide(
+        BOT, "sha256:c1", run_id="run_1", profile="default@1", ceiling=RiskTier.T1
     )
-    decision = await service.decide(BOT, "sha256:c1")
     assert decision.outcome is GateOutcome.NEEDS_REVIEW
     assert decision.owner_id == "owner-1" and decision.run_id == "run_1"
 
     # 幂等：再问一次不会重新计算，也不会出现第二条。
-    assert await service.decide(BOT, "sha256:c1") == decision
+    assert (
+        await service.decide(BOT, "sha256:c1", run_id="run_1", profile="default@1", ceiling=RiskTier.T1)
+        == decision
+    )
     # needs_review 会开一张评审单；队列读的是评审条目，不是门禁记录本身。
     queued = service.queue(BOT)
     assert [item.candidate_id for item in queued] == ["sha256:c1"]
-    assert queued[0].gate_decision_id == gate_decision_id("sha256:c1")
+    assert queued[0].gate_decision_id == gate_decision_id("run_1", "sha256:c1")
     assert service.queue(BOT, status=None)[0].candidate_id == "sha256:c1"
 
     with pytest.raises(PromotionNotReady):
-        await service.promote(BOT, "sha256:c1")
+        await service.promote(BOT, "sha256:c1", run_id="run_1", profile="default@1")
 
 
 @pytest.mark.asyncio
@@ -135,4 +135,4 @@ async def test_pending_verdict_blocks_the_gate() -> None:
     )
     service = LocalPromotionService(verdicts=verdicts, store=GateDecisionStore(store.conn))
     with pytest.raises(VerdictPending):
-        await service.decide(BOT, "sha256:c2")
+        await service.decide(BOT, "sha256:c2", run_id="run_2", profile="default@1")

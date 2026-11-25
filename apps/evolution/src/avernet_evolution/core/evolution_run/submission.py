@@ -11,6 +11,7 @@ from typing import Any
 from avernet_evolution.core.evolution_strategy import Candidate, check_allowed_genes
 
 from .budget import BudgetUsage
+from .data_scope import data_scope, run_data_scope
 from .errors import CandidateRejected
 from .records import Run
 
@@ -65,14 +66,15 @@ async def submit_candidate(
         # Registry is idempotent for (bot, run, patch), including a lost response
         # after its transaction committed. Never manufacture a second run/ref.
         try:
-            revision = await genome.commit_patch(
-                run.bot,
-                patch,
-                run.id,
-                run.strategy_ref,
-                tuple(run.allowed_genes),
-                run.strategy_ref,
-            )
+            with data_scope(run_data_scope(run)):
+                revision = await genome.commit_patch(
+                    run.bot,
+                    patch,
+                    run.id,
+                    run.strategy_ref,
+                    tuple(run.allowed_genes),
+                    run.strategy_ref,
+                )
         except CandidateRejected as exc:
             store.events.append(
                 "candidate.rejected",

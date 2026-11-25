@@ -15,6 +15,7 @@ GENOME_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         ("GET", "/revisions"),
         ("POST", "/revisions"),
         ("POST", "/revisions:capture"),
+        ("POST", "/baseline:initialize"),
         ("GET", "/revisions/{rev:path}/diff"),
         ("GET", "/revisions/{rev:path}"),
         ("PUT", "/policy"),

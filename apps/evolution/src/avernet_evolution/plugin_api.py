@@ -23,6 +23,7 @@ from .core.evolution_run.ports import (
 class AccessGrant:
     bot: BotRef
     actor: str
+    operator_user_id: str | None = None  # only from the verified built-in Backend receipt
 
 
 class AccessPort(Protocol):

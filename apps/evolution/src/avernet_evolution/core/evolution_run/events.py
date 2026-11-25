@@ -1,7 +1,7 @@
 """Durable, metadata-only execution evidence (not arbitrary strategy stdout).
 
-State transitions currently commit before their journal append. Append failures
-propagate: an incomplete journal is NOT a successful/atomic audit transaction.
+Most state transitions commit before their journal append. Review decisions
+and their audit event share one transaction. Append failures propagate.
 Host events have no run until a worker actually claims it; reads correlate them
 through that claim, never through a speculative queue peek.
 """
@@ -96,6 +96,45 @@ class ExecutionEvents:
         sandbox_id: str | None = None,
         authority: str = "platform",
         details: dict[str, Any] | None = None,
+        once: bool = False,
+    ) -> None:
+        with self.conn:
+            if once:
+                self.conn.execute("BEGIN IMMEDIATE")
+            self._write(
+                kind,
+                run_id=run_id,
+                job_id=job_id,
+                attempt=attempt,
+                worker_id=worker_id,
+                sandbox_id=sandbox_id,
+                authority=authority,
+                details=details,
+                once=once,
+            )
+
+    def write_review_decided(self, run_id: str, candidate_id: str, *, status: str, actor: str) -> None:
+        """Append approval evidence in the caller's state/idempotency transaction."""
+        if not self.conn.in_transaction:
+            raise RuntimeError("review evidence requires a transaction")
+        self._write(
+            "review.decided",
+            run_id=run_id,
+            details={"candidate_id": candidate_id, "review_status": status, "actor": actor},
+        )
+
+    def _write(
+        self,
+        kind: str,
+        *,
+        run_id: str | None = None,
+        job_id: str | None = None,
+        attempt: int | None = None,
+        worker_id: str | None = None,
+        sandbox_id: str | None = None,
+        authority: str = "platform",
+        details: dict[str, Any] | None = None,
+        once: bool = False,
     ) -> None:
         data = details or {}
         if kind not in _KINDS or set(data) - _FIELDS:
@@ -107,6 +146,15 @@ class ExecutionEvents:
         encoded = json.dumps(data, sort_keys=True)
         if len(encoded) > 32768:
             raise ValueError("execution metadata too large")
+        if (
+            once
+            and self.conn.execute(
+                "SELECT 1 FROM evolution_event WHERE run_id=? AND kind=? AND details=?",
+                (run_id, kind, encoded),
+            ).fetchone()
+            is not None
+        ):
+            return
         try:
             self.conn.execute(
                 "INSERT INTO evolution_event "
@@ -124,9 +172,7 @@ class ExecutionEvents:
                     encoded,
                 ),
             )
-            self.conn.commit()
         except sqlite3.Error as exc:
-            self.conn.rollback()
             raise ExecutionEventWriteError("execution evidence write failed") from exc
 
     def for_run(self, run_id: str, *, after: int = 0, limit: int = 500) -> list[dict]:

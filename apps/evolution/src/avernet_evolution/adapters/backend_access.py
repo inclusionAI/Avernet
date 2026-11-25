@@ -33,7 +33,9 @@ def fingerprint(method: str, path: str, query: str, body: bytes, headers: Mappin
     return hashlib.sha256(material.encode()).hexdigest()
 
 
-def issue_grant(*, key: str, bot: BotRef, actor: str, tenant: str, request_hash: str) -> str:
+def issue_grant(
+    *, key: str, bot: BotRef, actor: str, tenant: str, request_hash: str, operator_user_id: str | None = None
+) -> str:
     if len(key.encode()) < 32 or not actor or not tenant:
         raise ValueError("Backend authorization receipt is not configured")
     now = int(time.time())
@@ -45,6 +47,7 @@ def issue_grant(*, key: str, bot: BotRef, actor: str, tenant: str, request_hash:
             "exp": now + 60,
             "bot": asdict(bot),
             "actor": actor,
+            "operator_user_id": operator_user_id,
             "tenant": tenant,
             "request_hash": request_hash,
         },
@@ -86,6 +89,11 @@ class BackendAccess:
                 or claims["exp"] - claims["iat"] > 60
             ):
                 raise ValueError("receipt scope mismatch")
-            return AccessGrant(bot=bot, actor=claims["actor"])
+            operator = claims.get("operator_user_id")
+            if operator is not None and (
+                not isinstance(operator, str) or not operator.strip() or operator != claims["actor"]
+            ):
+                raise ValueError("receipt operator mismatch")
+            return AccessGrant(bot=bot, actor=claims["actor"], operator_user_id=operator)
         except (jwt.PyJWTError, ValueError, TypeError, KeyError):
             raise PermissionError("Backend authorization receipt required") from None

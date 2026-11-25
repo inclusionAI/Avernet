@@ -106,19 +106,17 @@ class _Candidates:
 
     async def verdict(self, candidate_id: str) -> Verdict:
         self._ctx.requires("candidates@1")
-        row = next(
-            (
-                row
-                for row in self._ctx._store.candidates(self._ctx._run.id)
-                if row.candidate_id == candidate_id
-            ),
-            None,
-        )
+        row = self._ctx._store.get_candidate(self._ctx._run.id, candidate_id)
         if row is None:
             raise KeyError("candidate not found in this run")
         verifier = self._ctx._verifier
-        if verifier is not None:
-            view = await verifier.strategy_view(candidate_id, self._ctx._run.id)
+        view = None
+        if verifier is not None and row.revision:
+            try:
+                view = await verifier.strategy_view(candidate_id, self._ctx._run.id)
+            except KeyError:
+                pass  # a historical submission may have no Run-scoped verdict
+        if view is not None:
             return Verdict(
                 candidate=candidate_id,
                 status=VerdictStatus(view.status.value),
@@ -136,7 +134,9 @@ class _Candidates:
             )
         return Verdict(
             candidate=candidate_id,
-            status=VerdictStatus.REJECT if row.verdict == "reject" else VerdictStatus.PENDING,
+            status=VerdictStatus.REJECT
+            if not row.revision and row.verdict == "reject"
+            else VerdictStatus.PENDING,
             revision=row.revision or None,
         )
 

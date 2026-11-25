@@ -88,7 +88,7 @@ async def _candidate(harness: Harness):
     service = harness.service()
     pending = await service.verify(_ref(), "default@1")
     assert pending.status is VerdictStatus.PENDING
-    return service, await service.settle("sha256:cand")
+    return service, await service.settle("sha256:cand", run_id="run_1")
 
 
 def _ref():
@@ -121,7 +121,7 @@ async def test_verify_is_idempotent_per_candidate() -> None:
     first = await service.verify(_ref(), "default@1")
     second = await service.verify(_ref(), "default@1")
     assert first.status is VerdictStatus.PENDING and second.status is VerdictStatus.PENDING
-    await service.settle("sha256:cand")
+    await service.settle("sha256:cand", run_id="run_1")
     again = await service.verify(_ref(), "default@1")
     assert again.status is VerdictStatus.ACCEPT
 
@@ -156,7 +156,7 @@ async def test_strategy_view_hides_case_detail() -> None:
 @pytest.mark.asyncio
 async def test_strategy_view_refuses_other_runs() -> None:
     service, _ = await _candidate(Harness())
-    with pytest.raises(PermissionError):
+    with pytest.raises(KeyError):
         await service.strategy_view("sha256:cand", "run_other")
 
 

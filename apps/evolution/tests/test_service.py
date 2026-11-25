@@ -20,7 +20,7 @@ BINDING = {
     "trigger": {"manual": True},
     "parent": "active",
     "allowed_genes": ["persona"],
-    "verification_profile": "pending@1",
+    "verification_profile": "rules-file@1",
     "budget": {"max_usd": 0.1, "max_wall_clock_s": 60},
     "auto_promote_ceiling": None,
 }

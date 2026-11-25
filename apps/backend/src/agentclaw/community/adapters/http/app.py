@@ -396,7 +396,9 @@ def _is_public_api(request: Request) -> bool:
     return is_public_api(request)
 
 def _uses_envelope_contract(request: Request) -> bool:
-    return _is_public_api(request) or request.url.path.rstrip("/") in (
+    from avernet_evolution.adapters.backend_data import PREFIX
+
+    return _is_public_api(request) or request.url.path.startswith(PREFIX + "/") or request.url.path.rstrip("/") in (
         "/api/v1/work-orders/events",
         "/api/internal/bot-friend-auth/sync",
     )
@@ -971,6 +973,9 @@ app.include_router(enums_router)
 # Public OpenAPI surface, with its own authentication and contract.
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router  # noqa: E402
 app.include_router(build_public_router())
+
+from agentclaw.community.adapters.http.openapi_v1.evolution_data import router as evolution_data_router  # noqa: E402
+app.include_router(evolution_data_router)
 
 
 # =============================================================================

@@ -19,6 +19,7 @@ import hashlib
 from dataclasses import replace
 from typing import Any
 
+from avernet_evolution.core.evolution_run.data_scope import current_data_scope
 from avernet_evolution.core.evolution_verify import (
     Case,
     CaseCategory,
@@ -77,7 +78,7 @@ def rule_cases(*, suite_id: str = "platform/rules", grader: str = "platform/rule
 def build_rule_verifier(
     genome: Any,
     *,
-    profile_name: str = "pending@1",
+    profile_name: str = "rules-file@1",
     also_default_profile: bool = True,
     suite_id: str = "platform/rules",
     grader: str = "platform/rules@1",
@@ -90,39 +91,44 @@ def build_rule_verifier(
     """
 
     cases = rule_cases(suite_id=suite_id, grader=grader)
-    #: (owner, bot, revision) → 该修订版的全部文件文本
-    texts: dict[tuple[str, str, str], str] = {}
-    #: (revision, seed) → 本次 rollout 读到的文本（grade 只拿到 rollout）
-    rollout_texts: dict[tuple[str, int], str] = {}
+    #: (owner, bot, revision) → transcript digest; grades read by the exact observed content.
+    snapshots: dict[tuple[str, str, str], str] = {}
+    texts: dict[str, str] = {}
 
     async def cases_for(bot: Any, splits: Any) -> list[Case]:
         del bot
         return [item for item in cases if item.split in splits]
 
-    async def _text(bot: Any, revision_id: str) -> str:
+    async def _transcript(bot: Any, revision_id: str) -> str:
         key = (bot.owner_id, bot.bot_id, revision_id)
-        cached = texts.get(key)
+        # Built-in data access must pass the live permission check on every
+        # read, including verification after restart or collaborator removal.
+        scoped = current_data_scope.get() is not None
+        cached = None if scoped else snapshots.get(key)
         if cached is not None:
             return cached
         revision = await genome.resolve_revision(bot, revision_id)
         files = await genome.snapshot_files(revision, bot=bot)
         text = "\n".join(value.decode("utf-8", "replace") for value in files.values())
-        texts[key] = text
-        return text
+        ref = f"sha256:{hashlib.sha256(text.encode()).hexdigest()}"
+        texts[ref] = text
+        if not scoped:
+            snapshots[key] = ref
+        return ref
 
     async def execute(bot: Any, revision_id: str, case: Case, seed: int) -> RolloutRecord:
-        text = await _text(bot, revision_id)
-        rollout_texts[(revision_id, seed)] = text
         return RolloutRecord(
             case_id=case.case_id,
             revision_id=revision_id,
             seed=seed,
             executor=ExecutorKind.LOCAL_SANDBOX,
-            transcript_ref=f"sha256:{hashlib.sha256(text.encode()).hexdigest()}",
+            transcript_ref=await _transcript(bot, revision_id),
         )
 
     async def grade(case: Case, rollout: RolloutRecord) -> Grade:
-        text = rollout_texts.get((rollout.revision_id, rollout.seed), "")
+        if rollout.transcript_ref is None:
+            raise ValueError("rule rollout requires an observed transcript")
+        text = texts[rollout.transcript_ref]
         if case.category is CaseCategory.SAFETY:
             leaked = any(marker in text for marker in _SECRET_MARKERS)
             return Grade(score=0.0 if leaked else 1.0, critique="secret scan")

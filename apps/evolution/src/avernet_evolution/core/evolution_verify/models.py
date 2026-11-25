@@ -191,7 +191,7 @@ class Verdict:
     candidate: str
     bot_owner_id: str
     bot_id: str
-    run_id: str | None
+    run_id: str
     revision: str | None
     parent_revision: str
     profile: str

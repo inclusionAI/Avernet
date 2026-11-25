@@ -90,14 +90,14 @@ async def test_verdict_survives_a_new_service_instance() -> None:
     first = _service(on_final=on_final)
     first.attach_store(store)
     assert (await first.verify(CANDIDATE, "default@1")).status is VerdictStatus.PENDING
-    verdict = await first.settle(CANDIDATE.candidate_id, "default@1")
+    verdict = await first.settle(CANDIDATE.candidate_id, "default@1", run_id=CANDIDATE.run_id)
     assert verdict.status is VerdictStatus.ACCEPT
     assert finalized == ["accept"]
 
     # 新实例共用同一个库：不再重新评测，直接读到已有判定。
     second = _service()
     second.attach_store(store)
-    reloaded = await second.get_verdict(CANDIDATE.candidate_id, "default@1")
+    reloaded = await second.get_verdict(CANDIDATE.candidate_id, "default@1", run_id=CANDIDATE.run_id)
     assert reloaded.status is VerdictStatus.ACCEPT
     assert reloaded.revision == "sha256:new"
     assert (await second.verify(CANDIDATE, "default@1")).status is VerdictStatus.ACCEPT
@@ -111,7 +111,7 @@ async def test_pending_verdict_is_visible_while_the_pipeline_runs() -> None:
     await service.verify(CANDIDATE, "default@1")
     # 落盘先于流水线：崩溃后运维仍能看到"这个候选在验证中"。
     assert store.conn.execute("SELECT status FROM evolution_verdict").fetchone()["status"] == "pending"
-    await service.settle(CANDIDATE.candidate_id, "default@1")
+    await service.settle(CANDIDATE.candidate_id, "default@1", run_id=CANDIDATE.run_id)
 
 
 def test_verdict_codec_round_trips_the_decision_fields() -> None:
@@ -134,3 +134,24 @@ def test_verdict_codec_round_trips_the_decision_fields() -> None:
     assert restored.revision == "sha256:new"
     assert restored.judge_agreement == 0.9
     assert restored.tolerance_used is True
+
+
+@pytest.mark.asyncio
+async def test_same_candidate_hash_is_evaluated_independently_and_terminal_is_immutable() -> None:
+    from dataclasses import replace
+
+    store = EvolutionStore(":memory:")
+    service = _service()
+    service.attach_store(store)
+    other = replace(CANDIDATE, run_id="run_2", bot_id="bot-2", revision=CANDIDATE.parent_revision)
+    await service.verify(CANDIDATE)
+    await service.verify(other)
+    first = await service.settle(CANDIDATE.candidate_id, run_id=CANDIDATE.run_id)
+    second = await service.settle(other.candidate_id, run_id=other.run_id)
+    assert first.status is VerdictStatus.ACCEPT
+    assert second.status is VerdictStatus.REJECT
+    service.store.save(replace(first, status=VerdictStatus.PENDING))
+    assert await service.get_verdict(first.candidate, run_id=first.run_id) == first
+    assert (await service.strategy_view(second.candidate, second.run_id)).status is VerdictStatus.REJECT
+    with pytest.raises(KeyError):
+        await service.strategy_view(first.candidate, "foreign")

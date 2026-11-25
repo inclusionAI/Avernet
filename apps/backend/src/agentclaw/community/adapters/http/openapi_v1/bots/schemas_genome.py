@@ -110,6 +110,15 @@ class GenomeRevisionPayload(BaseModel):
     )
 
 
+class BaselineInitialized(BaseModel):
+    """The initial `active` baseline: where it points, and whether this call created it."""
+
+    revision: str = Field(description="The revision `active` points at, `sha256:<hex64>`.")
+    created: bool = Field(
+        description="True when this call recorded and named the baseline; False when `active` already existed."
+    )
+
+
 class RevisionRecorded(BaseModel):
     """What recording answers: the revision's identity and, for a patch, its assessment."""
 

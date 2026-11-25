@@ -182,7 +182,7 @@ class LocalGovernance:
         return await self.bot_ceiling(bot)
 
     async def profile_problems(self, profile):
-        return [] if profile == "pending@1" else ["local profile only supports pending@1 (no evaluation)"]
+        return [] if profile == "rules-file@1" else ["local profile only supports rules-file@1"]
 
 
 class LocalKills:

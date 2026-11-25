@@ -100,10 +100,10 @@ def decision_from_json(text: str) -> GateDecision:
     )
 
 
-def gate_decision_id(candidate_id: str) -> str:
-    """门禁决定的稳定标识：由候选内容哈希派生，重算不会换 id（08 §2.2）。"""
+def gate_decision_id(run_id: str, candidate_id: str) -> str:
+    """门禁决定的稳定标识：按提交 Run 与候选内容派生。"""
 
-    return "gd_" + hashlib.sha256(candidate_id.encode()).hexdigest()[:12]
+    return "gd_" + hashlib.sha256(f"{run_id}/{candidate_id}".encode()).hexdigest()[:12]
 
 
 @dataclass(frozen=True)

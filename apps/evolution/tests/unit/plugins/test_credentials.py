@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from avernet_evolution.core.evolution_run.errors import GenomeBaselineMissing
+from avernet_evolution.core.evolution_run.errors import EvolutionAppNotGranted, GenomeBaselineMissing
 from avernet_evolution.plugins.credentials import Delegation, FileDelegations
 from avernet_evolution.plugins.platform_http import (
     HttpGenome,
@@ -65,14 +66,32 @@ async def test_short_token_is_treated_as_not_provisioned(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_active_404_is_reported_as_missing_baseline() -> None:
-    class Bridge:
-        async def request(self, bot, method, suffix, **kwargs):
-            raise PlatformHttpError("platform request refused (404)", status=404)
-
-    genome = HttpGenome(Bridge())
+async def test_active_404_is_reported_as_missing_baseline_only_if_visible() -> None:
+    request = AsyncMock(side_effect=[PlatformHttpError("refused", status=404), {"drift": None}])
+    bot = _bot()
     with pytest.raises(GenomeBaselineMissing):
-        await genome.resolve_revision(_bot(), "active")
+        await HttpGenome(SimpleNamespace(request=request)).resolve_revision(bot, "active")
+    request.assert_awaited_with(bot, "GET", "/genome/drift")
+
+
+@pytest.mark.asyncio
+async def test_drift_override_does_not_prove_visibility() -> None:
+    request = AsyncMock(side_effect=PlatformHttpError("refused", status=404))
+    override = AsyncMock(return_value=None)
+    bot = _bot()
+    with pytest.raises(EvolutionAppNotGranted, match="check the application grant"):
+        await HttpGenome(SimpleNamespace(request=request), drift=override).resolve_revision(bot, "active")
+    request.assert_awaited_with(bot, "GET", "/genome/drift")
+    override.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_nonempty_drift_does_not_mean_no_baseline() -> None:
+    failure = PlatformHttpError("refused", status=404)
+    request = AsyncMock(side_effect=[failure, {"drift": {"active": "rev1", "observed": "rev2"}}])
+    with pytest.raises(PlatformHttpError) as caught:
+        await HttpGenome(SimpleNamespace(request=request)).resolve_revision(_bot(), "active")
+    assert caught.value is failure
 
 
 @pytest.mark.asyncio
@@ -84,3 +103,11 @@ async def test_other_404_stays_a_generic_failure() -> None:
     genome = HttpGenome(Bridge())
     with pytest.raises(PlatformHttpError):
         await genome.resolve_revision(_bot(), "sha256:missing")
+
+
+@pytest.mark.asyncio
+async def test_default_drift_404_is_inaccessible_before_resolving_active() -> None:
+    request = AsyncMock(side_effect=PlatformHttpError("refused", status=404))
+    with pytest.raises(EvolutionAppNotGranted):
+        await HttpGenome(SimpleNamespace(request=request)).drift(_bot())
+    assert request.await_count == 1

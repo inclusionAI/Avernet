@@ -14,6 +14,7 @@ from typing import Any, Protocol
 from avernet_evolution.core.evolution_strategy.errors import CapabilityNotGranted
 
 from .budget import BudgetUsage
+from .data_scope import data_scope, run_data_scope
 from .enums import ChargeSource
 from .errors import JobNotFound, StaleFencingToken
 from .ports import ExperienceQueryFactory
@@ -153,8 +154,9 @@ class JobChannel:
 
     async def files(self, job_id: str, fencing_token: str) -> dict[str, bytes]:
         run = self._run_for(job_id, fencing_token)
-        revision = await self.genome.resolve_revision(run.bot, run.parent_revision)
-        return await self.genome.snapshot_files(revision, bot=run.bot)
+        with data_scope(run_data_scope(run)):
+            revision = await self.genome.resolve_revision(run.bot, run.parent_revision)
+            return await self.genome.snapshot_files(revision, bot=run.bot)
 
     async def submit(self, job_id: str, fencing_token: str, patch: dict[str, Any]) -> dict[str, Any]:
         from avernet_genome.patch_models import GenomePatch
@@ -184,21 +186,23 @@ class JobChannel:
         self._requires(run, "candidates@1")
         # Check ownership even when no 07 verifier is installed. Never turn an
         # unknown/foreign id into a plausible pending verdict.
-        candidate = next(
-            (row for row in self.store.candidates(run.id) if row.candidate_id == candidate_id),
-            None,
-        )
+        candidate = self.store.get_candidate(run.id, candidate_id)
         if candidate is None:
             raise JobUnauthorized(candidate_id)
-        if self.verifier is None:
+        view = None
+        if self.verifier is not None and candidate.revision:
+            try:
+                view = await self.verifier.strategy_view(candidate_id, run.id)
+            except KeyError:
+                pass  # a historical submission may have no Run-scoped verdict
+        if view is None:
             return {
                 "candidate": candidate_id,
-                "status": "reject" if candidate.verdict == "reject" else "pending",
+                "status": "reject" if not candidate.revision and candidate.verdict == "reject" else "pending",
                 "revision": candidate.revision or None,
                 "aggregates": {},
                 "reasons": [],
             }
-        view = await self.verifier.strategy_view(candidate_id, run.id)
         return {
             "candidate": view.candidate,
             "status": view.status.value,
@@ -219,8 +223,9 @@ class JobChannel:
     ) -> list[Any]:
         run = self._run_for(job_id, fencing_token)
         self._requires(run, "experience.sessions@1")
-        provider = self._experience_for(run)
-        episodes = await provider.sessions(days=days, limit=limit, revision=revision)
+        with data_scope(run_data_scope(run)):
+            provider = self._experience_for(run)
+            episodes = await provider.sessions(days=days, limit=limit, revision=revision)
         self._event(
             "experience.query.completed",
             job_id,
@@ -247,8 +252,9 @@ class JobChannel:
     ) -> list[Any]:
         run = self._run_for(job_id, fencing_token)
         self._requires(run, "experience.feedback@1")
-        provider = self._experience_for(run)
-        return await provider.feedback(days=days, kinds=kinds, limit=limit)
+        with data_scope(run_data_scope(run)):
+            provider = self._experience_for(run)
+            return await provider.feedback(days=days, kinds=kinds, limit=limit)
 
     # -- models --------------------------------------------------------
     async def models_complete(

@@ -11,6 +11,7 @@ from injector import inject
 class EvolutionControlConfig:
     upstream: str = ""
     timeout_s: float = 30
+    builtin_data_tenant: str = ""  # empty disables the built-in operator data channel
 
     def __post_init__(self):
         if self.upstream:

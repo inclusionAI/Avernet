@@ -58,8 +58,8 @@ def _genome(parent_text: str, candidate_text: str) -> _Genome:
 async def test_marker_hits_accept_and_read_each_revision_once() -> None:
     genome = _genome("旧内容\n", "## Core Truths\n" + "\n".join(RULE_VALIDATION_MARKERS) + "\n")
     service = build_rule_verifier(genome)
-    await service.verify(_ref(), "pending@1")
-    verdict = await service.settle(CANDIDATE, "pending@1")
+    await service.verify(_ref(), "rules-file@1")
+    verdict = await service.settle(CANDIDATE, "rules-file@1", run_id="run_1")
 
     assert verdict.status is VerdictStatus.ACCEPT, verdict.reasons
     assert verdict.splits["validation"].cases == 3
@@ -72,8 +72,8 @@ async def test_marker_hits_accept_and_read_each_revision_once() -> None:
 async def test_unchanged_content_does_not_improve() -> None:
     same = "## Core Truths\n旧内容\n"
     service = build_rule_verifier(_genome(same, same))
-    await service.verify(_ref(), "pending@1")
-    verdict = await service.settle(CANDIDATE, "pending@1")
+    await service.verify(_ref(), "rules-file@1")
+    verdict = await service.settle(CANDIDATE, "rules-file@1", run_id="run_1")
 
     assert verdict.status is VerdictStatus.REJECT
     assert verdict.splits["validation"].mean_delta == 0.0
@@ -87,8 +87,8 @@ async def test_candidate_that_introduces_a_secret_is_rejected() -> None:
             "## Core Truths\n" + "\n".join(RULE_VALIDATION_MARKERS) + "\nsk-live-abc123\n",
         )
     )
-    await service.verify(_ref(), "pending@1")
-    verdict = await service.settle(CANDIDATE, "pending@1")
+    await service.verify(_ref(), "rules-file@1")
+    verdict = await service.settle(CANDIDATE, "rules-file@1", run_id="run_1")
 
     # 验证有增益，但 safety 新失败零容差 → 必须拒绝。
     assert verdict.status is VerdictStatus.REJECT
@@ -98,5 +98,26 @@ async def test_candidate_that_introduces_a_secret_is_rejected() -> None:
 @pytest.mark.asyncio
 async def test_profiles_expose_the_binding_names() -> None:
     service = build_rule_verifier(_genome("a", "b"))
-    assert set(service.profiles) == {"pending@1", "default@1"}
-    assert service.default_profile == "pending@1"
+    assert set(service.profiles) == {"rules-file@1", "default@1"}
+    assert service.default_profile == "rules-file@1"
+
+
+@pytest.mark.asyncio
+async def test_grader_reads_the_observed_snapshot_not_another_bots_rollout() -> None:
+    other = SimpleNamespace(owner_id=BOT.owner_id, bot_id="bot-2")
+
+    class ScopedGenome:
+        async def resolve_revision(self, bot, revision):
+            return SimpleNamespace(bot=bot, id=revision)
+
+        async def snapshot_files(self, revision, *, bot):
+            assert revision.bot == bot
+            text = RULE_VALIDATION_MARKERS[0] if bot == BOT else "no matching marker"
+            return {"persona/AGENTS.md": text.encode()}
+
+    service = build_rule_verifier(ScopedGenome())
+    case = (await service.cases_for(BOT, ("validation",)))[0]
+    first = await service.execute(BOT, CANDIDATE, case, 1)
+    second = await service.execute(other, CANDIDATE, case, 1)
+    assert (await service.grade(case, first)).score == 1.0
+    assert (await service.grade(case, second)).score == 0.0

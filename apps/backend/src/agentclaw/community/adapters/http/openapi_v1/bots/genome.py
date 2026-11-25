@@ -28,6 +28,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import envelope, env
 from agentclaw.community.api.bot_genome_promotion_service import GenomePromotionServiceProtocol
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.bot_genome.baseline import ensure_active_baseline
 from agentclaw.community.core.bot_genome.canonical import NotCanonicalizable, canonicalize, loads_strict
 from agentclaw.community.core.bot_genome.errors import LimitExceeded
 from agentclaw.community.core.bot_genome.limits import MAX_UPLOAD_BYTES
@@ -49,6 +50,7 @@ from agentclaw.community.di import Injected
 
 from .config_manifest_support import audit_actor, manifest_target
 from .schemas_genome import (
+    BaselineInitialized,
     BotIdentityPayload,
     ContentStored,
     GenomeDiffPayload,
@@ -170,7 +172,7 @@ def _summary(meta: RevisionMetadata, bot: BotRef) -> RevisionSummary:
     )
 
 
-def _recorded(recorded: RecordedRevision, response: Response) -> RevisionRecorded:
+def recorded_payload(recorded: RecordedRevision, response: Response) -> RevisionRecorded:
     """201 for new content, 200 when the registry already held it."""
     meta = recorded.revision.revision
     response.status_code = 201 if recorded.created else 200
@@ -311,7 +313,7 @@ async def commit_genome_patch(
     recorded = await registry.commit_patch(
         bot, body.patch, created_by=actor, status=RevisionStatus(body.status), run=run
     )
-    return envelope(_recorded(recorded, response), request)
+    return envelope(recorded_payload(recorded, response), request)
 
 
 @router.post(
@@ -340,7 +342,38 @@ async def capture_genome_revision(
     """
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     recorded = await registry.capture(bot, created_by=_actor(actor_id, caller))
-    return envelope(_recorded(recorded, response), request)
+    return envelope(recorded_payload(recorded, response), request)
+
+
+@router.post(
+    "/baseline:initialize",
+    response_model=Envelope[BaselineInitialized],
+    responses=USER_SCOPED_403,
+    status_code=201,
+    operation_id="initialize_bot_genome_baseline",
+)
+@envelope_errors
+async def initialize_bot_genome_baseline(
+    bot_id: BotIdPath,
+    request: Request,
+    response: Response,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    caller: ActingCallerDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    registry: GenomeRegistryProtocol = Injected(GenomeRegistryProtocol),
+) -> Envelope[BaselineInitialized]:
+    """Name the bot's current state the `active` baseline when there is none (RSI cold start).
+
+    `201` when this call recorded the baseline, `200` when one already
+    existed — retries and concurrent first saves are safe. Unlike a
+    promotion nothing is applied: the recorded revision IS the bot's
+    current state. A `422` names what cannot be captured.
+    """
+    bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    baseline = await ensure_active_baseline(registry, bot, actor=_actor(actor_id, caller))
+    response.status_code = 201 if baseline.created else 200
+    return envelope(BaselineInitialized(revision=baseline.revision, created=baseline.created), request)
 
 
 @router.get(
@@ -397,15 +430,16 @@ async def get_genome_revision(
 ) -> Envelope[GenomeRevisionPayload]:
     """One revision, whole: metadata, `spec` and `policy`. A revision of another bot is not found."""
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
+    return envelope(revision_payload(registry, bot, rev), request)
+
+
+def revision_payload(registry: GenomeRegistryProtocol, bot: BotRef, rev: str) -> GenomeRevisionPayload:
     revision = registry.get_revision(bot, rev)
-    return envelope(
-        GenomeRevisionPayload(
-            genome_schema=revision.genome_schema,
-            revision=_summary(revision.revision, bot),
-            spec=revision.spec,
-            policy=revision.policy,
-        ),
-        request,
+    return GenomeRevisionPayload(
+        genome_schema=revision.genome_schema,
+        revision=_summary(revision.revision, bot),
+        spec=revision.spec,
+        policy=revision.policy,
     )
 
 
@@ -434,7 +468,7 @@ async def set_genome_policy(
     """
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     recorded = registry.set_policy(bot, body, created_by=_actor(actor_id, caller))
-    return envelope(_recorded(recorded, response), request)
+    return envelope(recorded_payload(recorded, response), request)
 
 
 # -- refs ---------------------------------------------------------------------------------------

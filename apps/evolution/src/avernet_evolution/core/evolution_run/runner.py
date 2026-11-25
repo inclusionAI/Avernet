@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -45,6 +46,7 @@ class EvolutionRunner:
     worker_id: str = "evolution-runner"
     last_error: str | None = None
     dispatched: int = 0
+    reconcile_finalized: Callable[[], Awaitable[None]] | None = None
     _task: asyncio.Task | None = field(default=None, repr=False)
     _stop: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
@@ -88,6 +90,8 @@ class EvolutionRunner:
     async def tick(self, now: datetime | None = None) -> int:
         """一次「回收过期租约 + 调度 + 派发」，返回本次派发进沙箱的作业数。"""
 
+        if self.reconcile_finalized is not None:
+            await self.reconcile_finalized()
         # 先回收：崩溃 worker 的租约到期后，运行回到 queued 并在同一轮被重新派发
         # （§7.2）。`jobs` 未注入时（禁用 / 测试替身）跳过回收。
         if self.jobs is not None:

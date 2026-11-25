@@ -127,6 +127,7 @@ Bearer <local-token 文件内容>`。夹具策略 `local/identity-hardening@1.0.
 | `LOCAL_TOKEN_FILE` | local 必填，至少32字符，仅本机夹具使用 |
 | `BACKEND_PRINCIPAL_KEY_FILE` | production 必填；部署提供既有平台 principal 签名材料的只读文件，至少32字节；不是 IAM Token，也不是 Worker key |
 | `BACKEND_TENANT` | production 必填；必须匹配 Backend 的系统租户，一个库只属于一个租户 |
+| `BACKEND_DATA_ORIGIN` | 默认关闭；内置手动 RSI 的 Backend 私有 HTTP(S) origin，由平台工厂传给 `BotHttp`，不经 Gateway |
 | `PLATFORM_FACTORY` | production 必填，可信 `module:async_factory`，返回 `Platform` |
 | `HOST` / `PORT` | `127.0.0.1` / `8091`；local 只允许回环地址 |
 | `CONSUMER` | `true`，控制独立服务自动消费；不是旧 Backend 的 `EVOLUTION_CONSUMER_ENABLED` |
@@ -148,8 +149,9 @@ Worker 签名材料、控制面 profile/tenant 和策略注册定义/镜像摘�
 生产的浏览器入口位于 Backend，复用 Gateway 登录、签名 principal、Bot admission 与
 协作者权限；不新增 RSI 登录、Cookie 文件或用户配置。`user_id` 由前端共享客户端
 从系统身份提供，Backend 与已验证 principal 比对；`entity_id`（兼容 `owner_id`）
-只是资源选择器，**不构成身份凭证**。读接口沿用 MEMBER，写/执行沿用系统的
-显式 MEMBER（或 Owner）；仅有 Space 合成的查看/聊天权限不会自动获得操作权限。
+只是资源选择器，**不构成身份凭证**。读接口沿用 MEMBER，保存/取消沿用显式 MEMBER；
+启用内置数据通道后，手动启动要求显式 ADMIN（或 Owner），与 Genome 候选写入一致。
+仅有 Space 合成的查看/聊天权限不会自动获得操作权限。
 
 Backend 从权威 Bot 解析结果取得稳定 entity 和当前 owner，独立记录实际 actor，
 不把 owner 当提交者。内部回执使用既有平台 principal 签名材料、固定 issuer/audience、
@@ -186,7 +188,7 @@ Backend 配置与故障边界见 [Bot RSI 控制入口](../backend/docs/flows/bo
 {
   "id": "identity", "strategy": "local/identity-hardening@1.0.0",
   "trigger": {"manual": true}, "parent": "active",
-  "allowed_genes": ["persona"], "verification_profile": "pending@1",
+  "allowed_genes": ["persona"], "verification_profile": "rules-file@1",
   "budget": {"max_usd": 0.1, "max_wall_clock_s": 60},
   "params": {}, "auto_promote_ceiling": null
 }
@@ -198,17 +200,25 @@ Backend 配置与故障边界见 [Bot RSI 控制入口](../backend/docs/flows/bo
 revision 文件、按用例打分；simulator 只负责选用），08 只做决策，09 的报告/队列/
 approve/reject 已可调用。
 **apply 仍未启用**：revision 目前只捕获 persona 等部分文件，不是 bot 的完整快照；
-因此 `promote()` 与 approve 之后的 apply 都会显式失败，而不是把 bot 覆盖成残缺状态。
+`promote()` 显式拒绝 apply；approve 只记录人工决定，不写回 bot 或移动 `active`。
 
 | 方法 / 后缀 | 输入 → 输出 |
 | --- | --- |
 | `GET /candidates/{candidate_id}` | 候选报告：diff 指针、判定与 splits、门禁、评审状态；判定仍 pending 时 `gate` / `review` 为 `null` |
 | `GET /review-queue?status=open&min_tier=T1&page=1&page_size=20` | `{total, items}`；`status` 可取 `open` / `approved` / `rejected` / `superseded` / `all` |
 | `POST /candidates/{candidate_id}:approve` | `{reason}` + `Idempotency-Key` → 记录批准；响应 `promotion` 为 `null`，`promotion_note` 说明 apply 未启用 |
-| `POST /candidates/{candidate_id}:reject` | `{reason}` → 记录拒绝，条目变为 `rejected` |
+| `POST /candidates/{candidate_id}:reject` | `{reason}` + 可选 `Idempotency-Key` → 记录拒绝，条目变为 `rejected` |
 
 错误码沿用 09 §2.1 的信封：未知候选/条目 `404 not_found`；不在队列
-（已自动晋升或不可晋升）`409 not_reviewable`；已决策 `409 already_decided`。
+（自动晋升条件满足或不可晋升）`409 not_reviewable`；已决策 `409 already_decided`。
+同一 Bot 的多个 Run 若历史上保存了同一哈希，只有哈希的候选报告和审批路径返回
+`409 candidate_ambiguous`，不会任选一个 Run。可从 Run 的候选和证据列表定位历史记录。
+旧应用委托通道的 `/genome/drift` 返回 404 表示进化应用不可见该 Bot
+（`409 evolution_app_not_granted`）。内置通道复用操作人的 Bot 权限，不查应用授权；
+当 Bot 可见但找不到 `active` 时，保存绑定或启动 Run 返回 `409 no_genome_baseline`。
+基线必须通过独立 Genome 流程建立，RSI 不会自动捕获或提升；冷启动走基因组侧的
+`POST /openapi/v1/bots/{bot_id}/genome/baseline:initialize`（只记录当前配置，不 apply，ADMIN），前端保存绑定时会自动调用一次。Chat 的 `missing login cookie`
+属于独立登录链路，这里不修改。
 
 验证器是插件：
 `build_rule_verifier(genome)`（`plugins/verifiers/rules.py`）演示了最小实现——
@@ -217,19 +227,36 @@ approve/reject 已可调用。
 `compare.py` / `policy.py` / 门禁 / 09 接口都不用改；同时要把 `agreement` 接上，
 否则 T2+ 候选的“多评分器集成”要求不会被执行。
 
-数据落在与 Run 同一个 SQLite：`evolution_verdict`（按 `(candidate, profile)` 幂等，
-终态永不改写）、`evolution_gate_decision`（每候选一条）、`evolution_review_item`
-（`open → approved / rejected / superseded`）、`evolution_review_idempotency`
-（同键重试返回第一次的响应）。
+数据落在与 Run 同一个 SQLite：`evolution_verdict` 按 `(run_id, candidate_id, profile)` 幂等，
+终态永不改写；`evolution_gate_decision` 与 `evolution_review_item` 按 `(run_id, candidate_id)`
+隔离。审批状态、`review.decided` 证据和 `evolution_review_request` 的幂等响应同事务提交。
+同一 owner/Bot 内，同键同动作、候选及原始 `reason` 返回第一次的响应；复用键但修改请求
+返回 `409 idempotency_key_reused`。
 
 门禁规则（08 §4.4）：判定非 `accept`、safety 新失败、回归超容差、超预算 →
 `not_promotable`；被容忍的回归、冻结、事件 → `needs_review`；风险等级在绑定
-`auto_promote_ceiling` 之内且非 T3 才 `auto_promote`。等级在提交时按补丁操作算一次
+`auto_promote_ceiling` 之内且非 T3 才 `auto_promote`。上限在提交 Run 时从当前 Run 所属的
+Binding 冻结，与同一 Bot 的其他 Binding 无关，之后修改配置不影响已提交 Run。
+等级在提交时按补丁操作算一次
 （persona → T2，resource/memory → T1，`memory.set_mode=replace` → T3，未知 → T2）。
 
 进程内验证流水线不跨重启：启动时会把库里停在 `pending` 的判定重跑一遍
-（`LocalVerificationService.resume_pending`），只补完没跑完的那次；门禁决策与评审条目
-本身是持久状态，重启后照常可读。
+（`LocalVerificationService.resume_pending`）。已经落定但还未写全下游效果的判定，不重跑
+评测；它在启动以及启用 consumer 时的轮询中补齐 Ledger、候选状态、门禁/评审单和证据。
+若日志出现 `evolution.final_delivery_failed`，按 Run ID 检查 Ledger 和运行库，不要重新提交
+候选绕过失败；下游缺写时不会标记为已投递。
+
+### 07–09 旧运行库升级
+
+停止旧实例及写入方，备份 Run 数据库及配对的 Ledger（含尚未 checkpoint 的 SQLite 状态），
+再启动新实例。旧 verdict、gate、review 原表保留为 `*_legacy`；只迁移能与 Run、Bot、候选和
+冻结 profile 核对的判定、门禁及评审记录。旧 Run 没有可证明的上限，按 `null` 处理：旧
+`auto_promote` 结论只保留为历史，新结论由对应终态判定补算，审批过的合法条目不重开。
+无法核实归属或从未写过独立判定的历史候选留待人工核对；报告没有本 Run 的判定时显示
+`pending`，不会借用另一个 Run 的结果，也不会后台批量重验旧候选。
+旧幂等表没有原始请求指纹，不返回归档响应；同一旧操作的原键重试返回
+`409 idempotency_key_reused`，请先读取评审状态，不要直接重发审批。回滚旧程序须恢复升级
+前的备份，不可直接用旧实例打开新 schema。升级和回放均不启用 apply。
 
 ### Worker Plugin API（内部作业面）
 
@@ -263,7 +290,7 @@ HTTP422、业务码422000、且所有 reasons 都是 `already_recorded` 的响�
 
 ### 已知缺口（不要当成已验收）
 
-- **apply 未启用**：`promote()` 与 approve 之后的 apply 都显式失败，`active` 不会移动。
+- **apply 未启用**：`promote()` 显式拒绝 apply；approve 只记录决定，`active` 不会移动。
 - **静态底线未接线**：`check_floor` 返回 `not_run`。结构、可变基因、允许的基因与大小
   已由提交路径和 Genome 注册表强制；密钥 / PII / 出站 URL 扫描器尚未接入，
   因此门禁里没有 `static_floor` 这一项。
@@ -297,8 +324,13 @@ HTTP422、业务码422000、且所有 reasons 都是 `already_recorded` 的响�
 `PLATFORM_FACTORY` 是可信部署代码，不接受 HTTP 指定模块。实现
 `plugin_api.Platform`：Genome 契约客户端、Bot-scoped 脱敏会话导出、治理/停机开关、
 策略注册及隔离沙箱。用户授权由 Backend 的默认链路提供，不由插件重复登录。
-后台平台调用仍须有部署侧正式服务委托，不能持久化浏览器 Cookie 当服务凭据，
-也不能靠 user_id/owner_id 代替授权。
+先部署支持内置回调的两端，在 Evolution 设置私有 `EVOLUTION_BACKEND_DATA_ORIGIN`
+并由平台工厂将 origin、现有 principal 签名材料和租户传给 `BotHttp`；随后在 Backend
+把 `evolution_control.builtin_data_tenant` 设为相同租户。不要向 Gateway/Worker 暴露
+内部回调或签名材料。内置手动 Run 保存经回执认证的发起人，重启后仍以该人回查当前 Bot
+权限；撤权或归属变更即拒绝后续数据访问，不降级到应用委托。候选仍只写入候选修订，
+不发布、不 apply。旧 Run 不迁移，应用调用和未启用内置通道的执行仍使用正式服务委托。
+任何通道都不能把浏览器 Cookie 或裸 user_id/owner_id 当成授权。
 
 HTTP provider 的凭据回调现返回 `PlatformCredential(headers, acting_user_id)`，
 不是旧的 headers 字典。acting_user_id 必须由服务委托解析，不回退到 Bot owner。
@@ -331,7 +363,7 @@ HTTP provider 的凭据回调现返回 `PlatformCredential(headers, acting_user_
 6. 回滚先关 UI 和新 consumer、停止全部写入。用迁移前备份恢复旧服务；若新服务
    已产生候选/写回平台，须核对和保留增量，不可直接丢弃新库或同时启动新旧消费者。
 
-**待切流条件**：真实 Platform 插件与服务委托、Swarm 子操作/workspace 映射、
+**待切流条件**：真实 Platform 插件与内置回调或服务委托、Swarm 子操作/workspace 映射、
 孤儿沙箱治理、singlebox 新服务接线及真实页面验收。SkillSet 捕获/编辑继续为
 [RSI-25](../backend/docs/bot-evolution/work-items.zh-CN.md#rsi-25-genome-兼容-skillset-的捕获与编辑)，不包含在此次迁移内。
 
@@ -379,7 +411,7 @@ apps/evolution/.venv/bin/python apps/evolution/scripts/evolution_events.py \
 
 独立服务与 Backend 的真实路由/回执/Binding 存储接线由
 [双服务测试](../backend/tests/community/adapters/http/openapi_v1/test_evolution_service_wiring.py)
-覆盖；具体分层验收见 [Bot 控制入口](../backend/docs/flows/bot-evolution-control.md#分层接线验收不提交-run)。
-这是合成身份、临时数据库、关闭 consumer 的隔离测试，不证明宿主登录、镜像组装或
+覆盖；具体分层验收见 [Bot 控制入口](../backend/docs/flows/bot-evolution-control.md#分层接线验收)。
+内置通道用例还覆盖 Run 重开、候选和规则验证。这是合成身份、临时数据库、关闭 consumer 的隔离测试，不证明宿主登录、镜像组装或
 真实 Platform 已部署。企业宿主应保留自己的构建/配置/只读检查脚本；公共仓不引入企业
 端点、浏览器 Cookie 或机器状态。仅打开 UI 开关或安装本包不能作为真实任务执行证明。

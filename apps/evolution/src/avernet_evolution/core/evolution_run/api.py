@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from avernet_genome.canonical import canonicalize, sha256_digest
 from avernet_genome.models import BotRef
 
 from avernet_evolution.core.evolution_promote import (
@@ -24,10 +25,11 @@ from avernet_evolution.core.evolution_promote.report import (
 )
 from avernet_evolution.core.evolution_promote.service import CandidateNotFound
 
-from .bindings import Binding
+from .bindings import Binding, ManualTrigger
 from .bindings_service import BindingsService
 from .budget import Budget
 from .enums import RunStatus, TriggerKind
+from .errors import CandidateAmbiguous, IdempotencyKeyReused
 from .records import TriggerRecord
 from .run_service import RunService
 
@@ -42,9 +44,11 @@ _ERROR_CODES = {
     "IdempotencyKeyReused": ("409", "idempotency_key_reused"),
     "RunNotFound": ("404", "run_not_found"),
     "GenomeBaselineMissing": ("409", "no_genome_baseline"),
+    "EvolutionAppNotGranted": ("409", "evolution_app_not_granted"),
     "RunAlreadyEnded": ("409", "run_already_ended"),
     "BudgetExhausted": ("409", "budget_exhausted"),
     "StaleFencingToken": ("409", "stale_fencing_token"),
+    "CandidateAmbiguous": ("409", "candidate_ambiguous"),
     "CandidateNotFound": ("404", "not_found"),
     "ReviewNotFound": ("404", "not_found"),
     "NotReviewable": ("409", "not_reviewable"),
@@ -101,8 +105,13 @@ class EvolutionApi:
         *,
         expected_etag: str | None,
         actor: str,
+        operator_user_id: str | None = None,
     ) -> dict[str, Any]:
         bindings = [self._parse_binding(entry) for entry in payload]
+        if operator_user_id is not None and any(not isinstance(b.trigger, ManualTrigger) for b in bindings):
+            from .errors import BindingCheckFailed
+
+            raise BindingCheckFailed(["built-in operator bindings require a manual trigger"])
         document = await self.bindings.put_bindings(bot, bindings, expected_etag=expected_etag, actor=actor)
         return {
             "bindings": [_binding_json(b) for b in document.bindings],
@@ -110,18 +119,23 @@ class EvolutionApi:
         }
 
     # -- §14.1 runs -----------------------------------------------------
-    async def submit_run(self, bot: BotRef, payload: dict[str, Any], *, actor: str) -> dict[str, Any]:
+    async def submit_run(
+        self, bot: BotRef, payload: dict[str, Any], *, actor: str, operator_user_id: str | None = None
+    ) -> dict[str, Any]:
         trigger = payload.get("trigger") or {"manual": True}
         record = (
-            TriggerRecord(kind=TriggerKind.MANUAL, requested_by=actor)
+            TriggerRecord(kind=TriggerKind.MANUAL, requested_by=actor, operator_user_id=operator_user_id)
             if "manual" in trigger
             else TriggerRecord(
                 kind=TriggerKind(trigger.get("kind", "manual")),
                 fire_time=trigger.get("fire_time"),
                 event_id=trigger.get("event_id"),
                 requested_by=actor,
+                operator_user_id=operator_user_id,
             )
         )
+        if operator_user_id is not None and record.kind != TriggerKind.MANUAL:
+            raise ValueError("built-in operator runs require a manual trigger")
         budget = payload.get("budget")
         run_id = await self.runs.submit(
             bot,
@@ -193,14 +207,17 @@ class EvolutionApi:
         """候选报告：diff 指针、验证摘要、门禁决定与评审状态。"""
 
         candidate_row, run_row = self._locate(bot, candidate_id)
+        run_id = run_row["run_id"]
         verdict = None
         if self.verification is not None:
             try:
-                verdict = await self.verification.get_verdict(candidate_id, run_row["verification_profile"])
+                verdict = await self.verification.get_verdict(
+                    candidate_id, run_row["verification_profile"], run_id=run_id
+                )
             except KeyError:
                 verdict = None
-        decision = self.promotion.store.get(candidate_id) if self.promotion is not None else None
-        review = self.promotion.store.get_review(candidate_id) if self.promotion is not None else None
+        decision = self.promotion.store.get(run_id, candidate_id) if self.promotion is not None else None
+        review = self.promotion.store.get_review(run_id, candidate_id) if self.promotion is not None else None
         entry = self._ledger_row(bot, run_row["run_id"], candidate_id)
         revision = candidate_row["revision"]
         parent = run_row["parent_revision"]
@@ -280,23 +297,8 @@ class EvolutionApi:
         actor: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        """批准一个开放评审条目。决定立即记录；apply 由晋升侧另行交付。"""
-
-        if self.promotion is None:
-            raise ReviewNotFound(candidate_id)
-        key = self._idempotency_key(bot, candidate_id, "approve", idempotency_key)
-        cached = self.promotion.store.replay(key)
-        if cached is not None:
-            return cached
-        result = await self.promotion.approve(bot, candidate_id, reason=reason, actor=actor)
-        self._review_event(result.review, actor=actor, outcome="approved")
-        body = {
-            "review": review_json(result.review),
-            "promotion": None,
-            "promotion_note": result.promotion_note,
-        }
-        self.promotion.store.remember(key, body)
-        return body
+        """记录批准；不执行 apply。"""
+        return self._decide_review(bot, candidate_id, "approve", reason, actor, idempotency_key)
 
     async def reject_candidate(
         self,
@@ -307,42 +309,66 @@ class EvolutionApi:
         actor: str,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        return self._decide_review(bot, candidate_id, "reject", reason, actor, idempotency_key)
+
+    def _decide_review(
+        self, bot: BotRef, candidate_id: str, action: str, reason: str, actor: str, key: str | None
+    ) -> dict[str, Any]:
         if self.promotion is None:
             raise ReviewNotFound(candidate_id)
-        key = self._idempotency_key(bot, candidate_id, "reject", idempotency_key)
-        cached = self.promotion.store.replay(key)
-        if cached is not None:
-            return cached
-        result = await self.promotion.reject(bot, candidate_id, reason=reason, actor=actor)
-        self._review_event(result.review, actor=actor, outcome="rejected")
-        body = {"review": review_json(result.review)}
-        self.promotion.store.remember(key, body)
-        return body
-
-    @staticmethod
-    def _idempotency_key(bot: BotRef, candidate_id: str, action: str, supplied: str | None) -> str | None:
-        if not supplied:
-            return None
-        return f"{bot.owner_id}:{bot.bot_id}:{candidate_id}:{action}:{supplied}"
+        store = self.runs.store
+        reviews = self.promotion.store
+        status = ReviewStatus.APPROVED if action == "approve" else ReviewStatus.REJECTED
+        # Bind the raw reason and endpoint to the Bot-wide review key; normalize only for storage.
+        fingerprint = sha256_digest(
+            canonicalize(
+                {
+                    "method": "POST",
+                    "path": f"/candidates/{candidate_id}:{action}",
+                    "body": {"reason": reason},
+                }
+            )
+        )
+        with store.conn:
+            store.conn.execute("BEGIN IMMEDIATE")
+            if key:
+                previous = reviews.replay(bot.owner_id, bot.bot_id, key)
+                if previous is not None:
+                    saved_fingerprint, body = previous
+                    if saved_fingerprint != fingerprint:
+                        raise IdempotencyKeyReused("idempotency key reused for a different review request")
+                    return body
+                if reviews.has_legacy_request(f"{bot.owner_id}:{bot.bot_id}:{candidate_id}:{action}:{key}"):
+                    raise IdempotencyKeyReused("idempotency key cannot be replayed across the review upgrade")
+            try:
+                _candidate, run = self._locate(bot, candidate_id)
+            except CandidateNotFound:
+                raise ReviewNotFound(candidate_id) from None
+            result = self.promotion.record_review(
+                bot, candidate_id, run_id=run["run_id"], status=status, reason=reason, actor=actor
+            )
+            body = {"review": review_json(result.review)}
+            if action == "approve":
+                body.update(promotion=None, promotion_note=result.promotion_note)
+            store.events.write_review_decided(run["run_id"], candidate_id, status=status.value, actor=actor)
+            if key:
+                reviews.remember(bot.owner_id, bot.bot_id, key, fingerprint, body)
+            return body
 
     def _locate(self, bot: BotRef, candidate_id: str) -> tuple[Any, Any]:
-        """按候选哈希定位候选行与 run 行，并把 bot 边界校验做完。"""
-
-        rows = self.runs.store.conn.execute(
-            "SELECT * FROM evolution_run_candidate WHERE candidate_id=?", (candidate_id,)
+        """Locate one published candidate for the addressed Bot, never another Run's hash match."""
+        conn = self.runs.store.conn
+        rows = conn.execute(
+            "SELECT c.* FROM evolution_run_candidate c JOIN evolution_run r ON r.run_id=c.run_id "
+            "WHERE c.candidate_id=? AND r.owner_id=? AND r.bot_id=? AND c.revision!='' LIMIT 2",
+            (candidate_id, bot.owner_id, bot.bot_id),
         ).fetchall()
-        for candidate_row in rows:
-            run_row = self.runs.store.conn.execute(
-                "SELECT * FROM evolution_run WHERE run_id=?", (candidate_row["run_id"],)
-            ).fetchone()
-            if run_row is None:
-                continue
-            if run_row["owner_id"] != bot.owner_id:
-                continue
-            if run_row["bot_id"] not in {bot.bot_id, bot.entity_id}:
-                continue
-            return candidate_row, run_row
-        raise CandidateNotFound(candidate_id)
+        if not rows:
+            raise CandidateNotFound(candidate_id)
+        if len(rows) != 1:
+            raise CandidateAmbiguous("candidate identifies multiple runs for this bot")
+        run = conn.execute("SELECT * FROM evolution_run WHERE run_id=?", (rows[0]["run_id"],)).fetchone()
+        return rows[0], run
 
     def _ledger_row(self, bot: BotRef, run_id: str, candidate_id: str) -> Any:
         if self.ledger is None:
@@ -384,19 +410,6 @@ class EvolutionApi:
         except Exception:  # noqa: BLE001 - 展示字段的失败不外溢
             return None
         return getattr(getattr(revision, "revision", None), "seq", None)
-
-    def _review_event(self, item: Any, *, actor: str, outcome: str) -> None:
-        if item.run_id:
-            self.runs.store.events.append(
-                "review.decided",
-                run_id=item.run_id,
-                # 决定理由留在评审条目里；证据只记录"谁把状态改成了什么"。
-                details={
-                    "candidate_id": item.candidate_id,
-                    "review_status": outcome,
-                    "actor": actor,
-                },
-            )
 
     def _parse_binding(self, entry: dict[str, Any]) -> Binding:
         from .bindings_service import _binding_from_document

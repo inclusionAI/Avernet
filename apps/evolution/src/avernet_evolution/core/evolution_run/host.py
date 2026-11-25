@@ -12,6 +12,7 @@ from avernet_evolution.core.evolution_strategy import (
 )
 
 from .budget import BudgetUsage
+from .data_scope import data_scope, run_data_scope
 from .errors import BudgetExhausted
 from .records import ClaimedJob
 from .store import EvolutionStore
@@ -64,7 +65,8 @@ class InProcessHost:
         claimed: ClaimedJob | None = await self._jobs.claim(worker_id, list(self._strategies))
         if claimed is None:
             return False
-        await self._execute(claimed)
+        with data_scope(run_data_scope(claimed.run)):
+            await self._execute(claimed)
         return True
 
     async def run_pending(self, worker_id: str, *, max_jobs: int = 100) -> int:

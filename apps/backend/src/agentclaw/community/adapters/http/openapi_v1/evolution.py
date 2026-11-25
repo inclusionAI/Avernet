@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from urllib.parse import quote
 
 import httpx
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.addressing import ResolvedBotContext
 from agentclaw.community.di import Injected
 from agentclaw.community.di.evolution_control_config import (
@@ -32,10 +33,11 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Res
 
 from .authorization import PublicAPIRoute
 from .authorization_rules_evolution import BASE
-from .bot_access import resolve_legacy_bot
+from .bot_access import resolve_bot_permission, resolve_legacy_bot
 from .bots.config_manifest_support import audit_actor
 from .contracts import Envelope
 from .engine_runtime.params import OwnerIdDep
+from .errors import BotAccessRefusedError
 from .principal import ActingCallerDep, UserIdDep
 
 router = APIRouter(prefix=BASE, tags=["evolution"], route_class=PublicAPIRoute)
@@ -82,6 +84,15 @@ async def relay(request, bot, user_id, caller, config, clients) -> Response:
     # neither request URL nor client headers may choose a host or worker API.
     route_path = request.scope["route"].path
     suffix = route_path.removeprefix(BASE)
+    tenant = get_current_avernet_tenant()
+    operator = user_id if config.builtin_data_tenant == tenant and not caller.is_application else None
+    if operator is not None and request.method == "POST" and suffix == "/runs":
+        level = await resolve_bot_permission(
+            request, bot_id=bot.bot_id, caller_id=operator, owner_id=bot.entity_id,
+            explicit=True, resolved_bot=bot,
+        )
+        if level < PermissionLevel.ADMIN:
+            raise BotAccessRefusedError("Bot access unavailable")
     if "run_id" in request.path_params:
         suffix = suffix.replace(
             "{run_id}", quote(request.path_params["run_id"], safe="")
@@ -114,7 +125,8 @@ async def relay(request, bot, user_id, caller, config, clients) -> Response:
                 key=key,
                 bot=target,
                 actor=audit_actor(caller, user_id),
-                tenant=get_current_avernet_tenant(),
+                tenant=tenant,
+                operator_user_id=operator,
                 request_hash=fingerprint(
                     request.method,
                     outgoing.url.path,

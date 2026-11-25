@@ -112,7 +112,7 @@ def require_check(rule: Check, *, bot_dependency: Callable = resolve_legacy_bot)
         caller_id: UserIdDep,
         bot: ResolvedBotContext = Depends(bot_dependency),
     ) -> AsyncIterator[None]:
-        level = await _resolve_level(
+        level = await resolve_bot_permission(
             request, bot_id=bot.bot_id, caller_id=caller_id,
             owner_id=bot.entity_id, explicit=rule.explicit, resolved_bot=bot,
         )
@@ -195,7 +195,7 @@ async def _uses_member_management_semantics(
         return False
 
 
-async def _resolve_level(
+async def resolve_bot_permission(
     request: Request,
     *,
     bot_id: str,
@@ -265,7 +265,7 @@ def _level(
     table cannot be read. Fail-closed is the whole contract; see the module
     docstring for why the internal interceptor's opposite choice is not ported.
 
-    Synchronous and blocking by design: :func:`_resolve_level` is what keeps it
+    Synchronous and blocking by design: :func:`resolve_bot_permission` is what keeps it
     off the event loop, and it takes its services as arguments so that this
     function never reaches for the injector from a worker thread.
 

@@ -113,12 +113,12 @@ class VerifierPort(Protocol):
     """07-verification：`verify(candidate, profile)` 立即返回 pending 判定（§4.2）。"""
 
     async def verify(self, candidate: Any, profile: str | None = None) -> Any:
-        """按 (candidate, profile) 幂等；返回当前判定。"""
+        """按 (Run, candidate, profile) 幂等；返回当前判定。"""
 
     async def strategy_view(self, candidate_id: str, run_id: str) -> Any:
         """策略可见的视图：仅 validation 聚合。"""
 
-    async def settle(self, candidate_id: str, profile: str | None = None) -> Any:
+    async def settle(self, candidate_id: str, profile: str | None = None, *, run_id: str) -> Any:
         """等待后台流水线结束（测试与运维用）。"""
 
 
@@ -126,8 +126,6 @@ class PromotionPort(Protocol):
     """08-promotion：静态底线与门禁。"""
 
     async def check_floor(self, bot: BotRef, candidate_id: str) -> GateCheck: ...
-
-    async def decide(self, bot: BotRef, candidate_id: str) -> GateDecision: ...
 
 
 class LedgerPort(Protocol):

@@ -30,6 +30,7 @@ class TriggerRecord:
     fire_time: datetime | None = None
     event_id: str | None = None
     requested_by: str | None = None
+    operator_user_id: str | None = None  # built-in operator; no login or service token
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ class Run:
     end_reason: EndReason | None = None
     summary: dict[str, Any] | None = None
     cancel_requested: bool = False
+    auto_promote_ceiling: str | None = None  # legacy runs and explicit human review default to None
 
     @property
     def budget(self):

@@ -56,6 +56,8 @@ def build_job_router(get_channel: Callable[[], Any], *, prefix: str = "") -> API
                 )
             except CapabilityNotGranted:
                 return JSONResponse({"error": {"code": "capability_not_granted"}}, status_code=403)
+            except PermissionError:
+                return JSONResponse({"error": {"code": "bot_data_access_denied"}}, status_code=403)
             except (KeyError, TypeError, ValueError) as exc:
                 # 线协议保持 {@code invalid_request} 不变（不回传内部细节），但排障
                 # 需要知道是哪个调用点炸的：只写服务端日志，类型 + 截断后的消息。

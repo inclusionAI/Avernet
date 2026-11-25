@@ -94,6 +94,113 @@ export const cancelRsiRun = (scope: RsiScope, runId: string) =>
 export const getRsiEvidence = (scope: RsiScope, runId: string) =>
   request<RsiEvidence>(scope, `${base(scope)}/runs/${encodeURIComponent(runId)}/evidence`);
 export const getRsiCandidates = (scope: RsiScope, runId: string) =>
-  request<{
-    candidates: { candidate_id: string; revision: string; verdict: string }[];
-  }>(scope, `${base(scope)}/runs/${encodeURIComponent(runId)}/candidates`);
+  request<{ candidates: RsiCandidate[] }>(scope, `${base(scope)}/runs/${encodeURIComponent(runId)}/candidates`);
+
+export interface RsiCandidate {
+  candidate_id: string;
+  revision: string;
+  verdict: string;
+}
+export interface RsiSplitSummary {
+  split: string;
+  mean_delta: number | null;
+  ci_low: number | null;
+  ci_high: number | null;
+  newly_failing: number;
+  detail_visible: boolean;
+}
+export interface RsiGateCheck {
+  name: string;
+  status: string;
+  detail: string;
+}
+export interface RsiGate {
+  id: string | null;
+  outcome: string;
+  risk: { tier: string; raised_by: string[] };
+  verdict: string;
+  checks: RsiGateCheck[];
+  decided_at: string;
+}
+export interface RsiReview {
+  status: string;
+  created_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  promotion_id: string | null;
+}
+export interface RsiPatchItem {
+  op_index: number;
+  op: string;
+  target: string;
+  tier: string;
+  reason: string;
+}
+export interface RsiCandidateReport {
+  candidate_id: string;
+  revision_id: string;
+  revision_seq: number | null;
+  parent_revision_id: string;
+  parent_revision_seq: number | null;
+  run_id: string;
+  strategy: string;
+  strategy_version: string;
+  patch_summary: RsiPatchItem[];
+  diff_path: string;
+  rationale: string;
+  evidence: unknown[];
+  verdict: string;
+  splits: RsiSplitSummary[];
+  cost: { parent_usd_per_case?: number | null; candidate_usd_per_case?: number | null };
+  flags: string[];
+  gate: RsiGate | null;
+  review: RsiReview | null;
+}
+export interface RsiReviewItem extends RsiReview {
+  candidate_id: string;
+  revision_id: string;
+  parent_revision_id: string;
+  run_id: string;
+  strategy: string;
+  strategy_version: string;
+  risk_tier: string;
+  gate_decision_id: string;
+  rationale: string;
+  evidence: unknown[];
+}
+export interface RsiReviewDecision {
+  review: RsiReview;
+  promotion?: unknown;
+  promotion_note?: string;
+}
+export const getRsiCandidateReport = (scope: RsiScope, candidateId: string) =>
+  request<RsiCandidateReport>(scope, `${base(scope)}/candidates/${encodeURIComponent(candidateId)}`);
+export const getRsiReviewQueue = (scope: RsiScope, status = 'open') =>
+  request<{ total: number; items: RsiReviewItem[] }>(scope, `${base(scope)}/review-queue`, {
+    params: { status },
+  });
+export const approveRsiCandidate = (scope: RsiScope, candidateId: string, key: string, reason: string) =>
+  request<RsiReviewDecision>(scope, `${base(scope)}/candidates/${encodeURIComponent(candidateId)}:approve`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+    data: { reason },
+  });
+export const rejectRsiCandidate = (scope: RsiScope, candidateId: string, key: string, reason: string) =>
+  request<RsiReviewDecision>(scope, `${base(scope)}/candidates/${encodeURIComponent(candidateId)}:reject`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+    data: { reason },
+  });
+
+export interface GenomeBaseline {
+  revision: string;
+  created: boolean;
+}
+/** 基因组侧的显式冷启动建基线：只记录当前配置，不 apply；需要 ADMIN。 */
+export const initializeGenomeBaseline = (scope: RsiScope) =>
+  request<GenomeBaseline>(
+    scope,
+    `/openapi/v1/bots/${encodeURIComponent(scope.botId)}/genome/baseline:initialize`,
+    { method: 'POST' },
+  );

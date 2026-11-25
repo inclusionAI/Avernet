@@ -136,28 +136,29 @@ class LocalExperimentLedger:
         return run.id
 
     async def record_verdict(self, entry_id: str, verdict: VerdictRecord) -> int:
-        seq = self._append(
-            entry_id,
-            LedgerEvent(
-                type=EventType.VERIFIED,
-                data={"status": verdict.status.value, "reason": verdict.reason},
-                idempotency_key=f"{entry_id}/verified",
-            ),
-        )
-        self.conn.execute(
-            "UPDATE ledger_entries SET verdict=? WHERE entry_id=?",
-            (
-                json.dumps(
-                    {
-                        "status": verdict.status.value,
-                        "reason": verdict.reason,
-                        "aggregates": verdict.aggregates,
-                    }
-                ),
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            seq = self._append(
                 entry_id,
-            ),
-        )
-        self.conn.commit()
+                LedgerEvent(
+                    type=EventType.VERIFIED,
+                    data={"status": verdict.status.value, "reason": verdict.reason},
+                    idempotency_key=f"{entry_id}/verified",
+                ),
+            )
+            self.conn.execute(
+                "UPDATE ledger_entries SET verdict=? WHERE entry_id=?",
+                (
+                    json.dumps(
+                        {
+                            "status": verdict.status.value,
+                            "reason": verdict.reason,
+                            "aggregates": verdict.aggregates,
+                        }
+                    ),
+                    entry_id,
+                ),
+            )
         return seq
 
     async def record_promotion(self, entry_id: str, *, revision: str, actor: str) -> int:

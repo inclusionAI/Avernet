@@ -8,9 +8,11 @@ __all__ = [
     "BindingBusy",
     "BindingCheckFailed",
     "BudgetExhausted",
+    "CandidateAmbiguous",
     "CandidateRejected",
     "CandidateRejectionCode",
     "CeilingExceeded",
+    "EvolutionAppNotGranted",
     "EvolutionFrozen",
     "EvolutionRunError",
     "GenomeBaselineMissing",
@@ -56,8 +58,27 @@ class BindingBusy(EvolutionRunError):
     """该绑定已有 queued/running 的运行（§4）。"""
 
 
+class CandidateAmbiguous(EvolutionRunError):
+    """A Bot-scoped hash-only route matches multiple recorded Runs of the same Bot."""
+
+
 class IdempotencyKeyReused(EvolutionRunError):
     """同一幂等键被用于不同的请求体（§6）。"""
+
+
+class EvolutionAppNotGranted(EvolutionRunError):
+    """进化服务在平台的 Bot 作用域内无法看到这个 Bot。
+
+    平台对未授权与不存在的 Bot 返回同一个 404，所以这里不声称 Bot 不存在，
+    只说明这个服务看不到它，以及该怎么补授权。
+    """
+
+    def __init__(self, bot_id: str) -> None:
+        self.bot_id = bot_id
+        super().__init__(
+            f"evolution cannot access bot {bot_id}: verify the bot and check the application grant "
+            "before configuring or running evolution"
+        )
 
 
 class GenomeBaselineMissing(EvolutionRunError):

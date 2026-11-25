@@ -139,7 +139,7 @@ async def test_container_hosts_claim_only_their_pinned_strategy_version(settings
                 "trigger": {"manual": True},
                 "parent": "active",
                 "allowed_genes": ["persona"],
-                "verification_profile": "pending@1",
+                "verification_profile": "rules-file@1",
                 "budget": {"max_usd": 0.1, "max_wall_clock_s": 60},
                 "auto_promote_ceiling": None,
             }
@@ -213,7 +213,7 @@ async def test_candidate_artifact_ledger_and_immutable_previous_identity(setting
             "trigger": {"manual": True},
             "parent": "active",
             "allowed_genes": ["persona"],
-            "verification_profile": "pending@1",
+            "verification_profile": "rules-file@1",
             "budget": {"max_usd": 0.1, "max_wall_clock_s": 60},
             "auto_promote_ceiling": None,
         }
