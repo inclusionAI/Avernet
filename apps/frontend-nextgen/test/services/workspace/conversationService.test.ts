@@ -242,7 +242,9 @@ describe('conversationService.listManagedSessions', () => {
 
     expect(mocked.listBotSessions).toHaveBeenCalledWith(
       'bot-a',
-      expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 1, page_size: 20, source: 'mine' }),
+      expect.objectContaining({
+        user_id: '900003', owner_id: '2088', f_user_id: '900003', page: 2, page_size: 20,
+      }),
     );
     expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -300,6 +302,7 @@ describe('conversationService.listManagedSessions', () => {
         expect.objectContaining({ page: 1, page_size: 100, user_id: '100' }),
       );
       expect(mocked.listBotSessions.mock.calls[0][1]).not.toHaveProperty('source');
+      expect(mocked.listBotSessions.mock.calls[0][1]).not.toHaveProperty('f_user_id');
       expect(mocked.listBotSessions).toHaveBeenCalledTimes(1);
       expect(result).toMatchObject({
         ok: true,
@@ -399,8 +402,8 @@ describe('conversationService.listManagedSessions', () => {
       });
     });
 
-    it('keeps normal CC Bots on the generic Backend source window', async () => {
-      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionItem], 1, 'mine'));
+    it('addresses normal CC Bots through the current conversation subject', async () => {
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionItem]));
 
       const result = await conversationService.listManagedSessions(
         { ...managedBot, engine: 'claude_code', templateType: 'normalCC', isAgentCodingBot: false },
@@ -410,8 +413,9 @@ describe('conversationService.listManagedSessions', () => {
 
       expect(mocked.listBotSessions).toHaveBeenCalledWith(
         'bot-a',
-        expect.objectContaining({ page: 1, page_size: 10, source: 'mine', user_id: '100' }),
+        expect.objectContaining({ page: 1, page_size: 10, user_id: '100', f_user_id: '100' }),
       );
+      expect(mocked.listBotSessions.mock.calls[0][1]).not.toHaveProperty('source');
       expect(result).toMatchObject({ ok: true, data: { items: [{ sessionId: 'session-1' }] } });
     });
 
@@ -474,6 +478,8 @@ it('normalizes a stale TEClaw favorite scope to ordinary sessions', async () => 
     10,
   );
   expect(result.ok).toBe(true);
-  expect(mocked.listBotSessions).toHaveBeenCalledWith('bot-a', expect.objectContaining({ page: 1, page_size: 10, source: 'mine' }));
+  expect(mocked.listBotSessions).toHaveBeenCalledWith(
+    'bot-a', expect.objectContaining({ page: 2, page_size: 10, f_user_id: 'user' }),
+  );
   expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
 });

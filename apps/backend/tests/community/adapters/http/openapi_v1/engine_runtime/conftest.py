@@ -130,8 +130,18 @@ class FakeRelay:
 
     # -- helpers -----------------------------------------------------------
     def set_bot_type(self, bot_type: str) -> None:
+        current = self.bots[(BOT, OWNER)]
         self.bots[(BOT, OWNER)] = BotFacts(
-            bot_id=BOT, bot_type=bot_type, active_engine="openclaw", owner_id=OWNER
+            bot_id=BOT, bot_type=bot_type, active_engine=current.active_engine,
+            owner_id=OWNER, call_type=current.call_type,
+        )
+
+    def set_call_type(self, call_type: str) -> None:
+        current = self.bots[(BOT, OWNER)]
+        self.bots[(BOT, OWNER)] = BotFacts(
+            bot_id=current.bot_id, bot_type=current.bot_type,
+            active_engine=current.active_engine, owner_id=current.owner_id,
+            call_type=call_type,
         )
 
     def set_active_engine(self, active_engine: str) -> None:
@@ -147,6 +157,7 @@ class FakeRelay:
             bot_type=current.bot_type,
             active_engine=active_engine,
             owner_id=current.owner_id,
+            call_type=current.call_type,
         )
 
     def add_operator(

@@ -231,33 +231,42 @@ See the [approved feature scope and validation handoff](specs/2026-11-18-task-es
 and its [file ownership manifest](specs/2026-11-18-task-escort-readonly/ownership-manifest.json).
 ## Conversation session origins
 
-The conversation sidebar uses Backend `sessions?source=mine|others` for managed
-and collaborating Bots. AgentCoding Bots are the engine-specific exception:
-their mine/others/collab lists request the raw paginated sessions and classify
-each session in the frontend with the same ID rules as AgentCoding (member-task
-is `collab`, BCS-CLI is `others`, a missing creator is `mine`, and recognized
-other creators are `others`). This avoids applying the generic source backend's
-different compatibility rules to AgentCoding's synthetic IDs. Other engines
-continue to use Backend source windows.
-Both sources render flat lists ordered by the loaded
+The conversation sidebar sends `f_user_id=<current Human>` for the current
+user's sessions on owned, collaborating and friend Bots. Backend uses that
+subject only to select an independent runtime for Caller-mode Bots; owner-mode
+Bots retain their shared runtime. The frontend does not call `caller-context`
+to choose a chat runtime. `user_id` remains the authenticated actor, `owner_id`
+continues to locate the Bot, and service conversations still send `stage=online`.
+Old clients that omit `f_user_id` keep the operator-console behavior.
+
+AgentCoding Bots are the engine-specific exception: their mine/others/collab
+lists omit `f_user_id`, request raw paginated sessions and classify each session
+in the frontend with the AgentCoding ID rules (member-task is `collab`, BCS-CLI
+is `others`, a missing creator is `mine`, and recognized other creators are
+`others`). This preserves AgentCoding's synthetic identities. For other managed
+and collaborating Bots, the “他人发起” view uses Backend
+`sessions?source=others`. All views render flat lists ordered by the loaded
 sessions' modified time descending (creation time is the fallback). Later
 windows are merged, deduplicated by session ID and sorted again; this is not a
 global sort over sessions that have not been loaded.
 
-Source queries keep `page=1`, send the authenticated Human as `user_id`, the
-real Bot owner as `owner_id`, and preserve runtime stage, instance and session-key
-filters. Continuation uses `next_cursor`, never the cumulative `total` or the
-number of returned items. A short/empty scan window with `has_more=true` exposes
-“继续加载” rather than a false empty state; no automatic unbounded scan runs in
-the browser. Filter revisions and user generations reject stale responses.
+The current user's view keeps ordinary page-number pagination on the selected
+subject runtime. “他人发起” source queries keep `page=1`, send the authenticated
+Human as `user_id`, the real Bot owner as `owner_id`, and preserve runtime stage,
+instance and session-key filters. Continuation uses `next_cursor`, never the
+cumulative `total` or the number of returned items. A short/empty scan window
+with `has_more=true` exposes “继续加载” rather than a false empty state; no
+automatic unbounded scan runs in the browser. Filter revisions and user
+generations reject stale responses.
 
 Others remain read-only: history uses the current operator, not `f_user_id` or an
 impersonated Owner. Favorites and friend Bots retain their separate existing
-flows; old `friend=` deep links retain the legacy friend view. Coding Bot
-visibility policy remains applied without reclassifying Backend source results.
-Deploy Backend source-window support before this frontend: missing/mismatched
-source metadata produces an explicit unsupported error instead of presenting an
-unfiltered list as “mine”. See the [Backend contract](../backend/docs/openapi-v1/engine-surface.md).
+flows; old `friend=` deep links retain the legacy friend view. AgentCoding's
+visibility policy is applied before its raw sessions are classified. For other
+engines, deploy Backend source-window support before this frontend:
+missing/mismatched source metadata produces an explicit unsupported error
+instead of presenting an unfiltered list as “mine”. See the
+[Backend contract](../backend/docs/openapi-v1/engine-surface.md).
 ## Lab tasks
 
 The [Lab task list](src/pages/Lab/Tasks/index.tsx) searches displayed task titles within

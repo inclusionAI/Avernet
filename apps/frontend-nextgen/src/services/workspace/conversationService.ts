@@ -87,7 +87,6 @@ async function listCodingSessionsByOrigin(
   let exhausted = false;
 
   while (matching.length < targetEnd && rawPage <= CODING_SESSION_MAX_SCAN_PAGES) {
-    const rangeArgs: [] | [ConversationSessionRequestRange] = range ? [range] : [];
     const result =
       scope === 'favorite' && supportsBotSessionFavorites(bot.engine)
         ? await botSessionService.listFavoriteSessionsPage(
@@ -95,7 +94,8 @@ async function listCodingSessionsByOrigin(
             userId,
             rawPage,
             CODING_SESSION_SCAN_PAGE_SIZE,
-            ...rangeArgs,
+            range,
+            false,
           )
         : await botSessionService.listSessionsPage(
             bot,
@@ -103,7 +103,8 @@ async function listCodingSessionsByOrigin(
             rawPage,
             CODING_SESSION_SCAN_PAGE_SIZE,
             sessionKey,
-            ...rangeArgs,
+            range,
+            false,
           );
     if (!result.ok) return result;
 
@@ -168,10 +169,10 @@ export const conversationService = {
     if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
       return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize, ...rangeArgs);
     }
-    return listConversationSource(bot, userId, origin, pageSize, sessionKey, range, cursor);
+    return listConversationSource(bot, userId, origin, page, pageSize, sessionKey, range, cursor);
   },
 
-  /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id;
+  /** Human→Bot 对话会话分页：当前 Human 同时作为 user_id 与 f_user_id；
    *  scope=favorite 走收藏接口,supportsBotSessionFavorites 保留引擎能力边界(TEClaw 回退普通列表)。 */
   async listFriendBotSessions(
     bot: ChatBotView,

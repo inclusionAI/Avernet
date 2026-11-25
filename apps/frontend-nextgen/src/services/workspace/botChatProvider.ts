@@ -18,7 +18,7 @@ import {
   botSessionService,
   resolveChatRuntimeStage,
   resolveUserId,
-  withFriendBotRequestParams,
+  withConversationSubjectParams,
   type ChatBotView,
 } from './botSessionService';
 
@@ -246,7 +246,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   }
 
   private async fetchIamToken(): Promise<string> {
-    const params = withFriendBotRequestParams(this.options.bot, this.options.userId, {
+    const params = withConversationSubjectParams(this.options.bot, this.options.userId, {
       user_id: resolveUserId(this.options.userId),
     });
     return this.getIamTokenFn(
@@ -256,9 +256,8 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       params.stage,
       {
         sessionKey: this.options.sessionId,
-        ...(this.options.bot.isFriendBot
-          ? { friendUserId: params.user_id, ownerId: this.options.bot.ownerId }
-          : {}),
+        friendUserId: params.f_user_id,
+        ownerId: this.options.bot.ownerId,
         // 多实例服务 Bot:IAM 换签带选中实例 device_uuid(与 getChatUrl 的实例选址同源
         // options.range,避免 Token 与实际实例不一致)。range 产出已由 useBotSessionRange /
         // supportsConversationInstanceScope 收口(服务 Bot+非好友+非 teclaw+已选实例)。
@@ -274,10 +273,10 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private async getChatUrl(): Promise<A2aProxyConnection & { url: string }> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
-      withFriendBotRequestParams(this.options.bot, this.options.userId, {
+      withConversationSubjectParams(this.options.bot, this.options.userId, {
         user_id: resolveUserId(this.options.userId),
         owner_id: this.options.bot.ownerId,
-        ...(this.options.bot.isFriendBot ? { session_id: this.options.sessionId } : {}),
+        session_id: this.options.sessionId,
         ...(this.options.range ? { device_uuid: this.options.range.deviceUuid } : {}),
       }),
     );
