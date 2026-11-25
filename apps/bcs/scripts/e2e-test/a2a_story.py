@@ -319,6 +319,8 @@ class A2aStory(Story):
             "agent_card_url": self.peer.base + "/agent-card.json"}, token=admin, status=201)
         assert set(registered) == {"provider_name", "provider_bot_ref", "agent_name", "bot_id", "agent_card_url", "agent_card", "catalog_labels", "agent_id", "visibility", "status", "user_visibility"}
         assert registered["catalog_labels"] == {}
+        assert registered["agent_id"] is None
+        assert registered["status"] == "online"
         assert registered["agent_name"] == self.peer.card["name"]
         bot_id = registered["bot_id"]
         bindings = self.request("GET", prefix, token=admin)
