@@ -20,6 +20,9 @@ export interface SendFileRefs {
   fileRefDisplay?: Array<{ insert_id: string; name: string }>;
 }
 export type BotLibraryCdnLoader = (botId: string) => Promise<number>;
+export interface UseBotChatOptions {
+  subjectScoped?: boolean;
+}
 /** useBotChat —— bot 单聊对话 Hook(镜像 useGroupChat)。 */
 export function useBotChat(
   bot: ChatBotView | null,
@@ -27,6 +30,7 @@ export function useBotChat(
   panelRef?: RefObject<PanelHandle | null>,
   loadBotLibraryCdn: BotLibraryCdnLoader = queryAndRegisterBotLibraryCdn,
   authenticatedUserId?: string | null,
+  options: UseBotChatOptions = {},
 ) {
   const workspaceIdentityId = useWorkspaceStore((s) => s.activeIdentityId);
   const identityId = authenticatedUserId === undefined ? workspaceIdentityId : authenticatedUserId;
@@ -44,8 +48,11 @@ export function useBotChat(
   const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
   const provider = useMemo(() => {
     if (!bot || !sessionId || !identityId) return null;
-    return createBotChatProvider({ bot, userId: identityId, sessionId, range: sessionRange });
-  }, [bot, sessionId, identityId, sessionRange]);
+    return createBotChatProvider({
+      bot, userId: identityId, sessionId, range: sessionRange,
+      subjectScoped: options.subjectScoped,
+    });
+  }, [bot, sessionId, identityId, options.subjectScoped, sessionRange]);
   const connectionRuntime = useBotConnectionRuntime(provider);
   const historyDone = provider !== null && historyProvider === provider;
   const currentProvider = useRef(provider);

@@ -12,20 +12,31 @@ export function clearBotModelCache(): void {
   currentUserId = null;
 }
 
-export function botModelContextKey(bot: ChatBotView | null, userId: string | null): string {
+export function botModelContextKey(
+  bot: ChatBotView | null,
+  userId: string | null,
+  subjectScoped = true,
+): string {
   return JSON.stringify([userId, bot?.botId, bot?.realBotId, bot?.ownerId, bot?.engine,
-    bot?.botType, bot?.runtimeStage, bot?.isTeamBot, bot?.isFriendBot]);
+    bot?.botType, bot?.runtimeStage, bot?.isTeamBot, bot?.isFriendBot, subjectScoped]);
 }
 
-export function loadCachedBotModels(bot: ChatBotView, userId: string): Promise<ModelResult> {
+export function loadCachedBotModels(
+  bot: ChatBotView,
+  userId: string,
+  subjectScoped = true,
+): Promise<ModelResult> {
   if (currentUserId !== userId) {
     clearBotModelCache();
     currentUserId = userId;
   }
-  const key = botModelContextKey(bot, userId);
+  const key = botModelContextKey(bot, userId, subjectScoped);
   const cached = entries.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.promise;
-  const entry = { promise: botSessionService.listModels(bot, userId), expiresAt: Infinity };
+  const entry = {
+    promise: botSessionService.listModels(bot, userId, subjectScoped),
+    expiresAt: Infinity,
+  };
   entry.promise = entry.promise.then((result) => {
     if (entries.get(key) === entry) {
       if (result.ok) entry.expiresAt = Date.now() + MODEL_CACHE_TTL_MS;

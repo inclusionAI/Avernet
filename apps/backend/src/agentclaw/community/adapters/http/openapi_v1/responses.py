@@ -228,6 +228,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerMcpSyncError,
 )
 from agentclaw.community.core.engine_runtime.errors import (
+    EngineCallerRuntimePreparingError,
     EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
     EngineSessionCursorError,
@@ -771,6 +772,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     # Retryable: cold, dormant or restarting. Distinct from 404 (the bot IS the
     # caller's) and from 500 (nothing is broken).
+    EngineCallerRuntimePreparingError: (409, "Caller runtime is preparing"),
     EngineDeviceNotReadyError: (409, "Bot device is not ready"),
     # NOT retryable as-is: the named stage has no live runtime (nothing
     # validating for verify, nothing released for online, or a published stage
@@ -902,6 +904,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
+    EngineCallerRuntimePreparingError: 409113,
     PersonalSpaceDeletionError: SpaceErrorCode.PERSONAL_SPACE_NOT_DELETABLE,
     SpaceNotEmptyError: SpaceErrorCode.SPACE_NOT_EMPTY,
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
@@ -992,5 +995,10 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
                 request,
                 code=ENVELOPE_ERROR_CODES.get(error_type),
                 data=error_data(exc),
+                headers=(
+                    {"Retry-After": "3"}
+                    if isinstance(exc, EngineCallerRuntimePreparingError)
+                    else None
+                ),
             )
     return None

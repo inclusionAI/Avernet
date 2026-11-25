@@ -78,6 +78,7 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
 from agentclaw.community.core.engine_runtime.errors import (
+    EngineCallerRuntimePreparingError,
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
     EngineUpstreamError,
@@ -149,6 +150,10 @@ async def create_session(
             )
             session_key = created_result.get("session_key")
             if not session_key:
+                if created_result.get("need_poll"):
+                    raise EngineCallerRuntimePreparingError(
+                        "caller runtime is preparing"
+                    )
                 raise EngineDeviceNotReadyError("friend bot runtime is not ready")
             requested = {
                 key: value
