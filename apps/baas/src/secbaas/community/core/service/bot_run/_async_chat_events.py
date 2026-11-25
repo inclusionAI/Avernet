@@ -24,7 +24,13 @@ from ._interaction_protocol import (
 )
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import SessionState
-from ._ws_failure import WsErrorChunk, WsFailure, WsFrame, failure_for_event
+from ._ws_failure import (
+    PendingWsErrorChunk,
+    WsErrorChunk,
+    WsFailure,
+    WsFrame,
+    failure_for_event,
+)
 
 logger = get_logger("core-bot-run")
 
@@ -37,7 +43,6 @@ class _EarlyWsError:
     frame: WsFrame
     source: str
     candidates: dict[str, SessionState]
-    legacy: tuple[str, SessionState] | None
 
 
 def _public_interaction_envelope(
@@ -152,6 +157,8 @@ class AsyncChatEvents:
         source: str,
         state: SessionState,
         failure: WsFailure | None,
+        *,
+        pending: bool = False,
     ) -> None:
         self._handle_terminal_error(
             state,
@@ -160,6 +167,7 @@ class AsyncChatEvents:
             source,
             error_code=frame.get("errorCode", "") if source != "error" else "",
             ws_failure=failure,
+            pending_frame=frame if pending else None,
         )
 
     def _route_ws_error(
@@ -182,15 +190,24 @@ class AsyncChatEvents:
         if owned:
             return False
 
+        if legacy is not None:
+            key, state = legacy
+            if key in frame.awaiting_ack:
+                self._deliver_ws_error(frame, source, state, None, pending=True)
+                return True
+            # Do not let an unrelated send delay this session's existing outcome.
+            return False
+
+        # Only stage an early event that the old matcher would have discarded.
+        # If an early alias matches a different live session, we cannot safely
+        # assume it belongs to an unacknowledged request instead.
         candidates = {
             key: self._sessions[key]
             for key in frame.awaiting_ack
             if key in self._sessions
         }
         if candidates and len(self._early_ws_errors) < _MAX_EARLY_WS_ERRORS:
-            self._early_ws_errors.append(
-                _EarlyWsError(frame, source, candidates, legacy)
-            )
+            self._early_ws_errors.append(_EarlyWsError(frame, source, candidates))
             return True
         return False
 
@@ -212,12 +229,6 @@ class AsyncChatEvents:
                 self._deliver_ws_error(early.frame, early.source, candidate, failure)
             elif early.candidates:
                 remaining.append(early)
-            elif early.legacy is not None:
-                key, legacy_state = early.legacy
-                if self._sessions.get(key) is legacy_state:
-                    self._deliver_ws_error(
-                        early.frame, early.source, legacy_state, None
-                    )
         self._early_ws_errors = remaining
 
     @staticmethod
@@ -233,6 +244,7 @@ class AsyncChatEvents:
         source: str,
         error_code: str = "",
         ws_failure: WsFailure | None = None,
+        pending_frame: WsFrame | None = None,
     ) -> None:
         msg = error_msg or f"{source} error"
         if error_code:
@@ -253,11 +265,16 @@ class AsyncChatEvents:
             state.error_message = msg
             state.chat_complete.set()
             state.ws_failure = ws_failure
-            chunk: StreamChunk = (
-                WsErrorChunk(type="error", content=msg, failure=ws_failure)
-                if ws_failure is not None
-                else StreamChunk(type="error", content=msg)
-            )
+            state.ws_pending_error = pending_frame
+            chunk: StreamChunk
+            if ws_failure is not None:
+                chunk = WsErrorChunk(type="error", content=msg, failure=ws_failure)
+            elif pending_frame is not None:
+                chunk = PendingWsErrorChunk(
+                    type="error", content=msg, frame=pending_frame
+                )
+            else:
+                chunk = StreamChunk(type="error", content=msg)
             AsyncChatEvents._emit_stream_chunk(state, chunk)
         finally:
             if token is not None:

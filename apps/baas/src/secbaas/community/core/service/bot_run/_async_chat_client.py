@@ -37,8 +37,10 @@ from ._chat_errors import NotConnectedError as NotConnectedError
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import SessionState
 from ._ws_failure import (
+    PendingWsErrorChunk,
     WsErrorChunk,
     failure_for_ack,
+    failure_for_event,
 )
 
 logger = get_logger("core-bot-run")
@@ -325,6 +327,7 @@ class AsyncChatClient(AsyncChatEvents):
                     state.agent_complete.clear()
                     state.ws_ack = None
                     state.ws_failure = None
+                    state.ws_pending_error = None
                     state.trace_context = trace_ctx
                 else:
                     state = SessionState(trace_context=trace_ctx)
@@ -367,10 +370,15 @@ class AsyncChatClient(AsyncChatEvents):
                     detail = (
                         f", error={state.error_message}" if state.error_message else ""
                     )
+                    failure = state.ws_failure
+                    if state.ws_pending_error is not None:
+                        failure = failure_for_event(
+                            state.ws_pending_error, state.ws_ack, session_key
+                        )
                     raise BotSessionError(
                         f"session ended with error state: "
                         f"session_key={session_key}{detail}",
-                        ws_failure=state.ws_failure,
+                        ws_failure=failure,
                     )
 
                 return state.content, state.agent_payloads
@@ -464,6 +472,7 @@ class AsyncChatClient(AsyncChatEvents):
                     state.agent_complete.clear()
                     state.ws_ack = None
                     state.ws_failure = None
+                    state.ws_pending_error = None
                     state.trace_context = trace_ctx
                 else:
                     state = SessionState(trace_context=trace_ctx)
@@ -501,7 +510,18 @@ class AsyncChatClient(AsyncChatEvents):
 
                 # 消费 stream_queue，逐 chunk 产出
                 async for chunk in self._drain_stream_queue(queue, timeout):
-                    yield chunk
+                    if isinstance(chunk, PendingWsErrorChunk):
+                        failure = failure_for_event(
+                            chunk.frame, state.ws_ack, session_key
+                        )
+                        if failure is not None:
+                            yield WsErrorChunk(
+                                type="error", content=chunk.content, failure=failure
+                            )
+                        else:
+                            yield StreamChunk(type="error", content=chunk.content)
+                    else:
+                        yield chunk
 
             finally:
                 async with self._condition:

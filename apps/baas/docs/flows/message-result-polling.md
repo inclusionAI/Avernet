@@ -33,11 +33,14 @@ reads `error.code`. An execution error event contributes `payload.errorCode`
 only if the same socket's successful `started` ACK identifies its `runId`
 and the event matches the request session key, the OpenClaw `agent:main:` form,
 or the explicit session key from that ACK. This lookup precedes legacy fuzzy
-routing; the WS consumer can also correlate an error received just before its
-ACK. An ACK that only says `accepted`, a session-only match, and a cached or
+routing. An error received before its own ACK follows its legacy route without
+waiting for unrelated sends. If no legacy session matches, a bounded buffer can
+correlate the error when the ACK arrives. An ACK that only says `accepted`, a session-only match, and a cached or
 replayed ACK cannot establish run ownership. Failures handled by the legacy
 path retain their existing status and text but do not attach a code. BaaS does
-not infer codes from text, A2A mappings, or disconnects.
+not infer codes from text, A2A mappings, or disconnects. The stored code is
+what the WS peer reported, not a claim that it originated upstream of that
+peer. The WS protocol does not expose that distinction.
 
 The [direct dispatcher](../../src/secbaas/community/core/service/bot_run/_task_message_dispatcher.py)
 and [queue executor](../../src/secbaas/community/core/service/bot_run/_executor.py)

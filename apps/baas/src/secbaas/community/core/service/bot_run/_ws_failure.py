@@ -79,6 +79,13 @@ def _nonblank_string(value: object) -> str | None:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class PendingWsErrorChunk(StreamChunk):
+    """Already delivered to the legacy session; only its code waits for ACK."""
+
+    frame: WsFrame = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class WsErrorChunk(StreamChunk):
     """An owned failure; converters still see the original content and metadata."""
 

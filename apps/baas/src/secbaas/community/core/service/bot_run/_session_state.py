@@ -36,3 +36,4 @@ class SessionState:
     error_message: str = ""
     ws_ack: WsFrame | None = field(default=None, repr=False)
     ws_failure: WsFailure | None = field(default=None, repr=False)
+    ws_pending_error: WsFrame | None = field(default=None, repr=False)

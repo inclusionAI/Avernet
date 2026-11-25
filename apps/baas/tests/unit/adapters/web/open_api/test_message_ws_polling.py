@@ -117,6 +117,8 @@ async def _respond(ws, scenario, before_reply):
             event["payload"]["sessionKey"] = "different-" + session
         elif scenario == "missing-event-code":
             del event["payload"]["errorCode"]
+        elif scenario == "peer-declared-termination":
+            event["payload"]["errorCode"] = "STREAM_TERMINATED_WITHOUT_FINAL"
         elif scenario == "success":
             event["payload"]["state"] = "final"
         if not early:
@@ -142,6 +144,7 @@ async def _respond(ws, scenario, before_reply):
         ("direct", "no-ack-run", None),
         ("direct", "cached-ack", None),
         ("direct", "missing-event-code", None),
+        ("direct", "peer-declared-termination", "STREAM_TERMINATED_WITHOUT_FINAL"),
         ("direct", "success", None),
         ("queued", "ack", CODE),
         ("queued", "event", CODE),
@@ -308,8 +311,7 @@ async def test_poll_ws_failure(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("early", [False, True])
-async def test_canonical_error_targets_its_run_not_an_overlapping_session(early):
+async def test_canonical_error_targets_its_run_not_an_overlapping_session():
     async def peer(ws):
         hello = json.loads(await ws.recv())
         await ws.send(json.dumps({"type": "res", "id": hello["id"], "ok": True}))
@@ -342,11 +344,8 @@ async def test_canonical_error_targets_its_run_not_an_overlapping_session(early)
             },
         }
         await ack("canonical", "other-run")
-        if early:
-            await ws.send(json.dumps(event))
         await ack("owner", "owner-run", sessionKey="canonical")
-        if not early:
-            await ws.send(json.dumps(event))
+        await ws.send(json.dumps(event))
         # The other active session must receive its own successful terminal.
         payload = event["payload"] | {"runId": "other-run", "state": "final"}
         await ws.send(json.dumps(event | {"payload": payload}))
@@ -374,4 +373,81 @@ async def test_canonical_error_targets_its_run_not_an_overlapping_session(early)
             assert failed.ws_failure is not None and failed.ws_failure.code == CODE
             assert successful == ("", [])
         finally:
+            await client.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_failure_does_not_wait_for_another_sessions_ack():
+    reply_to_other = asyncio.Event()
+
+    async def peer(ws):
+        hello = json.loads(await ws.recv())
+        await ws.send(json.dumps({"type": "res", "id": hello["id"], "ok": True}))
+        requests = (json.loads(await ws.recv()), json.loads(await ws.recv()))
+        ids = {req["params"]["sessionKey"]: req["id"] for req in requests}
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "res",
+                    "id": ids["legacy"],
+                    "ok": True,
+                    "payload": {"accepted": True},
+                }
+            )
+        )
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "event",
+                    "event": "chat",
+                    "payload": {
+                        "sessionKey": "legacy",
+                        "runId": "legacy-run",
+                        "state": "error",
+                        "errorCode": CODE,
+                        "errorMessage": "expected legacy failure",
+                    },
+                }
+            )
+        )
+        # Keep the unrelated ACK genuinely pending until the legacy request ends.
+        await reply_to_other.wait()
+        await ws.send(json.dumps({"type": "res", "id": ids["other"], "ok": True}))
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "event",
+                    "event": "chat",
+                    "payload": {
+                        "sessionKey": "other",
+                        "state": "final",
+                    },
+                }
+            )
+        )
+        await ws.wait_closed()
+
+    async with serve(peer, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        client = AsyncChatClient(
+            transport=build_chat_transport(
+                uri=f"ws://127.0.0.1:{port}",
+                mode="off",
+                headers=None,
+                ignore_case=False,
+                proxypass_token_minter=None,
+            )
+        )
+        await client.connect()
+        other = asyncio.create_task(client.send_message("other", session_key="other"))
+        try:
+            with pytest.raises(
+                BotSessionError, match="expected legacy failure"
+            ) as error:
+                await client.send_message("legacy", session_key="legacy", timeout=0.5)
+            assert error.value.ws_failure is None
+        finally:
+            reply_to_other.set()
+            async with asyncio.timeout(2):
+                assert await other == ("", [])
             await client.close()
