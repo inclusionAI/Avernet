@@ -82,7 +82,7 @@ class BotWebSocketClient:
         self._request_id = 0
         self._connection_epoch = object()
         self._pending_chat_sends: dict[str, str] = {}
-        self._chat_send_ack: Callable[[str, object, WsFrame | None], None] | None = None
+        self._chat_send_ack: Callable[[str, WsFrame], None] | None = None
         self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._event_handlers: dict[str, EventHandler] = {}
         self._disconnect_callback: EventHandler | None = None
@@ -373,15 +373,13 @@ class BotWebSocketClient:
         headers.update(self.headers)
         return headers
 
-    def on_chat_send_ack(
-        self, callback: Callable[[str, object, WsFrame | None], None]
-    ) -> None:
+    def on_chat_send_ack(self, callback: Callable[[str, WsFrame], None]) -> None:
         self._chat_send_ack = callback
 
-    def _notify_chat_send_ack(self, session_key: str, ack: WsFrame | None) -> None:
+    def _notify_chat_send_ack(self, session_key: str, ack: WsFrame) -> None:
         if self._chat_send_ack is not None:
             try:
-                self._chat_send_ack(session_key, self._connection_epoch, ack)
+                self._chat_send_ack(session_key, ack)
             except Exception:
                 logger.exception("WS chat ACK observer failed")
 
@@ -538,6 +536,4 @@ class BotWebSocketClient:
             raise TimeoutError(f"Request {method} timed out")
         finally:
             self._pending_requests.pop(request_id, None)
-            session_key = self._pending_chat_sends.pop(request_id, None)
-            if session_key is not None:
-                self._notify_chat_send_ack(session_key, None)
+            self._pending_chat_sends.pop(request_id, None)

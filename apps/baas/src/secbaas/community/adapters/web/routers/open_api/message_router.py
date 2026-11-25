@@ -491,10 +491,7 @@ async def get_message_result(
 
         error_code = None
         if message_info.status == "FAILED":
-            stored_code = message_info.error_code
-            error_code = (
-                stored_code if stored_code and stored_code.strip() else "DEFAULT"
-            )
+            error_code = message_info.error_code or "DEFAULT"
 
         return MessagePollResponse(
             code=0,

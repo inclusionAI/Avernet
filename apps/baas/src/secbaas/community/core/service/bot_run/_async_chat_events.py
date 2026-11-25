@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 from secbaas.community.api.sse import StreamChunk
@@ -34,14 +33,6 @@ from ._ws_failure import (
 logger = get_logger("core-bot-run")
 
 _WS_ERROR_SOURCES = {"_on_chat": "chat", "_on_agent": "agent", "_on_error": "error"}
-_MAX_EARLY_WS_ERRORS = 16
-
-
-@dataclass(slots=True)
-class _EarlyWsError:
-    frame: WsFrame
-    source: str
-    candidates: dict[str, SessionState]
 
 
 def _public_interaction_envelope(
@@ -136,7 +127,6 @@ class AsyncChatEvents:
     """Internal callback implementation; state is initialized by AsyncChatClient."""
 
     _sessions: dict[str, SessionState]
-    _early_ws_errors: list[_EarlyWsError]
     _session_matcher: SessionKeyMatcher
     _ignore_case: bool
     _interaction_service: BotInteractionService | None
@@ -189,42 +179,15 @@ class AsyncChatEvents:
         if legacy is not None:
             key, state = legacy
             if key in frame.awaiting_ack:
+                # Deliver now; only the code waits for this session's ACK.
                 self._deliver_ws_error(frame, source, state, pending=True)
                 return True
-            # Do not let an unrelated send delay this session's existing outcome.
-            return False
-
-        # Only stage an early event that the old matcher would have discarded.
-        # If an early alias matches a different live session, we cannot safely
-        # assume it belongs to an unacknowledged request instead.
-        candidates = {
-            key: self._sessions[key]
-            for key in frame.awaiting_ack
-            if key in self._sessions
-        }
-        if candidates and len(self._early_ws_errors) < _MAX_EARLY_WS_ERRORS:
-            self._early_ws_errors.append(_EarlyWsError(frame, source, candidates))
-            return True
         return False
 
-    def _on_ws_send_ack(
-        self, session_key: str, connection: object, ack: WsFrame | None
-    ) -> None:
+    def _on_ws_send_ack(self, session_key: str, ack: WsFrame) -> None:
         state = self._sessions.get(session_key)
-        if state is not None and ack is not None:
+        if state is not None:
             state.ws_ack = ack
-        remaining = []
-        for early in self._early_ws_errors:
-            candidate = early.candidates.get(session_key)
-            if candidate is None or connection is not early.frame.connection:
-                remaining.append(early)
-                continue
-            early.candidates.pop(session_key)
-            if candidate is state and event_matches_ack(early.frame, ack, session_key):
-                self._deliver_ws_error(early.frame, early.source, candidate)
-            elif early.candidates:
-                remaining.append(early)
-        self._early_ws_errors = remaining
 
     @staticmethod
     def _emit_stream_chunk(state: SessionState, chunk: StreamChunk) -> None:

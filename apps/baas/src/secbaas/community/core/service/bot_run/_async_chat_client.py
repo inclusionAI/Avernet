@@ -30,7 +30,7 @@ from ._async_chat_client_transport import (
     ChatTransport,
     ChatTransportCallbacks,
 )
-from ._async_chat_events import AsyncChatEvents, _capture_trace_context, _EarlyWsError
+from ._async_chat_events import AsyncChatEvents, _capture_trace_context
 from ._chat_errors import BotSessionError as BotSessionError
 from ._chat_errors import ChatRequestError
 from ._chat_errors import NotConnectedError as NotConnectedError
@@ -127,7 +127,6 @@ class AsyncChatClient(AsyncChatEvents):
 
         # sessionKey → _SessionState 分流表
         self._sessions: dict[str, SessionState] = {}
-        self._early_ws_errors: list[_EarlyWsError] = []
 
         # sessionKey 模糊匹配器：服务端返回的 sessionKey 可能比客户端注册的长，
         # 通过 contains 匹配从 store 中回溯查找客户端注册的原始 key
@@ -635,7 +634,6 @@ class AsyncChatClient(AsyncChatEvents):
         # 清理所有 session state，并唤醒等待中的协程
         async with self._condition:
             self._sessions.clear()
-            self._early_ws_errors.clear()
             self._active_sessions.clear()
             self._condition.notify_all()
 

@@ -80,7 +80,16 @@ async def _respond(ws, scenario, before_reply):
             "errorMessage": "engine failure",
         },
     }
-    if scenario in {"ack", "bad-ack-code", "bad-ack-shape", "inject-ack"}:
+    if scenario == "unmatched-early-error":
+        ack["payload"]["sessionKey"] = "canonical-without-request-key"
+        event["payload"]["sessionKey"] = ack["payload"]["sessionKey"]
+        await ws.send(json.dumps(event))
+        # Deliver final through the legacy route before the ACK arrives.
+        event["payload"]["sessionKey"] = session
+        event["payload"]["state"] = "final"
+        await ws.send(json.dumps(event))
+        await ws.send(json.dumps(ack))
+    elif scenario in {"ack", "bad-ack-code", "bad-ack-shape", "inject-ack"}:
         rejection = {
             "type": "res",
             "id": request_id,
@@ -97,8 +106,8 @@ async def _respond(ws, scenario, before_reply):
             rejection["error"] = []
         await ws.send(json.dumps(rejection))
     else:
-        early = scenario in {"early-event", "canonical-early"}
-        if scenario in {"canonical-early", "canonical-event"}:
+        early = scenario == "early-event"
+        if scenario == "canonical-event":
             ack["payload"]["sessionKey"] = "canonical-without-request-key"
             event["payload"]["sessionKey"] = ack["payload"]["sessionKey"]
         elif scenario == "openclaw-prefix":
@@ -117,6 +126,8 @@ async def _respond(ws, scenario, before_reply):
             event["payload"]["sessionKey"] = "different-" + session
         elif scenario == "missing-event-code":
             del event["payload"]["errorCode"]
+        elif scenario == "blank-event-code":
+            event["payload"]["errorCode"] = "  "
         elif scenario == "peer-declared-termination":
             event["payload"]["errorCode"] = "STREAM_TERMINATED_WITHOUT_FINAL"
         elif scenario == "success":
@@ -137,6 +148,7 @@ async def _respond(ws, scenario, before_reply):
         ("direct", "bad-ack-shape", None),
         ("direct", "event", CODE),
         ("direct", "early-event", CODE),
+        ("direct", "unmatched-early-error", None),
         ("direct", "canonical-event", CODE),
         ("direct", "openclaw-prefix", CODE),
         ("direct", "late-old-run", None),
@@ -144,6 +156,7 @@ async def _respond(ws, scenario, before_reply):
         ("direct", "no-ack-run", None),
         ("direct", "cached-ack", None),
         ("direct", "missing-event-code", None),
+        ("direct", "blank-event-code", None),
         ("direct", "peer-declared-termination", "STREAM_TERMINATED_WITHOUT_FINAL"),
         ("direct", "success", None),
         ("queued", "ack", CODE),
@@ -153,7 +166,7 @@ async def _respond(ws, scenario, before_reply):
         ("queued", "metadata", CODE),
         ("queue-stream", "ack", CODE),
         ("queue-stream", "early-event", CODE),
-        ("queue-stream", "canonical-early", CODE),
+        ("queue-stream", "unmatched-early-error", None),
         ("queue-stream", "late-old-run", None),
     ],
 )
@@ -295,9 +308,11 @@ async def test_poll_ws_failure(
         finally:
             await pool.close_all()
 
-    expected_status = {"success": "COMPLETED", "aborted": "ABORTED"}.get(
-        scenario, "FAILED"
-    )
+    expected_status = {
+        "success": "COMPLETED",
+        "unmatched-early-error": "COMPLETED",
+        "aborted": "ABORTED",
+    }.get(scenario, "FAILED")
     assert data["status"] == expected_status
     row = repo.get_by_run_id(run_id)
     assert row is not None and row.error_code == stored_code
@@ -306,7 +321,7 @@ async def test_poll_ws_failure(
     )
     if scenario == "aborted":
         assert data["error"] == "client cancelled"
-    elif scenario not in {"success", "bad-ack-shape"}:
+    elif expected_status == "FAILED" and scenario != "bad-ack-shape":
         assert "engine failure" in data["error"]
 
 

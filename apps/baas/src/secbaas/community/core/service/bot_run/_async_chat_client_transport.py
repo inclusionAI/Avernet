@@ -40,7 +40,7 @@ class ChatTransportCallbacks:
     events: Mapping[str, EventHandler]
     on_disconnect: EventHandler
     on_sessions_failed: Callable[[tuple[str, ...], str, str], None]
-    on_ws_send_ack: Callable[[str, object, WsFrame | None], None] | None = None
+    on_ws_send_ack: Callable[[str, WsFrame], None] | None = None
 
 
 class ChatTransport(Protocol):

@@ -62,7 +62,6 @@ def polling_app():
         ("FAILED", "007", "007"),
         ("FAILED", " future/未知 ", " future/未知 "),
         ("FAILED", None, "DEFAULT"),
-        ("FAILED", "  ", "DEFAULT"),
         ("PENDING", "unused", None),
         ("RUNNING", "unused", None),
         ("COMPLETED", "unused", None),

@@ -24,8 +24,9 @@ The [run repository](../../src/secbaas/community/core/repository/bot_run/_protoc
 can write `FAILED`, `error`, and an optional `error_code` together while the run
 is active. Only a trusted producer that has verified the code belongs to the
 same attempt may supply it. Blank, malformed or invalid UTF-8 values and values
-over 65,535 UTF-8 bytes are discarded without losing the failure or its error
-text. `DEFAULT` is a response fallback, not a database default or backfill.
+over 65,535 UTF-8 bytes are not stored in `error_code`. This check does not
+rewrite or validate the existing `error` text. `DEFAULT` is a response fallback,
+not a database default or backfill.
 BaaS consumes the code sent by its existing WebSocket peer; it does not add or
 change an engine producer. The [WS reader](../../src/secbaas/community/core/service/bot_run/_bot_websocket_client.py)
 correlates the response by request ID. The [code parser](../../src/secbaas/community/core/service/bot_run/_ws_failure.py)
@@ -34,11 +35,11 @@ it as a string through the existing failure path. An execution error event
 contributes `payload.errorCode` only if the same socket's successful `started` ACK identifies its `runId`
 and the event matches the request session key, the OpenClaw `agent:main:` form,
 or the explicit session key from that ACK. This lookup precedes legacy fuzzy
-routing. An error received before its own ACK follows its legacy route without
-waiting for unrelated sends. If no legacy session matches, a bounded buffer can
-correlate the error when the ACK arrives. An ACK that only says `accepted`, a session-only match, and a cached or
-replayed ACK cannot establish run ownership. Failures handled by the legacy
-path retain their existing status and text but do not attach a code. BaaS does
+routing. Before its ACK, an error follows the legacy route if that route finds
+a session; only its code waits for that session's ACK. An unmatched early error
+is not replayed. An ACK that only says `accepted`, a session-only match, and a
+cached or replayed ACK cannot establish run ownership. Without proof of ownership,
+failures retain their existing status and text without an attached code. BaaS does
 not infer codes from text, A2A mappings, or disconnects. The stored code is
 what the WS peer reported, not a claim that it originated upstream of that
 peer. The WS protocol does not expose that distinction.
