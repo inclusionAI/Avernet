@@ -14,7 +14,7 @@ it.each([150, 151] as const)('rejects real SQLite v%s incompatible schema and re
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, version INTEGER, description TEXT, gmt_modified INTEGER);
     INSERT INTO schema_version (version, description) VALUES (${version - 1}, 'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT, gmt_modified INTEGER${version === 151 ? ', ordinary_run_marker INTEGER' : ''});
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, flow_id TEXT, gmt_modified INTEGER${version === 151 ? ', ordinary_run_marker INTEGER' : ''});
     INSERT INTO flow_runs (id, flow_id, gmt_modified) VALUES (1, 'existing', 0);
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, ${version === 150 ? 'wrong_name' : 'child_workflow_id'} TEXT NOT NULL,

@@ -23,6 +23,7 @@ function fixture(origin: RunOriginScope = scope) {
   // Deliberately case-insensitive columns: an ordinary SQL equality would match a different identity.
   raw.exec(`CREATE TABLE flow_runs (
     id INTEGER PRIMARY KEY, flow_id TEXT UNIQUE, workflow_id TEXT COLLATE NOCASE, workflow_title TEXT,
+    parent_flow_id VARCHAR(255), root_flow_id VARCHAR(255),
     status TEXT, node_count INTEGER, succeeded_count INTEGER, failed_count INTEGER,
     total_duration_ms INTEGER, total_token_usage INTEGER, started_at INTEGER, completed_at INTEGER,
     triggered_by TEXT, identity_key TEXT, current_phase TEXT, origin_session_key TEXT, origin_session_id TEXT,
