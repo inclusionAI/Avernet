@@ -230,6 +230,136 @@ def test_get_latest_dim_records(repo):
     assert by_dim["security"]["health_score"] == 99
 
 
+def _insert_row(repo, **overrides):
+    """Direct row insert with explicit column control (gmt_create)."""
+    from agentclaw.community.core.harness.sqlite_models import (
+        HarnessScanRecordModel,
+    )
+
+    base = dict(
+        bot_id="bot-1",
+        entity_id="ent-1",
+        health_score=0,
+        check_items="[]",
+        findings="[]",
+        findings_summary="{}",
+        trigger_source="api",
+        status="completed",
+        env="dev",
+        layer="L1",
+    )
+    base.update(overrides)
+    with repo._db.orm_session() as db:
+        db.add(HarnessScanRecordModel(**base))
+        db.flush()
+
+
+def test_get_latest_dim_records_interleaved_timestamps(repo):
+    from datetime import datetime, timedelta
+
+    day = datetime(2026, 11, 1, 12, 0, 0)
+    # 3 dims × 3 interleaved rows; the newest per dim is deliberately
+    # NOT the highest id of the whole set (older insert, newer clock).
+    _insert_row(repo, scan_dim="security", health_score=1, gmt_create=day)
+    _insert_row(repo, scan_dim="perf", health_score=2, gmt_create=day + timedelta(hours=1))
+    _insert_row(repo, scan_dim="stability", health_score=3, gmt_create=day + timedelta(hours=2))
+    _insert_row(repo, scan_dim="security", health_score=11, gmt_create=day + timedelta(hours=3))
+    _insert_row(repo, scan_dim="perf", health_score=12, gmt_create=day + timedelta(hours=4))
+    _insert_row(repo, scan_dim="security", health_score=21, gmt_create=day + timedelta(hours=5))
+    _insert_row(repo, scan_dim="stability", health_score=13, gmt_create=day + timedelta(days=1))
+
+    latest = repo.get_latest_dim_records("bot-1", "ent-1")
+    # One row per dim, the (gmt_create DESC, id DESC) winner each.
+    assert [r["scan_dim"] for r in latest] == ["stability", "security", "perf"]
+    assert {r["scan_dim"]: r["health_score"] for r in latest} == {
+        "stability": 13,
+        "security": 21,
+        "perf": 12,
+    }
+
+
+def test_get_latest_dim_records_null_dim_grouped(repo):
+    from datetime import datetime, timedelta
+
+    day = datetime(2026, 11, 2, 8, 0, 0)
+    _insert_row(repo, scan_dim=None, health_score=5, gmt_create=day)
+    _insert_row(repo, scan_dim=None, health_score=6, gmt_create=day + timedelta(hours=1))
+    _insert_row(repo, scan_dim="security", health_score=9, gmt_create=day)
+
+    latest = repo.get_latest_dim_records("bot-1", "ent-1")
+    # NULL scan_dim collapses into one group (''), keeping its newest row.
+    assert [r["scan_dim"] for r in latest] == [None, "security"]
+    assert latest[0]["health_score"] == 6
+
+
+def test_get_latest_dim_records_publish_filters(repo):
+    repo.batch_create(
+        "bot-1", "ent-1", "pub-1", "L1", "api",
+        [
+            _rec(scan_dim="security", health_score=10),
+            _rec(scan_dim="perf", health_score=11),
+        ],
+    )
+    repo.batch_create(
+        "bot-1", "ent-1", None, "L1", "api",
+        [_rec(scan_dim="security", health_score=20)],
+    )
+
+    # Specific publish id → only that publish's rows.
+    by_dim = {r["scan_dim"]: r for r in repo.get_latest_dim_records("bot-1", "ent-1", "pub-1")}
+    assert dict(security=10, perf=11) == {d: r["health_score"] for d, r in by_dim.items()}
+
+    # match_null_publish=True (default) → only bot_publish_id IS NULL rows.
+    null_rows = repo.get_latest_dim_records("bot-1", "ent-1")
+    assert [r["health_score"] for r in null_rows] == [20]
+
+    # match_null_publish=False → any bot_publish_id (incl. NULL): newest per dim across both groups.
+    all_rows = repo.get_latest_dim_records("bot-1", "ent-1", match_null_publish=False)
+    assert {r["scan_dim"]: r["health_score"] for r in all_rows} == {
+        "security": 20,
+        "perf": 11,
+    }
+
+
+def test_get_latest_dim_records_bounded_fetch(repo):
+    """Full rows are fetched only for the per-dim winners (regression
+    guard for the unbounded fetch-all that timed out in prod)."""
+    from sqlalchemy import event
+
+    fat = "x" * 4096
+    for i in range(8):
+        repo.batch_create(
+            "bot-1", "ent-1", None, "L1", "api",
+            [
+                _rec(scan_dim="security", health_score=i, findings=fat),
+                _rec(scan_dim="perf", health_score=i, findings=fat),
+                _rec(scan_dim="stability", health_score=i, findings=fat),
+            ],
+        )
+
+    engine = repo._db._factory.kw["bind"]
+    statements = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda conn, cursor, stmt, params, ctx, *a: statements.append(stmt),
+    )
+
+    latest = repo.get_latest_dim_records("bot-1", "ent-1")
+
+    assert len(latest) == 3  # one per dim, bounded by #dims not history
+    # Deliberately implementation-coupled SQL-shape pins: this is the
+    # regression guard for the prod fetch-all timeout, so statement shape
+    # (window subquery → winner-id full-row fetch) is exactly what must
+    # not regress silently.
+    table_selects = [s for s in statements if s.upper().startswith("SELECT") and "ac_harness_scan_record" in s]
+    assert len(table_selects) == 2  # window subquery + winner full-row fetch
+    assert "row_number() OVER" in table_selects[0]
+    # narrow projection: the window statement must not carry TEXT columns
+    assert "findings" not in table_selects[0]
+    assert " IN (" in table_selects[1]  # full-row fetch carries winner ids only
+
+
 # ── get_recent / list_records ───────────────────────────────────────
 
 def test_get_recent_filters(repo):
