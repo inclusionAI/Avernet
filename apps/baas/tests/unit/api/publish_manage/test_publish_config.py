@@ -33,13 +33,12 @@ class TestPublishConfig:
         config = PublishConfig.model_validate(
             {
                 "stages": {
-                    "PREPUB": {"device_count": 2, "batch_capacity": 3},
-                    "GRAY": {"device_count": 4},
+                    "PREPUB": {"batch_capacity": 3},
+                    "GRAY": {"batch_capacity": 100},
                 },
                 "drain_timeout_seconds": 60,
             }
         )
-        assert config.stages["PREPUB"].device_count == 2
         assert config.stages["PREPUB"].batch_capacity == 3
         assert config.drain_timeout_seconds == 60
 
@@ -59,7 +58,7 @@ class TestPublishConfig:
         defaults = PublishConfig.get_defaults_for_type(PublishType.CREATE)
         config = PublishConfig.model_validate(defaults)
         assert "PREPUB" in config.stages
-        assert config.stages["PREPUB"].device_count == 2
+        assert config.stages["PREPUB"].batch_capacity == 100
         assert config.stages["PREPUB"].pause_for_approval is True
 
     def test_extra_allow(self) -> None:
@@ -98,19 +97,17 @@ class TestPublishBatchConfig:
 class TestStageConfig:
     def test_defaults(self) -> None:
         cfg = StageConfig()
-        assert cfg.device_count == 0
-        assert cfg.batch_capacity == 5
+        assert cfg.batch_capacity == 100
         assert cfg.cooldown_seconds == 0
         assert cfg.pause_for_approval is False
 
     def test_from_dict(self) -> None:
         cfg = StageConfig.model_validate(
             {
-                "device_count": 10,
                 "batch_capacity": 3,
                 "cooldown_seconds": 0,
                 "pause_for_approval": True,
             }
         )
-        assert cfg.device_count == 10
+        assert cfg.batch_capacity == 3
         assert cfg.pause_for_approval is True
