@@ -112,7 +112,7 @@ class FilteredIndexFallback:
                 ids = await self.execution.call(
                     self.read_ids, request.filters, self.PAGE_SIZE
                 )
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 -- preserve the original empty result
                 stage.update(outcome="unavailable", error_type=type(error).__name__)
                 return replace(
                     original,
@@ -128,7 +128,9 @@ class FilteredIndexFallback:
             if not candidates:
                 return original
             result = await self.snapshot().retrieval.enrich(
-                replace(original, items=candidates), allow_timeout_projection=False
+                replace(original, items=candidates),
+                request=request,
+                allow_timeout_projection=False,
             )
             items = tuple(
                 item
