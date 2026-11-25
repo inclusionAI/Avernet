@@ -6,12 +6,13 @@ from ._errors import (
     ArcaSandboxNotFoundError,
     ArcaSandboxTimeoutError,
 )
-from ._protocols import ArcaSandbox, ArcaSandboxPlugin
+from ._protocols import ArcaSandbox, ArcaSandboxInfoReader, ArcaSandboxPlugin
 
 __all__ = [
     "ArcaSandbox",
     "ArcaSandboxError",
     "ArcaSandboxInfo",
+    "ArcaSandboxInfoReader",
     "ArcaSandboxNotFoundError",
     "ArcaSandboxPlugin",
     "ArcaSandboxTimeoutError",

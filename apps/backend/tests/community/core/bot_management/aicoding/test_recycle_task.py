@@ -777,3 +777,31 @@ def test_openapi_first_duplicate_does_not_gain_manual_notification(case):
     with case.db.orm_session() as session:
         assert session.query(DormantNotifyLog).count() == 0
         assert session.query(DormantCheckAudit).one().source == "openapi"
+
+
+def test_destroyed_physical_info_finishes_with_frontend_recycled_status(case):
+    import httpx
+    from agentclaw.community.core.bot_dormant.recycle_service import observe_baas_release
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
+
+    baas = object.__new__(BaasService)
+    baas._tenant = "test"
+    baas._http = MagicMock()
+    baas._http.get.return_value = httpx.Response(
+        200, request=httpx.Request("GET", "https://example.invalid/info"),
+        json={"code": 0, "data": {"status": "DESTROYED", "sandbox_id": "s1"}},
+    )
+    case.runtime.observe_release.side_effect = lambda *_args: observe_baas_release(
+        baas, physical_targets=["s1@42"]
+    )
+    result, payload = submit(case)
+    assert isinstance(case.handler.handle(payload), Complete)
+    public = case.service.get_operation(
+        bot_id="b1", owner_id="u1", operation_id=result["operation_id"],
+    )
+    assert public["phase"] == "SUCCEEDED"
+    assert public["bot_status"] == "RECYCLED"
+    assert case.store.read("b1", "u1")["binding_id"] is None
+    with case.db.orm_session() as session:
+        assert session.query(EntityDeviceBinding).one().status == "RELEASED"
+    case.runtime.submit_release.assert_called_once()

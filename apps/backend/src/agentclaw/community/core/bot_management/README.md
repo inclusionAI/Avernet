@@ -453,11 +453,12 @@ real credential/device acceptance. See the
 
 ### Unified recycle and coding-only backup
 
-All supported personal managed-cloud Bots use the single durable recycle worker
-in `core/bot_dormant/recycle_task.py` and its pinned runtime beside the shared
-facade. Neutral state/contracts live in `engines/restart_contract.py`. Submission,
-operation queries, provider release confirmation, audit completion and activation
-are identical for fastdisk coding, non-fastdisk coding and non-coding Bots.
+Only confirmed-fastdisk coding Bots use the durable recycle worker in
+`core/bot_dormant/recycle_task.py`. Non-coding and non-fastdisk coding Bots use
+the original synchronous recycle path without a queue/journal state. Internal
+manual operations and OpenAPI share this engine-owned admission decision and the
+existing activation service. Neutral state/contracts live in
+`engines/restart_contract.py`.
 
 `EngineProvisioningStrategy.prepare_recycle` defaults to a no-op: non-coding Bots
 never run the fastdisk probe, backup helper or failure-switch reader.
@@ -469,8 +470,12 @@ for the shared worker; backup implementation never moves into generic lifecycle 
 ARCA SDK primitives retain the existing `ArcaRecycleTransport` host import and DI
 seam. BaaS/local release uses the narrow `BaasRecycleRuntime` capability and persisted
 `physical_targets`, including stopped/released inventory rows. Every exact provider
-identity must be confirmed absent. Logical deletion, successful workflows, empty
-inventory or stopped containers cannot substitute for physical proof. The existing
+identity must be confirmed absent or explicitly `DESTROYED` by the physical
+provider. A successful info response must match the pinned sandbox identity;
+logical deletion, successful workflows, empty inventory or stopped containers
+cannot substitute for physical proof. BaaS uses management-plane inspection when
+the sandbox plugin supplies it: connecting requires RUNNING and cannot observe
+a destroyed runtime. The existing
 600-second observation budget ends unresolved release as `NEEDS_CONFIRMATION`,
 without repeating destroy or freezing/unbinding the Bot.
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from secbaas.community.api.device_manage import (
     MountPoint,
@@ -89,6 +89,18 @@ class ArcaSandbox(Protocol):
             True/False or an object with a .success attribute.
         """
         ...
+
+
+@runtime_checkable
+class ArcaSandboxInfoReader(Protocol):
+    """Optional management-plane inspection, independent of runtime readiness.
+
+    Providers whose connect operation requires RUNNING implement this capability
+    so lifecycle observations can also read PAUSED/DESTROYED sandboxes. Typed
+    absence, authentication and transport errors retain their original meaning.
+    """
+
+    def get_sandbox_info(self, sandbox_id: str) -> ArcaSandboxInfo: ...
 
 
 class ArcaSandboxPlugin(Protocol):

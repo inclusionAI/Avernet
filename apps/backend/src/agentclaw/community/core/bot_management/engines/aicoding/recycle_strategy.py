@@ -26,7 +26,7 @@ def _recycle_backup_errors():
 class AicodingRecycleMixin:
     def should_async_recycle(self, ctx, **kwargs) -> bool:
         """Queue only when the existing restart probe confirms fastdisk."""
-        from .restart_backup import probe_fastdisk_for_recycle
+        from .recycle_probe import probe_fastdisk_for_recycle
 
         return probe_fastdisk_for_recycle(ctx, **kwargs)
 

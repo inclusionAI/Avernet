@@ -426,3 +426,31 @@ def test_arca_missing_release_capability_fails_before_backup(monkeypatch):
         runtime.prepare(bot, {"target": runtime.target(bot)}, MagicMock())
     resolve.assert_not_called()
     strategy.prepare_recycle.assert_not_called()
+
+
+@pytest.mark.parametrize("status,expected", [("DESTROYED", True), ("RUNNING", False), ("PAUSED", False), ("FAILED", False)])
+def test_explicit_physical_destroyed_state_confirms_release(status, expected):
+    import httpx
+
+    service = object.__new__(BaasService)
+    service._tenant = "test"
+    service._http = MagicMock()
+    service._http.get.return_value = httpx.Response(
+        200, request=httpx.Request("GET", "https://example.invalid/info"),
+        json={"code": 0, "data": {"status": status, "sandbox_id": "s1"}},
+    )
+    assert service.is_physical_device_destroyed(provider_device_id="s1@42") is expected
+
+
+@pytest.mark.parametrize("sandbox_id", [None, "different-sandbox"])
+def test_destroyed_response_must_match_the_pinned_physical_target(sandbox_id):
+    import httpx
+
+    service = object.__new__(BaasService)
+    service._tenant = "test"
+    service._http = MagicMock()
+    service._http.get.return_value = httpx.Response(
+        200, request=httpx.Request("GET", "https://example.invalid/info"),
+        json={"code": 0, "data": {"status": "DESTROYED", "sandbox_id": sandbox_id}},
+    )
+    assert service.is_physical_device_destroyed(provider_device_id="s1@42") is False
