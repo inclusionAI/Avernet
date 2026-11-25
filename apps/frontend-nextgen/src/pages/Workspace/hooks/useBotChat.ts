@@ -20,9 +20,6 @@ export interface SendFileRefs {
   fileRefDisplay?: Array<{ insert_id: string; name: string }>;
 }
 export type BotLibraryCdnLoader = (botId: string) => Promise<number>;
-export interface UseBotChatOptions {
-  subjectScoped?: boolean;
-}
 /** useBotChat —— bot 单聊对话 Hook(镜像 useGroupChat)。 */
 export function useBotChat(
   bot: ChatBotView | null,
@@ -30,7 +27,7 @@ export function useBotChat(
   panelRef?: RefObject<PanelHandle | null>,
   loadBotLibraryCdn: BotLibraryCdnLoader = queryAndRegisterBotLibraryCdn,
   authenticatedUserId?: string | null,
-  options: UseBotChatOptions = {},
+  options: { subjectScoped?: boolean } = {},
 ) {
   const workspaceIdentityId = useWorkspaceStore((s) => s.activeIdentityId);
   const identityId = authenticatedUserId === undefined ? workspaceIdentityId : authenticatedUserId;
@@ -48,16 +45,12 @@ export function useBotChat(
   const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
   const provider = useMemo(() => {
     if (!bot || !sessionId || !identityId) return null;
-    return createBotChatProvider({
-      bot, userId: identityId, sessionId, range: sessionRange,
-      subjectScoped: options.subjectScoped,
-    });
+    return createBotChatProvider({ bot, userId: identityId, sessionId, range: sessionRange, subjectScoped: options.subjectScoped });
   }, [bot, sessionId, identityId, options.subjectScoped, sessionRange]);
   const connectionRuntime = useBotConnectionRuntime(provider);
   const historyDone = provider !== null && historyProvider === provider;
   const currentProvider = useRef(provider);
   currentProvider.current = provider;
-
   // 副屏 CDN 映射后台加载；切 Bot/卸载清旧 scope，失败不阻塞历史和连接。
   useEffect(() => {
     const botId = bot?.botId ?? null;
