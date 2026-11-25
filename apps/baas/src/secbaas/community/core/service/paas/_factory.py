@@ -369,6 +369,7 @@ class PaasServiceFactory(PaasServiceFactoryProtocol):
             api_key=api_key,
             app_name=config.app_name,
             arca_template_id=effective_template_id,
+            arca_tenant_id=config.arca_tenant_id,
             oss_mount_id=config.oss_mount_id,
             default_ttl_minutes=config.default_ttl_minutes,
             timeout=config.timeout,
