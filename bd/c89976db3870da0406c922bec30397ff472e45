@@ -1,0 +1,72 @@
+apps/backend/tests/community/core/session_resources/test_runtime.py
+  s_f364df1c07a1e6::t_7576b366a4a161 1-55
+  s_f364df1c07a1e6::t_389b169b77060b 56-57,83-108
+  s_f364df1c07a1e6::t_a9f8b8e40afe87 58-82
+apps/backend/src/agentclaw/community/core/session_resources/engine_files.py
+  s_f364df1c07a1e6::t_c240ad11b91125 20,22,38,47,50-52,54-55,75,85,123,125,162,176,208-209,211-213
+apps/backend/tests/community/endpoints/test_openapi_session_files.py
+  s_f364df1c07a1e6::t_d0b193871acad4 199,203,206
+  s_f364df1c07a1e6::t_13a92811dc6ed7 26,154,156,161
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_f364df1c07a1e6::t_32236bf8849889 557,567,573-574,687,695,705,734,743,753,791,801,810-811
+apps/backend/src/agentclaw/community/core/session_resources/runtime.py
+  s_f364df1c07a1e6::t_a6173cd4f67f13 49
+  s_f364df1c07a1e6::t_9d9bbe51064a75 1-48,50-62
+apps/backend/tests/community/core/session_resources/test_creator_name.py
+  s_f364df1c07a1e6::t_13a92811dc6ed7 87
+apps/backend/src/agentclaw/community/core/session_resources/repository/models.py
+  s_f364df1c07a1e6::t_26b441ea320db0 27,74
+apps/backend/tests/community/core/session_resources/test_repository.py
+  s_f364df1c07a1e6::t_09fc9041ad97d4 65
+  s_f364df1c07a1e6::t_389b169b77060b 66-86
+apps/backend/src/agentclaw/community/core/session_resources/materialization.py
+  s_f364df1c07a1e6::t_26b441ea320db0 86
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_instance_selection.py
+  s_f364df1c07a1e6::t_85025a9861c5a6 19,28,30,33-36
+apps/backend/src/agentclaw/community/core/session_resources/service.py
+  s_f364df1c07a1e6::t_26b441ea320db0 86,98,179,563,571,632,653
+apps/backend/tests/community/core/session_resources/test_service.py
+  s_f364df1c07a1e6::t_b6a78d29bcef37 736-760
+  s_f364df1c07a1e6::t_c95c77ac2e1781 735
+apps/backend/src/agentclaw/community/core/session_resources/sql/2026_11_24_session_file_device_uuid.sql
+  s_f364df1c07a1e6::t_26b441ea320db0 1-3
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_session_files.py
+  s_f364df1c07a1e6::t_05b6907e09dfab 928-937
+  s_f364df1c07a1e6::t_b38e7822cc480a 93,172,185,194
+  s_f364df1c07a1e6::t_13a92811dc6ed7 29-30,171,184,189,193,198,205,207,209-210,242,308,346-352,356-369,371,386,390,463-465,467-475,478,491,501,506,517-520,526-531,535-536,540,542,659,915-917,924,938-940,942-956,958-970,975-981,983-997
+apps/backend/tests/community/core/session_resources/test_friend_upload_affinity.py
+  s_f364df1c07a1e6::t_4a0682c7ef4650 2-90,92-125,127-157,159,164-165,167
+  s_f364df1c07a1e6::t_31610b0420f98e 1,91,126,158,160-163,166
+apps/backend/src/agentclaw/community/api/engine_session_files.py
+  s_f364df1c07a1e6::t_c240ad11b91125 15-17,22,29,34-35
+apps/backend/tests/community/core/session_resources/test_engine_files.py
+  s_f364df1c07a1e6::t_13a92811dc6ed7 13,24,30,48,223,226,233,236,243-244,246,251,253-254,256-263,265-268
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/file_access.py
+  s_f364df1c07a1e6::t_75404cdfa0f3cc 30,69,73-75,85-86,109
+apps/backend/src/agentclaw/community/core/session_resources/types.py
+  s_f364df1c07a1e6::t_26b441ea320db0 67
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/dependencies_session_files.py
+  s_f364df1c07a1e6::t_9d9bbe51064a75 5,7,22-23,47,65-66,70,76-79,93-94,111,113,119,122,127-128,130-132
+apps/backend/tests/community/adapters/http/openapi_v1/test_authorization_inventory.py
+  s_f364df1c07a1e6::t_2da7ed26ba6eff 19,22,259-291,313
+apps/backend/src/agentclaw/community/core/session_resources/sql/ac_session_resource.sql
+  s_f364df1c07a1e6::t_26b441ea320db0 11
+apps/backend/tests/community/core/session_resources/test_materialization.py
+  s_f364df1c07a1e6::t_a9f8b8e40afe87 182-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bdc89976db3870da0406c922bec30397ff472e45",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": null
+    }
+  }
+}

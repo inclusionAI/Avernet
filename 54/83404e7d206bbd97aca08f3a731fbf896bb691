@@ -1,0 +1,64 @@
+apps/backend/src/agentclaw/community/core/schema.py
+  h_059e888e5e4e82 89-90
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/context_service.py
+  h_059e888e5e4e82 1-331
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/context_service_protocol.py
+  h_059e888e5e4e82 1-137
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/__init__.py
+  h_059e888e5e4e82 1
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/collet_lifecycle.py
+  h_059e888e5e4e82 1-204
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/contracts.py
+  h_059e888e5e4e82 1-261
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/start.py
+  h_059e888e5e4e82 1-46
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/work.py
+  h_059e888e5e4e82 1-84
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/__init__.py
+  h_059e888e5e4e82 1
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/creation.py
+  h_059e888e5e4e82 1-96
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/models.py
+  h_059e888e5e4e82 1-212
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/participation.py
+  h_059e888e5e4e82 1-131
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/records.py
+  h_059e888e5e4e82 1-157
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/repository.py
+  h_059e888e5e4e82 1-576
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/row_codec.py
+  h_059e888e5e4e82 1-157
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/task_storage.py
+  h_059e888e5e4e82 1-217
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/service_ports.py
+  h_059e888e5e4e82 1-109
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/collet_lifecycle_store.py
+  h_059e888e5e4e82 1-53
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/models.py
+  h_059e888e5e4e82 1,3-6
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/repository.py
+  h_059e888e5e4e82 1-11
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/task_storage.py
+  h_059e888e5e4e82 1-7
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_11_context_collab.sql
+  h_059e888e5e4e82 12-15
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_13_context_collab_task.sql
+  h_059e888e5e4e82 1-28
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_16_context_collab_creation_facts.sql
+  h_059e888e5e4e82 1-18
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_17_context_collab_collet_metadata.sql
+  h_059e888e5e4e82 1-11
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_19_context_collab_collet_resources.sql
+  h_059e888e5e4e82 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5483404e7d206bbd97aca08f3a731fbf896bb691",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

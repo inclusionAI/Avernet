@@ -1,0 +1,42 @@
+apps/backend/tests/community/repository/task/context_collab/conftest.py
+  h_059e888e5e4e82 7,16-17
+apps/backend/tests/community/repository/task/context_collab/test_collet_creation.py
+  h_059e888e5e4e82 1-518
+apps/backend/tests/community/repository/task/context_collab/test_collet_metadata.py
+  h_059e888e5e4e82 1-312
+apps/backend/tests/community/repository/task/context_collab/test_collet_resources.py
+  h_059e888e5e4e82 1-166
+apps/backend/tests/community/repository/task/context_collab/test_l4_repository.py
+  h_059e888e5e4e82 1-279
+apps/backend/tests/community/repository/task/context_collab/test_l4_repository_wiring.py
+  h_059e888e5e4e82 1-86
+apps/backend/tests/community/repository/task/context_collab/test_models.py
+  h_059e888e5e4e82 1-5,8,21,25,35-38,40,50-54,56-60,70-71,120-150,155,160
+apps/backend/tests/community/repository/task/context_collab/test_participant_scope.py
+  h_059e888e5e4e82 1-551
+apps/backend/tests/community/repository/task/context_collab/test_product_creation.py
+  h_059e888e5e4e82 1-347
+apps/backend/tests/community/repository/task/context_collab/test_product_instantiation.py
+  h_059e888e5e4e82 1-537
+apps/backend/tests/community/repository/task/context_collab/test_repository_append.py
+  h_059e888e5e4e82 35-39,50-51,58-60,68-72,77,81,118,133-137,142-144,159,167,184,191,196,202-207,211,221-224,226,229-230,237-238,248,251,257-258,269,288
+apps/backend/tests/community/repository/task/context_collab/test_repository_create_get.py
+  h_059e888e5e4e82 7,27,31-35,42,44,51-53,62-67,72,79,81,91,96,98,100-102,104-109,114,123,135,142-146,148,152,154-155,157,163-165,170,176,178-180,182,193,213
+apps/backend/tests/community/repository/task/context_collab/test_repository_listing.py
+  h_059e888e5e4e82 1-192
+apps/backend/tests/community/repository/task/context_collab/test_task_authority.py
+  h_059e888e5e4e82 1-498
+apps/backend/tests/community/repository/task/context_collab/test_work_start_creation.py
+  h_059e888e5e4e82 1-362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f6dbd764ced26b6cba27a21846399114a30e12bc",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
