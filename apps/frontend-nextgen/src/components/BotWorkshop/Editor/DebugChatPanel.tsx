@@ -80,20 +80,26 @@ export function DebugChatPanel({
     (botId: string) => botEditorService.registerRenderScreenLibraries(botId, ownerId ?? bot.ownerId),
     [bot.ownerId, ownerId],
   );
-  const debug = useBotChat(chatBot, session, undefined, registerRenderScreenLibraries, identityId);
+  const debug = useBotChat(
+    chatBot, session, undefined, registerRenderScreenLibraries, identityId,
+    { subjectScoped: false },
+  );
   const clearContext = useDebugChatClearContext(chatBot, identityId, session?.sessionId, debug.reloadHistory);
   const handleSessionModelChange = useCallback((_botId: string, sessionId: string, model: string) => {
     setSessions((items) => items.map((item) => (item.sessionId === sessionId ? { ...item, model } : item)));
     setSession((current) => (current?.sessionId === sessionId ? { ...current, model } : current));
   }, []);
-  const botModels = useBotModels(chatBot, session, identityId, handleSessionModelChange);
+  const botModels = useBotModels(
+    chatBot, session, identityId, handleSessionModelChange, true,
+    { subjectScoped: false },
+  );
   const loadSessions = useCallback(async () => {
     if (!identityId) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    const result = await botSessionService.listSessions(chatBot, identityId);
+    const result = await botSessionService.listSessions(chatBot, identityId, false);
     setLoading(false);
     if (!result.ok) {
       toast.error(result.error.friendlyMessage);
@@ -111,7 +117,9 @@ export function DebugChatPanel({
     if (!identityId) return;
     setCreatingSession(true);
     try {
-      const result = await botSessionService.createSession(chatBot, identityId, 'Bot 工坊调试');
+      const result = await botSessionService.createSession(
+        chatBot, identityId, 'Bot 工坊调试', { subjectScoped: false },
+      );
       if (!result.ok) {
         toast.error(result.error.friendlyMessage);
         return;

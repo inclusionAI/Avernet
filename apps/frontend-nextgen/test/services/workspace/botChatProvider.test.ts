@@ -233,6 +233,32 @@ describe('botChatProvider', () => {
     expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'draft', draftContext);
   });
 
+  it('Bot 工坊调试关闭 subject scope，IAM、连接和历史均不携带 f_user_id', async () => {
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+    const draftBot = { ...bot, runtimeStage: 'draft' as const };
+    const p = createBotChatProvider({
+      bot: draftBot, userId: 'u', sessionId: 'debug-session', subjectScoped: false,
+    });
+
+    await p.connect();
+    await p.loadHistory();
+
+    expect(mockedGetConnection).toHaveBeenCalledWith('b', {
+      user_id: 'u', owner_id: '2088', stage: 'draft', session_id: 'debug-session',
+    });
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'draft', {
+      sessionKey: 'debug-session', friendUserId: undefined, ownerId: '2088',
+    });
+    expect(botSessionService.botSessionService.listMessagesPage).toHaveBeenCalledWith(
+      draftBot, 'u', 'debug-session', 1, 50, undefined, false,
+    );
+  });
+
   it('多实例 online 服务 Bot:初始化、重连刷新和发送前的 IAM 均带选中实例 device_uuid', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,

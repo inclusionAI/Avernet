@@ -397,7 +397,11 @@ describe('useConversationSessions', () => {
     await act(async () => result.current.createSession('bot-a:2088'));
     expect(useConversationStore.getState().expandedBotIds).toEqual({ 'bot-a:2088': true });
 
-    expect(createSession).toHaveBeenCalledWith(managedBot.bot, '327325', undefined, { friendlyErrors: true });
+    expect(createSession).toHaveBeenCalledWith(managedBot.bot, '327325', undefined, {
+      friendlyErrors: true,
+      signal: expect.any(AbortSignal),
+      waitForCallerRuntime: true,
+    });
     const view = useConversationStore.getState().sessionsByBotId['bot-a:2088'];
     expect(view.sessions.items[0]?.sessionId).toBe('s-new');
     expect(useConversationStore.getState().selectedSessionId).toBe('s-new');
