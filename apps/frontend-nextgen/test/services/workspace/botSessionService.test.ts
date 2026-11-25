@@ -270,6 +270,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
+      f_user_id: '900003',
       page: 1,
       page_size: 50,
     });
@@ -298,7 +299,7 @@ describe('botSessionService', () => {
     const res = await botSessionService.createSession(bot, 'human_900003', '新');
     expect(mocked.createBotSession).toHaveBeenCalledWith(
       '20260402_ab',
-      { user_id: '900003', owner_id: '2088' },
+      { user_id: '900003', owner_id: '2088', f_user_id: '900003' },
       { title: '新' },
     );
     expect((res as any).data.sessionId).toBe('sid-new');
@@ -324,7 +325,7 @@ describe('botSessionService', () => {
 
     expect(mocked.createBotSession).toHaveBeenCalledWith(
       '20260402_ab',
-      { user_id: '900003', owner_id: '2088' },
+      { user_id: '900003', owner_id: '2088', f_user_id: '900003' },
       { title: '新会话' },
     );
   });
@@ -340,6 +341,7 @@ describe('botSessionService', () => {
     expect(mocked.deleteBotSession).toHaveBeenCalledWith('20260402_ab', 'sid-9', {
       user_id: '900003',
       owner_id: '2088',
+      f_user_id: '900003',
     });
     expect(res.ok).toBe(true);
   });
@@ -367,6 +369,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('20260402_ab', 's', {
       user_id: '2088',
       owner_id: '2088',
+      f_user_id: '2088',
       page: 1,
       page_size: 50,
     });
@@ -385,6 +388,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('20260402_ab', 's', {
       user_id: '900003',
       owner_id: '2088',
+      f_user_id: '900003',
       page: 1,
       page_size: 50,
     });
@@ -407,6 +411,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotModels).toHaveBeenCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
+      f_user_id: '900003',
       page: 1,
       page_size: 50,
     });
@@ -432,13 +437,13 @@ describe('botSessionService', () => {
     expect(mocked.updateBotSession).toHaveBeenCalledWith(
       '20260402_ab',
       's1',
-      { user_id: '900003' },
+      { user_id: '900003', f_user_id: '900003' },
       { model: 'openai/gpt-5.3' },
     );
     expect(res.ok && res.data.model).toBe('openai/gpt-5.3');
   });
 
-  it('好友 Bot 的单聊接口统一携带 f_user_id，管理 Bot 不携带', async () => {
+  it('所有对话 Bot 的本人会话接口统一携带 f_user_id', async () => {
     const sessionDto = {
       session_id: 's1',
       title: '标题',
@@ -522,6 +527,7 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessions).toHaveBeenLastCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
+      f_user_id: '900003',
       page: 1,
       page_size: 10,
     });
@@ -558,6 +564,7 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
   expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
     user_id: '900003',
     owner_id: '2088',
+    f_user_id: '900003',
     page: 2,
     page_size: 10,
   });

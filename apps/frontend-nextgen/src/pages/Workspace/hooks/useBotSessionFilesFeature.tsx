@@ -40,12 +40,18 @@ export interface UseBotSessionFilesFeatureResult {
   capabilitySets: ComposerCapabilitySetsState | null;
 }
 
+interface BotSessionFilesFeatureOptions {
+  /** 对话会话传 true；编辑调试传 false，保持运维请求不携带 f_user_id。 */
+  subjectScoped?: boolean;
+}
+
 export function useBotSessionFilesFeature(
   bot: ChatBotView | null,
   session: BotChatSessionView | null,
   userId: string | null,
   onClear: () => Promise<void>,
   stageOverride?: BotRuntimeStage,
+  options: BotSessionFilesFeatureOptions = {},
 ): UseBotSessionFilesFeatureResult {
   const filesSupported = supportsBotSessionFiles(bot);
   const botId = filesSupported ? bot?.realBotId ?? null : null;
@@ -59,13 +65,15 @@ export function useBotSessionFilesFeature(
 
   // 多实例选中实例范围(openspec add-session-files-device-uuid):与会话列表/IAM token 同一
   // range 取值源(useBotSessionRange → instanceSelectionByBotId)。supportsConversationInstanceScope
-  // 已排除好友 Bot 与 teclaw——好友/个人 Bot 对话天成不携带 device_uuid。
+  // 已排除 Caller、好友 Bot 与 teclaw——这些对话按会话主体寻址，不携带 device_uuid。
   const instanceRange = useBotSessionRange(bot);
   const deviceUuid = instanceRange?.deviceUuid;
 
-  // 好友会话身份(2026-11-19 需求追加):好友 Bot 全链文件接口携带 f_user_id(与 user_id 同值);
-  // 单一收口,列表/上传/删除/预览/下载全链同源同值,非好友不携带。
-  const friendUserId = bot?.isFriendBot ? userId ?? undefined : undefined;
+  // 对话栏目本人会话全链携带 f_user_id；Bot 编辑调试显式关闭 subject scope，
+  // 继续保持原运维请求形状。好友链路保留既有 subject 参数。
+  const friendUserId = options.subjectScoped !== false || bot?.isFriendBot
+    ? userId ?? undefined
+    : undefined;
 
   const files = useBotSessionFiles(
     botId,

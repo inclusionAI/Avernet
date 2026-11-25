@@ -77,7 +77,11 @@ it.each<[string, BotLifecycle, BotRuntimeStage | undefined, BotRuntimeStage]>([
     expect.objectContaining({ sessionId: 'debug-session' }), undefined, expect.any(Function), 'viewer');
   expect(useBotSessionFilesFeature).toHaveBeenLastCalledWith(
     expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }),
-    expect.objectContaining({ sessionId: 'debug-session' }), 'viewer', expect.any(Function), expected,
+    expect.objectContaining({ sessionId: 'debug-session' }),
+    'viewer',
+    expect.any(Function),
+    expected,
+    { subjectScoped: false },
   );
 });
 

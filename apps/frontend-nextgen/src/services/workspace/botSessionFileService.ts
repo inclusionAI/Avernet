@@ -82,7 +82,7 @@ function buildParams(
   ownerId?: string,
   stage?: BotRuntimeStage,
   deviceUuid?: string,
-  /** 好友会话身份(2026-11-19 需求追加:好友 Bot 文件全链携带 f_user_id),缺省不携带 */
+  /** 对话会话主体；本人发起的 owner/协作/好友 Bot 文件链均携带，运维调试缺省不携带。 */
   friendUserId?: string,
 ): BotRequestParams {
   return {
@@ -140,7 +140,7 @@ export const botSessionFileService = {
        */
       deviceUuid?: string;
       /**
-       * 好友会话身份(2026-11-19 需求追加):好友 Bot 上传链三接口携带为 query `f_user_id`;
+       * 对话会话主体：上传链三接口携带 query `f_user_id`；
        * 非好友会话缺省完全不携带。
        */
       friendUserId?: string;
@@ -149,7 +149,7 @@ export const botSessionFileService = {
       onPhase?: (phase: 'completing' | 'materializing') => void;
     },
   ): Promise<DomainResult<BotSessionFileView>> {
-    // f_user_id 好友全链(2026-11-19 需求追加):intents/complete/materialize 三类请求均携带。
+    // f_user_id 对话主体全链：intents/complete/materialize 三类请求均携带。
     const params = buildParams(userId, opts.ownerId, opts.stage, opts.deviceUuid, opts.friendUserId);
     try {
       const hash = await sha256Hex(file);
@@ -239,7 +239,7 @@ export const botSessionFileService = {
     disposition?: 'inline' | 'attachment',
     stage?: BotRuntimeStage,
     deviceUuid?: string,
-    /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
+    /** 对话会话主体；对话链携带 f_user_id，运维链缺省不携带。 */
     friendUserId?: string,
   ): string {
     const path = buildBotSessionFileContentUrl(
@@ -262,7 +262,7 @@ export const botSessionFileService = {
     ownerId?: string,
     stage?: BotRuntimeStage,
     deviceUuid?: string,
-    /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
+    /** 对话会话主体；对话链携带 f_user_id，运维链缺省不携带。 */
     friendUserId?: string,
   ): Promise<string> {
     const contentUrl = buildBotSessionFileContentUrl(
@@ -284,7 +284,7 @@ export const botSessionFileService = {
     stage?: BotRuntimeStage,
     /** 多实例选中实例(openspec add-session-files-device-uuid 扩展段),缺省不携带 */
     deviceUuid?: string,
-    /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
+    /** 对话会话主体；对话链携带 f_user_id，运维链缺省不携带。 */
     friendUserId?: string,
   ): Promise<DomainResult<boolean>> {
     try {
@@ -309,7 +309,7 @@ export const botSessionFileService = {
     disposition?: 'inline' | 'attachment',
     stage?: BotRuntimeStage,
     deviceUuid?: string,
-    /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
+    /** 对话会话主体；对话链携带 f_user_id，运维链缺省不携带。 */
     friendUserId?: string,
   ): Promise<DomainResult<Blob>> {
     try {
