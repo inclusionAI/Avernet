@@ -105,7 +105,13 @@ class RiskRecordResponse(BaseModel):
     invalidation_reason: str | None = Field(
         default=None, description="Reason the application lost eligibility."
     )
-    approval_decision: str | None = None
+    approval_decision: str | None = Field(
+        default=None,
+        description=(
+            "Decision reported by the approval service (AGREE, DISAGREE, or CANCEL), "
+            "or null until a decision is recorded. The phase reports the publication outcome."
+        ),
+    )
     approval_puid: str | None = Field(
         default=None, description="Existing publication approval identifier."
     )
