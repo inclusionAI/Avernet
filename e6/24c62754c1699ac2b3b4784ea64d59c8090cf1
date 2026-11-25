@@ -1,0 +1,107 @@
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_885ffb973587a3::t_d16c79c15fead7 21,81-82,251,253,278,283,644-652,673-681
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_885ffb973587a3::t_d16c79c15fead7 13-22
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessions.test.tsx
+  s_885ffb973587a3::t_d16c79c15fead7 400-404
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotModels.test.tsx
+  s_885ffb973587a3::t_d16c79c15fead7 84
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_885ffb973587a3::t_d16c79c15fead7 73-79,83-85,100-102,104,110-113
+apps/backend/tests/community/adapters/http/openapi_v1/test_user_delegated_creation.py
+  s_885ffb973587a3::t_d16c79c15fead7 93-95,282
+apps/backend/tests/community/endpoints/test_config_manifest_source_matrix.py
+  s_885ffb973587a3::t_d16c79c15fead7 186
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_885ffb973587a3::t_d16c79c15fead7 236-261
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/conftest.py
+  s_885ffb973587a3::t_d16c79c15fead7 137,146,163,298,317
+apps/frontend-nextgen/test/pages/Workspace/hooks/useDebugChatClearContext.test.tsx
+  s_885ffb973587a3::t_d16c79c15fead7 17
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_sessions.py
+  s_885ffb973587a3::t_d16c79c15fead7 1005-1071
+apps/backend/docs/openapi-v1/engine-surface.zh-CN.md
+  s_885ffb973587a3::t_d16c79c15fead7 154-163
+apps/backend/docs/openapi-v1/engine-surface.md
+  s_885ffb973587a3::t_d16c79c15fead7 236-250
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/containers/router.py
+  s_885ffb973587a3::t_d16c79c15fead7 8,86-88
+apps/backend/src/agentclaw/community/core/engine_runtime/models.py
+  s_885ffb973587a3::t_d16c79c15fead7 63-67,103-126,128-131,133-135
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/collaborator.py
+  s_885ffb973587a3::t_d16c79c15fead7 12,18
+apps/backend/tests/community/core/engine_runtime/test_models.py
+  s_885ffb973587a3::t_d16c79c15fead7 1-34
+apps/backend/tests/community/adapters/http/openapi_v1/test_container_endpoints.py
+  s_885ffb973587a3::t_d16c79c15fead7 5-8,18-22,92-173
+  s_885ffb973587a3::t_bb81cf413a8087 174-175
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_885ffb973587a3::t_d16c79c15fead7 81,153-156
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionCreation.ts
+  s_885ffb973587a3::t_d16c79c15fead7 23,31-32,83-84,130-134,206
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/source_bot_access.py
+  s_885ffb973587a3::t_d16c79c15fead7 9-21,33,62-79,81-85,91,93-97,99-100,106-110
+apps/frontend-nextgen/src/pages/Workspace/hooks/useDebugChatClearContext.ts
+  s_885ffb973587a3::t_d16c79c15fead7 14
+apps/frontend-nextgen/src/services/workspace/botModelCache.ts
+  s_885ffb973587a3::t_d16c79c15fead7 15-19,21,24-28,33,36-39
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_885ffb973587a3::t_d16c79c15fead7 111-122,188-230,485-489,491,496,508,511,514-537,614-619,624,713-717,719,724,737,740-742
+apps/frontend-nextgen/test/services/workspace/botModelCache.test.ts
+  s_885ffb973587a3::t_d16c79c15fead7 33-39
+apps/backend/tests/community/http/test_copy_skill_sets_endpoint.py
+  s_885ffb973587a3::t_d16c79c15fead7 80-85,91,112
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/copy.py
+  s_885ffb973587a3::t_d16c79c15fead7 77-79,428,459-471,809-811,828
+apps/backend/src/agentclaw/community/core/engine_runtime/__init__.py
+  s_885ffb973587a3::t_d16c79c15fead7 5,30
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessionFilters.test.tsx
+  s_885ffb973587a3::t_d16c79c15fead7 481-485
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest.py
+  s_885ffb973587a3::t_d16c79c15fead7 55-57,144-146,199-202
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_885ffb973587a3::t_d16c79c15fead7 231,775,907,998
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotModels.ts
+  s_885ffb973587a3::t_d16c79c15fead7 35,37-38,58,70,77-79,88
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  s_885ffb973587a3::t_d16c79c15fead7 73,77-78
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/create_with_manifest.py
+  s_885ffb973587a3::t_d16c79c15fead7 97-99,164-166,219,264,272-275
+apps/backend/tests/community/http/test_copy_route.py
+  s_885ffb973587a3::t_d16c79c15fead7 39,92-97,139,160,167,205,227,255,280,295,308,320,340,358,369,379,392,402,404-405,407-408,413-414,419-421,429,457,477-479,491
+apps/backend/tests/community/di/test_openapi_user_id_bypass_config_provider.py
+  s_885ffb973587a3::t_d16c79c15fead7 35-37,185-221
+  s_885ffb973587a3::t_4a751667c1e436 222-223
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationSessionPlaceholder.test.tsx
+  s_885ffb973587a3::t_d16c79c15fead7 251-255
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/backend.py
+  s_885ffb973587a3::t_d16c79c15fead7 48-51
+apps/frontend-nextgen/test/services/workspace/botSessionService.test.ts
+  s_885ffb973587a3::t_d16c79c15fead7 333-408
+apps/backend/src/agentclaw/community/di/modules/openapi_user_id_bypass_config_module.py
+  s_885ffb973587a3::t_d16c79c15fead7 47
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotChat.ts
+  s_885ffb973587a3::t_d16c79c15fead7 30,48-49
+apps/backend/src/agentclaw/community/core/engine_runtime/errors.py
+  s_885ffb973587a3::t_d16c79c15fead7 29-37,129
+apps/backend/tests/community/http/test_source_bot_access.py
+  s_885ffb973587a3::t_d16c79c15fead7 7,25-28,33-35,39-52,70-71,74-77,84-85,87-90,94-96,98-101,109-112,121-124,131-132,148-151,173,189
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  s_885ffb973587a3::t_d16c79c15fead7 83-86,92-95,102,120-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e624c62754c1699ac2b3b4784ea64d59c8090cf1",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
