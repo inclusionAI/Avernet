@@ -20,6 +20,16 @@ Bot or collaboration profile stores cannot persist.
 
 ## Context Boundary
 
+Managed draft operations expose `ManagedBotServiceProtocol`, consuming the
+existing Bot lifecycle and a template-association read repository. The HTTP
+trust gate belongs to deployment configuration; the service verifies persisted
+template scope and delegates restart without changing backup or deduplication.
+Guarded snapshot writes validate their revision under the existing row lock.
+The engine's `restart_config_error_is_fatal` policy prevents a rejected mandatory
+write from becoming an ordinary restart on the legacy unbound/recovery path;
+other optional engine extensions keep their existing failure behavior.
+See [the public contract](../../../../../docs/openapi-v1/managed-bot-operations.md).
+
 ```yaml
 purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching."
 provides:
@@ -32,6 +42,7 @@ provides:
   - provider_address_kwargs
   - "OwnerHandoffServiceProtocol and durable OwnerHandoffService"
   - "BotService"
+  - "ManagedBotServiceProtocol"
   - "BotCreateContext"
   - "BotCreateDeploymentMode"
   - "PreparedBotCreate"
