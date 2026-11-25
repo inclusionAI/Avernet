@@ -10,6 +10,7 @@ import NodeInputPanel from './NodeInputPanel'
 import RenderedNodeHero from './RenderedNodeHero'
 import NodeStepTracePanel from './NodeStepTracePanel'
 import AnalysisModal from './AnalysisModal'
+import ApprovalNodeDetails from './ApprovalNodeDetails'
 import AIStudioTrainWatchCard from './AIStudioTrainWatchCard'
 import type { SubworkflowGroupRef } from '../api/run-subworkflows'
 import SubworkflowPanel from './subworkflows/SubworkflowPanel'
@@ -481,6 +482,9 @@ function NodeDetailPanel({
         <h3 className="font-semibold text-foreground">子工作流组</h3>
         <p>暂无持久化数据，等待父运行快照；此入口不会启动子运行。</p>
       </section>}
+      {(node.executor_type === 'approval' || workflowSpec?.nodes.some((specNode) => specNode.id === node.node_id && specNode.executor.type === 'approval')) && (
+        <ApprovalNodeDetails flowId={flowId} nodeId={node.node_id} readOnly={readOnly} />
+      )}
       {node.executor_type === 'aistudio-train' ? (
         <AIStudioTrainWatchCard
           key={`${flowId}-${node.node_id}-${node.attempt}`}
