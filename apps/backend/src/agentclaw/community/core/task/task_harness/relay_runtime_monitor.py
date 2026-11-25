@@ -231,7 +231,27 @@ async def monitor_relay_runtime(
         try:
             if self._relay_recovery is None:
                 raise RelaySessionRecoveryError("relay recovery service is not configured")
-            resumed = await self._relay_recovery.resume(node, resume_step=resume_step)
+            abort_before_resume_run_id = None
+            if reason == "runtime_no_progress":
+                # This branch is reached only after the configured stale-active
+                # threshold; it must release the old OpenAPI run before queueing a
+                # new resume. Group sessions rely on BCS delivery convergence.
+                props = node.run_info.extend_props
+                if not props.get("group_id"):
+                    raw_run_id = (
+                        props.get("relay_harness_resume_run_id")
+                        or props.get("run_id")
+                    )
+                    abort_before_resume_run_id = str(raw_run_id or "").strip() or None
+                    if not abort_before_resume_run_id:
+                        raise RelaySessionPreconditionError(
+                            "relay active-run recovery has no old run_id to abort"
+                        )
+            resumed = await self._relay_recovery.resume(
+                node,
+                resume_step=resume_step,
+                abort_before_resume_run_id=abort_before_resume_run_id,
+            )
             channel = resumed.channel
         except Exception as exc:  # noqa: BLE001
             if isinstance(exc, RelaySessionPreconditionError):

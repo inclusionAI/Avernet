@@ -67,11 +67,19 @@ class RelaySessionRecovery:
         self._bot_tokens = bot_tokens
 
     async def resume(
-        self, node: TaskNode, *, resume_step: str | None = None
+        self,
+        node: TaskNode,
+        *,
+        resume_step: str | None = None,
+        abort_before_resume_run_id: str | None = None,
     ) -> RelayResumeResult:
         props = getattr(node.run_info, "extend_props", {}) or {}
         group_id = str(props.get("group_id") or "").strip()
         session_id = str(props.get("session_id") or "").strip()
+        if abort_before_resume_run_id and group_id:
+            raise RelaySessionPreconditionError(
+                "relay same-session pre-abort is only supported by the OpenAPI Bot session"
+            )
         if group_id:
             if self._bcs is None:
                 raise RelaySessionRecoveryError(
@@ -136,6 +144,26 @@ class RelaySessionRecovery:
                 "relay node has no valid assignee for the existing session"
             )
         lifecycle_stage = str(props.get("lifecycle_stage") or "").strip()
+        if abort_before_resume_run_id:
+            abort_run_id = str(abort_before_resume_run_id).strip()
+            if not abort_run_id:
+                raise RelaySessionPreconditionError(
+                    "relay node has no existing run_id to abort before resume"
+                )
+            try:
+                await self._bot.cancel_run(abort_run_id)
+            except Exception as exc:
+                raise RelaySessionRecoveryError(
+                    f"abort before same-session resume failed: {exc}"
+                ) from exc
+            logger.info(
+                "[task][harness][relay-resume] stale run aborted task=%s node=%s "
+                "session=%s run=%s",
+                node.task_id,
+                node.node_id,
+                session_id,
+                abort_run_id,
+            )
         metadata: dict[str, Any] = {"session_id": session_id}
         if lifecycle_stage:
             metadata["bot_options"] = {"lifecycle_stage": lifecycle_stage}
