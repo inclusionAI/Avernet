@@ -1,0 +1,21 @@
+apps/bcs/crates/service-api/bcs-service-api/src/types/a2a_bot.rs
+  s_94c42a5933ce17::t_6cfd50e3e08d0d 101-120
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_94c42a5933ce17::t_7f4c8398b64d32 320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1c533bafab8b71ad19d75e8a9b0ae9ae980727a3",
+  "prompts": {},
+  "sessions": {
+    "s_94c42a5933ce17": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20d69-010f-7df2-957c-de77c2ec3c63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
