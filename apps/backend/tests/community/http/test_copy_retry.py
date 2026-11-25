@@ -168,7 +168,9 @@ def test_retry_team_dst_space_id_resolved_via_numeric_id_not_raw_dst_row():
     # numeric_id=200 and assert the spec carries 200 regardless of dst.space_id.
     mocks = _mocks()
     _bot_copy_repo, _apply_repo, bot_repo, manifest_seam, space_context = mocks
-    bot_repo.get_by_id.return_value = {"status": "PENDING", "space_id": 200}
+    bot_repo.get_by_id.return_value = {
+        "status": "PENDING", "space_id": 200, "owner_name": "Alice"
+    }
     space_context.resolve_current.return_value = SimpleNamespace(
         kind="team", numeric_id=200
     )
@@ -178,6 +180,9 @@ def test_retry_team_dst_space_id_resolved_via_numeric_id_not_raw_dst_row():
     spec = manifest_seam.start_job.call_args.kwargs["spec"]
     assert spec["space_id"] == 200
     assert spec["space_kind"] == "team"
+    # nick_name is read back from the dst's already-written owner_name, so a
+    # retry re-stamps the same real name instead of the 工号 worker fallback.
+    assert spec["nick_name"] == "Alice"
 
 
 def test_retry_null_dst_space_id_promoted_to_resolved_personal_numeric_id():
@@ -202,3 +207,23 @@ def test_retry_null_dst_space_id_promoted_to_resolved_personal_numeric_id():
     # promoted: None dst → real personal numeric id 300, not None.
     assert spec["space_id"] == 300
     assert spec["space_kind"] == "personal"
+    # nick_name fallback: dst row has no owner_name yet (first submit failed
+    # before the bot row was written), so nick_name falls back to the dst owner
+    # id -- same fallback shape the worker applies at create_flow.py:735.
+    assert spec["nick_name"] == "u1"
+
+
+def test_retry_nick_name_falls_back_to_owner_id_when_dst_row_lacks_owner_name():
+    # A partial dst row (no owner_name column value) must not send nick_name=None
+    # into the spec -- that would let the worker's ``spec.get("nick_name",
+    # user_id)`` resolve to user_id anyway, but explicitly falling back to the
+    # dst owner id here keeps retry self-consistent regardless of the worker.
+    mocks = _mocks()
+    _bot_copy_repo, _apply_repo, bot_repo, manifest_seam, space_context = mocks
+    bot_repo.get_by_id.return_value = {"status": "PENDING", "owner_name": None}
+    space_context.resolve_current.return_value = SimpleNamespace(
+        kind="personal", numeric_id=None
+    )
+    assert _retry(mocks) is RetryResult.RE_ENQUEUED
+    spec = manifest_seam.start_job.call_args.kwargs["spec"]
+    assert spec["nick_name"] == "u1"   # row.dst_owner_id

@@ -413,6 +413,24 @@ def test_submit_copy_stringifies_int_space_id_before_resolve_current():
     assert isinstance(passed, str)  # pins the contract vs resolve_current's .strip()
 
 
+def test_submit_copy_threads_owner_name_as_nick_name_into_creation_spec():
+    # The dst's ``ac_bots.owner_name`` is written by create_bot from the worker's
+    # nick_name (create_flow.py:735 ``spec.get("nick_name", user_id)``). submit_copy
+    # must carry the verified display name (OwnerNameDep) into the durable spec as
+    # ``nick_name`` -- like submit_manifest_creation:513 -- else the dst row is
+    # stamped with the 工号 fallback instead of the real name, diverging from every
+    # ordinary-create bot.
+    mocks = _mocks()
+    (bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport,
+     _space_context, _, _bot_service, _, _) = mocks
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
+    passport = _passport
+    passport.apply_agent_passport.return_value = {"token": "tok"}
+    _call({}, {}, mocks=mocks)
+    spec = manifest_seam.start_job.call_args.kwargs["spec"]
+    assert spec["nick_name"] == "owner"   # the owner_name _call passes through
+
+
 def test_submit_copy_non_member_of_team_source_propagates_space_denial():
     # Same-space rule, cross-space refusal: a team source whose space the caller
     # is not a member of is rejected by ``resolve_current``'s

@@ -434,7 +434,13 @@ def submit_copy(
     manifest-creation flow (``manifest_seam.start_job`` → ``create_job``) drives
     apply + provision. ``creation.py`` / ``create_job`` are untouched.
     """
-    del owner_name
+    # ``owner_name`` is threaded into the durable creation spec as ``nick_name``
+    # (matching ``submit_manifest_creation`` at create_flow.py:513) so the worker
+    # path ``create_job → complete_bot_authorization`` resolves the dst's
+    # ``owner_name`` from the verified display name rather than the user_id
+    # fallback (create_flow.py:735 ``spec.get("nick_name", user_id)``). Without
+    # this the copy's dst bot would persist ``ac_bots.owner_name = <工号>``,
+    # diverging from every ordinary-create bot which carries the real name.
     # bot_id 非全局唯一(共享 bot_id 如 `default` 每用户一行):裸 get_by_id 的
     # .first() 会回取环境内任一 live 行,owner_id 错配 → 误判 no-edit-permission 403。
     # 按 bot_id + source_owner_id + env 精确定位源行(BotRepository.get_by_id_and_owner,
@@ -638,6 +644,9 @@ def submit_copy(
         ),
         "request_detail": body.request_detail,
         "source_bot_id": source["bot_id"],
+        # See the ``owner_name`` note above: this is the verified display name
+        # the worker reads at create_flow.py:735 to fill ``ac_bots.owner_name``.
+        "nick_name": owner_name,
     }
 
     passport_result = passport_plugin.apply_agent_passport(
@@ -794,6 +803,14 @@ def retry_copy(
         ),
         "request_detail": row.request_detail,
         "source_bot_id": row.source_bot_id,
+        # Threading ``nick_name`` here keeps a retry's re-write of the dst row
+        # consistent with submit_copy's first write: read the name the first
+        # write already persisted on the dst bot row (``ac_bots.owner_name``),
+        # falling back to the owner id if the dst record is still partial (first
+        # submit failed before the row was written) -- same fallback shape the
+        # worker applies at create_flow.py:735. This avoids the worker's
+        # ``user_id`` fallback re-stamping a real-name dst with the 工号.
+        "nick_name": dst.get("owner_name") or row.dst_owner_id,
     }
     manifest_seam.start_job(
         bot_id=row.dst_bot_id,
