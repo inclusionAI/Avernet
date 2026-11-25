@@ -18,6 +18,7 @@ from typing import Any, List, Literal, Optional
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from starlette.requests import ClientDisconnect
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator, get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -1676,6 +1677,18 @@ async def refresh_bot_passport_token(
             data=result,
         )
 
+    except ClientDisconnect:
+        # 调用方在请求体读完前断开（上游/客户端超时放弃）。str() 为空，
+        # 曾落入通用 except 造成空消息 ERROR 噪音，这里按"调用方放弃"分类记录。
+        logger.warning(
+            "[bot_router.refresh_bot_passport_token] Caller disconnected before body was read"
+        )
+        return ApiResponse(
+            success=False,
+            message="调用方在请求体读取完成前断开连接，本次刷新未执行",
+            error_code=400,
+            data=None,
+        )
     except BotNotFoundError:
         return ApiResponse(
             success=False,
@@ -1700,10 +1713,14 @@ async def refresh_bot_passport_token(
             data=None,
         )
     except Exception as e:
-        logger.error(f"[bot_router.refresh_bot_passport_token] Unexpected error: {e}")
+        logger.error(
+            f"[bot_router.refresh_bot_passport_token] Unexpected error: "
+            f"{type(e).__name__}: {e!r}",
+            exc_info=True,
+        )
         return ApiResponse(
             success=False,
-            message=f"刷新 Passport Token 失败: {str(e)}",
+            message=f"刷新 Passport Token 失败: {type(e).__name__}: {e}",
             error_code=500,
             data=None,
         )
