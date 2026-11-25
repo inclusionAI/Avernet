@@ -118,6 +118,24 @@ def test_send_message_forwards_session_id_when_present():
     assert rid.session_id == "s_99"
 
 
+def test_cancel_run_aborts_openapi_run():
+    def h(req):
+        assert req.method == "POST"
+        assert req.url.path == "/openapi/v1/runs/mid_77/abort"
+        assert req.headers["authorization"] == "Bearer ak1234567890"
+        return httpx.Response(200, json={"code": 0, "data": {"ok": True}})
+
+    _run(_adapter(h).cancel_run("mid_77"))
+
+
+def test_cancel_run_rejects_business_failure():
+    def h(req):
+        return httpx.Response(200, json={"code": 60001, "message": "run not found"})
+
+    with pytest.raises(OpenApiError, match="cancel_run"):
+        _run(_adapter(h).cancel_run("mid_77"))
+
+
 def test_openapi_error_implements_port_error_contract():
     assert issubclass(OpenApiError, OpenApiBotError)
 
