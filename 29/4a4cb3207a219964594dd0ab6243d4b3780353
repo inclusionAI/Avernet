@@ -1,0 +1,95 @@
+apps/bcs/crates/contracts/bcs-domain/CONTEXT.md
+  s_94c42a5933ce17::t_235167e710676d 32-41
+apps/bcs/crates/contracts/bcs-domain/src/edge_permission.rs
+  s_7d114ded8fc0da::t_78743b4181cc4a 29-32,41-52,97,213-214
+apps/bcs/crates/contracts/bcs-domain/src/lib.rs
+  s_7d114ded8fc0da::t_4896a9d54893cc 19
+apps/bcs/crates/contracts/bcs-domain/src/system_invoke.rs
+  s_7d114ded8fc0da::t_3f04244ca2783d 1-111
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_94c42a5933ce17::t_8b92768e941a3d 1059-1071
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/edge_grant.rs
+  s_7d114ded8fc0da::t_b54a4ebf369d4e 29-30,33-46
+apps/bcs/crates/services/bcs-edge-permission-store/CONTEXT.md
+  s_94c42a5933ce17::t_6266860ca907f0 160-180
+apps/bcs/crates/services/bcs-edge-permission-store/src/edge_grants.rs
+  s_7d114ded8fc0da::t_1037d7416f099c 99,126-131,324-327
+apps/bcs/crates/services/bcs-edge-permission-store/src/lib.rs
+  s_7d114ded8fc0da::t_8d07b66eb9edc8 54
+apps/bcs/crates/services/bcs-edge-permission-store/src/mapping.rs
+  s_7d114ded8fc0da::t_901f11baf36bca 35,62,109,122-133,267,347
+apps/bcs/crates/services/bcs-edge-permission-store/src/memory.rs
+  s_7d114ded8fc0da::t_26b38983b8ec61 296,302-312,390-393
+apps/bcs/crates/services/bcs-edge-permission-store/src/runtime_grants.rs
+  s_7d114ded8fc0da::t_83080ebd2cb099 1-38
+apps/bcs/crates/services/bcs-edge-permission-store/src/tests/mod.rs
+  s_7d114ded8fc0da::t_77077150befd0d 6
+apps/bcs/crates/services/bcs-edge-permission-store/src/tests/system_invoke.rs
+  s_94c42a5933ce17::t_4071f7a055d38b 1-101
+apps/bcs/crates/services/bcs-edge-permission-store/tests/conformance_edge_grant.rs
+  s_7d114ded8fc0da::t_1b3992528d4f0c 81-88
+apps/bcs/crates/services/bcs-edge-permission-store/tests/conformance_memory.rs
+  s_7d114ded8fc0da::t_63b34573ad47bc 41-48
+apps/bcs/crates/services/bcs-edge-permission-store/tests/conformance_system_invoke_mysql.rs
+  s_7d114ded8fc0da::t_78b1a83e1d9000 1-20
+apps/bcs/crates/services/bcs-edge-permission/src/admission.rs
+  s_7d114ded8fc0da::t_aef75643cac38d 154-158,226
+apps/bcs/crates/services/bcs-edge-permission/src/connect/lifecycle.rs
+  s_7d114ded8fc0da::t_cb215d46fe0f16 274-277,420-423,482-485,544,737-738
+apps/bcs/crates/services/bcs-edge-permission/src/tests/mod.rs
+  s_7d114ded8fc0da::t_474df1b0538962 389-390
+apps/bcs/crates/services/bcs-edge-permission/src/tests/system_invoke.rs
+  s_7d114ded8fc0da::t_13ed59811102e2 1-112
+apps/bcs/crates/test-support/bcs-test-support/src/contract/repo/edge_grant.rs
+  s_7d114ded8fc0da::t_231a5a963552dc 139-142
+apps/bcs/crates/test-support/bcs-test-support/src/contract/repo/system_invoke.rs
+  s_7d114ded8fc0da::t_db03b2d731cd32 1-65
+apps/bcs/crates/test-support/bcs-test-support/src/edge_permission_noop.rs
+  s_7d114ded8fc0da::t_3182b51392775b 23
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/.openspec.yaml
+  s_94c42a5933ce17::t_79daba885c553c 1-2
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/design.md
+  s_7d114ded8fc0da::t_e9df24c2b49486 1-186
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/implementation.md
+  s_7d114ded8fc0da::t_83d2fc97a222e8 1-57
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/proposal.md
+  s_7d114ded8fc0da::t_ee7fb7ed577ea3 1-33
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/research.md
+  s_94c42a5933ce17::t_0bbfe207240b1a 1-55
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/spec.md
+  s_7d114ded8fc0da::t_37f5913493958a 1-64
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/specs/system-agent-invoke-authorization/spec.md
+  s_7d114ded8fc0da::t_c31fb32d60720a 1-220
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/tasks.md
+  s_7d114ded8fc0da::t_86aa0d4a959b24 1-51
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/test-plan.md
+  s_94c42a5933ce17::t_eaeabd6b86d63a 1-61
+apps/bcs/specs/2026-11-25-system-agent-invoke-authorization/validation.md
+  s_7d114ded8fc0da::t_72801c36ca3c82 1-32
+apps/bcs/specs/README.md
+  s_7d114ded8fc0da::t_7cf865d1835700 60-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "294a4cb3207a219964594dd0ab6243d4b3780353",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    },
+    "s_94c42a5933ce17": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20d69-010f-7df2-957c-de77c2ec3c63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
