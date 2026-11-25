@@ -314,7 +314,7 @@ outcome remains CommitUnknown, even for duplicate/timeout-looking causes.
 Legacy/custom plugins retain a conservative fallback and must not pretend
 to have native commit/rollback acknowledgement. Writer/runtime activation must
 remain disabled in production until registry producers, trusted ingress,
-governance query APIs, HTTP/SDK, dispatch and real E2E integration are complete.
+governance HTTP APIs, HTTP/SDK, dispatch and real E2E integration are complete.
 
 Outcome regression tests use actual SQLite audit failure to prove rollback
 does not consume the receipt key, and a recording wrapper loses the detailed
@@ -322,3 +322,39 @@ commit acknowledgement after a real commit to prove recovery returns the old
 receipt without a second mutation. Existing legacy-wrapper ambiguity tests stay
 independent. No transaction retry, statement-count increase, schema change or
 production activation is added by the typed-outcome increment.
+
+
+## Governance query snapshots (not HTTP publication)
+
+`DbAgentInvokeQueryStore` implements the separate `AgentInvokeQueryRepoPort`.
+One point-only authorization preflight rejects unauthorized scans; it does not
+license a response. A read transaction locks scope, anchor and (for Human)
+operator, rereads current authority and queries data. Pure Core reauthorizes
+that snapshot before returning it; torn scope IDs/revisions fail closed.
+No eligibility/runtime gate, write, revision increment or positive cache is
+introduced. Missing counterpart registration preserves history with absent
+display fields, never fabricated qualification. Malformed canonical rows,
+metadata, delegation or owner graph and DB errors fail the read, not empty it.
+
+Human page/exact operations use 6 SQL statements total (5 for Governance);
+degrees use 9 (8 for Governance), including preflight. Lists use one bounded
+joined data statement (limit+1 <=101 rows), no OFFSET, per-edge network calls or
+N+1 inventory reads. Degrees use four directed aggregates: distinct stored
+approved peers in/out and pending requests in/out. Count basis is explicitly
+StoredApproved, not live invoke eligibility. Aggregate corruption checks reject
+bad scope/version/canonical shape and invalid Agent endpoints.
+
+SQLite 050 / MySQL 052 add request-pair and audit pair/time and action/time
+indexes; earlier migrations remain frozen. Keysets use stable edge/internal
+request IDs and audit (created_at_ms,id). Audit omits raw snapshots. Peer name
+and agent_code are joined display data, not authorization evidence.
+
+SQLite regressions include a 110-peer fixture, maximum page/query/bind budgets,
+actual EXPLAIN, audit timestamp ties, no read-side writes, failed lookahead and
+metadata decoding, lost authority after preflight (Notify), torn scope, gates
+off and historical reads. Shared query consumer/repo/policy harnesses cover
+concrete implementations. The native empty-MySQL gate additionally EXPLAINs
+actual captured query SQL for seven hinted indexes; local ignored status is
+not MySQL proof. A small contract fixture and fixed statement count do not prove
+large-graph rows-examined cost, lock contention or scalability. Production
+registry/host, trusted ingress, HTTP/SDK, dispatch and E2E are still separate.

@@ -9,6 +9,8 @@
 - `AgentInvokeApplicationService`, implementing the independent invocation and
   management application contracts. It validates ingress before reading facts,
   calls one complete fact snapshot, and submits at most one atomic command.
+- `AgentInvokeQueryPolicy` and `AgentInvokeQueryApplicationService` implement
+  independent governance reads without fabricating mutation commands.
 
 ## Consumes
 
@@ -17,6 +19,7 @@
   snapshots, never raw AgentCard labels or SDK credentials.
 - `AgentInvokeCommandRepoPort` for atomic version/fence/quota/audit/receipt
   persistence; no application-level sequence of legacy writes is allowed.
+- `AgentInvokeQueryRepoPort` for an authorized, consistent governance snapshot.
 
 ## Allowed dependencies
 
@@ -51,4 +54,22 @@ concrete implementation; local mutex tests do not prove production costs.
 role matrix, exact identity/operation/domain checks, generation failures and
 closed errors. `bcs-test-support::contract::agent_invoke` drives the real
 application against the synthetic local lifecycle implementation. Registered
-HTTP, SQL transactions, host integration and actual dispatch remain unverified.
+HTTP, host integration and actual dispatch remain unmounted. Concrete SQL
+transaction implementations and their tests belong to the store crate.
+
+
+## Governance query boundary
+
+Policy validates the complete cursor context and bounded page shape before a
+repo call; the application calls the repo once, propagates errors and rejects
+a mismatched result context/resource. Human owner/manager can read controlled
+Bot incident history. Ordinary Agent principals are forbidden. Governance is
+exact-pair Query delegation only (both directions for degrees), not whole-Bot
+graph access. Audit is pair-only. Current authority, not Agent eligibility or
+writer/runtime activation, permits history reads. StoredApproved counts and
+optional display metadata cannot be used as runtime invocation authority.
+
+Shared query policy/application/repo conformance runs against real SQLite
+lifecycle data. Unit tests record actual port calls and cover cursor context,
+roles, validation, errors and mismatched results. SQL costs, transaction
+reauthorization and native MySQL acceptance are the store's responsibilities.

@@ -92,6 +92,7 @@ async fn auth_session_version_upgrade_clears_legacy_tokens_once() -> DbResult<()
             (47, "dist_immutable_objects"),
             (48, "agent_invoke_authorization"),
             (49, "agent_invoke_command_fences"),
+            (50, "agent_invoke_governance_queries"),
         ],
         "only versions after 41 are pending on the upgrade path"
     );

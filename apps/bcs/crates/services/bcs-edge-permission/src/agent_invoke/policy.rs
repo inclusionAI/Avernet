@@ -25,7 +25,7 @@ fn validate_pair(pair: &AgentInvokePair) -> AgentInvokeResult<()> {
     Ok(())
 }
 
-fn validate_principal(principal: &AgentInvokePrincipal) -> AgentInvokeResult<()> {
+pub(super) fn validate_principal(principal: &AgentInvokePrincipal) -> AgentInvokeResult<()> {
     if principal.id().trim().is_empty() {
         return Err(AgentInvokeError::Unauthenticated);
     }

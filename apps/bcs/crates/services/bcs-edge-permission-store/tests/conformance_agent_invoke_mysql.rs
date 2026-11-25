@@ -15,6 +15,8 @@ mod snapshot_fixture;
 mod audit_collision;
 #[path = "support/agent_invoke_sql_driver.rs"]
 mod lifecycle;
+#[path="support/agent_invoke_query_plans.rs"]
+mod query_plans;
 
 #[tokio::test]
 #[ignore = "requires BCS_TEST_MYSQL_URL pointing to a disposable EMPTY MySQL database"]
@@ -46,6 +48,18 @@ async fn agent_invoke_repo_contract_mysql() {
     let governance=lifecycle::Driver::new_on(database.plugin.clone(),bcs_db_api::DbSqlFlavor::Mysql,"governance-feed").await;
     bcs_test_support::contract::agent_invoke_facts::agent_invoke_governance_repo_port_contract_tests(governance.store.as_ref(),governance.scope.clone()).await;
     println!("agent-invoke-mysql-gate=durable-lifecycle scenarios=10 governance-feed=verified");
+    let n=std::num::NonZeroU32::new(1000).unwrap();
+    for (env,application) in [("query-application",true),("query-repository",false)] {
+        let plans=std::sync::Arc::new(query_plans::QueryPlans::new(database.plugin.clone()));
+        let q=lifecycle::Driver::new_on_with_limits(plans.clone(),bcs_db_api::DbSqlFlavor::Mysql,env,
+            bcs_service_api::types::agent_invoke::AgentInvokeLimits{max_out_degree:n,max_in_degree:n,max_pending_out:n,max_pending_in:n}).await;
+        if application {bcs_test_support::contract::agent_invoke_query::agent_invoke_governance_query_service_contract_tests(&q).await;}
+        else {bcs_test_support::contract::agent_invoke_query::agent_invoke_query_repo_port_contract_tests(&q).await;}
+        if application {plans.verify_mysql_hints().await;}
+
+    }
+    println!("agent-invoke-mysql-gate=governance-query application-and-repo=verified");
+
     database.close().await;
 }
 

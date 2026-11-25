@@ -79,3 +79,13 @@ pub trait AgentInvokeGovernanceRepoPort: Send + Sync {
         publication: crate::types::agent_invoke::AgentInvokeDelegationPublication,
     ) -> AgentInvokeResult<std::num::NonZeroU64>;
 }
+
+/// Bounded governance reads with current authorization and data in ONE read
+/// snapshot. No mutation/audit, fallback to legacy kinds or per-edge inventory
+/// calls. Page errors/corrupt rows fail wholly, never partial/empty success.
+#[async_trait]
+pub trait AgentInvokeQueryRepoPort: Send + Sync {
+    async fn read_query(&self, scope:&AgentInvokeScope,
+        query:crate::types::agent_invoke_query::AgentInvokeQuery)
+        -> AgentInvokeResult<crate::types::agent_invoke_query::AgentInvokeQueryResult>;
+}

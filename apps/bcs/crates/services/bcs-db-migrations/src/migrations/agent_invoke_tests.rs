@@ -29,7 +29,7 @@ async fn agent_invoke_upgrade_preserves_populated_edges_requests_and_history() -
     assert_eq!(db.query(DbStatement::new(HISTORY)).await?, history);
     assert_eq!(db.query(DbStatement::new("SELECT * FROM edge_grants")).await?, edges);
     assert_eq!(db.query(DbStatement::new("SELECT * FROM permission_requests")).await?, requests);
-    assert_eq!(current_sqlite_version(&db, true).await?, Some(49));
+    assert_eq!(current_sqlite_version(&db, true).await?, Some(50));
     let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'agent_invoke_%' ORDER BY name")).await?;
     let names: Vec<String> = tables.iter().map(|r| db_get_column(r, "name")).collect::<DbResult<_>>()?;
     assert_eq!(names, ["agent_invoke_audit", "agent_invoke_facts", "agent_invoke_governance", "agent_invoke_grants", "agent_invoke_pending_pairs", "agent_invoke_receipts", "agent_invoke_requests", "agent_invoke_scopes"]);

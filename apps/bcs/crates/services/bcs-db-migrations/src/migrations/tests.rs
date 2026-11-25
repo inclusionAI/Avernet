@@ -124,7 +124,7 @@ async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
 
     let report = check_sqlite_migrations(&db).await?;
-    assert_eq!(report.pending_versions.len(), 49);
+    assert_eq!(report.pending_versions.len(), 50);
     assert_eq!(report.pending_versions[0].version, 1);
     assert_eq!(report.pending_versions[0].name, "init_schema");
     assert!(report.pending_versions[0].statements.is_empty());
@@ -589,6 +589,7 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
             (47, "dist_immutable_objects".to_string(), "sqlite".to_string()),
             (48, "agent_invoke_authorization".to_string(), "sqlite".to_string()),
             (49, "agent_invoke_command_fences".to_string(), "sqlite".to_string()),
+            (50, "agent_invoke_governance_queries".to_string(), "sqlite".to_string()),
         ]
     );
     Ok(())

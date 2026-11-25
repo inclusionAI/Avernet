@@ -163,6 +163,7 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
             (47, "dist_immutable_objects".to_string(), "sqlite".to_string()),
             (48, "agent_invoke_authorization".to_string(), "sqlite".to_string()),
             (49, "agent_invoke_command_fences".to_string(), "sqlite".to_string()),
+            (50, "agent_invoke_governance_queries".to_string(), "sqlite".to_string()),
         ]
     );
     Ok(())

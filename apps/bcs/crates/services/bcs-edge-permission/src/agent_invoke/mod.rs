@@ -2,6 +2,8 @@
 //! production router or legacy admission path until fenced store/providers and
 //! reader capabilities are available. Constructor injection is mandatory.
 mod policy;
+mod query;
+pub use query::{AgentInvokeQueryApplicationService, AgentInvokeQueryPolicy};
 pub use policy::AgentInvokePolicy;
 
 use std::sync::Arc;

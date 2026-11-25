@@ -8,6 +8,8 @@ mod management_reads;
 mod invalidation;
 mod delegation;
 mod commands;
+mod queries;
+pub use queries::DbAgentInvokeQueryStore;
 pub use commands::DbAgentInvokeCommandStore;
 
 use std::num::NonZeroU64;

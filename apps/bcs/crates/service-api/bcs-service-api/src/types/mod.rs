@@ -88,3 +88,5 @@ pub mod run_budget;
 pub mod catalog_labels;
 
 pub mod agent_invoke;
+
+pub mod agent_invoke_query;

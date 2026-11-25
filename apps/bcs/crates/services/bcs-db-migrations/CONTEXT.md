@@ -6,14 +6,14 @@
   then versioned migrations, then index creation
   (`run_sqlite_bootstrap_tables`, `run_sqlite_versioned_migrations`,
   `run_sqlite_bootstrap_indexes`).
-- The versioned SQLite migration chain (versions 1..49) with per-migration
+- The versioned SQLite migration chain (versions 1..50) with per-migration
   SHA-256 checksums, applied-history validation, repair conditions for legacy
   local databases, and the `bcs_schema_migrations` record bookkeeping.
 - Migration state inspection (`check_sqlite_migrations`) and the apply-report
   summary (`SqliteMigrationReport` / `SqliteMigrationPlan` /
   `run_sqlite_migrations_with_report`), plus `sqlite_target_version()` and
   `sqlite_migration_count()` for CLI reporting.
-- The full behavior test suite (62 tests) that previously registered 30 times
+- The full behavior test suite (65 tests) that previously registered 30 times
   across the workspace via `#[path]` source includes; they now run once here.
 
 ## Allowed dependencies
@@ -54,7 +54,7 @@
 
 ## Tests
 
-- `cargo test -p bcs-db-migrations` — 62 tests, including fresh empty-DB
+- `cargo test -p bcs-db-migrations` — 65 tests, including fresh empty-DB
   init, legacy-database upgrades (pre-existing records / partial steps),
   repeated-startup idempotency, checksum-mismatch and write-failure error
   propagation, cross-dialect migration-content mirrors.
@@ -85,3 +85,11 @@ the five-column edge unique key or actor collations. New SQLite 049 keeps DDL an
 history atomic; committed 048/050 and all earlier migrations remain frozen.
 Upgrade tests preserve prior history/data and inject history-record failure.
 Static MySQL key-width checks do not replace full-chain execution on real MySQL.
+
+
+SQLite 050 / MySQL 052 add the AgentInvoke request-pair and audit pair/time /
+action/time query indexes as one additive upgrade per dialect. No committed
+migration body, checksum or retained application data is changed. SQLite tests
+verify index installation, existing history/data preservation and atomic
+DDL/history rollback. Cross-dialect static key-width checks retain the native
+MySQL 3072-byte budget; they do not replace real MySQL execution or query plans.

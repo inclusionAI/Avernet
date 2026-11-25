@@ -39,3 +39,5 @@ pub mod agent_invoke;
 pub mod agent_invoke_facts;
 
 pub mod agent_invoke_snapshots;
+
+pub mod agent_invoke_query;

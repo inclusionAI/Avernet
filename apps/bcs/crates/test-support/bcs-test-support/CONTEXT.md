@@ -9,6 +9,12 @@
   by noop tests and the bootstrap Prometheus adapter's rendered-series tests.
 
 - Shared contract-test harnesses for BCS service and plugin boundaries.
+- Independent AgentInvoke governance query application, pure policy and repo
+  harnesses in `contract::agent_invoke_query`. Drivers create real lifecycle
+  data and supply the services; shared code never selects a concrete store.
+  Tests cover directed pages, exact reads, bounded cursors, degrees, pair/action
+  audit, role/delegation boundaries, history and failure propagation. SQLite
+  entries and the explicit native MySQL gate consume the same harnesses.
 - Opt-in native DB transaction-outcome conformance: actual committed prefixes,
   acknowledged rollback, bindings, deadlines and forbidden-control rejection.
   SQLite memory/file and MySQL text/prepared drivers supply concrete plugins;

@@ -76,7 +76,7 @@ async fn command_fence_upgrade_preserves_legacy_and_does_not_invent_binding_proo
             assert!(actual.iter().any(|v| v == column), "{table}.{column}");
         }
     }
-    assert_eq!(current_sqlite_version(&db, true).await?, Some(49));
+    assert_eq!(current_sqlite_version(&db, true).await?, Some(50));
     Ok(())
 }
 #[tokio::test]

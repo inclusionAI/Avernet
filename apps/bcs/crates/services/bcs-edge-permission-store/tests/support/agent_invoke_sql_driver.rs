@@ -25,6 +25,8 @@ pub struct Driver {
     pub service: AgentInvokeApplicationService,
     pub scope: AgentInvokeScope,
     pub flavor: DbSqlFlavor,
+    pub query_repo: Arc<bcs_edge_permission_store::agent_invoke::DbAgentInvokeQueryStore>,
+    pub query_service: bcs_edge_permission::agent_invoke::AgentInvokeQueryApplicationService,
 }
 impl Driver {
     pub async fn new() -> Self {
@@ -35,22 +37,20 @@ impl Driver {
         Self::new_on(db, DbSqlFlavor::Sqlite, "sql-lifecycle").await
     }
     pub async fn new_on(db: Arc<dyn DbPlugin>, flavor: DbSqlFlavor, env: &str) -> Self {
+        let n=NonZeroU32::MIN;
+        Self::new_on_with_limits(db,flavor,env,AgentInvokeLimits{max_out_degree:n,max_in_degree:n,max_pending_out:n,max_pending_in:n}).await
+    }
+    pub async fn new_on_with_limits(db:Arc<dyn DbPlugin>,flavor:DbSqlFlavor,env:&str,limits:AgentInvokeLimits)->Self {
         let scope = AgentInvokeScope {
             namespace: format!("isolated-{env}"),
             env: env.into(),
         };
-        let one = NonZeroU32::MIN;
         let store = Arc::new(
             DbAgentInvokeStore::new(
                 db.clone(),
                 flavor,
                 scope.clone(),
-                AgentInvokeLimits {
-                    max_out_degree: one,
-                    max_in_degree: one,
-                    max_pending_out: one,
-                    max_pending_in: one,
-                },
+                limits,
                 NonZeroU64::new(60_000).unwrap(),
             )
             .unwrap(),
@@ -72,7 +72,11 @@ impl Driver {
             commands.clone(),
         )
         .unwrap();
+        let query_policy=Arc::new(bcs_edge_permission::agent_invoke::AgentInvokeQueryPolicy);
+        let query_repo=Arc::new(bcs_edge_permission_store::agent_invoke::DbAgentInvokeQueryStore::new(store.clone(),query_policy.clone()));
+        let query_service=bcs_edge_permission::agent_invoke::AgentInvokeQueryApplicationService::new(scope.clone(),query_policy,query_repo.clone()).unwrap();
         Self {
+            query_repo,query_service,
             db,
             store,
             commands,
@@ -220,5 +224,17 @@ impl AgentInvokeContractDriver for Driver {
     async fn audit_count(&self) -> usize {
         let rows=self.db.query(DbStatement::with_params("SELECT COUNT(*) AS n FROM agent_invoke_audit WHERE scope_id=(SELECT id FROM agent_invoke_scopes WHERE namespace=? AND env=?) AND action<>'qualification_publish'",vec![self.scope.namespace.as_str().into(),self.scope.env.as_str().into()])).await.unwrap();
         db_get_column::<u64>(&rows[0], "n").unwrap() as usize
+    }
+}
+
+#[async_trait]
+impl bcs_test_support::contract::agent_invoke_query::AgentInvokeQueryContractDriver for Driver {
+    fn queries(&self)->&dyn bcs_service_api::application::agent_invoke::AgentInvokeGovernanceQueryService {&self.query_service}
+    fn query_repo(&self)->&dyn bcs_service_api::port::repo::agent_invoke::AgentInvokeQueryRepoPort {self.query_repo.as_ref()}
+    async fn query_delegation(&self,pair:AgentInvokePair) {
+        self.delegate(&AgentInvokePrincipal::Governance("query-governor".into()),&pair,0,vec![AgentInvokeAction::Query],"query contract").await.unwrap();
+    }
+    async fn legacy_query_fixture(&self) {
+        self.sql("INSERT INTO edge_grants (env,from_id,to_id,grant_kind,grant_ref_id,rules,status,originator_policy_type) VALUES (?,'query-a','query-b','rules',987,'[]','approved','any')",vec![self.scope.env.as_str().into()]).await;
     }
 }

@@ -24,3 +24,10 @@ pub trait AgentInvokeGrantManagementService: Send + Sync {
     /// Unknown commit outcomes are surfaced; callers recover with the SAME key.
     async fn change(&self, command: AgentInvokeCommand) -> AgentInvokeResult<AgentInvokeReceipt>;
 }
+
+/// Read-only governance, distinct from invocation permission and write commands.
+#[async_trait]
+pub trait AgentInvokeGovernanceQueryService: Send + Sync {
+    async fn read(&self, query: crate::types::agent_invoke_query::AgentInvokeQuery)
+        -> AgentInvokeResult<crate::types::agent_invoke_query::AgentInvokeQueryResult>;
+}

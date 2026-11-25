@@ -1092,6 +1092,33 @@ or wire formats; custom downstream implementations opt in explicitly.
 
 Consumer conformance: `bcs-edge-permission::tests::agent_invoke_policy` records
 actual fact/command port hits and failure propagation. Shared lifecycle tests
-are `bcs-test-support::contract::agent_invoke`, currently run by the synthetic
-local driver only. No production provider, SQL lifecycle, HTTP route, SDK or
-runtime dispatch is enabled by these contracts.
+are `bcs-test-support::contract::agent_invoke`, run by the synthetic local and
+real SQLite lifecycle drivers; the native MySQL gate opts in separately. SQL
+lifecycle implementations do not enable a production provider, HTTP route, SDK
+or runtime dispatch.
+
+
+## Independent Agent invocation governance queries
+
+The additive `AgentInvokeGovernanceQueryService`, pure
+`AgentInvokeQueryPolicyCoreService` and `AgentInvokeQueryRepoPort` separate
+management reads from write commands and runtime permission checks. Their
+credential-free types in `types::agent_invoke_query` intentionally have no
+serde: authentication, scope and principal must come from a trusted ingress,
+not request JSON. Existing traits and wire formats remain unchanged.
+
+Exact grants/requests, directed keyset lists, pair/action audit time pages and
+atomic degrees use one bound context. Cursors bind principal, scope, anchor,
+peer, resource, direction and filters; page defaults to 50, maximum 100.
+Human current owner/manager controls the anchor; ordinary Agents cannot inspect
+the management graph. Governance requires exact-pair Query delegation; a degree
+reveals both directions and therefore requires both delegations. Audit requires
+a peer. Eligibility and writer/runtime gates do not block authorized history.
+
+`StoredApproved` degree counts persisted approvals, not executable permissions.
+Display name/agent_code is optional decoration, never identity or authority.
+Audit projects fixed fields, not raw before/after snapshots. The repository
+must reauthorize the same data snapshot, propagate backend/corrupt-row errors,
+and perform no write. Central query harnesses exercise policy, application and
+real SQLite repository implementations; MySQL executes the same application
+and repo harnesses in its explicit native gate. HTTP and SDK remain unmounted.
