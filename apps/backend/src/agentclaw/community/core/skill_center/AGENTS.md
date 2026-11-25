@@ -272,7 +272,7 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 
 Runtime probe 的 `READY` 通常必须携带迁移 `preparation_id`。OpenClaw 统一稳态 marker 可以省略或保留历史 migration identity：响应必须同时证明 `activation_state=active`，且 checks 中 `active_marker_valid`、`active_root_valid`、`pool_local_valid`、`legacy_storage_entries_absent` 全为 true；省略时 `preparation_id=None`，保留时透传历史 `preparation_id`。`finalizing` 仍走严格迁移 probe，DB phase/generation 决定未完成迁移的 reconcile；只带 preparation/generation 之一的 partial identity 必须 fail closed，不能降级为 steady 或 `NOT_CAPABLE`。合同测试见 `tests/community/core/skill_center/test_runtime_layout_probe.py` 及 Engine OpenClaw layout-probe tests。
 
-排查 OpenClaw Legacy 服务 Bot 的 Center Skill 产物构建时，参见 [服务构建探测](../skills_pool/README.md#openclaw-服务构建探测)。
+排查 OpenClaw 或 AICoding Legacy 服务 Bot 的 Center Skill 产物构建时，参见 [服务构建探测](../skills_pool/README.md#服务构建探测)。
 
 完整内容库与 active 发现入口分离。逐 Skill 入口可以指向 Repo/Local/Center，不能新增指向整库的 active 桥。受管链接、用户实体目录、悬空链接的降级处理以 Runtime mapping/apply contract 为准；操作结果应保留具体问题项。
 
