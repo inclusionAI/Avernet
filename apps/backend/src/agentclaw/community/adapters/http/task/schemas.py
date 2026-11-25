@@ -144,6 +144,13 @@ class ExecutionConfigDTO(BaseModel):
         None,
         description="任务级执行策略快照;runtime_profile.allowed_run_modes 是后继节点执行模态白名单",
     )
+    source_channel: Literal["dingtalk", "webchat"] | None = Field(
+        None,
+        description=(
+            "用户原始消息渠道;与 source_type 语义正交。"
+            "缺省表示非钉钉或未知,不能从当前 Relay 运行会话反推"
+        ),
+    )
 
 
 class TaskInfoRequestDTO(BaseModel):

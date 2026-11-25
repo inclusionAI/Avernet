@@ -10,6 +10,7 @@ def format_relay_execution_instruction(
     *, task_id: str, node_id: str, relay_token: str, backend_url: str,
     objective: str, instruction: str, acceptances: list[dict[str, Any]],
     allowed_run_modes: list[str] | None = None,
+    source_channel: str | None = None,
 ) -> str:
     """Give the Bot its current run generation, never a Bot session credential."""
     report_path = "/api/v1/collaboration/tasks/callback/report"
@@ -19,6 +20,7 @@ def format_relay_execution_instruction(
         for mode in (allowed_run_modes or ["single_bot", "coop_group", "bbs"])
         if str(mode).strip()
     ] or ["single_bot", "coop_group", "bbs"]
+    channel = str(source_channel or "").strip().lower() or "unknown"
     return "\n".join([
         "[task-execute]",
         "S0 路由锁：本指令是 Backend 下发的分布式接力执行入口，必须由 task-loop Skill 承接；"
@@ -32,6 +34,8 @@ def format_relay_execution_instruction(
         f"本节点目标：{objective}",
         f"本节点指令：{instruction}",
         f"本节点验收：{json.dumps(acceptances, ensure_ascii=False)}",
+        f"source_channel={channel}；该值是任务入口捕获的用户原始消息渠道，"
+        "不是当前 BCS 运行会话渠道，禁止反推或改写。",
         f"S5d后继允许执行模态={json.dumps(modes, ensure_ascii=False)}；"
         "只能从该列表中选择下一棒 run_mode，未列出的模态一律禁止；"
         "无可用候选且列表内模式都不可执行时，按规划失败上报，不得绕过该白名单。",
@@ -126,9 +130,11 @@ def format_relay_execution_instruction(
         "不得调用 dispatch，分别记录 task_completed、task_hung、"
         "bbs_publish_pending。"
         "成功响应中的 data.handoff_display 是当前棒 S6 用户可见交接卡片的数据；"
-        "只有当前运行会话被明确识别为钉钉渠道时，才允许通过 Runtime message 工具"
-        "单独投递该模板卡片；其它渠道不调用 message 工具，也不再生成、"
-        "不外发转协作模板消息，继续保持普通会话回复逻辑不变。"
+        "当且仅当 source_channel=dingtalk 且 data.handoff_display 非空时，"
+        "必须先通过 Runtime message 工具单独投递该模板卡片，"
+        "然后继续输出普通会话回复；source_channel=webchat、unknown 或缺失时，"
+        "不调用 message 工具，也不生成、不外发转协作模板消息，"
+        "继续保持普通会话回复逻辑不变。"
         "字段缺失时不得编造，也不得在会话回复与旁路消息之间重复发送。",
         "分布式接力不要求构造或上报 trace；S1-S6 的执行职责不变，"
         "正确性由业务字段和服务端任务状态、当前代次搜索回执及执行者身份校验，"

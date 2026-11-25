@@ -82,9 +82,9 @@ def test_relay_prompt_forbids_dispatch_for_terminal_and_bbs_plans() -> None:
     assert "task_completed=true、task_hung=true 或 bbs_publish_pending=true" in prompt
     assert "不得调用 dispatch" in prompt
     assert "成功响应中的 data.handoff_display 是当前棒 S6 用户可见交接卡片的数据" in prompt
-    assert "只有当前运行会话被明确识别为钉钉渠道时" in prompt
-    assert "才允许通过 Runtime message 工具单独投递该模板卡片" in prompt
-    assert "其它渠道不调用 message 工具" in prompt
+    assert "当且仅当 source_channel=dingtalk 且 data.handoff_display 非空时" in prompt
+    assert "必须先通过 Runtime message 工具单独投递该模板卡片" in prompt
+    assert "不调用 message 工具" in prompt
     assert "继续保持普通会话回复逻辑不变" in prompt
     assert "不得在会话回复与旁路消息之间重复发送" in prompt
     assert "HTTP 422 表示契约非法" in prompt
@@ -252,3 +252,52 @@ def test_relay_prompt_injects_allowed_run_modes() -> None:
     assert "HIT_MULTI_BOTS 或 MISS" in prompt
     assert "当 bbs 在白名单内时，MISS 才可填 run_mode=bbs" in prompt
     assert "bbs_disabled_and_no_candidate" in prompt
+
+
+def test_relay_prompt_injects_task_source_channel() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+        source_channel="dingtalk",
+    )
+
+    assert "source_channel=dingtalk" in prompt
+    assert "该值是任务入口捕获的用户原始消息渠道" in prompt
+    assert "不是当前 BCS 运行会话渠道" in prompt
+
+
+def test_relay_prompt_treats_missing_source_channel_as_unknown() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "source_channel=unknown" in prompt
+    assert "source_channel=dingtalk 且" in prompt
+    assert "不调用 message 工具" in prompt
+
+
+def test_relay_prompt_injects_non_dingtalk_source_channel() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+        source_channel="webchat",
+    )
+
+    assert "source_channel=webchat" in prompt
+    assert "source_channel=dingtalk 且" in prompt

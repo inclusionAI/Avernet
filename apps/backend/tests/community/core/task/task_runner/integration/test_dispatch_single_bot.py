@@ -387,6 +387,38 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
     assert "TaskDispatcher.dispatch(target_node)" in prompt
 
 
+def test_relay_prompt_uses_task_graph_source_channel():
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        task_id="t1",
+        extend_props={
+            "execution_config": {
+                "orchestration_mode": "relay",
+                "source_channel": "dingtalk",
+            }
+        },
+    )
+    node = _node()
+    node.node_run_graph = graph
+    node.run_info.extend_props["relay_token"] = "attempt-1"
+
+    prompt = PromptFormatterImpl().format_execute(
+        {
+            "mode": "execute",
+            "node_instruction": "分析行业",
+            "execution_mode": "single_bot",
+            "backend": "http://backend",
+            "task_id": "t1",
+            "node_id": "c1",
+        },
+        node,
+    )
+
+    assert "source_channel=dingtalk" in prompt
+
+
 def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():
     """静态协作接力必须在全员完成后唯一汇总，并要求结构化 Markdown 产出。"""
     relay = (
