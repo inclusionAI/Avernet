@@ -141,4 +141,29 @@ describe('collaboration friend connection controller', () => {
       injectUserId: false,
     });
   });
+
+  it('forwards the optional owner actor pair and exposes the typed deleted flag', async () => {
+    backendRequest.mockResolvedValue({ code: 20000, data: { deleted: true } });
+
+    const response = await deleteFriendConnection({
+      actor_type: 'bot',
+      actor_id: 'bot-b:100',
+      target_actor_type: 'human',
+      target_actor_id: '1001',
+    });
+
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/friend-connections', {
+      method: 'DELETE',
+      params: {
+        actor_type: 'bot',
+        actor_id: 'bot-b:100',
+        target_actor_type: 'human',
+        target_actor_id: '1001',
+      },
+      injectUserId: false,
+    });
+    // Typed result: `deleted` reads straight off the envelope data, no cast.
+    const deleted: boolean = response.data?.deleted ?? false;
+    expect(deleted).toBe(true);
+  });
 });

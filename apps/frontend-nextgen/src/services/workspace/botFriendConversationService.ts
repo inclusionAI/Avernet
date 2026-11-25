@@ -125,7 +125,14 @@ async function loadAllRelations(
     const current = response.data?.items ?? [];
     total = response.data?.total ?? current.length;
     items.push(...current);
-    if (current.length === 0) break;
+    if (current.length === 0) {
+      // D2:total 未满时的空页是服务端无进展信号——中止为该类型的错误态
+      // (带重试),绝不把部分名单当全量名单渲染/搜索。
+      if (items.length < total) {
+        throw new Error('friend-connections pagination made no progress');
+      }
+      break;
+    }
     page += 1;
   }
   return { items, total };
