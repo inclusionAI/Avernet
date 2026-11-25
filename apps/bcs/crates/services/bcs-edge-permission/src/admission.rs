@@ -151,7 +151,11 @@ impl AdmissionService for DbAdmissionService {
         // `Specific`/`Owner` policies in a later installment.
         let _ = originator;
 
-        if self.edge_grants.is_authorized(actor, bot, env).await {
+        // A SystemInvoke candidate is never proof of generic admission.
+        // Keep the old profile/rules behavior and its one pair-read budget.
+        let legacy_authorized = self.edge_grants.list_active_grants(actor, bot, env).await
+            .iter().any(|grant| grant.grant_kind.is_legacy_runtime());
+        if legacy_authorized {
             if let Some(grant) = self
                 .ensure_default_profile_ref(bot, env, GrantSource::EdgeGrant)
                 .await
@@ -219,7 +223,7 @@ impl AdmissionService for DbAdmissionService {
         let active = self.edge_grants.list_active_grants(from, to, env).await;
 
         let mut grants: Vec<AuthzGrantRef> = Vec::with_capacity(active.len());
-        for g in active {
+        for g in active.into_iter().filter(|grant| grant.grant_kind.is_legacy_runtime()) {
             // For permission_profile edges we COULD enrich revision/digest by
             // looking up the profile by `grant_ref_id`. `get_active_default`
             // takes `bot_id`, not `profile_id`, and we only need enrichment for

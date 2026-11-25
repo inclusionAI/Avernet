@@ -26,12 +26,28 @@ pub enum GrantKind {
     PermissionProfile,
     /// Edge carries inline `rules`.
     Rules,
+    /// Directed system-Agent invocation candidate, never friendship or authority.
+    /// Canonical shape: ref=0, rules=None, same_as_from, no policy data.
+    /// Consumption requires a separate trusted, operation-aware decision.
+    SystemInvoke,
     /// Owner management edge (Human → Bot). Exactly one approved
     /// edge per `(env, to_id)`; unified `grant_ref_id = 0`.
     Owner,
     /// Manager management edge (Human → Bot). Unified
     /// `grant_ref_id = 0`; owner takes precedence over manager.
     Manager,
+}
+
+impl GrantKind {
+    /// Kinds usable by the existing generic admission paths.
+    pub fn is_legacy_runtime(self) -> bool {
+        matches!(self, Self::PermissionProfile | Self::Rules)
+    }
+
+    /// Runtime candidates, not a complete caller/operation authorization.
+    pub fn is_runtime_candidate(self) -> bool {
+        self.is_legacy_runtime() || self == Self::SystemInvoke
+    }
 }
 
 /// Lifecycle status of an edge grant.
@@ -78,6 +94,7 @@ pub struct EdgeGrant {
     /// `Rules` -> opaque rules ref.
     pub grant_ref_id: u64,
     /// Inline rules; `None` unless `GrantKind::Rules`.
+    /// SystemInvoke always uses ref=0 and rules=None, without a default profile.
     #[serde(default)]
     pub rules: Option<Value>,
     #[serde(default)]
@@ -193,6 +210,8 @@ pub enum RequestKind {
     Rules,
     /// Revoke an existing edge.
     Revoke,
+    /// Dedicated system invocation request, never a Connect request.
+    SystemInvoke,
 }
 
 /// Status of a permission request.

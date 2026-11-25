@@ -1056,3 +1056,16 @@ Memory and SQL implement the contract, and legacy normal-Group creation uses it
 instead of upsert. Custom downstream Core/repo implementations must implement
 or delegate this method before using legacy creation. Trusted internal upserts
 and DM pair reuse retain their separate behavior. See the [label contract](../../../docs/catalog-labels.md).
+
+## Reader-first system invocation support
+
+`EdgeGrantRepoPort` candidates include approved `system_invoke` alongside
+profile/rules and exclude owner/manager. The additive
+`list_runtime_grants_checked` contract fails as a whole on query, row, unknown
+kind or system-shape errors; its default is explicitly unavailable, never a
+wrapper over the legacy best-effort read. DB and memory implement it. Existing
+vec/bool signatures remain compatible; their results are candidates, not
+operation authorization. Generic admission/context consumers explicitly retain
+profile/rules only, and friend request operations accept Connect only. Downstream
+implementations must implement the checked contract before using the future
+system invocation decision; this phase adds no management API or production allow.
