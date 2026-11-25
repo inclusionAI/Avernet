@@ -97,14 +97,14 @@ class BotPublicRiskModule(Module):
     @provider
     def risk_approval_guard(self, repo: RiskRepository,
                             eligibility: RiskEligibility) -> RiskApprovalGuard:
-        return RiskApprovalGuard(repo, eligibility, utc_now)
+        return RiskApprovalGuard(repo, eligibility.evaluate, utc_now)
 
     @singleton
     @provider
     def risk_advance(self, repo: RiskRepository, eligibility: RiskEligibility,
                      bots: BotRepository, public: BotPublicServiceProtocol,
                      recovery: ApprovalRecovery) -> RiskAdvance:
-        return RiskAdvance(repo, eligibility, RiskPublishAdapter(bots, public), utc_now, recovery=recovery)
+        return RiskAdvance(repo, eligibility.evaluate, RiskPublishAdapter(bots, public), utc_now, recovery=recovery)
 
     @singleton
     @provider

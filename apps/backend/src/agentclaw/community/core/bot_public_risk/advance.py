@@ -4,8 +4,14 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Protocol
 
-from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository, RiskCheck
+from agentclaw.community.core.bot_public_risk.eligibility import (
+    BLOCK_NOTICE,
+    EligibilityCheck,
+    evaluate_eligibility,
+    log_block,
+)
 from agentclaw.community.core.bot_public_risk.notices import stage_notice
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository, RiskCheck
 
 
 class ApprovalRecovery(Protocol):
@@ -37,7 +43,7 @@ class RiskAdvance:
     input digest and check current owner and the original operator's permission.
     """
 
-    def __init__(self, repository: RiskRepository, check_h2: Callable[[RiskCheck], bool],
+    def __init__(self, repository: RiskRepository, check_h2: EligibilityCheck,
                  submit: Callable, clock: Callable, recovery: ApprovalRecovery | None = None):
         self.repo, self.check_h2, self.submit, self.clock = repository, check_h2, submit, clock
         self.recovery = recovery
@@ -49,8 +55,8 @@ class RiskAdvance:
         if (reason == "APPROVAL_OUTCOME_UNKNOWN" and self.recovery is not None
                 and not workflow.get("approval_recovery_attempted")):
             changes["next_action_at"] = self.clock()
-        if reason == "INPUT_OR_PERMISSION_INVALID":
-            stage_notice(row, workflow, "INPUT_INVALID", self.clock(), changes)
+        if reason in BLOCK_NOTICE:
+            stage_notice(row, workflow, BLOCK_NOTICE[reason], self.clock(), changes)
         changes["workflow_json"] = json.dumps(workflow)
         self.repo.update_current(env=row.env, risk_check_id=row.risk_check_id, row_version=row.row_version,
                                  changes=changes)
@@ -69,8 +75,11 @@ class RiskAdvance:
         if workflow.get("approval_intent"):
             self._recover_unknown(row)
             return
-        if self.check_h2(row) is not True:
-            self._attention(row, "INPUT_OR_PERMISSION_INVALID")
+        eligibility = evaluate_eligibility(self.check_h2, row)
+        if not eligibility.ok:
+            assert eligibility.reason is not None
+            log_block(row, eligibility, gate="H2")
+            self._attention(row, eligibility.reason)
             return
         workflow["approval_intent"] = True
         if not self.repo.update_current(env=env, risk_check_id=risk_check_id, row_version=row.row_version,
@@ -92,7 +101,7 @@ class RiskAdvance:
                 if latest.phase == "NEEDS_ATTENTION" and workflow.get("error") in {"APPROVAL_OUTCOME_UNKNOWN", "APPROVAL_TARGET_NOT_READY"}:
                     if latest.approval_puid and latest.approval_puid != puid:
                         raise RuntimeError("approval PUID differs from recovered instance")
-                    if self.check_h2(latest) is not True:
+                    if not evaluate_eligibility(self.check_h2, latest).ok:
                         raise RuntimeError("risk eligibility changed before approval association")
                     workflow.pop("error", None)
                 elif latest.phase != "ADVANCING":
@@ -124,7 +133,7 @@ class RiskAdvance:
         recovered_direct = (latest.phase == "NEEDS_ATTENTION"
                             and workflow.get("error") == "APPROVAL_OUTCOME_UNKNOWN")
         if outcome == "published" and (latest.phase == "ADVANCING" or recovered_direct):
-            if recovered_direct and self.check_h2(latest) is not True:
+            if recovered_direct and not evaluate_eligibility(self.check_h2, latest).ok:
                 return
             workflow.pop("error", None)
             self.repo.update_current(env=env, risk_check_id=risk_check_id, row_version=latest.row_version,
@@ -228,9 +237,15 @@ class RiskPendingHandler:
                                          changes={"phase": "NEEDS_ATTENTION", "next_action_at": None,
                                                   "workflow_json": json.dumps(workflow)})
                 return Complete()
-            if (workflow.get("callback_claim") or {}).get("status") == "processing":
+            claim = workflow.get("callback_claim") or {}
+            if claim.get("status") == "processing":
                 if row.next_action_at is not None and row.next_action_at > self.clock():
                     return Reschedule(delay_seconds=(row.next_action_at - self.clock()).total_seconds())
+                event = claim.get("event") or {}
+                if (row.approval_puid and event.get("puid") == row.approval_puid
+                        and event.get("decision") == "AGREE" and claim.get("block_reason") in BLOCK_NOTICE):
+                    self.guard.finish(env, risk_id, row.approval_puid, "AGREE", False)
+                    return Complete()
                 workflow["error"] = "CALLBACK_OUTCOME_UNKNOWN"
                 self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
                                          changes={"phase": "NEEDS_ATTENTION", "next_action_at": None,
