@@ -3624,9 +3624,19 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - Human decision/revoke 比已有 command 多一个精确授权 query use case（6 SQL），Governance explicit-pair 决策直接调用原 atomic command、不增加 Query use case；无事务跨网络、无自动 HTTP retry、无逐边 inventory 或正向 cache。GET 仍用原 bounded SQL 查询。不会用 HTTP port 存在替代 actual trusted ingress 唯一 Bot resolver、operation-aware invocation 或生产 host capability。
 - OpenAPI internal/public 两 entrypoint 具有完整严格 input/result/error schemas、12+12 operation IDs、HTTP 状态和幂等/游标约定；mirror 共用 operation definition，仅区分唯一 operationId。真实 SQLite handler tests 分别覆盖六类写和六类读、权限/租户/重放/终态/游标/配额/关闭态；逐端点 401 和各闭合 application 错误码及真实 port hit 另有 recording fault wrapper，后者不算 DB rollback 或 unknown-commit 证明。SDK 与真实 HTTP→DB→A2A Singlebox changed-line 仍未完成。
 
+### 后续实现增补：operation-aware Direct A2A 派发与队列撤权检查（生产入口仍关闭）
+
+- 复用中央 `MessageInterceptor` 扩展点，新增独立 `on_agent_invocation` hook。旧 interceptor 默认 None 表示不具备能力，不能表示允许；显式调用要求至少一个 provider，任一错误、非 AgentInvoke/零 ID/缺版本/错误来源 permit 或多 provider 不一致均关闭。普通 outbound chain 的空链/旧安全检查语义不变。`AgentInvokeInterceptor` 只委托现有 invocation application，不给好友、Group 或 Tool 消息附加权限；不引入具体 security singleton。
+- `A2aChatService::chat_agent_invocation` 和 `A2aChatRunService::start_async_agent_invocation` 是显式可信内部入口；旧实现有默认拒绝，普通 chat 不因好友/公开准入失败而 fallback。实际 A2aChat 校验 Bot caller、exact source/target、principal、originator==source、DirectInvocation 和 from/channel lineage，拒绝 Integration/Human/anonymous、转委托、Tool/Group、Human-as-Bot staff、organization/test-user 混用。可信输入仍不可 serde；本次不把公开 body 或原 from_actor_id 当可信 ingress resolver。
+- mandatory hook 在 channel/context/session/Run/queue effects 前执行，即使双方都没有 agent_code 也不能跳过；inline 在 resolver/content hooks 后、真实 deliver 前重新读取当前 SQL 事实。只在明确新模式以 AgentInvoke 代替 friend/public reachability，Provider collaboration/same-owner 上界仍每次核验，真实 target 使用 fallible registry read，旧 friend/public/owner/organization 路径不变。
+- 新队列记录使用 private V2 semantic projection，仅保存 scoped operation/可信 originator，不保存 token、permit 或可重用正向决定；V1 普通记录保持旧形状。旧 reader 的 version!=1 会拒绝 V2，不会当普通好友消息放行。新 reader 校验版本/operation、ChatRun/持久消息/row 的 source、target、session、run 和 lineage，pickup 及 send-start CAS/关联写入后的 `before_send` 都重新授权；资格/绑定 ABA、撤权、关闭态和存储错误不能通过已入队或已准备的旧 permit 继续发送。旧 reader 兼容 gate 未确认前不启用生产 writer。
+- 正常同步 inline 新增 2 次当前 pair snapshot、异步 inline 3 次，queued admission 2 次、pickup 2 次、最终 before_send 1 次，共 5 次。bundled SQL snapshot 每次 1 statement、LIMIT 2 exact-pair joins；测试记录真实 SQL 和返回行上界。每次还调用现有 Provider collaboration 检查（固定两个 actor 的批量 metadata 读；未注入该 provider 的 fixture 为 0 SQL），无图扫描、每帧检查、正向 cache、新授权事务或授权自动重试，也无数据库锁跨网络。保留原队列 transition/恢复成本；多 replica/load/外部宿主成本不由小 SQLite fixture 证明。
+- 共享 interceptor harness 的真正 discoverable conformance entry、真实 SQL grant/revoke→注册 hook→inline/queued fake transport 回归，覆盖实际发送、缺 code/缺 provider、身份/lineage/operation、scope、Provider 上界、版本损坏、资格/绑定恢复不复活，以及 Notify 控制“inline 初次通过后 revoke 已提交、最终发送检查拒绝”。实际 scheduler 成功路径和 prepare→StartSend CAS→revoke→before_send 拒绝分别验证，不以准备成功代替网络派发。
+- 仍缺 trusted HTTP Bot resolver/入口、SDK、host inventory/generation/capability 与 approved composition、完整争用矩阵、HTTP→DB→A2A Singlebox/changed-line 和 rollout 证明；本轮内部 runtime 注入能力不是生产启用。本机不启动 Colima/MySQL/Singlebox，全部远端检查仍按新 SHA 单独记录。
+
 ### 原 27 项研发与验收跟踪（保留完整范围）
 
-将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 12/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
+将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 13/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
 
 #### 1. 评审与启用前置
 
@@ -3657,7 +3667,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - [ ] 4.1 管理矩阵和 scoped governance 已实现；仍需新入口禁止 anonymous/auto-claim、可信 ingress 唯一 scoped bot_uuid resolver 和拒绝自报资格的实际挂载。
 - [x] 4.2 request/grant/approve/reject/cancel/revoke、receipt/state conflict/error 映射已由 application + 真实 SQLite store 实现；资格预读不持写事务锁，unknown commit 恢复无第二次 mutation。HTTP 挂载/真实 MySQL分别归 4.3/3.5。
 - [ ] 4.3 独立 routes/DTO/OpenAPI 与逐端点验证/响应/鉴权已有真实 V1 router 实现；SDK 尚未补齐，整项不勾选，HTTP 默认不启用生产能力。
-- [ ] 4.4 统一 operation-aware authz dispatch hook、originator/qualification generation 与一般 admission/friend/public/collaboration 旧语义隔离；独立 invocation application 的通过不等同于真正 dispatch 接入。
+- [x] 4.4 统一 operation-aware interceptor hook 已接入真实 Direct A2A inline/queue 与最终 before_send；exact operation/originator/current qualification generation、Provider 上界和旧 friend/public/organization 隔离有真实 SQL→scheduler/transport 及撤权回归。可信外部 ingress 与生产 composition 仍分别归 4.1/4.5，不以内部入口代替。
 - [ ] 4.5 composition roots 注入真实/假身份资格源、validated limits、consumer capability 与默认关闭 writer；当前 stores 未生产挂载，不伪造 host capability。
 
 #### 5. 分层回归与发布证据
@@ -3670,4 +3680,4 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - [ ] 5.6 完整受影响 architecture/boundary/module/HTTP/legacy/authority 与扩展 gates；已通过限定范围检查不代表全架构 baseline 绿灯。
 - [ ] 5.7 reader/SDK/runtime 接收兼容、迁移后 writer 启用、关闭/回滚/保留历史演练，以及 current-SHA CI 和 host 集成记录；未获部署授权不操作生产。
 
-完成条目：1.4、2.1、2.2、2.3、2.4、2.5、3.1、3.3、3.4、4.2、5.1、5.3。其余原条目均按完整验收范围保留，不重新拆小来增加完成数量。
+完成条目：1.4、2.1、2.2、2.3、2.4、2.5、3.1、3.3、3.4、4.2、4.4、5.1、5.3。其余原条目均按完整验收范围保留，不重新拆小来增加完成数量。

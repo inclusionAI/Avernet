@@ -322,6 +322,8 @@ impl RoutingCoreService for FakeRoutingCoreService {
 #[derive(Default)]
 pub struct FakeRegistryService {
     bots: RwLock<HashMap<String, RegisteredBot>>,
+    collaboration_denied: std::sync::atomic::AtomicBool,
+    without_credentials: RwLock<std::collections::HashSet<String>>,
     protocol_versions: RwLock<HashMap<String, u32>>,
     delivery_targets: RwLock<HashMap<String, BotDeliveryTarget>>,
     coordination_surfaces: RwLock<HashMap<String, CoordinationSurface>>,
@@ -360,6 +362,14 @@ impl FakeRegistryService {
             .get(id)
             .copied()
             .unwrap_or_default()
+    }
+
+    pub fn deny_collaboration(&self) {
+        self.collaboration_denied.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub async fn without_agent_credentials(&self, bot: &str) {
+        self.without_credentials.write().await.insert(bot.into());
     }
 
     pub async fn set_visibility(&self, id: &str, visibility: &str) {
@@ -412,6 +422,12 @@ impl FakeRegistryService {
 
 #[async_trait]
 impl BotRegistryCoreService for FakeRegistryService {
+    async fn collaboration_owner(&self, _: &[String]) -> ServiceResult<Option<String>> {
+        if self.collaboration_denied.load(std::sync::atomic::Ordering::SeqCst) {
+            Err(ServiceError::Forbidden("fixture Provider collaboration scope".into()))
+        } else { Ok(None) }
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         self.bots.write().await.insert(
             bot_id.clone(),
@@ -443,6 +459,7 @@ impl BotRegistryCoreService for FakeRegistryService {
     }
 
     async fn get_agent_credentials(&self, bot_id: &str) -> Option<AgentCredentials> {
+        if self.without_credentials.read().await.contains(bot_id) { return None; }
         // Test bots get synthetic agent credentials so the outbound interceptor
         // chain runs through to BlockingInterceptor / SecurityInterceptor in
         // tests. Production code skips the chain when agent_code is missing

@@ -1,14 +1,23 @@
 //! Direct chat validation and legacy transport dispatch.
 use super::*;
 use bcs_service_api::BotDeliveryTarget;
+use bcs_service_api::application::agent_invoke::AgentInvocationInput;
 
 impl A2aChat {
-    pub(super) async fn chat_with_queue_mode(&self, cmd: A2aChatCommand, selected_queue_mode: Option<bool>) -> ServiceResult<A2aChatOutcome> {
+    pub(super) async fn chat_with_queue_mode(&self, cmd: A2aChatCommand, selected_queue_mode: Option<bool>, invocation: Option<AgentInvocationInput>) -> ServiceResult<A2aChatOutcome> {
         validate_message(&cmd.message)?;
         let client_kind = direct_chat_client_kind(cmd.client.as_deref());
         let from_bot_id = bot_caller_id(&cmd.caller)?;
-        bcs_observability::observe_result("chat.authorize.owner", self.ensure_source_owner(&from_bot_id, cmd.authenticated_staff_id.as_deref())).await?;
-        let target_bot = if let Some(code) = cmd.organization_code.as_deref() {
+        if invocation.is_none() {
+            bcs_observability::observe_result("chat.authorize.owner", self.ensure_source_owner(&from_bot_id, cmd.authenticated_staff_id.as_deref())).await?;
+        }
+        let target_bot = if let Some(input) = invocation.as_ref() {
+            self.authorize_direct_invocation(input, &cmd.caller, &cmd.target_bot_id,
+                cmd.from_actor_id.as_deref(), cmd.authenticated_staff_id.as_deref(),
+                cmd.organization_code.as_deref(), cmd.a2a_test_user.is_some()).await?;
+            self.registry.try_get(&cmd.target_bot_id).await?
+                .ok_or_else(|| ServiceError::BotNotFound(cmd.target_bot_id.clone()))?
+        } else if let Some(code) = cmd.organization_code.as_deref() {
             let organization = self.organization.as_ref().ok_or_else(|| {
                 ServiceError::InvalidOperation {
                     message: "organization service is not configured".to_string(),
@@ -65,7 +74,7 @@ impl A2aChat {
         if cmd.a2a_test_user.is_none() && cmd.async_mode
             && match selected_queue_mode { Some(queued) => queued, None => self.queue_enabled(&cmd.target_bot_id).await }
         {
-            return self.admit_direct(&cmd, &from_bot_id, &run_id, &session_key, expires_at_ms).await;
+            return self.admit_direct(&cmd, &from_bot_id, &run_id, &session_key, expires_at_ms, invocation.as_ref()).await;
         }
         self.guard_legacy(&cmd.target_bot_id, &session_key).await?;
         let delivery_target = bcs_observability::observe_result("chat.delivery.resolve", self
@@ -243,6 +252,12 @@ impl A2aChat {
             }
         }
 
+        if let Some(input) = invocation.as_ref() {
+            if let Err(error) = self.check_invocation(input).await {
+                self.run_store.mark_failed(&run_id, "agent_invoke_denied").await;
+                return Err(error);
+            }
+        }
         let delivery = match bcs_observability::observe_result("chat.delivery.send", self
             .bot_delivery
             .deliver(BotDeliveryCommand {

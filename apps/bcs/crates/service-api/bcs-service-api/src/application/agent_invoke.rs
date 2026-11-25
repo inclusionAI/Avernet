@@ -5,7 +5,7 @@ use async_trait::async_trait;
 // Delivery imports the application contract and its credential-free input/
 // result vocabulary, never Core, repository ports or concrete implementations.
 pub use crate::types::agent_invoke::{
-    AgentInvocationInput, AgentInvocationPermit, AgentInvokeCommand, AgentInvokeReceipt,
+    AgentInvocationInput, AgentInvocationPermit, AgentInvokeOperation, AgentInvokeCommand, AgentInvokeReceipt,
     AgentInvokeResult, AgentInvokeScope, AgentInvokePrincipal, AgentInvokePair,
     AgentInvokeChange, AgentInvokeError, AgentInvokeGrantView, AgentInvokeRequestView,
 };

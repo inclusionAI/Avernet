@@ -206,6 +206,16 @@ impl A2aChatRunService for InstrumentedA2aChatRunService {
         result
     }
 
+    async fn start_async_agent_invocation(
+        &self,
+        cmd: AsyncA2aChatCommand,
+        invocation: bcs_service_api::application::agent_invoke::AgentInvocationInput,
+    ) -> ServiceResult<AsyncA2aChatAccepted> {
+        let result = self.inner.start_async_agent_invocation(cmd, invocation).await;
+        self.record(result.is_ok());
+        result
+    }
+
     async fn get_run(&self, cmd: ChatRunQueryCommand) -> ServiceResult<A2aRunStatus> {
         let result = self.inner.get_run(cmd).await;
         self.record(result.is_ok());
@@ -483,3 +493,7 @@ impl FrontendDeliveryPort for MetricsFrontendDeliveryPort {
         self.inner.unregister_run(run_id).await
     }
 }
+
+#[cfg(all(test, feature = "prometheus-metrics"))]
+#[path = "agent_invocation_tests.rs"]
+mod agent_invocation_tests;

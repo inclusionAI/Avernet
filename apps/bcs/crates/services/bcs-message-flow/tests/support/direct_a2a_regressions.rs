@@ -20,7 +20,7 @@ impl Pause {
     }
 }
 
-fn transition(row: &PersistedMessageDelivery, event: Event) -> DeliveryTransitionCommand {
+pub(super) fn transition(row: &PersistedMessageDelivery, event: Event) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand {
         caller_dispatch_commit: None,
         caller_cancel: None,

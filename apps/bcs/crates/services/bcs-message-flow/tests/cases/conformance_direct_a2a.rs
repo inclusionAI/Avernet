@@ -17,6 +17,8 @@ use bcs_db_migrations as migrations;
 mod regressions;
 #[path = "../support/direct_a2a_empty_input.rs"]
 mod empty_input;
+#[path = "../support/direct_agent_invocation.rs"]
+mod agent_invocation;
 
 struct Harness {
     db: Option<Arc<ObservedDb>>,
@@ -41,6 +43,11 @@ impl Harness {
     }
 
     async fn with_observer(sql: bool, shared: Option<Arc<ObservedDb>>, observer: Option<Arc<dyn BotTerminalObserverPort>>) -> Self {
+        Self::with_options(sql, shared, observer, None).await
+    }
+
+    async fn with_options(sql: bool, shared: Option<Arc<ObservedDb>>, observer: Option<Arc<dyn BotTerminalObserverPort>>,
+        interceptors: Option<Arc<interceptor::InterceptorChain>>) -> Self {
         let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
         support.registry.set_visibility("bot-observer", "public").await;
         let mut observed_db = None;
@@ -71,10 +78,12 @@ impl Harness {
         let service = Arc::new(ManagedMessageDelivery::new(deliveries).with_policy(policy.clone()));
         let admission_events = Arc::new(empty_input::AdmissionEvents::default());
         let contexts = Arc::new(MemoryBotRunContextStore::new());
-        let direct = Arc::new(A2aChat::new_with_run_ports(support.bot_delivery.clone(), Arc::new(ChatRunStore::with_repo(runs)), 60_000,
+        let mut direct = A2aChat::new_with_run_ports(support.bot_delivery.clone(), Arc::new(ChatRunStore::with_repo(runs)), 60_000,
             support.registry.clone(), Arc::new(bcs_test_support::NoopFriendCoreService),
             admission_events.clone(), admission_events.clone())
-            .with_bot_run_context(contexts.clone()).with_session_management(session_service.clone()));
+            .with_bot_run_context(contexts.clone()).with_session_management(session_service.clone());
+        if let Some(chain) = interceptors { direct = direct.with_interceptors(chain); }
+        let direct = Arc::new(direct);
         let mut flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
             .with_message_repo(messages.clone()).with_managed_deliveries(service.clone()).with_session_management(session_service)
             .with_bot_run_context(contexts.clone()).with_direct_chat(direct.clone());
@@ -423,4 +432,13 @@ async fn expired_or_no_longer_authorized_requests_never_reach_transport() {
         assert!(h.support.bot_delivery.frames().await.is_empty());
         stop.send(true).unwrap(); worker.await.unwrap().unwrap();
     }
+}
+
+#[tokio::test]
+async fn conformance_registered_agent_invoke_interceptor() {
+    let (provider, input): (bcs_edge_permission::agent_invoke::AgentInvokeInterceptor, _) =
+        agent_invocation::unapproved_provider().await;
+    bcs_test_support::contract::interceptor::message_interceptor_contract_tests(&provider).await;
+    bcs_test_support::contract::interceptor::agent_invocation_interceptor_contract_tests(
+        &provider, &input, Err(application::agent_invoke::AgentInvokeError::Forbidden)).await;
 }

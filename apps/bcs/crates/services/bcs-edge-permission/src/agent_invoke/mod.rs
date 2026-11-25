@@ -1,6 +1,8 @@
 //! Agent invocation use-case orchestration. Deliberately not mounted into any
 //! production router or legacy admission path until fenced store/providers and
 //! reader capabilities are available. Constructor injection is mandatory.
+mod interceptor;
+pub use interceptor::AgentInvokeInterceptor;
 mod policy;
 mod query;
 pub use query::{AgentInvokeQueryApplicationService, AgentInvokeQueryPolicy};

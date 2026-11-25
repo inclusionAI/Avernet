@@ -524,3 +524,36 @@ establish production MySQL load capacity. See the
 [shared store conformance](../../test-support/bcs-test-support/src/contract/repo/message_delivery.rs).
 The [delegation regressions](src/caller_delegation_tests.rs) cover a rejected
 reply target followed by a valid sibling with one invocation remaining.
+
+
+## Explicit AgentInvoke Direct A2A capability
+
+The additive chat_agent_invocation/start_async_agent_invocation application
+methods require verified scoped Bot identity and trusted originator lineage.
+They never consume ordinary chat body metadata as proof or fall back to public/
+friend/organization admission. Older implementations default to refusal. The
+existing central MessageInterceptor chain has a separate mandatory operation
+hook, independent of optional agent_code-based legacy content/security hooks.
+No provider, mismatched pair/lineage, errors or malformed permits fail closed.
+AgentInvoke does not widen Provider collaboration/same-owner policy.
+
+Authorization precedes channel/context/session/Run/queue effects and is repeated
+immediately before inline delivery. A private V2 DirectProjection persists only
+credential-free scope/operation/lineage, not a positive permit. Older V1 readers
+reject the version; V1 legacy records remain unchanged. Pickup compares canonical
+ChatRun/message/row identities, validates the projection, rereads current facts,
+and keeps the existing target/content checks. before_send performs a final live
+authorization after StartSend CAS and correlation writes. Revocation, qualification
+or binding ABA, disabled capability and DB failure cannot reuse an admission
+permit; no automatic authorization retry or lock spans network delivery.
+
+With the bundled SQL facts provider, synchronous inline uses two exact-pair SQL
+snapshots, asynchronous inline three, queued admission two plus pickup two and
+before_send one (five total). Each is one LIMIT 2 statement and each check also
+reuses existing Provider collaboration over exactly two actors. Existing queue
+storage/transition costs remain, with no added growing-graph scan or per-frame
+reads. Regression tests record actual SQL count/returned-row bounds, genuine
+SQLite lifecycle writes, Notify-controlled revocation, and actual scheduler fake
+transport sends. They do not establish multi-worker/load, trusted HTTP ingress,
+production inventory capability, or Singlebox E2E coverage; production assembly
+remains disabled until those separate contracts are satisfied.

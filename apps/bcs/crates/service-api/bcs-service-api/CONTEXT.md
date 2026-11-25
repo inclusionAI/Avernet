@@ -1136,3 +1136,21 @@ remain unchanged. The V1 adapter now implements the management/query protocol
 under independent AgentInvoke prefixes; disabled/missing production capability
 returns 503 rather than enabling the feature. SDK/host/runtime integration is
 not established by exposing these declarations.
+
+
+## Additive explicit AgentInvoke dispatch contract
+
+A2aChatService::chat_agent_invocation and
+A2aChatRunService::start_async_agent_invocation receive non-serde trusted
+AgentInvocationInput separately from ordinary chat commands. Ingress must resolve
+verified unique scoped Bot identity and preserve originator lineage; legacy
+implementations default to Forbidden. This is not a new ordinary-chat DTO field
+or a public/friend fallback. MessageInterceptor::on_agent_invocation is the
+central operation-aware extension; None means unsupported. InterceptorChain
+requires at least one provider, propagates failures, validates AgentInvoke permit
+shape and rejects inconsistent providers. Ordinary on_outbound semantics and
+struct literals are unchanged. A2aChat consumes the hook before effects and at
+send time; its V2 queued projection is private, credential-free and rejected by
+old V1 readers. No wire SDK schema or production capability is implied. The
+shared interceptor harness, API chain/default compatibility tests and real SQL
+Direct A2A runtime conformance cover propagation to existing implementations.

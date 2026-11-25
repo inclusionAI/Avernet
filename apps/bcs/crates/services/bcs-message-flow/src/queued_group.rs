@@ -458,6 +458,10 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
                 .await;
         }
         crate::queued_task::restore(&flow, delivery).await?;
+        if delivery.flow_kind == DeliveryFlowKind::DirectA2a {
+            flow.direct_chat.as_ref().ok_or_else(|| invalid("direct queue authorization unavailable"))?
+                .authorize_direct_send(delivery, command).await?;
+        }
         Ok(())
     }
 
