@@ -70,11 +70,12 @@ it.each<[string, BotLifecycle, BotRuntimeStage | undefined, BotRuntimeStage]>([
   mockSearch = `?id=bot&type=${mode}${stage ? `&runtime_stage=${stage}` : ''}`;
   render(<Page />);
   await waitFor(() => expect(botSessionService.listSessions).toHaveBeenCalledWith(
-    expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }), 'viewer',
+    expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }), 'viewer', false,
   ));
   expect(await screen.findByTestId('composer')).toBeInTheDocument();
   expect(useBotChat).toHaveBeenLastCalledWith(expect.objectContaining({ runtimeStage: expected }),
-    expect.objectContaining({ sessionId: 'debug-session' }), undefined, expect.any(Function), 'viewer');
+    expect.objectContaining({ sessionId: 'debug-session' }), undefined, expect.any(Function), 'viewer',
+    { subjectScoped: false });
   expect(useBotSessionFilesFeature).toHaveBeenLastCalledWith(
     expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }),
     expect.objectContaining({ sessionId: 'debug-session' }),

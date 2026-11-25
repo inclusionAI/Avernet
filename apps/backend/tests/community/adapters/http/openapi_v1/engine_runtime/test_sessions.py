@@ -1002,6 +1002,73 @@ def test_owner_mode_self_subject_preserves_the_shared_runtime(
     assert expert.calls == []
 
 
+def test_teclaw_caller_subject_list_uses_shared_stage_runtime(
+    client, relay, friendships, expert
+):
+    relay.set_bot_type("service")
+    relay.set_call_type("caller")
+    relay.set_active_engine("teclaw")
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+
+    data = ok(client.get(
+        _base(), params={"owner_id": OWNER, "f_user_id": OWNER, "stage": "online"},
+    ))
+
+    assert data["items"][0]["session_id"] == SESSION_ID
+    assert relay.paths == ["/api/sessions"]
+    assert friendships.calls == []
+    assert expert.calls == []
+
+
+def test_teclaw_caller_subject_create_uses_shared_stage_runtime(
+    client, relay, friendships, expert
+):
+    relay.set_bot_type("service")
+    relay.set_call_type("caller")
+    relay.set_active_engine("teclaw")
+    relay.results = [EngineResult(data=ENGINE_SESSION)]
+
+    response = client.post(
+        _base(),
+        params={"owner_id": OWNER, "f_user_id": OWNER, "stage": "online"},
+        json={"title": "New"},
+    )
+    assert response.status_code == 201, response.json()
+    assert response.json()["code"] == 201000
+    data = response.json()["data"]
+
+    assert data["session_id"] == SESSION_ID
+    assert relay.paths == ["/api/sessions"]
+    assert relay.calls[0]["stage"] == "online"
+    assert relay.calls[0]["body"]["user_id"] == OWNER
+    assert friendships.calls == []
+    assert expert.calls == []
+
+
+def test_caller_session_creation_reports_durable_runtime_preparation(
+    client, relay, expert
+):
+    relay.set_bot_type("service")
+    relay.set_call_type("caller")
+    expert.create_result = {
+        "session_key": None,
+        "is_new": True,
+        "connection": None,
+        "need_poll": True,
+    }
+
+    response = client.post(
+        _base(),
+        params={"owner_id": OWNER, "f_user_id": OWNER, "stage": "online"},
+        json={"title": "New"},
+    )
+
+    body = fails(response, 409)
+    assert body["code"] == 409113
+    assert body["message"] == "Caller runtime is preparing"
+    assert response.headers["retry-after"] == "3"
+
+
 def test_owner_mode_collaborator_self_subject_filters_the_shared_runtime(
     make_client, relay, friendships, expert
 ):
