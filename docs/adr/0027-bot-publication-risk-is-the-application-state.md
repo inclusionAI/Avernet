@@ -25,8 +25,10 @@ Rejection and cancellation close the matching application even if publication
 eligibility has changed.
 
 The legacy Bot approval field remains a projection for its matching PUID.
-A blocked agreement changes its pending status to `BLOCKED`. Archival marks
-any remaining `PROCESSING` entry as `REPLACED`.
+A blocked agreement changes its pending status to `BLOCKED`. A new risk
+application archives the matching legacy approval in the same transaction that
+replaces the earlier risk record. Archival marks any remaining `PROCESSING`
+entry as `REPLACED`.
 
 ## Consequences
 

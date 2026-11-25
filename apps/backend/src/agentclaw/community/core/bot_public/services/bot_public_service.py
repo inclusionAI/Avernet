@@ -50,7 +50,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.bot_public.bot_public_service_protocol import BotPublicServiceProtocol
-from agentclaw.community.core.bot_public_risk.eligibility import BLOCK_NOTICE
+from agentclaw.community.core.bot_public_risk.legacy_approval import project_legacy_approval_block
 from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -393,32 +393,7 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
         row = self._risk_approval_guard.repo.get(env=env, risk_check_id=risk_id)
         if row is None or row.bot_pk != bot_pk or row.approval_puid != puid:
             return
-        workflow = json.loads(row.workflow_json)
-        reason = workflow.get("error")
-        if (reason not in BLOCK_NOTICE or workflow.get("approval_decision") != "AGREE"
-                or workflow.get("approval_decision_puid") != puid):
-            return
-        for _ in range(3):
-            bot = self._bot_repository.get_by_pk(bot_pk)
-            if not bot:
-                return
-            ext = bot.get("ext") or {}
-            approval = ext.get("public_approval") or {}
-            if approval.get("puid") != puid or approval.get("status") != "PROCESSING":
-                return
-            updated_approval = {
-                **approval,
-                "status": "BLOCKED",
-                "approval_decision": "AGREE",
-                "block_reason": reason,
-                "processed_at": datetime.now().isoformat(),
-            }
-            if self._bot_repository.compare_and_set_ext(
-                bot_id=bot["bot_id"], owner_id=bot["owner_id"], expected_ext=ext,
-                ext={**ext, "public_approval": updated_approval},
-            ) is not None:
-                return
-        raise BotPublicServiceError("could not record blocked legacy public approval")
+        project_legacy_approval_block(self._bot_repository, row)
 
     def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str, public_scope: str | None = None, *, risk_check_id: str | None = None, _risk_guarded: bool = False, _risk_target: dict | None = None) -> Dict[str, Any]:
         """
@@ -587,20 +562,18 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
             self._sync_bcsfuse_runtime_state(bot_id, owner_id, public_value)
             logger.info(f"[bot_service.handle_public_approval_callback] Approval agreed: bot_id={bot_id}, public={public_value}")
             return {"success": True, "public": public_value, "message": "Public status updated"}
-        elif last_operate_upper == "DISAGREE":
-            public_approval["status"] = "DISAGREE"
+        elif last_operate_upper in {"DISAGREE", "CANCEL"}:
+            public_approval["status"] = last_operate_upper
             public_approval["processed_at"] = datetime.now().isoformat()
             ext["public_approval"] = public_approval
-            self._update_bot_with_notification(bot_id, owner_id, {"ext": ext, "modifier_id": public_approval.get("applicant", owner_id)}, bot, notify_device=False)
-            logger.info(f"[bot_service.handle_public_approval_callback] Approval DISAGREE: bot_id={bot_id}")
-            return {"success": True, "public": None, "message": "Approval DISAGREE, public not changed"}
-        elif last_operate_upper == "CANCEL":
-            public_approval["status"] = "CANCEL"
-            public_approval["processed_at"] = datetime.now().isoformat()
-            ext["public_approval"] = public_approval
-            self._update_bot_with_notification(bot_id, owner_id, {"ext": ext, "modifier_id": public_approval.get("applicant", owner_id)}, bot, notify_device=False)
-            logger.info(f"[bot_service.handle_public_approval_callback] Approval CANCEL: bot_id={bot_id}")
-            return {"success": True, "public": None, "message": "Approval CANCEL, public not changed"}
+            updated_bot = self._update_bot_with_notification(
+                bot_id, owner_id, {"ext": ext, "modifier_id": public_approval.get("applicant", owner_id)},
+                bot, notify_device=False,
+            )
+            if _risk_guarded and not updated_bot:
+                return {"success": False, "public": None, "message": "Failed to update bot approval"}
+            logger.info(f"[bot_service.handle_public_approval_callback] Approval {last_operate_upper}: bot_id={bot_id}")
+            return {"success": True, "public": None, "message": f"Approval {last_operate_upper}, public not changed"}
         else:
             logger.warning(f"[bot_service.handle_public_approval_callback] Unknown last_operate: {last_operate}")
             return {"success": False, "public": None, "message": f"Unknown operation: {last_operate}"}

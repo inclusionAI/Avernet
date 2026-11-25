@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
+from agentclaw.community.core.bot_public_risk.legacy_approval import archive_legacy_approval
 from agentclaw.community.core.operator_context import OperatorContext
 
 from agentclaw.community.plugin_api.bot_publish_approval import (
@@ -440,17 +441,9 @@ class PublicationActions:
         return updated_bot
 
     def _archive_public_approval(self, ext: Dict[str, Any], bot_id: str) -> None:
-        if "public_approval" not in ext:
-            return
-        from datetime import datetime
-        old_approval = dict(ext.pop("public_approval"))
-        if old_approval.get("status") == "PROCESSING":
-            old_approval["status"] = "REPLACED"
-        old_approval.setdefault("processed_at", datetime.now().isoformat())
-        history = ext.get("public_approval_history", [])
-        history.append(old_approval)
-        ext["public_approval_history"] = history[-5:]
-        logger.info(f"[bot_service.public_bot] Moved existing approval to history: bot_id={bot_id}, old_puid={old_approval.get('puid')}")
+        approval = ext.get("public_approval") or {}
+        if archive_legacy_approval(ext):
+            logger.info(f"[bot_service.public_bot] Moved existing approval to history: bot_id={bot_id}, old_puid={approval.get('puid')}")
 
     def _build_public_approval_context(self, bot: Dict[str, Any], operator: Optional[OperatorContext] = None) -> Dict[str, str]:
         """构建公开审批上下文信息。

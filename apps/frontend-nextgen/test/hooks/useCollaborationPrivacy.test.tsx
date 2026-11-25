@@ -637,7 +637,7 @@ describe('useCollaborationPrivacy 检测进入审批边沿静默刷新协作数�
 });
 
 describe('useCollaborationPrivacy 重新申请公开', () => {
-  it('复用上笔公开目标并为每次结束后的重新申请生成新请求 ID', async () => {
+  it('复用上笔公开目标，网络失败时复用请求 ID，新终态才生成新 ID', async () => {
     mockedUseHumanIdentity.mockReturnValue({
       status: 'ready',
       identity: { userId: '900004', displayName: '真实用户', online: true },
@@ -669,6 +669,7 @@ describe('useCollaborationPrivacy 重新申请公开', () => {
     });
     const create = jest
       .spyOn(riskController, 'createBotPublicRiskCheck')
+      .mockRejectedValueOnce(new Error('网络响应中断'))
       .mockResolvedValueOnce({ code: 202000, message: 'OK', data: { ...blocked, risk_check_id: 'blocked-2' } })
       .mockResolvedValueOnce({
         code: 202000,
@@ -681,13 +682,15 @@ describe('useCollaborationPrivacy 重新申请公开', () => {
     act(() => result.current.openPublicationEditor(overviewWithBots.bots[0]!, 'user'));
     await act(async () => result.current.userRisk.retryCurrent?.());
     await act(async () => result.current.userRisk.retryCurrent?.());
+    await act(async () => result.current.userRisk.retryCurrent?.());
 
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledTimes(3);
     for (const [botId, userId, request] of create.mock.calls) {
       expect([botId, userId]).toEqual(['bot-1', '900004']);
       expect(request).toEqual({ ...target, client_request_id: expect.any(String) });
     }
-    expect(create.mock.calls[0]?.[2].client_request_id).not.toBe(create.mock.calls[1]?.[2].client_request_id);
+    expect(create.mock.calls[0]?.[2].client_request_id).toBe(create.mock.calls[1]?.[2].client_request_id);
+    expect(create.mock.calls[1]?.[2].client_request_id).not.toBe(create.mock.calls[2]?.[2].client_request_id);
     expect(result.current.userRisk.uiState.kind).toBe('checking');
     expect(result.current.userRisk.retryCurrent).toBeUndefined();
   });

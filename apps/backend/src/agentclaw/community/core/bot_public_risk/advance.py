@@ -10,6 +10,7 @@ from agentclaw.community.core.bot_public_risk.eligibility import (
     evaluate_eligibility,
     log_block,
 )
+from agentclaw.community.core.bot_public_risk.legacy_approval import project_legacy_approval_block
 from agentclaw.community.core.bot_public_risk.notices import stage_notice
 from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository, RiskCheck
 
@@ -98,15 +99,19 @@ class RiskAdvance:
                 if latest is None or latest.current_target_key is None:
                     raise RuntimeError("risk application no longer current")
                 workflow = json.loads(latest.workflow_json)
-                if latest.phase == "NEEDS_ATTENTION" and workflow.get("error") in {"APPROVAL_OUTCOME_UNKNOWN", "APPROVAL_TARGET_NOT_READY"}:
-                    if latest.approval_puid and latest.approval_puid != puid:
-                        raise RuntimeError("approval PUID differs from recovered instance")
-                    if not evaluate_eligibility(self.check_h2, latest).ok:
-                        raise RuntimeError("risk eligibility changed before approval association")
-                    workflow.pop("error", None)
-                elif latest.phase != "ADVANCING":
+                recovering = latest.phase == "NEEDS_ATTENTION" and workflow.get("error") in {
+                    "APPROVAL_OUTCOME_UNKNOWN", "APPROVAL_TARGET_NOT_READY",
+                }
+                if recovering and latest.approval_puid and latest.approval_puid != puid:
+                    raise RuntimeError("approval PUID differs from recovered instance")
+                if not recovering and latest.phase != "ADVANCING":
                     raise RuntimeError("risk application no longer advancing")
                 _select_authoritative_pending(workflow, puid)
+                if recovering:
+                    pending_decision = (workflow.get("pending_approval") or {}).get("decision")
+                    if pending_decision not in {"DISAGREE", "CANCEL"} and not evaluate_eligibility(self.check_h2, latest).ok:
+                        raise RuntimeError("risk eligibility changed before approval association")
+                    workflow.pop("error", None)
                 if self.repo.update_current(env=env, risk_check_id=risk_check_id, row_version=latest.row_version,
                                             changes={"phase": "APPROVING", "approval_puid": puid,
                                                      "workflow_json": json.dumps(workflow),
@@ -226,7 +231,12 @@ class RiskPendingHandler:
             raise ValueError("callback replay environment differs from worker")
         with avernet_tenant_scope(tenant):
             row = self.repo.get(env=env, risk_check_id=risk_id)
-            if row is None or row.current_target_key is None or row.phase != "APPROVING":
+            if row is None or row.current_target_key is None:
+                return Complete()
+            if row.phase == "NEEDS_ATTENTION":
+                project_legacy_approval_block(self.bots, row)
+                return Complete()
+            if row.phase != "APPROVING":
                 return Complete()
             workflow = json.loads(row.workflow_json)
             if workflow.get("approval_target_ready") is not True:
@@ -245,6 +255,9 @@ class RiskPendingHandler:
                 if (row.approval_puid and event.get("puid") == row.approval_puid
                         and event.get("decision") == "AGREE" and claim.get("block_reason") in BLOCK_NOTICE):
                     self.guard.finish(env, risk_id, row.approval_puid, "AGREE", False)
+                    blocked = self.repo.get(env=env, risk_check_id=risk_id)
+                    if blocked is not None:
+                        project_legacy_approval_block(self.bots, blocked)
                     return Complete()
                 workflow["error"] = "CALLBACK_OUTCOME_UNKNOWN"
                 self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
