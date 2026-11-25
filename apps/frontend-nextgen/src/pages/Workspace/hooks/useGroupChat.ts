@@ -2,21 +2,15 @@ import type { SessionView } from '@/domain/collaboration';
 import { collectParticipantBots } from '@/services/bcs/collabSenderBots';
 import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { chatBridge } from '@/services/workspace/chatBridge';
-import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, useChatBridge, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { BridgeInputRef, ChatMessage, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
-import { useCallback, useMemo, useRef, useState, type RefObject } from 'react';
+import { useMemo, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
-import {
-  buildActorEcho,
-  buildEchoAttachments,
-  buildGroupChatBridgeRequest,
-  buildGroupUserMessageExtra,
-} from './groupChatRequestBuilder';
+import { buildActorEcho, buildGroupChatBridgeRequest } from './groupChatRequestBuilder';
 import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
 import { useGroupChatDisplayStatus } from './useGroupChatDisplayStatus';
 import { useGroupChatHistorySync } from './useGroupChatHistorySync';
@@ -24,6 +18,7 @@ import { useGroupChatInteractions } from './useGroupChatInteractions';
 import { useGroupChatPanelCleanup } from './useGroupChatPanelCleanup';
 import { useGroupChatProvider } from './useGroupChatProvider';
 import { useGroupChatRunControl } from './useGroupChatRunControl';
+import { useGroupChatSendActions } from './useGroupChatSendActions';
 import { useCancelledGroupChatMessages } from './useCancelledGroupChatMessages';
 import { useProviderStateSubscriptions } from './useProviderStateSubscriptions';
 import { useSenderBotCdnSync } from './useSenderBotCdnSync';
@@ -139,27 +134,14 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
     mergePersistedHistory: true,
   });
 
-  const send = (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => {
-    const hasText = text.trim().length > 0;
-    const hasAttachments = !!attachments && attachments.length > 0;
-    // 输出中不阻塞发送：SDK 经 supportsConcurrentRequests 直发 provider.request，
-    // 消息进入后端投递队列依次消费（拥塞控制归属后端）。
-    if (!provider?.liveEnabled || !sessionId || (!hasText && !hasAttachments)) return;
-    const trimmed = text.trim();
-    // 本地回显附件：share_url 用于跨端/免鉴权分发，`<img>` 本地回显改走会话内容地址避免分享域名/CORS 加载失败。
-    // 与桥路径 buildGroupChatBridgeRequest 共用 buildEchoAttachments/buildGroupUserMessageExtra（O3 回显一致）。
-    const echoAttachments = buildEchoAttachments(sessionId, attachments);
-    chat.onRequest({
-      content: trimmed,
-      sessionId,
-      ...(mentions && mentions.length > 0 ? { mentions } : {}),
-      ...(attachments && attachments.length > 0 ? { attachments } : {}),
-      userMessage: {
-        content: trimmed,
-        extra: buildGroupUserMessageExtra(echoAttachments, buildActorEcho(activeIdentity)),
-      },
-    });
-  };
+  // 发送/副屏提交动作（send / submitPanelMessage / submitTaskExecutionMessage，
+  // 拆至 useGroupChatSendActions 控制 hook ≤250 行门禁，回显映射经同一构造器保持一致）。
+  const { send, submitPanelMessage, submitTaskExecutionMessage } = useGroupChatSendActions({
+    chat,
+    provider,
+    sessionId,
+    activeIdentity,
+  });
 
   const reconnect = async () => {
     if (!provider?.liveEnabled) return;
@@ -208,29 +190,6 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
       setIsLoadingMoreHistory(false);
     }
   };
-  const submitPanelMessage = useCallback(
-    (content: string) => {
-      if (sessionId && provider?.liveEnabled)
-        chat.onRequest(
-          buildGroupChatBridgeRequest(sessionId, content, { isInject: true }, buildActorEcho(activeIdentity)),
-        );
-    },
-    [activeIdentity, chat, sessionId, provider],
-  );
-  const submitTaskExecutionMessage = useCallback(
-    (content: string, holderId: string) => {
-      if (sessionId && provider?.liveEnabled)
-        chat.onRequest(
-          buildGroupChatBridgeRequest(
-            sessionId,
-            content,
-            { isInject: false, botUuid: holderId },
-            buildActorEcho(activeIdentity),
-          ),
-        );
-    },
-    [activeIdentity, chat, sessionId, provider],
-  );
   return {
     chat,
     panelRef,
