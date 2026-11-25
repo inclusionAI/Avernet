@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import re
 import time
-from functools import partial
 from typing import Any, Callable, Optional, cast
 
 from agentclaw.community.core.common_config.service import CommonConfigService
@@ -9,7 +9,6 @@ from agentclaw.community.core.bot_management.utils import (
     build_baas_restart_ext,
 )
 from agentclaw.community.core.devices.models import DeviceBindingStatus
-from agentclaw.community.core.devices.services.baas_restart_progress import log_restart_progress
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.baas_restart_support import (
     RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
@@ -429,11 +428,28 @@ class BaasRestartPublishPollHandler:
             if current_request_id != request_id:
                 return Complete()
 
-        log_progress = partial(
-            log_restart_progress, payload=payload, binding=binding,
-            bot_repository=self._bot_repository, clock=self._clock,
-            timeout_s=_RESTART_PUBLISH_TIMEOUT_SECONDS,
-        )
+        def log_progress(*, status: str, publish_id: int | None = None, bot: Any = None) -> None:
+            if bot is None and self._bot_repository is not None:
+                try:
+                    bot = self._bot_repository.get_by_binding_id(binding_id)
+                except Exception:
+                    bot = None  # Metadata must not interrupt workflow adoption.
+            engine = bot.get("active_engine") if isinstance(bot, dict) else None
+
+            def field(value: Any, default: str = "-") -> str:
+                if not isinstance(value, (str, int)):
+                    return default
+                return re.sub(r"[^\w.:@/+-]", "_", str(value))[:256] or default
+
+            logger.info(
+                "event=bot_restart_progress phase=publish_poll entry_point=baas.restart.publish_poll "
+                "bot_id=%s binding_id=%s publish_id=%s request_id=%s "
+                "engine_type=%s env=%s status=%s elapsed_s=%.3f timeout_s=%s",
+                field(bot_id), binding_id, field(publish_id), field(request_id),
+                field(engine, "unknown"), field(binding.env), field(status),
+                max(0.0, self._clock() - started_at_epoch_s), _RESTART_PUBLISH_TIMEOUT_SECONDS,
+            )
+
         if publish_id is None:
             publish_id = self._resolve_or_adopt_publish_id(
                 binding=binding,
