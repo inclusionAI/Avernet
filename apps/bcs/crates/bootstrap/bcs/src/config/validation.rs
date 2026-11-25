@@ -131,10 +131,8 @@ pub(super) fn validate_loaded_config_for_environment(
         if config.provider_http.bypass_headers.iter().any(|name| name.trim().eq_ignore_ascii_case(&test_user.header_name)) {
             return Err(crate::BcsError::InvalidConfig("A2A test user header conflicts with Provider bypass configuration".into()).into());
         }
-        let url = reqwest::Url::parse(&test_user.interface_url)
-            .map_err(|_| crate::BcsError::InvalidConfig("invalid a2a_test_user URL".into()))?;
-        if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
-            return Err(crate::BcsError::InvalidConfig("a2a_test_user requires an HTTPS interface URL".into()).into());
+        if !bcs_service_api::types::a2a_bot::http_interface_address_allowed(&test_user.interface_url) {
+            return Err(crate::BcsError::InvalidConfig("invalid a2a_test_user HTTP(S) interface URL".into()).into());
         }
     }
     validate_eventing_environment_policy(config, environment).map_err(|error| {

@@ -81,7 +81,7 @@ fn test_user_header(
     }
     let actual = reqwest::Url::parse(&interface.url).map_err(|_| denied())?;
     let expected = reqwest::Url::parse(&config.interface_url).map_err(|_| denied())?;
-    if actual != expected || actual.scheme() != "https" {
+    if actual != expected {
         return Err(denied());
     }
     let name = reqwest::header::HeaderName::from_bytes(config.header_name.as_bytes()).map_err(|_| denied())?;
@@ -116,11 +116,8 @@ impl A2aHttpTransport {
 
     pub fn with_test_user(mut self, config: A2aTestUserConfig) -> ServiceResult<Self> {
         config.validate().map_err(invalid)?;
-        let endpoint = reqwest::Url::parse(&config.interface_url).map_err(|_| invalid("invalid A2A test user URL"))?;
-        if endpoint.scheme() != "https" || !endpoint.username().is_empty() || endpoint.password().is_some()
-            || endpoint.fragment().is_some()
-        {
-            return Err(invalid("invalid A2A test user configuration"));
+        if !bcs_service_api::types::a2a_bot::http_interface_address_allowed(&config.interface_url) {
+            return Err(invalid("invalid A2A test user HTTP(S) interface URL"));
         }
         if self.inner.identity.is_none() {
             return Err(invalid("A2A test user requires application identity"));

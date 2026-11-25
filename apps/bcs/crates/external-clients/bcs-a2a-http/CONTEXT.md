@@ -205,10 +205,11 @@ mode. Anonymous HTTP/gRPC clients do not look up or transmit Provider credential
 Authentication errors never switch a run to anonymous or change its binding.
 
 Pre-release named chat can carry a request-scoped test `user_id`. The adapter
-checks the caller, stable target, full HTTPS endpoint, and JSON-RPC streaming
-binding. The initial Send uses a sensitive user header and requires application
-identity on a Card without a Bearer scheme. The user ID is kept in memory for
-the submission. Follow-up Task operations use the ordinary client.
+checks the caller, stable target, full configured HTTP or HTTPS endpoint, and
+JSON-RPC streaming binding. The outbound URL policy and redirect blocking apply
+to this request. The initial Send uses a sensitive user header and requires
+application identity on a Card without a Bearer scheme. The user ID is kept in
+memory for the submission. Follow-up Task operations use the ordinary client.
 
 For this scoped submission, `a2a.test_response` records HTTP status, media
 type, observed byte count and body state. Complete bodies up to 512 bytes,
