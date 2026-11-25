@@ -86,10 +86,7 @@ auto-resolved (marked FAILED) to unblock subsequent publish operations.
 class StageConfig(BaseModel):
     """Configuration for a single pipeline stage per D-01 extra_config spec."""
 
-    device_count: int = Field(
-        default=0, ge=0, description="Number of devices for this stage"
-    )
-    batch_capacity: int = Field(default=5, ge=1, description="Devices per batch")
+    batch_capacity: int = Field(default=100, ge=1, description="Devices per batch")
     cooldown_seconds: int = Field(
         default=0, ge=0, description="Seconds between batches"
     )
@@ -116,7 +113,7 @@ class PublishConfig(BaseModel):
         default=0, ge=0, le=3600, description="Max wait for session drain"
     )
     batch_capacity_default: int = Field(
-        default=5, ge=1, le=100, description="Default devices per batch"
+        default=100, ge=1, le=100, description="Default devices per batch"
     )
     auto_complete: bool = Field(
         default=True, description="Auto-complete publish when all batches succeed"
@@ -205,24 +202,22 @@ class PublishConfig(BaseModel):
             return {
                 "stages": {
                     "PREPUB": {
-                        "device_count": 2,
-                        "batch_capacity": 2,
+                        "batch_capacity": 100,
                         "cooldown_seconds": 0,
                         "pause_for_approval": True,
                     },
                     "GRAY": {
-                        "device_count": 4,
-                        "batch_capacity": 2,
+                        "batch_capacity": 100,
                         "cooldown_seconds": 0,
                         "pause_for_approval": True,
                     },
                     "PROD_FIRST_BATCH": {
-                        "batch_capacity": 5,
+                        "batch_capacity": 100,
                         "cooldown_seconds": 0,
                         "pause_for_approval": True,
                     },
                     "PROD_OTHER_BATCH": {
-                        "batch_capacity": 5,
+                        "batch_capacity": 100,
                         "cooldown_seconds": 0,
                         "pause_for_approval": False,
                     },
@@ -233,12 +228,12 @@ class PublishConfig(BaseModel):
             return {
                 "stages": {
                     "PROD_FIRST_BATCH": {
-                        "batch_capacity": 5,
+                        "batch_capacity": 100,
                         "cooldown_seconds": 0,
                         "pause_for_approval": True,
                     },
                     "PROD_OTHER_BATCH": {
-                        "batch_capacity": 5,
+                        "batch_capacity": 100,
                         "cooldown_seconds": 0,
                         "pause_for_approval": False,
                     },
@@ -481,6 +476,13 @@ class DeviceOperationResult(BaseModel):
     )
     publish_retry_count: int = Field(
         default=0, description="Retry attempts consumed so far for this device"
+    )
+    publish_manual_retry_count: int = Field(
+        default=0,
+        description=(
+            "Operator-authorized retry attempts consumed so far for this device "
+            "(independent of the automatic publish_max_retry_times budget)"
+        ),
     )
     gmt_create: datetime = Field(..., description="Operation timestamp")
 
