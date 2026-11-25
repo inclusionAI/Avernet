@@ -5,6 +5,7 @@ import {
   toggleExclude,
   type ExcludeCheckState,
 } from '@/services/botWorkshop/excludeTree';
+import { buildProtectedNames, isProtectedPath } from '@/services/botWorkshop/protectedPaths';
 import { buildVisibleResourceTree } from '@/services/botWorkshop/resourceTree';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -23,6 +24,8 @@ export interface UseExcludeFileTreeResult {
   collapse: (path: string) => void;
   toggle: (path: string, type: 'file' | 'folder') => void;
   checkState: (path: string, type: 'file' | 'folder') => ExcludeCheckState;
+  /** 受保护(系统级、不可排除)路径判定;命中祖先目录同样视为受保护。 */
+  isProtected: (path: string) => boolean;
 }
 
 /**
@@ -37,6 +40,7 @@ export interface UseExcludeFileTreeResult {
 export function useExcludeFileTree(
   sourceBotId: string | undefined,
   sourceOwnerId?: string,
+  engineType?: string,
 ): UseExcludeFileTreeResult {
   const [resources, setResources] = useState<BotEditorResource[]>([]);
   const [expanded, setExpanded] = useState<string[]>([]);
@@ -112,11 +116,21 @@ export function useExcludeFileTree(
     setExpanded((current) => current.filter((item) => item !== path));
   }, []);
 
+  /** 受保护名集合:共享系统目录 + 当前引擎系统 md(名单对齐老前端「发布文件排除」)。 */
+  const protectedNames = useMemo(() => buildProtectedNames(engineType), [engineType]);
+
+  const isProtected = useCallback(
+    (path: string) => isProtectedPath(path, protectedNames),
+    [protectedNames],
+  );
+
   const toggle = useCallback(
     (path: string, type: 'file' | 'folder') => {
+      // 受保护路径(系统必需目录 / 文件)禁止勾选为排除。
+      if (isProtectedPath(path, protectedNames)) return;
       setExcluded((current) => toggleExclude(resources, current, path, type));
     },
-    [resources],
+    [resources, protectedNames],
   );
 
   const checkState = useCallback(
@@ -141,5 +155,6 @@ export function useExcludeFileTree(
     collapse,
     toggle,
     checkState,
+    isProtected,
   };
 }
