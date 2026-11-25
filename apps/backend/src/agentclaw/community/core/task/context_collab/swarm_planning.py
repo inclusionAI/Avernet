@@ -38,6 +38,7 @@ class StageAssignment:
 @dataclass(frozen=True)
 class PlanningDecision:
     # None means an existing plan is being reconciled, not a missing initial plan.
+
     candidate: SwarmPlanCandidateCommand | None = None
     assignment: StageAssignment | None = None
     finished: bool = False
