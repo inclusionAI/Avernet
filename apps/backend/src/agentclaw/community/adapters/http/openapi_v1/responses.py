@@ -995,10 +995,6 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
                 request,
                 code=ENVELOPE_ERROR_CODES.get(error_type),
                 data=error_data(exc),
-                headers=(
-                    {"Retry-After": "3"}
-                    if isinstance(exc, EngineCallerRuntimePreparingError)
-                    else None
-                ),
+                headers={"Retry-After": "3"} if isinstance(exc, EngineCallerRuntimePreparingError) else None,
             )
     return None
