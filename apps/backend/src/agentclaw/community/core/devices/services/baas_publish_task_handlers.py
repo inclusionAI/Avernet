@@ -496,6 +496,12 @@ class BaasRestartPublishPollHandler:
         bot = None
         if self._bot_repository is not None:
             bot = self._bot_repository.get_by_binding_id(binding_id)
+        logger.info(
+            "[BaasRestartPublishPollHandler] restart progress: bot_id=%r engine_type=%r "
+            "binding_id=%s publish_id=%s request_id=%r env=%r elapsed_s=%.3f",
+            bot_id, (bot or {}).get("active_engine"), binding_id, publish_id,
+            request_id, binding.env, self._clock() - started_at_epoch_s,
+        )
         if _business_timed_out(
             started_at_epoch_s=started_at_epoch_s,
             timeout_s=_RESTART_PUBLISH_TIMEOUT_SECONDS,
