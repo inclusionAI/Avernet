@@ -10,6 +10,16 @@ legacy owner/entity lookup; service-source mismatches fail closed.
 
 Service-bot domain — bot publication facade, BAAS service binding, sub-resource management.
 
+## Container-list request scheduling
+
+`GET /openapi/v1/bots/{bot_id}/containers` awaits the synchronous publication
+facade in Starlette's bounded worker pool. Authorization, database reads and
+provider health checks run together off the event loop; the response still waits
+for the completed snapshot and retains its existing schema and error mapping.
+Slow health checks no longer block the event loop, but provider latency and
+worker-pool saturation can still delay this request. No retry, cache, timeout
+change or fire-and-forget task is introduced; container restart is unchanged.
+
 ## Online retry and restart recovery
 
 Online publication retry and restart share the same candidate decision and
