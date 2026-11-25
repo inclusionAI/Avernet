@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from functools import partial
 from typing import Any, Callable, Optional, cast
 
 from agentclaw.community.core.common_config.service import CommonConfigService
@@ -8,6 +9,7 @@ from agentclaw.community.core.bot_management.utils import (
     build_baas_restart_ext,
 )
 from agentclaw.community.core.devices.models import DeviceBindingStatus
+from agentclaw.community.core.devices.services.baas_restart_progress import log_restart_progress
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.baas_restart_support import (
     RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
@@ -427,6 +429,11 @@ class BaasRestartPublishPollHandler:
             if current_request_id != request_id:
                 return Complete()
 
+        log_progress = partial(
+            log_restart_progress, payload=payload, binding=binding,
+            bot_repository=self._bot_repository, clock=self._clock,
+            timeout_s=_RESTART_PUBLISH_TIMEOUT_SECONDS,
+        )
         if publish_id is None:
             publish_id = self._resolve_or_adopt_publish_id(
                 binding=binding,
@@ -452,6 +459,7 @@ class BaasRestartPublishPollHandler:
                     request_id=request_id,
                 ):
                     return Retry("BaaS restart intent clear CAS conflict")
+                log_progress(status="FAILED")
                 return publish_id
             if isinstance(publish_id, (Complete, Reschedule, Retry)):
                 if _business_timed_out(
@@ -475,7 +483,10 @@ class BaasRestartPublishPollHandler:
                         request_id=request_id,
                     ):
                         return Retry("BaaS restart intent clear CAS conflict")
+                    log_progress(status="TIMED_OUT")
                     return Complete()
+                if isinstance(publish_id, (Reschedule, Retry)):
+                    log_progress(status="ADOPTING")
                 return publish_id
 
         image_policy_on_success = resolve_restart_image_policy(
@@ -520,11 +531,14 @@ class BaasRestartPublishPollHandler:
                 request_id=request_id,
             ):
                 return Retry("BaaS restart intent clear CAS conflict")
+            log_progress(status="TIMED_OUT", publish_id=publish_id, bot=bot)
             return Complete()
         if self._baas_device_service is None:
+            log_progress(status="RETRYING", publish_id=publish_id, bot=bot)
             return Retry("restart publish status service unavailable")
 
         status = self._baas_device_service.poll_publish_once(publish_id=publish_id)
+        log_progress(status=status or "RETRYING", publish_id=publish_id, bot=bot)
         if status is None:
             return Retry(_PUBLISH_PROGRESS_TRANSIENT_ERROR)
         if status == DeviceBindingStatus.PENDING.value:

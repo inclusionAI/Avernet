@@ -131,3 +131,42 @@ the Bot before querying Passport with that immutable entity, including when the
 compatibility request names the current Owner. Only unlinked historical bindings
 retain standalone entity ownership; a linked Bot's former Owner gains no grant
 from the retained binding identity.
+
+## BaaS restart progress telemetry
+
+`BaasRestartPublishPollHandler` emits one allowlisted INFO event for each
+observed result or retry of the current ordinary-Bot restart. The event answers
+which Bot/engine is still waiting and how long this publish attempt has waited.
+It does not change task scheduling, the 1,800-second failure deadline or Bot state.
+
+```text
+event=bot_restart_progress phase=publish_poll entry_point=baas.restart.publish_poll bot_id=example-bot binding_id=42 publish_id=1001 request_id=example-request engine_type=claude_code env=pre status=PENDING elapsed_s=601.000 timeout_s=1800
+```
+
+The identifiers above are illustrative, not production evidence.
+
+- Correlate `bot_id`, `binding_id`, `request_id` and `publish_id`; `publish_id=-`
+  means the current accepted intent is still adopting its provider workflow.
+- `engine_type` comes from the current Bot's `active_engine`; absent metadata is
+  explicitly `unknown`, never silently classified as OpenClaw. Normal polling
+  reuses its existing Bot read. Workflow adoption uses one best-effort metadata
+  read; a failure does not interrupt recovery or print the exception body.
+- `elapsed_s` uses the task's persisted `started_at_epoch_s` and the existing
+  clock, clamped at zero for clock skew. The ordinary coding submission creates
+  this timestamp after its pre-restart backup/preparation, so backup is not
+  included. It is not the age of the Bot or the 24-hour queue retention period.
+- `status` is the publish-poll observation: `ADOPTING`, `PENDING`, `RETRYING`,
+  `ACTIVE`, `FAILED` or `TIMED_OUT`. `ACTIVE` here means provider publish success,
+  not proof that the engine is ready. Continue to use the readiness contract.
+  Superseded requests and uncommitted intents emit no progress event.
+- To detect a slow in-flight publish, filter `phase=publish_poll`, group by the
+  current Bot/request and select `ADOPTING`, `PENDING` or `RETRYING` with
+  `elapsed_s > 600`. Do not add another ten-minute continuous-trigger window.
+  Terminal observations are separate; absence of new events is not proof of
+  recovery because the poll worker or log delivery could also have stopped.
+
+Correlation values are single-line, field-injection-safe and bounded. The event
+never serializes Bot config, credentials, request payloads or provider responses.
+The logger emits at the existing task cadence (normally ten seconds for provider
+polling); it has no new timer, state table or monitoring side effect. Actual alert
+routing and delivery must be verified separately after deployment.
