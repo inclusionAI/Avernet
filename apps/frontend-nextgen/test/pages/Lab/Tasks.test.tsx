@@ -503,7 +503,7 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
   });
 });
 
-describe('lab title-only search compatibility', () => {
+describe('Lab server-side task search', () => {
   const record = {
     ...listItem,
     task_id: 'unique-task-id',
@@ -517,70 +517,36 @@ describe('lab title-only search compatibility', () => {
       goal: listItem.task_spec.goal,
     },
   };
-  const filter = (keyword: string, titleOnly = true) =>
-    filterUserTaskRecords({
-      taskRecords: [record],
-      keyword,
-      titleOnly,
-      ownerBotFilter: 'all',
-      ownerBotOptions: [],
-    });
 
-  it('matches the displayed title case-insensitively with trimmed input', () => {
-    expect(filter('  primary title  ')).toEqual([record]);
-    expect(filter('old metadata')).toEqual([]);
-  });
-
-  it.each(['unique-task-id', 'unique-owner-bot', 'api'])('does not match non-title %s in lab', (keyword) => {
-    expect(filter(keyword)).toEqual([]);
-    expect(filter(keyword, false)).toEqual([record]);
-  });
-
-  it('retains the original broad matching by default', () => {
-    expect(
+  it('keeps the Lab Owner Bot filter local', () => {
+    const filter = (ownerBotFilter: string) =>
       filterUserTaskRecords({
         taskRecords: [record],
-        keyword: 'unique-owner-bot',
-        ownerBotFilter: 'all',
-        ownerBotOptions: [],
-      }),
-    ).toEqual([record]);
+        ownerBotFilter,
+        ownerBotOptions: [
+          { value: 'unique-owner-bot', label: 'Owner', aliases: ['unique-owner-bot'] },
+        ],
+      });
+
+    expect(filter('all')).toEqual([record]);
+    expect(filter('unique-owner-bot')).toEqual([record]);
+    expect(filter('another-bot')).toEqual([]);
   });
 
-  it('preserves displayed title fallback and Owner Bot intersection', () => {
-    const metadataRecord = {
-      ...record,
-      task_spec: {
-        ...record.task_spec,
-        context: { ...record.task_spec.context, title: '' },
-        metadata: { title: 'Metadata title' },
-      },
-    };
-    const idFallbackRecord = {
-      ...metadataRecord,
-      task_spec: { ...metadataRecord.task_spec, metadata: { title: '' } },
-    };
-    const filtered = (
-      item: typeof record | typeof metadataRecord | typeof idFallbackRecord,
-      keyword: string,
-      ownerBotFilter = 'all',
-    ) => filterUserTaskRecords({ taskRecords: [item], keyword, titleOnly: true, ownerBotFilter, ownerBotOptions: [] });
-    expect(filtered(metadataRecord, 'metadata')).toEqual([metadataRecord]);
-    expect(filtered(idFallbackRecord, 'unique-task-id')).toEqual([idFallbackRecord]);
-    expect(filtered(record, 'primary', 'another-bot')).toEqual([]);
-    expect(filtered(record, 'primary', 'unique-owner-bot')).toEqual([record]);
-  });
-
-  it('wires title-only matching into the lab page without changing the query scope', async () => {
+  it('sends the keyword to the task list API instead of filtering the loaded page locally', async () => {
     mockListMyTasks.mockResolvedValue({ code: 0, message: 'ok', data: [record], request_id: 'r' });
     render(<LabTasksPage />);
     await screen.findByText('Primary TITLE');
-    const input = screen.getByPlaceholderText('搜索任务标题');
-    fireEvent.change(input, { target: { value: 'unique-owner-bot' } });
-    expect(screen.queryByText('Primary TITLE')).not.toBeInTheDocument();
-    expect(screen.getByText('暂无符合条件的用户任务')).toBeInTheDocument();
-    fireEvent.change(input, { target: { value: '  PRIMARY  ' } });
-    expect(screen.getByText('Primary TITLE')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('搜索任务标题'), {
+      target: { value: 'unique-owner-bot' },
+    });
+
+    await waitFor(() => {
+      const searchCalls = mockListMyTasks.mock.calls.filter(([params]) =>
+        Boolean(params && params.keyword === 'unique-owner-bot'),
+      );
+      expect(searchCalls).toHaveLength(1);
+    });
   });
 });
 
@@ -606,6 +572,8 @@ describe('UserTaskTab default timestamp compatibility', () => {
       loading: false,
       error: null,
       statusFilter: 'all',
+      keyword: '',
+      onKeywordChange: jest.fn(),
       selectedTaskId: null,
       botNameMap: { 'b-9': '调研助手' },
       ownerBotUserIdMap: {},
