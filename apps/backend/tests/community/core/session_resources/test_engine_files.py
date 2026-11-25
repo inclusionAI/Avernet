@@ -10,7 +10,7 @@ from agentclaw.community.core.engine_runtime.errors import EngineDeviceNotReadyE
 from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError, UnknownProviderError
 from agentclaw.community.core.runtime_binding.errors import RuntimeBindingNotFoundError
 from agentclaw.community.core.resources.service import FileTooLargeError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingSource, RuntimeBindingTarget
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingSource
 from agentclaw.community.core.session_resources.engine_files import EngineSessionFilesService
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError, DeviceAdapterHTTPStatusError,
@@ -21,7 +21,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 @pytest.fixture
 def setup():
     bindings = Mock()
-    bindings.resolve.return_value = SimpleNamespace(binding_id=73)
+    bindings.resolve_session_file.return_value = SimpleNamespace(binding_id=73, source=RuntimeBindingSource.PERSONAL)
     resolver = Mock()
     resolver.resolve_for_binding.return_value = SimpleNamespace(
         conn_info={"headers": {"Authorization": "private-test-credential"}},
@@ -47,7 +47,7 @@ async def test_list_uses_selected_engine_and_projects_safe_view(setup, caplog):
     assert files == [{"resource_id": "sr_local", "display_name": "report.txt",
                       "status": "ready", "size_bytes": 7,
                       "creator_type": None, "creator_name": None, "created_at": None}]
-    bindings.resolve.assert_called_once_with(target)
+    bindings.resolve_session_file.assert_called_once_with(target, session_user_id=None)
     resolver.resolve_for_binding.assert_called_once_with(73, "actor", bot_id="bot")
     assert transport.invoke.await_args.args[1:] == ("GET", "/api/session-files")
     assert transport.invoke.await_args.kwargs["params"] == {"sessionKey": "session:one"}
@@ -182,7 +182,7 @@ async def test_content_rejects_invalid_disposition_before_transport(setup):
 @pytest.mark.asyncio
 async def test_resolution_failure_never_contacts_engine(setup, caplog):
     service, target, bindings, _, transport = setup
-    bindings.resolve.side_effect = ValueError("private-test-credential")
+    bindings.resolve_session_file.side_effect = ValueError("private-test-credential")
     with caplog.at_level("INFO"), pytest.raises(EngineUpstreamError):
         await service.open_content(target, "s", "sr_local", "inline")
     transport.stream.assert_not_awaited()
@@ -207,7 +207,7 @@ async def test_stream_transport_404_maps_to_resource_error(setup):
 async def test_unavailable_binding_is_not_a_file_404(setup, failure, expected, caplog):
     service, target, bindings, resolver, transport = setup
     if isinstance(failure, RuntimeBindingNotFoundError):
-        bindings.resolve.side_effect = failure
+        bindings.resolve_session_file.side_effect = failure
     else:
         resolver.resolve_for_binding.side_effect = failure
     with caplog.at_level("INFO"), pytest.raises(expected):
@@ -225,7 +225,7 @@ async def test_shared_runtime_keeps_reader_identity_for_friend_subject(setup, bo
     service._bots.get_by_id_and_owner.return_value = {"bot_type": bot_type, "call_type": "owner"}
     transport.invoke.return_value = {"files": []}
     assert await service.list_files(target, "s", session_user_id="friend") == []
-    bindings.resolve.assert_called_once_with(target)
+    bindings.resolve_session_file.assert_called_once_with(target, session_user_id="friend")
     resolver.resolve_for_binding.assert_called_once_with(73, "owner", bot_id="bot")
 
 
@@ -234,7 +234,7 @@ async def test_only_owner_can_select_another_session_subject(setup):
     service, target, bindings, _, transport = setup
     with pytest.raises(EngineResourceNotFoundError):
         await service.list_files(target, "s", session_user_id="friend")
-    bindings.resolve.assert_not_called()
+    bindings.resolve_session_file.assert_not_called()
     transport.invoke.assert_not_awaited()
 
 
@@ -244,24 +244,27 @@ async def test_missing_bot_does_not_select_subject_binding(setup):
     service._bots.get_by_id_and_owner.return_value = None
     with pytest.raises(EngineResourceNotFoundError):
         await service.list_files(RuntimeBindingRequest("bot", "owner", "owner"), "s", session_user_id="friend")
-    bindings.resolve.assert_not_called()
+    bindings.resolve_session_file.assert_not_called()
     transport.invoke.assert_not_awaited()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["list", "inline", "attachment", "delete"])
 @pytest.mark.parametrize("source", [RuntimeBindingSource.SERVICE_ONLINE, RuntimeBindingSource.CALLER_INSTANCE])
-async def test_friend_target_confirms_authorized_binding(setup, source):
+@pytest.mark.parametrize("actor", ["owner", "friend"])
+async def test_friend_operations_use_resolved_source_for_connection_identity(setup, source, operation, actor):
     service, _, bindings, resolver, transport = setup
-    target = RuntimeBindingRequest("bot", "owner", "owner", "online", target=RuntimeBindingTarget.CALLER_INSTANCE)
-    is_caller = source is RuntimeBindingSource.CALLER_INSTANCE
-    service._bots.get_by_id_and_owner.return_value = {"bot_type": "service", "call_type": "caller" if is_caller else "owner"}
-    bindings.resolve.return_value = SimpleNamespace(binding_id=73, source=source)
-    transport.invoke.return_value = {"files": []}
-    if is_caller:
-        assert await service.list_files(target, "s", session_user_id="friend") == []
-        resolver.resolve_for_binding.assert_called_once_with(73, "friend", bot_id="bot")
+    target = RuntimeBindingRequest("bot", "owner", actor, "online")
+    bindings.resolve_session_file.return_value = SimpleNamespace(binding_id=73, source=source)
+    transport.invoke.return_value = {"files": [], "deleted": True, "resource_id": "sr_local"}
+    transport.stream.return_value = DeviceAdapterStreamResponse(200, {}, _body(), AsyncMock())
+    if operation == "list":
+        await service.list_files(target, "s", session_user_id="friend")
+    elif operation == "delete":
+        await service.delete_file(target, "s", "sr_local", session_user_id="friend")
     else:
-        with pytest.raises(EngineResourceNotFoundError):
-            await service.list_files(target, "s", session_user_id="friend")
-        resolver.resolve_for_binding.assert_not_called()
-        transport.invoke.assert_not_awaited()
+        await service.open_content(target, "s", "sr_local", operation, session_user_id="friend")
+    bindings.resolve_session_file.assert_called_once_with(target, session_user_id="friend")
+    bindings.resolve.assert_not_called()
+    identity = "friend" if source is RuntimeBindingSource.CALLER_INSTANCE else actor
+    resolver.resolve_for_binding.assert_called_once_with(73, identity, bot_id="bot")

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from dataclasses import replace
 from typing import Any
 from urllib.parse import quote
 
@@ -18,7 +17,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineRuntimeError,
 )
 from agentclaw.community.core.resources.service import FileTooLargeError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingSource, RuntimeBindingTarget
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingSource
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.runtime_binding.errors import RuntimeBindingResolutionError
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
@@ -49,10 +48,6 @@ class EngineSessionFilesService:
     def _connection(
         self, target: RuntimeBindingRequest, session_user_id: str | None = None,
     ) -> dict[str, Any]:
-        # On the friend surface the selector can confirm the authorized runtime only.
-        confirm_caller = session_user_id is not None and target.target is RuntimeBindingTarget.CALLER_INSTANCE
-        if confirm_caller:
-            target = replace(target, target=RuntimeBindingTarget.AUTO)
         if session_user_id is not None and session_user_id != target.actor_user_id:
             # COSEC: only an authorized owner may address another session subject.
             if target.actor_user_id != target.owner_id:
@@ -60,14 +55,14 @@ class EngineSessionFilesService:
             bot = self._bots.get_by_id_and_owner(target.bot_id, target.owner_id)
             if not bot:
                 raise EngineResourceNotFoundError("session file bot not found")
-            if bot.get("bot_type") == "service" and bot.get("call_type") == "caller":
-                target = replace(target, actor_user_id=session_user_id, target=RuntimeBindingTarget.CALLER_INSTANCE)
         try:
-            binding = self._bindings.resolve(target)
-            if confirm_caller and binding.source is not RuntimeBindingSource.CALLER_INSTANCE:
-                raise EngineResourceNotFoundError("caller runtime is unavailable for friend chat")
+            binding = self._bindings.resolve_session_file(target, session_user_id=session_user_id)
+            connection_user_id = (
+                session_user_id if binding.source is RuntimeBindingSource.CALLER_INSTANCE
+                else target.actor_user_id
+            )
             return self._resolver.resolve_for_binding(
-                binding.binding_id, target.actor_user_id, bot_id=target.bot_id,
+                binding.binding_id, connection_user_id, bot_id=target.bot_id,
             ).conn_info
         except (RuntimeBindingResolutionError, ConnInfoBuildError, DeviceNotBoundError):
             raise EngineDeviceNotReadyError("session file binding unavailable") from None
@@ -217,5 +212,8 @@ class EngineSessionFilesService:
 
     async def delete_file(
         self, target: RuntimeBindingRequest, session_key: str, resource_id: str,
+        *, session_user_id: str | None = None,
     ) -> None:
-        await self._invoke(target, session_key, "DELETE", self._path(resource_id))
+        await self._invoke(
+            target, session_key, "DELETE", self._path(resource_id), session_user_id=session_user_id,
+        )
