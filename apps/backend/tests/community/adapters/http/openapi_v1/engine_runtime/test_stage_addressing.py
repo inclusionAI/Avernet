@@ -411,6 +411,9 @@ def test_the_connection_build_receives_the_named_stage(relay):
     from agentclaw.community.api.engine_connection_service import (
         EngineConnectionServiceProtocol,
     )
+    from agentclaw.community.api.engine_runtime_service import (
+        EngineRuntimeRelayProtocol,
+    )
     from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
     from agentclaw.community.api.human_bot_friendship_service import (
         HumanBotFriendshipServiceProtocol,
@@ -426,6 +429,7 @@ def test_the_connection_build_receives_the_named_stage(relay):
     class _M(Module):
         def configure(self, binder):
             binder.bind(EngineConnectionServiceProtocol, to=connections)
+            binder.bind(EngineRuntimeRelayProtocol, to=relay)
             binder.bind(HumanBotFriendshipServiceProtocol, to=FakeFriendships())
             binder.bind(ExpertChatServiceProtocol, to=FakeExpertChat())
 
