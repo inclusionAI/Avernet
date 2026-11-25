@@ -8,30 +8,32 @@
 
 **Tech Stack:** Rust (axum, async-trait defaulted methods), Python FastAPI (`StrEnum` event catalog), React 18 + Jest (frontend-nextgen house style). No migrations, no config flags.
 
-**Spec:** [2026-11-24-bot-friend-roster-design.md](2026-11-24-bot-friend-roster-design.md) (decisions D1–D8; the plan argues from it).
+**Spec:** [design.md](design.md) (decisions D1–D8; the plan argues from it). Both documents live in `docs/specs/2026-11-24-bot-friend-roster/` per `CONTEXT-MAP.md` (cross-module scope).
 
 ## Global Constraints
 
 - Work item: 2026112400120934898. Branch/lifecycle (commit, push, PR) is owned by the dispatching pipeline task, not by this plan — no `git` mutation steps appear below.
 - **Deploy order:** Backend catalog (Task 6) must land before or together with the BCS notification change (Tasks 1–4); BCS-first loses notices with only a WARN trail (Backend intake 422s unregistered event types). The frontend (Tasks 7–9) can ship either side.
-- Wait for requester answers to design D8 CF-1…CF-4 before starting Tasks 7–8 (frontend hook/UI copy/scope). Tests encode the defaults: section renders for external Bots too (CF-1), removal is Owner-only (CF-2), proposed notification copy (CF-3), proposed counts labels (CF-4). API/backend tasks (1–6) are not gated.
+- **Confirmation gates are per-task, not global.** CF-2 decides the authorization model and therefore blocks Task 2 and Task 5 (Owner-only vs `can_manage`). CF-3 decides notification copy and therefore blocks Tasks 3, 4 and 6. CF-1 (external-Bots scope) and CF-4 (counts labels) block Tasks 7–9. CF-5 (may a removed party re-request) re-opens overall scope when vetoed, so **all implementation tasks are gated on CF-5**. Only Task 1 (contract surface; no behavior tied to a CF) may proceed before answers. Tests still encode the proposed defaults so a later flip is a visible diff.
 - Every existing contract stays byte-compatible: new query params on DELETE are optional, GET untouched. Legacy surfaces (`apps/frontend`, `bcs-http` friend routes, legacy list facade) untouched.
 - Authorization rules: list keeps live `can_manage` act-as; removal with `actor` requires live `require_owner`; never historical `created_by`.
 - Notification is best-effort (WARN + continue) and only emitted when at least one edge was actually revoked (D5); self-removal (no `actor`) stays silent.
 - Source files stay ≤ 1,000 lines: `connect.rs` is at 909 — removal+notify goes in `connect/lifecycle.rs` (764); `bcs-app-invitation/src/lib.rs` is at 962 — new application code goes in a new module file (`friend_roster.rs`) with a `mod` + delegation from `lib.rs`.
-- No `cargo fmt` / global formatting; only touched lines change. No `cargo clean`; build via `.cargo/config.toml` target-dir (`/tmp/cargo/Avernet-target`); `df -h /tmp` before heavy runs; focused `cargo test -p <pkg> --test <name>` only until the final sweep.
+- No `cargo fmt` / global formatting; only touched lines change. No `cargo clean`. Run cargo from `apps/bcs` (or `--manifest-path apps/bcs/Cargo.toml`); the repository ships no `.cargo/config.toml`, so set `CARGO_TARGET_DIR=/tmp/cargo/Avernet-target` explicitly. `df -h /tmp` before heavy runs; focused `cargo test -p <pkg> --test <name>` only until the final sweep.
 - Do not add routes/endpoints outside the listed files; all new user-visible copy is Chinese, matching dialog style.
 
 ## Review Focus
 
 1. Partial actor params (`actor_type` without `actor_id`, or an unknown `actor_type` variant) → 400 `invalid_request`, never silently ignored (Task 5).
 2. Manager (has `can_manage`, is not owner) calling removal with `actor` → 403, while the same caller *listing* friends succeeds (Tasks 2, 5) — the two paths intentionally differ.
-3. Double-clicking remove / removing an already-removed friend → `deleted: false`, **no** notification emitted (Task 3).
+3. Double-clicking remove / removing an already-removed friend → `deleted: false`, **no** notification emitted (Task 3); two genuinely concurrent removals → exactly one transition and one notice (atomic conditional revoke, Task 3).
 4. Work-order intake down (or event types not yet registered) at removal time → removal still succeeds, WARN logged with recipient ids (Task 3); no retry loop.
 5. A friend whose details do not resolve (deleted/unregistered actor) → row renders the raw id and stays removable (Tasks 7–8); dangling edges are never silently dropped.
 6. Friend Bot whose Owner cannot be resolved (`ownership` empty + no `created_by`) → the bot-friend notice is skipped with WARN; the human-friend path is unaffected (Task 3).
 7. 免审批 auto-approved friend (`friend_check_in_strategy=open`) appears in the list and is removable via the new path (Task 5 integration coverage).
 8. `keyword` search matches display name *and* raw actor id, case-insensitive, and only filters the active tab (Task 7).
+9. A type with >2,000 friends (>20 pages) is fetched completely — no cap — and a friend on the last page is listed and searchable (Task 7 regression).
+10. The removal notice's `applicant_actor_id` is the removed actor in both directions (human target → `first`, bot target → `second`), and the adapter payload maps to `HUMAN2BOT_FRIEND_REMOVED` / `BOT2BOT_FRIEND_REMOVED` respectively (Task 3 end-to-end payload assertion).
 
 ## Tasks
 
@@ -41,17 +43,21 @@
 - Modify: `crates/service-api/bcs-service-api/src/application/v1/friend_connection.rs` (`DeleteFriendConnection` `:162`)
 - Modify: `crates/service-api/bcs-service-api/src/application/connect.rs` (`ConnectService` `:60`)
 - Modify: `crates/service-api/bcs-service-api/src/port/friend_connect_notification.rs` (`FriendConnectNotificationKind` `:8`)
+- Modify: `crates/service-api/bcs-service-api/src/port/repo/edge_grant.rs` (add defaulted `revoke_grant_if_active`, see Interfaces)
+- Modify: `crates/service-api/bcs-service-api/CONTEXT.md` (record the Rust Service API version bump and the source-compatibility note)
 
 **Interfaces:**
 - Produces:
   - `DeleteFriendConnection` gains `pub actor: Option<FriendConnectionActor>` (doc: absent = caller-side self-removal, present = managed-Bot removal; the transport layer validates both-or-none).
   - `FriendConnectNotificationKind` gains `RemovedByOwner` (doc: emitted only from `revoke_friend_as_owner` after a non-empty revoke; best-effort).
   - `ConnectService` gains the defaulted method from design D4 (exact signature): `async fn revoke_friend_as_owner(&self, first: &str, second: &str, request_auth: Option<RequestAuthHeaders>) -> ServiceResult<Vec<u64>>` with default body `self.revoke_friend(first, second, request_auth).await`.
+  - `EdgeGrantRepoPort` gains a **defaulted** `async fn revoke_grant_if_active(&self, edge_id: u64, env: &str) -> ServiceResult<bool>` whose default calls `revoke_grant` and returns `Ok(true)` (keeps external implementors compiling; the durable store overrides it with `UPDATE … WHERE edge_id=? AND status='approved'` and returns `rows_affected > 0`).
+  - **Rust Service API versioning:** adding a field to `DeleteFriendConnection` and a variant to `FriendConnectNotificationKind` is source-incompatible for Rust consumers (struct literals / exhaustive matches), even though the HTTP wire stays compatible. Bump `bcs-service-api` per its `CONTEXT.md` major-version rule, update that CONTEXT, fix every in-workspace constructor/`match`, and prove it with a workspace-wide `cargo check`. The compatibility promise in this plan is **HTTP-level only**.
 
 - [ ] **Step 1: Write failing tests** in `application/v1/friend_connection.rs` (or its test module): serde round-trip of `FriendConnectionActor` unchanged; struct literal with `actor: None` compiles (existing tests become the regression).
 - [ ] **Step 2: Run RED:** `cargo test -p bcs-service-api --lib` — fails on missing field/variant/method.
 - [ ] **Step 3: Implement** the three additions exactly as above.
-- [ ] **Step 4: Run GREEN** + `cargo check -p bcs-test-support -p bcs-edge-permission -p bcs-app-invitation -p bcs-app-bot` proving every existing `ConnectService` implementation compiles unedited against the defaulted method.
+- [ ] **Step 4: Run GREEN** + `cargo check --workspace` (run from `apps/bcs`) proving every existing `ConnectService`/`EdgeGrantRepoPort` implementation compiles against the defaulted methods and every struct literal/`match` now covers the new field/variant.
 
 ### Task 2: V1 application service — authorized owner removal
 
@@ -75,16 +81,32 @@
 ### Task 3: Durable removal + RemovedByOwner notification
 
 **Files:**
-- Modify: `crates/services/bcs-edge-permission/src/connect/lifecycle.rs` (override `revoke_friend_as_owner`; reuse `revoke_friend`; reuse `emit_friend_connect_notification` / `target_notification_recipients` from `connect.rs`)
+- Modify: `crates/services/bcs-edge-permission/src/connect/lifecycle.rs` (override `revoke_friend_as_owner`; atomic revoke loop; reuse `emit_friend_connect_notification` / `target_notification_recipients` from `connect.rs`)
+- Modify: `crates/services/bcs-edge-permission-store/src/edge_grants.rs` and `crates/services/bcs-edge-permission-store/src/memory.rs` (override `revoke_grant_if_active` with a conditional update / conditional in-memory transition returning whether this call performed the transition)
+- Modify: `crates/test-support/bcs-test-support/src/edge_permission_noop.rs` and other test stubs only if they need behavior beyond the trait default
 - Modify: `crates/services/bcs-edge-permission/src/connect.rs` only if the notify helper needs a visibility tweak (keep the file ≤1,000 lines)
 - Modify: `crates/services/bcs-edge-permission/src/tests/notifications.rs` and `crates/services/bcs-edge-permission/src/tests/connect_lifecycle.rs` (fixtures: `assemble()`, `seed_bot`, `RecordingFriendConnectNotificationPort`, `service_with_notification`)
 
 **Interfaces:**
 - Consumes: Task 1 defaulted trait; existing `revoke_friend`, `target_notification_recipients`, `resolve_actor_display_name`, fake `FriendConnectNotificationPort` in tests.
 - Produces: `DbConnectService::revoke_friend_as_owner(first, second, request_auth)` —
-  call `revoke_friend(first, second, request_auth)`; empty result → return without notifying (Review Focus #3); otherwise recipients: `first` human → `[<staff_no>]` (`strip_prefix("human_")`); both bots → `target_notification_recipients(second)` (the removed friend's Owner, Review Focus #6); `target_bot_id` = `second` when `first` is human, else `first` (the managed bot). Notify with `kind=RemovedByOwner`, `applicant_actor_id=second` (removed actor), display names via `resolve_actor_display_name`, `request_ids` = revoked edge ids stringified, `request_auth` forwarded; notification errors WARN + `Ok(revoked)` (Review Focus #4).
+  perform the same edge selection as `revoke_friend`, but revoke each candidate through
+  `edge_grants.revoke_grant_if_active(edge_id, env)` and collect only edges whose call
+  returned `true` (this is what makes concurrent removals safe); empty result →
+  return without notifying (Review Focus #3/#10). For a non-empty transition set:
+  - **human friend** (`first = human_<staff>`, `second = <bot>`): `applicant_actor_id = first` (the removed human),
+    `target_bot_id = second` (the managed bot), recipients `[<staff_no>]` via `strip_prefix("human_")`.
+  - **bot friend** (`first = <managed bot>`, `second = <friend bot>`): `applicant_actor_id = second` (the removed bot),
+    `target_bot_id = first` (the managed bot); recipients via `target_notification_recipients(second, cfg)`,
+    where `cfg` is the friend Bot's `BotActorConfig` loaded with the existing bot-config read helper;
+    if the config is absent, WARN with the bot id and skip the notice (removal still returns `Ok(revoked)`).
+  Notify with `kind=RemovedByOwner`, display names via `resolve_actor_display_name`,
+  `request_ids` = transitioned edge ids stringified, `request_auth` forwarded; notification
+  errors WARN + `Ok(revoked)` (Review Focus #4). The adapter must map this payload to
+  `HUMAN2BOT_FRIEND_REMOVED` for the human case and `BOT2BOT_FRIEND_REMOVED` for the bot case
+  (asserted end to end in Step 1, not only at the port).
 
-- [ ] **Step 1: Write failing tests**: owner removes human friend → exactly one notice, recipients `[<staff>]`, kind, `target_bot_id=second`, edge ids in payload; owner removes bot friend → recipients = friend's ownership resolution (never the friend bot itself); empty revoke → zero notify calls; notification port error → result still `Ok` with edges returned; existing revoke/auth-sync lifecycle tests pass unmodified (regression guard).
+- [ ] **Step 1: Write failing tests**: owner removes human friend → exactly one notice with `applicant_actor_id=first` (human), `target_bot_id=second`, and adapter `event_type=HUMAN2BOT_FRIEND_REMOVED`; owner removes bot friend → `applicant_actor_id=second`, `target_bot_id=first`, recipients from `target_notification_recipients(second, cfg)`, adapter `event_type=BOT2BOT_FRIEND_REMOVED`; missing friend-Bot config → WARN and no notice, removal still `Ok`; two concurrent removals of the same friend → exactly one transition set and exactly one notice (Review Focus #10); empty transition → zero notify calls; notification port error → result still `Ok` with edges returned; existing revoke/auth-sync lifecycle tests pass unmodified (regression guard).
 - [ ] **Step 2: Run RED:** `cargo test -p bcs-edge-permission removed_by_owner`.
 - [ ] **Step 3: Implement** the override in `connect/lifecycle.rs`.
 - [ ] **Step 4: Run GREEN** + the crate's full suite `cargo test -p bcs-edge-permission` + `cargo check -p bcs-friend`.
@@ -97,9 +119,9 @@
 
 **Interfaces:**
 - Consumes: Task 1 `RemovedByOwner` + design D5 payload contract.
-- Produces: mapping — category `"NOTICE"`; `event_type_for` → `HUMAN2BOT_FRIEND_REMOVED` (human removed) / `BOT2BOT_FRIEND_REMOVED` (bot removed) via the existing `is_human_actor(applicant_actor_id)` split; label `"removed_by_owner"`; title 「好友关系已解除」; content per design D5 (human: `Bot「<bot>」的管理者已将你移出其好友名单，好友关系已解除。`; bot: `Bot「<bot>」的管理者已将你的 Bot「<friend>」移出其好友名单，好友关系已解除。`), name fallbacks to raw ids; routing through `recipient_user_ids` like other NOTICE kinds; `applicant_user_id` omitted (NOTICE forbids approver/applicant fields on the intake).
+- Produces: mapping — category `"NOTICE"`; `event_type_for` → `HUMAN2BOT_FRIEND_REMOVED` (human removed) / `BOT2BOT_FRIEND_REMOVED` (bot removed) via the existing `is_human_actor(applicant_actor_id)` split; label `"removed_by_owner"`; titles must equal the Backend catalog strings exactly — human 「你已被移出 Bot 好友名单」, bot 「你的 Bot 已被移出好友名单」 — because Backend resolves the persisted title through `notification_title_for` (catalog wins; the BCS title is only a fallback for unregistered types); content per design D5 (human: `Bot「<bot>」的管理者已将你移出其好友名单，好友关系已解除。`; bot: `Bot「<bot>」的管理者已将你的 Bot「<friend>」移出其好友名单，好友关系已解除。`), name fallbacks to raw ids; routing through `recipient_user_ids` like other NOTICE kinds; `applicant_user_id` omitted (NOTICE forbids approver/applicant fields on the intake).
 
-- [ ] **Step 1: Write failing payload tests** mirroring the existing `builds_*_payload` tests: human-removed event_type/title/content with resolved names; bot-removed content with per-field name fallback; serialized JSON omits `applicant_user_id` and `approver_user_ids`; `biz_data.request_ids` carries the revoked edge ids.
+- [ ] **Step 1: Write failing payload tests** mirroring the existing `builds_*_payload` tests: human-removed event_type/title/content with resolved names; bot-removed content with per-field name fallback; **both titles asserted equal to the Task 6 catalog constants** (no divergent BCS copy); serialized JSON omits `applicant_user_id` and `approver_user_ids`; `biz_data.request_ids` carries the revoked edge ids.
 - [ ] **Step 2: Run RED:** `cargo test -p bcs --lib friend_connect_notification`.
 - [ ] **Step 3: Implement** the match arms.
 - [ ] **Step 4: Run GREEN.**
@@ -119,7 +141,10 @@
 - [ ] **Step 1: Write failing route tests**: absent actor → current behavior (`openapi_friend_connection_routes_forward_decisions_and_delete` keeps passing byte-identically); owner principal with `actor_type=bot&actor_id=<bot>` → `actor` forwarded to the stubbed service; partial params / unknown type → 400; manager/stale-owner with actor → 403.
 - [ ] **Step 2: Run RED:** `cargo test -p bcs-api-http --test friendship_routes`.
 - [ ] **Step 3: Implement** DTO + handler; update `friendships.yaml`.
-- [ ] **Step 4: Contract governance** (additive-optional-param precedent: the 2026-11-13 `sort` params): run `python apps/bcs/scripts/validate_openapi_contract.py`; regenerate the public gateway snapshot via `python apps/bcs/scripts/dump_openapi.py apps/gateway/configs/schemas/bcn.openapi.json` (and the internal one with the matching entrypoint/prefix arguments if it covers this path — diff must contain only this change); run the `apps/bcs/tests/openapi/` pytest contract suites; record every command + result in the PR. No new operation means the counts in `api-contracts/README.md` stay unchanged — do not edit them.
+- [ ] **Step 4: Contract governance** (additive-optional-param precedent: the 2026-11-13 `sort` params): run
+  `python apps/bcs/scripts/validate_openapi_contract.py --root apps/bcs/api-contracts/v1`
+  (the `--root` is required; without it the script exits 2. Verified output with it: `81 operations validated for openapi.yaml`);
+  regenerate the public gateway snapshot via `python apps/bcs/scripts/dump_openapi.py apps/gateway/configs/schemas/bcn.openapi.json` (and the internal one with the matching entrypoint/prefix arguments if it covers this path — diff must contain only this change); run the `apps/bcs/tests/openapi/` pytest contract suites; record every command + result in the PR. No new operation means the counts in `api-contracts/README.md` stay unchanged — do not edit them.
 - [ ] **Step 5: 免审批 regression (Review Focus #7):** integration case under the crate's fixtures: `friend_check_in_strategy="open"`, create a human→bot and a bot→bot friendship without approval, assert both appear in `GET /friend-connections`, and the owner `DELETE` with `actor` revokes each (`deleted:true`, second delete `deleted:false`).
 
 ### Task 6: Backend work-order event catalog (deploy gate Task 1–4)
@@ -140,7 +165,7 @@
 ### Task 7: frontend-nextgen roster data hook
 
 **Files:**
-- Modify: `apps/frontend-nextgen/src/services/backendApi/collaboration/collaborationFriendConnectionController.ts` (`DeleteFriendConnectionParams` `:64-68` gains optional `actor_type` / `actor_id`, passed through as query params; comment notes both-or-none is enforced server-side)
+- Modify: `apps/frontend-nextgen/src/services/backendApi/collaboration/collaborationFriendConnectionController.ts` (`DeleteFriendConnectionParams` `:64-68` gains optional `actor_type` / `actor_id`, passed through as query params; comment notes both-or-none is enforced server-side; **response typing** changes from `BackendApiEnvelope<void>` to `BackendApiEnvelope<DeleteFriendConnectionResult>` with `export interface DeleteFriendConnectionResult { deleted: boolean }`, so hooks can read `data.deleted` without a cast)
 - Modify: `apps/frontend-nextgen/src/services/workspace/botFriendConversationService.ts` — **only if** the roster needs a behavior the service lacks; prefer zero edits (its `loadDirectory`/`loadSection` already cover fetch-all, dedupe, name/online resolution, per-type degrade)
 - Create: `apps/frontend-nextgen/src/domain/collaborationPrivacy/botFriends.ts`
 - Create: `apps/frontend-nextgen/src/hooks/useBotFriendRoster.ts`
@@ -153,7 +178,7 @@
   - hook `useBotFriendRoster(botUuid: string)`: **`botUuid` is the BCS collaboration Bot UUID (`targetBot.id`, with `:port` suffix) — never the Backend row `bot.id`** (the dialog already distinguishes the two; the wrong one 404s/403s against `load_bot`). Returns `sections { human, bot }` + `counts` derived; `reload(type?)` (full directory or one type via `loadSection`); drawer-local `tab` + `keyword` state stays in the drawer component (hook holds data only); `removeFriend(view)` → optimistic guard (`removingIds`) → `deleteFriendConnection({ actor_type: 'bot', actor_id: botUuid, target_actor_type: view.actorType, target_actor_id: view.actorId })` → on success `loadSection(view.actorType)` (counts+tab converge, acceptance ② in-place refresh); `{ deleted: false }` → neutral already-removed path (no error state); errors surface as the hook's `removeError` for the drawer to render; per-type section errors keep their existing `DomainError` retry semantics.
 - The roster ignores `BotIdentityFriendView.disabledReason` (conversation-surface concern), renders raw `actorId` when `detailsResolved` is false (Review Focus #5).
 
-- [ ] **Step 1: Write failing tests** — controller param serialization with actor (and unchanged query when omitted); domain filter (display-name match, staff-no match, bot-uuid match, case folding, empty keyword); hook (mock `loadDirectory`/`loadSection`/controller): counts from two section totals, failed type degrades to `null` count + retry without blanking the other, remove success → only that type refetched, remove 403 → `removeError` set, `{ deleted:false }` → neutral path with no error.
+- [ ] **Step 1: Write failing tests** — controller param serialization with actor (and unchanged query when omitted) **plus the typed `{ deleted: boolean }` response (no `void`/cast)**; domain filter (display-name match, staff-no match, bot-uuid match, case folding, empty keyword); hook (mock `loadDirectory`/`loadSection`/controller): counts from two section totals, failed type degrades to `null` count + retry without blanking the other, remove success → only that type refetched, remove 403 → `removeError` set, `{ deleted:false }` → neutral path with no error; **>20-page regression**: a type with `total=2,050` (21 pages) yields all rows (none capped) and a keyword only present on the last page is found.
 - [ ] **Step 2: Run RED:** `npx jest test/domain/collaborationPrivacy/botFriends.test.ts test/hooks/useBotFriendRoster.test.tsx`.
 - [ ] **Step 3: Implement** the controller param addition, domain helpers, and the hook (no edits to `botFriendConversationService` unless a test in Step 1 proves a real gap — record the gap in the PR if so).
 - [ ] **Step 4: Run GREEN** + the existing service suite + `npm run typecheck`.
@@ -171,38 +196,41 @@
 - Consumes: Task 7 hook; existing `Drawer` (`side="right"`), `ConfirmDialog` (destructive), `Avatar`, `Empty`, `Skeleton`, `Segmented`, design tokens.
 - Produces:
   - Section 「好友名单」: title + summary 「好友用户 {users} · 好友 Bot {bots}」 with per-type loading/error+retry degrade (failed count shows as `-` with retry) + 「管理好友」 button.
-  - Drawer: tabs 好友用户/好友 Bot; search input (「搜索好友」); rows = Avatar + display name (raw id fallback), bot subtitle = online badge + uuid, human subtitle = staff no; per-row 「移除」; per-tab empty states; truncation hint when a type hit the 20-page cap.
+  - Drawer: tabs 好友用户/好友 Bot; search input (「搜索好友」); rows = Avatar + display name (raw id fallback), bot subtitle = online badge + uuid, human subtitle = staff no; per-row 「移除」; per-tab empty states. No truncation state exists because there is no cap: the section always reflects the complete roster. A type whose fetch cannot complete (non-progress page) shows that type's error + retry instead of a partial list.
   - Confirm flow (D7): 「移除后双方好友关系将同步解除，对方将在通知中心收到系统消息。确定移除好友「{name}」吗？」(bot variant names the friend Bot and mentions notifying its Owner), destructive variant.
   - Owner gate: section + drawer mount only under the strict owner check (acceptance ③); the external-Bot dialog variant behaves the same (CF-1 default).
   - Notice meta: `WORK_ORDER_TYPE_META` gains the two removal types with 标签/颜色 matching the existing NOTICE friend entries' visual language. The locked baseline (`test/domain/admin/workOrderMeta.test.ts`, documented "后端增删事件必须显式改基线") asserts an exact catalog — today 16 keys (5 APPROVAL / 11 NOTICE) — update it deliberately to 18 keys (5 / 13) in the same diff.
   - Actor id source: the section passes `targetBot.id` into `useBotFriendRoster` (never `bot.id`); renders only inside the resolved-`targetBot` branch (no fake 0/0 for unjoined/failed dialogs).
 
-- [ ] **Step 1: Write failing tests**: owner sees section + counts; manager/stranger render lacks the section; open drawer → both tab lists render fetched views; search narrows by name and by id; remove → confirm copy → success refetch + toast; cancel keeps the row; `{ deleted:false }` → already-removed toast; unresolved-details row renders the raw id and remains removable; hook receives the collaboration uuid, not the Backend row id; external-bot variant renders the section for its owner; workOrderMeta baseline passes with the two new rows present.
+- [ ] **Step 1: Write failing tests**: owner sees section + counts; manager/stranger render lacks the section; open drawer → both tab lists render fetched views; search narrows by name and by id; **a 21-page (>2,000 friends) type renders the friend from the final page and search finds it (no cap)**; remove → confirm copy → success refetch + toast; cancel keeps the row; `{ deleted:false }` → already-removed toast; unresolved-details row renders the raw id and remains removable; hook receives the collaboration uuid, not the Backend row id; external-bot variant renders the section for its owner; workOrderMeta baseline passes with the two new rows present.
 - [ ] **Step 2: Run RED:** `npx jest test/components/CollaborationPrivacy/BotFriendRoster.test.tsx test/domain/admin/workOrderMeta.test.ts`.
 - [ ] **Step 3: Implement** section + drawer + dialog wiring + meta rows.
 - [ ] **Step 4: Run GREEN** + existing dialog suites (`BotGeneralConfigDialog.test.tsx`, `ExternalBotGeneralConfigDialog.test.tsx`) for regression + `npm run typecheck`.
 
 ### Task 9: Final verification sweep
 
-- [ ] **Step 1:** `df -h /tmp` first; BCS focused sweep recording real output: `cargo test -p bcs-service-api --lib`, `cargo test -p bcs-edge-permission`, `cargo test -p bcs-app-invitation`, `cargo test -p bcs-api-http --test friendship_routes`, `cargo test -p bcs --lib friend_connect_notification`.
-- [ ] **Step 2:** Backend: `cd apps/backend && python -m pytest tests/community/core/work_orders -q` (plus the schemas sibling suite from Task 6 if one was found).
-- [ ] **Step 3:** Frontend: changed-file jest set + `npm run typecheck` + `npm run check:open-core`.
+- [ ] **Step 1:** `df -h /tmp` first; BCS focused sweep recording real output, run inside `apps/bcs` (the repo root has no `Cargo.toml`): `(cd apps/bcs && CARGO_TARGET_DIR=/tmp/cargo/Avernet-target cargo test -p bcs-service-api --lib)`, likewise `bcs-edge-permission`, `bcs-app-invitation`, `bcs-api-http --test friendship_routes`, `bcs --lib friend_connect_notification`.
+- [ ] **Step 2:** Backend: `(cd apps/backend && python -m pytest tests/community/core/work_orders -q)` (plus the schemas sibling suite from Task 6 if one was found).
+- [ ] **Step 3:** Frontend: `(cd apps/frontend-nextgen && npx jest … && npm run typecheck && npm run check:open-core)` — each stage in its own subshell so a failed `cd` cannot silently run in the previous directory.
 - [ ] **Step 4:** `git diff --check`; verify every touched file ≤ 1,000 lines; report truly-unavailable gates (live MySQL, full singlebox E2E, workspace-wide cargo test) explicitly in the implementation PR.
 
 ## Verification commands
 
 ```sh
+# Run from the repository root; every stage is its own subshell.
 df -h /tmp
-cargo test -p bcs-service-api --lib
-cargo test -p bcs-edge-permission
-cargo test -p bcs-app-invitation
-cargo test -p bcs-api-http --test friendship_routes
-cargo test -p bcs --lib friend_connect_notification
-cd apps/backend && python -m pytest tests/community/core/work_orders -q
-cd apps/frontend-nextgen && npx jest test/domain/collaborationPrivacy/botFriends.test.ts test/hooks/useBotFriendRoster.test.tsx test/components/CollaborationPrivacy/BotFriendRoster.test.tsx test/domain/admin/workOrderMeta.test.ts test/services/workspace/botFriendConversationService.test.ts && npm run typecheck && npm run check:open-core
+(cd apps/bcs && CARGO_TARGET_DIR=/tmp/cargo/Avernet-target cargo test -p bcs-service-api --lib)
+(cd apps/bcs && CARGO_TARGET_DIR=/tmp/cargo/Avernet-target cargo test -p bcs-edge-permission)
+(cd apps/bcs && CARGO_TARGET_DIR=/tmp/cargo/Avernet-target cargo test -p bcs-app-invitation)
+(cd apps/bcs && CARGO_TARGET_DIR=/tmp/cargo/Avernet-target cargo test -p bcs-api-http --test friendship_routes)
+(cd apps/bcs && CARGO_TARGET_DIR=/tmp/cargo/Avernet-target cargo test -p bcs --lib friend_connect_notification)
+(cd apps/bcs && CARGO_TARGET_DIR=/tmp/cargo/Avernet-target cargo check --workspace)
+python apps/bcs/scripts/validate_openapi_contract.py --root apps/bcs/api-contracts/v1
+(cd apps/backend && python -m pytest tests/community/core/work_orders -q)
+(cd apps/frontend-nextgen && npx jest test/domain/collaborationPrivacy/botFriends.test.ts test/hooks/useBotFriendRoster.test.tsx test/components/CollaborationPrivacy/BotFriendRoster.test.tsx test/domain/admin/workOrderMeta.test.ts test/services/workspace/botFriendConversationService.test.ts && npm run typecheck && npm run check:open-core)
 git diff --check
 ```
 
 ## Contract (acceptance pinned by tests above)
 
-Owner (and only the Owner) sees the 好友名单 section with 好友用户/好友 Bot split counts and opens the two-tab manage drawer listing **all** friends — including no-approval-origin ones — with display names (raw-id fallback) and client-side search. Removal asks for confirmation, revokes the friendship on both sides through the edge store (the legacy mirror is cleaned by the same call), is a no-op when the friendship is already gone, and emits one NOTICE work-order (`HUMAN2BOT_FRIEND_REMOVED` to the removed human, `BOT2BOT_FRIEND_REMOVED` to the removed Bot's current Owner) best-effort after a real revoke — with the Backend catalog registered first so the intake accepts it. The roster refreshes in place. Every pre-existing endpoint, the legacy frontends, and the approval flows behave byte-identically; non-owner API callers passing an `actor` parameter get 403; partial `actor` params get 400.
+Owner (and only the Owner) sees the 好友名单 section with 好友用户/好友 Bot split counts and opens the two-tab manage drawer listing **all** friends — including no-approval-origin ones and rosters beyond 2,000 entries (fetch-all pages to `total`, no cap) — with display names (raw-id fallback) and client-side search over the complete set. Removal asks for confirmation, revokes the friendship on both sides through the edge store (the legacy mirror is cleaned by the same call), is a no-op when the friendship is already gone (concurrent removals transition exactly once and notify exactly once, enforced by the atomic conditional revoke), and emits one NOTICE work-order (`HUMAN2BOT_FRIEND_REMOVED` to the removed human, `BOT2BOT_FRIEND_REMOVED` to the removed Bot's current Owner) best-effort after a real revoke — with the Backend catalog registered first so the intake accepts it. The roster refreshes in place. Every pre-existing endpoint, the legacy frontends, and the approval flows behave byte-identically; non-owner API callers passing an `actor` parameter get 403; partial `actor` params get 400.
