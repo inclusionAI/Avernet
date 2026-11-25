@@ -15,7 +15,6 @@ import {
   rosterCounts,
   type BotFriendRosterCounts,
 } from '@/domain/collaborationPrivacy/botFriends';
-import { deleteFriendConnection } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import {
   botFriendConversationService,
   type BotFriendActorType,
@@ -95,16 +94,14 @@ export function useBotFriendRoster(botUuid: string): BotFriendRoster {
       setRemovingIds(Array.from(removingRef.current));
       setRemoveError(null);
       try {
-        const response = await deleteFriendConnection({
-          // Owner 移除参数：actor=被管理 Bot（服务端校验 owner);target=被移除好友。
-          actor_type: 'bot',
-          actor_id: botUuid,
-          target_actor_type: view.actorType,
-          target_actor_id: view.actorId,
-        });
-        const deleted = response.data?.deleted ?? false;
+        // 分层：Hook 只调 Service，由 Service 再落到 API Controller。
+        const result = await botFriendConversationService.removeFriend(botUuid, view);
+        if (!result.ok) {
+          setRemoveError(result.error);
+          return { ok: false };
+        }
         await reload(view.actorType);
-        return deleted ? { ok: true } : { ok: true, alreadyRemoved: true };
+        return result.data.deleted ? { ok: true } : { ok: true, alreadyRemoved: true };
       } catch {
         setRemoveError({
           code: 'BOT_FRIEND_REMOVE_FAILED',
