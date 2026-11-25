@@ -69,15 +69,15 @@ def _record() -> BotPublishRecord:
     )
 
 
-def _probe_result() -> RuntimeLayoutProbeResult:
+def _probe_result(engine: str = "openclaw") -> RuntimeLayoutProbeResult:
     return RuntimeLayoutProbeResult(
         status=RuntimeLayoutProbeStatus.READY,
-        engine="openclaw",
+        engine=engine,
         layout_contract_version="skills-pool-p3-v1",
         preparation_id="preparation-1",
         evidence={
             "resolved_layout": {
-                "engine": "openclaw",
+                "engine": engine,
                 "layout_contract_version": "skills-pool-p3-v1",
                 "active_root": "/home/admin/.openclaw/workspace/skills",
                 "local_root": (
@@ -103,7 +103,7 @@ def _probe_result() -> RuntimeLayoutProbeResult:
     )
 
 
-def _runner(producer, *, ext=None):
+def _runner(producer, *, ext=None, engine="openclaw"):
     ext_state = Mock()
     ext_state.owner_id.return_value = "u1"
     ext_state.get_latest_ext_snapshot.return_value = (
@@ -115,7 +115,7 @@ def _runner(producer, *, ext=None):
         "bot_id": "b1",
         "owner_id": "u1",
         "entity_id": "u1",
-        "active_engine": "openclaw",
+        "active_engine": engine,
         "env": "dev",
     }
     baas_service = Mock()
@@ -129,7 +129,7 @@ def _runner(producer, *, ext=None):
     projector = Mock()
     projector.project = AsyncMock()
     probe = Mock()
-    probe.probe_bot = AsyncMock(return_value=_probe_result())
+    probe.probe_bot = AsyncMock(return_value=_probe_result(engine))
     runner = BuildStageRunner(
         ext_state=ext_state,
         bot_service=bot_service,
@@ -143,9 +143,10 @@ def _runner(producer, *, ext=None):
 
 
 @pytest.mark.asyncio
-async def test_filesystem_producer_receives_one_fresh_observation() -> None:
+@pytest.mark.parametrize("engine", ["openclaw", "aicoding"])
+async def test_filesystem_producer_receives_one_fresh_observation(engine) -> None:
     producer = _Producer(filesystem=True)
-    runner, ext_state, projector, probe = _runner(producer)
+    runner, ext_state, projector, probe = _runner(producer, engine=engine)
 
     result = await runner.build(_record(), "operator")
 
@@ -154,7 +155,7 @@ async def test_filesystem_producer_receives_one_fresh_observation() -> None:
         bot_id="b1", owner_id="u1", scope=ProjectionScope(skills=True)
     )
     probe.probe_bot.assert_awaited_once_with(
-        bot_id="b1", user_id="u1", engine="openclaw", for_service_build=True
+        bot_id="b1", user_id="u1", engine=engine, for_service_build=True
     )
     observation = producer.requests[0].layout_observation
     assert observation is not None
