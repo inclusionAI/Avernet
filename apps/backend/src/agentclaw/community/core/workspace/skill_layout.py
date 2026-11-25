@@ -59,6 +59,7 @@ PoolPaths = (
     OpenClawPoolPaths | ClaudeCodePoolPaths | AICodingPoolPaths | HermesPoolPaths
 )
 FILESYSTEM_POOL_ENGINES = ("openclaw", "claude_code", "aicoding", "hermes")
+LEGACY_SERVICE_BUILD_ENGINES = frozenset({"openclaw", "aicoding"})
 
 
 def runtime_layout_engine_for_bot(bot: Mapping[str, object]) -> str:

@@ -32,7 +32,6 @@ from engine.community.plugins.openclaw.layout_activation import (
     verify_skill_mappings,
 )
 from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layout
-from engine.community.plugins.openclaw.service_layout_probe import inspect_legacy_service_layout
 from engine.community.plugins.skills_pool.center_mount import (
     CenterMountStatus,
     inspect_center_mount,
@@ -45,6 +44,9 @@ from engine.community.plugins.skills_pool.mapping_contract import (
     ResolvedMappingPayload,
     apply_logical_mapping_request,
     resolve_mapping_payload,
+)
+from engine.community.plugins.skills_pool.service_layout_probe import (
+    inspect_legacy_service_layout,
 )
 
 log = logging.getLogger("openclaw-port")
@@ -133,6 +135,7 @@ class _SkillsPortMixin:
         ):
             legacy = await asyncio.to_thread(
                 inspect_legacy_service_layout,
+                engine="openclaw",
                 context=self._skills_runtime_context(),
                 contract_version=params["layout_contract_version"],
                 is_mounted=self._skills_center_is_mounted,
