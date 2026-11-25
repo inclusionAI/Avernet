@@ -47,6 +47,7 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
       bot_id: cardText(task.request.target.bot_id), session_key: cardText(task.request.session_key), title: "请处理任务待办",
       summary: ownerCardText(request.summary, "当前任务需要处理权限申请，具体对象和操作请见下方。"),
       instructions: ownerCardText(request.instructions, "请打开任务详情，查看完整的权限对象、处理事项和入口。"), task_url: url.href,
+      session_url: this.sessionUrl({ botId: task.request.target.bot_id, ownerId: task.request.target.entity_id, sessionKey: task.request.session_key }),
       // Clear the retired display field on partial updates to existing cards as well.
       status: "",
       confirm_visible: "true", confirm_enabled: String(canConfirm), confirm_status: canConfirm ? "normal" : "disabled",
@@ -70,9 +71,14 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     return { request, environment, config, url };
   }
 
+  private sessionUrl(input: { botId: string; ownerId: string; sessionKey: string }): string {
+    // An oversized navigation URL must be omitted, never truncated into a different target.
+    return ownerCardText(this.resolveSessionUrl?.(input) ?? "", "");
+  }
+
   private handoffInstructions(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): string {
     const instructions = input.handoff?.instructions ?? "请查看下方任务详情，按完整处理事项继续。";
-    const sessionUrl = input.handoff?.reason === "owner_material_needed" ? this.resolveSessionUrl?.(input) : undefined;
+    const sessionUrl = input.handoff?.reason === "owner_material_needed" ? this.sessionUrl(input) : undefined;
     if (!sessionUrl) return instructions;
     const entry = `\n\n[去原会话补材料](${sessionUrl})`;
     const fallback = ownerCardText(`请查看任务详情中的完整补料清单。${entry}`, "请打开任务详情，查看完整补料清单及原会话入口。");
@@ -100,7 +106,7 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
         cardParamMap: { task_id: input.taskId, request_id: "", control_plane: environment,
           bot_id: cardText(input.botId), session_key: cardText(input.sessionKey), title,
           summary: input.handoff?.summary ?? ownerCardText(input.summary, "处理说明较长，请打开任务详情查看完整内容。"),
-          instructions: this.handoffInstructions(input), task_url: url.href,
+          instructions: this.handoffInstructions(input), task_url: url.href, session_url: this.sessionUrl(input),
           status: "",
           confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
       return true;
