@@ -90,6 +90,62 @@ A 在 J2 查询仅在 J1 写入的 `legacy_entry`，响应为 200 和 `{"items":
 
    定义反例可从该夹具派生。绑定反例在 `input1` 添加 `assignee: {type: runtime_actor, actor: <actor-A>}`。并发反例使用一个入口 Bot 节点，把 `complete.targets` 设成 `[input1, input2]`，两个未绑定 HumanInput 各依赖入口并指向同一个 `final_output: true` 的 Bot 节点。Bot 节点使用 `assignee: {type: bot_binding, binding: referee}`。两种定义都核对错误来自预期校验。
 
+## 自动复核换局词条权限
+
+按复现步骤建立同一群内的两个会话。四个席位条目的内容分别使用 `synthetic-j1-seat-1`、`synthetic-j1-seat-2`、`synthetic-j2-seat-1`、`synthetic-j2-seat-2`，额外条目 `legacy_entry` 使用 `synthetic-j1-legacy`。以下脚本接收本地 BCS 地址、群及会话 ID，以及三个测试身份的 `X-Mock-User-Id` 原值。
+
+```bash
+python3 - "$BCS_URL" "$GROUP_ID" "$J1_SESSION" "$J2_SESSION" \
+    "$A_MOCK_ID" "$B_MOCK_ID" "$C_MOCK_ID" <<'PY'
+import json
+import sys
+from urllib.error import HTTPError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import Request, urlopen
+
+base, group, j1, j2, a, b, c = sys.argv[1:]
+url = urlsplit(base)
+assert url.scheme == "http" and url.hostname in {"127.0.0.1", "::1"}
+entries = (
+    (j1, "seat_1", "synthetic-j1-seat-1", a),
+    (j1, "seat_2", "synthetic-j1-seat-2", b),
+    (j1, "legacy_entry", "synthetic-j1-legacy", a),
+    (j2, "seat_1", "synthetic-j2-seat-1", c),
+    (j2, "seat_2", "synthetic-j2-seat-2", a),
+)
+markers = {entry[2] for entry in entries}
+
+def read(session, name, user):
+    query = urlencode({"groupId": group, "sessionId": session})
+    request = Request(
+        f"{base.rstrip('/')}/groupcontext/get?{query}",
+        data=json.dumps({"name": name, "scope_levels": ["session"]}).encode(),
+        headers={"Content-Type": "application/json", "X-Mock-User-Id": user},
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            return response.status, json.load(response)
+    except HTTPError as response:
+        return response.code, json.load(response)
+
+allowed = denied = 0
+for session, name, marker, owner in entries:
+    for user in (a, b, c):
+        status, body = read(session, name, user)
+        if user == owner:
+            assert status == 200 and [item["content"] for item in body["items"]] == [marker]
+            allowed += 1
+        else:
+            assert status == 403 and all(value not in json.dumps(body) for value in markers)
+            denied += 1
+
+assert read(j2, "legacy_entry", a) == (200, {"items": []})
+print(f"{allowed} 认证玩家本人读取成功，{denied} 次越权读取被拒，旧词条未回退到新局")
+PY
+```
+
+复核脚本已在原版 BCS 上运行。正常夹具得到 5 次本人成功、10 次拒绝；随后由主持人在独立测试会话中临时把 J2 的 `seat_2` 读取范围改为 A 和旧玩家 B，脚本按预期失败。撤销 B 的授权后，复用同一脚本再次通过。此反例覆盖的是跨局词条授权。公开副屏参数注入和完整信道扫描仍列入多人实现验收。
+
 ## 现有基线与待验收
 
 - 在 WSL Ubuntu 按 profile 的 README 运行 referee 的 `unittest discover`，51 项通过，含 `flow_baseline.json` 快照断言。直接以 Windows 默认编码运行会遇到 GBK 文件读取和 POSIX 路径假设，已在需求指定的 Linux 环境重跑。
@@ -129,3 +185,9 @@ A 在 J2 查询仅在 J1 写入的 `legacy_entry`，响应为 200 和 `{"items":
 | 3 Human + 3 玩家 Bot | `roster_valid=true`，3 Human、3 Bot | 同样确认名单，发牌前返回 `MULTI_HUMAN_CAPABILITY_REQUIRED` |
 
 两种多人配置都未生成发牌命令或游戏状态。此次验收覆盖名单检查和发牌保护，真实多人整局仍依赖私有发词和绑定 HumanInput 的实现。Referee 53 项测试通过，含缺席成员、人数边界及单人流程快照。
+
+### 私有写入原型复测
+
+实现分支通过现有 BCS CLI 写入并以主持人身份回读，核对会话级作用域、唯一玩家的读取权限、词条所有者和内容。原版 BCS 上四条词写入并重试成功，4 次本人读取命中，8 次其他 Human 和 4 次其他 Bot 读取被拒。尝试以同名条目写入不同词时，原型拒绝且原词条内容仍可被本人读取。Referee 56 项测试通过，其中新增测试覆盖写入响应丢失、授权冲突和写入无法确认。
+
+本节结果来自独立的本地实现验证。开局接入、Workbench 私有读词和两种完整多人对局仍待验收。
