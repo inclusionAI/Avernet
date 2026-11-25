@@ -1,0 +1,33 @@
+apps/backend/tests/community/core/task/task_runner/integration/test_open_api_bot_adapter.py
+  s_abbd34b394aecf::t_28ac3512dfc90b 3,11,572-639
+apps/backend/tests/community/core/task/task_harness/test_runtime_probe.py
+  s_abbd34b394aecf::t_e3e9551d9b10f9 143,151-154,369,373-376
+apps/backend/src/agentclaw/community/core/task/README.md
+  s_abbd34b394aecf::t_e3e9551d9b10f9 254-260
+apps/backend/src/agentclaw/community/core/task/task_harness/runtime_probe.py
+  s_abbd34b394aecf::t_84bb0298a4a459 351-354,358-361,393-423,425,427-437
+  s_abbd34b394aecf::t_e3e9551d9b10f9 357,424,426
+  s_abbd34b394aecf::t_e9bd6e182d0ccb 438
+apps/backend/src/agentclaw/community/core/task/task_runner/client/open_api_bot_adapter.py
+  s_abbd34b394aecf::t_84bb0298a4a459 359-369,371-393
+apps/backend/tests/community/core/task/task_harness/test_bot_runtime_fallback.py
+  s_abbd34b394aecf::t_e3e9551d9b10f9 1-120
+apps/backend/tests/community/core/task/task_harness/test_harness.py
+  s_abbd34b394aecf::t_1b8a3ddea1c442 953-995
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4746992eee1cf325fd5313dbfeac0a6f7ab8d065",
+  "prompts": {},
+  "sessions": {
+    "s_abbd34b394aecf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f24b-c3d4-75a0-a9dd-f07cd92d719c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

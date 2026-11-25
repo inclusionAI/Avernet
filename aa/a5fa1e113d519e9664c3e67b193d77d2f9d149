@@ -1,0 +1,2088 @@
+apps/frontend-nextgen/src/components/Community/CommunityPage/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,8,18,23,59-66,82-83,123,138-140,143,149-152,156,161-162,164,173-204,217,219,253,257-258
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/create/spec.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 55,184
+apps/frontend-nextgen/test/components/Community/CommunityPagePersonalCenterNavigation.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 98,100-103,109
+apps/backend/tests/community/di/test_runtime_container_locator.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-11
+apps/frontend-nextgen/test/components/BotWorkshop/IdentityConfigPanel.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 49-101
+apps/backend/src/agentclaw/community/core/session_resources/sql/ac_session_resource.sql
+  s_abbd34b394aecf::t_197cc9d171bc5b 11
+apps/backend/tests/community/plugins/community/agentswarm/chat/test_baas_gateway.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 22,285-288,293,529
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/StandardEvaluationFlowResultBanner.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-100
+apps/frontend-nextgen/test/pages/Workspace/Chat/CodingBotStageBoundary.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 2-3,270-306
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_provider_a2a_registration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 150,194,328,372
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFilesFeature.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 10,66,76,249-250
+apps/bcs/scripts/ci/check-store-boundaries.sh
+  s_abbd34b394aecf::t_197cc9d171bc5b 18
+apps/frontend-nextgen/src/shell/SidebarUserFooter.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-42
+apps/frontend-nextgen/test/services/workspace/groupSpeakingLeaseService.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 17,37-41,44,72-77,313-377
+apps/frontend-nextgen/src/services/backendApi/bots/botController.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 20-21,25,77,110
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 216-224,878-880,917-922
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/RestartEvaluationPanel.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,4-7,12,16,25,37,59,73-89,103-104,117,178-182,224-226,283,289
+apps/frontend-nextgen/src/services/workspace/botSessionTitleService.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 6-19,22-23,25-31
+  s_abbd34b394aecf::t_f08c0f82fcf818 5
+apps/frontend-nextgen/src/components/Community/PublishTopicModal/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,24-27,31,59,62,68,97-105,108-109,112-113,116-118,121,124,131,137,139-140,143-144,162-170
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/groups_contract/visibility.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 36
+apps/bcs/crates/bootstrap/bcs/tests/integration_catalog_labels.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-178
+apps/bcsfuse/packages/search-core/src/search_core/application/emergency.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 23-30,126,134,137,142,148
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/PersonalCenter.css
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-16
+apps/backend/src/agentclaw/community/core/task/todos/stage_outcome_models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-28
+apps/backend/src/agentclaw/community/di/modules/aicoding_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 10,14-16,25-27,31-32,37-46,53-64,78-87,98-100,161-165
+apps/backend/tests/community/endpoints/test_openapi_config_manifest.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 581-583,594-599,623-656
+  s_abbd34b394aecf::t_5d51eb13cb5492 657-658
+apps/frontend-nextgen/test/hooks/usePersonalCenter.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 65
+apps/bcs/crates/services/bcs-group/src/application/management/projections.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,94-117
+  s_abbd34b394aecf::t_512c9262aab0d8 118-119
+apps/bcs/crates/services/bcs-dist-connector-store/src/held.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-332
+apps/backend/src/agentclaw/community/core/apply_engine/run/context_builder.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-79
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/errors_todo.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 15-19,38-42
+apps/backend/tests/community/core/session_resources/test_engine_files.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,24,30,48,223,226,233,236,243-244,246,251,253-254,256-263,265-268
+apps/frontend-nextgen/src/components/Community/PublishTopicModal/PollEditor.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 33,38-86,88-97,99-102,111,114
+apps/frontend-nextgen/src/hooks/usePersonalCenter.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 31,52-58,60
+apps/backend/src/agentclaw/community/core/devices/services/device_read_errors.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-19
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 381-382,386-390
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_schema_docs.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,15,52-64
+  s_abbd34b394aecf::t_96f8975083780b 65-66
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/FollowList.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 4-11,14-16,21,41,56-58,64-78,114,117,123,136,142,153,155-220,222
+apps/backend/src/agentclaw/community/core/mcp/services/passport_scope_sync.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,99-103,105-106,109-110,113-137,139-142,145-146,149-151,153-155,157-158,160-265
+apps/backend/tests/community/core/bot_management/aicoding/test_restart_failure_log.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 3,14,51,89-90,150-151,164-260
+apps/bcs/crates/services/bcs-bot-store/tests/provider_initial_managers_mysql/registration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 16
+apps/bcs/scripts/test-master-slave/setup.sh
+  s_abbd34b394aecf::t_197cc9d171bc5b 53
+apps/bcs/crates/bootstrap/bcs/tests/bot_authority_migration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 267-273
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/config_manifest_apply.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,25,140,157-158,209-230
+  s_abbd34b394aecf::t_12695d5faa4b3a 231
+apps/bcs/crates/services/bcs-dist-connector-store/src/delayed.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-28
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 152-153,156,164,181,223,249,272,295,320
+devops/hook/test_check_secrets.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 147-187
+apps/backend/tests/community/endpoints/test_todo_template_endpoints.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-521
+apps/bcs/crates/external-clients/bcs-a2a-http/src/dist_agent/events.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-175
+apps/bcs/crates/services/bcs-bot-store/src/a2a.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,95,137,146,152,159-161,191,195,232,238,240
+apps/bcs/crates/contracts/bcs-protocol/src/http/provider.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 201-202
+apps/backend/tests/community/core/service_bot/services/test_ext_state_compose.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 16-22,70-140
+  s_abbd34b394aecf::t_48df2147679bed 141-142
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_catalog.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,12-13
+apps/frontend-nextgen/src/components/Community/BotBrowseConfigButton/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,6,10-33
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/FollowIdentity.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-79
+apps/bcs/crates/services/bcs-group-store/tests/catalog_labels.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-102
+apps/backend/src/agentclaw/community/core/ports/skill_package_upload_port.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 37-39,42-95,134-150
+apps/bcs/crates/tools/bcs-bridge/cli/tests/daemon.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 199-203,205-210,212
+apps/backend/src/agentclaw/community/core/devices/services/device_context.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 8-10,14-15,47,75-114
+apps/frontend-nextgen/src/services/workspace/groupChatProvider.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 188-190
+apps/bcs/crates/application/v1/bcs-app-group/src/update.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-117
+apps/backend/tests/community/core/task/todos/test_todo_artifact_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 342-360
+apps/bcs/specs/2026-11-19-configured-catalog-labels/requirements/full-catalog-label-publication/spec.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-53
+apps/backend/tests/community/core/session_resources/test_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 736-760
+  s_abbd34b394aecf::t_d514354e54f307 735
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/ChannelFormModal.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 7,13-15
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_routes.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 34,102
+apps/backend/tests/community/core/mcp/test_scoped_config_flow.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 75,77,153,156-164,177,179,195-200,206-256
+  s_abbd34b394aecf::t_92d0687c36eda7 257-258
+apps/bcs/crates/application/v1/bcs-app-group/tests/authority_cutover.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 332
+apps/backend/tests/community/endpoints/test_todo_stage_lifecycle_endpoints.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-309
+apps/bcs/crates/services/bcs-group/src/application/management/operations.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 7-9,15,57,358,383,448
+apps/frontend-nextgen/src/components/Community/CommunityTopicList/TopicRow.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 3,8,10,20-27,56,72,75,95,97-112,114-116,120,137,145-170
+apps/bcs/crates/bootstrap/bcs/src/server/resource_builders.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 570,660
+apps/frontend-nextgen/src/services/botScheduledTasks/metadata.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 36
+apps/frontend-nextgen/src/stores/communityStore.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 35,76-84
+apps/gateway/configs/schemas/bcn.openapi.json
+  s_abbd34b394aecf::t_197cc9d171bc5b 1
+apps/backend/src/agentclaw/community/core/ports/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 51-52,117-118,122
+apps/backend/tests/community/di/test_task_todo_bindings.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 7,9-15,19-21,31-41,137-157
+apps/frontend-nextgen/src/services/botWorkshop/standardEvaluationFlowState.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-102
+apps/backend/tests/community/endpoints/test_openapi_create_with_manifest.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 47,779,786-791,809-835
+  s_abbd34b394aecf::t_3456e2c0b72e5a 836-837
+apps/frontend-nextgen/test/hooks/useTodoDetail.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 77,182,190-196,199-203,207-220
+  s_abbd34b394aecf::t_5547ee277c82f4 221-222
+apps/backend/src/agentclaw/community/core/skill_center/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 83,150,177-178
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/management.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 28-29,41-42,58-59,115,137,228,233,239-242
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client/tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 110-116,135-167
+  s_abbd34b394aecf::t_701068a3ca7023 168-169
+singlebox/ci/tests/test_unit_test_workflow_diff.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 61
+apps/frontend-nextgen/src/services/botWorkshop/standardEvaluationWorkflow.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 3,16,34-38,209,259,293-295,342
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 27-30,117,133,136-137,139
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_template_repository.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-350
+apps/bcs/scripts/e2e-test/delivery_fault_isolation_story.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 209
+apps/frontend-nextgen/src/components/Community/BotBrowseConfigButton/BotBrowseConfigPanel.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-2,4,9-10,13-14,16-19,23-25,27,30-34,37-42,48,50,54,56,72,81,87
+apps/backend/src/agentclaw/community/core/channel/json_config_utils.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 99-100,121-125
+apps/backend/tests/community/adapters/http/openapi_v1/spaces/test_contract.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 669-672,692,745
+apps/bcs/crates/tools/bcs-cli/src/client/groups.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 25,123
+apps/backend/tests/community/core/skill_center/services/test_space_skill_query_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 152,290
+apps/frontend-nextgen/src/shell/AppSidebar.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 14,111-112,121
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFileUpload.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 130
+apps/bcs/specs/2026-11-17-connector-runtime/research.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-185
+apps/frontend-nextgen/src/domain/conversation/botAvailability.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 28
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/TopicFirstFloor.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 28,45,69-70,79,95
+apps/frontend-nextgen/src/capabilities/types.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 15,409-410,561-589,603-604,623-624,665-685
+apps/backend/tests/community/plugins/community/agentswarm/test_host_running_apply.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 40-42
+apps/backend/tests/community/di/test_bot_dormant_module_wiring.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 4-6,40-62
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_reconcile.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-101
+apps/bcs/crates/services/bcs-dist-connector-store/src/feed.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-248
+apps/frontend-nextgen/test/hooks/useStandardEvaluationFlow.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-93
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 60-63,199-258,265-278,282-284,307-318
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_desired_state.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 10,13-18,78,87,109-131,610
+apps/backend/src/agentclaw/community/core/engine_runtime/stage.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 324,347-352,396-404
+apps/backend/src/agentclaw/community/plugins/local/sandbox_client.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 32-34
+apps/bcs/crates/service-api/bcs-service-api/tests/v1_group_driver_metadata_contracts.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 39,50
+apps/backend/tests/community/plugins/community/agentswarm/test_bot_authorization.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 31,35,37-40,96,101,120,266
+apps/backend/src/agentclaw/community/core/task/todos/template_codec.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-342
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_names.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,11-12,35,40-41,45,52-53,70,74,77-81,88,91
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/provisioning.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 14,176,234
+apps/backend/src/agentclaw/community/api/task/todo_template_capability_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-7
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/recycle_strategy.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-70
+apps/backend/src/agentclaw/community/core/runtime_binding/service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 54-57
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 207-211
+docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/proposal.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-82
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 37,45,86,90-100,133-136,164-165,200-201,220,288,341,477,593,656-657,670,708,727-737,835-858,871-875
+apps/frontend-nextgen/test/services/todos/todoService.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-34
+apps/bcs/Cargo.toml
+  s_abbd34b394aecf::t_197cc9d171bc5b 31-32,168-169
+apps/backend/src/agentclaw/community/core/task/todos/template_management_models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-85
+apps/bcs/crates/services/bcs-dist-connector-store/tests/feed.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-259
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 100-121
+apps/backend/src/agentclaw/community/core/bot_config_manifest/creation.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 390,399
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 329
+apps/backend/src/agentclaw/community/core/config_compose/services/collector.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 386-407,454
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_dependencies.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 13
+apps/backend/src/agentclaw/community/core/skill_center/runtime_projection_contract.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 7,9,49-54,87-107,127,141,151-152,154-155,159,168-175,242-246,259-260,437-438,457-458,460-465
+apps/bcs/crates/bootstrap/bcs/src/server/use_case_wiring.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 147
+apps/frontend-nextgen/src/services/botWorkshop/botWorkshopService.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,289,352-366
+apps/frontend-nextgen/src/services/workspace/groupSpeakingLeaseService.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 33-38,154-155,172-175,186,194-200
+  s_abbd34b394aecf::t_ae3e6607c361bf 201-202
+apps/backend/tests/community/architecture/test_module_boundaries.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 79
+apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 40
+apps/backend/docs/bot-config-manifest/user-manual.zh-CN.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1826-1829,1855-1857
+apps/backend/tests/community/core/task/todos/test_template_codec.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-138
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_session_files.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 29-30,93,171-172,184-185,189,193-194,198,205,207,209-210,242,308,346-352,356-369,371,386,390,463-465,467-475,478,491,501,506,517-520,526-531,535-536,540,542,659,915-917,924,928-940,942-956,958-970,975-981,983-997
+engine/adapter/src/engine/community/plugin_api/openclaw/chat.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,28-42,54
+apps/bcs/crates/services/bcs-group-store/src/card_snapshot.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 9-10,32-33
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/model.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 90-97
+apps/backend/tests/community/core/skill_center/_test_skill_set_management_service_support.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 86-88
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_filesystem.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 43,137-142
+  s_abbd34b394aecf::t_d0937189c3f1c9 143
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/config_manifest_apply.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 96-101
+  s_abbd34b394aecf::t_fc1dccedea1a8a 95
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useSessionStatusBridge.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 4,9-14,20,45,49,55,66
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/eval_publish_mixin.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9,17-19,132-146,151,197,252-264
+  s_abbd34b394aecf::t_93d6c483cc8403 265
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/copy.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 113-118,434-439
+apps/bcs/crates/services/bcs-dist-connector/tests/common/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-100
+apps/bcs/crates/application/v1/bcs-app-register/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 41,55,63-65,121-122,160,309-310,630,670,701,731,752,770
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/provider_name_updates.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-81
+apps/frontend-nextgen/src/pages/Workspace/Chat/ConversationPage.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 21,35,118-119,144-145,244-249,265
+apps/backend/src/agentclaw/community/di/modules/runtime_projection_recovery_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 13-24,31-33,37-39,45-100,108,113
+apps/backend/src/agentclaw/community/core/session_resources/types.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 67
+apps/backend/src/agentclaw/community/plugins/community/agentswarm/chat/baas_gateway.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 488
+apps/backend/tests/community/core/mcp/services/test_sync_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1654-1712
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/recycle.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-29
+apps/frontend-nextgen/src/components/Community/profileStats.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-10
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 20-25,174-175,295,401,410,412
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/useReplyScroll.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-93
+apps/backend/tests/community/endpoints/test_openapi_skill_delete.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 17,33,45,141,153-154,201-204
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotStatusCell.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 8,83
+apps/backend/tests/community/core/mcp/services/test_passport_scope_sync.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-57
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 4,69,333
+apps/backend/src/agentclaw/community/core/mcp/mcp_config_service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 26,52
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotPrimaryActionsCell.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 72
+apps/backend/tests/community/core/devices/services/test_checked_file_reads.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-136
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/types.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-57
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 57,73,199
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 18
+engine/adapter/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 32-51
+apps/backend/tests/community/acceptance/expert_chat/test_caller_cron_sessions.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 138-142,144
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/file_access.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 30,69,73-75,85-86,109
+apps/bcs/crates/services/bcs-collaboration-runtime/tests/definition_validation.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 420-463
+  s_abbd34b394aecf::t_ece223d08217fb 419
+apps/frontend-nextgen/test/pages/BotWorkshop/RoutineRunConversation.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 103
+apps/backend/tests/community/core/task/todos/test_todo_source_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-257
+apps/bcs/crates/tools/bcs-admin/src/migrate_regression_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 45-47,116-119
+apps/backend/tests/community/core/task/todos/test_todo_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 21-22,28,122,281-286,288,290,326-415,712-855
+  s_abbd34b394aecf::t_70a08de66d30ce 856-857
+apps/backend/tests/community/core/service_bot/services/test_baas_service_get_ws_info_by_bot_uuid.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 109-120,165,177,185
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-269
+apps/bcs/scripts/e2e-test/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 59-60
+apps/backend/src/agentclaw/community/core/task/todos/template_validation.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-207
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/Floor.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 5-6,8,10,46,82,85-101,131,142-159,162-183,185,187,197,213,236,256
+apps/backend/tests/community/contracts/test_mcp_server_permission.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-17
+apps/backend/tests/community/core/mcp/test_bot_config_projection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-112
+apps/backend/src/agentclaw/community/api/task/todo_source_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-7
+apps/backend/src/agentclaw/community/api/task/todo_template_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-7
+apps/backend/tests/community/core/service_bot/services/test_baas_service_get_http_info.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 24-27,150-167
+  s_abbd34b394aecf::t_750863fc8c410f 168-169
+apps/bcs/crates/service-api/bcs-service-api/src/core/dist_connector.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-111
+apps/bcs/specs/2026-11-19-configured-catalog-labels/proposal.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-31
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/catalog_label_type_errors.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-59
+apps/backend/tests/community/api/test_legacy_iam_friend_selectors.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-111
+apps/bcs/crates/services/bcs-group-store/tests/conformance_mutation_snapshot.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-17
+apps/bcs/crates/services/bcs-dist-store/tests/command.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-62
+apps/backend/src/agentclaw/community/core/devices/services/local_device_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 387,389-391
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 157,182,206
+apps/backend/src/agentclaw/community/core/digital_employee/publication.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 188-205
+engine/adapter/src/engine/community/openclaw/client/chat_dispatch.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-152
+apps/backend/src/agentclaw/community/core/bot_config_manifest/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 501-503,590
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_a2a_storage.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,20,252,270,283,297,396-457
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/TopicDetailFooter.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-100
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_configuration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 69,75,141
+apps/frontend-nextgen/src/stores/conversationStoreState.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 79-80,109
+apps/backend/tests/community/core/apply_engine/test_mcp_permission_notes.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-169
+apps/frontend-nextgen/src/hooks/useServicePublications.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 52,56
+apps/backend/src/agentclaw/community/core/task/todos/source_models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-53
+apps/backend/tests/community/adapters/http/openapi_v1/test_friend_iam.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 189-190,195-196,201-202,235-254
+apps/frontend-nextgen/test/components/ui/notify.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 14,19,25,47-50
+  s_abbd34b394aecf::t_a3ce5bed478a6d 51-52
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessionEdits.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 110-129
+apps/backend/src/agentclaw/community/core/knowledge_management/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 194-208
+apps/baas/tests/unit/adapters/web/test_bot_wss_router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 152,164,168-169,180,192
+apps/bcs/specs/2026-11-17-connector-runtime/spec.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-137
+apps/bcs/crates/application/bcs-app-dist-runtime/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 14-17
+apps/backend/tests/community/core/skill_center/services/test_space_skill_publication_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,18,23-25,27-31,184-229
+apps/backend/src/agentclaw/community/core/task/todos/sql/2026_11_10_todos.sql
+  s_abbd34b394aecf::t_197cc9d171bc5b 11-21,35-70,87-106,113
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 637-644,655-682,899-915
+apps/backend/src/agentclaw/community/core/ports/runtime_binding.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-12
+apps/frontend-nextgen/src/components/Common/PillTabs.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-35
+apps/backend/docs/openapi-v1/README.zh-CN.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1033-1036
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/group.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 72-78,86-96,107-115
+apps/backend/src/agentclaw/community/api/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 139-140,145,149-152
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 306
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 82,140
+engine/adapter/src/engine/community/engines/openclaw/tests/test_f2_baseline_parity.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 64
+apps/backend/src/agentclaw/community/api/engine_session_files.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 15-17,22,29,34-35
+apps/backend/src/agentclaw/community/core/ports/manifest_delivery.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-18
+apps/backend/src/agentclaw/community/core/devices/services/local_device_filesystem.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 26,28,49-50,103-130
+  s_abbd34b394aecf::t_f77cde8fce8fb9 131
+apps/bcs/crates/services/bcs-group/tests/management/visibility.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 226
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 156-157
+apps/backend/src/agentclaw/community/di/manifest_apply_config.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-15
+apps/bcs/crates/services/bcs-group/src/application/management/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 73,146-148,228-230,241
+apps/backend/src/agentclaw/community/di/modules/engine_runtime_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 65-66,139-148
+  s_abbd34b394aecf::t_0175a888289d90 149-150
+apps/backend/tests/community/core/skill_center/test_handoff_mcp_projection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 80-81
+apps/frontend-nextgen/src/hooks/useStandardEvaluationFlow.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,3-11,21-25,50,62-66,80-82,84-86,88-90,116,136,141-146,167-168,179,181,194-200,203-208,225-227,236-237,243
+apps/bcs/crates/application/bcs-app-a2a-bot/src/management.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 14,26,73,81-88,117-118,141,152,160-162,169-172,180,182-184,189,203-205,210-215,217-218,244,257
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 55,59,194-196,219-228,230-231
+apps/backend/src/agentclaw/community/core/runtime_binding/container_locator.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-103
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_management.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 28-29,41-42,231-234,279,293,298
+apps/bcs/crates/services/bcs-group-store/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 178,463-469
+  s_abbd34b394aecf::t_f2b2398c88d26f 470
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_write.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,11,15-20,71-78,91-92,95,100,145-159,161-175,177,180,198-201,204,225,239,257,271-272,296-299,307,333,356,361,363-369,375-376,384
+apps/frontend-nextgen/src/domain/community/bodyPreview.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-20
+apps/backend/tests/community/endpoints/test_knowledge_source_catalog.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-211
+apps/backend/tests/community/repository/skill_center/test_space_skill_draft_repository.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 22-24,274-277
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 662-668,670-675,899-907
+apps/frontend-nextgen/src/components/Community/TopicInteractionBar/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 4,11,28,36,75-76,79
+apps/bcs/crates/bootstrap/bcs/src/server/a2a_wiring.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,32
+apps/frontend-nextgen/src/hooks/useCommunityTopicDetail.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 14,39-41,45,50-52,54,60-62,73-75,84,94,101,109,111,113,128,136,138,140,159-160,170,173-189,196-197,202-205,207
+apps/bcs/crates/services/bcs-db-migrations/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 165,594-600,748-751
+apps/backend/tests/community/architecture/test_service_api_conformance.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 56-61,69-74,76-78,80-82,88,130-132,145-147,342-344,361-363,400-402,405-410,414-419,422,452
+apps/backend/src/agentclaw/community/core/devices/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 49-50
+apps/backend/src/agentclaw/community/core/devices/models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9,186-188
+  s_abbd34b394aecf::t_29047813ed7d0c 189
+apps/backend/src/agentclaw/community/core/mcp/services/detail_fanout.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,15,26-32,40-53,73,76-77,81,91,98,101-102,105-106,109-110
+apps/bcs/crates/adapters/http/bcs-api-http/tests/avatar_response_contract.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 179
+apps/frontend-nextgen/src/pages/BotWorkshop/Evaluation/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 4,9,197
+apps/backend/tests/community/core/skill_center/test_desktop_skill_recovery.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 719-721
+apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 82-83
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 166
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/RenderScreenPanel.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 73-75
+apps/backend/src/agentclaw/community/core/skill_center/services/recovering_bot_runtime_projector.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,8-10,42,46,63-66,68-74,85-95,118-121,123-130,147-159
+apps/frontend-nextgen/src/components/OverflowTooltip/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-69
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/catalog_labels_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-30
+apps/frontend-nextgen/src/services/workspace/botA2aFetch.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-78
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,7,39,48-49,54,56-62,82-84,153,165,178-188,203-210,250-251,254,261-264,272-283,295-304,444-453,459-460,496-543,719-725,727,776-814
+engine/adapter/src/engine/community/tests/core/skills/test_local_package_publisher.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 7,54-79
+  s_abbd34b394aecf::t_7d426dbb85840c 80-81
+engine/adapter/src/engine/community/core/adapters/openclaw/session.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 65-70,78-135,237-243,424,531
+apps/backend/tests/community/core/skills_pool/test_edit_guard.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5-6,98-101,104,118-134,136,153,178,191,210,232,254,266,290
+apps/bcs/specs/2026-11-19-configured-catalog-labels/.openspec.yaml
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-2
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,7,11,15-16,18-19,26,31,36-46,78-110,125-126,128-197,201-228,234-236,240-271,285,304,306-310,344,346,366,412,414,421-422,437-784
+apps/backend/src/agentclaw/community/api/task/todo_template_creation_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-7
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_backup.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 28,89,122,129,227-229,240,244,332,339,341,353,366-368,377-379,407-409,411-413,460-461,498-499,526-527,542,544,557,559,564-565,743-744,824-825,859,940,960-961
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/a2a.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,26,36
+apps/backend/src/agentclaw/community/core/mcp/services/detail_delivery.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 38-41,55-56,77-88,90-137,139-140,142-147,150-173
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/card_admission.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-141
+apps/backend/src/agentclaw/community/core/apply_engine/orchestrator.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 39,42,202,204,211-216,224,236-238,240,252-253,257-263,276,280
+apps/backend/tests/community/acceptance/bot_dormant/test_dormant_lifecycle.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 4,9,23-28,150-281
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery/test_user_contract.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,8-9,16-17,23-24,28,44-47,51-56
+apps/backend/src/agentclaw/community/adapters/http/channel/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 27-28,309-314,323
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 124,186,208,219,423-454
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 61-77
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/dormant/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,8-20,28,31-32,34,46-95,101,105-106,109-144,148-219,221,227-270,284-302
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationFavorites.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 97-135
+apps/frontend-nextgen/test/stores/sessionStatusBridge.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 8,97,105-112,115,137,141-142,152,158,180,183,210,215,251,313,332,344,360,370,378,404,410
+apps/backend/src/agentclaw/community/core/mcp/services/config_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 142,153,155,191,201,352,377-378
+  s_abbd34b394aecf::t_9a173c476dc469 379
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/__init__.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9-11,13-17
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_projection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 7-12,14,16-17,87-88,145-150,154-156,208-210,216,223,231,238-248,272-276,278-280,282-297,307,312-315,318-319,353-354
+apps/gateway/tests/unit/scripts/test_bcn_catalog_labels.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-112
+apps/backend/tests/community/core/task/todos/test_dima_source_client.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-353
+apps/backend/src/agentclaw/community/core/devices/services/baas_publish_task_handlers.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 45
+apps/backend/src/agentclaw/community/core/skill_center/skill_set_apply.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 81
+docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/design.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-859
+apps/backend/src/agentclaw/community/core/devices/services/conn_info_builders/teclaw_builder.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,45
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 17-27,991-1011
+apps/backend/src/agentclaw/community/core/task/todos/source_client_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-21
+apps/bcs/crates/test-support/bcs-test-support/src/contract/group_mutation_snapshot.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-50
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 69,85-86
+apps/backend/tests/community/core/space_knowledge/test_membership_real_database.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 542-545
+apps/frontend-nextgen/src/stores/conversationStore.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 48-56
+engine/adapter/src/engine/community/openclaw/client/gateway_client.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 23,35,164,166-171,179-181,188-192
+apps/backend/src/agentclaw/community/plugin_api/mcp_auth.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 14-25
+  s_abbd34b394aecf::t_f39867dc938c48 13
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/spaces/schemas.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 527-530
+apps/frontend-nextgen/test/services/workspace/botSessionService.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 5-11,648-728
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management_by_id.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 89,152-201
+apps/backend/src/agentclaw/community/core/devices/services/device_context_resolver.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 28,84-86,107,145-147,167,192-194,243
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/mcp.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 15,97-107
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 166-171,302-303
+apps/bcs/api-contracts/v1/domain-models.yaml
+  s_abbd34b394aecf::t_197cc9d171bc5b 929,943-944,997,1009-1010,2516-2542
+apps/backend/src/agentclaw/community/core/skill_center/local_skill_upload_service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9-11,37-40
+  s_abbd34b394aecf::t_fcc254fadf2722 41
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_stage_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-137
+apps/bcs/crates/adapters/http/bcs-http/src/routes/providers/registration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 68-81,125,127-129
+apps/bcs/crates/service-api/bcs-config-api/src/a2a_test_user.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,5,8,11-21,36
+apps/frontend-nextgen/src/hooks/useTodoMentionBots.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-43
+apps/backend/docs/openapi-v1/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1355-1357,1361,1395-1450,1452-1504,1926-1928
+  s_abbd34b394aecf::t_4c7878d2f90b06 1929
+apps/frontend-nextgen/test/services/workspace/conversationService.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 283-288,290,292-293,300,302,310,312-313,315-317,331,334-340,345,370,390-392,402-417,419
+apps/backend/src/agentclaw/community/plugins/community/sandbox_client.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 34-36
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotManagementRuntimeItems.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 106,146-147,173
+docs/specs/a2a/minimal-card-registration-v1.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 58,60-65
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_schemas.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-403
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-381
+apps/backend/src/agentclaw/community/core/task/todos/artifact_service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,19,22-25,36-37
+apps/backend/tests/community/core/digital_employee/test_repositories.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 28-29,98-102
+apps/frontend-nextgen/test/components/BotWorkshop/ServiceBotEvaluation/RestartEvaluationPanel.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 5-13,23-25,28-31,72,84,91,101,128,135-204
+apps/backend/src/agentclaw/community/core/digital_employee/service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,140-142
+  s_abbd34b394aecf::t_38f7ae9b28a16c 143
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/groups_contract.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 447,492,564,596,811
+apps/bcs/crates/service-api/bcs-service-api/tests/group_use_cases_contract.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 15,89,169,257
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiAdapter.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 356-362
+apps/bcs/crates/services/bcs-dist-connector/src/delayed.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-43
+apps/frontend-nextgen/test/services/backendApi/todos/todoService.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-12,16-18,22-24,29-31,91-151
+  s_abbd34b394aecf::t_01497fcd6ac613 152
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_state.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,16,219,352-420
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_instance_selection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 19,28,30,33-36
+apps/backend/src/agentclaw/community/core/repository/implementations/platform/resource.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 56,58-62,65
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/translation.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 108-120
+apps/frontend-nextgen/src/shell/AppShell.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 17,148-150,156
+apps/bcs/crates/service-api/bcs-service-api/src/application/a2a_bot.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 6-7,12,19,29,43,50,58-67,70-81,121-125
+apps/frontend-nextgen/src/components/BotWorkshop/ServicePublicationDrawer.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 9-10,46,77,84-88
+apps/backend/src/agentclaw/community/core/task/todos/errors.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 55-90
+apps/bcs/crates/services/bcs-dist-connector/tests/conformance_runtime_control.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-12
+apps/backend/src/agentclaw/community/core/devices/services/device_filesystem.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 15,27-54,58-60
+  s_abbd34b394aecf::t_a6ff03975879e5 61
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/template_models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-164
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_bot_mcp.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-24
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 22,25,37,128,212
+apps/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,8-9,63-64,180-184,189,203,205-211,235-242,248-252,254-255,263-264,266-267,284,310,590,629,633-653,665
+apps/bcs/crates/services/bcs-bot/src/core/a2a_provider_registration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 88
+apps/bcs/crates/services/bcs-group/tests/catalog_commit.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-602
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionList.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,135-183
+  s_abbd34b394aecf::t_10d354e72b2618 184
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_notifications.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 21,55,100
+apps/bcs/specs/2026-11-19-configured-catalog-labels/tasks.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-74
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/dependencies_session_files.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,7,22-23,47,65-66,70,76-79,93-94,111,113,119,122,127-128,130-132
+apps/bcs/crates/application/v1/bcs-app-group/src/service.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 269-272,447,450,453-454
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 72
+apps/backend/tests/community/core/skill_center/test_mutation_flow_timing.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,16,378-436
+apps/frontend-nextgen/src/components/BotWorkshop/BotManagementTabs.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,20-26,28
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 241-250
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/handlers.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 84-86
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/IdentityConfigPanel.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 7,27,41-52,127,130-131
+apps/bcs/crates/services/bcs-dist-connector-store/src/queue.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-309
+docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/pipeline/config.yaml
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-24
+apps/frontend-nextgen/src/components/Community/CommunityAuthorAvatar/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,60,94,99,106-108,119-120,125,127,136,144
+apps/frontend-nextgen/src/hooks/useStandardEvaluationGoal.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-22
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued_runtime.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 11,51
+apps/bcs/api-contracts/v1/openapi/register.yaml
+  s_abbd34b394aecf::t_197cc9d171bc5b 261-263
+apps/bcs/crates/services/bcs-dist-connector-store/src/membership.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-64
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/connection/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 252
+apps/backend/src/agentclaw/community/core/apply_engine/registry.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 98-100,105-123,130
+apps/bcs/crates/services/bcs-group-store/src/store_writes.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 36-37,103,120,189,204-206,248-252,291,321-323
+apps/bcs/crates/services/bcs-dist-connector/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-28
+apps/backend/src/agentclaw/community/core/session_resources/service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 86,98,179,563,571,632,653
+apps/bcs/crates/services/bcs-dist-connector-store/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-24
+apps/bcs/crates/bootstrap/bcs/src/config/tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 106,126,152,240,856,859,897,900
+apps/bcs/crates/bootstrap/bcs/tests/bootstrap_auth_boundaries.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 5
+apps/frontend-nextgen/src/components/Community/PublishTopicModal/RichTextEditor.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-198
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/conversationFavoriteHydration.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 18-19
+apps/backend/tests/community/core/agentswarm/test_bot_e2e.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 81,86,539-542,545-546,577-581,583-584,590-593,604-608,616-626,694-703
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/register.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 34
+apps/backend/src/agentclaw/community/core/devices/services/device_filesystem_resolver.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 23-30,163-166,198-215,249-252
+apps/bcs/crates/bootstrap/bcs/tests/human_friend_group_creation.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 42,71
+apps/backend/src/agentclaw/community/core/services/resource_file_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 41,46-47,55-56,271,294-301,314-319,462,475,481-482,619-642,673,683-685,698-700,823,827,832-841
+  s_abbd34b394aecf::t_5ddf93824769a4 842
+apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_template_capabilities.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-83
+apps/backend/src/agentclaw/community/adapters/http/task/todos/artifact_routes.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 79-88,189-190
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_arca_lifecycle.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 10,51,80
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 7,11,23,34-98,122
+apps/backend/src/agentclaw/community/core/skill_center/services/_mutation_flow.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,21-22,142-144,176-211,213,223-225,233,262,272,279,288,292,296-297,300-301,305,313,335-353,358,362,367,382-384
+apps/bcs/crates/application/v1/bcs-app-register/tests/authority_registration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 42,52,221
+apps/backend/src/agentclaw/community/core/task/todos/stage_models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-75
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 37-39,145,171,173,177,180
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest_support.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 14-16,190,205,265,283-285
+engine/adapter/src/engine/community/openclaw/client/tests/test_chat_completion.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-566
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/owner_identity.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-31
+apps/backend/src/agentclaw/community/core/skill_center/services/passport_write_checkpoint.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-25
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-56
+apps/backend/tests/community/core/token_exchange/test_actor_identity.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 225,235-237,244,249-250,254-255,271-272,276,279,284-285,297-322
+apps/backend/tests/community/core/bot_management/services/test_restart_authorization_refresh.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 23,101,130-131,135-138,183,351,394,432
+apps/backend/src/agentclaw/community/core/apply_engine/context.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 22-24,32-33,127-133
+apps/bcs/crates/adapters/ws/bcs-ws/tests/support/ws_lease_harness.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 122-129,148-160,162,229-237,242,311-322
+apps/backend/tests/community/repository/skill_center/test_capability_desired_state_apply_claims.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 271-298
+apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 20,27-30,47-50,53,75-77,80-117,121,126-132,142,145,171-187,193-196,198,202
+apps/frontend-nextgen/package.json
+  s_abbd34b394aecf::t_197cc9d171bc5b 42-45,64,72,76-77,85
+apps/backend/tests/community/endpoints/todo_endpoint_support.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-265
+apps/frontend-nextgen/test/components/Community/PersonalCenter.coverage.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 3,16,286,325-328,330-332,335,345,353,355,369-374,399-400,407-413,415,476,581-582,587
+apps/frontend-nextgen/src/services/backendApi/bots/collaboratingBotController.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 23
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/state_machine.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,62,122,169,271,335,385,439,511,555,626
+apps/backend/src/agentclaw/community/core/session_resources/runtime.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-62
+apps/backend/tests/community/core/task/todos/test_todo_template_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-327
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/catalog_snapshot.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-259
+apps/backend/tests/community/core/bot_config_manifest/creation/test_create_job.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 106-115
+apps/bcs/crates/external-clients/bcs-a2a-http/src/transport_error.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-38
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_creation_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-371
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5-6,44,79-84,99,104,106-107,234-236
+apps/backend/tests/community/core/apply_engine/test_device_port_forwarding.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 52,104,117,200-215
+  s_abbd34b394aecf::t_a302e0ab6a964c 216-217
+apps/frontend-nextgen/test/components/BotWorkshop/BotStatusPublicationMenu.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 75,81,145,174,230,271-272,275-276,305-306,329
+apps/backend/src/agentclaw/community/core/engine_runtime/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,144-163
+apps/frontend-nextgen/test/components/Community/CommunityTopicDetail.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 52-53,56,69,85-86,102,136-137,152,258-265,267-284,359,397,400,446,449,462,465,503-506,513,519,526-535,550,553,558-581,688-700,703-706,871,884-885,893,895-896,931-932
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/translation_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 33-55
+apps/bcs/crates/services/bcs-dist-connector/tests/conformance_rules.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-17
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/whole_artifact.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 7-15,78,152-169,173,175-176,180-184
+apps/backend/src/agentclaw/community/di/modules/skill_center_group4_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 40-42,255,262
+apps/backend/tests/community/endpoints/test_runtime_unavailability.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-94
+apps/backend/tests/community/repository/bot/test_scoped_mcp_config.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 11,265-394
+apps/bcs/crates/adapters/ws/bcs-ws/src/web/dispatcher/lease.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 15-22,85-87,93
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/caller_e2e_route_contract.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 153
+apps/backend/src/agentclaw/community/adapters/http/resources/file_router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 47,336,338-339,396,398-399
+apps/backend/src/agentclaw/community/core/skill_center/services/direct_activation_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 14,51-52,58,157,164-167,176,212,219-222,231,415-419,421-426,429,440-443,452-462,478,496,506-509,518
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 128-135
+apps/baas/src/secbaas/community/adapters/web/routers/bot_service/wss_router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 53-57,172
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/owner_handoff.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 26,135-138,163-166
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileStages.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 39,43,61,66,83-84
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useCodingSessionStatusPolling.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-292
+apps/backend/tests/community/core/service_bot/services/test_bot_build_service_teclaw_routing.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 90-145
+apps/backend/tests/community/repository/skill_center/capability_desired_state_support.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 28-29
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotItem.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 54-57,263,268,274-275
+apps/backend/src/agentclaw/community/api/task/todo_stage_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-7
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionStatus.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 103
+apps/frontend-nextgen/test/components/Community/BotBrowseConfigButton/BotBrowseConfigPanel.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 49,53,59-60,68-69,73-74,79-83
+apps/backend/tests/community/core/digital_employee/test_publication.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,25,70
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/ReplyComposer.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 10,18-19,28,40-42,51,64,69,81,89-94,96,103,107
+apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_client.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 158-160
+apps/backend/tests/community/core/skill_center/test_skill_set_apply_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 188-228
+apps/backend/src/agentclaw/community/core/runtime_binding/models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 8-9,38,49-86,92-95
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 397
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/connection/schemas.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 8,33,36-47,78-79
+apps/frontend-nextgen/src/services/todos/todoService.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-3,20-22,26-40
+apps/frontend-nextgen/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 235-242,421-472
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/auth_session_version_migration_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 91
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/token/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 107,140
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationCollapsedRail.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 119
+apps/bcs/specs/2026-11-17-connector-runtime/tasks.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-92
+apps/backend/src/agentclaw/community/di/modules/bot_dormant_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 20,22-34,39,42-48,61-63,67-69,71-76,82,89,144-146,156,162,183-301
+  s_abbd34b394aecf::t_d394bddb5bc8c6 17,302
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/scoped_mcp_config.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9-10,13-22,29-31,48-76,96-97,107-108,152,186-251
+apps/bcs/crates/services/bcs-group-store/src/store_repo.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 17-37,39,46-51
+  s_abbd34b394aecf::t_b5c76269083dad 52
+apps/backend/src/agentclaw/community/di/modules/bot_management_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 815
+apps/backend/tests/community/http/test_copy_route.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 134-138,160,198,220,248,273,288,301,313,333,351,362,372,379-408,415,443,448-450,476
+apps/bcs/specs/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 17,54-55
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoInteractionStream.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 4,10,15,53-91,142-143,145,159-160,162,186-195,225,232-238,242-261
+apps/backend/src/agentclaw/community/core/task/todos/template_models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-136
+apps/backend/src/agentclaw/community/core/task/todos/sql/2026_11_20_todo_templates.sql
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-52
+apps/backend/tests/community/endpoints/test_openapi_config_manifest_apply.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 221,275-317
+  s_abbd34b394aecf::t_b2b217b6c91ee7 318-319
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/dto.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 106-107,141
+apps/backend/src/agentclaw/community/core/digital_employee/contracts.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,23-24,44
+  s_abbd34b394aecf::t_0257a25d4d4873 45
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 38,887-889,910
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/skill_runtime_delivery.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 225,364-377
+apps/backend/src/agentclaw/community/core/task/todos/artifact_models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 41
+apps/bcs/crates/services/bcs-dist-connector/tests/recovery.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-445
+apps/frontend-nextgen/src/services/workspace/collaborationCandidateService.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 38
+apps/frontend-nextgen/test/services/workspace/botSessionTitleService.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 30-36
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/legacy_group_patch_contract.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 84
+apps/backend/tests/community/core/service_bot/services/deploy/test_engine_ext_stage.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9,152-201,305-332
+  s_abbd34b394aecf::t_f594e884d6687e 333-334
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 243-246,727-736
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 338,344-347
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_mcp_config.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-345
+apps/backend/src/agentclaw/community/core/mcp/scoped_config_flow.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,7,13-22,25-28,50-51,231,307-311,321,324-327,355-398,430,439,474-523,525-564
+apps/backend/src/agentclaw/community/di/container.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 48,236
+apps/backend/src/agentclaw/community/core/bot_dormant/activate_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 33-47,56,60,83,85-90,96-102,106,115-118,121-130,162,198-215
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 9,48,69,98
+apps/backend/tests/community/core/apply_engine/test_apply_service_uses_strategy.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12-13,47-54,146,188,203-204,236-317,640-667
+apps/frontend-nextgen/src/hooks/useCommunityReplies.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 3,5,7-13,16-28,31-35,37-55,57-80,82-89,92-93,95-96
+docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/spec.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-95
+apps/frontend-nextgen/test/pages/Lab/Todos.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 86,89-91,179-180,189,344-422,435-444,450-454,457-461
+apps/bcsfuse/packages/search-core/tests/test_filtered_index_fallback.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-81
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_execution_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 27-31,198-199,361-364,397-526,614,616
+apps/frontend-nextgen/src/capabilities/index.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 37-39,111-113
+apps/backend/src/agentclaw/community/core/bot_management/manifest_seam.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 117
+apps/backend/src/agentclaw/community/core/session_resources/materialization.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 86
+apps/bcs/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 17,142-145
+apps/backend/tests/community/adapters/http/openapi_v1/test_schema_docs.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 19-25,226-342
+apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_mysql_cases.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 14
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/projections.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 39,139
+apps/backend/tests/community/core/bot_management/aicoding/test_recycle_runtime.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-414
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/ActivityList.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 109-116,120-124,129,139-141
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bot_registration_chain.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 254
+apps/backend/tests/community/core/apply_engine/test_mcp_artifact_contract.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 3,8,127-128,169-172,174
+apps/frontend-nextgen/src/pages/Lab/Todos/TodoDetailPage.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 234-236
+apps/backend/tests/community/core/service_bot/services/publish_flow/test_eval_publish_external_params.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 65,212-284
+  s_abbd34b394aecf::t_19e1b365db1767 285-286
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_direct_a2a.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 121,137,146-150,154-158
+apps/backend/tests/community/core/bot_management/aicoding/test_recycle_strategy.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-229
+apps/backend/src/agentclaw/community/core/bot_config_manifest/create_job.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 151,176,222,246,659,662
+apps/backend/tests/community/core/devices/services/test_baas_publish_task_handlers.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1050,1088,1094-1132
+  s_abbd34b394aecf::t_0783c49b3c9fbe 1133-1134
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_label_updates.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-127
+apps/backend/src/agentclaw/community/core/apply_engine/run/service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 99
+apps/backend/src/agentclaw/community/core/skills_pool/mapping_intent.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,85-95
+  s_abbd34b394aecf::t_42580b60c9bb55 96-97
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_artifact_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 52-55,79,87-95,98-104,120-121,123,125-129,150-153,155,167-168,187-188,192-217
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/friend_cutover_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 21
+singlebox/ci/tests/test_check_secrets_references.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 145
+apps/backend/src/agentclaw/community/core/bot_dormant/bot_dormant_service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 50-63
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_security_handoff.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-140
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilePreview.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 54,119
+apps/bcs/crates/service-api/bcs-service-api/src/types/a2a_bot.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 27-28,54
+apps/frontend-nextgen/src/hooks/useCommunityTopicActions.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 25-26,51-52,70-71,85-86,203,215
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 33,69-103
+apps/bcs/crates/services/bcs-dist-connector-store/Cargo.toml
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-26
+apps/bcs/crates/services/bcs-group-store/tests/group_card_snapshots.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 52-54,69
+apps/bcs/configs/catalog-labels.toml
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-3
+apps/backend/src/agentclaw/community/core/apply_engine/run/report_codec.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 33-36,88-91,94,117-120
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 20,95-98
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/create/response.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 41,76
+apps/backend/src/agentclaw/community/core/apply_engine/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 80-84,206
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/validation.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 56,223,270,301,358,405,428,466,502,521
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_artifact_repository.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 58,82
+apps/bcs/crates/adapters/http/bcs-http/Cargo.toml
+  s_abbd34b394aecf::t_197cc9d171bc5b 37
+apps/bcs/crates/adapters/http/bcs-http/src/state.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 492,772
+apps/backend/src/agentclaw/community/core/channel/services/channel_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 620
+apps/bcs/specs/2026-11-17-connector-runtime/plan.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-507
+apps/backend/src/agentclaw/community/di/modules/local_skill_upload_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 58,118,132
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFiles.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 60,70,94,139,164
+apps/bcs/scripts/e2e-test/oauth/config_cases.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 8,14
+apps/backend/src/agentclaw/community/core/devices/services/mcp_device_transport.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 80-82,96-98,201,203,205,233-236,249
+apps/bcs/crates/services/bcs-group-store/tests/group_card_templates.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 72-74,272
+docs/specs/2026-11-21-bot-mcp-config-ops/spec.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-81
+apps/bcs/crates/services/bcs-bot-store/CONTEXT.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 483-492
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/mcp/bot_config.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-113
+apps/frontend-nextgen/src/pages/Workspace/Chat/CodingBotStageBoundary.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,23-24,40,54,58-59,61,65,70,79,94-107,109-113,115-116,119-120,123-131
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/create/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 19,21-33,184
+apps/frontend-nextgen/src/components/BotWorkshop/CopyBotModal/ExcludeFileTree.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,85-90,92-110
+apps/frontend-nextgen/src/components/Community/PublishTopicModal/richText.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-96
+apps/backend/tests/community/core/devices/services/test_a2a_proxy_connection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-114
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 57
+apps/backend/src/agentclaw/community/di/modules/mcp_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 65-67,208-216
+  s_abbd34b394aecf::t_1820a12efd979f 217
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/mcp_skill_set_control_plane.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 76,166,207,257,326,370,442
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-423
+engine/adapter/src/engine/community/api/transport/a2a/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1029-1030,1058-1059
+apps/backend/tests/community/plugins/community/agentswarm/test_host_running_creation_apply.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 17-36,51-54
+apps/backend/src/agentclaw/community/core/repository/protocols/task/todo_templates.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-88
+apps/frontend-nextgen/test/components/Community/CommunityRichText.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-101
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/create_with_manifest.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 29,34,45,158,210,254,276
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_apply_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,11,63,90-96,108-109,111-116,119,127-130,141-142,146-148,165
+apps/frontend-nextgen/src/hooks/useTodos.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,83
+apps/backend/src/agentclaw/community/core/repository/protocols/capability_desired_state.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,31-38
+  s_abbd34b394aecf::t_3a80d481415b50 39
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 312-321
+apps/bcs/crates/services/bcs-dist-connector-store/tests/common/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-727
+apps/backend/tests/community/core/engine_runtime/test_connection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 730-739,800-801,805-811,832-833
+apps/bcs/crates/services/bcs-dist-connector/src/call.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-381
+apps/backend/src/agentclaw/community/core/agentswarm/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 386-388,489
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/model.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 3
+apps/backend/src/agentclaw/community/core/service_bot/baas_service_errors.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 14-17,37
+apps/frontend-nextgen/test/services/workspace/botChatProvider.a2a.seam.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 18,36,40,73,154
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_package_runtime.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 10,18,29,42-62,83-91,93,99-116,118-122,140,144,152,170,178,186-187,211,214,224,234-236
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_list_workspace_path.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-85
+apps/backend/tests/community/core/apply_engine/test_manifest_mcp_install_admission.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-103
+apps/bcs/crates/bootstrap/bcs/src/server/state_default_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 28
+apps/backend/src/agentclaw/community/core/task/todos/template_management_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-122
+apps/backend/tests/community/core/skill_center/test_local_skill_upload_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 14-15,24,673,740,754,2708-2726
+apps/bcs/docs/bcsfuse-catalog.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 243-248
+apps/backend/tests/community/core/skill_center/test_skill_set_management_service_part6.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 436,450,452
+apps/backend/src/agentclaw/community/core/task/todos/service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,17-18,51,60-64,83-84
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_labels.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-129
+apps/backend/tests/community/core/apply_engine/test_unified_capabilities.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 591-635
+apps/frontend-nextgen/src/hooks/useCollaborationSquareFriendActions.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,124-125,128-130,153,203
+apps/bcsfuse/packages/search-core/src/search_core/application/default_candidates.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 4,86,96-146
+apps/backend/src/agentclaw/community/core/bot_management/engines/provisioning.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,20,250-292,442-467
+apps/backend/src/agentclaw/community/core/bot_management/engines/restart_contract.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,5,7,10-12,46-126
+apps/backend/tests/community/core/skill_center/test_local_skill_package_batch.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-319
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_resources_handlers.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 186-188,277-278
+  s_abbd34b394aecf::t_af23b0b494f026 279
+apps/bcs/crates/bootstrap/bcs/src/config/loading.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 145,195,345
+apps/bcs/specs/2026-11-19-configured-catalog-labels/design.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-131
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionActions.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-7,16,87-98,102-104
+apps/backend/src/agentclaw/community/core/task/todos/stage_outcome_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-33
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/group_card_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 27
+apps/bcs/crates/services/bcs-dist-connector-store/tests/stubs.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-31
+apps/bcs/crates/services/bcs-dist-connector-store/tests/claim.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-463
+apps/backend/tests/community/adapters/http/openapi_v1/dormant/test_dormant_handlers.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,28,38-40,54-70,83-84,99,141,146,148-149,151-152,154,160-161,181,189-190,194-195,198,206,224-225,232,267,279-280,312,360,362-422
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionTitleActions.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 48-49,58
+apps/bcs/crates/bootstrap/bcs/tests/support/e2e_helpers.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 14,138-147
+apps/bcs/specs/2026-11-19-configured-catalog-labels/requirements/configured-catalog-label-policy/spec.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-50
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/apply_skill_set_commands.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 219
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_ordering_teclaw.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 59,87-89,91,133-135,148-150,164-165,168,185,216-217,263-345
+  s_abbd34b394aecf::t_3e316479dc9065 346-347
+apps/backend/tests/community/repository/task/todos/conftest.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 14
+engine/adapter/src/engine/community/api/transport/ws_server.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 86,1100-1106
+apps/bcs/crates/services/bcs-fusion/src/core/card_sync.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 127,164,167-172,267
+apps/frontend-nextgen/test/hooks/useCommunity.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 300,311-333,476,485,494-496,510,515,520
+apps/bcs/crates/test-support/bcs-test-support/src/contract/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 35
+apps/backend/tests/community/endpoints/test_openapi_bots.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 32,39,474,480-487,490,501,503-504,508,510-511,581-654
+  s_abbd34b394aecf::t_0c18b5068229af 655
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/legacy_group_event_subscription_contract.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 95,309-404
+apps/bcs/crates/application/v1/bcs-app-group/CONTEXT.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 5-18
+apps/bcs/crates/application/v1/bcs-app-group/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 65,406-417,427,801-802
+apps/bcsfuse/packages/search-core/src/search_core/providers/keyword.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 174-203,215
+apps/frontend-nextgen/src/components/Community/CommunityBody/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-15
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 274-307
+apps/frontend-nextgen/src/domain/collaboration/serviceBotRouting.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,10-12
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 27-31,55-64,118-126,135-237,282-335,349,369,417-424
+apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 3,9,14,16-17,31,37-45,264-311,352-354,384-386,406-407,412-447,459-461,497-499,510-513,564-566,620-732
+apps/bcs/crates/services/bcs-group-store/src/store_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 324-330,332-336
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/connect_signal.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-78
+apps/frontend-nextgen/src/services/backendApi/collaboration/collaborationBotController.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 41
+apps/backend/src/agentclaw/community/plugins/community/agentswarm/host.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 22-23,583-591
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/principal.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 706-741
+apps/backend/src/agentclaw/community/api/knowledge_content_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 44-46
+apps/backend/tests/community/core/skill_center/test_direct_activation_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 47-49,883-913
+apps/backend/src/agentclaw/community/core/apply_engine/redeliver.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 23,102-121
+  s_abbd34b394aecf::t_7fa8eb31ac744c 122
+apps/backend/tests/community/core/apply_engine/test_registered_capability_delivery.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 47-49,207-418
+apps/bcs/crates/services/bcs-dist-connector-store/tests/held.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-423
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/dto/catalog_labels_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-18
+apps/bcs/crates/service-api/bcs-service-api/src/types/catalog_labels.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-151
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors_payloads.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 29-31,36-37
+apps/bcs/crates/services/bcs-dist-store/src/command.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-46
+apps/bcs/crates/contracts/bcs-domain/src/catalog_labels.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-10
+apps/bcs/crates/bootstrap/bcs/src/http_adapter.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 151
+apps/bcs/scripts/dev-gateway.sh
+  s_abbd34b394aecf::t_197cc9d171bc5b 119
+apps/backend/tests/community/endpoints/test_openapi_session_files.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 26,154,156,161,199,203,206
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/per_domain.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9,12,134,158,184-193,205,227-229,231,259,261-264
+apps/frontend-nextgen/src/components/Community/CommunityPage/CommunityPage.css
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-17
+apps/backend/src/agentclaw/community/core/devices/repository/models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 45
+apps/frontend-nextgen/src/hooks/useServiceBotEvalMenuVisibility.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 8,12
+docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/pipeline/rules-context.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-43
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/conformance_dist_agent_client.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-73
+apps/frontend-nextgen/src/hooks/useTodoDetail.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,16,55,150,155,162,225-227
+apps/backend/tests/community/endpoints/test_openapi_resources.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 27,153-155,178,361-387
+  s_abbd34b394aecf::t_397404fd48f841 388
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/recycle.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-243
+apps/backend/tests/community/core/devices/test_teclaw_device_sync.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 406,417,426-481
+apps/bcs/crates/services/bcs-group/CONTEXT.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 5-18,81-87,113-138
+apps/bcs/specs/2026-11-17-connector-runtime/validation.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-193
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/strategy.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 45,166,907,910-916,945
+apps/backend/src/agentclaw/community/di/modules/apply_engine_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 365,374-384
+apps/backend/tests/community/core/services/test_identity_stage_addressing.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 30-32,64-67,74,89-154
+  s_abbd34b394aecf::t_48a5419dc0b9f7 155-156
+.github/workflows/backend-unit-tests.yml
+  s_abbd34b394aecf::t_197cc9d171bc5b 28
+apps/bcs/crates/services/bcs-group/src/application/management/queries.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 50
+engine/adapter/src/engine/community/openclaw/client/chat_stream.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-799
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/StandardEvaluationFlowSteps.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 9,18,25,53-55,71
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessionActions.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,46-52,105-144
+  s_abbd34b394aecf::t_5f5938ff7b82b0 145-146
+apps/bcs/crates/services/bcs-dist-connector/Cargo.toml
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-28
+apps/frontend-nextgen/src/pages/Workspace/Chat/CodingBotConversationStage.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 15,22,39
+apps/backend/tests/community/repository/task/todos/test_todo_repository.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9-10,17,21,51-62,74-138,327-346
+  s_abbd34b394aecf::t_b9cdb3a8310a4c 347-348
+apps/backend/tests/community/core/skill_center/test_bot_runtime_projector_timing.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 4-8,11-17,183,195-265
+apps/bcs/crates/service-api/bcs-service-api/src/core/group.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 171-177,179-189,203-208
+  s_abbd34b394aecf::t_4b1a6f98d70c6b 209
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 71,203-228,237-242,245,249-259
+apps/frontend-nextgen/src/services/backendApi/todos/todoController.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 7,65-89,100-106,137-151,155,188-195,199,242-268
+apps/bcs/crates/services/bcs-group/src/core/group_core.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 35-120,196-204,213-227,257-264,266,663
+apps/bcs/crates/service-api/bcs-service-api/src/application/group_management.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,182-183,378-381
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_delete_workspace_path.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-96
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_batch.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-119
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_bots.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,31-32,35,50,52,57-62,65
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/direct_installation_commands.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 57,129
+apps/frontend-nextgen/test/services/workspace/botA2aFetch.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-187
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 34,61-62,313-324
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoInteractionComposer.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-167
+apps/backend/tests/community/core/bot_management/test_owner_handoff_owner_identity.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-166
+apps/frontend-nextgen/test/pages/Lab/TodoDetail.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 39,194-197,318-433
+apps/backend/src/agentclaw/community/core/mcp/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 26-27,68-69,128-161
+apps/backend/src/agentclaw/community/core/skill_center/policies/platform_default_mcp.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 21-32,48-49
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionRow.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 8,113-114,125-128,131,142,144,146,148-149,162-252,254,267-271,273-280,285-319,330,332-334,340,346-347
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_intent.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-62
+apps/bcs/scripts/e2e-test/caller_execution_story.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 457
+apps/bcs/crates/application/v1/bcs-app-register/src/tests/provider_registration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 65
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 40
+apps/backend/src/agentclaw/community/core/engine_runtime/connection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 365-370
+apps/frontend-nextgen/src/services/collaborationSquare/publicBotMetadata.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 95-97,112-113,136,143,146,151
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-325
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/notify_mode.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 94
+engine/adapter/src/engine/community/core/engine/base.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 158
+apps/bcs/scripts/e2e-test/fuse_cards_story.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 312
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoInteractionPanel.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 3-10,12,17,20,33-35,44,57-59,70,83-86,128-129,131,175-183
+engine/adapter/src/engine/community/openclaw/client/chat_serialization.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-250
+apps/backend/src/agentclaw/community/core/skills_pool/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 201
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/avatar_response_contract.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 111,215
+apps/backend/src/agentclaw/community/plugin_api/token_plugin.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,24
+apps/bcs/crates/service-api/bcs-service-api/src/core/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 42
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/ChannelConfigPanel.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 9,104
+apps/bcs/crates/application/v1/bcs-app-group/src/create.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,172,429
+docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/tasks.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-163
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/http.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 36,47
+apps/bcs/crates/application/bcs-app-dist-runtime/tests/conformance_connector_runtime.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-70
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_delete_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 17-21,112-113,115-121,123-125,127-143,184,191
+apps/bcs/crates/services/bcs-dist-connector/tests/runtime.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-327
+apps/backend/tests/community/adapters/http/openapi_v1/test_desktop_metadata.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 80-158,175-177,179-181,183-294
+apps/backend/src/agentclaw/community/core/apply_engine/skill_set_apply_delegates.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 46,55
+apps/bcs/crates/services/bcs-bot/tests/a2a_discovery.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 29,38
+apps/bcs/crates/services/bcs-group/tests/management/creation.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 23-24,26,81-82,84,374-395
+  s_abbd34b394aecf::t_28ea9aee49773d 396
+apps/backend/src/agentclaw/community/core/runtime_binding/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 15-17,26-30,33-36,47-65
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 21-24,84,231,242,251-256,279-286,297
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 11-14,25-30,35,42-44,52,64,91-106,117-131,151,165-167,243-273,278,289-292,299-338,340-343,346-380,382-393,395-434,436-441,444-453,455-473,475-484,513-514,532,556-557,651,774-775,858-860,862
+apps/backend/src/agentclaw/community/core/task/todos/template_capabilities.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-82
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/register.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 44-45,98
+apps/bcs/crates/service-api/bcs-service-api/Cargo.toml
+  s_abbd34b394aecf::t_197cc9d171bc5b 4
+engine/adapter/src/engine/community/openclaw/client/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 22-68
+apps/bcs/scripts/e2e-test/a2a_test_user_story.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 55,88,98,118,121,155,159,174-175,199
+apps/backend/src/agentclaw/community/core/repository/protocols/task/todo_artifacts.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 26
+apps/bcs/crates/adapters/http/bcs-http/src/routes/catalog_label_errors.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-36
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/TopicDetailHeader.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,27-32,34-39,41-94,96
+apps/frontend-nextgen/src/components/Community/CommunityTopicList/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 149
+apps/bcs/crates/adapters/http/bcs-http/src/routes/register.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 97-98,166,204
+apps/backend/tests/community/core/skill_center/test_skill_set_management_service_part5.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 241-244,248-249,261-264,556-579
+  s_abbd34b394aecf::t_e924eecbb644fa 580-581
+apps/backend/src/agentclaw/community/core/skill_center/services/desktop_skill_recovery.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9,21-23,207,214,328-329,331-337
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/experts/create.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,18-19,76,98
+apps/bcs/crates/application/bcs-app-a2a-bot/src/registration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 14-17,19,28,32-33,38
+apps/bcs/crates/service-api/bcs-service-api/src/types/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 32-33,42-49,57-58,87-88
+engine/adapter/src/engine/community/engines/openclaw/engine.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 107
+apps/bcs/crates/services/bcs-dist-connector/src/control.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-242
+apps/frontend-nextgen/test/components/Community/useCommunityTopicActions.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 29-30
+apps/bcs/crates/services/bcs-group/tests/authority_cutover.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 94,157-161,249,358,395
+apps/frontend-nextgen/test/services/backendApi/todos/todoController.taskApiBase.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 18-24
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSelection.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 795-833
+apps/backend/src/agentclaw/community/adapters/http/devices/converter.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 22,54
+apps/backend/src/agentclaw/community/core/task/todos/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 4-54,64-74,96-114,168-170,172-175,191,202-204,213-216,230-232,238
+apps/backend/src/agentclaw/community/core/task/todos/services/dima_source_client.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-258
+apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_template_management.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-480
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/PollPanel.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,16-17,29,31-33,35-39,41-42,44-81
+apps/backend/tests/community/plugins/local/test_local_device_filesystem_baas.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 61-70
+apps/frontend-nextgen/test/pages/Lab/index.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 71-74
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 27,37,232-242,277,1345-1370,2113,2160-2162,3430-3488,3932-3937,3945-3948
+apps/backend/src/agentclaw/community/adapters/http/token_exchange/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 109-110,116-117,123-124,129-130
+apps/backend/src/agentclaw/community/core/mcp/services/sync_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 24,28,48,277-278,298-299,310-339,341-348,350,352,361-362,368-369,372,619,900-901,909-910,962-963
+apps/bcs/crates/bootstrap/bcs/tests/metrics_wrappers.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 608,648
+apps/bcs/scripts/e2e-test/oauth/harness.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 174
+apps/backend/src/agentclaw/community/core/engine_runtime/models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 111-112,117,131-132
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/dto/group.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 241-242,257-258,275,286,307,321,335-336,362,467-470
+engine/adapter/src/engine/community/api/tests/test_a2a_transport.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 419,436,2515
+apps/backend/src/agentclaw/community/core/mcp/scoped_config_contract.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 6-8,35-47,50,64-71
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_stage_addressing.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 140,143-144
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 63,119,149-152,168
+apps/bcs/crates/services/bcs-group/tests/management/support/builders.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 8
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 585,601,620,633,642,659,670
+apps/bcs/crates/services/bcs-fusion/CONTEXT.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 65-74
+apps/backend/src/agentclaw/community/core/apply_engine/outcomes.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 20-27,331,345,351-355,519-522,562,577-588
+apps/bcs/crates/bootstrap/bcs/tests/api_auth_config.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 110,575,830
+apps/backend/tests/community/core/session_resources/test_runtime.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-108
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/config.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,12,18-23
+  s_abbd34b394aecf::t_d8579acfb664b4 24
+apps/backend/src/agentclaw/community/core/apply_engine/skill_set_apply_port.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 38
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_config_manifest_apply.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 24-27,116-133,158-163,249-256
+apps/bcs/scripts/e2e-test/task_cache_story.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 37-38
+apps/frontend-nextgen/src/services/backendApi/bots/privateBotSessionController.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 56-57
+apps/bcs/scripts/e2e-test/caller_config_storage_story.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 210
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/runner.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 7-8
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_via_controlled_bot.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 104
+apps/bcs/crates/application/v1/bcs-app-group/src/authorization.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 523,536-537,545,551
+apps/gateway/tests/contracts/test_bot_mcp_config_published_contract.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-35
+apps/backend/src/agentclaw/community/core/session_resources/sql/2026_11_24_session_file_device_uuid.sql
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-3
+apps/backend/docs/plans/2026-11-07-openapi-recycle-async.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-135
+apps/backend/src/agentclaw/community/core/apply_engine/skill_package_upload.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 21,25-26,36,68-73
+  s_abbd34b394aecf::t_5ea1ec85ec434f 74-75
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/template_capability_schemas.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-79
+apps/backend/src/agentclaw/community/api/publish_flow_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 6-8,60-67
+  s_abbd34b394aecf::t_c1bb0a393808bb 68-69
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 252-263
+apps/bcs/crates/bootstrap/bcs/src/config/tests_infrastructure.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 801,870,892,915
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/conversationSessionPageRequest.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 165
+apps/backend/src/agentclaw/community/core/task/todos/template_capability_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-16
+apps/frontend-nextgen/src/pages/Lab/Todos/components/todoInteractionModel.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 10-16,46-49,219-249
+  s_abbd34b394aecf::t_1accbbc9f09180 250
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/enums.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 77-78
+apps/frontend-nextgen/src/components/BotWorkshop/BotBasicInfoDrawer.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,44
+apps/bcs/crates/adapters/ws/bcs-ws/tests/speaking_lease_commands_contract.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 9,227-283
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/dist_agent.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-582
+apps/bcs/crates/services/bcs-dist-connector/src/report.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-250
+apps/frontend-nextgen/src/domain/todos/models.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 6-41,136,141-147
+apps/backend/src/agentclaw/community/core/task/todos/template_creation_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-28
+apps/frontend-nextgen/src/services/workspace/serviceBotPublishResolver.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,64
+apps/frontend-nextgen/test/components/BotWorkshop/BotEvaluationHistoryMenu.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 8,19,39,50-55
+  s_abbd34b394aecf::t_f680f471933698 56-57
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useExpandedCodingBotStatusPolling.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-36
+docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/pipeline/config.json
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-31
+apps/frontend-nextgen/src/domain/botWorkshop.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 9-13,76,269-274,288,294-300,339-340
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/ThreadReply.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 25,51,79,81,90,116
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/content.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 67-76
+apps/backend/tests/community/di/test_manifest_apply_without_dispatch_tables.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-24
+apps/frontend-nextgen/test/components/Community/CommunityPage.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 42-43,104,109,126-129,135-163
+  s_abbd34b394aecf::t_7ff498866e6833 164
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationBotItem.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,251-343,802
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/skill.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 63-65,665-669,952,985
+apps/frontend-nextgen/src/hooks/useBotPublicationMenu.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,12-14,24-26,131-135
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/conversationSessionStatusKnownIds.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-88
+apps/backend/src/agentclaw/community/core/apply_engine/run/capability_projection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-72
+apps/backend/src/agentclaw/community/core/bot_dormant/recycle_task.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-421
+apps/bcs/scripts/e2e-test/custom_binding_story.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 17-40,98,124
+apps/bcs/crates/services/bcs-dist-connector/tests/lifecycle.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-294
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/resources/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 74,81,201-204,213,215,217-223,226,228-243,274-284,314-316,338-349,878-885,917-928,951
+apps/bcs/crates/services/bcs-bot/tests/provider_webhook_parts/a2a_abort.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,19,45,51
+apps/backend/tests/community/core/session_resources/test_creator_name.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 87
+apps/bcs/specs/2026-11-19-configured-catalog-labels/validation.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-576
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationRouteResolver.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 51-55,147-157
+  s_abbd34b394aecf::t_9fcf9afb91187a 158
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/recycle_runtime.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-25
+apps/backend/tests/community/core/bot_management/aicoding/test_restart_persistence.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 263-280
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoCreateModal.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 4,7-8,10,16,27-28,33-34,40-45,48-55,64,67-163,165-168,173,208-217
+apps/bcs/crates/external-clients/bcs-a2a-http/Cargo.toml
+  s_abbd34b394aecf::t_197cc9d171bc5b 13-16,19,43-45
+apps/bcs/crates/services/bcs-dist-connector/src/identity.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-90
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/bot_mutation_fence.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 5-12,21-82,84-85,97-100,102
+apps/bcs/crates/external-clients/bcs-a2a-http/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 8-10
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/mcp/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 84-85,113-118
+  s_abbd34b394aecf::t_907d3f769d241f 119
+apps/bcs/migrations/sqlite/046_configured_catalog_labels.sql
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-2
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/commands.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-108
+apps/bcs/scripts/ci/tests/store_api_boundary.sh
+  s_abbd34b394aecf::t_197cc9d171bc5b 9
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 4-5,7-8,10-13,15,20,28,51-53,61-67,69,72-73,100-132,144-150,169-170,172-185,192,229-234,238,243,251,256-276
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/originator_v1_policy.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 19
+apps/frontend-nextgen/test/components/BotWorkshop/ServicePublicationDrawer.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 92
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/schemas.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 14-23,31,39-117,119,121,123-124,126,129-134,154-179,201-413,424-434,558,621-635,650-656
+apps/bcs/crates/bootstrap/bcs/tests/a2a_http_identity/plugin.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 22-24
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_source_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-450
+apps/backend/src/agentclaw/community/core/repository/implementations/identity/digital_employee.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 3-4,53-67
+  s_abbd34b394aecf::t_8350ff5505def4 68
+apps/backend/tests/community/core/skill_center/services/test_skill_center_uses_resolver.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 86-88,99,124
+apps/bcs/crates/services/bcs-dist-connector-store/src/doc.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-134
+apps/bcs/crates/services/bcs-group-store/src/memory.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 30,92-100,109-110,168-174,186-188,249-250,253-258,262-265,269,275-285,296-298,515
+apps/backend/tests/community/api/test_dingtalk_iam_token.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 90
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/group.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 266-267,295-296,381,398,530,544-545
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 47-49,52,60,103
+apps/backend/src/agentclaw/community/core/session_resources/engine_files.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 20,22,38,47,50-52,54-55,75,85,123,125,162,176,208-209,211-213
+apps/bcs/crates/bootstrap/bcs/src/config/catalog_labels.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-53
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 276,287,748
+apps/backend/src/agentclaw/community/core/skill_center/space_skill_query_service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 87
+apps/backend/src/agentclaw/community/core/bot_management/engines/registry.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 593,677-682
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 28,33,45-49,65-68,70-71,73-77
+apps/backend/src/agentclaw/community/core/services/identity.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 316,325-327,337,358,367,406,414,430,452,465,479,586,602,618,778,965,970-971
+apps/bcs/crates/adapters/http/bcs-http/src/routes/register/scoped.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 65,78
+apps/frontend-nextgen/test/botCopyContract.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 56,72-73
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/ext_state.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 23,26-28,182-186,188-193,203-247
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 45,82,234,251-255,264,278-281,453-480
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/CreateGroupModal.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 845-846
+apps/bcs/crates/external-clients/bcs-a2a-http/src/dist_agent/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-436
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_management_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 47,515-517,540-542
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/mutation_authorization.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 124,242,322,355,391
+apps/bcs/specs/2026-11-19-configured-catalog-labels/audit.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-100
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_task.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 111-112
+apps/backend/tests/community/core/mcp/services/test_cli_capabilities.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 29,32-35,38-39,42-44,46,49,51,54
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/conversationFavoriteLoading.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 57-85
+apps/frontend-nextgen/test/stores/conversationStore.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 271-292
+apps/backend/src/agentclaw/community/core/devices/repository/record.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12-22,50
+apps/backend/src/agentclaw/community/core/bot_dormant/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-62
+apps/bcs/crates/bootstrap/bcs/src/config/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 29
+apps/backend/src/agentclaw/community/core/repository/protocols/skill_center_types.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 217
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/services.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 5,151-191
+  s_abbd34b394aecf::t_2fabcb7f8fc204 192-193
+apps/bcs/crates/services/bcs-group/src/application/management/create.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 250-253
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/space_skill_read.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 56-64,122-136,138,279
+apps/bcs/crates/services/bcs-group-store/src/store_eventful.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 66-73,99-112,114,130-160,205,245,264,267,513-542,545-556,558-561
+apps/backend/tests/community/core/bot_management/services/test_bot_service_restart_idempotency.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 27,2259,2374
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_providers.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 20-22
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_task_routes.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 181-218,221-236,238-241,252-263
+engine/adapter/src/engine/community/api/tests/transport/test_chat_error_fields.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-171
+apps/bcs/crates/services/bcs-dist-connector-store/tests/conformance_dispatch_board.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-47
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_types.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 69
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_filesystem.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 22-23,26,84-85,98-113
+  s_abbd34b394aecf::t_1b5f43e5654b1c 114
+apps/bcs/crates/application/v1/bcs-app-group/src/projections.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 8-27,31,68,110
+  s_abbd34b394aecf::t_6a9ee0e3b00e1b 7
+engine/adapter/src/engine/community/plugins/openclaw/token_pool.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 31,103
+apps/backend/src/agentclaw/community/core/bot_management/create_flow.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 444,547,580,639
+apps/backend/src/agentclaw/community/core/repository/protocols/devices.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,106-113,118
+apps/backend/src/agentclaw/community/core/skill_center/services/space_skill_query_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 232
+apps/bcs/crates/application/bcs-app-dist-runtime/src/connector.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-43
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/dormant/schemas.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 43-85
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessions.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 116-119,121-126,131-132,134,136-139,143-145
+docs/specs/todo/2026-11-20-todo-template-stage-lifecycle/pipeline/state.json
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-1118
+devops/hook/check_secrets.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 201,222-223,231,334-335,351-356,389-398,484-486,502,546
+apps/baas/src/secbaas/community/api/bot_runtime/_ws_connection_info.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 35-38
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_v1.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 25,84,116,137,146
+apps/backend/src/agentclaw/community/plugin_api/sandbox_runtime.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 22,48-56,91-96
+  s_abbd34b394aecf::t_c3b66a36594157 97-98
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_capability_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-16
+apps/backend/src/agentclaw/community/core/skill_center/errors.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 108-111,334-341
+apps/bcs/crates/services/bcs-dist-connector/tests/control.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-539
+apps/frontend-nextgen/src/pages/Workspace/Chat/RetainedCodingBotStage.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-21
+apps/backend/tests/community/core/devices/services/test_device_context_resolver.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,90-108
+  s_abbd34b394aecf::t_acf7ca7833fe02 109-110
+apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 60,62,66,71,144-147,192,194,338,347
+apps/frontend-nextgen/src/components/ui/notify.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 22,85-88
+  s_abbd34b394aecf::t_9ab2bdbc416f4c 89
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_plan.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 7,94,106-112,118
+apps/backend/tests/community/core/cron/services/test_cron_relay_uses_resolver.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 107-109,2633-2636
+apps/bcs/docs/catalog-labels.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-192
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionList.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 27-30,48-49,90-91
+apps/bcs/crates/application/bcs-app-a2a-bot/src/names.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 15,20,24-34,40
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/dispatch.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 3,65-67,74-76,249
+apps/bcs/crates/services/bcs-dist-connector-store/src/shared.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-76
+apps/backend/tests/community/core/session_resources/test_friend_upload_affinity.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-167
+apps/backend/src/agentclaw/community/core/skill_center/skill_set_management_service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 30
+apps/bcs/specs/2026-11-19-configured-catalog-labels/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-44
+apps/backend/src/agentclaw/community/api/bot_dormant_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 15,22
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/catalog_labels_tests.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-28
+apps/bcs/crates/services/bcs-dist-connector/tests/rules.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-262
+apps/frontend-nextgen/src/components/Community/FeedbackModal/index.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 40,42-45,47,50-71,75,80
+apps/frontend-nextgen/src/services/botScheduledTasks/types.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,4,200
+apps/backend/tests/community/endpoints/test_openapi_desktop_metadata.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 27
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_management_errors.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 42,86,596,674,676-678,680-682,685-688,693
+apps/bcs/crates/services/bcs-dist-connector-store/src/held_index.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-56
+apps/bcs/crates/services/bcs-group-store/src/card_template.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 114,118,133-138
+  s_abbd34b394aecf::t_7ac40b68fa488f 139-140
+apps/bcs/crates/services/bcs-dist-connector/src/rules.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-168
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_resolve.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 255
+apps/bcs/crates/services/bcs-dist-connector/src/engine.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-496
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest_apply.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 18,21,31,103,190
+apps/bcs/specs/2026-11-19-configured-catalog-labels/requirements/card-catalog-label-management/spec.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-81
+apps/frontend-nextgen/test/botCopyAvailability.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-143
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationFavorites.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 18-22,25,27-31,36,45,49-50,82-85,93,137,190-198
+apps/backend/src/agentclaw/community/core/devices/services/a2a_proxy_connection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-49
+apps/bcs/api-contracts/v1/openapi/groups.yaml
+  s_abbd34b394aecf::t_197cc9d171bc5b 634-636,692-694,715-717
+apps/backend/src/agentclaw/community/core/task/todos/models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 25,29-31,33-34,36-52,65-76,88,101-107
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionRow.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 15-18,20,47-48,62,69-70,105-108,111-115,119-148,158-167
+apps/backend/src/agentclaw/community/core/session_resources/repository/models.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 27,74
+engine/adapter/src/engine/community/api/transport/chat_error_fields.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-18
+apps/bcs/crates/application/bcs-app-dist-runtime/Cargo.toml
+  s_abbd34b394aecf::t_197cc9d171bc5b 3,16
+apps/frontend-nextgen/test/components/Community/PublishTopicModal.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 4,24-38,49,52-53,74,91,109,122-124,141,158
+apps/backend/src/agentclaw/community/core/apply_engine/delivery.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 80,86,121,548,558,567-598
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/PollPanel.css
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-64
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 37-41,48-49,51,53,59,61,65-67,69-70,72,92-101,182-196,199-219,221-333,336,379-460,524-531
+apps/bcs/migrations/mysql/048_configured_catalog_labels.sql
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-3
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/avatars.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 167,712
+apps/frontend-nextgen/test/services/collaborationSquare/publicBotMetadata.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 79-105,277-286
+apps/backend/src/agentclaw/community/di/modules/task/todo_bindings.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,21-23,47,49-66,74-86,100-104,111-136
+apps/backend/tests/community/core/skill_center/services/test_skill_set_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 855-893
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/ServiceBotRoutingControl.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 43
+apps/backend/tests/community/endpoints/test_openapi_skill_upload.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 22,42,53,174-181,257,269-270,308
+apps/frontend-nextgen/src/pages/Lab/Todos/components/useTodoSourceImport.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-199
+apps/backend/src/agentclaw/community/core/skill_center/services/space_skill_publication_task.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 337-345,348-349
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useCodingSessionStatusPolling.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-128
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/desktop_metadata.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 87-96,172,194
+apps/bcs/crates/bootstrap/bcs/src/server/state.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 543
+apps/bcs/crates/bootstrap/bcs/src/config/root.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 33-35,471
+apps/bcs/crates/contracts/bcs-protocol/src/http/groups.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 79-82
+apps/backend/tests/community/repository/task/todos/test_todo_template_repository.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-266
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/catalog_labels.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-43
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 315-316,357-366,464-465
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/FollowList.css
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-21
+apps/frontend-nextgen/test/services/backendApi/todos/todoController.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,10-11,112-187,231-245,247-248
+  s_abbd34b394aecf::t_c41536e7aad599 246,249
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_connection.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 159-168
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/template.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,26-34,79
+apps/backend/tests/community/core/apply_engine/_registered_capability_world.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 33,68
+apps/backend/src/agentclaw/community/core/bot_dormant/recycle_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 6-12,40,44-63,76-80,146-304
+apps/backend/tests/community/core/session_resources/test_repository.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 66-86
+  s_abbd34b394aecf::t_5d76cda6be6a8d 65
+apps/bcs/crates/services/bcs-group-store/tests/detail_snapshot.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-101
+apps/backend/tests/community/core/devices/services/test_baas_device_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 376
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,72,74-75,78,88,121,125-127,194,203-205
+apps/backend/src/agentclaw/community/configs/cli-capabilities.yaml
+  s_abbd34b394aecf::t_197cc9d171bc5b 2,20,48-56
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionEdits.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 42,50-51,59
+apps/frontend-nextgen/test/hooks/useServiceBotEvalMenuVisibility.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-67
+apps/backend/tests/community/endpoints/test_mcp_scoped_config.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 18,211-268
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 22-25,95-113
+apps/backend/src/agentclaw/community/core/apply_engine/apply_task.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 76,156
+apps/backend/tests/community/core/session_resources/test_materialization.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 182-205
+apps/bcs/scripts/e2e-test/group_card_story.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 89-128,176-178,190-191,223
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/apply_claim_commands.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 237,300,356,439
+apps/bcs/crates/tools/bcs-cli/src/client/collaboration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 196
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 160,333-340
+apps/bcs/crates/services/bcs-dist-connector/src/config.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-105
+apps/backend/tests/community/core/agentswarm/runtime/handler/test_failed_ref_failfast.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 19,320,326-333,346,348,350
+engine/adapter/src/engine/community/core/engine/capability.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 75-76
+apps/bcs/crates/adapters/http/bcs-api-http/tests/group_routes.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 442
+apps/backend/src/agentclaw/community/core/apply_engine/run/mcp_permission_notes.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-121
+apps/backend/src/agentclaw/community/di/modules/manifest_apply_module.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-68
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1,148,274,299-300,308-309,326-327,331,343-345,551-553
+apps/frontend-nextgen/test/services/workspace/serviceBotPublishResolver.test.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 101
+apps/backend/src/agentclaw/community/core/mcp/mcp_sync_service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 9-11
+apps/backend/tests/community/core/runtime_binding/test_container_locator.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-272
+apps/backend/src/agentclaw/community/core/task/todos/scheduler.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 182-188
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotManagementMenu.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 122
+apps/frontend-nextgen/test/shell/AppShellResponsive.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 6,160-172
+  s_abbd34b394aecf::t_a04f50fc875b7d 173-175
+engine/adapter/src/engine/community/core/adapters/openclaw/tests/test_session.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 20,24,772-864
+apps/bcs/crates/services/bcs-dist-connector/tests/rig/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-475
+apps/backend/src/agentclaw/community/core/repository/implementations/devices/device.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 80,493-513,520,524
+apps/bcs/crates/contracts/bcs-domain/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 138-139
+apps/backend/tests/community/core/bot_management/aicoding/test_recycle_task.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-668
+apps/bcs/crates/services/bcs-dist-connector/src/send.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-322
+apps/backend/tests/community/core/skill_center/test_local_skill_delete_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 68,221,532-549
+apps/backend/src/agentclaw/community/core/skill_center/mcp_apply_policy.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-21
+apps/backend/tests/community/endpoints/test_todo_workbench.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 17-19,47-51,223-251,261-269,272,299,339,368,470,487,511-651,655,664,668,690
+apps/backend/src/agentclaw/community/core/repository/protocols/task/todos.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 15-21,33-34,36,39-49,63,67-68,71,114-159
+apps/bcs/crates/application/v1/bcs-app-register/tests/a2a_registration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 50
+apps/frontend-nextgen/src/services/workspace/conversationService.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 64-71,163
+apps/backend/tests/community/core/agentswarm/runtime/worker/test_drain_breaker.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 572-579,600-607
+apps/backend/tests/community/core/devices/services/test_local_device_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 884
+apps/frontend-nextgen/src/hooks/useStandardEvaluationSampleSets.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-62
+apps/bcs/crates/services/bcs-dist-store/src/lib.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 12,16
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 557,567,573-574,687,695,705,734,743,753,791,801,810-811
+apps/backend/tests/community/adapters/http/openapi_v1/test_authorization_inventory.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 19,22,259-291,313,619
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_card_routes.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 13,16,30,50,78,348-363
+  s_abbd34b394aecf::t_f6217aea24dd04 364
+apps/backend/tests/community/core/apply_engine/test_teclaw_delivery.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 262-441
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/__init__.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 65-66,68
+apps/frontend-nextgen/src/services/backendApi/todos/todoService.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 9-11,19,21,26-27,33-35,136-198
+apps/backend/tests/community/http/test_copy_skill_sets_endpoint.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 91,94-96,292
+apps/backend/src/agentclaw/community/adapters/http/knowledge_management/content_router.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 40-48
+apps/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service/creation_authorization.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,72,107,218,253,293,320,348,376
+apps/backend/tests/community/core/repository/implementations/test_resource_id_range.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-54
+apps/backend/tests/community/core/task/todos/test_template_definition.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-301
+apps/backend/src/agentclaw/community/core/devices/services/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 76-82
+apps/backend/tests/community/adapters/http/task/todos/test_artifact_routes.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 16,32-35,134-135,153-154,169-176
+  s_abbd34b394aecf::t_82efb15e4dddb3 177-178
+apps/frontend-nextgen/test/components/Community/CommunityTopicList.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 60,69,84,150-151,157,159,163,165
+apps/backend/tests/community/plugins/prod/test_device_filesystem_dispatcher.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 12-13,194-241
+apps/backend/src/agentclaw/community/core/task/todos/source_service_protocol.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-40
+apps/frontend-nextgen/test/components/Community/PersonalCenter.test.tsx
+  s_abbd34b394aecf::t_197cc9d171bc5b 89,92,163,182,185,197,199,209-212,348,350,358-360,369,371-374,403,464-473
+apps/backend/tests/community/core/apply_engine/test_apply_reports_and_failures.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 86-185,429-432
+apps/bcs/crates/application/bcs-app-dist-runtime/README.md
+  s_abbd34b394aecf::t_197cc9d171bc5b 12-16
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 150,571
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/transport.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 50,56,59-61
+  s_abbd34b394aecf::t_fbf03401a72040 62
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 20-21,4153,4176,4312,4549,4580-4581,4789-4790,4874,4921-4922,5149,5151,5226
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/engine_ext_stage.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 3-9,29,42-60,87-90,94-101,112-118,120,191-192,194-199,205-210
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_sync.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 18,47,91-98,181-204,253,271,305,308-317,320,322-331,341,361-372,376,429
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_release_evidence.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-103
+apps/bcs/crates/adapters/http/bcs-http/src/routes/mod.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 2
+apps/frontend-nextgen/src/hooks/useBotBrowseConfig.ts
+  s_abbd34b394aecf::t_197cc9d171bc5b 12-13,64-65
+apps/bcs/crates/services/bcs-bot/src/core/provider_registration.rs
+  s_abbd34b394aecf::t_197cc9d171bc5b 286
+apps/backend/tests/community/repository/task/todos/test_todo_stage_lifecycle.py
+  s_abbd34b394aecf::t_197cc9d171bc5b 1-271
+apps/backend/docs/arch/generated/dependents.md
+  s_abbd34b394aecf::t_f5b2a4de8d0677 88-93,113,191,270,286,325,350,371,414
+apps/bcs/Cargo.lock
+  s_abbd34b394aecf::t_233fbdc06f9eeb 501,507,710,1488-1523,1960,2462
+apps/frontend-nextgen/package-lock.json
+  s_abbd34b394aecf::t_3fd0914c29d318 29-32,5921-6356,6803,6809,6819,13860-13868,17841-17846,18945-18950,20046-20184,21217-21222
+apps/gateway/configs/schemas/bots.openapi.json
+  s_abbd34b394aecf::t_67d9ac2f40911c 4-206,4470,4482-4492,4571-4578,4914,6455,28675-28682,28688,28710,33312-33362,33372-33864,84755,84757,84760-84770,84774,84776,84787-84807,84811,84813,84818,84825-84874
+singlebox/modules/bcs_runtime_config.sh
+  s_abbd34b394aecf::t_ba28e51b5f4e83 187-191
+singlebox/verity/test_singlebox_bcs_runtime_config.sh
+  s_abbd34b394aecf::t_477bcbbd62396b 33,88-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aaa5fa1e113d519e9664c3e67b193d77d2f9d149",
+  "prompts": {},
+  "sessions": {
+    "s_abbd34b394aecf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f24b-c3d4-75a0-a9dd-f07cd92d719c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
