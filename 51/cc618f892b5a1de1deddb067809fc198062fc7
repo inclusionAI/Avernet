@@ -1,0 +1,28 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store.py
+  h_059e888e5e4e82 1-558
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/__init__.py
+  h_059e888e5e4e82 1-39
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/base.py
+  h_059e888e5e4e82 1-58
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/binding_slice.py
+  h_059e888e5e4e82 1-208
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/group_slice.py
+  h_059e888e5e4e82 1-307
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/open_slice.py
+  h_059e888e5e4e82 1-408
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/selection_slice.py
+  h_059e888e5e4e82 1-257
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/swarm_slice.py
+  h_059e888e5e4e82 1-598
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "51cc618f892b5a1de1deddb067809fc198062fc7",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apps/gateway/tests/unit/core/authn/test_route_security.py
+  h_059e888e5e4e82 644-645,648
+apps/gateway/tests/unit/core/forwarding/test_commission_a2a_routing.py
+  h_059e888e5e4e82 1,5,7,9-10,12,26-27,29-82,85
+  h_059e888e5e4e82 4
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 459-473,476-477,483-487,655-658,746-752
+apps/gateway/README.md
+  h_059e888e5e4e82 173-182
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/plan.md
+  h_059e888e5e4e82 128-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d9ec524cf9ca268cc61a55877377e579ed844fbf",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
