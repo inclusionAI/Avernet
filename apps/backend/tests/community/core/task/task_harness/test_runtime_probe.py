@@ -140,7 +140,7 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.state, "terminal_failed")
         self.assertEqual(result.status, "failed")
 
-    async def test_session_activity_request_failure_is_unknown(self):
+    async def test_session_activity_request_failure_falls_back_to_messages(self):
         class _TimeoutSessionBot(_FakeBot):
             async def get_session_runtime_status(self, session_id, *, bot_id=None, lifecycle_stage=None):
                 raise TimeoutError("request timeout")
@@ -148,10 +148,10 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         probe = TaskRuntimeLivenessProbe(bot=_TimeoutSessionBot())
         result = await probe.probe(_Node(session_id="s1"))
 
-        self.assertEqual(result.state, "activity_unknown")
-        self.assertEqual(result.source, "openapi_bot.runtime")
-        self.assertIn("TimeoutError", result.error or "")
-        self.assertEqual(result.detail["reason"], "activity_query_failed")
+        self.assertEqual(result.state, "active")
+        self.assertEqual(result.source, "openapi_bot.session_fallback")
+        self.assertEqual(result.detail["status_error"], "TimeoutError")
+        self.assertEqual(result.detail["fallback_reason"], "activity_query_failed")
 
     async def test_run_request_failure_is_probe_unavailable(self):
         class _TimeoutRunBot(_FakeBot):
@@ -366,11 +366,14 @@ async def test_runtime_generation_change_rebaselines_without_false_progress(chan
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reason", ["NO_ACTIVE_RUN", "AMBIGUOUS_RUN", "UNSUPPORTED_ENGINE"])
-async def test_missing_activity_is_not_terminal_or_permission_to_resume(reason):
+async def test_missing_activity_falls_back_to_message_observation(reason):
     bot = _FakeBot()
     bot.runtime = dict(found=False, reason=reason)
     result = await TaskRuntimeLivenessProbe(bot=bot).probe(_Node(session_id="s1"))
-    assert result.state == "activity_unknown"
+    assert result.state == "active"
+    assert result.source == "openapi_bot.session_fallback"
+    assert result.detail["fallback_reason"] == reason
+    assert result.baseline_reset
     assert not result.progressed
 
 
