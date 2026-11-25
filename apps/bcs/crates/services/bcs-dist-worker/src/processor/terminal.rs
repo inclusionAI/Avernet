@@ -29,6 +29,7 @@ use crate::runtime::{err, store_error};
 use bcs_service_api::types::dist_runtime::RuntimeError;
 use bcs_dist_encoding::{digest_fields, digest_json, hex_of};
 use bcs_dist_model::*;
+use super::{engine::Slot, publication::{Delivery, sealed_round_publication}};
 use bcs_service_api::port::repo::distributed::{
     common::*,
     group_round::StrictLicense,
@@ -161,10 +162,19 @@ impl super::WorkerProcessor {
     /// round on the terminal authority window (the successor processor
     /// generation retires the round after re-acquisition), `Ok(false)` when
     /// the round may retire through the generic path.
+    ///
+    /// Slice 14 (plan T7) additions, both before any authority claim:
+    /// 1. the committed archive gains the round's real publication (parts +
+    ///    complete ordered history) through the guarded attach seam;
+    /// 2. the round's own publication identities are probed for the
+    ///    persistent conflict class — a second sink disputing the paired
+    ///    publications refuses the terminal while the sealed intent stays
+    ///    durably registered (C3). Transient refusals never block here.
     pub(super) async fn strict_round_closes(
         &self,
         before: &Checkpoint,
         tid: &Tid,
+        slot: &mut Slot,
     ) -> Result<bool, RuntimeError> {
         let Some(license) = task_license(before, tid) else {
             return Ok(false);
@@ -173,6 +183,8 @@ impl super::WorkerProcessor {
             return Ok(false);
         };
         let round = license.round_key();
+        self.attach_round_publication(before, tid, &license, &mut slot.attached_rounds)
+            .await?;
         let retained = retained_terminal(before, tid);
         if let Some(view) = self.io(rounds.get(&round)).await?
             && view.terminal.is_some()
@@ -180,12 +192,116 @@ impl super::WorkerProcessor {
             // The window closed: the successor generation may retire.
             return Ok(false);
         }
+        // The conflict probe runs over the round's own obligations before
+        // any authority claim. Transient refusals never block the close
+        // (they remain the follower lane's retry work); a persistent
+        // identity conflict refuses it — C3's second sink.
+        let sealed_owner = slot.acquired.envelope.owner.clone();
+        for publication in before
+            .feed_publications
+            .iter()
+            .filter(|p| p.tid == *tid)
+        {
+            if slot
+                .publication_proofs
+                .iter()
+                .any(|p| p == &publication.effect)
+            {
+                continue;
+            }
+            match self
+                .deliver_publication(publication, sealed_owner.clone())
+                .await?
+            {
+                Delivery::Asserted => slot.publication_proofs.push(publication.effect.clone()),
+                Delivery::Conflicted => {
+                    // C3: the terminal never settles above a disputed
+                    // publication identity; the registered intent stays.
+                    return Err(err("round_publication_conflict"));
+                }
+                Delivery::Blocked | Delivery::Failed => break,
+            }
+        }
         let proof = match retained {
             Some(retained) => retained,
             None => self.build_terminal_proof(before, tid, license)?,
         };
         self.io(rounds.commit_terminal(&round, &proof)).await?;
+        // The rounds terminal CAS is an out-of-band fenced envelope writer:
+        // this slot's sealed view is stale by definition now. Reconstruct
+        // the successor generation's acquisition in place — ownership
+        // unchanged, the durable envelope and its reconstructed commit
+        // proof reloaded — so retirement and the publication lane continue
+        // on the real head instead of a dead one.
+        let envelope = self
+            .io(self.runtime.sessions.load(&round.sid))
+            .await?
+            .ok_or_else(|| err("session_envelope_missing"))?;
+        let mut acquired = slot.acquired.clone();
+        acquired.last_commit = envelope
+            .checkpoint
+            .outbox
+            .as_ref()
+            .map(|batch| CommitReceipt {
+                sid: round.sid.clone(),
+                owner: envelope.owner.clone(),
+                commit_id: batch.commit_id.clone(),
+                content_digest: batch.content_digest.clone(),
+                sequence: batch.source_commit,
+                consumed: envelope.checkpoint.consumed.clone(),
+                proof: format!(
+                    "document:{}:{}:{}",
+                    round.sid.0, batch.source_commit.0, batch.commit_id.0
+                ),
+            });
+        acquired.envelope = envelope;
+        self.runtime
+            .refresh_local_reacquire(&acquired.ownership, acquired.clone())?;
+        *slot = Slot::new(acquired);
         Ok(true)
+    }
+
+    /// Complete the round's committed archive with the real ordered artifact
+    /// parts and the complete public history through the guarded attach
+    /// seam. The store re-verifies every field against the sealed register;
+    /// a success (fresh or idempotent) marks the round attached so the
+    /// follower lane may retire its proven obligations.
+    async fn attach_round_publication(
+        &self,
+        before: &Checkpoint,
+        tid: &Tid,
+        license: &StrictLicense,
+        attached: &mut Vec<Tid>,
+    ) -> Result<(), RuntimeError> {
+        if attached.iter().any(|t| t == tid) {
+            return Ok(());
+        }
+        let Some(archives) = self.ports.archives.clone() else {
+            return Err(err("round_archive_unconfigured"));
+        };
+        let Some(sealed) = sealed_round_publication(&before.feed_publications, tid)
+        else {
+            attached.push(tid.clone());
+            return Ok(());
+        };
+        let publication = PublicPublication {
+            schema_version: 1,
+            effects: sealed.effects,
+            history: sealed.history,
+            artifacts: sealed.artifacts,
+        };
+        match self
+            .io(archives.attach_publication(&license.round_key(), &publication))
+            .await?
+        {
+            AttachedPublication::Attached | AttachedPublication::AlreadyAttached => {
+                attached.push(tid.clone());
+                Ok(())
+            }
+            AttachedPublication::ContentConflict => {
+                Err(err("round_publication_attach_conflict"))
+            }
+        }
     }
 
     /// Build the round's terminal proof from sealed facts only: the frozen

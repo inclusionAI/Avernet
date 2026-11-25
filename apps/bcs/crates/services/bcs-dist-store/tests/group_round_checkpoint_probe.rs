@@ -23,6 +23,7 @@ fn initial() -> Checkpoint {
             state: RunnerState { format_version: 1, value: json!({}) } }),
         dispatch_seq: Default::default(), deadlines: vec![],
         view_drafts: Default::default(), last_event_id: None, outbox: None,
+        feed_publications: Vec::new(),
     }
 }
 

@@ -347,6 +347,7 @@ fn empty_checkpoint() -> Checkpoint {
         view_drafts: Default::default(),
         runner_state: None,
         last_event_id: None,
+        feed_publications: Vec::new(),
         outbox: None,
     }
 }

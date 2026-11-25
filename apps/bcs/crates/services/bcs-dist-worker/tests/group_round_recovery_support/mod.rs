@@ -20,6 +20,7 @@ use bcs_service_api::{
         repo::distributed::{
             dispatch::HeldDispatchPort,
             group_round::*,
+            inbox::*,
             result::*,
             session::*,
         },
@@ -30,6 +31,7 @@ use bcs_dist_store::{
     group_admission::{GroupAdmissionConfig, StoreGroupRoundAdmission},
     layout::KeyLayout,
 };
+use bcs_service_api::port::repo::distributed::common::SessionOwnership;
 use bcs_service_api::port::repo::distributed::ownership::*;
 use bcs_store_api::document::DocumentStorePlugin;
 use std::{
@@ -109,6 +111,14 @@ pub enum FsmMode {
     /// StartDispatch to the sibling node and yield; finish only on the
     /// sibling's Final report.
     WaitOnSibling,
+    /// Show one over-threshold inline artifact and FinishTask in the first
+    /// reduction: the registered obligation pins externalization of
+    /// retained publication payloads (fix round I1).
+    HugeAnswer,
+    /// Upsert "a" then AppendText " b" on one artifact, then FinishTask:
+    /// pins the per-artifact amendment rule in both part derivations
+    /// (fix round I3).
+    AmendAnswer,
 }
 
 impl FsmRunner {
@@ -160,6 +170,28 @@ impl DistRunnerCoreService for FsmRunner {
             if self.mode == FsmMode::AnswerThenFinish {
                 actions.push(show(&tid));
                 actions.push(finish(&tid));
+            } else if self.mode == FsmMode::HugeAnswer {
+                actions.push(show_update(
+                    tid,
+                    ArtifactUpdate::Upsert {
+                        content: Payload::Inline(serde_json::json!("x".repeat(80_000))),
+                    },
+                ));
+                actions.push(finish(&tid));
+            } else if self.mode == FsmMode::AmendAnswer {
+                actions.push(show_update(
+                    tid,
+                    ArtifactUpdate::Upsert {
+                        content: Payload::Inline(serde_json::json!("a")),
+                    },
+                ));
+                actions.push(show_update(
+                    tid,
+                    ArtifactUpdate::AppendText {
+                        delta: Payload::Inline(serde_json::json!(" b")),
+                    },
+                ));
+                actions.push(finish(&tid));
             } else {
                 actions.push(ActionIntent::StartDispatch(dispatch_spec_for(tid, c.spec)));
             }
@@ -191,14 +223,20 @@ impl DistRunnerCoreService for FsmRunner {
 }
 
 fn show(tid: &Tid) -> ActionIntent {
+    show_update(
+        tid,
+        ArtifactUpdate::Upsert {
+            content: Payload::Inline(serde_json::json!("answer-of-round")),
+        },
+    )
+}
+fn show_update(tid: &Tid, update: ArtifactUpdate) -> ActionIntent {
     ActionIntent::Show {
         tid: tid.clone(),
         node: NodeId(NODE.into()),
         artifact_id: ArtifactId("answer".into()),
         class: OutputClass::Output,
-        update: ArtifactUpdate::Upsert {
-            content: Payload::Inline(serde_json::json!("answer-of-round")),
-        },
+        update,
     }
 }
 
@@ -427,6 +465,221 @@ pub fn strict_spec() -> SessionSpec {
     }];
     spec
 }
+
+/// The killed Worker generation's local hand-off: the quiescent resident
+/// session is released exactly as a real crash's successor would find it,
+/// so the acquisition machinery (deferred retries, pending scans) can
+/// re-claim the work the durable publication register still owns.
+pub async fn kill_generation(world: &Arc<RoundWorld>) {
+    let claim = world
+        .f
+        .coordination
+        .current(ShardId(1))
+        .await
+        .unwrap()
+        .expect("shard 1 claim")
+        .claim;
+    let _ = world
+        .f
+        .runtime
+        .release_session(&SessionOwnership {
+            sid: sid(),
+            shard: ShardId(1),
+            owner: claim.owner,
+        })
+        .await;
+}
+
+
+// ---------------------------------------------------------------------------
+// Shared strict-round feed publication vector helpers (plan T7 slice 2 and
+// its fix rounds): wedges, takeovers, feed reads and register accessors.
+// ---------------------------------------------------------------------------
+
+pub fn sibling_did(tid: &Tid) -> Did {
+    Did(format!("{}.fsm:1:{NODE}:1", tid.0))
+}
+
+pub async fn bounded<const SECS: u64>(future: impl Future<Output = ()>) {
+    tokio::time::timeout(Duration::from_secs(SECS), future)
+        .await
+        .expect("vector exceeded its wall-time bound");
+}
+
+/// The ConnectorAdmission report of one dispatch terminal: no
+/// `remote_event_id`, the stable connector key identity and the state bound
+/// inside the payload.
+pub fn terminal_report(tid: &Tid, did: &Did, state: &str) -> ConnectorAdmission {
+    let event = AgentEvent {
+        did: did.clone(),
+        holder_epoch: HolderEpoch(1),
+        seq: InputSeq(1),
+        kind: AgentEventKind::Final,
+        remote_event_id: None,
+        payload: Payload::Inline(serde_json::json!({"state": state, "answer": "answer-of-round"})),
+    };
+    ConnectorAdmission {
+        input: InputEnvelope {
+            schema_version: 1,
+            sid: sid(),
+            tid: tid.clone(),
+            input_id: bcs_dist_encoding::connector::key_input_id(
+                did,
+                bcs_dist_encoding::connector::KeyEvent::Final,
+            ),
+            business_digest: Digest(String::new()),
+            body: InputBody::Agent { event },
+        },
+        identity: ConnectorEventIdentity {
+            round: None,
+            state: state.into(),
+        },
+    }
+}
+
+pub fn wedge_feed(world: &RoundWorld) {
+    world
+        .f
+        .publisher
+        .fail_session
+        .lock()
+        .unwrap()
+        .replace((sid(), false));
+}
+pub fn release_feed(world: &RoundWorld) {
+    world.f.publisher.fail_session.lock().unwrap().take();
+}
+pub fn wedge_publish(world: &RoundWorld) {
+    world
+        .f
+        .publisher
+        .fail_publish
+        .lock()
+        .unwrap()
+        .replace(sid());
+}
+pub fn release_publish(world: &RoundWorld) {
+    world.f.publisher.fail_publish.lock().unwrap().take();
+}
+pub fn wedge_conflict(world: &RoundWorld) {
+    world
+        .f
+        .publisher
+        .conflict_session
+        .lock()
+        .unwrap()
+        .replace(sid());
+}
+pub fn release_conflict(world: &RoundWorld) {
+    world.f.publisher.conflict_session.lock().unwrap().take();
+}
+
+/// The ordered public events of the session feed, decoded from the durable
+/// stream the publisher writes — the only claim of "published" this suite
+/// accepts.
+pub async fn feed_events(world: &RoundWorld) -> Vec<OutputEvent> {
+    use bcs_store_api::{
+        stream::{ReadOptions, StreamRead, StreamStorePlugin},
+        StoreCapability, StorePlugin,
+    };
+    assert!(
+        world.f.model.supports(StoreCapability::Stream),
+        "the fixture model is the session feed's stream provider"
+    );
+    let key = world.f.layout.ev(&sid()).unwrap();
+    let mut events = Vec::new();
+    let mut after = None;
+    for _ in 0..32 {
+        let mut page = world
+            .f
+            .model
+            .read(
+                &[StreamRead {
+                    key: key.clone(),
+                    after,
+                }],
+                ReadOptions {
+                    max_entries: std::num::NonZeroU32::new(256).unwrap(),
+                    block: None,
+                },
+            )
+            .await
+            .unwrap()
+            .pop()
+            .unwrap()
+            .page;
+        let count = page.entries.len();
+        if let Some(last) = page.entries.last() {
+            after = Some(last.id);
+        }
+        for entry in std::mem::take(&mut page.entries) {
+            let bytes = entry
+                .fields
+                .get("event")
+                .expect("feed entries carry their event frame");
+            events.push(serde_json::from_slice::<OutputEvent>(bytes).unwrap());
+        }
+        if count == 0 {
+            return events;
+        }
+    }
+    panic!("feed page loop did not terminate");
+}
+
+/// Drives A through the sibling leg (report + durable stop fact) so the round
+/// holds its finalized record at the AwaitingResult boundary.
+pub async fn settle_a_round(
+    world: &Arc<RoundWorld>,
+    processor: &Arc<bcs_dist_worker::WorkerProcessor>,
+    tid: &Tid,
+) {
+    let did = sibling_did(tid);
+    until_dispatch(world, processor, &did).await;
+    claim_sibling(world, &did).await;
+    world
+        .f
+        .inbox
+        .admit_connector(terminal_report(tid, &did, "final"))
+        .await
+        .unwrap();
+    confirm_attempt_stop(world, &did).await;
+}
+
+pub async fn publications(world: &RoundWorld) -> Vec<FeedPublication> {
+    world.checkpoint().await.feed_publications
+}
+
+pub fn find_publication<'p>(
+    publications: &'p [FeedPublication],
+    effect: &EffectId,
+) -> Option<&'p FeedPublication> {
+    publications.iter().find(|p| &p.effect == effect)
+}
+
+pub fn artifact_index(events: &[OutputEvent], tid: &Tid) -> Option<usize> {
+    events.iter().position(|e| {
+        e.tid == *tid
+            && matches!(
+                &e.body,
+                OutputBody::Artifact {
+                    artifact_id,
+                    update: ArtifactUpdate::Upsert { .. },
+                    ..
+                } if *artifact_id == ArtifactId("answer".into())
+            )
+    })
+}
+
+pub fn terminal_index(events: &[OutputEvent], tid: &Tid) -> Option<usize> {
+    events
+        .iter()
+        .position(|e| e.tid == *tid && matches!(&e.body, OutputBody::Terminal { .. }))
+}
+
+/// Wedge the shared feed; A must still close its authority, retire, and B
+/// must actually dispatch its first node while every feed write is refused;
+/// afterwards the restored lane delivers A's events with the artifact before
+/// the terminal, exactly once, from the retained predecessor.
 
 /// Drives the inbox/scheduling runtime and then the processor, the same
 /// heartbeat the lifecycle targets use.

@@ -178,6 +178,7 @@ pub fn checkpoint() -> Checkpoint {
         deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: Some(event_id()),
+        feed_publications: Vec::new(),
         outbox: Some(CommittedBatch {
             created_at: None,
             commit_id: proof().commit_id,

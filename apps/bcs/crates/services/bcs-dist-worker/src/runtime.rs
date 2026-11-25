@@ -82,6 +82,11 @@ pub(crate) struct State {
     pub scans: BTreeMap<ShardId, Scan>,
     pub acquisitions: BTreeMap<Sid, Acquisition>,
     pub retries: BTreeMap<Sid, (ShardClaim, Instant)>,
+    /// Deferred reacquires carrying real outstanding work (undelivered feed
+    /// publication obligations, plan T7 slice 2): only these re-drive on a
+    /// dry pending index. Ordinary deferrals keep their pre-slice resting
+    /// semantics exactly.
+    pub publication_retries: BTreeMap<Sid, (ShardClaim, Instant)>,
     pub priority_shards: VecDeque<ShardId>,
     pub priority_turn: bool,
     pub recovery_cursor: Option<ShardId>,
@@ -271,6 +276,7 @@ impl WorkerRuntime {
                 scans: BTreeMap::new(),
                 acquisitions: BTreeMap::new(),
                 retries: BTreeMap::new(),
+                publication_retries: BTreeMap::new(),
                 priority_shards: VecDeque::new(),
                 priority_turn: true,
                 recovery_cursor: None,
@@ -440,6 +446,9 @@ impl WorkerRuntime {
                     let mut state = self.state()?;
                     state.shards.remove(&shard);
                     state.retries.retain(|_, (claim, _)| claim.shard != shard);
+                    state
+                        .publication_retries
+                        .retain(|_, (claim, _)| claim.shard != shard);
                 }
                 // Do not rebalance healthy owners; uncertain liveness is not death.
                 let identity = (
@@ -868,61 +877,6 @@ impl WorkerRuntime {
             return Err(err("session_owner_changed"));
         }
         s.phase = Phase::Unknown;
-        Ok(())
-    }
-    /// Release only quiescent local state. This never removes persistent pending
-    /// work or changes ownership; a later scan can recover it again if required.
-    pub async fn release_session(&self, owner: &SessionOwnership) -> Result<(), RuntimeError> {
-        {
-            let mut state = self.state()?;
-            let s = state
-                .sessions
-                .get_mut(&owner.sid)
-                .ok_or_else(|| err("session_not_active"))?;
-            if s.acquired.ownership != *owner
-                || !matches!(s.phase, Phase::Idle | Phase::Releasing)
-                || s.pending_schedule
-                || s.pending_effects != 0
-            {
-                return Err(err("session_not_quiescent"));
-            }
-            s.phase = Phase::Releasing;
-            s.drain_retry_at = Instant::now() + self.config.check_interval;
-        }
-        let feed = self
-            .feeds
-            .lock()
-            .map_err(|_| err("worker_feed_poisoned"))?
-            .get(&owner.shard)
-            .cloned();
-        if let Some(feed) = feed {
-            self.bounded(async {
-                feed.lock()
-                    .await
-                    .as_mut()
-                    .ok_or_else(reader_rebuilding)?
-                    .unwatch(&owner.sid)
-                    .await
-            })
-            .await?;
-        }
-        // Cleanup follows transfer/unwatch I/O; its own retry interval starts
-        // here, not at the earlier batch-selection or transfer timestamp.
-        if let Some(session) = self.state()?.sessions.get_mut(&owner.sid) {
-            session.drain_retry_at = Instant::now() + self.config.check_interval;
-        }
-        self.bounded(self.sessions.release_local(owner)).await?;
-        let mut state = self.state()?;
-        if state
-            .sessions
-            .get(&owner.sid)
-            .is_some_and(|s| s.acquired.ownership == *owner && s.phase == Phase::Releasing)
-        {
-            state.sessions.remove(&owner.sid);
-            state.made_progress();
-        }
-        drop(state);
-        self.close_unused_feeds()?;
         Ok(())
     }
     pub(crate) fn close_unused_feeds(&self) -> Result<(), RuntimeError> {

@@ -62,8 +62,10 @@ pub use projection::JsonProjectionValidator;
 mod finalization;
 mod proof;
 mod projection;
+mod publication;
 
 use finalization::*;
+
 
 use crate::archive::{blob_reference, object_hash, result_blob_reference};
 use crate::evidence::{completion_identity, EffectVerifier};
@@ -740,6 +742,14 @@ impl TaskArchiveRepo for GroupArtifactStore {
                 operation_id: hash.clone(),
             }),
         }
+    }
+
+    async fn attach_publication(
+        &self,
+        round: &RoundKey,
+        publication: &PublicPublication,
+    ) -> Result<AttachedPublication, StoreError> {
+        self.attach_publication_impl(round, publication).await
     }
 
     async fn confirm_terminal_proof(

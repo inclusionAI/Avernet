@@ -112,7 +112,7 @@ fn initial() -> Checkpoint {
         runner_state: Some(TaskRunnerState { tid: records_tid(), state: RunnerState
             { format_version: 1, value: json!({"records": [], "generation": 0, "cold": []}) } }),
         dispatch_seq: Default::default(), deadlines: vec![], view_drafts: Default::default(),
-        last_event_id: None, outbox: None }
+        last_event_id: None, outbox: None, feed_publications: Vec::new() }
 }
 /// Cold-proof index held by the same checkpoint state: `[{tid,digest}]`. Every
 /// read from a cold document must re-verify the indexed digest first.

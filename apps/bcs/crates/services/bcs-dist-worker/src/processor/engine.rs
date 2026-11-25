@@ -102,9 +102,16 @@ pub(super) struct Slot {
     pub round_started: bool,
     pub retry_at: tokio::time::Instant,
     pub ack_pending: bool,
+    /// Durable read-back proofs of the publication follower lane
+    /// (plan T7 slice 2): effects proven complete this slot lifetime. A
+    /// takeover slot starts empty and re-proves idempotently.
+    pub publication_proofs: Vec<EffectId>,
+    /// Rounds whose committed archive gained its real publication (parts +
+    /// history) inside this slot lifetime.
+    pub attached_rounds: Vec<Tid>,
 }
 impl Slot {
-    fn new(acquired: AcquiredSession) -> Self {
+    pub(super) fn new(acquired: AcquiredSession) -> Self {
         let ack_pending = acquired.last_commit.is_some();
         Self {
             effects_pending: acquired.envelope.checkpoint.outbox.is_some(),
@@ -131,6 +138,8 @@ impl Slot {
             round_started: false,
             retry_at: tokio::time::Instant::now(),
             ack_pending,
+            publication_proofs: Vec::new(),
+            attached_rounds: Vec::new(),
         }
     }
     pub fn idle(&self) -> bool {

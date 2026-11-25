@@ -303,7 +303,10 @@ pub(super) fn apply_decision(
         kinds.push(EffectKind::SaveResult { record });
     }
     candidate.view_drafts.insert(task.tid.clone(), content);
-    install_effects(&mut candidate, &metadata.sid, kinds)?;
+    match task_license(before, &metadata.tid) {
+        Some(license) => install_effects_licensed(&mut candidate, &license, kinds)?,
+        None => install_effects(&mut candidate, &metadata.sid, kinds)?,
+    }
     Ok(candidate)
 }
 
@@ -434,7 +437,10 @@ pub(super) fn archive_confirmed(
             ),
         },
     ];
-    install_effects(&mut candidate, &metadata.sid, kinds)?;
+    match task_license(before, &metadata.tid) {
+        Some(license) => install_effects_licensed(&mut candidate, &license, kinds)?,
+        None => install_effects(&mut candidate, &metadata.sid, kinds)?,
+    }
     Ok(candidate)
 }
 
@@ -463,6 +469,48 @@ pub(super) fn install_effects(
             })
         })
         .collect::<Result<_, StoreError>>()?;
+    Ok(())
+}
+
+/// Strict-group licensed installs (plan T7 slice 2): `AppendEvents` and
+/// `PublishSnapshot` effects are split out of the blocking session outbox
+/// into the durable paired publication register, registered with the same
+/// authoritative commit. Their stable delivery identities continue the batch's
+/// dense index order and their sealed commit binding is completed by
+/// `seal_candidate`. Retirement and next-round dispatch never wait for them;
+/// every other effect kind keeps the original outbox authorization exactly.
+pub(super) fn install_effects_licensed(
+    candidate: &mut Checkpoint,
+    license: &bcs_service_api::port::repo::distributed::group_round::StrictLicense,
+    kinds: Vec<EffectKind>,
+) -> Result<(), StoreError> {
+    let mut blocking = Vec::new();
+    for kind in kinds {
+        match kind {
+            EffectKind::AppendEvents { .. } | EffectKind::PublishSnapshot { .. } => {
+                candidate.feed_publications.push(FeedPublication {
+                    schema_version: 1,
+                    sid: license.sid.clone(),
+                    tid: license.tid.clone(),
+                    scope: license.scope.clone(),
+                    group: license.group.clone(),
+                    generation: license.generation,
+                    commit_id: CommitId(String::new()),
+                    commit_digest: Digest(String::new()),
+                    consumed: None,
+                    effect: EffectId {
+                        sid: license.sid.clone(),
+                        commit: candidate.commit_seq,
+                        index: NonZeroU32::MIN,
+                    },
+                    content_digest: Digest(String::new()),
+                    kind,
+                });
+            }
+            other => blocking.push(other),
+        }
+    }
+    install_effects(candidate, &license.sid, blocking)?;
     Ok(())
 }
 fn assign_events(

@@ -67,10 +67,12 @@ impl WorkerProcessor {
             // the proof builds from sealed facts and the rounds repository
             // commits it (closure evidence, terminal CAS, cold confirm and
             // read-back) before the successor generation retires the task.
-            if self.strict_round_closes(before, &task.tid).await? {
+            let tid = task.tid.clone();
+            let done_before = before.clone();
+            if self.strict_round_closes(&done_before, &tid, slot).await? {
                 return Ok(None);
             }
-            return retire_published(before, slot.completed.as_ref())
+            return retire_published(&done_before, slot.completed.as_ref())
                 .map(|c| Some((c, false)))
                 .map_err(store_error);
         }

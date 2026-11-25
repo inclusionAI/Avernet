@@ -180,10 +180,22 @@ async fn archive_visible_impl() {
         )
         .await
         .unwrap();
-    assert!(
-        parts.is_empty(),
-        "the slice archives only proven parts; the paired publication \
-         obligations (slice 14) own the artifact list"
+    // Slice 14 (plan T7): the terminal window's archive carries the real
+    // artifact parts through the guarded attach seam — the round's single
+    // Upsert artifact, content and order intact — never a placeholder.
+    assert_eq!(
+        parts,
+        vec![(
+            a_key.tid.clone(),
+            ArtifactPart {
+                artifact_id: ArtifactId("answer".into()),
+                order: std::num::NonZeroU32::new(1).unwrap(),
+                part: RoundPart::Text {
+                    text: "answer-of-round".into()
+                },
+            }
+        )],
+        "the paired publication obligations deliver the real artifact parts"
     );
     assert!(matches!(
         world.admission.admit(&round("b", 2)).await.unwrap(),

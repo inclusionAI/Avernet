@@ -1,5 +1,6 @@
 //! Verify committed effects against durable facts, never an opaque proof string.
 use crate::{codec::decode_json, error, identity::digest_json, layout::KeyLayout};
+use bcs_dist_model::Sid;
 use bcs_service_api::port::repo::distributed::{common::*, session::*};
 use bcs_store_api::document::DocumentStorePlugin;
 use std::sync::Arc;
@@ -12,6 +13,71 @@ pub struct EffectVerifier {
 impl EffectVerifier {
     pub fn new(documents: Arc<dyn DocumentStorePlugin>, layout: KeyLayout) -> Self {
         Self { documents, layout }
+    }
+
+    /// The strict-group paired first-write permission (plan T7 slice 2).
+    /// `AppendEvents`/`PublishSnapshot` effects split out of a strict
+    /// session's blocking outbox stay verifiable after the checkpoint
+    /// advanced past their commit: the authoritative commit that registered
+    /// them left the durable publication register inside the sealed
+    /// checkpoint, and this check matches the delivery claim against that
+    /// register entry exactly — sealed commit identity (id, sequence
+    /// binding, digest, consumed position), the paired delivery identity
+    /// (`effect_id`), the effect content digest and the full effect body
+    /// (append: previous/event range/event digests; snapshot: snapshot
+    /// digest/`source_commit`/`snapshot_event_id`), plus the licensed
+    /// `Sid/generation/Tid` binding.
+    ///
+    /// Sessions without register entries answer `Ok(false)`, so callers
+    /// keep their original error and no non-strict behavior changes. A
+    /// register entry under the same delivery identity with different
+    /// binding or content is a loud permission conflict, never a silent
+    /// authorization.
+    pub async fn verify_paired(
+        &self,
+        source: &EffectSource,
+        kind: &EffectKind,
+    ) -> Result<bool, StoreError> {
+        let Some(envelope) = self.envelope(&source.commit.sid).await? else {
+            return Ok(false);
+        };
+        for publication in &envelope.checkpoint.feed_publications {
+            if publication.effect != source.effect_id {
+                continue;
+            }
+            if publication.sid != source.commit.sid
+                || publication.commit_id != source.commit.commit_id
+                || publication.commit_digest != source.commit.content_digest
+                || publication.consumed != source.commit.consumed
+                || publication.content_digest != source.content_digest
+                || digest_json(&serde_json::to_value(kind).map_err(|_| invalid())?)
+                    != source.content_digest
+                || publication.kind != *kind
+            {
+                return Err(StoreError::Invalid {
+                    code: "publication_permission_conflict".into(),
+                });
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// The sealed session envelope behind a paired permission check, or
+    /// `None` when the session has no durable envelope yet.
+    async fn envelope(
+        &self,
+        sid: &Sid,
+    ) -> Result<Option<CheckpointEnvelope>, StoreError> {
+        match self
+            .documents
+            .read_document(&self.layout.ckpt(sid)?)
+            .await
+            .map_err(|error| error::from_read(&error))?
+        {
+            Some(document) => Ok(Some(decode_json(document.value)?)),
+            None => Ok(None),
+        }
     }
 
     /// A sealed successor may replay an earlier owner's exact committed effect.

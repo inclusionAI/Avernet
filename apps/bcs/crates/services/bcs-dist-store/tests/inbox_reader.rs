@@ -173,6 +173,7 @@ async fn persist_commit(store: &Recorder, consumed: Option<InboxPos>) -> CommitR
             deadline_history: Default::default(),
             view_drafts: Default::default(),
             last_event_id: None,
+            feed_publications: Vec::new(),
             outbox: Some(CommittedBatch {
                 created_at: None,
                 commit_id: commit_id.clone(),

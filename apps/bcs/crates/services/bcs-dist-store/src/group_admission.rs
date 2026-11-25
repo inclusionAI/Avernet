@@ -334,6 +334,7 @@ impl StoreGroupRoundAdmission {
             view_drafts: Default::default(),
             runner_state: None,
             last_event_id: None,
+            feed_publications: Vec::new(),
             outbox: None,
         };
         use bcs_service_api::port::repo::distributed::session::AcquireOutcome;

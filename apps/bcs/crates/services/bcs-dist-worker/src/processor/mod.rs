@@ -25,6 +25,7 @@ mod drive;
 mod engine;
 mod observations;
 mod prepare;
+mod publication;
 mod replay;
 mod risk;
 mod thinking;

@@ -327,6 +327,8 @@ impl Fixture {
             lose_append: AtomicBool::new(false),
             append_calls: AtomicUsize::new(0),
             fail_session: Default::default(),
+            fail_publish: Default::default(),
+            conflict_session: Default::default(),
             append_requests: Default::default(),
             pause_failure: AtomicBool::new(false),
             failure_entered: tokio::sync::Notify::new(),

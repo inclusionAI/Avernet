@@ -132,6 +132,36 @@ pub enum ArchivedTaskView {
 /// (plan T4). The final record, every ordered artifact part and all immutable
 /// blob references are written in ONE transaction or not at all; expiry
 /// marking and reclamation are independent and idempotent.
+/// The controlled completion payload of a committed strict-group archive
+/// (plan T7 slice 2): the complete ordered public history and the ordered
+/// artifact parts, covered by the exact sealed publication obligations of
+/// the round. The store re-verifies every field against the register kept
+/// in the session's sealed checkpoint — this payload is a claim, never an
+/// authority of its own.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PublicPublication {
+    pub schema_version: u32,
+    /// Sealed obligation identities this publication covers, in stable
+    /// delivery order.
+    pub effects: Vec<EffectId>,
+    /// Complete ordered public history (state, artifact and terminal
+    /// events) of the task, exactly as sealed in the covered obligations.
+    pub history: Vec<OutputEvent>,
+    /// Ordered artifact parts derived one-to-one from the artifact events
+    /// of the covered obligations; unique per `(tid, artifact_id)`.
+    pub artifacts: Vec<ArtifactPart>,
+}
+
+/// Outcome of the guarded archive completion above. A matching repeat is
+/// `AlreadyAttached`; a different payload for the same archive is a loud
+/// conflict, never a silent overwrite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttachedPublication {
+    Attached,
+    AlreadyAttached,
+    ContentConflict,
+}
+
 #[async_trait]
 pub trait TaskArchiveRepo: Send + Sync {
     /// Authorization comes from persisted committed evidence, exactly like
@@ -240,6 +270,24 @@ pub trait TaskArchiveRepo: Send + Sync {
         group: &GroupId,
         tid: &Tid,
     ) -> Result<Option<TerminalProof>, StoreError>;
+    /// Controlled completion of a committed archive with the real ordered
+    /// artifact parts and the complete public history (plan T7 slice 2).
+    /// The default refusal keeps unextended stores honest
+    /// (`archive_attach_unconfigured`); extensions must verify every claim
+    /// against the sealed checkpoint register before updating the archive
+    /// row: a committed archive with empty parts may gain them exactly
+    /// once, a conflicting payload is refused, and no path fabricates
+    /// `AlreadySaved`/`AlreadyAttached` semantics.
+    async fn attach_publication(
+        &self,
+        round: &RoundKey,
+        publication: &PublicPublication,
+    ) -> Result<AttachedPublication, StoreError> {
+        let _ = (round, publication);
+        Err(StoreError::NotApplied {
+            code: "archive_attach_unconfigured".into(),
+        })
+    }
 }
 
 #[async_trait]

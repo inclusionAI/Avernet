@@ -38,6 +38,7 @@ pub(super) fn maximum_envelope_bytes() -> Result<usize, StoreError> {
                 deadline_history: Default::default(),
                 view_drafts: Default::default(),
                 last_event_id: None,
+                feed_publications: Vec::new(),
                 outbox: None,
             },
             recovery: RecoveryMetadata {

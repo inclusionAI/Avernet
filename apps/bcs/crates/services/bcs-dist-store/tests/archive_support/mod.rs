@@ -85,6 +85,7 @@ impl Fixture {
                 deadline_history: Default::default(),
                 view_drafts: BTreeMap::new(),
                 last_event_id: None,
+                feed_publications: Vec::new(),
                 outbox: Some(batch),
             },
             recovery: RecoveryMetadata {
