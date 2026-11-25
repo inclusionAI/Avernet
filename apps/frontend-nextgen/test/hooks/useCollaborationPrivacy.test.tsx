@@ -635,3 +635,60 @@ describe('useCollaborationPrivacy 检测进入审批边沿静默刷新协作数�
     expect(result.current.overview).toEqual(overviewWithBots);
   });
 });
+
+describe('useCollaborationPrivacy 重新申请公开', () => {
+  it('复用上笔公开目标并为每次结束后的重新申请生成新请求 ID', async () => {
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBots);
+    const target = {
+      public_scope: 'user',
+      visibility: 'protected',
+      view_depts: [{ deptNo: 'dept-1', deptName: '研发' }],
+    };
+    const blocked: riskController.BotPublicRiskCheckRecord = {
+      risk_check_id: 'blocked-1',
+      phase: 'NEEDS_ATTENTION',
+      security_status: 'PASS',
+      detail_url: null,
+      auto_poll_paused: false,
+      auto_poll_until: null,
+      next_action_at: null,
+      target,
+      error_reason: 'CONFIG_CHANGED',
+      invalidation_reason: null,
+      approval_puid: 'approval-1',
+      approval_decision: 'AGREE',
+    };
+    jest.spyOn(riskController, 'getCurrentBotPublicRiskCheck').mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: blocked,
+    });
+    const create = jest
+      .spyOn(riskController, 'createBotPublicRiskCheck')
+      .mockResolvedValueOnce({ code: 202000, message: 'OK', data: { ...blocked, risk_check_id: 'blocked-2' } })
+      .mockResolvedValueOnce({
+        code: 202000,
+        message: 'OK',
+        data: { ...blocked, risk_check_id: 'checking-3', phase: 'CHECKING', security_status: null },
+      });
+    const { result } = renderHook(() => useCollaborationPrivacy({ fixedBotId: 'bot-1' }));
+    await waitFor(() => expect(result.current.userRisk.record?.risk_check_id).toBe('blocked-1'));
+
+    act(() => result.current.openPublicationEditor(overviewWithBots.bots[0]!, 'user'));
+    await act(async () => result.current.userRisk.retryCurrent?.());
+    await act(async () => result.current.userRisk.retryCurrent?.());
+
+    expect(create).toHaveBeenCalledTimes(2);
+    for (const [botId, userId, request] of create.mock.calls) {
+      expect([botId, userId]).toEqual(['bot-1', '900004']);
+      expect(request).toEqual({ ...target, client_request_id: expect.any(String) });
+    }
+    expect(create.mock.calls[0]?.[2].client_request_id).not.toBe(create.mock.calls[1]?.[2].client_request_id);
+    expect(result.current.userRisk.uiState.kind).toBe('checking');
+    expect(result.current.userRisk.retryCurrent).toBeUndefined();
+  });
+});

@@ -6,7 +6,7 @@ import {
   resolvePrivacyLoadScope,
 } from '@/domain/collaborationPrivacy/loadScope';
 import type { CollaborationBot, PublicAudience, PublicConfig } from '@/domain/collaborationPrivacy/types';
-import { useBotPublicRisk } from '@/hooks/useBotPublicRisk';
+import { useBotPublicRisk, type BotPublicRiskCreateIntent } from '@/hooks/useBotPublicRisk';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
@@ -152,6 +152,35 @@ export function useCollaborationPrivacy({
     // 仅在进入 approving 的边沿触发一次；重复触发无额外收益（load 引用随身份/范围重建）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [risk.uiState.kind]);
+  const createUserRisk = useCallback(
+    async (botId: string, intent: BotPublicRiskCreateIntent) => {
+      const { busyAction, setBusyAction } = useCollaborationPrivacyStore.getState();
+      if (busyAction || risk.isRefreshing) return;
+      setBusyAction(`${botId}:publication:user`);
+      try {
+        const record = await risk.create(intent);
+        if (record) notifySuccess('Bot公开风险前置检测已发起');
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [risk.create, risk.isRefreshing],
+  );
+  const target = risk.currentRecord?.target;
+  const retryVisibility = target?.visibility.toLowerCase();
+  const recoveringRisk = risk.uiState.kind === 'failed' || risk.uiState.kind === 'attention';
+  const retryCurrent =
+    riskEnabled &&
+    publicationEditor?.audience === 'user' &&
+    target?.public_scope === 'user' &&
+    (retryVisibility === 'public' || retryVisibility === 'protected') &&
+    recoveringRisk
+      ? () =>
+          createUserRisk(publicationEditor.botId, {
+            visibility: retryVisibility,
+            view_depts: target.view_depts,
+          })
+      : undefined;
   const submitPublication = useCallback(
     async (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => {
       if (!publicationEditor) return;
@@ -161,36 +190,28 @@ export function useCollaborationPrivacy({
       // 收紧 / 外部 Bot / 对 Bot 维度继续走原直改/审批通道。
       const isUserPublication = !isExternalBot && publicationEditor.audience === 'user';
       if (isUserPublication && resolvePublishChannel(config, bot.publication.user, false) === 'risk-check') {
-        const actionKey = `${bot.id}:publication:${publicationEditor.audience}`;
-        if (store.busyAction) return;
-        store.setBusyAction(actionKey);
-        try {
-          const record = await risk.create(toBotPublicRiskVisibility(config.scope, deptEntries));
-          if (record) notifySuccess('Bot公开风险前置检测已发起');
-        } finally {
-          store.setBusyAction(null);
-        }
+        await createUserRisk(bot.id, toBotPublicRiskVisibility(config.scope, deptEntries));
         return;
       }
+      const command = buildPublicationCommand({
+        botId: bot.id,
+        audience: publicationEditor.audience,
+        config,
+        deptEntries,
+        isExternalBot,
+      });
+      const blockedRiskApprovalPuid = isUserPublication && recoveringRisk ? risk.currentRecord?.approval_puid : null;
       const succeeded = await runBotAction(
         `${bot.id}:publication:${publicationEditor.audience}`,
         () =>
           collaborationPrivacyService.submitPublication(
-            buildPublicationCommand({
-              botId: bot.id,
-              audience: publicationEditor.audience,
-              config,
-              deptEntries,
-              isExternalBot,
-            }),
+            blockedRiskApprovalPuid ? { ...command, blockedRiskApprovalPuid } : command,
           ),
         isExternalBot ? externalPublicationSaveMessage : publicationSuccessMessage(config),
       );
       if (succeeded) setPublicationEditor(null);
     },
-    // risk.create 引用稳定（useCallback 于 useBotPublicRisk），依赖随 currentRecord 变化由 hook 内部消化
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isExternalBot, publicationEditor, risk.create, runBotAction, store.overview],
+    [isExternalBot, publicationEditor, createUserRisk, recoveringRisk, risk.currentRecord, runBotAction, store.overview],
   );
 
   return {
@@ -201,6 +222,7 @@ export function useCollaborationPrivacy({
       isCreating: risk.isCreating,
       refreshCurrent: risk.refreshCurrent,
       isRefreshing: risk.isRefreshing,
+      retryCurrent,
     },
     load,
     confirmation,

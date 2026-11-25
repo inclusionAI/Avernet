@@ -43,6 +43,53 @@ export function deriveRiskUiState(record: BotPublicRiskRecordLike | null): BotPu
   return { kind: 'checking', record };
 }
 
+/** 失败标题、恢复操作和行级简短状态使用同一映射。 */
+export function getRiskFailurePresentation(
+  kind: 'failed' | 'attention',
+  record: BotPublicRiskRecordLike | null,
+) {
+  const approved = record?.approval_decision === 'AGREE';
+  switch (kind === 'attention' ? record?.error_reason : null) {
+    case 'CONFIG_CHANGED':
+      return {
+        label: '配置已变更',
+        title: approved ? '配置已变更，本次公开未生效' : '配置已变更，请重新申请',
+        description: approved
+          ? '审批已通过，但期间 Bot 配置（如 MCP 或其他资源）发生变更。为保障安全，本次公开已被拦截，请按当前配置重新申请。'
+          : 'Bot 配置已偏离送扫快照，本次申请未生效，请按当前配置重新申请。',
+        canRefresh: false,
+      };
+    case 'PERMISSION_CHANGED':
+      return {
+        label: '权限已变更',
+        title: '权限已变更，本次公开未生效',
+        description: `${approved ? '审批已通过，但' : ''}原申请人管理权限或 Bot 归属已变化，请确认权限后重新申请。`,
+        canRefresh: false,
+      };
+    case 'INPUT_OR_PERMISSION_INVALID':
+      return {
+        label: '配置或权限已变更',
+        title: '配置或权限已变更，请重新申请',
+        description: '申请期间 Bot 配置或申请人权限发生变化，本次公开未生效。',
+        canRefresh: false,
+      };
+    default:
+      return kind === 'failed'
+        ? {
+            label: '检测未通过',
+            title: 'Bot 公开风险前置检测未通过',
+            description: '请前往检测工单查看风险明细并整改，整改后可重新申请。',
+            canRefresh: true,
+          }
+        : {
+            label: '流程异常',
+            title: '公开流程状态异常',
+            description: '请先刷新状态确认，或重新发起公开申请。',
+            canRefresh: true,
+          };
+  }
+}
+
 /** 发布提交通道：direct=现行直改（收紧/外部 Bot）、risk-check=前置检测动线、none=未变化。 */
 export type BotPublicPublishChannel = 'direct' | 'risk-check' | 'none';
 
