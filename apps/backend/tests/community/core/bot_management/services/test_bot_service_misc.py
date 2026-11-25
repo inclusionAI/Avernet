@@ -622,6 +622,92 @@ class TestDeleteBot:
             svc.delete_bot("bot001", "user001")
         svc._repository.soft_delete_by_owner.assert_not_called()
 
+    def test_concurrent_release_race_during_delete_proceeds(self):
+        """A binding released between pre-check and release_device is a win.
+
+        The status pre-check and release_device's own validation are two
+        separate reads. A concurrent actor (stop_bot, admin release, async
+        recycle, duplicate delete) can flip the binding to RELEASED in
+        between; the delete already wants it released, so the deletion must
+        continue instead of failing the user's request on the transient race.
+        """
+        from agentclaw.community.core.devices.errors import InvalidDeviceStatusError
+
+        svc = _make_service()
+        bot = _make_bot(binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        mock_device_service = MagicMock()
+        pre_check_binding = MagicMock()
+        pre_check_binding.status = "ACTIVE"
+        raced_binding = MagicMock()
+        raced_binding.status = DeviceBindingStatus.RELEASED.value
+        mock_device_service.get_device.side_effect = [
+            pre_check_binding,
+            raced_binding,
+        ]
+        mock_device_service.release_device.side_effect = InvalidDeviceStatusError(
+            "only ACTIVE/PENDING/FAILED/STOPPED devices can be released"
+        )
+        svc._device_service_provider = lambda: mock_device_service
+
+        result = svc.delete_bot("bot001", "user001")
+
+        assert result is True
+        mock_device_service.release_device.assert_called_once()
+        svc._repository.soft_delete_by_owner.assert_called_once_with("bot001", "user001")
+
+    def test_concurrent_release_race_binding_gone_during_delete_proceeds(self):
+        """Re-read raising means the binding vanished — same end state."""
+        from agentclaw.community.core.devices.errors import InvalidDeviceStatusError
+
+        svc = _make_service()
+        bot = _make_bot(binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        mock_device_service = MagicMock()
+        pre_check_binding = MagicMock()
+        pre_check_binding.status = "ACTIVE"
+        mock_device_service.get_device.side_effect = [
+            pre_check_binding,
+            RuntimeError("binding row gone"),
+        ]
+        mock_device_service.release_device.side_effect = InvalidDeviceStatusError(
+            "only ACTIVE/PENDING/FAILED/STOPPED devices can be released"
+        )
+        svc._device_service_provider = lambda: mock_device_service
+
+        result = svc.delete_bot("bot001", "user001")
+
+        assert result is True
+        svc._repository.soft_delete_by_owner.assert_called_once_with("bot001", "user001")
+
+    def test_unexpected_invalid_status_still_blocks_deletion(self):
+        """InvalidDeviceStatusError on a still-releasable binding stays fatal.
+
+        If the re-read still shows a releasable status, the release genuinely
+        failed for an unexpected reason and must not be glossed over as a
+        concurrent release.
+        """
+        from agentclaw.community.core.devices.errors import InvalidDeviceStatusError
+
+        svc = _make_service()
+        bot = _make_bot(binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        mock_device_service = MagicMock()
+        mock_binding = MagicMock()
+        mock_binding.status = "ACTIVE"
+        mock_device_service.get_device.return_value = mock_binding
+        mock_device_service.release_device.side_effect = InvalidDeviceStatusError(
+            "only ACTIVE/PENDING/FAILED/STOPPED devices can be released"
+        )
+        svc._device_service_provider = lambda: mock_device_service
+
+        with pytest.raises(BotServiceError, match="设备释放失败"):
+            svc.delete_bot("bot001", "user001")
+        svc._repository.soft_delete_by_owner.assert_not_called()
+
     def test_passport_destroy_failure_blocks_deletion(self):
         from agentclaw.community.plugin_api.passport import PassportError
 
@@ -1068,3 +1154,78 @@ class TestTemplateFactoryBranchCoverage:
         assert BotService._resolve_bcn_provider_connection_mode(
             active_engine="aicoding", bot_type="personal"
         ) is None
+
+
+# ===========================================================================
+# release_bot_for_others
+# ===========================================================================
+
+
+class TestReleaseBotForOthers:
+
+    def test_concurrent_release_race_proceeds(self):
+        """Admin release hitting a concurrently-released binding continues.
+
+        Same transient race as delete_bot: the status pre-check and
+        release_device's own validation are two reads; a binding flipped to
+        RELEASED in between is the desired end state, not an admin failure.
+        """
+        from agentclaw.community.core.devices.errors import InvalidDeviceStatusError
+
+        svc = _make_service()
+        svc._repository.exists_by_owner_and_bot_id.return_value = True
+        bot = _make_bot(bot_id="bot001", owner_id="user002", binding_id=42)
+        svc._repository.list_by_owner.return_value = (1, [bot])
+        svc._repository.update_by_owner.return_value = bot
+
+        mock_device_service = MagicMock()
+        pre_check_binding = MagicMock()
+        pre_check_binding.status = "ACTIVE"
+        raced_binding = MagicMock()
+        raced_binding.status = DeviceBindingStatus.RELEASED.value
+        mock_device_service.get_device.side_effect = [
+            pre_check_binding,
+            raced_binding,
+        ]
+        mock_device_service.release_device.side_effect = InvalidDeviceStatusError(
+            "only ACTIVE/PENDING/FAILED/STOPPED devices can be released"
+        )
+        svc._device_service_provider = lambda: mock_device_service
+
+        result = svc.release_bot_for_others(
+            target_user_id="user002",
+            target_bot_id="bot001",
+            caller_user_id="admin001",
+            caller_nick_name="admin",
+        )
+
+        assert result["action"] == "released"
+        mock_device_service.release_device.assert_called_once()
+        svc._repository.update_by_owner.assert_called_once()
+
+    def test_unexpected_invalid_status_still_blocks(self):
+        """InvalidDeviceStatusError on a still-releasable binding stays fatal."""
+        from agentclaw.community.core.devices.errors import InvalidDeviceStatusError
+
+        svc = _make_service()
+        svc._repository.exists_by_owner_and_bot_id.return_value = True
+        bot = _make_bot(bot_id="bot001", owner_id="user002", binding_id=42)
+        svc._repository.list_by_owner.return_value = (1, [bot])
+
+        mock_device_service = MagicMock()
+        mock_binding = MagicMock()
+        mock_binding.status = "ACTIVE"
+        mock_device_service.get_device.return_value = mock_binding
+        mock_device_service.release_device.side_effect = InvalidDeviceStatusError(
+            "only ACTIVE/PENDING/FAILED/STOPPED devices can be released"
+        )
+        svc._device_service_provider = lambda: mock_device_service
+
+        with pytest.raises(BotServiceError, match="释放设备失败"):
+            svc.release_bot_for_others(
+                target_user_id="user002",
+                target_bot_id="bot001",
+                caller_user_id="admin001",
+                caller_nick_name="admin",
+            )
+        svc._repository.update_by_owner.assert_not_called()
