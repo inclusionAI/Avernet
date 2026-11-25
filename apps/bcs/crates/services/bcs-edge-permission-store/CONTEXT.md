@@ -400,3 +400,21 @@ verify the local path; the same harness is registered in the existing native MyS
 selector, whose ignored local test is not a MySQL pass. Existing migrations and
 checksums remain frozen. Host inventory/consumer capability and production
 assembly are still required before enabling writers.
+
+
+## Deterministic command interleavings
+
+Test-only shared SQL scenarios control actual pre-transaction and post-native-
+commit boundaries with one-shot Notify gates. Two independent file-SQLite
+connections exercise both commit orders for approve/cancel, approve/revoke,
+directed degree/pending limits and pending-pair uniqueness, plus old-key/new-
+approval and competing-key recovery. Losing plans require a native acknowledged
+rollback and exact equality of all scoped durable rows, not just row counts.
+Each of the six command actions has native audit-step rollback and lost-commit-
+acknowledgement recovery assertions; recovery is cross-worker and never retries
+a mutation automatically. The same 31 scenarios are in the existing disposable
+MySQL selector; compilation/ignored local status is not native MySQL proof.
+
+Production code, dependencies, migrations and database round-trip budgets are
+unchanged. Scheduling gates hold no transaction/lock, so this demonstrates
+stale-plan revalidation, not unobserved lock acquisition or production load.

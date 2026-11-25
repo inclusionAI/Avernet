@@ -3644,6 +3644,15 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 使用真实 Gateway HS256/issuer/audience/kid/time 校验的 HTTP→身份 SQL→授权/Run SQL→真实 A2A fake-transport 集成测试，逐项拒绝缺失/伪签名、App/Human、跨 tenant、缺失 UUID/同 code 另一 Bot、错误 code、scope/body/lineage 自报、未批准 public target 和 store error；失败前无 channel/Run/transport effect。Notify 证明身份解析后 publish rebind 已提交且新 grant 已显式批准，旧 handoff 仍拒绝；真实队列另证 V3 pin 在 pickup/StartSend CAS 后仍不能复用。跨层测试放在 message-flow 的 test composition，不给 HTTP adapter 增加禁止的 legacy protocol 依赖，不放宽 boundary gate。
 - 正常公开 async direct 比前一轮多一次身份 SELECT：inline 共 4 次当前身份/授权读，queued 全周期共 6 次；既有 Provider 双 actor 上界读仍单独计算。无外部 inventory N+1、资格正向 cache、新授权事务或事务锁跨网络。此处是进程内公开 Router 集成，不是真实 Singlebox/生产 inventory/capability/rollout；后者仍保持原完整任务范围与关闭态。
 
+### 后续实现增补：真实 SQL 的确定性交错与事务结果矩阵
+
+- 新增 31 个共享 SQL 场景，每个在本地由独立可发现的 SQLite 测试执行；目录一致性断言逐一比较完整场景，而非只比较测试总数。相同场景加入既有 disposable EMPTY MySQL selector，不另起数据库/旁路工作流，本机不启动 MySQL 或 Colima。
+- SQLite 每场景使用同一临时文件上的两个独立 plugin/connection，两个 application 均已完成真实 SQL pre-read 和完整事务计划后，Notify 才按指定顺序释放 writer。分别证明 approve/cancel、approve/revoke 的两个提交顺序；出边/入边额度、pending 出/入额度及同 pair pending 唯一性的两个获胜方；scope/version CAS 拒绝 stale plan。不是用 tokio::join! 的参数顺序假设谁先提交，也不声称测试了未实际观察的数据库锁调度。
+- 失败方必须得到真实 native NotCommitted/Conflict，且只尝试一次事务；检查 12 张相关表的完整 scoped durable rows 与获胜提交后的快照逐行一致，包含实体/metadata 版本、pending、原 receipt、audit JSON、facts/authority/scope，而非仅计数。显式释放容量后，未成功 key 以原 payload 再提交成功；没有测试侧自动重试掩盖失败。
+- 旧批准 key 在新批准事务暂停期间只能回放 revoked current state、不能调用；新批准提交后仍保留旧 original grant/action，current 引用新版本。相同 key 两个预构建事务、相同 key 不同 payload，以及实际 COMMIT 已完成但首个调用确认尚未返回时第二 worker 的同 key恢复均单独验证，最多一次批准变更。
+- 六类 command（grant/request/approve/reject/cancel/revoke）逐一执行真正的 audit SQL 失败并由 native plugin 确认 rollback，完整 durable rows 恢复、key 未消耗；另逐一在实际提交成功后注入确认丢失，只返回 CommitUnknown，跨 worker receipt 恢复不执行第二次 mutation。并发 revoke 在原 grant 确认丢失窗口提交后，恢复仍返回 original approved/current revoked，不复活权限。确认丢失是测试 transport 注入，不冒称真实网络故障或 OceanBase 证明。
+- 本增补仅增加 consumer/SQL 测试及远端 native selector，没有修改生产策略、迁移或任何覆盖率阈值；不因此把原 5.4/5.2/3.2 的当前 SHA 原生 MySQL 验收、其他 writer/host fencing 或 Singlebox E2E 勾选完成。后续当前 SHA 的完整测试分母与远端结果记录在 PR。
+
 ### 原 27 项研发与验收跟踪（保留完整范围）
 
 将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 14/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
@@ -3685,7 +3694,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - [x] 5.1 纯类型/shape/policy/identity/state 单元测试，包含旧四 kind、坏输入和 requester/资格恢复不复活；当前 scoped unit run 已覆盖，非 whole-workspace/E2E 声明。
 - [ ] 5.2 完整管理/运行 consumer 与 repo conformance、Memory/SQLite/真实 MySQL 同语义及实际 port 命中；已有共享 lifecycle/facts/snapshot 和 native DB outcome harness，query consumer 已有真实 SQLite，真实 MySQL 与完整其余 consumer 验收仍需补齐。
 - [x] 5.3 每个新 GET/create/request/approve/reject/cancel/revoke/list/degree（及 audit）endpoint 独立 HTTP contract，覆盖 401/403/404/400/409/429/503 与真实 application port hit；真实 SQLite 路由场景和完整 adapter legacy 回归已实现。recording error injection 仅证明 delivery 映射，不代替 5.4/5.5。
-- [ ] 5.4 真实 DB + Notify/barrier 覆盖 approve/cancel、approve/revoke、旧 key/regrant、并发配额和 commit-unknown 全矩阵；已有部分确定性交错和真实 rollback/recovery，不把顺序 harness 等同于完整争用证明。
+- [ ] 5.4 真实 DB + Notify/barrier 的 approve/cancel、approve/revoke、旧 key/regrant、双向配额/pending、同 key 和六类 command rollback/commit-unknown 已补 31 场景/双独立 SQLite connection；同矩阵已加入远端 MySQL selector，当前 SHA 原生执行结果仍待验证，不以 SQLite 或编译替代。
 - [ ] 5.5 production-domain synthetic Singlebox HTTP→application→DB→A2A fake-target E2E 与 changed-line gate；不以单测调用 domain 方法冒充 E2E。
 - [ ] 5.6 完整受影响 architecture/boundary/module/HTTP/legacy/authority 与扩展 gates；已通过限定范围检查不代表全架构 baseline 绿灯。
 - [ ] 5.7 reader/SDK/runtime 接收兼容、迁移后 writer 启用、关闭/回滚/保留历史演练，以及 current-SHA CI 和 host 集成记录；未获部署授权不操作生产。

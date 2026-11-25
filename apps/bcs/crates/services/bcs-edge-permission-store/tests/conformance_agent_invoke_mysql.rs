@@ -17,6 +17,8 @@ mod audit_collision;
 mod lifecycle;
 #[path="support/agent_invoke_query_plans.rs"]
 mod query_plans;
+#[path="support/agent_invoke_races.rs"]
+mod races;
 #[path="support/agent_invoke_registry.rs"]
 mod registry;
 
@@ -70,6 +72,14 @@ async fn agent_invoke_repo_contract_mysql() {
         bcs_service_api::types::agent_invoke::AgentInvokeVerifiedBot{bot_id:"identity-source".into(),agent_code:"Code".into()}).await;
     println!("agent-invoke-mysql-gate=exact-identity-resolution source-epochs=verified");
 
+    let races = races::cases();
+    let case_count = races.len();
+    for (index, case) in races.into_iter().enumerate() {
+        println!("agent-invoke-mysql-race={index} case={case:?}");
+        races::run_case(database.plugin.clone(), database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql,
+            &format!("sql-race-{index}"), case).await;
+    }
+    println!("agent-invoke-mysql-gate=deterministic-races scenarios={case_count} native-outcomes=verified");
     registry::run(database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql).await;
     database.close().await;
 }
