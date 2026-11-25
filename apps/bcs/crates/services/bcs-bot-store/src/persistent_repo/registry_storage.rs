@@ -170,7 +170,7 @@ impl PersistentBotRepo {
             let bot_info_params = columns.bot_info_params;
             if let Some(token) = session_token {
                 let sql = format!(
-                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                    "name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP"
                 );
                 let mut params = vec![Value::from(columns.name.as_str())];
                 params.extend(bot_info_params);
@@ -178,23 +178,21 @@ impl PersistentBotRepo {
                     Value::from(token),
                     Value::from(columns.visibility.as_str()),
                     columns.agent_code.clone(),
-                    Value::from(bot_uuid),
-                    Value::from(env.as_str()),
                 ]);
-                self.db_execute_affected(&sql, params).await
+                crate::agent_invoke_identity::update(self.db.as_ref(), &env, bot_uuid,
+                    &[("agent_code", columns.agent_code.clone())], &sql, params).await
             } else {
                 let sql = format!(
-                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                    "name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP"
                 );
                 let mut params = vec![Value::from(columns.name.as_str())];
                 params.extend(bot_info_params);
                 params.extend([
                     Value::from(columns.visibility.as_str()),
                     columns.agent_code.clone(),
-                    Value::from(bot_uuid),
-                    Value::from(env.as_str()),
                 ]);
-                self.db_execute_affected(&sql, params).await
+                crate::agent_invoke_identity::update(self.db.as_ref(), &env, bot_uuid,
+                    &[("agent_code", columns.agent_code.clone())], &sql, params).await
             }
         } else {
             // INSERT new record — None maps to SQL NULL.

@@ -3605,6 +3605,15 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 共享 query application/repo/policy 三套 conformance 使用真实 lifecycle 数据；SQLite 补 110-peer 最大分页与 query/bind/EXPLAIN、Notify 预检后失权、scope torn revision、历史读取、audit 同毫秒游标/无写、坏 owner/delegation/request/lookahead/error 回归。远端原有 MySQL selector 增加 application/repo query harness，并对实际捕获 SQL 做 7 个 hinted index EXPLAIN；小 fixture、固定 statement 数或 SQLite 结果不是 MySQL 大图 rows-examined/锁争用证明。
 - 本地不启动 Colima/MySQL/Singlebox；普通单测、插桩覆盖率、ignored MySQL、远端当前 SHA 和真实 E2E 分开记录。新 query 尚未注册 HTTP/SDK，也不补齐 registry 生命周期 producers/host、trusted ingress、统一 dispatch 或 Singlebox changed-line gate。
 
+### 后续实现增补：真实 registry 身份 revision 写端（未替代宿主资格源）
+
+- 真实 `PersistentBotRepo` / `DbProviderStore` 的 AgentCode 改变、hidden/online 转换、Provider 首次归属/plugin→gateway、普通/Provider 退役、显式 tombstone restore、legacy binding insert/disable/restore，现与原写操作同提交推进 `agent_invoke_identity_revision`。同值 re-onboard、重复 attach/retire 不误增；restore 保留单调 revision，不因复用 UUID 重置。
+- 比较 AgentCode 为 byte-exact，NULL 与空串不同。计数耗尽/损坏时新 identity transition 整体失败，不依赖非 strict MySQL 的 overflow coercion。普通 metadata/Card/name/avatar/webhook、连接/heartbeat、同一 Bot 的凭据轮换及 owner/manager 变更不盲目撤销资格；Human status 不当成 Agent 重新分类。此 revision 是物理绑定 fence，不是看到 agent_code 就认定 eligible。
+- runtime/management 读取真实 actor `status`，不仅看 visibility；可信 feed 中 hidden=false 也不能覆盖物理 hidden，未知 status 整体失败。每次调用仍读最新物理 revision，资格/绑定失效→恢复 ABA 不能匹配旧 approval；后续 trusted publication 持久撤销旧批准并推进 version，恢复 feed 不自动重批。未发布失效前 StoredApproved 可保守占配额，不当成执行权。
+- registry save/status 的 UPDATE 改为固定三 statement 事务（锁物理行、revision guard、条件 revision+数据更新；save 原有 existence 预读仍单列）。legacy binding insert 四条、disable 五条，遵循 binding→Bot 锁顺序，无 graph scan/N+1/网络调用/自动重试。已有 attach/retire/restore composite 只增加 assignment/predicate，无新 transaction/往返；runtime 仍一条 pair SQL。固定 statement 数不是 MySQL 大图/争用证明。
+- 真实完整 SQLite schema 的 registry→invocation 回归覆盖 code 大小写/恢复、hidden ABA、同值重放、Provider attachment/mode、binding ABA、普通/Provider 退役与恢复；独立测试验证 revision 耗尽时 binding INSERT 前缀也回滚，以及 Notify 控制的“approve 预检后真实 registry hidden→restore 已确认、旧 approve 提交被拒且无 audit/receipt 前缀”。共享实际 writer 场景进入原 native MySQL selector，本地 ignored 不算 MySQL 通过。
+- **仍不是完整 3.6/4.5 验收**：Provider-wide config/credential 及外部资格的生产 generation/失效 feed、host capability/freshness/owners、多 worker 撤权后证明，以及 HTTP/统一 dispatch/E2E 仍须补齐。公共 bootstrap 不启用新 writer/runtime，不以本次 physical revision producer 代替宿主 inventory 或完整研发完成。
+
 ### 原 27 项研发与验收跟踪（保留完整范围）
 
 将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 10/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
@@ -3631,7 +3640,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - [x] 3.3 保持五列唯一键、单 approved owner 与 byte-exact/no-pad 身份；同一 edge ID 重授予推进版本，旧 key 不复活；对应共享 SQL/regrant/legacy 回归已有。
 - [x] 3.4 出入边 keyset page、scoped aggregate/pending count、atomic degree 与批量展示独立接口；真实 SQLite 同快照授权、查询成本/分页/损坏回归及共享 conformance 已实现。HTTP/真实 MySQL 验收分别归 4.3/3.5。
 - [ ] 3.5 完整 upgrade/populated fixture 的当前 SHA SQLite/真实 MySQL、复合索引预算和真实 EXPLAIN/rows-examined，以及宿主兼容 DB 验收；SQLite/静态预算不能替代其他证据。
-- [ ] 3.6 durable invalidation/reapproval 已实现，但 registry 生命周期 producer、多 worker/缓存的撤销确认后 freshness 证明和 host 接入仍缺。
+- [ ] 3.6 durable invalidation/reapproval 与 SQL registry physical-revision producers 已实现；Provider-wide/外部资格的生产失效 feed、多 worker/缓存的撤销确认后 freshness 证明和 host 接入仍缺。
 
 #### 4. Application、HTTP 与 runtime 集成
 

@@ -358,3 +358,25 @@ actual captured query SQL for seven hinted indexes; local ignored status is
 not MySQL proof. A small contract fixture and fixed statement count do not prove
 large-graph rows-examined cost, lock contention or scalability. Production
 registry/host, trusted ingress, HTTP/SDK, dispatch and E2E are still separate.
+
+
+## Physical registry producers and current actor status
+
+Runtime/management pair reads now include the actual `bcs_bots.status` as well
+as visibility and registration identity/revision. A fresh published hidden=false
+cannot override a physically hidden Bot; unknown actor status fails closed.
+The existing pure policy, command guards and one-statement runtime read remain
+unchanged in call count. SQL registry lifecycle writers now atomically advance
+physical identity revision; changed and restored values cannot match an old
+approval or fact binding again. `authority::lifecycle`'s tombstone builder
+advances revision with its existing checked transition, rejecting exhaustion.
+
+`tests/agent_invoke_registry.rs` drives actual registry/Provider APIs then the
+real invocation application; its shared scenario is also in the disposable
+native MySQL gate. The SQLite revision-exhaustion and Notify approve/registry
+race tests are separate evidence, not native MySQL concurrency proof. Current
+hand-built fixtures include the previously committed 049 fence column; no
+historical schema/migration is edited. Additional dependencies on Bot store and
+configuration are dev-only concrete test assembly, not new production edges.
+External inventory/Provider-wide invalidation, host capabilities, trusted HTTP
+ingress, dispatch and E2E are still required before production activation.

@@ -90,11 +90,11 @@ impl DbProviderStore {
         }
         steps.push(DbTransactionStep::ExecuteChecked {
             statement: DbStatement::with_params(
-                "UPDATE bcs_bots SET name = ?, bot_info = ?, session_token = ?, created_by = ?, \
+                "UPDATE bcs_bots SET agent_invoke_identity_revision = agent_invoke_identity_revision + 1, name = ?, bot_info = ?, session_token = ?, created_by = ?, \
                  visibility = ?, agent_code = ?, provider_id = ?, provider_bot_ref = ?, \
                  connection_mode = ?, webhook_url = ?, is_deleted = 0, status = 'online', \
                  ownership_version = 1, updated_at = CURRENT_TIMESTAMP \
-                 WHERE bot_uuid = ? AND env = ? AND is_deleted = 1",
+                 WHERE bot_uuid = ? AND env = ? AND is_deleted = 1 AND agent_invoke_identity_revision BETWEEN 1 AND 9223372036854775806",
                 vec![
                     capabilities.name.as_deref().unwrap_or(&record.bot_uuid).into(),
                     info.into(),

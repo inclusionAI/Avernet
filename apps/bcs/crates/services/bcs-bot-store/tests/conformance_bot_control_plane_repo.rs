@@ -123,7 +123,7 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
 
 async fn create_control_plane_schema(db: &dyn DbPlugin) {
     db.execute(DbStatement::new(
-        "CREATE TABLE bcs_bots (
+        "CREATE TABLE bcs_bots (agent_invoke_identity_revision BIGINT NOT NULL DEFAULT 1,
             agent_card TEXT,
             connection_mode TEXT DEFAULT 'plugin',
             id INTEGER PRIMARY KEY AUTOINCREMENT,

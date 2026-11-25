@@ -341,7 +341,7 @@ fn grant_kind_str(kind: BotAccessRelation) -> &'static str {
 
 /// Post-migration SQLite schema for the authority store.
 const SCHEMA_STATEMENTS: &[&str] = &[
-    "CREATE TABLE bcs_bots (agent_card TEXT,\
+    "CREATE TABLE bcs_bots (agent_invoke_identity_revision BIGINT NOT NULL DEFAULT 1,agent_card TEXT,\
         id INTEGER PRIMARY KEY AUTOINCREMENT, \
         bot_uuid TEXT NOT NULL, \
         env TEXT NOT NULL, \

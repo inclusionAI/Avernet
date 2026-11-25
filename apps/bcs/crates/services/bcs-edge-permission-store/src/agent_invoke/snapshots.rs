@@ -60,6 +60,7 @@ impl DbAgentInvokeStore {
                 "visibility",
                 "ownership_version",
                 "agent_invoke_identity_revision",
+                "status",
             ]
             .iter()
             .map(|c| format!("{alias}.{c} AS {prefix}_registration_{c}"))
@@ -198,6 +199,10 @@ impl DbAgentInvokeStore {
             if runtime && !registration_matches {
                 return Err(AgentInvokeError::Unavailable);
             }
+            let status = string(row, &key("registration_status"))?;
+            if !["online", "hidden"].contains(&status.as_str()) {
+                return Err(AgentInvokeError::InvalidState);
+            }
             let visibility = string(row, &key("registration_visibility"))?;
             if !["public", "protected", "hidden"].contains(&visibility.as_str()) {
                 return Err(AgentInvokeError::InvalidState);
@@ -211,7 +216,7 @@ impl DbAgentInvokeStore {
                     && boolean(row, &key("active"))?
                     && !boolean(row, &key("registration_is_deleted"))?
                     && valid_until > domain.now_ms,
-                hidden: boolean(row, &key("hidden"))? || visibility == "hidden",
+                hidden: boolean(row, &key("hidden"))? || visibility == "hidden" || status == "hidden",
             })
         };
         let source = state("source", &pair.from_bot_id)?;

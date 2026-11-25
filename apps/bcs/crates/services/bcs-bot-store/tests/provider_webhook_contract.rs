@@ -6,12 +6,7 @@ use bcs_service_api::{ProviderBotBinding, ProviderBotBindingRepoPort};
 
 async fn database() -> Arc<dyn DbPlugin> {
     let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().unwrap());
-    db.execute(DbStatement::new("CREATE TABLE bcs_provider_bot_bindings (
-        bot_uuid TEXT NOT NULL, provider_id TEXT NOT NULL, provider_bot_ref TEXT NOT NULL,
-        env TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0, webhook_url TEXT,
-        gmt_create TEXT DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(env, bot_uuid), UNIQUE(env, provider_id, provider_bot_ref)
-    )")).await.unwrap();
+    bcs_db_migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
     db
 }
 

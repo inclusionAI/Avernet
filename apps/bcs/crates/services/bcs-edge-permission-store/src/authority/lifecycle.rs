@@ -318,9 +318,9 @@ pub fn tombstone_bot_statement(
     bot_id: &str,
 ) -> DbStatement {
     DbStatement::with_params(
-        "UPDATE bcs_bots SET is_deleted = 1, \
+        "UPDATE bcs_bots SET agent_invoke_identity_revision = agent_invoke_identity_revision + 1, is_deleted = 1, \
          updated_at = CURRENT_TIMESTAMP \
-         WHERE bot_uuid = ? AND env = ? AND is_deleted = 0",
+         WHERE bot_uuid = ? AND env = ? AND is_deleted = 0 AND agent_invoke_identity_revision BETWEEN 1 AND 9223372036854775806",
         vec![DbValue::from(bot_id), DbValue::from(env)],
     )
 }

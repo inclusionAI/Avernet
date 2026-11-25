@@ -17,6 +17,8 @@ mod audit_collision;
 mod lifecycle;
 #[path="support/agent_invoke_query_plans.rs"]
 mod query_plans;
+#[path="support/agent_invoke_registry.rs"]
+mod registry;
 
 #[tokio::test]
 #[ignore = "requires BCS_TEST_MYSQL_URL pointing to a disposable EMPTY MySQL database"]
@@ -60,6 +62,7 @@ async fn agent_invoke_repo_contract_mysql() {
     }
     println!("agent-invoke-mysql-gate=governance-query application-and-repo=verified");
 
+    registry::run(database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql).await;
     database.close().await;
 }
 

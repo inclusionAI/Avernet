@@ -32,6 +32,7 @@ fn log_bot_cache_source(source: &'static str) {
     debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), source, "bot.load.source");
 }
 
+mod agent_invoke_identity;
 pub mod memory;
 pub mod persistent_repo;
 pub mod provider;
