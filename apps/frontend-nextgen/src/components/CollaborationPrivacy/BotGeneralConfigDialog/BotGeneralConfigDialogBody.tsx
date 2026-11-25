@@ -13,6 +13,7 @@ import { useUserRiskStatus } from '@/components/CollaborationPrivacy/BotGeneralC
 import { FriendApprovalEditor } from '@/components/CollaborationPrivacy/FriendApprovalEditor';
 import { PublicationEditor } from '@/components/CollaborationPrivacy/PublicationEditor';
 import { ScopeViewer } from '@/components/CollaborationPrivacy/ScopeViewer';
+import { FriendRosterSection } from '@/components/CollaborationPrivacy/FriendRosterSection';
 import {
   BotAbilitySettings,
   BotVisibilitySettings,
@@ -79,6 +80,8 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
     Boolean(userId && bot.ownerId === userId),
     bot.lock?.status === 'other',
   );
+  // 好友名单仅 Bot Owner 可见可管理（PRD R7 / AC-07）：非 Owner 视角不渲染本节与入口。
+  const isOwner = Boolean(userId && bot.ownerId === userId);
   const repairEnabled = repairVisible && human.status === 'ready' && availability.enabled;
   // 请求寻址使用 Backend 列表行 bot.id 与当前认证 Human，不使用 BCS targetBot.id。
   // 修复后的配置刷新走静默读取：只更新数据，不把整个「公开设置」切回加载骨架（刷新范围收敛到修复行自身的状态反馈）。
@@ -203,6 +206,11 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
                 onViewFriendApprovalScope={privacy.openFriendScopeViewer}
               />
             </div>
+            {isOwner && !isExternalBot ? (
+              <div className={sectionCardClass}>
+                <FriendRosterSection botId={targetBot.id} botName={bot.name} enabled={isOwner} />
+              </div>
+            ) : null}
             {showCollaborationAbilitySettings ? (
               <div className={sectionCardClass}>
                 <BotAbilitySettings
