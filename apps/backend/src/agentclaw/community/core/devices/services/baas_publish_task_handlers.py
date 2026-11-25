@@ -435,12 +435,6 @@ class BaasRestartPublishPollHandler:
                 request_id=request_id,
                 workflow_baseline=workflow_baseline,
             )
-            if isinstance(publish_id, (Fail, Complete, Reschedule, Retry)):
-                try:
-                    log_bot = self._bot_repository.get_by_binding_id(binding_id) if self._bot_repository is not None else None
-                except Exception:
-                    log_bot = None  # Metadata must not interrupt workflow adoption.
-                engine_type = (log_bot.get("active_engine") or "unknown") if isinstance(log_bot, dict) else "unknown"
             if isinstance(publish_id, Fail):
                 persisted = self._persist_failed(
                     bot_id=bot_id,
@@ -458,12 +452,6 @@ class BaasRestartPublishPollHandler:
                     request_id=request_id,
                 ):
                     return Retry("BaaS restart intent clear CAS conflict")
-                logger.info(
-                    "[BaasRestartPublishPollHandler] event=bot_restart_progress bot_id=%r engine_type=%r "
-                    "binding_id=%s publish_id=%s request_id=%r env=%r status=FAILED elapsed_s=%.3f timeout_s=%s",
-                    bot_id, engine_type, binding_id, "-", request_id, binding.env,
-                    max(0.0, self._clock() - started_at_epoch_s), _RESTART_PUBLISH_TIMEOUT_SECONDS,
-                )
                 return publish_id
             if isinstance(publish_id, (Complete, Reschedule, Retry)):
                 if _business_timed_out(
@@ -487,20 +475,7 @@ class BaasRestartPublishPollHandler:
                         request_id=request_id,
                     ):
                         return Retry("BaaS restart intent clear CAS conflict")
-                    logger.info(
-                        "[BaasRestartPublishPollHandler] event=bot_restart_progress bot_id=%r engine_type=%r "
-                        "binding_id=%s publish_id=%s request_id=%r env=%r status=TIMED_OUT elapsed_s=%.3f timeout_s=%s",
-                        bot_id, engine_type, binding_id, "-", request_id, binding.env,
-                        max(0.0, self._clock() - started_at_epoch_s), _RESTART_PUBLISH_TIMEOUT_SECONDS,
-                    )
                     return Complete()
-                if isinstance(publish_id, (Reschedule, Retry)):
-                    logger.info(
-                        "[BaasRestartPublishPollHandler] event=bot_restart_progress bot_id=%r engine_type=%r "
-                        "binding_id=%s publish_id=%s request_id=%r env=%r status=ADOPTING elapsed_s=%.3f timeout_s=%s",
-                        bot_id, engine_type, binding_id, "-", request_id, binding.env,
-                        max(0.0, self._clock() - started_at_epoch_s), _RESTART_PUBLISH_TIMEOUT_SECONDS,
-                    )
                 return publish_id
 
         image_policy_on_success = resolve_restart_image_policy(
@@ -521,7 +496,12 @@ class BaasRestartPublishPollHandler:
         bot = None
         if self._bot_repository is not None:
             bot = self._bot_repository.get_by_binding_id(binding_id)
-        engine_type = (bot.get("active_engine") or "unknown") if isinstance(bot, dict) else "unknown"
+        logger.info(
+            "[BaasRestartPublishPollHandler] restart progress: bot_id=%r engine_type=%r "
+            "binding_id=%s publish_id=%s request_id=%r env=%r elapsed_s=%.3f",
+            bot_id, (bot or {}).get("active_engine"), binding_id, publish_id,
+            request_id, binding.env, self._clock() - started_at_epoch_s,
+        )
         if _business_timed_out(
             started_at_epoch_s=started_at_epoch_s,
             timeout_s=_RESTART_PUBLISH_TIMEOUT_SECONDS,
@@ -546,29 +526,11 @@ class BaasRestartPublishPollHandler:
                 request_id=request_id,
             ):
                 return Retry("BaaS restart intent clear CAS conflict")
-            logger.info(
-                "[BaasRestartPublishPollHandler] event=bot_restart_progress bot_id=%r engine_type=%r "
-                "binding_id=%s publish_id=%s request_id=%r env=%r status=TIMED_OUT elapsed_s=%.3f timeout_s=%s",
-                bot_id, engine_type, binding_id, publish_id, request_id, binding.env,
-                max(0.0, self._clock() - started_at_epoch_s), _RESTART_PUBLISH_TIMEOUT_SECONDS,
-            )
             return Complete()
         if self._baas_device_service is None:
-            logger.info(
-                "[BaasRestartPublishPollHandler] event=bot_restart_progress bot_id=%r engine_type=%r "
-                "binding_id=%s publish_id=%s request_id=%r env=%r status=RETRYING elapsed_s=%.3f timeout_s=%s",
-                bot_id, engine_type, binding_id, publish_id, request_id, binding.env,
-                max(0.0, self._clock() - started_at_epoch_s), _RESTART_PUBLISH_TIMEOUT_SECONDS,
-            )
             return Retry("restart publish status service unavailable")
 
         status = self._baas_device_service.poll_publish_once(publish_id=publish_id)
-        logger.info(
-            "[BaasRestartPublishPollHandler] event=bot_restart_progress bot_id=%r engine_type=%r "
-            "binding_id=%s publish_id=%s request_id=%r env=%r status=%s elapsed_s=%.3f timeout_s=%s",
-            bot_id, engine_type, binding_id, publish_id, request_id, binding.env,
-            status or "RETRYING", max(0.0, self._clock() - started_at_epoch_s), _RESTART_PUBLISH_TIMEOUT_SECONDS,
-        )
         if status is None:
             return Retry(_PUBLISH_PROGRESS_TRANSIENT_ERROR)
         if status == DeviceBindingStatus.PENDING.value:

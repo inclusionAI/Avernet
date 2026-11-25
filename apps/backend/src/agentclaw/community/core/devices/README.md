@@ -131,18 +131,3 @@ the Bot before querying Passport with that immutable entity, including when the
 compatibility request names the current Owner. Only unlinked historical bindings
 retain standalone entity ownership; a linked Bot's former Owner gains no grant
 from the retained binding identity.
-
-## BaaS restart progress logs
-
-The existing restart handler directly emits INFO logs with its usual
-`[BaasRestartPublishPollHandler]` prefix and `event=bot_restart_progress`,
-Bot/binding/request/publish identity, `engine_type`, `env`, `status`, `elapsed_s`
-and `timeout_s`. String fields use `%r` to escape line breaks; no configuration,
-credentials or provider response is logged. Missing engine
-metadata is `unknown`. Stale/uncommitted intents emit no progress event.
-
-For slow in-flight publishes, select `ADOPTING`, `PENDING` or `RETRYING` with
-`elapsed_s > 600`; do not add another ten-minute trigger window. The existing
-1,800-second deadline is unchanged. Elapsed time starts after backup/preparation,
-and provider `ACTIVE` is not engine readiness. Missing events do not prove
-recovery; actual alert delivery must be verified separately after deployment.
