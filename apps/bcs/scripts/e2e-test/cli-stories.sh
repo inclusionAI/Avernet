@@ -6,7 +6,7 @@ story_session_group_page() {
     local rc=0
     get_bcs_cli_bin && python3 "$SCRIPT_DIR/session_group_page_story.py" \
         --cli "$BCS_CLI_BIN_PATH" --binary "${BCS_BIN:-$SCRIPT_DIR/../../target/debug/bcs}" || rc=$?
-    assert_eq "Resumed CLI session pages its Groups without duplicating members or webhook delivery" "$rc" "0"
+    assert_eq "Resumed CLI session pages its Groups; replay of a successful webhook delivery is rejected" "$rc" "0"
 }
 
 _cli_story_run() {

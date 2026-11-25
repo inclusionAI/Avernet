@@ -53,7 +53,8 @@ def run(story, cli, sink):
         session = {"token": story.bot_tokens[driver], "bot_uuid": driver, "bcs_url": ws}
         (profile / "session.json").write_text(json.dumps(session))
         env = dict(os.environ, BOT_DATA_DIR=tmp)
-        for key in ("MOLTIS_BCS_URL", "BCS_API_BASE_URL", "BCN_BOT_TOKEN", "BCN_ACTOR_BOT_ID", "BCN_AUTH_MODE"):
+        for key in ("MOLTIS_BCS_URL", "BCS_API_BASE_URL", "BCN_BOT_TOKEN",
+                    "BCN_ACTOR_BOT_ID", "BCN_AUTH_MODE", "tc_sdb_nenv"):
             env.pop(key, None)
 
         def page(offset):

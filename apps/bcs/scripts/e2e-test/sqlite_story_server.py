@@ -46,11 +46,12 @@ def sqlite_server(binary):
             process = subprocess.Popen([binary, "-c", str(config_path)], cwd=root,
                                        env=env, stdout=log, stderr=log)
             try:
+                http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
                 for _ in range(150):
                     if process.poll() is not None:
                         raise RuntimeError("BCS exited during story startup")
                     try:
-                        with urllib.request.urlopen(base_url + "/health", timeout=2):
+                        with http.open(base_url + "/health", timeout=2):
                             pass
                         break
                     except (OSError, urllib.error.URLError):
