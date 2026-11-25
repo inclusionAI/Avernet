@@ -31,8 +31,10 @@ pub trait AgentInvokeCommandRepoPort: Send + Sync {
     /// Fences and quota checks share the same serialization boundary as all
     /// competing grant/revoke/identity/role writers. Stores MUST NOT implement
     /// this by chaining existing insert/decide/revoke methods. Definite failed
-    /// writes roll back all effects; timeout/unknown commit is CommitUnknown
-    /// and never blindly retried. Raw DB/provider details stay in the store.
+    /// writes roll back all effects. A deadline with an explicit plugin rollback
+    /// guarantee returns Unavailable; an outcome without a rollback guarantee
+    /// returns CommitUnknown. Neither is blindly retried. Raw DB/provider
+    /// details stay in the store.
     async fn execute(
         &self,
         scope: &AgentInvokeScope,
@@ -53,7 +55,8 @@ pub trait AgentInvokeFactRepoPort: Send + Sync {
         &self, scope: &AgentInvokeScope, bot_id: &str,
     ) -> AgentInvokeResult<Option<crate::types::agent_invoke::AgentInvokePublishedFact>>;
 
-    /// Atomically advance scope/fact revision and persist an audit entry.
+    /// Atomically advance scope/fact revision, revoke stale incident approvals
+    /// with advanced versions, and persist publication/invalidation audit entries.
     /// Changed qualification or an expired lease requires a strictly newer
     /// eligibility generation. Binding generations never go backwards.
     /// Definite failure rolls back every effect; unknown commit is surfaced
@@ -63,4 +66,16 @@ pub trait AgentInvokeFactRepoPort: Send + Sync {
         &self, scope: &AgentInvokeScope,
         publication: crate::types::agent_invoke::AgentInvokeFactPublication,
     ) -> AgentInvokeResult<crate::types::agent_invoke::AgentInvokePublishedFact>;
+}
+
+/// Trusted governance feed, separate from operator commands and authentication.
+/// Publishers atomically advance delegation/scope revision and typed audit.
+/// Removing then restoring a delegation never restores an old request's epoch.
+#[async_trait]
+pub trait AgentInvokeGovernanceRepoPort: Send + Sync {
+    async fn publish_delegation(
+        &self,
+        scope: &AgentInvokeScope,
+        publication: crate::types::agent_invoke::AgentInvokeDelegationPublication,
+    ) -> AgentInvokeResult<std::num::NonZeroU64>;
 }

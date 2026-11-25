@@ -1,4 +1,4 @@
-//! DML-only third-statement failure: no MySQL SUPER/trigger/binlog exception.
+//! DML-only final-audit failure: no MySQL SUPER/trigger/binlog exception.
 use bcs_db_api::{DbPlugin, DbStatement, db_get_column};
 use bcs_edge_permission_store::agent_invoke::DbAgentInvokeStore;
 use bcs_service_api::port::repo::agent_invoke::AgentInvokeFactRepoPort;
@@ -22,7 +22,7 @@ pub async fn audit_collision_rolls_back(
         .unwrap();
     let count: u64 = db_get_column(&counts[0], "n").unwrap();
     // This row is owned solely by the test. Its unique action_id makes the
-    // real publication fail at audit insertion after scope/fact CAS executed.
+    // real publication fail at the final audit after scope/fact CAS and invalidation executed.
     db.execute(DbStatement::with_params(
         "INSERT INTO agent_invoke_audit (scope_id, action_id, action, principal_kind, principal_id, from_id, to_id, reason, before_json, after_json, created_at_ms) SELECT id, ?, 'fixture_collision', 'test', 'test-audit-collision', ?, ?, 'DML rollback fixture', 'null', 'null', 1 FROM agent_invoke_scopes WHERE namespace = ? AND env = ?",
         vec![action_id.as_str().into(), bot.into(), bot.into(), scope.namespace.as_str().into(), scope.env.as_str().into()],

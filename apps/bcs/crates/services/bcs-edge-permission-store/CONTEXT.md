@@ -163,8 +163,8 @@ and [rollout](../../../migrations/README.md#legacy-friend-request-cutover).
 The SQL and memory edge stores decode `agent_invoke`, validate its canonical
 shape and include it in the existing runtime candidate listing/existence
 projection. Raw repository writes are trusted infrastructure operations, not a
-new public authorization lifecycle. No Agent-approval transaction or endpoint
-is enabled here; callers must not expose raw insert/upsert as such an API.
+new public authorization lifecycle. No Agent-approval endpoint or production
+writer is enabled here; callers must not expose raw insert/upsert as such an API.
 
 `list_runtime_grants_checked` performs one indexed pair/env read, with exact
 identity residuals (also on legacy case-insensitive schemas), excludes known
@@ -176,8 +176,9 @@ Legacy generic admission retains one pair read and filters out AgentInvoke.
 No cache, historical migration or index is changed. Shared repo conformance
 runs on memory/SQLite; the MySQL driver explicitly requires a disposable empty
 database and the full migration chain, and is not proof of MySQL execution unless
-run. Approval-generation, management transactions and degree queries remain later
-phases; do not enable production writers based on reader compatibility alone.
+run. The durable command implementation is described below; governance query
+APIs and production activation remain separate work. Reader compatibility alone
+is never sufficient to enable production writers.
 
 
 ## Synthetic local Agent invocation lifecycle
@@ -201,28 +202,34 @@ scalability claim. There is no positive authorization cache.
 Conformance driver: `tests/conformance_agent_invoke_local.rs`, sharing the
 application/port harness `bcs-test-support::contract::agent_invoke`. SQL schema,
 atomic rollback/audit failure, query plans, real DB contention, host freshness,
-HTTP routes and restart durability remain separate unverified work.
+HTTP routes remain separate unverified work. Durable SQL tests below provide
+independent transaction/restart evidence, not production integration evidence.
 
 
 ## Durable Agent invocation foundation (not mounted)
 
 `agent_invoke::DbAgentInvokeStore` implements the trusted `AgentInvokeFactRepoPort`,
-`AgentInvokeFactsPort` snapshots and scope initialization/activation, not SQL
-management commands. It consumes `DbPlugin`, uses the new
-SQLite 048 / MySQL 050 schema, and never enables a writer/runtime or invents
+`AgentInvokeFactsPort` snapshots, trusted governance publication and scope
+initialization/activation. `DbAgentInvokeCommandStore` provides atomic commands
+on the same database. They consume `DbPlugin` and SQLite 048/049 or MySQL 050/051, and never enables a writer/runtime or invents
 eligible facts during initialization. The legacy tables have no tenant key;
 `UNIQUE(env)` therefore makes each env exclusive to a single physical namespace.
 Exact Bot identities use indexable keys plus binary residuals. Configuration
 limits must match persisted values on reopen. Activation requires revision CAS
 and cannot enable a writer without runtime capability.
 
-Publication uses two point SELECTs and one three-step transaction (scope CAS,
-fact CAS, audit). Changed/expired qualification requires advancing eligibility
-generation. Opaque backend errors remain commit-unknown and are never blindly
+Publication uses two external point SELECTs (scope, joined fact/registration)
+and a twelve-step transaction: scope CAS, physical registration lock, fact CAS,
+two directed invalidation ranges (overflow guard/audit/metadata/edge per range),
+then publication audit. Changed/expired qualification requires advancing
+eligibility generation. Binding/revision changes require newer binding or
+eligibility generations. Stale incident approvals are durably revoked and
+versioned in the same transaction. Opaque backend errors remain commit-unknown and are never blindly
 retried; explicit DbPlugin deadline failures guarantee rollback. Reads return
 expired facts for publisher recovery, not runtime authorization. No public
-HTTP endpoint or bootstrap selects this store, and it does not yet implement
-SQL grant/request commands or registered identity resolution.
+HTTP endpoint or bootstrap selects these stores. Host identity resolution and
+automatic identity-revision advancement in registry lifecycle writers are still
+unimplemented; the new column is not proof of an active freshness capability.
 
 Tests: `tests/agent_invoke_facts.rs` runs the full SQLite chain, exact identity,
 CAS, deterministic concurrency, audit rollback, file reopen and actual query
@@ -254,12 +261,54 @@ At most two extra point queries and one scope-revision check detect publication
 between lock release and delegation read (publishers must advance scope revision
 atomically). Thus the ordinary Human path has six statements, worst governance
 path nine, with no N+1 loop; aggregate/index/lock costs still need real MySQL
-measurement. This is a prerequisite for write-command fencing, not a substitute
-for revalidation inside a mutating transaction or a production host feed.
+measurement. The command store below consumes this material but revalidates it inside its
+mutating transaction. Neither snapshot reads nor command tests replace a
+production host feed.
 
 `tests/conformance_agent_invoke_snapshots.rs` and the synthetic local conformance
 entry call the same `agent_invoke_facts_port_contract_tests`; the explicit MySQL
 gate uses that harness too. Focused tests additionally record actual plugin SQL
 counts/rows and use Notify handshakes for qualification/delegation races, without
-sleep-based ordering. SQL commands, HTTP/SDK/dispatch and host integration remain
+sleep-based ordering. HTTP/SDK/dispatch and host integration remain
 unimplemented. Test seeding SQL is never production management orchestration.
+
+## Durable Agent invocation commands (not mounted)
+
+`agent_invoke::DbAgentInvokeCommandStore` implements request, direct grant,
+approve, reject, cancel and revoke against the actual SQL tables. A command
+rechecks current operator authority, recovers an existing receipt before mutable
+qualification/version checks, then builds one transaction covering edge/request,
+approval versions, pending-pair uniqueness, audit and receipt. Regrant preserves
+the edge ID and advances its approval version. Old receipts never restore a
+revoked edge; the same key with different canonical input conflicts.
+
+The transaction locks scope, each Bot separately in byte order, involved Humans,
+and exact edge/request rows. It then consumes same-transaction query results
+for row-count and null-safe byte-exact guards over every trusted pre-read,
+including original requester registration/role/delegation and degree aggregates.
+Scope CAS serializes competing commands and trusted publications. No legacy
+write chaining, external I/O or automatic retry is used. Tests bound an ordinary
+management command to at most 48 statements total, 32 transaction steps and 512
+binds per statement; runtime remains one pair statement. These are plan bounds,
+not MySQL scanned-row or contention measurements.
+
+Fact invalidation takes separate outbound/inbound indexed ranges rather than a
+whole-scope OR scan (MySQL FORCE INDEX/STRAIGHT_JOIN; SQLite INDEXED BY/CROSS
+JOIN). Work is proportional to incident active approvals; degree limits bound
+new grants, not corrupt or preexisting out-of-limit data. Large retained graphs
+and real MySQL execution plans still require independent verification.
+
+Trusted `AgentInvokeGovernanceRepoPort` publication changes scoped delegation,
+revision and audit atomically; audit identifies the trusted publisher, not the
+subject as its own issuer. No public DTO or endpoint exposes this capability.
+
+SQLite runs the same ten lifecycle scenarios as the synthetic local driver,
+plus governance-feed conformance. Atomicity tests cover audit rollback, lost
+commit acknowledgement/replay, role changes between precheck and commit,
+requester/delegation/registration ABA fences, file reopen and actual plan cost.
+The independent empty-MySQL CI gate now runs these lifecycle scenarios too.
+A local ignored MySQL test is never a passing real-MySQL result. Opaque backend
+errors are conservatively CommitUnknown until the DB abstraction supplies
+typed transaction phase/outcome information. Writer/runtime activation must
+remain disabled in production until registry producers, trusted ingress,
+governance query APIs, HTTP/SDK, dispatch and real E2E integration are complete.

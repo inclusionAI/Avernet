@@ -5,6 +5,10 @@ mod facts;
 mod scope;
 mod snapshots;
 mod management_reads;
+mod invalidation;
+mod delegation;
+mod commands;
+pub use commands::DbAgentInvokeCommandStore;
 
 use std::num::NonZeroU64;
 use std::sync::Arc;

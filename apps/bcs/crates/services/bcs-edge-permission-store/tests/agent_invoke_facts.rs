@@ -196,7 +196,8 @@ impl DbPlugin for ObservedDb {
         if s.sql().contains("agent_invoke_scopes") && self.fail_scope_reads.load(Ordering::SeqCst) {
             return Err(DbError::Backend("injected dependency outage".into()));
         }
-        let fact = s.sql().contains("FROM agent_invoke_facts");
+        let fact = s.sql().contains("FROM agent_invoke_facts")
+            || s.sql().contains("JOIN agent_invoke_facts f");
         let rows = self.inner.query(s).await?;
         let barrier = self.barrier.lock().unwrap().clone();
         if let Some(barrier) = barrier { if fact { barrier.wait().await; } }
@@ -206,7 +207,7 @@ impl DbPlugin for ObservedDb {
     async fn transaction(&self, s: Vec<DbTransactionStep>) -> DbResult<Vec<DbTransactionStepResult>> { self.inner.transaction(s).await }
     async fn transaction_with_options(&self, s: Vec<DbTransactionStep>, o: DbTransactionOptions) -> DbResult<Vec<DbTransactionStepResult>> {
         self.transactions.fetch_add(1, Ordering::SeqCst);
-        assert!(s.len() <= 3, "bounded publication transaction");
+        assert!(s.len() <= 12, "bounded publication transaction");
         let result = self.inner.transaction_with_options(s, o).await?;
         if self.lose_commit_ack.load(Ordering::SeqCst) { return Err(DbError::Backend("lost acknowledgement".into())); }
         Ok(result)

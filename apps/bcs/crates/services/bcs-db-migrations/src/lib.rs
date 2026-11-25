@@ -165,6 +165,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 46, name: "configured_catalog_labels" },
     SqliteMigration { version: 47, name: "dist_immutable_objects" },
     SqliteMigration { version: 48, name: "agent_invoke_authorization" },
+    SqliteMigration { version: 49, name: "agent_invoke_command_fences" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -301,11 +302,11 @@ async fn apply_sqlite_migration(db: &dyn DbPlugin, migration: &SqliteMigration) 
             DbValue::from(checksum.as_str()),
         ],
     );
-    if migration.version == 48 {
+    if migration.version == 48 || migration.version == 49 {
         // This NEW migration owns its DDL and history record in one commit.
         // A failed/unknown record write cannot leave unrecorded new tables.
         // Historical migration bodies/checksums and their runner are unchanged.
-        let mut steps = agent_invoke_schema_steps();
+        let mut steps = if migration.version == 48 { agent_invoke_schema_steps() } else { agent_invoke_writer_steps() };
         steps.push(DbTransactionStep::Execute(record));
         db.transaction(steps).await?;
         return Ok(());
@@ -618,6 +619,7 @@ async fn apply_sqlite_migration_body(
             db.transaction(agent_invoke_schema_steps()).await?;
             Ok(())
         }
+        49 => { db.transaction(agent_invoke_writer_steps()).await?; Ok(()) }
         _ => Ok(()),
     }
 }
@@ -730,6 +732,9 @@ fn sqlite_migration_checksum(migration: &SqliteMigration) -> String {
     if migration.version == 48 {
         hasher.update(include_bytes!("../../../../migrations/sqlite/048_agent_invoke_authorization.sql"));
     }
+    if migration.version == 49 {
+        hasher.update(include_bytes!("../../../../migrations/sqlite/049_agent_invoke_command_fences.sql"));
+    }
     hex::encode(hasher.finalize())
 }
 
@@ -789,3 +794,12 @@ fn agent_invoke_schema_steps() -> Vec<DbTransactionStep> {
         "../../../../migrations/sqlite/048_agent_invoke_authorization.sql"
     )).into_iter().map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect()
 }
+
+fn agent_invoke_writer_steps() -> Vec<DbTransactionStep> {
+    bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/049_agent_invoke_command_fences.sql"))
+        .into_iter().map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect()
+}
+
+#[cfg(test)]
+#[path="migrations/agent_invoke_writer_tests.rs"]
+mod agent_invoke_writer_tests;

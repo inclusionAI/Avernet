@@ -261,3 +261,14 @@ pub struct AgentInvokePublishedFact {
     pub revision: NonZeroU64,
     pub valid_until_ms: u64,
 }
+
+/// Trusted delegation feed publication, never an ingress DTO. The authenticated
+/// host publisher owns this input; `principal` is the delegate, not the issuer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInvokeDelegationPublication {
+    pub principal: AgentInvokePrincipal,
+    pub pair: AgentInvokePair,
+    pub expected_revision: u64,
+    pub actions: Vec<AgentInvokeAction>,
+    pub reason: String,
+}

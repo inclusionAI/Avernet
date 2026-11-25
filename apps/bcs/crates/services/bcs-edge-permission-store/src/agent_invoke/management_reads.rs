@@ -4,6 +4,14 @@ use super::*;
 use bcs_db_api::{DbTransactionStep, DbTransactionStepResult};
 use sha2::{Digest, Sha256};
 
+pub(super) struct ManagementRead {
+    pub snapshot: AgentInvokeManagementSnapshot,
+    pub pair: snapshots::PairRead,
+    pub request: Vec<DbRow>,
+    pub authority: DbRow,
+    pub groups: Vec<(DbStatement, Vec<DbRow>)>,
+}
+
 impl DbAgentInvokeStore {
     pub(super) fn bot_lock_statement(&self, bot_id: &str) -> DbStatement {
         let lock = if self.flavor == DbSqlFlavor::Mysql {
@@ -36,6 +44,8 @@ impl DbAgentInvokeStore {
             format!(
                 "SELECT p.*, m.scope_id AS metadata_scope_id, m.version AS request_version, m.creator_kind, \
              m.source_ownership_version, m.source_authority_sequence, m.edge_version, \
+             m.from_registration_id, m.to_registration_id, m.from_registration_revision, m.to_registration_revision, \
+             m.requester_registration_id, m.requester_registration_revision, m.requester_delegation_revision, \
              m.from_binding_generation, m.to_binding_generation, m.from_eligibility_generation, m.to_eligibility_generation \
              FROM permission_requests p LEFT JOIN agent_invoke_requests m ON m.request_id = p.request_id AND {} = {} \
              WHERE p.request_id = ? AND {} = ? AND p.env = ? AND {} = ? \
@@ -134,6 +144,13 @@ impl DbAgentInvokeStore {
             select.push(format!("(SELECT h.id FROM bcs_bots h WHERE h.bot_uuid = {actor} AND {} = {} AND h.env = ? AND {} = ? AND h.actor_kind = 'human' AND h.is_deleted = 0 LIMIT 1) AS {name}", self.exact("h.bot_uuid"), self.exact(actor), self.exact("h.env")));
             values.extend([env.into(), env.into()]);
         }
+        for (name, actor) in [
+            ("operator_registration_revision", "a.operator_id"),
+            ("requester_registration_revision", "p.created_by"),
+        ] {
+            select.push(format!("(SELECT h.agent_invoke_identity_revision FROM bcs_bots h WHERE h.bot_uuid = {actor} AND {} = {} AND h.env = ? AND {} = ? AND h.actor_kind = 'human' AND h.is_deleted = 0 LIMIT 1) AS {name}", self.exact("h.bot_uuid"),self.exact(actor),self.exact("h.env")));
+            values.extend([env.into(), env.into()]);
+        }
         // An absent request joins no requester. It never borrows the deciding
         // actor's source authority. Only the separately decoded scoped request
         // can make this projection usable.
@@ -166,10 +183,9 @@ impl DbAgentInvokeStore {
             return Ok((Vec::new(), Vec::new()));
         }
         let hash = principal_hash(principal);
-        let rows = self.query(DbStatement::with_params(format!(
-            "SELECT * FROM agent_invoke_governance WHERE scope_id = ? AND principal_hash = ? AND from_id = ? AND to_id = ? AND {} = ? AND {} = ? LIMIT 2",
-            self.exact("from_id"), self.exact("to_id")),
-            vec![scope_id.into(), hash.as_str().into(), pair.from_bot_id.as_str().into(), pair.to_bot_id.as_str().into(), pair.from_bot_id.as_str().into(), pair.to_bot_id.as_str().into()])).await?;
+        let rows = self
+            .query(self.delegation_statement(scope_id, principal, pair))
+            .await?;
         let actions = match rows.as_slice() {
             [] => Vec::new(),
             [row] => {
@@ -208,10 +224,39 @@ impl DbAgentInvokeStore {
         Ok((actions, rows))
     }
 
+    pub(super) fn delegation_statement(
+        &self,
+        scope_id: u64,
+        principal: &AgentInvokePrincipal,
+        pair: &AgentInvokePair,
+    ) -> DbStatement {
+        let hash = principal_hash(principal);
+        DbStatement::with_params(
+            format!(
+                "SELECT * FROM agent_invoke_governance WHERE scope_id = ? AND principal_hash = ? AND from_id = ? AND to_id = ? AND {} = ? AND {} = ? LIMIT 2",
+                self.exact("from_id"),
+                self.exact("to_id")
+            ),
+            vec![
+                scope_id.into(),
+                hash.into(),
+                pair.from_bot_id.as_str().into(),
+                pair.to_bot_id.as_str().into(),
+                pair.from_bot_id.as_str().into(),
+                pair.to_bot_id.as_str().into(),
+            ],
+        )
+    }
     pub(super) async fn read_management_snapshot(
         &self,
         command: &AgentInvokeCommand,
     ) -> AgentInvokeResult<AgentInvokeManagementSnapshot> {
+        Ok(self.read_management_material(command).await?.snapshot)
+    }
+    pub(super) async fn read_management_material(
+        &self,
+        command: &AgentInvokeCommand,
+    ) -> AgentInvokeResult<ManagementRead> {
         if command.authenticated_scope != self.scope {
             return Err(AgentInvokeError::NotFound);
         }
@@ -317,6 +362,15 @@ impl DbAgentInvokeStore {
                 },
             }
         };
+        for subject in ["operator", "requester"] {
+            let id = authority.get(&format!("{subject}_registration_id"));
+            let revision = authority.get(&format!("{subject}_registration_revision"));
+            if id == Some(&DbValue::Null) && revision == Some(&DbValue::Null) {
+                continue;
+            }
+            positive(authority, &format!("{subject}_registration_id"))?;
+            positive(authority, &format!("{subject}_registration_revision"))?;
+        }
         number(authority, "source_epoch")?;
         number(authority, "target_epoch")?;
         let human = matches!(command.principal, AgentInvokePrincipal::Human(_));
@@ -358,18 +412,47 @@ impl DbAgentInvokeStore {
             operator_delegation.as_slice(),
             requester_delegation.as_slice(),
         ])?;
-        Ok(AgentInvokeManagementSnapshot {
+        let snapshot = AgentInvokeManagementSnapshot {
             scope: self.scope.clone(),
             pair: command.pair.clone(),
             principal: command.principal.clone(),
-            source: pair.source,
-            target: pair.target,
+            source: pair.source.clone(),
+            target: pair.target.clone(),
             source_role,
             target_role,
             delegated_actions,
             request_creator,
             requester_source_authorized,
             fence,
+        };
+        let mut groups = vec![
+            (self.scope_statement(false), tx_rows(&results, 0)?.to_vec()),
+            (
+                self.pair_statement(&command.pair),
+                tx_rows(&results, 3)?.to_vec(),
+            ),
+            (self.request_statement(command), requests.to_vec()),
+            (self.authority_statement(command), vec![authority.clone()]),
+        ];
+        for (principal, rows) in [
+            (Some(&command.principal), operator_delegation),
+            (snapshot.request_creator.as_ref(), requester_delegation),
+        ] {
+            if let Some(principal) = principal {
+                if matches!(principal, AgentInvokePrincipal::Governance(_)) {
+                    groups.push((
+                        self.delegation_statement(scope.id, principal, &command.pair),
+                        rows,
+                    ));
+                }
+            }
+        }
+        Ok(ManagementRead {
+            snapshot,
+            pair,
+            request: requests.to_vec(),
+            authority: authority.clone(),
+            groups,
         })
     }
 }

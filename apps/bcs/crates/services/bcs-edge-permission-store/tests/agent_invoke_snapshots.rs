@@ -5,7 +5,7 @@ use bcs_db_api::*;
 use bcs_domain::edge_permission::EdgeStatus;
 use bcs_edge_permission::agent_invoke::{AgentInvokeApplicationService, AgentInvokePolicy};
 use bcs_edge_permission_store::agent_invoke::DbAgentInvokeStore;
-use bcs_service_api::application::agent_invoke::AgentInvocationService;
+use bcs_service_api::application::agent_invoke::{AgentInvocationService,AgentInvokeGrantManagementService};
 use bcs_service_api::core::agent_invoke::AgentInvokePolicyCoreService;
 use bcs_service_api::port::agent_invoke::AgentInvokeFactsPort;
 use bcs_service_api::port::repo::agent_invoke::AgentInvokeFactRepoPort;
@@ -80,8 +80,11 @@ async fn qualification_loss_restoration_and_binding_change_do_not_revive_approva
         f.app.authorize_invocation(input()).await,
         Err(AgentInvokeError::Forbidden)
     );
-    f.sql("UPDATE agent_invoke_grants SET from_eligibility_generation = 3, version = 2")
-        .await;
+    let policy=Arc::new(AgentInvokePolicy);
+    let commands=Arc::new(bcs_edge_permission_store::agent_invoke::DbAgentInvokeCommandStore::new(f.store.clone(),policy.clone()));
+    let management=AgentInvokeApplicationService::new(scope(),policy,f.store.clone(),commands).unwrap();
+    let current=f.store.runtime_snapshot(&scope(),&pair()).await.unwrap().approval.unwrap();
+    management.change(command("human_target",AgentInvokeChange::Grant {expected_version:current.version.get()})).await.unwrap();
     assert!(f.app.authorize_invocation(input()).await.is_ok());
     p.expected_revision = 3;
     p.state.binding_generation = nz(2);

@@ -156,6 +156,7 @@ impl Fixture {
         let rows = self.db.query(DbStatement::with_params("SELECT id FROM edge_grants WHERE env=? AND from_id='bot-a' AND to_id='bot-b' AND grant_kind='agent_invoke' AND grant_ref_id=0", vec![self.scope.env.as_str().into()])).await.unwrap();
         let id: u64 = db_get_column(&rows[0], "id").unwrap();
         self.db.execute(DbStatement::with_params("INSERT INTO agent_invoke_grants (edge_id, scope_id, version, from_binding_generation, to_binding_generation, from_eligibility_generation, to_eligibility_generation, created_at_ms, updated_at_ms) SELECT ?, id, 1, 1, 1, 1, 1, 1, 1 FROM agent_invoke_scopes WHERE namespace = ? AND env = ?", vec![id.into(), self.scope.namespace.as_str().into(), self.scope.env.as_str().into()])).await.unwrap();
+        self.db.execute(DbStatement::with_params("UPDATE agent_invoke_grants SET from_registration_id=(SELECT id FROM bcs_bots WHERE bot_uuid='bot-a' AND env=?),to_registration_id=(SELECT id FROM bcs_bots WHERE bot_uuid='bot-b' AND env=?),from_registration_revision=1,to_registration_revision=1 WHERE edge_id=?",vec![self.scope.env.as_str().into(),self.scope.env.as_str().into(),id.into()])).await.unwrap();
         id
     }
     pub async fn sql(&self, sql: &str) {

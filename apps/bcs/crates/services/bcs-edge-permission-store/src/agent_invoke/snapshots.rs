@@ -34,9 +34,20 @@ impl DbAgentInvokeStore {
                 "hidden",
                 "revision",
                 "valid_until_ms",
+                "registration_id",
+                "registration_revision",
             ]
             .iter()
-            .map(|c| format!("{alias}.{c} AS {prefix}_{c}"))
+            .map(|c| {
+                format!(
+                    "{alias}.{c} AS {prefix}_{}",
+                    if c.starts_with("registration_") {
+                        format!("bound_{c}")
+                    } else {
+                        c.to_string()
+                    }
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ")
         };
@@ -48,6 +59,7 @@ impl DbAgentInvokeStore {
                 "is_deleted",
                 "visibility",
                 "ownership_version",
+                "agent_invoke_identity_revision",
             ]
             .iter()
             .map(|c| format!("{alias}.{c} AS {prefix}_registration_{c}"))
@@ -79,6 +91,10 @@ impl DbAgentInvokeStore {
         for c in [
             "scope_id",
             "version",
+            "from_registration_id",
+            "to_registration_id",
+            "from_registration_revision",
+            "to_registration_revision",
             "from_binding_generation",
             "to_binding_generation",
             "from_eligibility_generation",
@@ -175,6 +191,13 @@ impl DbAgentInvokeStore {
             if runtime && valid_until <= domain.now_ms {
                 return Err(AgentInvokeError::Unavailable);
             }
+            let registration_matches = number(row, &key("bound_registration_id"))?
+                == positive(row, &key("registration_id"))?.get()
+                && number(row, &key("bound_registration_revision"))?
+                    == positive(row, &key("registration_agent_invoke_identity_revision"))?.get();
+            if runtime && !registration_matches {
+                return Err(AgentInvokeError::Unavailable);
+            }
             let visibility = string(row, &key("registration_visibility"))?;
             if !["public", "protected", "hidden"].contains(&visibility.as_str()) {
                 return Err(AgentInvokeError::InvalidState);
@@ -184,7 +207,8 @@ impl DbAgentInvokeStore {
                 binding_generation: positive(row, &key("binding_generation"))?,
                 eligibility_generation: positive(row, &key("eligibility_generation"))?,
                 eligible: boolean(row, &key("eligible"))?,
-                active: boolean(row, &key("active"))?
+                active: registration_matches
+                    && boolean(row, &key("active"))?
                     && !boolean(row, &key("registration_is_deleted"))?
                     && valid_until > domain.now_ms,
                 hidden: boolean(row, &key("hidden"))? || visibility == "hidden",
@@ -212,6 +236,21 @@ impl DbAgentInvokeStore {
                 "revoked" => EdgeStatus::Revoked,
                 _ => return Err(AgentInvokeError::InvalidState),
             };
+            if runtime {
+                for (prefix, side) in [("source", "from"), ("target", "to")] {
+                    if positive(row, &format!("approval_{side}_registration_id"))?.get()
+                        != positive(row, &format!("{prefix}_registration_id"))?.get()
+                        || positive(row, &format!("approval_{side}_registration_revision"))?.get()
+                            != positive(
+                                row,
+                                &format!("{prefix}_registration_agent_invoke_identity_revision"),
+                            )?
+                            .get()
+                    {
+                        return Err(AgentInvokeError::Forbidden);
+                    }
+                }
+            }
             Some(AgentInvokeApproval {
                 edge: EdgeGrant {
                     edge_id: positive(row, "edge_id")?.get(),

@@ -6,14 +6,14 @@
   then versioned migrations, then index creation
   (`run_sqlite_bootstrap_tables`, `run_sqlite_versioned_migrations`,
   `run_sqlite_bootstrap_indexes`).
-- The versioned SQLite migration chain (versions 1..48) with per-migration
+- The versioned SQLite migration chain (versions 1..49) with per-migration
   SHA-256 checksums, applied-history validation, repair conditions for legacy
   local databases, and the `bcs_schema_migrations` record bookkeeping.
 - Migration state inspection (`check_sqlite_migrations`) and the apply-report
   summary (`SqliteMigrationReport` / `SqliteMigrationPlan` /
   `run_sqlite_migrations_with_report`), plus `sqlite_target_version()` and
   `sqlite_migration_count()` for CLI reporting.
-- The full behavior test suite (59 tests) that previously registered 30 times
+- The full behavior test suite (62 tests) that previously registered 30 times
   across the workspace via `#[path]` source includes; they now run once here.
 
 ## Allowed dependencies
@@ -54,7 +54,7 @@
 
 ## Tests
 
-- `cargo test -p bcs-db-migrations` — 59 tests, including fresh empty-DB
+- `cargo test -p bcs-db-migrations` — 62 tests, including fresh empty-DB
   init, legacy-database upgrades (pre-existing records / partial steps),
   repeated-startup idempotency, checksum-mismatch and write-failure error
   propagation, cross-dialect migration-content mirrors.
@@ -75,3 +75,13 @@ one transaction; record failure rolls back both, unlike implicit-commit MySQL
 DDL. Upgrade tests preserve populated legacy rows and prior migration history.
 The separate MySQL CI contract must execute the full chain on an EMPTY database;
 static schema checks and local SQLite tests are not a MySQL acceptance result.
+
+SQLite 049 / MySQL 051 add command registration/requester fences. Existing
+approval/request/fact metadata defaults to unknown binding (zero), not invented
+registration proof. Bot/Human registration rows receive a dedicated identity
+revision column, but lifecycle writers still need to advance it before production
+activation. MySQL widens legacy env and request operator columns without changing
+the five-column edge unique key or actor collations. New SQLite 049 keeps DDL and
+history atomic; committed 048/050 and all earlier migrations remain frozen.
+Upgrade tests preserve prior history/data and inject history-record failure.
+Static MySQL key-width checks do not replace full-chain execution on real MySQL.

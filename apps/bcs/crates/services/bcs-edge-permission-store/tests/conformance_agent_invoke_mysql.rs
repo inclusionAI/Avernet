@@ -1,6 +1,7 @@
 //! Run explicitly against a disposable, EMPTY MySQL database. The same shared
 //! reader-first harness runs in the default SQLite and memory conformance suites.
-//! Also verifies durable qualification publication. Not a SQL grant lifecycle.
+//! Also verifies durable qualification/delegation publication, SQL lifecycle
+//! commands and the shared management/runtime snapshot consumer contracts.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use bcs_edge_permission_store::DbEdgeGrantStore;
@@ -12,6 +13,8 @@ mod mysql_chain;
 mod snapshot_fixture;
 #[path = "support/agent_invoke_audit_collision.rs"]
 mod audit_collision;
+#[path = "support/agent_invoke_sql_driver.rs"]
+mod lifecycle;
 
 #[tokio::test]
 #[ignore = "requires BCS_TEST_MYSQL_URL pointing to a disposable EMPTY MySQL database"]
@@ -24,6 +27,25 @@ async fn agent_invoke_repo_contract_mysql() {
     let snapshot = snapshot_fixture::Fixture::new_on(database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql,
         bcs_service_api::types::agent_invoke::AgentInvokeScope { namespace:"mysql-invoke".into(),env:"agent-test".into() }).await;
     bcs_test_support::contract::agent_invoke_snapshots::agent_invoke_facts_port_contract_tests(&snapshot).await;
+    use bcs_test_support::contract::agent_invoke::*;
+    for case in 0..10 {
+        let driver=lifecycle::Driver::new_on(database.plugin.clone(),bcs_db_api::DbSqlFlavor::Mysql,&format!("lifecycle-{case}")).await;
+        match case {
+            0=>agent_invoke_grant_management_service_contract_tests(&driver).await,
+            1=>run_agent_invoke_replay_contract(&driver).await,
+            2=>agent_invocation_service_contract_tests(&driver).await,
+            3=>run_agent_invoke_request_terminals_contract(&driver).await,
+            4=>agent_invoke_command_repo_port_contract_tests(&driver).await,
+            5=>run_agent_invoke_requester_authority_contract(&driver).await,
+            6=>run_agent_invoke_limits_contract(&driver).await,
+            7=>run_agent_invoke_atomic_limits_contract(&driver).await,
+            8=>run_agent_invoke_approve_revoke_contract(&driver,true).await,
+            _=>run_agent_invoke_approve_revoke_contract(&driver,false).await,
+        }
+    }
+    let governance=lifecycle::Driver::new_on(database.plugin.clone(),bcs_db_api::DbSqlFlavor::Mysql,"governance-feed").await;
+    bcs_test_support::contract::agent_invoke_facts::agent_invoke_governance_repo_port_contract_tests(governance.store.as_ref(),governance.scope.clone()).await;
+    println!("agent-invoke-mysql-gate=durable-lifecycle scenarios=10 governance-feed=verified");
     database.close().await;
 }
 
