@@ -10,14 +10,22 @@ refused until someone puts it in a group on purpose.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
-from agentclaw.community.adapters.http.openapi_v1.admission_modes import (
-    AdmissionMode,
+from fastapi import Depends
+
+from agentclaw.community.adapters.http.openapi_v1.admission_managed_bot_routes import (
+    ENGINE_BOT_DEPENDENCIES,
 )
+from agentclaw.community.adapters.http.openapi_v1.admission_modes import AdmissionMode
+from agentclaw.community.adapters.http.openapi_v1.contracts import ErrorEnvelope, error_example
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    EngineOperationUnsupportedError,
     GrantNotResolvableError,
 )
+from agentclaw.community.adapters.http.openapi_v1.error_decorator import envelope_errors
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.user_app_grant_service import (
@@ -58,9 +66,60 @@ ADMITTING_MODES = frozenset(
         AdmissionMode.GRANT_FILTERED,
         AdmissionMode.USER_GATED,
         AdmissionMode.USER_DELEGATED,
+        AdmissionMode.ENGINE_CODING,
         AdmissionMode.OPEN,
     }
 )
+
+
+def admission_for(operation: tuple[str, str]) -> AdmissionMode:
+    """Read one operation's complete policy; an absent operation refuses apps."""
+    return ADMISSION.get(operation, AdmissionMode.REFUSED)
+
+
+def apply_admission(path: str, route_options: dict[str, Any]) -> None:
+    """Attach mode-specific admission checks from the authoritative inventory."""
+    methods = set(route_options.get('methods') or {'GET'}) - {'HEAD', 'OPTIONS'}
+    modes = {admission_for((method, path)) for method in methods}
+    engine_modes = [mode for mode in modes if mode.engines]
+    if not engine_modes:
+        return
+    if len(modes) != 1:
+        raise ValueError(f'Engine admission requires identical admission modes for every route method: {path}')
+    mode = engine_modes[0]
+    try:
+        bot_dependencies = {ENGINE_BOT_DEPENDENCIES[(method, path)] for method in methods}
+    except KeyError as error:
+        raise ValueError(
+            f'Engine admission requires an authorized Bot dependency for every route method: {path}'
+        ) from error
+    if len(bot_dependencies) != 1:
+        raise ValueError(f'Engine admission requires identical Bot dependencies for every route method: {path}')
+    bot_dependency = bot_dependencies.pop()
+
+    async def gate(bots: list[dict[str, Any]] = Depends(bot_dependency())) -> None:
+        if any(bot.get('active_engine') not in mode.engines for bot in bots):
+            raise EngineOperationUnsupportedError('operation is not supported for this engine')
+
+    route_options['dependencies'] = [
+        *(route_options.get('dependencies') or []), Depends(gate),
+    ]
+    responses = dict(route_options.get('responses') or {})
+    responses[501] = {
+        'model': ErrorEnvelope,
+        'description': 'Supported engines: ' + ', '.join(sorted(mode.engines)) + '.',
+        **error_example(501, 'Not supported for this engine'),
+    }
+    route_options['responses'] = responses
+
+
+def admission_checked_handler(
+    path: str, methods: set[str], handler: Callable[..., Any],
+) -> Callable[..., Any]:
+    """Map admission dependency failures with the existing public error envelope."""
+    if any(admission_for((method, path)).engines for method in methods):
+        return envelope_errors(handler)
+    return handler
 
 
 @dataclass(frozen=True)
@@ -300,4 +359,7 @@ __all__ = [
     "SKILL_SCOPED_OPERATIONS",
     "ActingCaller",
     "AdmissionMode",
+    "admission_for",
+    "apply_admission",
+    "admission_checked_handler",
 ]
