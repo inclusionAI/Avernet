@@ -12,7 +12,7 @@ import { FlowRunRepository } from "../../repositories/flow-run-repository.js";
 import { NodeExecutionRepository } from "../../repositories/node-execution-repository.js";
 import { createRunsRouter } from "../runs.js";
 
-const secret = "execution-record-credential-must-not-leak";
+const secret = "<execution-record-credential-must-not-leak>";
 const flow = {
   id: 1, flow_id: "fixture-flow", workflow_id: "fixture-workflow", workflow_title: "Fixture",
   status: "succeeded", params_json: ' { "values" : [1,true] }\n', input_json: "not valid {json",

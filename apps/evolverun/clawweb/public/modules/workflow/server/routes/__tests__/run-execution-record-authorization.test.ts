@@ -15,7 +15,7 @@ import { RunSubworkflowsService } from "../../services/run-subworkflows-service.
 import type { TaskGuardApiDiagnostic } from "../error-log-format.js";
 import { createRunsRouter } from "../runs.js";
 
-const secret = "PRIVATE_EXECUTION_RECORD_CREDENTIAL";
+const secret = "<PRIVATE_EXECUTION_RECORD_CREDENTIAL>";
 const privatePayload = "PRIVATE_FANOUT_PAYLOAD";
 const denied = { error: "Forbidden", message: "No view permission for this run" };
 const fanoutDenied = { error: "Forbidden", message: "Execution records are unavailable for fanout runs" };
