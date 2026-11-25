@@ -376,20 +376,30 @@ describe('taskPanelMapper V2 derivation wiring', () => {
     expect(task.dagNodes.find((n) => n.id === 'n-a')!.present).toBe('merged');
   });
 
-  it('drillable:协作群节点 true,单聊节点 false', () => {
+  it('drillable:群节点或带自身 session 的单 Bot true,未分配节点 false', () => {
     const task = mapDashboard(buildDashboard({
       tasks: [
-        { node_id: 'n-solo', task_id: 'task-v2', sequence: 1, status: 'RUNNING', task_spec: { metadata: { title: '单聊' }, goal: { objective: '', acceptances: [] } } },
+        { node_id: 'n-missing-session', task_id: 'task-v2', sequence: 1, status: 'RUNNING', task_spec: { metadata: { title: '无会话' }, goal: { objective: '', acceptances: [] } } },
         {
-          node_id: 'n-group', task_id: 'task-v2', sequence: 2, status: 'RUNNING',
+          node_id: 'n-solo', task_id: 'task-v2', sequence: 2, status: 'RUNNING',
+          task_spec: { metadata: { title: '单聊' }, goal: { objective: '', acceptances: [] } },
+          run_info: { run_mode: 'single_bot', assignee: 'bot-owner:user-1', extend_props: { session_id: 'agent:main:session:s-solo:user:user-1' } },
+        },
+        {
+          node_id: 'n-group', task_id: 'task-v2', sequence: 3, status: 'RUNNING',
           task_spec: { metadata: { title: '群节点' }, goal: { objective: '', acceptances: [] } },
           run_info: { run_mode: 'coop_group' },
         },
       ] as TaskDashboardResponse['tasks'],
-      relations: [{ src_id: 'n-solo', dst_id: 'n-group', type: 'DEPENDENCY' }] as TaskDashboardResponse['relations'],
+      relations: [
+        { src_id: 'n-missing-session', dst_id: 'n-solo', type: 'DEPENDENCY' },
+        { src_id: 'n-solo', dst_id: 'n-group', type: 'DEPENDENCY' },
+      ] as TaskDashboardResponse['relations'],
     }));
-    expect(task.nodes.find((n) => n.id === 'n-solo')!.drillable).toBe(false);
+    expect(task.nodes.find((n) => n.id === 'n-missing-session')!.drillable).toBe(false);
+    expect(task.nodes.find((n) => n.id === 'n-solo')!.drillable).toBe(true);
     expect(task.nodes.find((n) => n.id === 'n-group')!.drillable).toBe(true);
+    expect(task.dagNodes.find((n) => n.id === 'n-solo')!.drillable).toBe(true);
     expect(task.dagNodes.find((n) => n.id === 'n-group')!.drillable).toBe(true);
   });
 
