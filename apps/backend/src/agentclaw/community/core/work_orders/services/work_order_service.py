@@ -97,6 +97,22 @@ from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 logger = get_logger()
 
 
+def _parse_applicant_bot_id(biz_data: str | None) -> str | None:
+    """Extract the applicant bot id from a Bot-Bot friend request biz_data."""
+    if not biz_data:
+        return None
+    try:
+        data = json.loads(biz_data)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    applicant = data.get("applicant_actor_id")
+    if isinstance(applicant, str) and applicant:
+        return applicant
+    return None
+
+
 class WorkOrderService(WorkOrderServiceProtocol):
     @inject
     def __init__(
@@ -547,6 +563,35 @@ class WorkOrderService(WorkOrderServiceProtocol):
                     credential=callback_credential,
                 )
             callback_succeeded = True
+        # Resolve display names for friend notification four-element
+        # content outside the repository's DB row lock, so slow user
+        # directory / bot-repo lookups never hold the lock.
+        reviewer_display_name: str | None = None
+        target_bot_name: str | None = None
+        applicant_identity: str | None = None
+        if context.work_order.biz_type == WorkOrderBizType.BOT_FRIEND.value:
+            reviewer_display_name = self._get_reviewer_name(
+                reviewer_user_id=actor_id
+            )
+            target_bot_id = context.work_order.biz_id
+            if target_bot_id:
+                target_bot_name = self._resolve_bot_display_name(target_bot_id)
+            try:
+                source_event = WorkOrderEventType(source_event_type)
+            except (TypeError, ValueError):
+                source_event = None
+            if source_event is WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED:
+                applicant_identity = self._get_applicant_name(
+                    applicant_user_id=context.work_order.applicant_user_id
+                )
+            elif source_event is WorkOrderEventType.BOT2BOT_FRIEND_APPLIED:
+                applicant_bot_id = _parse_applicant_bot_id(
+                    context.work_order.biz_data
+                )
+                if applicant_bot_id:
+                    applicant_identity = self._resolve_bot_display_name(
+                        applicant_bot_id
+                    )
         try:
             with execution_phase(
                 "manual_finalize",
@@ -560,6 +605,9 @@ class WorkOrderService(WorkOrderServiceProtocol):
                     decision=decision,
                     review_remark=normalized,
                     env=get_current_env(),
+                    reviewer_display_name=reviewer_display_name,
+                    target_bot_name=target_bot_name,
+                    applicant_identity=applicant_identity,
                 )
         except WorkOrderAlreadyProcessedError:
             raise
@@ -760,6 +808,22 @@ class WorkOrderService(WorkOrderServiceProtocol):
 
         nickname = (profile.nick_name or "").strip()
         return nickname[:128] or None
+
+    def _resolve_bot_display_name(self, bot_id: str) -> str | None:
+        """Resolve the display name of a Bot, or ``None`` on any miss."""
+        try:
+            bot = self._bots.get_by_id(bot_id)
+        except Exception:
+            logger.warning(
+                "failed to resolve bot display name",
+                extra={"bot_id": bot_id},
+                exc_info=True,
+            )
+            return None
+        if bot is None:
+            return None
+        name = (bot.get("name") or "").strip()
+        return name[:128] or None
 
     def list_items(
         self,

@@ -295,9 +295,9 @@ class WorkOrderMessageTitle(StrEnum):
     SKILL_COLLABORATOR_APPROVED = "Skill 共同编辑申请已通过"
     SKILL_COLLABORATOR_REJECTED = "Skill 共同编辑申请未通过"
     HUMAN_FRIEND_APPROVED = "人机好友申请已通过"
-    HUMAN_FRIEND_REJECTED = "人机好友申请未通过"
+    HUMAN_FRIEND_REJECTED = "人机好友申请已驳回"
     BOT_FRIEND_APPROVED = "Bot 好友申请已通过"
-    BOT_FRIEND_REJECTED = "Bot 好友申请未通过"
+    BOT_FRIEND_REJECTED = "Bot 好友申请已驳回"
 
 
 class WorkOrderMessageContent(StrEnum):
@@ -324,10 +324,22 @@ class WorkOrderMessageContent(StrEnum):
     SKILL_COLLABORATOR_REJECTED = (
         "你共同编辑 Skill「{skill_name}」的申请未通过。拒绝原因：{review_remark}"
     )
-    HUMAN_FRIEND_APPROVED = "你的 Bot 好友申请已通过。"
-    HUMAN_FRIEND_REJECTED = "你的 Bot 好友申请未通过。"
-    BOT_FRIEND_APPROVED = "你的 Bot 好友申请已通过。"
-    BOT_FRIEND_REJECTED = "你的 Bot 好友申请未通过。"
+    HUMAN_FRIEND_APPROVED = (
+        "审批人 {reviewer_display} 通过了 {applicant_display}"
+        " 对 Bot「{target_bot_name}」的好友申请。"
+    )
+    HUMAN_FRIEND_REJECTED = (
+        "审批人 {reviewer_display} 驳回了 {applicant_display}"
+        " 对 Bot「{target_bot_name}」的好友申请。"
+    )
+    BOT_FRIEND_APPROVED = (
+        "审批人 {reviewer_display} 通过了 Bot「{applicant_bot_name}」"
+        " 对 Bot「{target_bot_name}」的好友申请。"
+    )
+    BOT_FRIEND_REJECTED = (
+        "审批人 {reviewer_display} 驳回了 Bot「{applicant_bot_name}」"
+        " 对 Bot「{target_bot_name}」的好友申请。"
+    )
 
 
 def skill_collaborator_applicant_display(

@@ -170,6 +170,9 @@ class WorkOrderRepository(
         review_remark: str | None,
         env: str,
         source_event_type: str | None = None,
+        reviewer_display_name: str | None = None,
+        target_bot_name: str | None = None,
+        applicant_identity: str | None = None,
     ):
         with self._db.transactional_orm_session() as db:
             now = db.execute(select(func.now())).scalar_one()
@@ -346,30 +349,56 @@ class WorkOrderRepository(
                     reviewed_event_type
                     == WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED.value
                 )
+                # Unified titles: "Bot 好友申请已通过 / Bot 好友申请已驳回"
                 if target is WorkOrderStatus.APPROVED:
-                    result_title = (
-                        WorkOrderMessageTitle.HUMAN_FRIEND_APPROVED.value
-                        if is_human_friend
-                        else WorkOrderMessageTitle.BOT_FRIEND_APPROVED.value
-                    )
-                    result_text = (
-                        WorkOrderMessageContent.HUMAN_FRIEND_APPROVED.value
-                        if is_human_friend
-                        else WorkOrderMessageContent.BOT_FRIEND_APPROVED.value
-                    )
+                    result_title = WorkOrderMessageTitle.BOT_FRIEND_APPROVED.value
                 else:
-                    result_title = (
-                        WorkOrderMessageTitle.HUMAN_FRIEND_REJECTED.value
-                        if is_human_friend
-                        else WorkOrderMessageTitle.BOT_FRIEND_REJECTED.value
-                    )
-                    result_text = (
-                        WorkOrderMessageContent.HUMAN_FRIEND_REJECTED.value
-                        if is_human_friend
+                    result_title = WorkOrderMessageTitle.BOT_FRIEND_REJECTED.value
+                # Four-element content assembly per PRD v1.1 §3.2
+                bot_name = target_bot_name or order.biz_id
+                if is_human_friend:
+                    if applicant_identity:
+                        content_template = (
+                            WorkOrderMessageContent.HUMAN_FRIEND_APPROVED.value
+                            if target is WorkOrderStatus.APPROVED
+                            else WorkOrderMessageContent.HUMAN_FRIEND_REJECTED.value
+                        )
+                        result_text = content_template.format(
+                            reviewer_display=reviewer_display_name or "",
+                            applicant_display=applicant_identity,
+                            target_bot_name=bot_name,
+                        )
+                    else:
+                        # Applicant display name resolved from order when
+                        # not provided by caller (legacy path).
+                        applicant_display = order.applicant_user_id or ""
+                        content_template = (
+                            WorkOrderMessageContent.HUMAN_FRIEND_APPROVED.value
+                            if target is WorkOrderStatus.APPROVED
+                            else WorkOrderMessageContent.HUMAN_FRIEND_REJECTED.value
+                        )
+                        result_text = content_template.format(
+                            reviewer_display=reviewer_display_name or "",
+                            applicant_display=applicant_display,
+                            target_bot_name=bot_name,
+                        )
+                else:
+                    bot_applicant_name = applicant_identity or order.biz_id
+                    content_template = (
+                        WorkOrderMessageContent.BOT_FRIEND_APPROVED.value
+                        if target is WorkOrderStatus.APPROVED
                         else WorkOrderMessageContent.BOT_FRIEND_REJECTED.value
                     )
-                result_payload = {"text": result_text}
-                if review_remark is not None:
+                    result_text = content_template.format(
+                        reviewer_display=reviewer_display_name or "",
+                        applicant_bot_name=bot_applicant_name,
+                        target_bot_name=bot_name,
+                    )
+                result_payload: dict[str, object] = {"text": result_text}
+                if (
+                    target is not WorkOrderStatus.APPROVED
+                    and review_remark is not None
+                ):
                     result_payload["review_remark"] = review_remark
                 result_content = json.dumps(result_payload, ensure_ascii=False)
             db.add(

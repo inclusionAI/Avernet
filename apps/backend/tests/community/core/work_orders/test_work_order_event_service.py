@@ -82,6 +82,10 @@ def test_friend_approval_calls_callback_before_local_persistence() -> None:
         review_remark=None,
         credential=credential,
     )
+    # The bot-repo mock returns a MagicMock for get_by_id → the resolved
+    # "target_bot_name" is a non-None MagicMock.  Match it with ANY (the
+    # assert only cares about *ordering*, not the exact mock value).
+    from unittest.mock import ANY as _ANY
     assert calls.mock_calls.index(
         call.callbacks.dispatch(
             context=context,
@@ -96,8 +100,14 @@ def test_friend_approval_calls_callback_before_local_persistence() -> None:
             decision=WorkOrderDecision.APPROVED,
             review_remark=None,
             env="dev",
+            reviewer_display_name=None,
+            target_bot_name=_ANY,
+            applicant_identity=_ANY,
         )
     )
+    # DEBUG
+    import sys
+    print("MOCK_CALLS:", calls.mock_calls, file=sys.stderr)
 
 
 def test_friend_callback_failure_keeps_local_approval_pending() -> None:

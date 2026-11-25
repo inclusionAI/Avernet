@@ -151,6 +151,9 @@ class WorkOrderRepositoryProtocol(Protocol):
         review_remark: str | None,
         env: str,
         source_event_type: str | None = None,
+        reviewer_display_name: str | None = None,
+        target_bot_name: str | None = None,
+        applicant_identity: str | None = None,
     ) -> WorkOrderReviewResult: ...
     @abstractmethod
     def create_space_join_request(
