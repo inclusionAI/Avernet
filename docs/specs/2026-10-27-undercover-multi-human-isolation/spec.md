@@ -1,7 +1,7 @@
 # 多人类谁是卧底：上下文隔离
 
 Issue: [#2609](https://github.com/inclusionAI/Avernet/issues/2609)。Target: `oss-camp2026`。
-Status: 评审中（v0.4，2026-10-27，已按维护者 10/27 的评审意见修订）。
+Status: 评审中（v0.5，2026-11-25：更正 §4.3 的 Group Context 可达性；v0.4 已按维护者 10/27 的评审意见修订）。
 配套文档：同目录 [`threat-model.md`](threat-model.md)（信道 C1～C15、泄露点 L1～L8、偷看者测试 T1～T12、证据 E1～E25）。
 
 **开发基线**：按 `oss-camp2026` 会同步 `dev` 来设计。本文依赖 `dev` 上已有的 Group Context 能力（#2538、#2900，后者为 `d163eb905`：add 成员校验、owners、collect_from 可选），实测核对到 `dev` @ `d48b2885c`（2026-10-27）。`oss-camp2026` 当前缺少 #2900，本文不为此维护长期兼容方案。
@@ -91,12 +91,12 @@ Status: 评审中（v0.4，2026-10-27，已按维护者 10/27 的评审意见修
 
 | 需要的能力 | `dev` 现状 | 结论 |
 |---|---|---|
-| 人类以认证身份读取 | `/groupcontext/*` 路由从请求头解析调用者，人类解析为 `human_<staff_no>`；10/19 在 `oss-camp2026` 实测人类可 add/get、他人 get 返回 403（E13），`dev` 上该路由的调用者解析相同 | 满足 |
+| 人类以认证身份读取 | `/groupcontext/*` 是给 `bcs-cli` 用的旧路由，只挂在 BCS 根路由（`bcs-http/src/router.rs`）。singlebox 旧前端经 `/bcnproxy` 可达，10/19 实测人类可 get、他人 get 返回 403（E13）；但 nextgen 前端与部署态副屏的基址是 `/api/v1/collaboration`（`frontend-nextgen/src/services/bcs/bcsPanelBaseUrl.ts`），该命名空间下没有 Group Context 路由 | **缺口** |
 | 外部抢注防护 | `add` 校验调用者是 session 当前参与者（`group_context_access.rs`） | 满足 |
 | 防篡改可见名单 | 非 owner 不能改 `visible_to`/`collect_from`/`owners` | 满足 |
 | 锁定作用域读取 | `get` 支持 `scope_levels` | 满足 |
 
-**结论：BCS 侧没有发现缺口。** 需要补的是副屏的 Group Context 调用（profile/panel 范围）。一个可选增强（非阻塞）：`get` 目前只对 owner 返回 `owners`，若对可读者也返回 `owners`，副屏可以直接校验"条目确由主持人创建"，不必依赖名字不可预测。
+**结论（v0.5 更正）：有一处 BCS 缺口——人类副屏在 nextgen / 部署态下够不到 Group Context。** v0.4 误写为"无缺口"，原因是 10/19 的实测只走了 singlebox 的 `/bcnproxy`；该缺口由 #2609 下 ShunyangLiu 的评论（Q2）指出，核对源码属实。可选方向：(a) 在 `/api/v1/collaboration` 下增加一个只读 `get`（调用者取自认证身份，权限判断与现有 `get` 相同）；(b) 由网关转发 `/groupcontext/*`。倾向 (a)：只开放读，人类副屏不需要 add/update。待维护者选择，选定后随 BCS PR 或单独 PR 提交。其余能力（add 成员校验、owner、`scope_levels`）满足。一个可选增强（非阻塞）：`get` 目前只对 owner 返回 `owners`，若对可读者也返回 `owners`，副屏可以直接校验"条目确由主持人创建"，不必依赖名字不可预测。
 
 ## 5. HumanInput 绑定与并行（BCS 改动）
 
@@ -217,3 +217,4 @@ profile 侧已知改动点：放开 `undercover.py` 的单人类限制（`len(hu
 
 1. 结果文件下载链接的 token 不绑定身份（E18）。文件只在终局后上传（E24），不影响对局公平；是否另开 issue？
 2. §4.3 的可选增强（`get` 对可读者返回 `owners`）是否值得做？
+3. §4.3 的缺口：人类副屏访问 Group Context 选 (a) `/api/v1/collaboration` 下只读 `get`，还是 (b) 网关转发 `/groupcontext/*`？
