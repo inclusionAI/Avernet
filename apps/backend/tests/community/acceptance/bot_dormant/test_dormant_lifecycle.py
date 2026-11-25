@@ -79,22 +79,12 @@ def test_dormant_recycle_notification_and_reactivate_live(live_backend):
                 "reason": "singlebox coverage lifecycle",
             },
         )
-        assert recycled.status_code == 202, recycled.text
-        operation_id = recycled.json()["data"]["operation_id"]
-        deadline = time.monotonic() + 180
-        while True:
-            observed = client.get(
-                f"/api/internal/dormant/bots/{bot_id}/recycle-operations/{operation_id}",
-                headers=INTERNAL_HEADERS, params={"owner_id": owner_id},
-            )
-            assert observed.status_code == 200, observed.text
-            result = observed.json()["data"]
-            assert result["phase"] not in {"FAILED", "NEEDS_CONFIRMATION"}, result
-            if result["phase"] == "SUCCEEDED":
-                break
-            assert time.monotonic() < deadline, result
-            time.sleep(1)
-        assert result["bot_status"] == "RECYCLED", result
+        # The singlebox runtime has no confirmed fastdisk: keep synchronous
+        # recycle, with no queued operation or extra physical-status polling.
+        assert recycled.status_code == 200, recycled.text
+        result = recycled.json()["data"]
+        assert result["status"] == "recycled", result
+        assert result["operation_id"] is None and result["phase"] is None, result
 
         pending = client.get(
             "/api/internal/dormant/pending-notifications",
@@ -185,13 +175,12 @@ def _principal_headers(owner_id: str) -> dict[str, str]:
 
 
 @pytest.mark.acceptance
-def test_openapi_async_recycle_without_binding_and_reactivate_live(live_backend):
-    """Recycle a resource-free Bot via the real queue, then allocate on activation.
+def test_openapi_sync_recycle_without_binding_and_reactivate_live(live_backend):
+    """An unbound non-coding Bot stays synchronous, then activates normally.
 
     Seed only the initial record through the existing local SQL test boundary;
-    admission, worker execution, journaling and activation remain real HTTP flows.
-    Physical-provider confirmation is covered by the recycle runtime contract
-    tests, not inferred from singlebox local_proc's untyped missing-resource error.
+    recycle, idempotent retry and activation remain real HTTP flows. No queue or
+    operation-query state should be introduced for this Bot.
     """
     owner_id = fresh_id("recycle_owner")
     query = {"user_id": owner_id}
@@ -226,34 +215,15 @@ def test_openapi_async_recycle_without_binding_and_reactivate_live(live_backend)
         submitted = client.post(
             f"{path}/recycle", params=query, headers=_principal_headers(owner_id),
         )
-        assert submitted.status_code == 202, submitted.text
-        admission = submitted.json()["data"]
-        assert admission["changed"] is True, admission
-        operation_id = admission["operation_id"]
-        assert operation_id, admission
-        operation_path = f"{path}/recycle-operations/{operation_id}"
-
+        assert submitted.status_code == 200, submitted.text
+        result = submitted.json()["data"]
+        assert result["changed"] is True and result["status"] == "RECYCLED", result
+        assert result["operation_id"] is None and result["phase"] is None, result
+        operation_path = f"{path}/recycle-operations/missing"
         missing = client.get(
-            f"{path}/recycle-operations/missing", params=query,
-            headers=_principal_headers(owner_id),
+            operation_path, params=query, headers=_principal_headers(owner_id),
         )
         assert missing.status_code == 404, missing.text
-
-        deadline = time.monotonic() + 180
-        while True:
-            observed = client.get(
-                operation_path, params=query, headers=_principal_headers(owner_id),
-            )
-            assert observed.status_code == 200, observed.text
-            result = observed.json()["data"]
-            assert result["operation_id"] == operation_id, result
-            assert result["phase"] not in {"FAILED", "NEEDS_CONFIRMATION"}, result
-            if result["phase"] == "SUCCEEDED":
-                break
-            assert time.monotonic() < deadline, result
-            time.sleep(1)
-        assert result["bot_status"] == "RECYCLED", result
-        assert result["error_code"] is None, result
 
         repeated = client.post(
             f"{path}/recycle", params=query, headers=_principal_headers(owner_id),
@@ -264,8 +234,7 @@ def test_openapi_async_recycle_without_binding_and_reactivate_live(live_backend)
         unchanged = client.get(
             operation_path, params=query, headers=_principal_headers(owner_id),
         )
-        assert unchanged.status_code == 200, unchanged.text
-        assert unchanged.json()["data"] == result, unchanged.text
+        assert unchanged.status_code == 404, unchanged.text
 
         pending = client.get(
             "/api/internal/dormant/pending-notifications", headers=INTERNAL_HEADERS,
@@ -290,6 +259,4 @@ def test_openapi_async_recycle_without_binding_and_reactivate_live(live_backend)
         retained = client.get(
             operation_path, params=query, headers=_principal_headers(owner_id),
         )
-        assert retained.status_code == 200, retained.text
-        assert retained.json()["data"]["phase"] == "SUCCEEDED", retained.text
-        assert retained.json()["data"]["bot_status"] == "ACTIVE", retained.text
+        assert retained.status_code == 404, retained.text

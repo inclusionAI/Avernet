@@ -113,7 +113,8 @@ async def recycle_dormant_bot(
     """Recycle an ACTIVE personal managed-cloud Bot; no request body.
 
     All supported personal managed-cloud Bots retain the original Bot state
-    machine: successful recycle sets RECYCLED; failures leave Bot status unchanged.
+    machine. A queued operation sets RECYCLED on success; its failure leaves Bot
+    status unchanged. Synchronous callers retain their existing behavior.
 
     OWNER only. Optional `entity_id` selects the Bot owner, defaulting to the
     caller; deprecated `owner_id` is still accepted. Conflicting values return
