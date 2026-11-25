@@ -67,6 +67,9 @@ def _target_collaborator_name(delivered, planned) -> str | None:
         name = str(props.get("assignee_name") or "").strip()
         if name:
             return name
+        group_name = str(props.get("group_name") or "").strip()
+        if group_name:
+            return group_name
         formation = props.get("pending_group_formation")
         if isinstance(formation, dict):
             group_name = str(formation.get("group_name") or "").strip()
@@ -104,20 +107,56 @@ def _handoff_bot_identity(delivered, planned) -> str | None:
     return None
 
 
-def _handoff_entry_url(delivered, planned, frontend_url: str) -> str | None:
+def _handoff_owner_user_id(graph) -> str | None:
+    props = getattr(graph, "extend_props", None) or {}
+    value = str(props.get("owner_user_id") or "").strip()
+    return value or None
+
+
+def _handoff_current_identity(graph) -> str | None:
+    owner = _handoff_owner_user_id(graph)
+    if not owner:
+        return None
+    return owner if owner.startswith("human_") else f"human_{owner}"
+
+
+def _handoff_entry_url(delivered, planned, graph, frontend_url: str) -> str | None:
     session_id = _target_session_id(delivered, planned)
-    bot_identity = _handoff_bot_identity(delivered, planned)
     base = str(frontend_url or "").strip().rstrip("/")
-    if not session_id or not bot_identity or not base:
+    if not session_id or not base:
         return None
     target = _handoff_target_fact(delivered, planned)
     mode = getattr(getattr(target, "run_info", None), "run_mode", None)
-    section = "team" if mode == "coop_group" else "managed"
-    query = urlencode({"section": section, "bot": bot_identity, "session": session_id})
+    if mode == "coop_group":
+        props = getattr(getattr(target, "run_info", None), "extend_props", None) or {}
+        group_id = str(props.get("group_id") or "").strip()
+        current_identity = _handoff_current_identity(graph)
+        if not group_id or not current_identity:
+            return None
+        query = urlencode({
+            "current": current_identity,
+            "group": group_id,
+            "session": session_id,
+            "membership": "direct",
+        })
+        return f"{base}/workspace/collaboration?{query}"
+    bot_identity = _handoff_bot_identity(delivered, planned)
+    if not bot_identity:
+        return None
+    query = urlencode(
+        {
+            "section": "managed",
+            "bot": bot_identity,
+            "origin": "mine",
+            "session": session_id,
+        }
+    )
     return f"{base}/workspace/chat?{query}"
 
 
-def build_dispatch_handoff_display(delivered, planned, frontend_url: str) -> RelayHandoffDisplayDTO:
+def build_dispatch_handoff_display(
+    delivered, planned, graph, frontend_url: str
+) -> RelayHandoffDisplayDTO:
     """Build the single display projection for a successfully dispatched successor."""
     subject = "Relay handoff"
     for node in (delivered, planned):
@@ -132,5 +171,5 @@ def build_dispatch_handoff_display(delivered, planned, frontend_url: str) -> Rel
     return RelayHandoffDisplayDTO(
         subject=f"{datetime.now().strftime('%m%d')}:{subject}",
         collaborator_name=_target_collaborator_name(delivered, planned),
-        entry_url=_handoff_entry_url(delivered, planned, frontend_url),
+        entry_url=_handoff_entry_url(delivered, planned, graph, frontend_url),
     )
