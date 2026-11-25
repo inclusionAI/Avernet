@@ -18,15 +18,17 @@ use crate::{
     inbox::{Clock, StrictRound, StoreInboxProducer},
     layout::KeyLayout,
 };
-use async_trait::async_trait;
 use bcs_dist_model::*;
+// The strict license contract lives with the group-round port (shared with
+// the Worker processor, which must not depend on a concrete store crate).
+pub use bcs_service_api::port::repo::distributed::group_round::{
+    StrictLicense, decode_strict_license,
+};
 use bcs_service_api::port::repo::distributed::{
     common::StoreError,
-    group_round::{
-        GroupRequestIdentity, GroupRequestRecord, GroupRoundRepo, GroupRoundView,
-    },
     inbox::{AdmitRequest, AdmitOutcome},
     ownership::ShardClaim,
+    result::TaskArchiveRepo,
     session::{
         AcquiredSession, Checkpoint, CommitOutcome, CommitPurpose, CommitRequest, CommittedBatch,
         SessionStorePort, TaskPhase, TaskProgress, TaskRunnerState,
@@ -35,7 +37,7 @@ use bcs_service_api::port::repo::distributed::{
 use bcs_service_api::port::repo::distributed::common::ShardOwner;
 use bcs_store_api::{StoreCapability, Version, WriteOutcome, document::DocumentStorePlugin};
 use serde::{Deserialize, Serialize};
-use std::{num::NonZeroU64, sync::Arc};
+use std::sync::Arc;
 
 /// Bound on one encoded registry row; the S1.1 candidate value, not a frozen
 /// production capacity (T4/T8 calibrate retention and budgets).
@@ -62,44 +64,10 @@ impl GroupAdmissionConfig {
     }
 }
 
-/// The strict license installed by the one acceptance CAS. It lives in the
-/// checkpoint `runner_state` value under the `group_admission` key and is the
-/// only public-read/execution permission. The T7 processor that later
-/// rewrites `runner_state` must carry it until the terminal proof transfer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct StrictLicense {
-    pub schema_version: u32,
-    pub scope: TaskScope,
-    pub group: GroupId,
-    pub sid: Sid,
-    pub tid: Tid,
-    pub generation: NonZeroU64,
-    pub request_id: String,
-    pub request_digest: String,
-}
-impl StrictLicense {
-    pub(crate) fn round_key(&self) -> RoundKey {
-        RoundKey {
-            scope: self.scope.clone(),
-            group: self.group.clone(),
-            sid: self.sid.clone(),
-            tid: self.tid.clone(),
-            generation: self.generation,
-        }
-    }
-}
-
-/// `value` is the checkpoint runner state's `value` JSON.
-pub(crate) fn decode_strict_license(
-    runner_value: &serde_json::Value,
-) -> Option<StrictLicense> {
-    serde_json::from_value(runner_value.get("group_admission")?.clone()).ok()
-}
-
 /// Read the strict license sealed in the session checkpoint document without
 /// going through the checkpoint port: probe callers (inbox producer, task
 /// reader) hold only the document plugin. One bounded document read.
-pub(crate) async fn probe_strict_license(
+pub async fn probe_strict_license(
     documents: &Arc<dyn DocumentStorePlugin>,
     layout: &KeyLayout,
     sid: &Sid,
@@ -169,11 +137,11 @@ pub fn strict_round_input_id(request: &AcceptedRound) -> Result<InputId, StoreEr
 /// original normalization. `abandoned` rows keep fence evidence and are only
 /// re-bound by the same request identity; `expired` tombstones answer Expired.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct GroupRequestRow {
-    schema_version: u32,
-    request_id: String,
-    state: String,
-    request: AcceptedRound,
+pub(crate) struct GroupRequestRow {
+    pub(crate) schema_version: u32,
+    pub(crate) request_id: String,
+    pub(crate) state: String,
+    pub(crate) request: AcceptedRound,
     /// Checkpoint head bound at prepare, for diagnostics and fencing review.
     head: u64,
     owner: ShardOwner,
@@ -184,13 +152,17 @@ struct GroupRequestRow {
 /// the Worker's sealed shard identity; Gateways never write checkpoints.
 #[derive(Clone)]
 pub struct StoreGroupRoundAdmission {
-    sessions: Arc<dyn SessionStorePort>,
-    producer: Arc<StoreInboxProducer>,
-    documents: Arc<dyn DocumentStorePlugin>,
-    layout: KeyLayout,
-    claim: ShardClaim,
-    config: GroupAdmissionConfig,
-    clock: Arc<dyn Clock>,
+    pub(crate) sessions: Arc<dyn SessionStorePort>,
+    pub(crate) producer: Arc<StoreInboxProducer>,
+    pub(crate) documents: Arc<dyn DocumentStorePlugin>,
+    pub(crate) layout: KeyLayout,
+    pub(crate) claim: ShardClaim,
+    pub(crate) config: GroupAdmissionConfig,
+    pub(crate) clock: Arc<dyn Clock>,
+    /// The T4 archive repository the terminal spine confirms cold proofs
+    /// against; the default constructor leaves the spine unconfigured and
+    /// `commit_terminal` refuses rather than faking authority.
+    pub(crate) artifacts: Option<Arc<dyn TaskArchiveRepo>>,
 }
 
 impl StoreGroupRoundAdmission {
@@ -203,6 +175,47 @@ impl StoreGroupRoundAdmission {
         layout: KeyLayout,
         config: GroupAdmissionConfig,
         clock: Arc<dyn Clock>,
+    ) -> Result<Self, StoreError> {
+        Self::assemble(
+            sessions,
+            producer,
+            documents,
+            claim,
+            layout,
+            config,
+            clock,
+            None,
+        )
+    }
+
+    /// The strict admission joined with the T4 archive repository: this is
+    /// the configuration that enables the T7 terminal commit spine
+    /// (`commit_terminal`, cold-proof gated next-round admission and the
+    /// authoritative public read).
+    #[allow(clippy::too_many_arguments, reason = "injected joint storage")]
+    pub fn with_artifacts(
+        sessions: Arc<dyn SessionStorePort>,
+        producer: Arc<StoreInboxProducer>,
+        documents: Arc<dyn DocumentStorePlugin>,
+        claim: ShardClaim,
+        layout: KeyLayout,
+        config: GroupAdmissionConfig,
+        clock: Arc<dyn Clock>,
+        artifacts: Arc<dyn TaskArchiveRepo>,
+    ) -> Result<Self, StoreError> {
+        Self::assemble(sessions, producer, documents, claim, layout, config, clock, Some(artifacts))
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "injected joint storage")]
+    fn assemble(
+        sessions: Arc<dyn SessionStorePort>,
+        producer: Arc<StoreInboxProducer>,
+        documents: Arc<dyn DocumentStorePlugin>,
+        claim: ShardClaim,
+        layout: KeyLayout,
+        config: GroupAdmissionConfig,
+        clock: Arc<dyn Clock>,
+        artifacts: Option<Arc<dyn TaskArchiveRepo>>,
     ) -> Result<Self, StoreError> {
         config.validate()?;
         if !documents.supports(StoreCapability::DocumentCas) {
@@ -218,12 +231,18 @@ impl StoreGroupRoundAdmission {
             claim,
             config,
             clock,
+            artifacts,
         })
+    }
+
+    /// The configured archive repository, when the terminal spine is armed.
+    pub(crate) fn artifacts(&self) -> Option<&Arc<dyn TaskArchiveRepo>> {
+        self.artifacts.as_ref()
     }
 
     // ---- bounded storage helpers ----
 
-    async fn load<T: serde::de::DeserializeOwned>(
+    pub(crate) async fn load<T: serde::de::DeserializeOwned>(
         &self,
         key: &str,
     ) -> Result<Option<(Version, T)>, StoreError> {
@@ -249,7 +268,7 @@ impl StoreGroupRoundAdmission {
         )
     }
 
-    async fn row(
+    pub(crate) async fn row(
         &self,
         request: &AcceptedRound,
     ) -> Result<Option<(Version, GroupRequestRow)>, StoreError> {
@@ -282,7 +301,7 @@ impl StoreGroupRoundAdmission {
     /// Spec binding: scope, group and workflow must name this session. A
     /// missing spec never creates the session; unknown client Sids are not
     /// instantiated by round admission. One bounded read, zero writes.
-    async fn check_binding(&self, request: &AcceptedRound) -> Result<(), StoreError> {
+    pub(crate) async fn check_binding(&self, request: &AcceptedRound) -> Result<(), StoreError> {
         let key = self.layout.spec(&request.input.key.sid)?;
         let Some((_, spec)) = self.load::<SessionSpec>(&key).await? else {
             return Err(StoreError::NotApplied {
@@ -303,7 +322,7 @@ impl StoreGroupRoundAdmission {
 
     /// Sealed session snapshot; the protected first create rides the claim
     /// fence inside the checkpoint port.
-    async fn acquire(&self, sid: &Sid) -> Result<AcquiredSession, StoreError> {
+    pub(crate) async fn acquire(&self, sid: &Sid) -> Result<AcquiredSession, StoreError> {
         let initial = Checkpoint {
             format_version: 1,
             commit_seq: CommitSeq(0),
@@ -329,7 +348,7 @@ impl StoreGroupRoundAdmission {
         }
     }
 
-    async fn license(&self, snapshot: &AcquiredSession) -> Option<StrictLicense> {
+    pub(crate) async fn license(&self, snapshot: &AcquiredSession) -> Option<StrictLicense> {
         snapshot
             .envelope
             .checkpoint
@@ -339,7 +358,7 @@ impl StoreGroupRoundAdmission {
             .filter(|l| l.sid == snapshot.ownership.sid)
     }
 
-    fn replay(original: &AcceptedRound, request: &AcceptedRound) -> Admission {
+    pub(crate) fn replay(original: &AcceptedRound, request: &AcceptedRound) -> Admission {
         if original.request_digest == request.request_digest
             && original.input.key.sid == request.input.key.sid
         {
@@ -353,7 +372,7 @@ impl StoreGroupRoundAdmission {
 
     /// Busy while the licensed round's task is not terminally Done in the
     /// checkpoint queue (the terminal commit itself is the T7 processor).
-    fn round_busy(license: &StrictLicense, snapshot: &AcquiredSession) -> bool {
+    pub(crate) fn round_busy(license: &StrictLicense, snapshot: &AcquiredSession) -> bool {
         snapshot
             .envelope
             .checkpoint
@@ -365,7 +384,7 @@ impl StoreGroupRoundAdmission {
 
     // ---- inbox entry for one round, keyed by the request identity ----
 
-    async fn aftermath(&self, request: &AcceptedRound) -> Result<StrictOutcome, StoreError> {
+    pub(crate) async fn aftermath(&self, request: &AcceptedRound) -> Result<StrictOutcome, StoreError> {
         let inbox = self.inbox_request(request)?;
         self.producer
             .admit_strict_round(
@@ -382,7 +401,7 @@ impl StoreGroupRoundAdmission {
     /// admission record is durably fenced and its schedule slot freed, so a
     /// duel loser never keeps a resident slot (each duel would otherwise
     /// permanently burn one of the session's bounded slots).
-    async fn abandon_start(&self, request: &AcceptedRound) -> Result<(), StoreError> {
+    pub(crate) async fn abandon_start(&self, request: &AcceptedRound) -> Result<(), StoreError> {
         let inbox = self.inbox_request(request)?;
         self.producer
             .abandon_strict_start(
@@ -488,11 +507,44 @@ impl StoreGroupRoundAdmission {
             request_id: request.request_id.0.clone(),
             request_digest: request.request_digest.0.clone(),
         };
+        let mut value = serde_json::json!({ "group_admission": license });
+        // Installing the next round condenses the predecessor's closed hot
+        // terminal marker into its durable cold index entry: the closed
+        // round stays publicly resolvable (frozen request row + cold proof)
+        // long after the successor took the checkpoint's runner state.
+        let prior = snapshot.envelope.checkpoint.runner_state.as_ref();
+        let mut cold: Vec<serde_json::Value> = prior
+            .and_then(|state| state.state.value.get(crate::group_terminal::COLD_INDEX_KEY))
+            .and_then(|entries| entries.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if let Some(closed) = prior
+            .and_then(|state| state.state.value.get("group_terminal"))
+            .cloned()
+            .and_then(|marker| serde_json::from_value::<TerminalProof>(marker).ok())
+        {
+            cold.retain(|entry| {
+                serde_json::from_value::<crate::group_terminal::ColdIndexEntry>(entry.clone())
+                    .is_ok_and(|kept| kept.tid != closed.key.tid)
+            });
+            if let Some(prior) = prior
+                && let Some(license) =
+                    decode_strict_license(&prior.state.value)
+            {
+                cold.push(serde_json::to_value(crate::group_terminal::ColdIndexEntry {
+                    schema_version: 1,
+                    tid: closed.key.tid.clone(),
+                    request_id: license.request_id.clone(),
+                    request_digest: license.request_digest.clone(),
+                }).map_err(|_| invalid("cold_index_encoding"))?);
+            }
+        }
+        value["group_cold"] = serde_json::Value::Array(cold);
         candidate.runner_state = Some(TaskRunnerState {
             tid: key.tid.clone(),
             state: RunnerState {
                 format_version: 1,
-                value: serde_json::json!({ "group_admission": license }),
+                value,
             },
         });
         let commit_id = CommitId(format!(
@@ -501,10 +553,34 @@ impl StoreGroupRoundAdmission {
             key.generation.get(),
             head
         ));
-        let content_digest = Digest(
-            serde_json::to_string(&candidate.runner_state)
-                .map_err(|_| invalid("license_encoding"))?,
-        );
+        // The acceptance CAS carries the control revision the sealed
+        // envelope currently holds: installing generation + 1 happens while
+        // the previous round's Worker recorded risk attempts, so a hardcoded
+        // revision would pause every successor admission.
+        let control_revision = crate::group_terminal::probe_control_revision(
+            &self.documents,
+            &self.layout,
+            &key.sid,
+        )
+        .await?
+        .ok_or_else(|| invalid("terminal_control_missing"))?;
+        // Seal with the whole-checkpoint digest in the same convention the
+        // Worker's `seal_candidate`/`verify_checkpoint` pair uses (the
+        // self-referential outbox digest is the fixed empty string in the
+        // hash input). A runner-state-only digest makes every strict session
+        // fail the Worker's `checkpoint_digest` reconciliation on its first
+        // step, so licensed rounds never run.
+        // Install the new batch with the placeholder digest first: the
+        // digest covers the complete sealed candidate (hash input carries
+        // the fixed empty-string digest), exactly like the Worker's seal.
+        candidate.outbox = Some(CommittedBatch {
+            created_at: None,
+            commit_id: commit_id.clone(),
+            source_commit: CommitSeq(sequence),
+            content_digest: Digest(String::new()),
+            effects: vec![],
+        });
+        let content_digest = authority_digest(&candidate)?;
         candidate.outbox = Some(CommittedBatch {
             created_at: None,
             commit_id: commit_id.clone(),
@@ -515,7 +591,7 @@ impl StoreGroupRoundAdmission {
         Ok(self
             .sessions
             .commit(CommitRequest {
-                purpose: CommitPurpose::Ordinary { control_revision: 0 },
+                purpose: CommitPurpose::Ordinary { control_revision },
                 owner: snapshot.ownership.clone(),
                 expected_commit_seq: CommitSeq(head),
                 commit_id,
@@ -528,7 +604,7 @@ impl StoreGroupRoundAdmission {
     /// Stage pre-writes (registry row + inbox/snapshot/index scaffolding),
     /// then take the acceptance CAS, then deliver the aftermath. Called only
     /// after classify left an empty/terminal authority at `snapshot`.
-    async fn install(
+    pub(crate) async fn install(
         &self,
         request: &AcceptedRound,
         snapshot: AcquiredSession,
@@ -617,7 +693,7 @@ impl StoreGroupRoundAdmission {
     /// Once the license committed, the row records that the message key's
     /// round installed. Classification failures of this bookkeeping fall back
     /// to the same-key license recovery path.
-    async fn mark_accepted(&self, request: &AcceptedRound, key: &str) -> Result<(), StoreError> {
+    pub(crate) async fn mark_accepted(&self, request: &AcceptedRound, key: &str) -> Result<(), StoreError> {
         for _ in 0..RETRIES {
             let Some((version, mut row)) = self.load::<GroupRequestRow>(key).await? else {
                 return Ok(());
@@ -638,7 +714,7 @@ impl StoreGroupRoundAdmission {
         })
     }
 
-    async fn bind_row(
+    pub(crate) async fn bind_row(
         &self,
         request: &AcceptedRound,
         key: &str,
@@ -689,7 +765,7 @@ impl StoreGroupRoundAdmission {
         })
     }
 
-    async fn abandon(&self, key: &str) -> Result<(), StoreError> {
+    pub(crate) async fn abandon(&self, key: &str) -> Result<(), StoreError> {
         for _ in 0..RETRIES {
             let Some((version, mut row)) = self.load::<GroupRequestRow>(key).await? else {
                 return Ok(());
@@ -706,188 +782,57 @@ impl StoreGroupRoundAdmission {
             operation_id: key.into(),
         })
     }
-}
-
-#[async_trait]
-impl GroupRoundRepo for StoreGroupRoundAdmission {
-    async fn lookup(
+    /// The spine gate of a foreign-license admission: the previous round's
+    /// window must be closed — cold proof confirmed and read back — before
+    /// the next generation installs. A window that still holds its retained
+    /// terminal authority is repaired exactly once here (idempotent cold
+    /// confirm); an authority that was never committed stays Busy.
+    pub(crate) async fn license_window_closed(
         &self,
-        identity: &GroupRequestIdentity<'_>,
-    ) -> Result<GroupRequestRecord, StoreError> {
-        let parts = identity.components();
-        if parts.len() != 5 || parts[0] != "group_a2a:v1" {
-            return Err(invalid("group_request_identity"));
+        snapshot: &AcquiredSession,
+        license: &StrictLicense,
+    ) -> Result<bool, StoreError> {
+        if self.cold_terminal_proof(license).await?.is_some() {
+            return Ok(true);
         }
-        let scope = TaskScope {
-            tenant: TenantId(parts[1].into()),
-            principal: PrincipalId(parts[2].into()),
-        };
-        let group = GroupId(parts[3].into());
-        let request_id = RequestId(parts[4].into());
-        let key = self.layout.group_request(&scope, &group, &request_id)?;
-        let Some((_, row)) = self.load::<GroupRequestRow>(&key).await? else {
-            return Ok(GroupRequestRecord::Absent);
-        };
-        // Abandonment is checkout by the fence, not a fresh message key; the
-        // row stays as evidence. Expired tombstones answer before everything.
-        if row.state == "abandoned" {
-            return Ok(GroupRequestRecord::Absent);
+        if self
+            .finish_terminal_window(&snapshot.envelope.checkpoint, license)
+            .await?
+        {
+            return Ok(true);
         }
-        if row.state == "expired" {
-            return Ok(GroupRequestRecord::Expired);
-        }
-        if row.state != "prepared" && row.state != "accepted" {
-            return Err(invalid("group_request_state"));
-        }
-        if row.state == "accepted" {
-            // The round installed under this message key once; supersession
-            // does not rewrite first identity.
-            return Ok(GroupRequestRecord::Accepted(row.request.clone()));
-        }
-        let license =
-            probe_strict_license(&self.documents, &self.layout, &row.request.input.key.sid)
-                .await?;
-        if license.is_some_and(|l| {
-            l.request_id == row.request.request_id.0
-                && l.request_digest == row.request.request_digest.0
-        }) {
-            return Ok(GroupRequestRecord::Accepted(row.request.clone()));
-        }
-        Ok(GroupRequestRecord::Prepared(row.request.clone()))
-    }
-
-    async fn admit(&self, request: &AcceptedRound) -> Result<Admission, StoreError> {
-        let key = &request.input.key;
-        if request.input.schema_version != RoundSchemaVersion::V1 {
-            return Err(StoreError::UnsupportedFormat { format: 1 });
-        }
-        if !matches!(request.input.source, GroupRoundSource::GroupA2a) {
-            return Err(invalid("group_round_source"));
-        }
-        if key.generation.get() == 0 {
-            return Err(invalid("group_round_generation"));
-        }
-        KeyLayout::shard_of(&key.sid)?;
-        self.layout.ckpt(&key.sid)?;
-        self.layout.group_request(&key.scope, &key.group, &request.request_id)?;
-        if request.request_id.0.is_empty() {
-            return Err(invalid("group_request_identity"));
-        }
-        self.check_binding(request).await?;
-        // Zero-write classification against the sealed authority.
-        let snapshot = self.acquire(&key.sid).await?;
-        let license = self.license(&snapshot).await;
-        let row = self.row(request).await?;
-        let row_lane = match &row {
-            Some((_, row)) => Some((row.state.as_str(), row.request.clone())),
-            None => None,
-        };
-        if matches!(row_lane, Some(("expired", _))) {
-            return Ok(Admission::Expired);
-        }
-        match &license {
-            Some(license) if license.request_id == request.request_id.0 => {
-                let original = match row_lane {
-                    Some(("prepared", original)) | Some(("accepted", original)) => original,
-                    // The row is destructible only via the T4 lifecycle; the
-                    // license still pins the first identity.
-                    None if license.request_digest == request.request_digest.0 => {
-                        request.clone()
-                    }
-                    None => return Ok(Admission::Conflict),
-                    Some(_) => return Ok(Admission::Conflict),
-                };
-                let admitted = Self::replay(&original, request);
-                if matches!(admitted, Admission::Replay { .. }) {
-                    // Recovery/aftermath repair for the same accepted round;
-                    // the Start entry stays exactly one durable record.
-                    self.aftermath(request).await?;
-                }
-                return Ok(admitted);
-            }
-            Some(license) => {
-                // A stored, installed round with this message id answers by
-                // its own first identity even after a superseding round took
-                // the session: the retry keeps reusing the original Tid. An
-                // uninstalled (pending) row never rides this path — it may
-                // still be busy or re-attempted once the session frees.
-                if let Some(("accepted", original)) = &row_lane
-                    && original.request_id == request.request_id
-                    && original.input.key.tid == request.input.key.tid
-                {
-                    return if original.request_digest != request.request_digest {
-                        Ok(Admission::Conflict)
-                    } else {
-                        Ok(Self::replay(original, request))
-                    };
-                }
-                if Self::round_busy(license, &snapshot) {
-                    return Ok(Admission::Busy);
-                }
-                // Every new-generation install pins the license chain: a
-                // stale (old) generation of any message id — including a
-                // re-sent forfeited round — never installs and never
-                // resurrects; only the exact expected next generation does.
-                if request.input.key.generation.get() != license.generation.get().saturating_add(1)
-                {
-                    return Err(invalid("stale_generation"));
-                }
-                // Install re-checks the row identity: a stored row with this
-                // message id and changed normalization answers Conflict.
-                return self.install(request, snapshot, row).await;
-            }
-            None => {
-                // No license yet: legacy or queued leftovers keep it busy.
-                if snapshot
-                    .envelope
-                    .checkpoint
-                    .tasks
-                    .iter()
-                    .any(|t| t.phase != TaskPhase::Done)
-                {
-                    return Ok(Admission::Busy);
-                }
-                if let Some((_, original)) = &row_lane {
-                    if original.request_id == request.request_id
-                        && original.request_digest != request.request_digest
-                    {
-                        return Ok(Admission::Conflict);
-                    }
-                }
-                if request.input.key.generation.get() != 1 {
-                    return Err(invalid("stale_generation"));
-                }
-                return self.install(request, snapshot, row).await;
+        // The window never opened (a crash between the Done commit and the
+        // authority CAS, or a delivering Worker wedged behind paused feed
+        // obligations). The sealed checkpoint still holds the Done task and
+        // its archived result: the gate itself closes the window from
+        // those durable facts with the same deterministic identity the
+        // Worker would have used, so only one authority can ever exist.
+        if let Some(proof) = crate::group_terminal::sealed_window_proof(
+            &snapshot.envelope.checkpoint,
+            license,
+        ) {
+            if self
+                .commit_terminal_authority(&license.round_key(), &proof)
+                .await
+                .is_ok()
+            {
+                return Ok(true);
             }
         }
-    }
-
-    async fn get(&self, key: &RoundKey) -> Result<Option<GroupRoundView>, StoreError> {
-        let license = probe_strict_license(&self.documents, &self.layout, &key.sid).await?;
-        let Some(license) = license.filter(|l| l.round_key() == *key) else {
-            return Ok(None);
-        };
-        let row_key = self.layout.group_request(
-            &key.scope,
-            &key.group,
-            &RequestId(license.request_id.clone()),
-        )?;
-        let Some((_, row)) = self.load::<GroupRequestRow>(&row_key).await? else {
-            return Err(StoreError::NotApplied {
-                code: "group_request_row_missing".into(),
-            });
-        };
-        if row.request.input.key != *key {
-            return Ok(None);
-        }
-        Ok(Some(GroupRoundView {
-            accepted: row.request.clone(),
-            terminal: None,
-            result: None,
-        }))
+        Ok(false)
     }
 }
 
-fn invalid(code: &str) -> StoreError {
+pub(super) fn invalid(code: &str) -> StoreError {
     StoreError::Invalid { code: code.into() }
+}
+
+/// The authority-commit digest convention shared with the Worker's sealed
+/// commits (`seal_candidate` / `verify_checkpoint`): hash the complete
+/// checkpoint with the outbox batch's own `content_digest` represented by
+/// the fixed empty string.
+pub(crate) fn authority_digest(candidate: &Checkpoint) -> Result<Digest, StoreError> {
+    let mut value = serde_json::to_value(candidate).map_err(|_| invalid("candidate_encoding"))?;
+    value["outbox"]["content_digest"] = serde_json::Value::String(String::new());
+    Ok(bcs_dist_encoding::digest_json(&value))
 }

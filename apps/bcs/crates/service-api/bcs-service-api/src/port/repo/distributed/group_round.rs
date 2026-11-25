@@ -2,19 +2,77 @@
 //! installed. The caller is the Worker admission use case, never an HTTP handler.
 use super::common::StoreError;
 use async_trait::async_trait;
-use bcs_dist_model::{AcceptedRound, Admission, RoundKey, TerminalProof};
+use bcs_dist_model::{
+    AcceptedRound, Admission, CommitId, CommitSeq, GroupId, RequestId, RoundKey, Sid, TaskScope,
+    TerminalProof, Tid,
+};
+use serde::{Deserialize, Serialize};
+use std::num::NonZeroU64;
+
+/// The strict license installed by a licensed round admission (plan T2). It
+/// lives under the `group_admission` key of the checkpoint's runner-state
+/// value until the T7 terminal spine condenses it into the cold index;
+/// every rewriter of `runner_state` must carry it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrictLicense {
+    pub schema_version: u32,
+    pub scope: TaskScope,
+    pub group: GroupId,
+    pub sid: Sid,
+    pub tid: Tid,
+    pub generation: NonZeroU64,
+    pub request_id: String,
+    pub request_digest: String,
+}
+
+impl StrictLicense {
+    /// The licensed round's key.
+    pub fn round_key(&self) -> RoundKey {
+        RoundKey {
+            scope: self.scope.clone(),
+            group: self.group.clone(),
+            sid: self.sid.clone(),
+            tid: self.tid.clone(),
+            generation: self.generation,
+        }
+    }
+}
+
+/// The stable commit identity of a round's terminal authority CAS. Both
+/// builders of the proof — the Worker's Done-boundary spine and an
+/// admission gate completing a still-open window — must derive the same
+/// identity from sealed facts, so their idempotent retries can never
+/// install two different authorities for one round.
+pub fn terminal_proof_identity(
+    round: &RoundKey,
+    result_digest: &bcs_dist_model::Digest,
+    commit_seq: &CommitSeq,
+) -> CommitId {
+    CommitId(format!(
+        "terminal:{}:{}:{}",
+        round.tid.0,
+        result_digest.0,
+        commit_seq.0
+    ))
+}
+
+/// Read the strict license out of a checkpoint runner-state value. Absent or
+/// malformed markers are `None`; probing is never authorization.
+pub fn decode_strict_license(runner_value: &serde_json::Value) -> Option<StrictLicense> {
+    serde_json::from_value(runner_value.get("group_admission")?.clone()).ok()
+}
 
 /// Stable request lookup fields; Sid is deliberately excluded. Identity hashing
 /// in the application must length-prefix these UTF-8 components and use distinct
 /// domains for session/task derivation. This is not a client-authorized scope.
 pub struct GroupRequestIdentity<'a> {
-    scope: &'a bcs_dist_model::TaskScope,
-    group: &'a bcs_dist_model::GroupId,
-    request: &'a bcs_dist_model::RequestId,
+    scope: &'a TaskScope,
+    group: &'a GroupId,
+    request: &'a RequestId,
 }
 impl<'a> GroupRequestIdentity<'a> {
-    pub fn strict(scope: &'a bcs_dist_model::TaskScope, group: &'a bcs_dist_model::GroupId,
-        request: &'a bcs_dist_model::RequestId) -> Self { Self { scope, group, request } }
+    pub fn strict(scope: &'a TaskScope, group: &'a GroupId,
+        request: &'a RequestId) -> Self { Self { scope, group, request } }
     pub fn components(&self) -> Vec<&str> {
         vec!["group_a2a:v1", &self.scope.tenant.0, &self.scope.principal.0, &self.group.0, &self.request.0]
     }
@@ -113,4 +171,31 @@ pub trait GroupRoundRepo: Send + Sync {
     /// data is absent. A terminal result is readable only after its authoritative
     /// commit; an archive row alone is not a terminal proof. Read errors propagate.
     async fn get(&self, key: &RoundKey) -> Result<Option<GroupRoundView>, StoreError>;
+
+    /// Commit the authoritative terminal state of the licensed round and
+    /// transfer its cold proof, inside one owner-fenced window (plan T7).
+    ///
+    /// The sequence inside that window is binding: the terminal CAS settles
+    /// first (the checkpoint retains the round's exact `TerminalProof`
+    /// original text alongside the Done task and its result reference, plus
+    /// the readable closure evidence), then the cold proof is confirmed
+    /// against the archive and read back. Only a caller holding this
+    /// function's completion may install the next round's runner state — an
+    /// admission of `generation + 1` before the cold proof exists would make
+    /// the licensed round's confirmation permanently unreachable (the A2
+    /// cold-confirm race). Late legacy writes carry an exact `commit_seq`
+    /// and are fenced by the same owner fence. SSE delivery is a follower,
+    /// never a condition of this commit.
+    ///
+    /// The default refuses: unconfigured strict rounds never fake a
+    /// terminal authority.
+    async fn commit_terminal(
+        &self,
+        _round: &RoundKey,
+        _proof: &TerminalProof,
+    ) -> Result<CommitSeq, StoreError> {
+        Err(StoreError::NotApplied {
+            code: "terminal_commit_unconfigured".into(),
+        })
+    }
 }

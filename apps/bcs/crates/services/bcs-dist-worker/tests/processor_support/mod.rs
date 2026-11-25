@@ -399,6 +399,8 @@ impl Fixture {
                 blobs: blobs.clone(),
                 results: archive.clone(),
                 dispatch: dispatch.clone(),
+                rounds: None,
+                archives: None,
                 now: {
                     let c = clock.clone();
                     Arc::new(move || c.now())
@@ -571,6 +573,8 @@ impl Fixture {
                 blobs: self.blobs.clone(),
                 results: self.archive.clone(),
                 dispatch: self.dispatch.clone(),
+                rounds: None,
+                archives: None,
                 now: {
                     let c = self.clock.clone();
                     Arc::new(move || c.now())

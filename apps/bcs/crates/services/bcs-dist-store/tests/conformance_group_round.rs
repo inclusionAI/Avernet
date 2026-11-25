@@ -31,6 +31,7 @@ use bcs_service_api::port::repo::distributed::{
     group_round::*,
     inbox::*,
     ownership::*,
+    result::*,
     session::*,
     task_feed::*,
 };
@@ -208,6 +209,12 @@ impl Rig {
     /// A fresh independent connection over the same durable store + claim:
     /// independent caches, same single durable authority.
     fn gateway(&self) -> Gateway {
+        self.gateway_with_archives(None)
+    }
+
+    /// Same connection, optionally joined with the T4 archive repository the
+    /// terminal spine confirms cold proofs against.
+    fn gateway_with_archives(&self, artifacts: Option<Arc<dyn TaskArchiveRepo>>) -> Gateway {
         let coordination = Arc::new(
             CoordinationStore::new(
                 self.store.clone(),
@@ -229,15 +236,27 @@ impl Rig {
             InboxProducerConfig::new(BackendId("tbase".into())),
         )
         .unwrap();
-        let rounds = StoreGroupRoundAdmission::new(
-            coordination.clone(),
-            Arc::new(producer.clone()),
-            self.store.clone(),
-            self.claim.clone(),
-            self.layout.clone(),
-            GroupAdmissionConfig::default(),
-            Arc::new(FixedClock(NOW)),
-        )
+        let rounds = match artifacts {
+            None => StoreGroupRoundAdmission::new(
+                coordination.clone(),
+                Arc::new(producer.clone()),
+                self.store.clone(),
+                self.claim.clone(),
+                self.layout.clone(),
+                GroupAdmissionConfig::default(),
+                Arc::new(FixedClock(NOW)),
+            ),
+            Some(artifacts) => StoreGroupRoundAdmission::with_artifacts(
+                coordination.clone(),
+                Arc::new(producer.clone()),
+                self.store.clone(),
+                self.claim.clone(),
+                self.layout.clone(),
+                GroupAdmissionConfig::default(),
+                Arc::new(FixedClock(NOW)),
+                artifacts,
+            ),
+        }
         .unwrap();
         Gateway {
             rounds,
@@ -960,4 +979,65 @@ fn dummy_claim() -> ShardClaim {
 fn strict_outcome_staging() {
     // Compile pin: staged rounds surface the staging contract, not success.
     let _ = StrictOutcome::Staged;
+}
+
+/// An error-injected T4 archive joint: every read fails with a definite
+/// storage error. Writes fail too — this fixture only pins the read path of
+/// the authoritative cut.
+struct FaultyArchives;
+#[async_trait::async_trait]
+impl TaskArchiveRepo for FaultyArchives {
+    async fn archive_final(&self, _source: EffectSource, _archive: TaskFinalArchive) -> Result<SavedArchive, StoreError> {
+        Err(fault())
+    }
+    async fn get_archived(&self, _grants: &ArchiveGrants, _scope: &TaskScope, _group: &GroupId, _tid: &Tid) -> Result<Option<ArchivedTaskView>, StoreError> {
+        Err(fault())
+    }
+    async fn list_archived_tasks(&self, _grants: &ArchiveGrants, _scope: &TaskScope, _group: &GroupId, _offset: u32, _limit: NonZeroU32) -> Result<Vec<Tid>, StoreError> {
+        Err(fault())
+    }
+    async fn task_artifacts(&self, _grants: &ArchiveGrants, _scope: &TaskScope, _group: &GroupId, _tids: &[Tid]) -> Result<Vec<(Tid, ArtifactPart)>, StoreError> {
+        Err(fault())
+    }
+    async fn read_task_result(&self, _grants: &ArchiveGrants, _scope: &TaskScope, _group: &GroupId, _tid: &Tid, _limit: NonZeroU32) -> Result<Option<(Vec<u8>, u64)>, StoreError> {
+        Err(fault())
+    }
+    async fn mark_task_expired(&self, _scope: &TaskScope, _group: &GroupId, _tid: &Tid) -> Result<IdempotentWrite, StoreError> {
+        Err(fault())
+    }
+    async fn reclaim_expired(&self, _scope: &TaskScope, _group: &GroupId, _tid: &Tid) -> Result<IdempotentWrite, StoreError> {
+        Err(fault())
+    }
+    async fn confirm_terminal_proof(&self, _scope: &TaskScope, _group: &GroupId, _tid: &Tid, _proof: &TerminalProof) -> Result<IdempotentWrite, StoreError> {
+        Err(fault())
+    }
+    async fn get_terminal_proof(&self, _grants: &ArchiveGrants, _scope: &TaskScope, _group: &GroupId, _tid: &Tid) -> Result<Option<TerminalProof>, StoreError> {
+        Err(fault())
+    }
+}
+fn fault() -> StoreError {
+    StoreError::NotApplied {
+        code: "archive_fault_injected".into(),
+    }
+}
+
+/// The authoritative cut propagates its storage errors: a failing
+/// terminal-proof or archive read of a live licensed round surfaces from
+/// `get` as the read error itself, never as a terminal-less success view.
+#[tokio::test]
+async fn get_propagates_confirmed_view_read_errors() {
+    let rig = Rig::new().await;
+    let gateway = rig.gateway_with_archives(Some(Arc::new(FaultyArchives)));
+    let accepted = round("pin-read", 1);
+    assert!(matches!(
+        gateway.rounds.admit(&accepted).await.unwrap(),
+        Admission::New { .. }
+    ));
+    // The licensed round is live and its frozen row exists; the injected
+    // archive read must surface, not downgrade visibility.
+    let observed = gateway.rounds.get(&accepted.input.key).await;
+    assert!(
+        matches!(&observed, Err(StoreError::NotApplied { code }) if code == "archive_fault_injected"),
+        "a read error is never a terminal-less success view, got {observed:?}"
+    );
 }

@@ -6,6 +6,7 @@ mod effects;
 mod encoding;
 mod lifecycle;
 mod references;
+mod terminal;
 mod transitions;
 
 #[cfg(test)]

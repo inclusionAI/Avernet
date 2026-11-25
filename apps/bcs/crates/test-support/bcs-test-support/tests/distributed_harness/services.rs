@@ -302,9 +302,13 @@ async fn agent_harness_keeps_uncertain_send_and_cancel_distinct_from_failure() -
             }
         };
         // The harness's own contract authority: the port is asked under the
-        // round, node, attempt and binding of the dispatch it serves.
+        // round, node, attempt and binding of the dispatch it serves. A
+        // cancel acts on the accepted remote task of that same dispatch
+        // (the tuple Task 13's RED pinned as ground truth).
         let start = contract_authority(&target());
-        let cancel = contract_authority(&target());
+        let mut cancel = contract_authority(&target());
+        cancel.operation = CallOperation::Cancel;
+        cancel.remote_ref = Some(remote());
         let script = Script::default()
             .expect(
                 "DistAgentClientPort::start",

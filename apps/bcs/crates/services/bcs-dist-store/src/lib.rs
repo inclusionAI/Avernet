@@ -22,6 +22,7 @@ pub mod error;
 pub mod evidence;
 pub mod group_admission;
 pub mod group_artifact;
+pub mod group_terminal;
 pub mod identity;
 pub mod inbox;
 pub mod layout;

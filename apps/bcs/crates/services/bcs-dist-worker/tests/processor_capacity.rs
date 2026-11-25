@@ -23,6 +23,8 @@ fn ports(f: &Fixture) -> ProcessorPorts {
         blobs: f.blobs.clone(),
         results: f.archive.clone(),
         dispatch: f.dispatch.clone(),
+        rounds: None,
+        archives: None,
         now: Arc::new(|| bcs_dist_model::TimestampMillis(1000)),
     }
 }

@@ -140,12 +140,56 @@ impl Shared {
 
     /// The task as stored: the live snapshot, or the final record once the
     /// task key expired. Another scope's task is reported as absent.
+    ///
+    /// Strict-group tasks follow the authoritative cut (plan T7): an
+    /// archive row alone never authorizes a terminal presentation while the
+    /// round's terminal authority window is unsettled, and a stale snapshot
+    /// that still says Working is likewise not success. The retained
+    /// terminal proof sealed by the authority commit is the one cut that may
+    /// disclose the archived terminal here.
     async fn stored(&self, scope: &TaskScope, tid: &Tid) -> Result<Option<Stored>, StoreError> {
         match self.snapshot(tid).await? {
-            Some(snapshot) if &snapshot.scope == scope => Ok(Some(Stored::Live(snapshot))),
+            Some(snapshot) if &snapshot.scope == scope => {
+                if is_terminal(snapshot.content.status)
+                    && !self.strict_terminal_viewable(&snapshot.sid, tid).await?
+                {
+                    return Ok(None);
+                }
+                Ok(Some(Stored::Live(snapshot)))
+            }
             Some(_) => Ok(None),
-            None => Ok(self.results.get_final(scope, tid).await?.map(Stored::Archived)),
+            None => match self.results.get_final(scope, tid).await? {
+                Some(record)
+                    if !self.strict_terminal_viewable(&record.sid, tid).await? =>
+                {
+                    Ok(None)
+                }
+                Some(record) => Ok(Some(Stored::Archived(record))),
+                None => Ok(None),
+            },
         }
+    }
+
+    /// May this task's terminal be disclosed on the old read path? For
+    /// strictly claimed sessions only through the retained authority
+    /// (`group_terminal` sealed by the terminal CAS, cold-confirmed by the
+    /// spine); every other strict state — an archive row alone or an old
+    /// snapshot — stays invisible as success. Non-strict sessions keep the
+    /// generic behavior.
+    async fn strict_terminal_viewable(&self, sid: &Sid, tid: &Tid) -> Result<bool, StoreError> {
+        let retained =
+            bcs_dist_store::group_admission::probe_strict_license(&self.documents, &self.layout, sid)
+                .await?;
+        if retained.is_none() {
+            return Ok(true);
+        }
+        Ok(bcs_dist_store::group_terminal::probe_retained_terminal(
+            &self.documents,
+            &self.layout,
+            sid,
+        )
+        .await?
+        .is_some_and(|proof| proof.key.tid == *tid))
     }
 
     /// Id of the newest entry of a stream; `None` when it has none.

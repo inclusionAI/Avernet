@@ -41,11 +41,35 @@ impl WorkerProcessor {
                 .completed
                 .as_ref()
                 .ok_or_else(|| err("archive_unconfirmed"))?;
+            // Licensed strict rounds close through the T7 spine: the stop
+            // barrier holds the Done transition until every registered
+            // attempt is provably stopped, and the per-task archive is
+            // evidence-verified before any authority claim.
+            if let Some(candidate) = self
+                .strict_round_prepares_done(
+                    before,
+                    &task.tid,
+                    now,
+                    completed,
+                    &spec.sid,
+                    slot.acquired.last_commit.clone(),
+                )
+                .await?
+            {
+                return Ok(Some((candidate, false)));
+            }
             return archive_confirmed(before, &metadata, now, completed)
                 .map(|c| Some((c, true)))
                 .map_err(store_error);
         }
-        if before.tasks.iter().any(|t| t.phase == TaskPhase::Done) {
+        if let Some(task) = before.tasks.iter().find(|t| t.phase == TaskPhase::Done) {
+            // One owner-fenced terminal authority window per strict round:
+            // the proof builds from sealed facts and the rounds repository
+            // commits it (closure evidence, terminal CAS, cold confirm and
+            // read-back) before the successor generation retires the task.
+            if self.strict_round_closes(before, &task.tid).await? {
+                return Ok(None);
+            }
             return retire_published(before, slot.completed.as_ref())
                 .map(|c| Some((c, false)))
                 .map_err(store_error);

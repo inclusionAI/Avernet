@@ -9,8 +9,8 @@ use bcs_service_api::{
     port::{
         dist_agent::DistGroupDirectoryPort,
         repo::distributed::{
-            admission::*, budget::*, common::*, control::*, dispatch::*, inbox::*, result::*,
-            session::*, task_feed::*,
+            admission::*, budget::*, common::*, control::*, dispatch::*, group_round::*,
+            inbox::*, result::*, session::*, task_feed::*,
         },
     },
     types::dist_runtime::RuntimeError,
@@ -33,6 +33,14 @@ pub struct ProcessorPorts {
     pub blobs: Arc<dyn BlobStorePort>,
     pub results: Arc<dyn ResultStorePort>,
     pub dispatch: Arc<dyn DispatchControlPort>,
+    /// Strict-group round authority (plan T7): when configured, licensed
+    /// FSM-group rounds close through this repository's owner-fenced
+    /// terminal commit instead of stopping at an archived record.
+    pub rounds: Option<Arc<dyn GroupRoundRepo>>,
+    /// The per-task final archive (plan T4). Configured together with
+    /// `rounds`: the terminal spine requires a committed archive before the
+    /// cold proof may confirm.
+    pub archives: Option<Arc<dyn TaskArchiveRepo>>,
     pub now: Arc<dyn Fn() -> TimestampMillis + Send + Sync>,
 }
 #[derive(Debug, Clone)]

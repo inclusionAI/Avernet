@@ -320,6 +320,8 @@ pub fn processor_with_blob(
             blobs,
             results,
             dispatch,
+            rounds: None,
+            archives: None,
             now: {
                 let c: Arc<ClockAt> = f.clock.clone();
                 Arc::new(move || c.now())
