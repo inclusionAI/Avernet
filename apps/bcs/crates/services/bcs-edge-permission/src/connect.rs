@@ -522,6 +522,13 @@ impl DbConnectService {
         // applicants were already `None` here (the adapter strips
         // `human_` to a staff_no).
         let applicant_user_id = None;
+        // For Bot-Bot approval cards, resolve the applicant bot owner's
+        // display name so the notification reads "{owner}的 Bot「{bot}」…".
+        let applicant_owner_name = if actor_kind_of(applicant_actor_id) == ActorKind::Bot {
+            self.resolve_bot_owner_name(applicant_actor_id).await
+        } else {
+            None
+        };
         self.friend_connect_notification
             .notify(FriendConnectNotificationCommand {
                 kind,
@@ -535,6 +542,7 @@ impl DbConnectService {
                 applicant_name,
                 target_bot_name,
                 applicant_user_id,
+                applicant_owner_name,
             })
             .await
     }
@@ -566,6 +574,30 @@ impl DbConnectService {
                 }
             }
         }
+    }
+
+    /// Resolve the display name of a Bot applicant's owner. Returns `None` when
+    /// the bot is unknown, has no owner, or the owner's display name can't be
+    /// resolved.
+    async fn resolve_bot_owner_name(&self, bot_id: &str) -> Option<String> {
+        let config = self.bot_config.get(bot_id, &self.env).await?;
+        let owner_id = config.created_by.as_deref()?;
+        if owner_id.is_empty() {
+            return None;
+        }
+        self.resolve_owner_display_name(owner_id).await
+    }
+
+    /// Resolve the display name of an owner by their id. Returns `None` on any
+    /// miss.
+    async fn resolve_owner_display_name(&self, owner_id: &str) -> Option<String> {
+        let user_directory = self.user_directory.as_ref()?;
+        let profile = user_directory
+            .lookup_by_staff_no(owner_id)
+            .await
+            .ok()
+            .flatten()?;
+        profile.nick_name.filter(|name| !name.is_empty())
     }
 
     /// Find pending `Connect` requests from `from` → `to` in this env.

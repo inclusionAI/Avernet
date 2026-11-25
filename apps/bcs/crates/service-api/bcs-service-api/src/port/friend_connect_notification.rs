@@ -45,6 +45,10 @@ pub struct FriendConnectNotificationCommand {
     /// for them. The Bot applicant always travels separately in
     /// `applicant_actor_id` / `biz_data.applicant_actor_id`.
     pub applicant_user_id: Option<String>,
+    /// Resolved display name of the applicant bot's owner (only meaningful
+    /// for Bot-Bot approval cards). When `None` and the applicant is a Bot,
+    /// the approval card renders without the owner prefix.
+    pub applicant_owner_name: Option<String>,
 }
 
 #[async_trait]

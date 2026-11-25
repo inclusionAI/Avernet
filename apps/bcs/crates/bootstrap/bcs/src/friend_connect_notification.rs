@@ -180,30 +180,73 @@ fn title_for(kind: FriendConnectNotificationKind) -> &'static str {
     }
 }
 
+fn is_bot_applicant(actor_id: &str) -> bool {
+    !is_human_actor(actor_id)
+}
+
 fn content_for(command: &FriendConnectNotificationCommand) -> String {
     // Prefer the resolved display names (a human nick name / a bot name); fall
     // back to the raw actor ids when a name could not be resolved.
-    let applicant = command
-        .applicant_name
-        .as_deref()
-        .unwrap_or(&command.applicant_actor_id);
     let target = command
         .target_bot_name
         .as_deref()
         .unwrap_or(&command.target_bot_id);
+    let is_bot = is_bot_applicant(&command.applicant_actor_id);
     match command.kind {
-        FriendConnectNotificationKind::ApprovalRequested => format!(
-            "{}申请添加你的 Bot「{}」为好友，请及时处理。",
-            applicant, target
-        ),
-        FriendConnectNotificationKind::AutoApproved => format!(
-            "{}与 Bot「{}」的好友申请已自动通过。",
-            applicant, target
-        ),
-        FriendConnectNotificationKind::Reviewed => format!(
-            "{}与 Bot「{}」的好友申请已处理。",
-            applicant, target
-        ),
+        FriendConnectNotificationKind::ApprovalRequested => {
+            if is_bot {
+                // Bot-Bot: "{owner}的 Bot「{applicant_bot}」申请添加你的 Bot「{target}」为好友，请及时处理。"
+                let applicant_bot_name = command
+                    .applicant_name
+                    .as_deref()
+                    .unwrap_or(&command.applicant_actor_id);
+                if let Some(ref owner_name) = command.applicant_owner_name {
+                    format!(
+                        "{}的 Bot「{}」申请添加你的 Bot「{}」为好友，请及时处理。",
+                        owner_name, applicant_bot_name, target
+                    )
+                } else {
+                    format!(
+                        "Bot「{}」申请添加你的 Bot「{}」为好友，请及时处理。",
+                        applicant_bot_name, target
+                    )
+                }
+            } else {
+                // Human-Bot: "{applicant}申请添加你的 Bot「{target}」为好友，请及时处理。"
+                // Omit the applicant element when the display name could not be
+                // resolved (do NOT fall back to the raw id).
+                match command.applicant_name.as_deref() {
+                    Some(name) if !name.is_empty() => format!(
+                        "{}申请添加你的 Bot「{}」为好友，请及时处理。",
+                        name, target
+                    ),
+                    _ => format!(
+                        "申请添加你的 Bot「{}」为好友，请及时处理。",
+                        target
+                    ),
+                }
+            }
+        }
+        FriendConnectNotificationKind::AutoApproved => {
+            let applicant = command
+                .applicant_name
+                .as_deref()
+                .unwrap_or(&command.applicant_actor_id);
+            format!(
+                "{}与 Bot「{}」的好友申请已自动通过。",
+                applicant, target
+            )
+        }
+        FriendConnectNotificationKind::Reviewed => {
+            let applicant = command
+                .applicant_name
+                .as_deref()
+                .unwrap_or(&command.applicant_actor_id);
+            format!(
+                "{}与 Bot「{}」的好友申请已处理。",
+                applicant, target
+            )
+        }
     }
 }
 
@@ -388,6 +431,7 @@ mod tests {
                 applicant_name: None,
                 target_bot_name: None,
                 applicant_user_id: None,
+                applicant_owner_name: None,
             })
             .await
             .expect("empty recipients should short-circuit");
@@ -419,6 +463,7 @@ mod tests {
             applicant_name: None,
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         };
         let payload = FriendWorkOrderEventRequest::from_command(&command);
         let request = adapter
@@ -455,6 +500,7 @@ mod tests {
                 applicant_name: None,
                 target_bot_name: None,
                 applicant_user_id: None,
+                applicant_owner_name: None,
             })
             .await;
         assert!(matches!(result, Err(ServiceError::InternalError(message)) if message.contains("friend work-order create request failed")));
@@ -474,6 +520,7 @@ mod tests {
             applicant_name: None,
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
         let url = reqwest::Url::parse(
             "https://backend.example.com/api/v1/work-orders/events",
@@ -492,6 +539,7 @@ mod tests {
             applicant_name: None,
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         };
         let error = friend_work_order_non_success_error(
             reqwest::StatusCode::UNPROCESSABLE_ENTITY,
@@ -529,6 +577,7 @@ mod tests {
             applicant_name: None,
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
 
         assert_eq!(payload.event_category, "APPROVAL");
@@ -572,6 +621,7 @@ mod tests {
             applicant_name: None,
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
 
         let serialized = serde_json::to_value(&payload).expect("serialize payload");
@@ -603,6 +653,7 @@ mod tests {
             applicant_name: None,
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
 
         assert_eq!(payload.event_category, "NOTICE");
@@ -627,6 +678,7 @@ mod tests {
             applicant_name: None,
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
 
         assert_eq!(payload.event_category, "APPROVAL");
@@ -704,6 +756,7 @@ mod tests {
             applicant_name: None,
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
 
         assert_eq!(payload.event_type, "HUMAN2BOT_FRIEND_APPLIED");
@@ -727,6 +780,7 @@ mod tests {
             applicant_name: None,
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
 
         assert_eq!(payload.event_category, "NOTICE");
@@ -775,6 +829,7 @@ mod tests {
             applicant_name: Some("李四".to_string()),
             target_bot_name: Some("本地代码专家".to_string()),
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
         assert_eq!(payload.title, "好友申请待审批");
         assert_eq!(
@@ -799,6 +854,7 @@ mod tests {
             applicant_name: Some("李四".to_string()),
             target_bot_name: None,
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
         assert_eq!(
             payload.content,
@@ -822,6 +878,7 @@ mod tests {
             applicant_name: Some("李四".to_string()),
             target_bot_name: Some("本地代码专家".to_string()),
             applicant_user_id: None,
+                applicant_owner_name: None,
         });
         assert_eq!(payload.title, "好友申请已自动通过");
         assert_eq!(
