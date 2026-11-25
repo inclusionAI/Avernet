@@ -154,6 +154,22 @@ def test_recycle_accepts_without_executing_or_writing_audit(
     audit_service.record_openapi_recycle.assert_not_called()
 
 
+def test_recycle_sync_result_records_openapi_audit(
+    client, recycle_service, audit_service
+):
+    recycle_service.submit.return_value = dict(
+        bot_id="b1", owner_id="u1", status="RECYCLED", changed=True,
+        operation_id=None, phase=None,
+    )
+
+    response = client.post("/openapi/v1/bots/b1/recycle")
+
+    assert response.status_code == 200
+    audit_service.record_openapi_recycle.assert_called_once_with(
+        request_id="", bot_id="b1", owner_id="u1",
+    )
+
+
 def test_recycle_idempotent_result_does_not_duplicate_audit(
     client, recycle_service, audit_service
 ):
@@ -390,8 +406,8 @@ def test_query_owner_alias_conflict_is_422(client, recycle_service):
     recycle_service.get_operation.assert_not_called()
 
 
-@pytest.mark.parametrize("engine", ["openclaw", "hermes", "aicoding", "claude_code"])
-def test_real_recycle_facade_uses_same_async_policy_for_all_engines(engine):
+@pytest.mark.parametrize("engine", ["aicoding", "claude_code"])
+def test_real_recycle_facade_preserves_async_result_for_coding_engines(engine):
     from agentclaw.community.core.bot_management.engines.restart_contract import RecycleServices
 
     bots, passport, operations = (MagicMock() for _ in range(3))
@@ -403,9 +419,12 @@ def test_real_recycle_facade_uses_same_async_policy_for_all_engines(engine):
     factory = MagicMock(return_value=operations)
     service = RecycleBotService(bots, passport, recycle_services=RecycleServices(factory))
 
+    audit_service = MagicMock(spec=DormantAuditService)
+
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(BotDormantRecycleOperationProtocol, to=service)
+            binder.bind(BotDormantAuditServiceProtocol, to=audit_service)
             binder.bind(BotRepository, to=SeamBots())
             binder.bind(CollaboratorServiceProtocol, to=SeamCollaborators())
 

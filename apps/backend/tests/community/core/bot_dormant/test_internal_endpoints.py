@@ -11,6 +11,7 @@ from injector import Injector, InstanceProvider, singleton
 
 from agentclaw.community.adapters.http.bot_dormant import router as dormant_router_module
 from agentclaw.community.adapters.http.bot_dormant.auth import verify_dormant_internal_token
+from agentclaw.community.api.bot_dormant_service import BotDormantRecycleOperationProtocol
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
 from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
 from agentclaw.community.core.bot_management.services.bot_service import (
@@ -27,6 +28,8 @@ def _build_app(
     bot_svc: DormantBotService | None = None,
     ops_svc: DormantOpsService | None = None,
     activate_svc: ActivateBotService | None = None,
+    recycle_svc=None,
+    bypass_auth: bool = True,
 ) -> TestClient:
     """Build a minimal FastAPI app with only the internal router mounted.
 
@@ -38,9 +41,10 @@ def _build_app(
     app.include_router(dormant_router_module.internal_router)
 
     # Bypass auth: replace the async dep with a no-op lambda.
-    app.dependency_overrides[verify_dormant_internal_token] = (
-        lambda authorization=None: None
-    )
+    if bypass_auth:
+        app.dependency_overrides[verify_dormant_internal_token] = (
+            lambda authorization=None: None
+        )
 
     # Wire mock services into fastapi_injector so Injected(...) resolves.
     injector = Injector()
@@ -65,6 +69,11 @@ def _build_app(
         activate_svc = MagicMock(spec=ActivateBotService)
     injector.binder.bind(
         ActivateBotService, InstanceProvider(activate_svc), scope=singleton
+    )
+    injector.binder.bind(
+        BotDormantRecycleOperationProtocol,
+        InstanceProvider(recycle_svc or MagicMock(spec=BotDormantRecycleOperationProtocol)),
+        scope=singleton,
     )
     attach_injector(app, injector)
 
@@ -249,7 +258,10 @@ def test_recycle_one_forwards_to_manual_recycle_service():
         "bot_id": "b1",
         "owner_id": "u1",
         "dry_run": False,
-        "status": "recycled",
+        "status": "ACTIVE",
+        "operation_id": "op-1",
+        "phase": "QUEUED",
+        "changed": True,
     }
 
     client = _build_app(ops_svc=ops_svc)
@@ -264,9 +276,10 @@ def test_recycle_one_forwards_to_manual_recycle_service():
         headers={"Authorization": "Bearer test-tok"},
     )
 
-    assert r.status_code == 200
+    assert r.status_code == 202
     assert r.json()["ok"] is True
-    assert r.json()["data"]["status"] == "recycled"
+    assert r.json()["data"]["status"] == "ACTIVE"
+    assert r.json()["data"]["operation_id"] == "op-1"
     ops_svc.recycle_one.assert_called_once_with(
         bot_id="b1",
         owner_id="u1",
@@ -458,3 +471,70 @@ def test_activate_one_returns_500_for_unexpected_error():
 
     assert r.status_code == 500
     assert "baas unavailable" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("phase", ["BACKING_UP", "SUCCEEDED", "FAILED", "NEEDS_CONFIRMATION"])
+def test_internal_recycle_query_uses_shared_read_only_service(phase):
+    service = MagicMock(spec=BotDormantRecycleOperationProtocol)
+    result = {"bot_id": "b1", "owner_id": "u1", "operation_id": "op-1",
+              "bot_status": "ACTIVE", "phase": phase, "error_code": None,
+              "message": None, "warning": None}
+    service.get_operation.return_value = result
+    client = _build_app(recycle_svc=service)
+    response = client.get("/api/internal/dormant/bots/b1/recycle-operations/op-1?owner_id=u1")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "data": result}
+    service.get_operation.assert_called_once_with(bot_id="b1", owner_id="u1", operation_id="op-1")
+    service.submit.assert_not_called()
+
+
+def test_internal_recycle_query_hides_mismatched_operation():
+    from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+    service = MagicMock(spec=BotDormantRecycleOperationProtocol)
+    service.get_operation.side_effect = BotNotFoundError("Recycle operation not found")
+    response = _build_app(recycle_svc=service).get(
+        "/api/internal/dormant/bots/b1/recycle-operations/old?owner_id=u1")
+    assert response.status_code == 404
+
+
+def test_internal_recycle_query_requires_owner():
+    response = _build_app().get("/api/internal/dormant/bots/b1/recycle-operations/op-1")
+    assert response.status_code == 422
+
+
+def test_internal_recycle_query_requires_existing_bearer_auth():
+    response = _build_app(bypass_auth=False).get(
+        "/api/internal/dormant/bots/b1/recycle-operations/op-1?owner_id=u1",
+        headers={"Authorization": "Basic invalid"})
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("dry_run,status", [(True, "dry_run_recycled"), (False, "RECYCLED")])
+def test_recycle_one_without_new_operation_remains_200(dry_run, status):
+    service = MagicMock(spec=DormantOpsService)
+    service.recycle_one.return_value = {"run_id": None, "bot_id": "b1", "owner_id": "u1",
+        "dry_run": dry_run, "status": status, "operation_id": None, "phase": None, "changed": False}
+    response = _build_app(ops_svc=service).post("/api/internal/dormant/recycle-one",
+        json={"bot_id": "b1", "owner_id": "u1", "dry_run": dry_run})
+    assert response.status_code == 200
+    assert response.json()["data"]["operation_id"] is None
+
+
+@pytest.mark.parametrize("error,status", [
+    (BotInvalidLifecycleStateError(bot_id="b1", current_status="BUSY"), 409),
+])
+def test_recycle_one_lifecycle_conflict_is_not_server_error(error, status):
+    service = MagicMock(spec=DormantOpsService)
+    service.recycle_one.side_effect = error
+    response = _build_app(ops_svc=service).post("/api/internal/dormant/recycle-one",
+        json={"bot_id": "b1", "owner_id": "u1", "dry_run": False})
+    assert response.status_code == status
+
+
+def test_recycle_one_unavailable_does_not_claim_acceptance():
+    from agentclaw.community.core.bot_management.engines.restart_contract import RecycleUnavailable
+    service = MagicMock(spec=DormantOpsService)
+    service.recycle_one.side_effect = RecycleUnavailable("worker disabled")
+    response = _build_app(ops_svc=service).post("/api/internal/dormant/recycle-one",
+        json={"bot_id": "b1", "owner_id": "u1", "dry_run": False})
+    assert response.status_code == 503
