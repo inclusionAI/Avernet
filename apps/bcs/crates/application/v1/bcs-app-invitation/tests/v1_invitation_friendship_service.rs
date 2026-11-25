@@ -2184,3 +2184,278 @@ async fn accept_reverse_row_returns_decided_request_without_facade_listing() {
         "the decision stamps updated_at"
     );
 }
+
+// ── Owner-initiated friend removal (bot friend roster) ─────────────────
+//
+// `DeleteFriendConnection.actor` present switches the V1 delete from the
+// caller-side self-removal to a managed-Bot Owner removal: the caller must
+// be the Bot's CURRENT owner (`require_owner`), and the revoke runs through
+// `ConnectService::revoke_friend_as_owner` in the orientation the durable
+// implementation needs for its RemovedByOwner notice. The fake records the
+// orientation through the inherited default body (which delegates to
+// `revoke_friend`).
+
+#[tokio::test]
+async fn delete_friend_connection_without_actor_stays_caller_self_removal() {
+    use bcs_service_api::application::v1::{
+        DeleteFriendConnection, FriendConnectionActor, FriendConnectionActorType as Kind,
+        FriendConnectionService,
+    };
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-9").await;
+    fx.connect.add_friendship("human_staff-2", "bot-9");
+
+    let deleted = fx
+        .service
+        .delete_friend_connection(DeleteFriendConnection {
+            caller: Fixture::human_principal("staff-2"),
+            actor: None,
+            target_actor: FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "bot-9".into(),
+            },
+            request_auth: None,
+        })
+        .await
+        .expect("caller-side self-removal");
+    assert!(deleted.deleted);
+    assert_eq!(
+        fx.connect.revoke_calls(),
+        vec![("human_staff-2".to_string(), "bot-9".to_string())],
+        "no actor keeps the byte-identical self-removal orientation"
+    );
+}
+
+#[tokio::test]
+async fn owner_remove_human_friend_orients_human_first() {
+    use bcs_service_api::application::v1::{
+        DeleteFriendConnection, FriendConnectionActor, FriendConnectionActorType as Kind,
+        FriendConnectionService,
+    };
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-b").await; // owner staff-2
+    fx.connect.add_friendship("human_1001", "bot-b");
+
+    let deleted = fx
+        .service
+        .delete_friend_connection(DeleteFriendConnection {
+            caller: Fixture::human_principal("staff-2"),
+            actor: Some(FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "bot-b".into(),
+            }),
+            target_actor: FriendConnectionActor {
+                actor_type: Kind::Human,
+                id: "1001".into(),
+            },
+            request_auth: None,
+        })
+        .await
+        .expect("owner removes the human friend");
+    assert!(deleted.deleted);
+    assert_eq!(
+        fx.connect.revoke_calls(),
+        vec![("human_1001".to_string(), "bot-b".to_string())],
+        "human target → revoke_friend_as_owner(human_<id>, bot)"
+    );
+}
+
+#[tokio::test]
+async fn owner_remove_bot_friend_orients_managed_bot_first() {
+    use bcs_service_api::application::v1::{
+        DeleteFriendConnection, FriendConnectionActor, FriendConnectionActorType as Kind,
+        FriendConnectionService,
+    };
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-b").await; // owner staff-2
+    fx.connect.add_friendship("bot-b", "friend-bot");
+
+    let deleted = fx
+        .service
+        .delete_friend_connection(DeleteFriendConnection {
+            caller: Fixture::human_principal("staff-2"),
+            actor: Some(FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "bot-b".into(),
+            }),
+            target_actor: FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "friend-bot".into(),
+            },
+            request_auth: None,
+        })
+        .await
+        .expect("owner removes the bot friend");
+    assert!(deleted.deleted);
+    assert_eq!(
+        fx.connect.revoke_calls(),
+        vec![("bot-b".to_string(), "friend-bot".to_string())],
+        "bot target → revoke_friend_as_owner(managed bot, friend bot)"
+    );
+}
+
+#[tokio::test]
+async fn owner_remove_empty_revocation_reports_not_deleted() {
+    use bcs_service_api::application::v1::{
+        DeleteFriendConnection, FriendConnectionActor, FriendConnectionActorType as Kind,
+        FriendConnectionService,
+    };
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-b").await; // owner staff-2
+
+    let deleted = fx
+        .service
+        .delete_friend_connection(DeleteFriendConnection {
+            caller: Fixture::human_principal("staff-2"),
+            actor: Some(FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "bot-b".into(),
+            }),
+            target_actor: FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "never-friended".into(),
+            },
+            request_auth: None,
+        })
+        .await
+        .expect("empty revocation is not an error");
+    assert!(
+        !deleted.deleted,
+        "no transitioned edge → deleted:false (idempotent re-remove)"
+    );
+}
+
+#[tokio::test]
+async fn owner_remove_requires_the_current_owner() {
+    use bcs_service_api::application::v1::{
+        DeleteFriendConnection, FriendConnectionActor, FriendConnectionActorType as Kind,
+        FriendConnectionService,
+    };
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-b").await; // owner staff-2
+    bcs_test_support::grant_manager_edge(&fx.authority_repo, "bot-b", "staff-9").await;
+    fx.connect.add_friendship("bot-b", "friend-bot");
+
+    for caller in [
+        Fixture::human_principal("staff-9"), // manager: can_manage, not owner
+        Fixture::human_principal("staff-1"), // stranger for bot-b
+    ] {
+        let error = fx
+            .service
+            .delete_friend_connection(DeleteFriendConnection {
+                caller,
+                actor: Some(FriendConnectionActor {
+                    actor_type: Kind::Bot,
+                    id: "bot-b".into(),
+                }),
+                target_actor: FriendConnectionActor {
+                    actor_type: Kind::Bot,
+                    id: "friend-bot".into(),
+                },
+                request_auth: None,
+            })
+            .await
+            .expect_err("removal is Owner-only");
+        assert_code(error, "forbidden");
+    }
+    assert!(
+        fx.connect.revoke_calls().is_empty(),
+        "a denied caller must never reach the connect revoke"
+    );
+}
+
+#[tokio::test]
+async fn owner_remove_requires_a_human_caller_and_a_known_bot() {
+    use bcs_service_api::application::v1::{
+        AuthenticatedCaller, DeleteFriendConnection, FriendConnectionActor,
+        FriendConnectionActorType as Kind, FriendConnectionService,
+    };
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-b").await; // owner staff-2
+    let anonymous = AuthenticatedCaller {
+        tenant: Some("dev".into()),
+        user: None,
+        bot: None,
+        app: None,
+        access_key: None,
+    };
+    let target = || FriendConnectionActor {
+        actor_type: Kind::Bot,
+        id: "friend-bot".into(),
+    };
+
+    let error = fx
+        .service
+        .delete_friend_connection(DeleteFriendConnection {
+            caller: anonymous,
+            actor: Some(FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "bot-b".into(),
+            }),
+            target_actor: target(),
+            request_auth: None,
+        })
+        .await
+        .expect_err("anonymous cannot remove through a managed Bot");
+    assert_code(error, "unauthenticated");
+
+    let error = fx
+        .service
+        .delete_friend_connection(DeleteFriendConnection {
+            caller: Fixture::human_principal("staff-2"),
+            actor: Some(FriendConnectionActor {
+                actor_type: Kind::Bot,
+                id: "ghost-bot".into(),
+            }),
+            target_actor: target(),
+            request_auth: None,
+        })
+        .await
+        .expect_err("the managed Bot must exist");
+    assert_code(error, "bot_not_found");
+    assert!(
+        fx.connect.revoke_calls().is_empty(),
+        "neither rejection may reach the connect revoke"
+    );
+}
+
+#[tokio::test]
+async fn owner_remove_rejects_a_human_actor_or_empty_bot_id() {
+    use bcs_service_api::application::v1::{
+        DeleteFriendConnection, FriendConnectionActor, FriendConnectionActorType as Kind,
+        FriendConnectionService,
+    };
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-b").await; // owner staff-2
+    let target = || FriendConnectionActor {
+        actor_type: Kind::Bot,
+        id: "friend-bot".into(),
+    };
+
+    for actor in [
+        FriendConnectionActor {
+            actor_type: Kind::Human,
+            id: "staff-2".into(),
+        },
+        FriendConnectionActor {
+            actor_type: Kind::Bot,
+            id: String::new(),
+        },
+    ] {
+        let error = fx
+            .service
+            .delete_friend_connection(DeleteFriendConnection {
+                caller: Fixture::human_principal("staff-2"),
+                actor: Some(actor),
+                target_actor: target(),
+                request_auth: None,
+            })
+            .await
+            .expect_err("actor must be a concrete Bot");
+        assert_code(error, "invalid_request");
+    }
+    assert!(
+        fx.connect.revoke_calls().is_empty(),
+        "defense-in-depth rejects must never reach the connect revoke"
+    );
+}
