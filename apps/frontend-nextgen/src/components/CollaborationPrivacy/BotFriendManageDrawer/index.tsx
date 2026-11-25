@@ -40,8 +40,8 @@ interface BotFriendManageDrawerProps {
 
 function removalConfirmCopy(view: BotIdentityFriendView): string {
   return view.actorType === 'bot'
-    ? `移除后双方好友关系将同步解除,该 Bot 的 Owner 将在通知中心收到系统消息。确定移除好友 Bot「${view.displayName}」吗?`
-    : `移除后双方好友关系将同步解除,对方将在通知中心收到系统消息。确定移除好友「${view.displayName}」吗?`;
+    ? `移除后双方好友关系将同步解除，该 Bot 的 Owner 将在通知中心收到系统消息。确定移除好友 Bot「${view.displayName}」吗？`
+    : `移除后双方好友关系将同步解除，对方将在通知中心收到系统消息。确定移除好友「${view.displayName}」吗？`;
 }
 
 function FriendRow({
