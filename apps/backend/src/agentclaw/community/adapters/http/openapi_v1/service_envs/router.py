@@ -51,11 +51,18 @@ async def publish_eval_env(
             description="BaaS deployment instance count for this eval environment; provider-defined upper limit.",
         ),
     ] = 1,
+    ttl_seconds: Annotated[
+        int | None,
+        Query(
+            gt=0,
+            description="Safety-net teardown delay in seconds from task enqueue; omitted uses 86400 (24 hours).",
+        ),
+    ] = None,
     cpu: Annotated[int | None, Query(gt=0, description="CPU cores; requires memory.")] = None,
     memory: Annotated[int | None, Query(gt=0, description="Memory in GiB; requires cpu.")] = None,
     disk: Annotated[int | None, Query(gt=0, description="Disk capacity passed to the provider; units and support are provider-defined. Requires cpu and memory.")] = None,
 ) -> Envelope[EvalEnvPublishResult]:
-    """Submit an eval deployment with default TTL; this does not signal readiness.
+    """Submit an eval deployment with an optional TTL override; this does not signal readiness.
 
     ### 调用示例
 
@@ -70,6 +77,10 @@ async def publish_eval_env(
     - `owner_id`、`operator` 必填。
     - `device_count` 可选，默认 1，表示本次评估环境要创建的实例数量。
       只接受正整数；超出提供方上限时由 BaaS 直接返回错误。
+    - `ttl_seconds` 可选，单位秒，必须为正整数；不传默认 86400（24 小时）。
+      例如追加 `&ttl_seconds=172800` 表示 48 小时后触发兜底销毁。
+      从清理任务入队时起算，不是从容器就绪时起算；不支持用 0 禁用销毁。
+      仅覆盖本次环境的兜底清理延迟，不代表底层容器租约续期。
     - 可选资源覆盖示例：在上述 URL 后追加 `&cpu=4&memory=8&disk=200`。
       `cpu`、`memory` 必须同时提供且为正整数；`disk` 可选且为正整数，不能单独传。
       CPU 为核数，内存为 GiB；磁盘值按底层提供方约定透传，不保证单位或支持情况。
@@ -98,6 +109,7 @@ async def publish_eval_env(
         operator=operator,
         biz_id=biz_id,
         default_tag="eval",
+        ttl_seconds=ttl_seconds,
         device_count=device_count,
         resource_spec=resource_spec,
     )
