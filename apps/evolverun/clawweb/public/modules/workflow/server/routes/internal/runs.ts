@@ -1,3 +1,4 @@
+import { FlowRunLineageError, normalizeFlowRunLineage } from '../../services/flow-run-lineage.js';
 import { captureApiError, errorStack } from "../error-log-format.js";
 import { FlowRunMarkerError, normalizeFlowRunMarkers } from '../../services/flow-run-markers.js';
 import { hasTrialFields, OrdinaryRequestError, type OrdinaryRequestAuth, type OrdinaryPrincipal } from '../../services/ordinary-run-request.js';
@@ -202,8 +203,11 @@ export function createInternalRunsRouter(
       }
 
       const markers = normalizeFlowRunMarkers({ env, tag });
+      const lineage = normalizeFlowRunLineage({ parentFlowId: requestBody.parent_flow_id, rootFlowId: requestBody.root_flow_id });
       const run = {
         ...markers,
+        parentFlowId: lineage.parent_flow_id,
+        rootFlowId: lineage.root_flow_id,
         flowId: flow_id,
         workflowId: workflow_id,
         workflowTitle: workflow_title ?? null,
@@ -273,7 +277,7 @@ export function createInternalRunsRouter(
       apiLog("WRITE", "/runs", { status: 201, flow_id, workflow_id, status_field: status });
       res.status(registered === 'existing' ? 200 : 201).json({ success: true, data: row });
     } catch (error) {
-      if (error instanceof FlowRunMarkerError) {
+      if (error instanceof FlowRunMarkerError || error instanceof FlowRunLineageError) {
         res.status(400).json({ success: false, error: 'Bad Request', message: error.message }); return;
       }
       if (ordinary) { respondError(res, error); return; }

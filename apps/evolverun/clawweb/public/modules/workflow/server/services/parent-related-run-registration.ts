@@ -1,3 +1,4 @@
+import { normalizeFlowRunLineage, runLineageMatches } from './flow-run-lineage.js';
 import { normalizeFlowRunMarkers } from './flow-run-markers.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunLinkRepository, type FlowRunLink } from '@avernet/clawweb-shared/server/repositories/flow-run-link-repository';
@@ -86,14 +87,15 @@ type NodeExecution = { id: number | string; flow_id: string; workflow_id: string
 
 function runInsertColumns(run: FlowRunInsert): { sql: string; params: unknown[] } {
   const markers = normalizeFlowRunMarkers(run);
+  const lineage = normalizeFlowRunLineage(run);
   return {
-    sql: `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, env, tag, gmt_create, gmt_modified)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, env, tag, parent_flow_id, root_flow_id, gmt_create, gmt_modified)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: [run.flowId, run.workflowId, run.workflowTitle ?? null, run.status, run.stateJson ?? null, run.paramsJson ?? null,
       run.inputJson ?? null, run.nodeCount ?? 0, run.triggeredBy ?? null, run.identityKey ?? null, run.currentPhase ?? null,
       run.startedAt, run.credentialsJson ?? null, run.originSessionKey ?? null, run.originSessionId ?? null,
       run.originBotId ?? null, run.userId ?? null, run.pluginVersion ?? null, run.engine ?? null,
-      run.workflowVersion ?? null, run.workflowDeployNumber ?? null, markers.env, markers.tag, run.startedAt, run.startedAt],
+      run.workflowVersion ?? null, run.workflowDeployNumber ?? null, markers.env, markers.tag, lineage.parent_flow_id, lineage.root_flow_id, run.startedAt, run.startedAt],
   };
 }
 async function insertRun(tx: IDatabase, run: FlowRunInsert): Promise<void> {
@@ -240,6 +242,7 @@ export async function registerParentRelatedRun(db: IDatabase, body: Record<strin
       FROM flow_runs WHERE flow_id = ?${locked(tx)}`, [run.flowId]);
     const existing = existingRows[0];
     if (existing) {
+      if (!await runLineageMatches(tx, run.flowId, body)) throw conflict('Flow run lineage conflicts');
       if (!immutableRegistrationMatches(existing, run)) throw conflict('Flow run registration metadata conflicts');
       if (!preexistingLink || !same(preexistingLink, authority.link)) throw conflict('Flow run link conflicts');
       return { created: false, relation: authority.validated };

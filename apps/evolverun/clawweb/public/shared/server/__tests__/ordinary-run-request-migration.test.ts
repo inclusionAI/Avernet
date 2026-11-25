@@ -8,6 +8,7 @@ import { sqliteDialect } from '../db/dialect.js';
 import { runMigrations } from '../db.js';
 import { sqliteTriggers } from '../schema.js';
 
+// Ordinary-readiness fixtures preprovision required lineage independently of optional migrations.
 const latestSchemaVersion = Math.max(...currentMigrations.map(m => m.version));
 
 function seedBaseTriggers(db: Database.Database) {
@@ -17,7 +18,7 @@ function seedBaseTriggers(db: Database.Database) {
 it('provisions v150 once on an existing SQLite schema', async () => {
   const raw = new Database(':memory:');
   const db = new SqliteDatabase(raw);
-  raw.exec("CREATE TABLE flow_runs (flow_id TEXT); CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'previous')");
+  raw.exec("CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'previous')");
   await runMigrations(db, 'sqlite');
   await runMigrations(db, 'sqlite');
   expect(raw.prepare('SELECT COUNT(*) AS n FROM schema_version WHERE version=150').get()).toEqual({ n: 1 });
@@ -29,7 +30,7 @@ it('provisions v150 once on an existing SQLite schema', async () => {
 it('upgrades old associations without modifying rows and resumes after a partially applied SQLite upgrade', async () => {
   const raw = new Database(':memory:'); const db = new SqliteDatabase(raw);
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-    CREATE TABLE flow_runs (flow_id TEXT, ordinary_run_marker VARCHAR(64));
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT, ordinary_run_marker VARCHAR(64));
     INSERT INTO flow_runs (flow_id) VALUES ('parent'), ('child');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT PRIMARY KEY, parent_flow_id TEXT, child_flow_id TEXT,
       child_workflow_id TEXT, request_fingerprint TEXT, parent_run_marker VARCHAR(64));
@@ -67,7 +68,7 @@ it('concurrently migrates two SQLite connections after both inspect the old sche
   const raw1 = new Database(join(dir, 'db.sqlite'));
   const raw2 = new Database(join(dir, 'db.sqlite'));
   raw1.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-    CREATE TABLE flow_runs (flow_id TEXT);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT);
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT PRIMARY KEY);`);
   let arrivals = 0;
   let release!: () => void;
@@ -160,7 +161,7 @@ it('defers when a duplicate-column race created an incompatible SQLite marker', 
   const raw = new Database(join(dir, 'db.sqlite'));
   const peer = new Database(join(dir, 'db.sqlite'));
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT PRIMARY KEY);`);
   const real = new SqliteDatabase(raw);
   const db: IDatabase = { dbType: 'sqlite', dialect: real.dialect, query: real.query.bind(real),
@@ -227,7 +228,7 @@ it.each(sqliteMarkerNames.flatMap(name => ['INTEGER PRIMARY KEY', 'INTEGER', 'NU
     const marker = (key: string) => `${key} ${key === name ? definition : 'VARCHAR(64)'}`;
     const requestKey = name !== 'ordinary_run_marker' && definition === 'INTEGER PRIMARY KEY' ? 'TEXT NOT NULL UNIQUE' : 'TEXT NOT NULL PRIMARY KEY';
     raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-      CREATE TABLE flow_runs (flow_id TEXT NOT NULL UNIQUE, ${marker('ordinary_run_marker')});
+      CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT NOT NULL UNIQUE, ${marker('ordinary_run_marker')});
       INSERT INTO flow_runs (flow_id) VALUES ('existing');
       CREATE TABLE ordinary_run_requests (request_key_hash ${requestKey}, parent_flow_id TEXT NOT NULL,
         child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL,
@@ -248,7 +249,7 @@ it('defers a duplicate-column race when a peer adds a non-text marker', async ()
   const raw = new Database(join(dir, 'db.sqlite'));
   const peer = new Database(join(dir, 'db.sqlite'));
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT PRIMARY KEY);`);
   const real = new SqliteDatabase(raw);
   const db: IDatabase = { dbType: 'sqlite', dialect: real.dialect, query: real.query.bind(real),
@@ -269,7 +270,7 @@ it('retries SQLite migration after a non-text marker is repaired', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version,description) VALUES (150,'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT, ordinary_run_marker NUMERIC);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT, ordinary_run_marker NUMERIC);
     INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT PRIMARY KEY, parent_run_marker TEXT, child_run_marker VARCHAR(64));`);
   const db = new SqliteDatabase(raw);
@@ -298,7 +299,7 @@ it.each([
     `request_fingerprint TEXT ${defect === 'request_fingerprint' ? '' : 'NOT NULL'}`,
   ];
   raw.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT); INSERT INTO schema_version (version, description) VALUES (149,'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT NOT NULL UNIQUE); INSERT INTO flow_runs (flow_id) VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT NOT NULL UNIQUE); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (${columns.join(',')});
     INSERT INTO ordinary_run_requests (request_key_hash,parent_flow_id,child_flow_id,request_fingerprint${defect === 'child_workflow_id' ? '' : ',child_workflow_id'}) VALUES ('key','parent','child','hash'${defect === 'child_workflow_id' ? '' : ",'workflow'"});`);
   const db = new SqliteDatabase(raw);
@@ -355,7 +356,7 @@ it.each(['missing', 'nullable', 'narrow', 'type', 'engine', 'nonunique', 'prefix
 it.each(['NUMERIC', 'INTEGER', 'BLOB', 'CHARINT'])('defers v150 for a SQLite hash column with %s affinity', async type => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash ${type} NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);`);
   const db = new SqliteDatabase(raw);
@@ -368,7 +369,7 @@ it.each(['NUMERIC', 'INTEGER', 'BLOB', 'CHARINT'])('defers v150 for a SQLite has
 it.each(['partial', 'composite'])('defers v150 for SQLite %s child index', async index => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);
     CREATE UNIQUE INDEX child_idx ON ordinary_run_requests (${index === 'composite' ? 'child_flow_id, parent_flow_id' : 'child_flow_id'}) ${index === 'partial' ? "WHERE child_flow_id <> ''" : ''};`);
@@ -382,7 +383,7 @@ it.each(['partial', 'composite'])('defers v150 for SQLite %s child index', async
 it('accepts a SQLite unique index whose name contains a quote', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);
     CREATE UNIQUE INDEX "child""index" ON ordinary_run_requests(child_flow_id);`);
@@ -394,7 +395,7 @@ it('accepts a SQLite unique index whose name contains a quote', async () => {
 it('defers v150 for an extra required SQLite column without default and preserves rows', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL, extra TEXT NOT NULL);
     INSERT INTO ordinary_run_requests VALUES ('k','p','c','w','f','keep');`);
@@ -417,7 +418,7 @@ it.each(['VIRTUAL GENERATED', 'STORED GENERATED'])('rejects MySQL %s marker on v
 it('defers v151 when a SQLite marker is generated rather than writable', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-    CREATE TABLE flow_runs (flow_id TEXT, ordinary_run_marker TEXT GENERATED ALWAYS AS (NULL) VIRTUAL);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT, ordinary_run_marker TEXT GENERATED ALWAYS AS (NULL) VIRTUAL);
     INSERT INTO flow_runs (flow_id) VALUES ('existing'); CREATE TABLE ordinary_run_requests (request_key_hash TEXT PRIMARY KEY);`);
   const db = new SqliteDatabase(raw);
   try { await runMigrations(db, 'sqlite'); expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 150 }); }
@@ -428,7 +429,7 @@ it.each(['SQLITE_BUSY', 'SQLITE_READONLY', 'SQLITE_BUSY_SNAPSHOT', 'SQLITE_READO
   ('defers optional SQLite DDL on %s, retains readable business data, and retries', async code => {
     const raw = new Database(':memory:');
     raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-      CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');`);
+      CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
     seedBaseTriggers(raw);
   const real = new SqliteDatabase(raw);
     let fail = true;
@@ -448,7 +449,7 @@ it.each(['SQLITE_BUSY', 'SQLITE_READONLY', 'SQLITE_BUSY_SNAPSHOT', 'SQLITE_READO
 
 it('does not hide a database failure while checking availability after a deferred SQLite migration', async () => {
   const raw = new Database(':memory:');
-  raw.exec("CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old'); CREATE TABLE flow_runs (flow_id TEXT)");
+  raw.exec("CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old'); CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT)");
   const real = new SqliteDatabase(raw); let failed = false;
   const unavailable = Object.assign(new Error('database I/O failed'), { code: 'SQLITE_IOERR' });
   const db: IDatabase = { dbType: 'sqlite', dialect: real.dialect, close: real.close.bind(real), transaction: real.transaction.bind(real),
@@ -460,7 +461,7 @@ it('does not hide a database failure while checking availability after a deferre
 it('defers v150 when an explicitly supplied SQLite identifier is generated', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-    CREATE TABLE flow_runs (flow_id TEXT);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT);
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL,
       request_fingerprint TEXT GENERATED ALWAYS AS ('fixed') VIRTUAL NOT NULL);`);
@@ -472,7 +473,7 @@ it('defers v150 when an explicitly supplied SQLite identifier is generated', asy
 it.each(['ALTER', 'ledger'])('defers SQLite v151 on READONLY during %s and retries', async where => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT PRIMARY KEY);`);
   seedBaseTriggers(raw);
   const real = new SqliteDatabase(raw); let fail = true;
@@ -494,7 +495,7 @@ it.each(['ALTER', 'ledger'])('defers SQLite v151 on READONLY during %s and retri
 
 it('propagates SQLite IOERR from optional DDL instead of deferring it', async () => {
   const raw = new Database(':memory:');
-  raw.exec("CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old'); CREATE TABLE flow_runs (flow_id TEXT)");
+  raw.exec("CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old'); CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT)");
   const real = new SqliteDatabase(raw); const error = Object.assign(new Error('disk failed'), { code: 'SQLITE_IOERR' });
   const db: IDatabase = { dbType: 'sqlite', dialect: real.dialect, query: real.query.bind(real), close: real.close.bind(real), transaction: real.transaction.bind(real),
     exec: async (sql, params) => { if (sql.startsWith('CREATE TABLE IF NOT EXISTS ordinary_run_requests')) throw error; return real.exec(sql, params); } };
@@ -510,7 +511,7 @@ it('rejects initDatabase on SQLite v150 READONLY and retries without a close', a
   const seed = new Database(path);
   seed.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149,'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
   seedBaseTriggers(seed);
   seed.close();
   vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('SQLITE_PATH', path);
@@ -542,7 +543,7 @@ it('rejects initDatabase on SQLite v150 READONLY and retries without a close', a
 it('permits a SQLite extra required column with a usable default', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-    CREATE TABLE flow_runs (flow_id TEXT);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT);
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL, extra TEXT NOT NULL DEFAULT 'ok');`);
   const db = new SqliteDatabase(raw);
@@ -559,7 +560,7 @@ it('defers a real SQLite lock encountered by v150 and resumes after release', as
   raw.pragma('journal_mode = WAL'); raw.pragma('busy_timeout = 1');
   raw.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149,'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
   seedBaseTriggers(raw);
   const real = new SqliteDatabase(raw); let locked = false; let code: unknown;
   const db: IDatabase = { dbType: 'sqlite', dialect: real.dialect, query: real.query.bind(real), close: real.close.bind(real), transaction: real.transaction.bind(real),
@@ -586,7 +587,7 @@ it('rejects SQLite initialization when a peer records v150 before a busy ledger 
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149,'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
   seedBaseTriggers(peer);
   vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('SQLITE_PATH', path);
   const original = SqliteDatabase.prototype.exec; let code: unknown;
@@ -615,7 +616,7 @@ it.each(['wrong description', 'missing version', 'schema incompatible', 'metadat
   ('does not accept an ambiguous concurrent v150 ledger result: %s', async scenario => {
     const raw = new Database(':memory:');
     raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-      CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');`);
+      CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
     const real = new SqliteDatabase(raw); let inserted = false;
     const code = scenario === 'readonly' ? 'SQLITE_READONLY' : scenario === 'io error' ? 'SQLITE_IOERR' : 'SQLITE_BUSY';
     const writeError = Object.assign(new Error('ledger write failed'), { code });
@@ -649,7 +650,7 @@ it('stops after a confirmed concurrent v151 ledger write without executing v152'
   migrations.push(later);
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing'); CREATE TABLE future_probe (value INTEGER);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing'); CREATE TABLE future_probe (value INTEGER);
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);`);
   seedBaseTriggers(raw);
@@ -673,7 +674,7 @@ it('stops after a confirmed concurrent v151 ledger write without executing v152'
 it('does not accept a peer v151 ledger row when a marker is missing', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);`);
   const real = new SqliteDatabase(raw);
@@ -704,7 +705,7 @@ it('rejects SQLite initialization when a peer completes v151 before a busy marke
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (150,'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);
     CREATE TABLE future_probe (value INTEGER);`);
@@ -740,7 +741,7 @@ it.each(['wrong description', 'conflicting descriptions', 'missing marker', 'inc
   ('does not accept a concurrent v151 DDL result with %s', async scenario => {
     const raw = new Database(':memory:');
     raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-      CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');
+      CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');
       CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
         child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);`);
     const real = new SqliteDatabase(raw); let raced = false;
@@ -778,7 +779,7 @@ it('defers v150 CREATE BUSY after a peer records the matching table and ledger r
   const { ordinaryRunRequestDdl } = await import('../schema-ordinary-run-request.js');
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');`);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
   seedBaseTriggers(raw);
   const real = new SqliteDatabase(raw); let raced = false;
   const db: IDatabase = { dbType: 'sqlite', dialect: real.dialect, query: real.query.bind(real), close: real.close.bind(real),

@@ -94,6 +94,10 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
       { index_name: 'child', column_name: 'child_flow_id', non_unique: 0, sub_part: null, seq: 1 },
     ] as T[];
     if (sql.includes('information_schema.COLUMNS') && sql.includes('COLUMN_NAME AS name') && sql.includes('TABLE_NAME = ?')) return [] as T[];
+    if (sql.includes('information_schema.COLUMNS') && sql.includes("TABLE_NAME = 'flow_runs'")) return [
+      'parent_flow_id', 'root_flow_id',
+    ].map(column_name => ({ column_name, data_type: 'varchar', max_length: 255,
+      is_nullable: 'YES', column_default: null, extra: '', generation_expression: null })) as T[];
     if (sql.includes('information_schema.COLUMNS') && sql.includes("'flow_run_links'")) {
       return ['child_flow_id', 'parent_flow_id', 'parent_node_id', 'child_workflow_id'].map(column_name => ({ column_name, max_length: options.linkMaxLength ?? 255 })) as T[];
     }
@@ -134,6 +138,7 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     // A missing pack table is never read or inspected at startup.
     expect(query.mock.calls.map(([sql]) => sql)).toEqual([
       expect.stringContaining("COLUMN_NAME = 'tag_name'"),
+      expect.stringContaining("TABLE_NAME = 'flow_runs'"),
     ]);
     expect(query.mock.calls.some(([sql]) => sql.includes('schema_version'))).toBe(false);
   });
@@ -224,6 +229,32 @@ it('does not record v151 when MySQL marker DDL fails', async () => {
     failure: { sqlPrefix: 'ALTER TABLE flow_runs ADD COLUMN ordinary_run_marker', error } });
   await expect(runMigrations(db, 'mysql')).rejects.toBe(error);
   expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [151, expect.any(String)]);
+});
+
+describe.each([150, 151] as const)('CREATE-probe success with v%i deferred', version => {
+  it.each(['absent', 'compatible'])('checks %s lineage read-only without advancing deferred or later versions', async lineage => {
+    const operation = version === 150 ? 'CREATE' : 'ALTER';
+    const sqlPrefix = version === 150 ? 'CREATE TABLE IF NOT EXISTS ordinary_run_requests'
+      : 'ALTER TABLE flow_runs ADD COLUMN ordinary_run_marker';
+    const denied = Object.assign(new Error(`${operation} command denied to user`), { code: 'ER_TABLEACCESS_DENIED_ERROR', errno: 1142 });
+    const { db, exec, query } = createDb('mysql', { canDdl: true, current: version - 1,
+      failure: { sqlPrefix, error: denied } });
+    const original = db.query;
+    db.query = async <T>(sql: string, params?: unknown[]): Promise<T[]> => {
+      const rows = await original<T>(sql, params);
+      return lineage === 'absent' && sql.includes("TABLE_NAME = 'flow_runs'") ? [] : rows;
+    };
+    const deferred = vi.fn();
+    if (lineage === 'absent') await expect(runMigrations(db, 'mysql', deferred)).rejects.toThrow('flow_runs.parent_flow_id is not compatibly provisioned');
+    else await expect(runMigrations(db, 'mysql', deferred)).resolves.toBeUndefined();
+    expect(exec).toHaveBeenCalledWith(expect.stringMatching(/^CREATE TABLE IF NOT EXISTS schema_version/));
+    expect(query).toHaveBeenCalledWith('SELECT MAX(version) as v FROM schema_version');
+    expect(query).toHaveBeenLastCalledWith(expect.stringContaining("TABLE_NAME = 'flow_runs'"));
+    expect(exec).toHaveBeenLastCalledWith(expect.stringContaining(sqlPrefix));
+    expect(exec.mock.calls.some(([sql, params]) => sql === ledgerInsert && Number(params?.[0]) >= version)).toBe(false);
+    expect(exec.mock.calls.some(([sql]) => /ADD COLUMN (parent_flow_id|root_flow_id)|future/.test(sql))).toBe(false);
+    expect(deferred).not.toHaveBeenCalled(); // MySQL optional readiness does not signal SQLite deferral.
+  });
 });
 
 it('defers v151 on an explicit ALTER permission denial without applying or recording later migrations, and retries after provisioning', async () => {
