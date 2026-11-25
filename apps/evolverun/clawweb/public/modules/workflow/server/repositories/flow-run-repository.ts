@@ -8,6 +8,7 @@ import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunP
  * No dependency on ClawFlow; shares the same database schema.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import type { ExecutionRecordFlowRun } from "../../shared/execution-record.js";
 import { FanoutStateRepository } from "./fanout-state-repository.js";
 import { RunLogRepository } from "./run-log-repository.js";
 import { registerParentRelatedRun, type ParentRelation } from '../services/parent-related-run-registration.js';
@@ -251,6 +252,20 @@ export class FlowRunRepository {
       console.warn(`[db] FlowRunRepository.findFullByFlowId failed: ${msg}`);
       return null;
     }
+  }
+
+  /** Callback-field snapshot. Never reads credentials; database failures must propagate. */
+  async findExecutionRecordByFlowIdStrict(flowId: string): Promise<ExecutionRecordFlowRun | null> {
+    const rows = await this.db.query<ExecutionRecordFlowRun>(
+      `SELECT id, flow_id, workflow_id, workflow_title, status, params_json, input_json,
+              result_json, node_count, succeeded_count, failed_count, total_duration_ms,
+              total_token_usage, triggered_by, identity_key, current_phase, started_at,
+              completed_at, NULL AS credentials_json, origin_session_key, origin_session_id,
+              origin_bot_id, user_id, plugin_version, gmt_create, gmt_modified
+       FROM flow_runs WHERE flow_id = ?`,
+      [flowId],
+    );
+    return rows[0] ?? null;
   }
 
   isTrialRun(flowId: string): Promise<boolean> { return isTrialRun(this.db, flowId); }

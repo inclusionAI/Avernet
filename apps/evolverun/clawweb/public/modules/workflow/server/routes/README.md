@@ -59,3 +59,9 @@ behavior, retries, or polling frequency.
 
 Public and enterprise sources are delivered separately. Local test success is
 not evidence of integration, a deployed version, or changed monitoring counts.
+
+## API contracts
+
+- [Execution record GET](../../docs/execution-record-contract.md):
+  `GET /api/runs/:flowId/execution-record` returns the persisted execution snapshot;
+  optional `includeNodeOutput=true` includes stored node output (omitted by default).
