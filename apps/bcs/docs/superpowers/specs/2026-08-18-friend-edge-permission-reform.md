@@ -3527,7 +3527,7 @@ MySQL `ux_profile_bot_env_default (bot_id,env,is_default,status)` 允许两条 `
 
 ### 架构、存储与验证边界
 
-纯结构约束留在 bcs-domain，application/core/repo 的声明与 store SQL 分离，delivery 不承担授权策略；可信身份、资格及实际 invocation 策略仍须通过声明的契约和集中授权扩展点接入。没有新增依赖、运行配置、正向权限缓存或历史 migration 修改。
+纯结构约束留在 bcs-domain，application/core/repo 的声明与 store SQL 分离，delivery 不承担授权策略；可信身份、资格及实际 invocation 策略仍须通过声明的契约和集中授权扩展点接入。没有新增运行时依赖、运行配置、正向权限缓存或历史 migration 修改；仅补充测试所需的现有 workspace dev-dependency。
 
 通用 admission 保持原来一次 pair 查询的成本，只增加内存 kind 过滤；checked read 为一次 pair/env SQL 加 byte-exact residual，返回该 pair 的候选集合，不是全图治理扫描，也不承诺治理分页的固定行数。真实 MySQL 查询计划、HTTP contract、singlebox E2E、宿主集成与生产验证须独立执行，不能由本地库测试或 lint-only pre-push 推断。
 
