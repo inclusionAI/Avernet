@@ -59,3 +59,42 @@ to the session PATCH handler via request-local server state. The write is then
 conditional on both values still matching. Requests whose scope no longer
 matches receive a denial; clients cannot supply the expected snapshot. Mounts
 without a server-provided snapshot keep their existing session behavior.
+
+## Workbench approval-node details
+
+Expanding an approval node in the run's node list also displays that node's
+approval records above the generic execution inputs and outputs. This is a
+read-only projection of the existing approval APIs; it does not add fields to
+`GET /api/runs/:flowId` or change approval permissions.
+
+- Records come from `GET /api/approval/by-flow/:flowId`, filtered by the exact
+  node ID, including pending, approved, and rejected cards. Multiple records
+  are shown newest first, with the card ID breaking equal creation times.
+  Cards have no execution-attempt identifier, so these are node-level records,
+  not a per-attempt audit trail.
+- **审批人** uses the persisted handler IDs and positionally paired names,
+  falling back to an ID for a missing or blank name. Per-handler decision
+  markers use `approvedBy` and `rejectedBy`.
+- **审批状态** comes from the approval card, never the node execution status.
+  A successful node can contain a rejected approval.
+- **审批时间** uses the card's `resolvedAt` final-resolution timestamp. It is
+  not a per-handler action time and must not fall back to the node completion
+  or card creation time. Unresolved cards have no final approval time.
+- **审批意见** comes from `GET /api/approval/:id`, since the list omits it.
+  Plain comments and structured `{ note, detail }` comments are supported;
+  the serialized structured envelope is not shown as prose when its note is
+  empty. The stored opinion is card-level, not a history of each handler's
+  comments. Loading or failure is shown explicitly rather than as an absent
+  comment.
+- **审批链接** opens the existing same-origin `/approval/:id` page without
+  adding identity or authorization query parameters. Read-only child views
+  retain all five field labels and approval detail reads, but replace actionable
+  approval navigation with plain explanatory text, matching `ApprovalPanel`.
+- A missing record is displayed as unavailable approval data, not inferred
+  approval. Fetch failures expose a retry, and pending records refresh while
+  their details are visible. Collapsed and non-approval nodes do not request
+  per-card detail.
+
+Regression coverage lives in
+`web/components/__tests__/ApprovalNodeDetails.test.tsx` and
+`web/components/__tests__/NodeExecutionListApproval.test.tsx`.
