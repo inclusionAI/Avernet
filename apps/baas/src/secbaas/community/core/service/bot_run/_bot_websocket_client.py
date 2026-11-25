@@ -32,6 +32,7 @@ from ._interaction_protocol import (
     EngineInteractionResolveExchange,
     build_interaction_resolve_request,
 )
+from ._ws_failure import WsFrame
 
 logger = get_logger("core-bot-run")
 
@@ -79,6 +80,9 @@ class BotWebSocketClient:
         self._ws: ClientConnection | None = None
         self._recv_task: asyncio.Task[None] | None = None
         self._request_id = 0
+        self._connection_epoch = object()
+        self._pending_chat_sends: dict[str, str] = {}
+        self._chat_send_ack: Callable[[str, object, WsFrame | None], None] | None = None
         self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._event_handlers: dict[str, EventHandler] = {}
         self._disconnect_callback: EventHandler | None = None
@@ -158,6 +162,7 @@ class BotWebSocketClient:
             websockets.connect(self.uri, **connect_kwargs),
             timeout=timeout,
         )
+        self._connection_epoch = object()
         self._connected = True
         logger.info("WebSocket connection established successfully")
 
@@ -368,6 +373,18 @@ class BotWebSocketClient:
         headers.update(self.headers)
         return headers
 
+    def on_chat_send_ack(
+        self, callback: Callable[[str, object, WsFrame | None], None]
+    ) -> None:
+        self._chat_send_ack = callback
+
+    def _notify_chat_send_ack(self, session_key: str, ack: WsFrame | None) -> None:
+        if self._chat_send_ack is not None:
+            try:
+                self._chat_send_ack(session_key, self._connection_epoch, ack)
+            except Exception:
+                logger.exception("WS chat ACK observer failed")
+
     async def _recv_loop(self) -> None:
         """后台消息接收循环（作为 asyncio Task 运行）"""
         assert self._ws is not None
@@ -422,7 +439,12 @@ class BotWebSocketClient:
                 request_id = data.get("id")
                 future = self._pending_requests.get(request_id)
                 if future and not future.done():
-                    future.set_result(data)
+                    frame = WsFrame(data, self._connection_epoch)
+                    session_key = self._pending_chat_sends.pop(request_id, None)
+                    future.set_result(frame)
+                    if session_key is not None:
+                        # Settle before the receive loop handles the next frame.
+                        self._notify_chat_send_ack(session_key, frame)
 
             elif frame_type == "event":
                 event_name = data.get("event")
@@ -431,7 +453,18 @@ class BotWebSocketClient:
                 handler = self._event_handlers.get(event_name)
                 if handler:
                     try:
-                        coro = handler(payload)
+                        dispatched_payload = payload
+                        if (
+                            event_name in {"chat", "agent", "error"}
+                            and isinstance(payload, dict)
+                            and payload.get("state") == "error"
+                        ):
+                            dispatched_payload = WsFrame(
+                                payload,
+                                self._connection_epoch,
+                                awaiting_ack=tuple(self._pending_chat_sends.values()),
+                            )
+                        coro = handler(dispatched_payload)
                         if asyncio.iscoroutine(coro):
                             await coro
                     except Exception as e:
@@ -493,11 +526,18 @@ class BotWebSocketClient:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         self._pending_requests[request_id] = future
-        await self._ws.send(json.dumps(request_frame))
-
+        params = request_frame.get("params")
+        if method == "chat.send" and isinstance(params, dict):
+            session_key = params.get("sessionKey")
+            if isinstance(session_key, str):
+                self._pending_chat_sends[request_id] = session_key
         try:
+            await self._ws.send(json.dumps(request_frame))
             return await asyncio.wait_for(future, timeout=timeout)
         except TimeoutError:
             raise TimeoutError(f"Request {method} timed out")
         finally:
             self._pending_requests.pop(request_id, None)
+            session_key = self._pending_chat_sends.pop(request_id, None)
+            if session_key is not None:
+                self._notify_chat_send_ack(session_key, None)

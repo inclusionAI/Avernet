@@ -30,11 +30,16 @@ from ._async_chat_client_transport import (
     ChatTransport,
     ChatTransportCallbacks,
 )
-from ._async_chat_events import AsyncChatEvents, _capture_trace_context
+from ._async_chat_events import AsyncChatEvents, _capture_trace_context, _EarlyWsError
+from ._chat_errors import BotSessionError as BotSessionError
 from ._chat_errors import ChatRequestError
 from ._chat_errors import NotConnectedError as NotConnectedError
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import SessionState
+from ._ws_failure import (
+    WsErrorChunk,
+    failure_for_ack,
+)
 
 logger = get_logger("core-bot-run")
 
@@ -44,15 +49,6 @@ class ConcurrentSessionError(Exception):
 
     AsyncChatClient 默认排队等待同一 sessionKey 的前一个请求完成，
     等待超过 session_key_timeout 后抛出此异常。
-    """
-
-
-class BotSessionError(Exception):
-    """WebSocket 会话以 error 状态终止时抛出。
-
-    当 agent/chat 事件回调收到 state=error 时，send_message 在
-    chat_complete 后检查 state.state 并抛出此异常，使上游调用方
-    （BaasBotService / executor）能将 bot_run 标记为 FAILED 而非 COMPLETED。
     """
 
 
@@ -134,6 +130,7 @@ class AsyncChatClient(AsyncChatEvents):
 
         # sessionKey → _SessionState 分流表
         self._sessions: dict[str, SessionState] = {}
+        self._early_ws_errors: list[_EarlyWsError] = []
 
         # sessionKey 模糊匹配器：服务端返回的 sessionKey 可能比客户端注册的长，
         # 通过 contains 匹配从 store 中回溯查找客户端注册的原始 key
@@ -159,6 +156,7 @@ class AsyncChatClient(AsyncChatEvents):
                 events=self._event_bridge_snapshot(),
                 on_disconnect=self._on_disconnect,
                 on_sessions_failed=self._on_transport_sessions_failed,
+                on_ws_send_ack=self._on_ws_send_ack,
             )
         )
 
@@ -325,6 +323,8 @@ class AsyncChatClient(AsyncChatEvents):
                     state.last_stream_is_assistant = False
                     state.chat_complete.clear()
                     state.agent_complete.clear()
+                    state.ws_ack = None
+                    state.ws_failure = None
                     state.trace_context = trace_ctx
                 else:
                     state = SessionState(trace_context=trace_ctx)
@@ -369,7 +369,8 @@ class AsyncChatClient(AsyncChatEvents):
                     )
                     raise BotSessionError(
                         f"session ended with error state: "
-                        f"session_key={session_key}{detail}"
+                        f"session_key={session_key}{detail}",
+                        ws_failure=state.ws_failure,
                     )
 
                 return state.content, state.agent_payloads
@@ -461,6 +462,8 @@ class AsyncChatClient(AsyncChatEvents):
                     state.last_stream_is_assistant = False
                     state.chat_complete.clear()
                     state.agent_complete.clear()
+                    state.ws_ack = None
+                    state.ws_failure = None
                     state.trace_context = trace_ctx
                 else:
                     state = SessionState(trace_context=trace_ctx)
@@ -487,10 +490,13 @@ class AsyncChatClient(AsyncChatEvents):
                     )
                 except ChatRequestError as e:
                     state.chat_complete.set()
-                    yield StreamChunk(
-                        type="error",
-                        content=f"chat.send failed: {e.error_code} - {e.error_message}",
-                    )
+                    content = f"chat.send failed: {e.error_code} - {e.error_message}"
+                    if e.ws_failure is not None:
+                        yield WsErrorChunk(
+                            type="error", content=content, failure=e.ws_failure
+                        )
+                    else:
+                        yield StreamChunk(type="error", content=content)
                     return
 
                 # 消费 stream_queue，逐 chunk 产出
@@ -558,7 +564,8 @@ class AsyncChatClient(AsyncChatEvents):
                 inject_result,
             )
             if not inject_result.get("ok"):
-                error_payload = inject_result.get("error", {})
+                raw_error = inject_result.get("error")
+                error_payload = raw_error if isinstance(raw_error, dict) else {}
                 logger.error(
                     "[inject] chat.inject failed: session_key=%s, error_code=%s, "
                     "error_message=%s",
@@ -571,6 +578,7 @@ class AsyncChatClient(AsyncChatEvents):
                     error_code=error_payload.get("code"),
                     error_message=error_payload.get("message"),
                     retryable=error_payload.get("retryable"),
+                    ws_failure=failure_for_ack(inject_result),
                 )
             logger.info(
                 "[inject] injected message not wait, return as soon as possible"
@@ -616,6 +624,7 @@ class AsyncChatClient(AsyncChatEvents):
         # 清理所有 session state，并唤醒等待中的协程
         async with self._condition:
             self._sessions.clear()
+            self._early_ws_errors.clear()
             self._active_sessions.clear()
             self._condition.notify_all()
 
@@ -698,7 +707,8 @@ class AsyncChatClient(AsyncChatEvents):
         )
 
         if not send_result.get("ok"):
-            error_payload = send_result.get("error", {})
+            raw_error = send_result.get("error")
+            error_payload = raw_error if isinstance(raw_error, dict) else {}
             logger.error(
                 "[%s] chat.send failed: session_key=%s, error_code=%s, error_message=%s",
                 caller_label,
@@ -711,6 +721,7 @@ class AsyncChatClient(AsyncChatEvents):
                 error_code=error_payload.get("code"),
                 error_message=error_payload.get("message"),
                 retryable=error_payload.get("retryable"),
+                ws_failure=failure_for_ack(send_result),
             )
 
         logger.info(

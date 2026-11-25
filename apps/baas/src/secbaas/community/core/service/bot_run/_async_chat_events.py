@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from secbaas.community.api.sse import StreamChunk
@@ -23,8 +24,20 @@ from ._interaction_protocol import (
 )
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import SessionState
+from ._ws_failure import WsErrorChunk, WsFailure, WsFrame, failure_for_event
 
 logger = get_logger("core-bot-run")
+
+_WS_ERROR_SOURCES = {"_on_chat": "chat", "_on_agent": "agent", "_on_error": "error"}
+_MAX_EARLY_WS_ERRORS = 16
+
+
+@dataclass(slots=True)
+class _EarlyWsError:
+    frame: WsFrame
+    source: str
+    candidates: dict[str, SessionState]
+    legacy: tuple[str, SessionState] | None
 
 
 def _public_interaction_envelope(
@@ -83,6 +96,17 @@ def _with_session_trace(method_name: str = "_on_event") -> Callable[..., Any]:
                 self._session_matcher.find(session_key) if session_key else None
             )
             state = match_result.state if match_result else None
+            source = _WS_ERROR_SOURCES.get(method_name)
+            if (
+                isinstance(payload, WsFrame)
+                and source
+                and self._route_ws_error(
+                    payload,
+                    source,
+                    (match_result.key, match_result.state) if match_result else None,
+                )
+            ):
+                return
 
             tracer = get_tracer_plugin()
             token = None
@@ -108,6 +132,7 @@ class AsyncChatEvents:
     """Internal callback implementation; state is initialized by AsyncChatClient."""
 
     _sessions: dict[str, SessionState]
+    _early_ws_errors: list[_EarlyWsError]
     _session_matcher: SessionKeyMatcher
     _ignore_case: bool
     _interaction_service: BotInteractionService | None
@@ -121,6 +146,80 @@ class AsyncChatEvents:
         result = self._session_matcher.find(session_key)
         return result.state if result else None
 
+    def _deliver_ws_error(
+        self,
+        frame: WsFrame,
+        source: str,
+        state: SessionState,
+        failure: WsFailure | None,
+    ) -> None:
+        self._handle_terminal_error(
+            state,
+            frame.get("sessionKey", ""),
+            frame.get("errorMessage", ""),
+            source,
+            error_code=frame.get("errorCode", "") if source != "error" else "",
+            ws_failure=failure,
+        )
+
+    def _route_ws_error(
+        self,
+        frame: WsFrame,
+        source: str,
+        legacy: tuple[str, SessionState] | None,
+    ) -> bool:
+        # COSEC: prefer proof of the owning run over the legacy (fuzzy) route.
+        # Do not attach a code if more than one live request claims the frame.
+        owned = [
+            (state, failure)
+            for key, state in self._sessions.items()
+            if (failure := failure_for_event(frame, state.ws_ack, key)) is not None
+        ]
+        if len(owned) == 1:
+            state, failure = owned[0]
+            self._deliver_ws_error(frame, source, state, failure)
+            return True
+        if owned:
+            return False
+
+        candidates = {
+            key: self._sessions[key]
+            for key in frame.awaiting_ack
+            if key in self._sessions
+        }
+        if candidates and len(self._early_ws_errors) < _MAX_EARLY_WS_ERRORS:
+            self._early_ws_errors.append(
+                _EarlyWsError(frame, source, candidates, legacy)
+            )
+            return True
+        return False
+
+    def _on_ws_send_ack(
+        self, session_key: str, connection: object, ack: WsFrame | None
+    ) -> None:
+        state = self._sessions.get(session_key)
+        if state is not None and ack is not None:
+            state.ws_ack = ack
+        remaining = []
+        for early in self._early_ws_errors:
+            candidate = early.candidates.get(session_key)
+            if candidate is None or connection is not early.frame.connection:
+                remaining.append(early)
+                continue
+            early.candidates.pop(session_key)
+            failure = failure_for_event(early.frame, ack, session_key)
+            if candidate is state and failure is not None:
+                self._deliver_ws_error(early.frame, early.source, candidate, failure)
+            elif early.candidates:
+                remaining.append(early)
+            elif early.legacy is not None:
+                key, legacy_state = early.legacy
+                if self._sessions.get(key) is legacy_state:
+                    self._deliver_ws_error(
+                        early.frame, early.source, legacy_state, None
+                    )
+        self._early_ws_errors = remaining
+
     @staticmethod
     def _emit_stream_chunk(state: SessionState, chunk: StreamChunk) -> None:
         if state.stream_queue is not None:
@@ -133,6 +232,7 @@ class AsyncChatEvents:
         error_msg: str,
         source: str,
         error_code: str = "",
+        ws_failure: WsFailure | None = None,
     ) -> None:
         msg = error_msg or f"{source} error"
         if error_code:
@@ -152,9 +252,13 @@ class AsyncChatEvents:
             state.state = "error"
             state.error_message = msg
             state.chat_complete.set()
-            AsyncChatEvents._emit_stream_chunk(
-                state, StreamChunk(type="error", content=msg)
+            state.ws_failure = ws_failure
+            chunk: StreamChunk = (
+                WsErrorChunk(type="error", content=msg, failure=ws_failure)
+                if ws_failure is not None
+                else StreamChunk(type="error", content=msg)
             )
+            AsyncChatEvents._emit_stream_chunk(state, chunk)
         finally:
             if token is not None:
                 tracer.detach_context(token)
@@ -610,7 +714,10 @@ class AsyncChatEvents:
         agent_state = payload.get("state", "")
         if agent_state and agent_state == "error":
             self._handle_terminal_error(
-                state, session_key, payload.get("errorMessage", ""), "error"
+                state,
+                session_key,
+                payload.get("errorMessage", ""),
+                "error",
             )
             return
 

@@ -112,6 +112,11 @@ def test_create_all_upgrades_existing_sqlite_file(tmp_path, monkeypatch):
     # Simulate two workers upgrading the same fully provisioned old database.
     with closing(sqlite3.connect(db_path)) as connection, connection:
         connection.execute("ALTER TABLE baas_bot_run DROP COLUMN error_code")
+        connection.execute("ALTER TABLE baas_bot_run_queue DROP COLUMN claim_id")
+        connection.execute(
+            "INSERT INTO baas_bot_run_queue (run_id, bot_id, status, meta) "
+            "VALUES ('old-run', 'bot', 'PENDING', '{\"example\":1}')"
+        )
     second = SqliteOrmPlugin(f"sqlite:///{db_path}", seed_data=False)
     with ThreadPoolExecutor(max_workers=2) as pool:
         jobs = [pool.submit(plugin.create_all) for plugin in (first, second)]
@@ -125,6 +130,13 @@ def test_create_all_upgrades_existing_sqlite_file(tmp_path, monkeypatch):
         cols = connection.execute("PRAGMA table_info(baas_bot_run)").fetchall()
         assert [(c[2], c[3], c[4]) for c in cols if c[1] == "error_code"] == [
             ("TEXT", 0, None)
+        ]
+        assert connection.execute(
+            "SELECT run_id, status, meta, claim_id FROM baas_bot_run_queue"
+        ).fetchall() == [("old-run", "PENDING", '{"example":1}', None)]
+        cols = connection.execute("PRAGMA table_info(baas_bot_run_queue)").fetchall()
+        assert [(c[2], c[3], c[4]) for c in cols if c[1] == "claim_id"] == [
+            ("VARCHAR(32)", 0, None)
         ]
 
 

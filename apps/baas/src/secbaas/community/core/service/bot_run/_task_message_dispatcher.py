@@ -21,6 +21,9 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.logger import get_logger
 
+from ._chat_errors import exception_ws_failure
+from ._ws_failure import failure_update
+
 if TYPE_CHECKING:
     from ._task_concurrency_pool import TaskConcurrencyPool, TaskConcurrencySlot
 
@@ -145,6 +148,7 @@ class TaskMessageDispatcher:
                 self._run_repository.update_error(
                     run_id=run_id,
                     error=str(e),
+                    **failure_update(exception_ws_failure(e)),
                 )
                 yield StreamChunk(type="error", content=str(e))
             finally:
@@ -275,6 +279,7 @@ class TaskMessageDispatcher:
             self._run_repository.update_error(
                 run_id=run_id,
                 error=str(e),
+                **failure_update(exception_ws_failure(e)),
             )
             logger.exception("Send message failed for run_id=%s: %s", run_id, e)
 
@@ -334,6 +339,7 @@ class TaskMessageDispatcher:
             self._run_repository.update_error(
                 run_id=run_id,
                 error=str(e),
+                **failure_update(exception_ws_failure(e)),
             )
             logger.exception("Inject message failed for run_id=%s: %s", run_id, e)
 

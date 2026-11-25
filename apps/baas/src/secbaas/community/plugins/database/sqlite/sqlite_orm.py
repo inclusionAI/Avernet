@@ -137,6 +137,13 @@ class SqliteOrmPlugin(DataSourcePlugin):
                 connection.exec_driver_sql(
                     "ALTER TABLE baas_bot_run ADD COLUMN error_code TEXT"
                 )
+            queue_columns = connection.exec_driver_sql(
+                "PRAGMA table_info(baas_bot_run_queue)"
+            )
+            if not any(row[1] == "claim_id" for row in queue_columns.all()):
+                connection.exec_driver_sql(
+                    "ALTER TABLE baas_bot_run_queue ADD COLUMN claim_id VARCHAR(32)"
+                )
 
         logger.info("SqliteOrmPlugin: tables created")
 

@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
+from secbaas.community.core.repository.bot_run_queue import active_queue_claim_exists
 from secbaas.community.logger import get_logger
 
 from ._orm_model import BotRunModel
@@ -123,10 +124,28 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
 
     @with_orm_session
     def update_error(
-        self, run_id: str, error: str, *, error_code: str | None = None
+        self,
+        run_id: str,
+        error: str,
+        *,
+        error_code: str | None = None,
+        queue_claim: tuple[str, str] | None = None,
     ) -> None:
         log.info("update_error: run_id=%s", run_id)
-        from sqlalchemy import func
+        from sqlalchemy import ColumnElement, case, func
+
+        code = _storable_error_code(error_code)
+        persisted_code: str | None | ColumnElement[str] = code
+        if code is not None and queue_claim is not None:
+            # COSEC: verify queue-attempt ownership inside this update (not a
+            # snapshot in the executor); only the new code is gated.
+            claim_id, worker_id = queue_claim
+            owns_claim = active_queue_claim_exists(
+                run_id=run_id,
+                claim_id=claim_id,
+                worker_id=worker_id,
+            )
+            persisted_code = case((owns_claim, code), else_=None)
 
         updated = (
             self._session.query(BotRunModel)
@@ -138,7 +157,7 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
                 {
                     "status": "FAILED",
                     "error": error,
-                    "error_code": _storable_error_code(error_code),
+                    "error_code": persisted_code,
                     "completed_at": func.now(),
                     "gmt_modified": func.now(),
                 },

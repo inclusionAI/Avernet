@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS `baas_bot_run_queue` (
   `session_id` varchar(128) DEFAULT NULL COMMENT '会话ID（session 串行锁 key）',
   `status` varchar(32) NOT NULL COMMENT '工作项状态：PENDING/RUNNING/DONE',
   `assigned_worker` varchar(64) DEFAULT NULL COMMENT '认领该工作项的 Worker 标识',
+  `claim_id` varchar(32) DEFAULT NULL COMMENT '当前队列认领批次',
   `last_heartbeat` timestamp NULL DEFAULT NULL COMMENT '请求级心跳时间戳（宕机恢复判活）',
   `meta` text DEFAULT NULL COMMENT '工作项元数据 JSON（含 callback_function、bcn_callback_sent 等）',
   `env` varchar(64) DEFAULT 'pre' COMMENT '执行环境',

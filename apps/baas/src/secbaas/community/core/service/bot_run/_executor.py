@@ -48,12 +48,15 @@ from ._bot_run_utils import (
     resolve_bot_id,
 )
 from ._bot_service_selector import BotServiceSelector
+from ._chat_errors import exception_ws_failure
 from ._internal_protocols import (
     RequestExecutor,
     SessionLockService,
 )
+from ._ws_failure import FailureUpdate, WsErrorChunk, WsFailure, failure_update
 
 if TYPE_CHECKING:
+    from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
     from secbaas.community.core.repository.bot_run_queue_chunk import (
         BotRunQueueChunkRepository,
     )
@@ -396,6 +399,7 @@ class BotRunRequestExecutor:
             elif stream:
                 await self._do_send_stream(
                     run,
+                    record,
                     bot_service,
                     session_id,
                     timeout_sec,
@@ -423,7 +427,11 @@ class BotRunRequestExecutor:
             self._repo.update_timeout(run.run_id, "Task execution timeout")
         except Exception as e:
             logger.exception("[BotRunExecutor] failed run_id=%s: %s", run.run_id, e)
-            self._repo.update_error(run.run_id, str(e))
+            self._repo.update_error(
+                run.run_id,
+                str(e),
+                **_queue_failure_update(exception_ws_failure(e), record),
+            )
 
     async def _do_send(
         self,
@@ -503,6 +511,7 @@ class BotRunRequestExecutor:
     async def _do_send_stream(
         self,
         run: Any,
+        record: BotRunQueueRecord,
         bot_service: Any,
         session_id: str,
         timeout_sec: float | None,
@@ -596,11 +605,17 @@ class BotRunRequestExecutor:
 
         final_content = ""
         stream_error: str | None = None
+        ws_failure: WsFailure | None = None
         last_flush_ts = time.monotonic()
 
         def _handle_chunk(chunk: StreamChunk) -> None:
             """处理单个 chunk，返回后由外层统一判断是否需要 flush。"""
-            nonlocal final_content, stream_error, pending_bytes, last_flush_ts
+            nonlocal \
+                final_content, \
+                stream_error, \
+                ws_failure, \
+                pending_bytes, \
+                last_flush_ts
             if chunk.type == "delta":
                 pending.append(("delta", chunk.content, chunk.engine_type))
                 pending_bytes += len(chunk.content or "")
@@ -614,6 +629,7 @@ class BotRunRequestExecutor:
                 last_flush_ts = time.monotonic()
             elif chunk.type == "error":
                 stream_error = chunk.content or "stream error"
+                ws_failure = chunk.failure if isinstance(chunk, WsErrorChunk) else None
                 _write_chunk(chunk)
                 last_flush_ts = time.monotonic()
             elif chunk.type == "interaction":
@@ -681,7 +697,11 @@ class BotRunRequestExecutor:
         _flush_buffers()
 
         if stream_error:
-            self._repo.update_error(run.run_id, stream_error)
+            self._repo.update_error(
+                run.run_id,
+                stream_error,
+                **_queue_failure_update(ws_failure, record),
+            )
         else:
             self._repo.update_result(
                 run_id=run.run_id,
@@ -712,3 +732,15 @@ class BotRunRequestExecutor:
             content_long="",
             extra={"session_id": session_id, "injected": "true"},
         )
+
+
+def _queue_failure_update(
+    failure: WsFailure | None, record: BotRunQueueRecord
+) -> FailureUpdate:
+    # A worker started by a legacy queue writer has no verifiable claim ID.
+    if not record.claim_id or not record.assigned_worker:
+        return {}
+    values = failure_update(failure)
+    if values:
+        values["queue_claim"] = (record.claim_id, record.assigned_worker)
+    return values

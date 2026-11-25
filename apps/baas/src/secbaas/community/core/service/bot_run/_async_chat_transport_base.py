@@ -44,6 +44,7 @@ class ChatTransportBase:
             events=dict(callbacks.events),
             on_disconnect=callbacks.on_disconnect,
             on_sessions_failed=callbacks.on_sessions_failed,
+            on_ws_send_ack=callbacks.on_ws_send_ack,
         )
 
     def _event_callbacks(self) -> ChatTransportCallbacks:
@@ -71,6 +72,7 @@ class ChatTransportBase:
         if self._client is not None:
             raise RuntimeError("Already connected")
         callbacks = self._event_callbacks()
+        self._bind_ws_ack(client, callbacks)
         for event, handler in callbacks.events.items():
             client.on_event(event, handler)
 
@@ -89,6 +91,11 @@ class ChatTransportBase:
             except Exception:
                 logger.exception("Failed to dispose of chat handshake candidate")
             raise
+
+    @staticmethod
+    def _bind_ws_ack(client: Any, callbacks: ChatTransportCallbacks) -> None:
+        if callbacks.on_ws_send_ack is not None and hasattr(client, "on_chat_send_ack"):
+            client.on_chat_send_ack(callbacks.on_ws_send_ack)
 
     async def _close_main(self) -> None:
         client, self._client = self._client, None

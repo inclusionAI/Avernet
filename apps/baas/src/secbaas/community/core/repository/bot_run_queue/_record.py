@@ -64,3 +64,4 @@ class BotRunQueueRecord:
     last_heartbeat: datetime | None
     meta: dict[str, Any] = field(default_factory=dict)
     env: str | None = None
+    claim_id: str | None = None
