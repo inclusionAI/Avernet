@@ -87,6 +87,18 @@ def _classify_status(value: Any) -> RuntimeLivenessState | None:
     return None
 
 
+def _is_transport_failure(error: Any) -> bool:
+    """Treat send-transport failure as backend activity, not business failure.
+
+    ``chat.send failed: TRANSPORT_ERROR`` means the runtime may have accepted the
+    request while the response stream broke. Downgrade it to the ordinary active
+    silence path so Harness waits for the configured no-progress interval before
+    resuming, instead of taking the immediate terminal-failure recovery branch.
+    """
+    normalized_error = _normalized_status(error)
+    return "chat.send failed: transport_error" in normalized_error
+
+
 def _digest(value: Any) -> str:
     try:
         text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
@@ -486,6 +498,16 @@ class TaskRuntimeLivenessProbe:
             )
         status = _normalized_status(run.get("status"))
         state = _classify_status(status) or "unknown"
+        if state == "terminal_failed" and _is_transport_failure(run.get("error")):
+            return RuntimeProbeResult(
+                state="active",
+                source="openapi_bot.run",
+                status="transport_error",
+                detail={
+                    "run_id": run_id,
+                    "transport_error": True,
+                },
+            )
         if state in {"terminal_success", "terminal_failed"}:
             return RuntimeProbeResult(
                 state=state,

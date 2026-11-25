@@ -140,6 +140,22 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.state, "terminal_failed")
         self.assertEqual(result.status, "failed")
 
+    async def test_transport_send_failure_waits_for_no_progress_recovery(self):
+        bot = _FakeBot()
+        bot.run = {
+            "status": "FAILED",
+            "error": (
+                "Failed to send message: chat.send failed: TRANSPORT_ERROR - Error in httpx send hook"
+            ),
+        }
+        probe = TaskRuntimeLivenessProbe(bot=bot)
+
+        result = await probe.probe(_Node(run_id="r1"))
+
+        self.assertEqual(result.state, "active")
+        self.assertEqual(result.status, "transport_error")
+        self.assertTrue(result.detail["transport_error"])
+
     async def test_session_activity_request_failure_falls_back_to_messages(self):
         class _TimeoutSessionBot(_FakeBot):
             async def get_session_runtime_status(self, session_id, *, bot_id=None, lifecycle_stage=None):
