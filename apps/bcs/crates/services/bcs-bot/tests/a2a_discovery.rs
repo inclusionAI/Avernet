@@ -35,8 +35,19 @@ async fn fixture() -> Fixture {
         "visibility":"public","owners":["untrusted"],"future":{"opaque":42},
         "skills":[{"id":"refund_lookup","name":"Refund lookup","description":"settlementneedle 100%_exact",
             "tags":["invoice-tag"],"futureSkill":{"opaque":"not-a-search-field"}}]});
-    let mut record=A2aBotRecord { catalog_labels:Default::default(),bot_uuid:"card-1".into(),provider_id:"provider".into(),provider_bot_ref:"card-1".into(),
-        agent_card_url:Some("https://example.org/card".into()),agent_card:raw,revision:1,};
+    let mut record=A2aBotRecord {
+        catalog_labels:Default::default(),
+        bot_uuid:"card-1".into(),
+        provider_id:"provider".into(),
+        provider_bot_ref:"card-1".into(),
+        visibility:bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Public,
+        status:bcs_service_api::ActorStatus::Online,
+        user_visibility:bcs_service_api::UserVisibility::Protected,
+        agent_id:None,
+        agent_card_url:Some("https://example.org/card".into()),
+        agent_card:raw,
+        revision:1,
+    };
     for (id,visibility) in [("card-1","public"),("card-2","public"),("card-private","private"),("legacy","public")] {
         let provider=if id=="card-1" {"provider".to_owned()} else {format!("provider-{id}")};
         let caps=BotCapabilities {name:Some(format!("BCS {id}")),summary:Some("legacy-only".into()),visibility:visibility.into(),

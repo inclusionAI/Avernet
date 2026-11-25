@@ -12,7 +12,7 @@ use bcs_service_api::application::v1::{
     ApplicationError,
     a2a::{
         A2aCardInput, A2aRegistrationVisibility, RegisterA2aAgent, RegisterNamedA2aAgent,
-        UpdateA2aAgent,
+        UpdateA2aAgent, UpdateA2aAgentMetadata,
     },
 };
 use serde::Deserialize;
@@ -21,6 +21,14 @@ use serde_json::{Value, json};
 #[derive(Deserialize)]
 pub struct Target {
     bot_id: String,
+}
+fn present_agent_id<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where D: serde::Deserializer<'de> {
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+fn present_json<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where D: serde::Deserializer<'de> {
+    Value::deserialize(deserializer).map(Some)
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +40,8 @@ struct Registration {
     visibility: A2aRegistrationVisibility,
     owners: Option<Vec<String>>,
     summary: Option<String>,
+    #[serde(default, deserialize_with = "present_agent_id")]
+    agent_id: Option<Option<String>>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
 }
@@ -41,9 +51,24 @@ struct Update {
     #[serde(default, deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
     catalog_labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     visibility: Option<A2aRegistrationVisibility>,
+    #[serde(default, deserialize_with = "present_agent_id")]
+    agent_id: Option<Option<String>>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetadataPatch {
+    #[serde(default, deserialize_with = "present_json")]
+    catalog_labels: Option<Value>,
+    #[serde(default, deserialize_with = "present_json")]
+    status: Option<Value>,
+    #[serde(default, deserialize_with = "present_json")]
+    visibility: Option<Value>,
+    #[serde(default, deserialize_with = "present_json")]
+    user_visibility: Option<Value>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceQuery {
@@ -62,6 +87,49 @@ struct NamedRegistration {
     summary: Option<String>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
+}
+
+fn metadata_command(
+    token: String,
+    bot_id: String,
+    input: MetadataPatch,
+) -> Result<UpdateA2aAgentMetadata, ApplicationError> {
+    if input.catalog_labels.is_none()
+        && input.status.is_none()
+        && input.visibility.is_none()
+        && input.user_visibility.is_none()
+    {
+        return Err(ApplicationError::invalid("invalid_request", "Metadata update requires at least one field"));
+    }
+    const INVALID_METADATA: &str = "Metadata values must use the documented enum values";
+    let invalid = |field: &'static str| {
+        ApplicationError::invalid("invalid_request", field)
+    };
+    let catalog_labels = match input.catalog_labels {
+        None => None,
+        Some(value) if value.is_null() => return Err(invalid("catalog_labels must be an object")),
+        Some(value) => Some(serde_json::from_value::<bcs_service_api::types::catalog_labels::CatalogLabelsInput>(value)
+            .map_err(|_| invalid("catalog_labels must be an object of nullable string arrays"))?),
+    };
+    let status = match input.status {
+        None => None,
+        Some(value) if value.is_null() => return Err(invalid("status must be online or hidden")),
+        Some(value) => Some(serde_json::from_value::<bcs_service_api::ActorStatus>(value)
+            .map_err(|_| ApplicationError::invalid("invalid_request", INVALID_METADATA))?),
+    };
+    let visibility = match input.visibility {
+        None => None,
+        Some(value) if value.is_null() => return Err(invalid("visibility must be public, protected or private")),
+        Some(value) => Some(serde_json::from_value::<A2aRegistrationVisibility>(value)
+            .map_err(|_| ApplicationError::invalid("invalid_request", INVALID_METADATA))?),
+    };
+    let user_visibility = match input.user_visibility {
+        None => None,
+        Some(value) if value.is_null() => return Err(invalid("user_visibility must be public, protected or private")),
+        Some(value) => Some(serde_json::from_value::<bcs_service_api::application::v1::UserVisibility>(value)
+            .map_err(|_| ApplicationError::invalid("invalid_request", INVALID_METADATA))?),
+    };
+    Ok(UpdateA2aAgentMetadata {token,bot_id,catalog_labels,status,visibility,user_visibility})
 }
 
 async fn execute(
@@ -110,6 +178,14 @@ async fn execute(
         ));
     }
     if let Some(bot_id) = bot_id {
+        if parts.uri.path().ends_with("/agent-card/metadata") {
+            if parts.method != axum::http::Method::PATCH {
+                return Err(ApplicationError::invalid("invalid_request", "Metadata supports PATCH only"));
+            }
+            let input: MetadataPatch = body(&parts.headers, &bytes)?;
+            let result=service.update_metadata(metadata_command(token,bot_id,input)?).await?;
+            return Ok((StatusCode::OK, json!(result)));
+        }
         if parts.method == axum::http::Method::PUT {
             let input: Update = body(&parts.headers, &bytes)?;
             let result = service
@@ -117,6 +193,7 @@ async fn execute(
                     token,
                     bot_id,
                     visibility: input.visibility,
+                    agent_id: bcs_service_api::types::a2a_bot::A2aAgentIdentity::from_present(input.agent_id),
                     source: A2aCardInput {
                         agent_card_url: input.agent_card_url,
                         agent_card: input.agent_card,
@@ -141,6 +218,7 @@ async fn execute(
             owners: input.owners,
             summary: input.summary,
             visibility: input.visibility,
+            agent_id: bcs_service_api::types::a2a_bot::A2aAgentIdentity::from_present(input.agent_id),
             source: A2aCardInput {
                 agent_card_url: input.agent_card_url,
                 agent_card: input.agent_card,
@@ -167,6 +245,8 @@ pub async fn handle(
         "GET, POST"
     } else if path.ends_with("/agent-card:refresh") {
         "POST"
+    } else if path.ends_with("/agent-card/metadata") {
+        "PATCH"
     } else {
         "GET, PUT"
     };

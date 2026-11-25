@@ -14,7 +14,7 @@ async fn rejected_label_updates_leave_provider_slug_mutable() {
             serde_json::from_value(json!({"stage":["trial"]})).unwrap()).await.unwrap();
         let before=chain.db.query(DbStatement::new("SELECT config FROM bcs_providers WHERE provider_id='provider-a'")).await.unwrap()[0].get_string("config").unwrap();
         let record=DbA2aBotStore::sqlite(chain.db.clone(),bcs_config::resolve_env_str()).get(&original.bot_uuid).await.unwrap().unwrap();
-        let mut update=UpdateAgentCommand {provider_admin_token:"test-admin".into(),bot_id:original.bot_uuid.clone(),
+        let mut update=UpdateAgentCommand { agent_id:Default::default(),provider_admin_token:"test-admin".into(),bot_id:original.bot_uuid.clone(),
             source:None,visibility:None,catalog_labels:Some(serde_json::from_value(json!({"stage":["running"]})).unwrap())};
         match rejection {
             "unknown-key"=>update.catalog_labels=Some(serde_json::from_value(json!({"unknown":null})).unwrap()),
@@ -44,7 +44,7 @@ async fn successful_label_update_still_pins_provider_slug() {
     chain.db.execute(DbStatement::new("UPDATE bcs_providers SET slug='orders' WHERE provider_id='provider-a'")).await.unwrap();
     let service=service.with_catalog_label_policy(catalog_labels::policy());
     let original=service.register_provider_bot_with_labels(command(),A2aCardSource::Inline(card("Before",None)),1000,Default::default()).await.unwrap();
-    let updated=service.update_agent(UpdateAgentCommand {provider_admin_token:"test-admin".into(),bot_id:original.bot_uuid.clone(),
+    let updated=service.update_agent(UpdateAgentCommand { agent_id:Default::default(),provider_admin_token:"test-admin".into(),bot_id:original.bot_uuid.clone(),
         source:None,visibility:None,catalog_labels:Some(serde_json::from_value(json!({"stage":["running"]})).unwrap())}).await.unwrap();
     assert_eq!(updated.provider_name,"orders");
     assert_eq!(updated.catalog_labels.as_map()["stage"],["running"]);
