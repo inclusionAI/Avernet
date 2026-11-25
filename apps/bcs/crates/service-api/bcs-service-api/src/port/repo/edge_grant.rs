@@ -69,6 +69,16 @@ pub trait EdgeGrantRepoPort: Send + Sync {
 
     async fn revoke_grant(&self, edge_id: u64, env: &str) -> ServiceResult<()>;
 
+    /// Atomically revoke the edge only when it is still active/approved,
+    /// returning `true` when this call performed the transition. The default
+    /// keeps existing implementors compiling; the durable store overrides it
+    /// with a conditional update (`… WHERE edge_id=? AND status='approved'`)
+    /// so concurrent removals transition exactly once and notify exactly once.
+    async fn revoke_grant_if_active(&self, edge_id: u64, env: &str) -> ServiceResult<bool> {
+        self.revoke_grant(edge_id, env).await?;
+        Ok(true)
+    }
+
     /// Cached source for friend-edge discrimination: `(bot_id, env) -> default profile_id`.
     async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<u64>;
 }

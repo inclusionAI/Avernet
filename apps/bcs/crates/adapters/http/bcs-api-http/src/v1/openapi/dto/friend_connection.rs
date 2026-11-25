@@ -134,6 +134,7 @@ impl DeleteFriendConnectionQuery {
     ) -> DeleteFriendConnection {
         DeleteFriendConnection {
             caller,
+            actor: None,
             target_actor: FriendConnectionActor {
                 actor_type: self.target_actor_type,
                 id: self.target_actor_id,

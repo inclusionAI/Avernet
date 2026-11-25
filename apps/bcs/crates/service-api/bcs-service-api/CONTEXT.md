@@ -1,5 +1,25 @@
 # bcs-service-api Context
 
+## Version 8.0.0: Owner-side friend removal contract
+
+`DeleteFriendConnection` (application/v1) gains `actor:
+Option<FriendConnectionActor>` — absent keeps caller-side self-removal,
+present marks a managed-Bot Owner removal. `FriendConnectNotificationKind`
+gains `RemovedByOwner`, emitted only after a non-empty owner revoke and
+best-effort. `ConnectService` gains the defaulted `revoke_friend_as_owner`
+and `EdgeGrantRepoPort` the defaulted `revoke_grant_if_active` (atomic
+conditional revoke returning whether the transition happened).
+
+Adding a field to a public struct and a variant to a public enum is
+source-incompatible for Rust consumers (struct literals / exhaustive
+matches), so this is a major Rust Service API version bump even though the
+HTTP wire compatibility stays strictly additive (optional query params on
+`DELETE /friend-connections`; GET untouched). All workspace consumers use
+path dependencies and rebuild together; exhaustive matches on
+`FriendConnectNotificationKind` must cover the new variant. The
+compatibility promise is HTTP-level only. There is no Plugin API, route,
+configuration, database schema, or migration change.
+
 ## Distributed output reads
 
 `port::dist_output` owns the pure `DistOutputAdapterPort`, Worker-side
