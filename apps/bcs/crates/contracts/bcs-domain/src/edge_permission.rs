@@ -26,10 +26,11 @@ pub enum GrantKind {
     PermissionProfile,
     /// Edge carries inline `rules`.
     Rules,
-    /// Directed system-Agent invocation candidate, never friendship or authority.
+    /// Directed Agent-to-Agent invocation candidate, never friendship or authority.
+    /// Framework-neutral (e.g. Spring AI); endpoints are concrete Bot identities.
     /// Canonical shape: ref=0, rules=None, same_as_from, no policy data.
     /// Consumption requires a separate trusted, operation-aware decision.
-    SystemInvoke,
+    AgentInvoke,
     /// Owner management edge (Human → Bot). Exactly one approved
     /// edge per `(env, to_id)`; unified `grant_ref_id = 0`.
     Owner,
@@ -46,7 +47,7 @@ impl GrantKind {
 
     /// Runtime candidates, not a complete caller/operation authorization.
     pub fn is_runtime_candidate(self) -> bool {
-        self.is_legacy_runtime() || self == Self::SystemInvoke
+        self.is_legacy_runtime() || self == Self::AgentInvoke
     }
 }
 
@@ -94,7 +95,7 @@ pub struct EdgeGrant {
     /// `Rules` -> opaque rules ref.
     pub grant_ref_id: u64,
     /// Inline rules; `None` unless `GrantKind::Rules`.
-    /// SystemInvoke always uses ref=0 and rules=None, without a default profile.
+    /// AgentInvoke always uses ref=0 and rules=None, without a default profile.
     #[serde(default)]
     pub rules: Option<Value>,
     #[serde(default)]
@@ -210,8 +211,8 @@ pub enum RequestKind {
     Rules,
     /// Revoke an existing edge.
     Revoke,
-    /// Dedicated system invocation request, never a Connect request.
-    SystemInvoke,
+    /// Dedicated Agent invocation request, never a Connect request.
+    AgentInvoke,
 }
 
 /// Status of a permission request.

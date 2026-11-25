@@ -151,7 +151,7 @@ impl AdmissionService for DbAdmissionService {
         // `Specific`/`Owner` policies in a later installment.
         let _ = originator;
 
-        // A SystemInvoke candidate is never proof of generic admission.
+        // A AgentInvoke candidate is never proof of generic admission.
         // Keep the old profile/rules behavior and its one pair-read budget.
         let legacy_authorized = self.edge_grants.list_active_grants(actor, bot, env).await
             .iter().any(|grant| grant.grant_kind.is_legacy_runtime());

@@ -3500,3 +3500,35 @@ MySQL `ux_profile_bot_env_default (bot_id,env,is_default,status)` 允许两条 `
 
 - 优先开 PR-1（P0 三连 + 低风险 P1）。建议先落 A1+B1，跑 CLI 烟测确认回归消除，再合 M1/B4c/B4e/B4g。
 - PR-2 前先确认 `bcs_bot_uuid` 映射表状态（建表/回填是否已存在），决定 A2 范围。
+
+---
+
+## 2026-11-25 增量修订：Agent→Agent 单向调用授权
+
+本节补充独立 Agent 之间的调用授权类型，不重定义前文的好友模型。适用对象包括以 Spring AI 等框架实现的服务端 Agent；**调用者仍须是已认证、唯一解析到具体 `bot_uuid` 的 Agent，不是一般应用、进程或应用凭据直接取得调用权**。框架、部署方式或“系统”标签本身都不构成授权依据。
+
+### 类型、方向与身份
+
+- 新增 `GrantKind::AgentInvoke`、`RequestKind::AgentInvoke`，JSON/DB 字符串统一为 **`agent_invoke`**。名称表达 Agent 的调用授权，不使用容易与操作系统调用或应用级调用混淆的前缀；未发布的旧命名不保留兼容别名，也不据此迁移真实业务数据。
+- 边 `A→B` 的 `from_id/to_id` 使用具体 `bot_uuid`，仅表达单向 Agent 调用候选；不自动产生 `B→A`，不传递到 `A→B→C`，不是好友、owner/manager、群组或任意工具权限。
+- `agent_code`/AgentCard 用于身份声明或描述，不能代替已认证的具体 Bot 绑定；同一 code 的其他 Bot 不继承授权。Provider、环境和安全域仍须在可信解析/策略边界校验。
+- canonical shape 为 `grant_ref_id=0`、`rules=NULL`、`originator_policy_type=same_as_from`、`originator_policy_data=NULL`；不依赖目标 default profile。形状合法不代表已经完成身份、环境、审批代次或实际操作授权。首版不借 `rules` 承诺尚未执行的细粒度策略。
+- 原有 `permission_profile`、`rules`、`owner`、`manager` 的字符串与语义保持不变；好友仍仅按 `PermissionProfile + target.default_profile` 判定。
+
+### 本次读端兼容与隔离修改（PR #4428）
+
+1. DB/Memory 的 `list_active_grants`/`is_authorized` 纳入 approved 的 `AgentInvoke` **候选**，继续排除 owner/manager；存在候选不等于某个 operation 可以执行。
+2. 新增 fallible `list_runtime_grants_checked`：自定义实现默认 unavailable；SQL/Memory 明确实现，查询/未知 kind/坏 JSON/坏形状整体失败，不把部分结果或空集合当成功。SQL 中 rules/policy data 必须真正为 NULL，不接受空串或 JSON `null`；身份匹配保持 byte-exact。
+3. 通用 admission 与既有 AuthzContext 只消费旧 profile/rules，不将 AgentInvoke 候选转换为 default-profile grant。已有 PublicDefault 等独立授权保持原语义，不冒称命中了本类型。
+4. 旧 friend request 的 get/approve/reject/cancel/list 仅处理 Connect，并在幂等/approved writeback 之前拦截其他 kind；原好友精确撤销不影响同一对上的 AgentInvoke 边。
+5. 领域结构验证、DB mapping、真实 SQLite 应用回归及 Memory/SQLite 共享 conformance 覆盖新名称与上述隔离；MySQL driver 需要独立空测试库和完整迁移链，ignored 不算实际验证通过。
+
+本次变更仍是读端兼容阶段：**独立管理/申请/审批/撤销 API、审批事务/审计/幂等/失效代次、治理入出度/限额及真正 operation-aware 的调用放行尚未完成**。不得将受信 repo insert/upsert 暴露为这些管理接口，也不得仅凭 canonical shape 启用生产调用。
+
+### 架构、存储与验证边界
+
+纯结构约束留在 bcs-domain，application/core/repo 的声明与 store SQL 分离，delivery 不承担授权策略；可信身份、资格及实际 invocation 策略仍须通过声明的契约和集中授权扩展点接入。没有新增依赖、运行配置、正向权限缓存或历史 migration 修改。
+
+通用 admission 保持原来一次 pair 查询的成本，只增加内存 kind 过滤；checked read 为一次 pair/env SQL 加 byte-exact residual，返回该 pair 的候选集合，不是全图治理扫描，也不承诺治理分页的固定行数。真实 MySQL 查询计划、HTTP contract、singlebox E2E、宿主集成与生产验证须独立执行，不能由本地库测试或 lint-only pre-push 推断。
+
+reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型不得回落到旧 grant。实际调用还须核验可信调用者与 originator、目标状态、安全域及当前审批/身份绑定代次。撤销后的历史数据不得改写成其他 grant kind 来兼容旧 reader。

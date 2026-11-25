@@ -40,9 +40,9 @@ async fn memory_permission_request_repo_contract() {
     run_permission_request_repo_contract(&store, ENV).await;
 }
 #[tokio::test]
-async fn system_invoke_repo_contract_memory() {
+async fn agent_invoke_repo_contract_memory() {
     let store = MemoryEdgeGrantStore::new(Arc::new(MemoryPermissionProfileStore::new()));
-    bcs_test_support::contract::repo::edge_grant::run_system_invoke_repo_contract(
-        &store, "system-test", "system-caller", "system-target",
+    bcs_test_support::contract::repo::edge_grant::run_agent_invoke_repo_contract(
+        &store, "agent-test", "agent-caller", "agent-target",
     ).await;
 }

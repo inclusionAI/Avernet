@@ -30,10 +30,10 @@ consumers, requiring no wire, persistence or configuration-schema migration.
 See the [outbound adapter boundary](../../external-clients/bcs-a2a-http/CONTEXT.md)
 and the `a2a_http_address` and `conformance_card_fetch` tests.
 
-## System invocation grant candidates
+## Agent invocation grant candidates
 
-`GrantKind::SystemInvoke` and `RequestKind::SystemInvoke` use the stable
-`system_invoke` serde/DB string. `system_invoke::validate_system_invoke_shape`
+`GrantKind::AgentInvoke` and `RequestKind::AgentInvoke` use the stable
+`agent_invoke` serde/DB string. `agent_invoke::validate_agent_invoke_shape`
 validates only structural invariants (Bot-shaped endpoints, ref=0, rules=None,
 same_as_from, no policy data), not trusted identity, production eligibility or
 approval-generation freshness. Profile/rules remain generic-runtime kinds;

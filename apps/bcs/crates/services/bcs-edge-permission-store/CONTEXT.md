@@ -158,12 +158,12 @@ reuses the existing fallible, Bot-filtered edge-page query in batches of 100,
 not the older unpaged N+1 profile reader. See [list access cost and semantics](../bcs-friend/CONTEXT.md#edge-owned-compatibility-list-access-cost)
 and [rollout](../../../migrations/README.md#legacy-friend-request-cutover).
 
-## System invocation reader compatibility
+## Agent invocation reader compatibility
 
-The SQL and memory edge stores decode `system_invoke`, validate its canonical
+The SQL and memory edge stores decode `agent_invoke`, validate its canonical
 shape and include it in the existing runtime candidate listing/existence
 projection. Raw repository writes are trusted infrastructure operations, not a
-new public authorization lifecycle. No system-approval transaction or endpoint
+new public authorization lifecycle. No Agent-approval transaction or endpoint
 is enabled here; callers must not expose raw insert/upsert as such an API.
 
 `list_runtime_grants_checked` performs one indexed pair/env read, with exact
@@ -172,7 +172,7 @@ authority metadata, and rejects unknown kinds and malformed runtime rows instead
 of returning partial/empty success. It does not create profiles or make external
 identity calls. The row count remains the number of approved runtime candidates
 for that pair, not a bounded governance page; it is not used to scan whole graphs.
-Legacy generic admission retains one pair read and filters out SystemInvoke.
+Legacy generic admission retains one pair read and filters out AgentInvoke.
 No cache, historical migration or index is changed. Shared repo conformance
 runs on memory/SQLite; the MySQL driver explicitly requires a disposable empty
 database and the full migration chain, and is not proof of MySQL execution unless

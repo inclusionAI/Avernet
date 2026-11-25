@@ -96,7 +96,7 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
                             rules, status, originator_policy_type, originator_policy_data \
                      FROM edge_grants \
                      WHERE from_id = ? AND to_id = ? AND env = ? AND status = 'approved' \
-                       AND grant_kind IN ('permission_profile', 'rules', 'system_invoke')",
+                       AND grant_kind IN ('permission_profile', 'rules', 'agent_invoke')",
                     vec![
                         DbValue::from(from),
                         DbValue::from(to),
@@ -321,9 +321,9 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
     }
 
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
-        bcs_domain::system_invoke::validate_system_invoke_shape(&grant)
+        bcs_domain::agent_invoke::validate_agent_invoke_shape(&grant)
             .map_err(|_| ServiceError::InvalidOperation {
-                message: "Invalid system invocation edge shape".into(), request_id: None,
+                message: "Invalid Agent invocation edge shape".into(), request_id: None,
             })?;
         let EdgeGrant {
             edge_id: _,

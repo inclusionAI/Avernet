@@ -137,6 +137,6 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
         "wrong-ref still active after friend revoke"
     );
 }
-#[path = "system_invoke.rs"]
-mod system_invoke;
-pub use system_invoke::run_system_invoke_repo_contract;
+#[path = "agent_invoke.rs"]
+mod agent_invoke;
+pub use agent_invoke::run_agent_invoke_repo_contract;

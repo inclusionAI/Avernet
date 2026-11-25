@@ -1,20 +1,20 @@
-//! Pure structural validation for a system-Agent invocation candidate.
+//! Pure structural validation for an Agent-to-Agent invocation candidate.
 //!
-//! A valid shape is NOT authentication, system eligibility, production-domain
+//! A valid shape is NOT authentication, Agent eligibility, production-domain
 //! isolation, approval-generation freshness or an operation admission decision.
 //! Those are mandatory before this kind can ever be consumed at runtime.
 
 use crate::edge_permission::{EdgeGrant, GrantKind, OriginatorPolicyType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("invalid system invocation edge shape")]
-pub struct SystemInvokeShapeError;
+#[error("invalid Agent invocation edge shape")]
+pub struct AgentInvokeShapeError;
 
-/// Reject noncanonical SystemInvoke rows; do not redefine legacy kinds.
+/// Reject noncanonical AgentInvoke rows; do not redefine legacy kinds.
 /// Bot IDs remain opaque and byte-exact; no trimming, code lookup or UUID
 /// syntax assumption substitutes for the trusted identity resolution boundary.
-pub fn validate_system_invoke_shape(grant: &EdgeGrant) -> Result<(), SystemInvokeShapeError> {
-    if grant.grant_kind != GrantKind::SystemInvoke {
+pub fn validate_agent_invoke_shape(grant: &EdgeGrant) -> Result<(), AgentInvokeShapeError> {
+    if grant.grant_kind != GrantKind::AgentInvoke {
         return Ok(());
     }
     if grant.env.is_empty() || grant.from_id.is_empty() || grant.to_id.is_empty()
@@ -24,7 +24,7 @@ pub fn validate_system_invoke_shape(grant: &EdgeGrant) -> Result<(), SystemInvok
         || grant.originator_policy_type != OriginatorPolicyType::SameAsFrom
         || grant.originator_policy_data.is_some()
     {
-        return Err(SystemInvokeShapeError);
+        return Err(AgentInvokeShapeError);
     }
     Ok(())
 }
@@ -38,7 +38,7 @@ mod tests {
         EdgeGrant {
             edge_id: 0, env: "synthetic-production".into(),
             from_id: "bot-a".into(), to_id: "bot-b".into(),
-            grant_kind: GrantKind::SystemInvoke, grant_ref_id: 0,
+            grant_kind: GrantKind::AgentInvoke, grant_ref_id: 0,
             rules: None, status: EdgeStatus::Approved,
             originator_policy_type: OriginatorPolicyType::SameAsFrom,
             originator_policy_data: None,
@@ -50,7 +50,7 @@ mod tests {
         for (kind, text) in [
             (GrantKind::PermissionProfile, "permission_profile"),
             (GrantKind::Rules, "rules"), (GrantKind::Owner, "owner"),
-            (GrantKind::Manager, "manager"), (GrantKind::SystemInvoke, "system_invoke"),
+            (GrantKind::Manager, "manager"), (GrantKind::AgentInvoke, "agent_invoke"),
         ] {
             let json = format!("\"{text}\"");
             assert_eq!(serde_json::to_string(&kind).unwrap(), json);
@@ -60,13 +60,13 @@ mod tests {
             (RequestKind::Connect, "connect"),
             (RequestKind::PermissionProfile, "permission_profile"),
             (RequestKind::Rules, "rules"), (RequestKind::Revoke, "revoke"),
-            (RequestKind::SystemInvoke, "system_invoke"),
+            (RequestKind::AgentInvoke, "agent_invoke"),
         ] {
             let json = format!("\"{text}\"");
             assert_eq!(serde_json::to_string(&kind).unwrap(), json);
             assert_eq!(serde_json::from_str::<RequestKind>(&json).unwrap(), kind);
         }
-        for text in ["system", "SystemInvoke", "unknown"] {
+        for text in ["system", "AgentInvoke", "SystemInvoke", "system_invoke", "unknown"] {
             assert!(serde_json::from_value::<GrantKind>(serde_json::json!(text)).is_err());
             assert!(serde_json::from_value::<RequestKind>(serde_json::json!(text)).is_err());
         }
@@ -75,11 +75,11 @@ mod tests {
     #[test]
     fn canonical_shape_roundtrips_and_revocation_does_not_change_shape() {
         let mut grant = edge();
-        assert!(validate_system_invoke_shape(&grant).is_ok());
+        assert!(validate_agent_invoke_shape(&grant).is_ok());
         assert_eq!(serde_json::from_str::<EdgeGrant>(
             &serde_json::to_string(&grant).unwrap()).unwrap(), grant);
         grant.status = EdgeStatus::Revoked;
-        assert!(validate_system_invoke_shape(&grant).is_ok());
+        assert!(validate_agent_invoke_shape(&grant).is_ok());
         assert!(grant.grant_kind.is_runtime_candidate());
         assert!(!grant.grant_kind.is_legacy_runtime());
         assert!(!GrantKind::Owner.is_runtime_candidate());
@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_system_shapes_are_rejected_without_changing_legacy_rules() {
+    fn invalid_agent_shapes_are_rejected_without_changing_legacy_rules() {
         let mut cases = Vec::new();
         let mut g = edge(); g.grant_ref_id = 1; cases.push(g);
         let mut g = edge(); g.rules = Some(serde_json::Value::Null); cases.push(g);
@@ -103,9 +103,9 @@ mod tests {
         let mut g = edge(); g.to_id.clear(); cases.push(g);
         let mut g = edge(); g.env.clear(); cases.push(g);
         for mut bad in cases {
-            assert_eq!(validate_system_invoke_shape(&bad), Err(SystemInvokeShapeError));
+            assert_eq!(validate_agent_invoke_shape(&bad), Err(AgentInvokeShapeError));
             bad.grant_kind = GrantKind::Rules;
-            assert!(validate_system_invoke_shape(&bad).is_ok());
+            assert!(validate_agent_invoke_shape(&bad).is_ok());
         }
     }
 }

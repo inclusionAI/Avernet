@@ -80,9 +80,9 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
 }
 
 #[tokio::test]
-async fn system_invoke_repo_contract_sqlite() {
+async fn agent_invoke_repo_contract_sqlite() {
     let store = DbEdgeGrantStore::sqlite(sqlite_with_schema().await);
-    bcs_test_support::contract::repo::edge_grant::run_system_invoke_repo_contract(
-        &store, "system-test", "system-caller", "system-target",
+    bcs_test_support::contract::repo::edge_grant::run_agent_invoke_repo_contract(
+        &store, "agent-test", "agent-caller", "agent-target",
     ).await;
 }

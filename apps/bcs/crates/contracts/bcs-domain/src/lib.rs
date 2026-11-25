@@ -16,7 +16,7 @@ pub mod caller_identity;
 pub mod channel;
 pub mod collaboration;
 pub mod edge_permission;
-pub mod system_invoke;
+pub mod agent_invoke;
 pub mod friend;
 pub mod fusion;
 pub mod group;

@@ -304,8 +304,8 @@ impl EdgeGrantRepoPort for MemoryEdgeGrantStore {
     ) -> ServiceResult<Vec<EdgeGrant>> {
         let grants = self.list_active_grants(from, to, env).await;
         for grant in &grants {
-            bcs_domain::system_invoke::validate_system_invoke_shape(grant)
-                .map_err(|_| ServiceError::InternalError("Invalid system invocation edge shape".into()))?;
+            bcs_domain::agent_invoke::validate_agent_invoke_shape(grant)
+                .map_err(|_| ServiceError::InternalError("Invalid Agent invocation edge shape".into()))?;
         }
         Ok(grants)
     }
@@ -387,9 +387,9 @@ impl EdgeGrantRepoPort for MemoryEdgeGrantStore {
     }
 
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
-        bcs_domain::system_invoke::validate_system_invoke_shape(&grant)
+        bcs_domain::agent_invoke::validate_agent_invoke_shape(&grant)
             .map_err(|_| ServiceError::InvalidOperation {
-                message: "Invalid system invocation edge shape".into(), request_id: None,
+                message: "Invalid Agent invocation edge shape".into(), request_id: None,
             })?;
         let mut grants = self.grants.write().await;
         let existing = grants.iter_mut().find(|existing| {

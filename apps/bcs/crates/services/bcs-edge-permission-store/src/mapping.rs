@@ -32,7 +32,7 @@ pub(super) fn parse_request_kind(value: &str) -> ServiceResult<RequestKind> {
         "permission_profile" => Ok(RequestKind::PermissionProfile),
         "rules" => Ok(RequestKind::Rules),
         "revoke" => Ok(RequestKind::Revoke),
-        "system_invoke" => Ok(RequestKind::SystemInvoke),
+        "agent_invoke" => Ok(RequestKind::AgentInvoke),
         other => Err(ServiceError::InternalError(format!(
             "unknown request_kind: {}",
             other
@@ -59,7 +59,7 @@ pub(super) fn request_kind_str(kind: RequestKind) -> &'static str {
         RequestKind::PermissionProfile => "permission_profile",
         RequestKind::Rules => "rules",
         RequestKind::Revoke => "revoke",
-        RequestKind::SystemInvoke => "system_invoke",
+        RequestKind::AgentInvoke => "agent_invoke",
     }
 }
 
@@ -120,15 +120,15 @@ pub(super) fn row_to_edge_grant(row: &DbRow) -> ServiceResult<EdgeGrant> {
         )?,
         originator_policy_data: parse_json_opt(&optional_string(row, "originator_policy_data")?)?,
     };
-    if grant.grant_kind == GrantKind::SystemInvoke {
+    if grant.grant_kind == GrantKind::AgentInvoke {
         // SQL NULL is required, not an empty string or the JSON text "null".
         if optional_string(row, "rules")?.is_some()
             || optional_string(row, "originator_policy_data")?.is_some()
         {
-            return Err(ServiceError::InternalError("Invalid system invocation SQL shape".into()));
+            return Err(ServiceError::InternalError("Invalid Agent invocation SQL shape".into()));
         }
-        bcs_domain::system_invoke::validate_system_invoke_shape(&grant)
-            .map_err(|_| ServiceError::InternalError("Invalid system invocation edge shape".into()))?;
+        bcs_domain::agent_invoke::validate_agent_invoke_shape(&grant)
+            .map_err(|_| ServiceError::InternalError("Invalid Agent invocation edge shape".into()))?;
     }
     Ok(grant)
 }
@@ -264,7 +264,7 @@ pub(super) fn parse_grant_kind(value: &str) -> ServiceResult<GrantKind> {
         "rules" => Ok(GrantKind::Rules),
         "owner" => Ok(GrantKind::Owner),
         "manager" => Ok(GrantKind::Manager),
-        "system_invoke" => Ok(GrantKind::SystemInvoke),
+        "agent_invoke" => Ok(GrantKind::AgentInvoke),
         other => Err(ServiceError::InternalError(format!(
             "unknown grant_kind: {}",
             other
@@ -344,7 +344,7 @@ pub(super) fn grant_kind_str(kind: GrantKind) -> &'static str {
         GrantKind::Rules => "rules",
         GrantKind::Owner => "owner",
         GrantKind::Manager => "manager",
-        GrantKind::SystemInvoke => "system_invoke",
+        GrantKind::AgentInvoke => "agent_invoke",
     }
 }
 

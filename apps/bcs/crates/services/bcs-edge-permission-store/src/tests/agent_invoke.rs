@@ -1,8 +1,8 @@
 use super::*;
 
-fn system_grant(from: &str, to: &str) -> EdgeGrant {
+fn agent_grant(from: &str, to: &str) -> EdgeGrant {
     EdgeGrant {
-        grant_kind: GrantKind::SystemInvoke,
+        grant_kind: GrantKind::AgentInvoke,
         originator_policy_type: OriginatorPolicyType::SameAsFrom,
         ..default_grant(from, to, "dev", 0)
     }
@@ -26,7 +26,7 @@ async fn checked_read_never_returns_partial_success_for_damaged_runtime_rows() {
     ] {
         let store = sqlite_store().await;
         store.insert_grant(default_grant("a", "b", "dev", 99)).await.unwrap();
-        let id = store.insert_grant(system_grant("a", "b")).await.unwrap();
+        let id = store.insert_grant(agent_grant("a", "b")).await.unwrap();
         store.db.execute(DbStatement::with_params(
             format!("UPDATE edge_grants SET {update} WHERE id = ?"), vec![id.into()],
         )).await.unwrap();
@@ -39,11 +39,11 @@ async fn checked_read_never_returns_partial_success_for_damaged_runtime_rows() {
 #[tokio::test]
 async fn shape_error_does_not_write_and_checked_read_excludes_revoked_rows() {
     let store = sqlite_store().await;
-    let mut invalid = system_grant("a", "b");
+    let mut invalid = agent_grant("a", "b");
     invalid.from_id = "human_1".into();
     assert!(store.insert_grant(invalid).await.is_err());
     assert!(store.list_runtime_grants_checked("human_1", "b", "dev").await.unwrap().is_empty());
-    let id = store.insert_grant(system_grant("a", "b")).await.unwrap();
+    let id = store.insert_grant(agent_grant("a", "b")).await.unwrap();
     store.revoke_grant(id, "dev").await.unwrap();
     // Even a damaged historical row cannot authorize or break current reads.
     store.db.execute(DbStatement::with_params(
@@ -57,7 +57,7 @@ fn new_and_legacy_db_strings_are_exact_and_unknowns_fail() {
     for (kind, text) in [
         (GrantKind::PermissionProfile, "permission_profile"), (GrantKind::Rules, "rules"),
         (GrantKind::Owner, "owner"), (GrantKind::Manager, "manager"),
-        (GrantKind::SystemInvoke, "system_invoke"),
+        (GrantKind::AgentInvoke, "agent_invoke"),
     ] {
         assert_eq!(grant_kind_str(kind), text);
         assert_eq!(parse_grant_kind(text).unwrap(), kind);
@@ -65,13 +65,15 @@ fn new_and_legacy_db_strings_are_exact_and_unknowns_fail() {
     for (kind, text) in [
         (RequestKind::Connect, "connect"), (RequestKind::PermissionProfile, "permission_profile"),
         (RequestKind::Rules, "rules"), (RequestKind::Revoke, "revoke"),
-        (RequestKind::SystemInvoke, "system_invoke"),
+        (RequestKind::AgentInvoke, "agent_invoke"),
     ] {
         assert_eq!(request_kind_str(kind), text);
         assert_eq!(parse_request_kind(text).unwrap(), kind);
     }
-    assert!(parse_grant_kind("SystemInvoke").is_err());
+    assert!(parse_grant_kind("AgentInvoke").is_err());
     assert!(parse_request_kind("system").is_err());
+    assert!(parse_grant_kind("system_invoke").is_err());
+    assert!(parse_request_kind("system_invoke").is_err());
 }
 
 #[tokio::test]
@@ -86,7 +88,7 @@ async fn checked_identity_comparison_stays_exact_on_case_insensitive_columns() {
     )).await.unwrap();
     db.execute(DbStatement::new(
         "INSERT INTO edge_grants VALUES (1, 'dev', 'bot-a', 'bot-b', \
-         'system_invoke', 0, NULL, 'approved', 'same_as_from', NULL)"
+         'agent_invoke', 0, NULL, 'approved', 'same_as_from', NULL)"
     )).await.unwrap();
     let store = DbEdgeGrantStore::sqlite(db.clone());
     assert_eq!(store.list_runtime_grants_checked("bot-a", "bot-b", "dev").await.unwrap().len(), 1);

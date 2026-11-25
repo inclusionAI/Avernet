@@ -3,7 +3,7 @@ use bcs_db_local::LocalSqliteDbPlugin;
 
 mod human_friend_bots;
 mod mapping_branches;
-mod system_invoke;
+mod agent_invoke;
 
 #[test]
 fn parse_timestamp_epoch_ms_converts_db_timestamp() {
