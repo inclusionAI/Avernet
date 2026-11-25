@@ -81,7 +81,7 @@ impl AgentInvokeContractDriver for Driver {
 
 #[tokio::test]
 async fn local_lifecycle() {
-    run_agent_invoke_lifecycle_contract(&Driver::new()).await;
+    agent_invoke_grant_management_service_contract_tests(&Driver::new()).await;
 }
 #[tokio::test]
 async fn local_replay_and_regrant() {
@@ -89,7 +89,7 @@ async fn local_replay_and_regrant() {
 }
 #[tokio::test]
 async fn local_invalidation() {
-    run_agent_invoke_invalidation_contract(&Driver::new()).await;
+    agent_invocation_service_contract_tests(&Driver::new()).await;
 }
 #[tokio::test]
 async fn local_request_terminals() {
@@ -97,11 +97,11 @@ async fn local_request_terminals() {
 }
 #[tokio::test]
 async fn local_fencing() {
-    run_agent_invoke_fencing_contract(&Driver::new()).await;
+    agent_invoke_command_repo_port_contract_tests(&Driver::new()).await;
 }
 #[tokio::test]
 async fn local_requester_authority() {
-    run_agent_invoke_requester_authority_contract(&Driver::new()).await;
+    agent_invoke_facts_port_contract_tests(&Driver::new()).await;
 }
 #[tokio::test]
 async fn local_limits() {
@@ -126,7 +126,7 @@ async fn local_invalidation_audit_retains_before_and_after_generations() {
     use bcs_domain::edge_permission::EdgeStatus;
     use bcs_edge_permission_store::local_agent_invoke::LocalAgentInvokeAuditAction;
     let driver = Driver::new();
-    run_agent_invoke_invalidation_contract(&driver).await;
+    agent_invocation_service_contract_tests(&driver).await;
     let audits = driver.store.audit().await;
     let invalidations: Vec<_> = audits
         .iter()
@@ -198,4 +198,9 @@ async fn local_governance_delegation_is_exact_principal_pair_and_action() {
         "history replay still requires current operator authority"
     );
     assert_eq!(d.audit_count().await, 1);
+}
+
+#[test]
+fn pure_policy_conformance() {
+    bcs_test_support::contract::agent_invoke_facts::agent_invoke_policy_core_service_contract_tests(&AgentInvokePolicy);
 }

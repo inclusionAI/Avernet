@@ -202,3 +202,29 @@ Conformance driver: `tests/conformance_agent_invoke_local.rs`, sharing the
 application/port harness `bcs-test-support::contract::agent_invoke`. SQL schema,
 atomic rollback/audit failure, query plans, real DB contention, host freshness,
 HTTP routes and restart durability remain separate unverified work.
+
+
+## Durable Agent invocation foundation (not mounted)
+
+`agent_invoke::DbAgentInvokeStore` implements the trusted `AgentInvokeFactRepoPort`
+and scope initialization/activation only. It consumes `DbPlugin`, uses the new
+SQLite 048 / MySQL 050 schema, and never enables a writer/runtime or invents
+eligible facts during initialization. The legacy tables have no tenant key;
+`UNIQUE(env)` therefore makes each env exclusive to a single physical namespace.
+Exact Bot identities use indexable keys plus binary residuals. Configuration
+limits must match persisted values on reopen. Activation requires revision CAS
+and cannot enable a writer without runtime capability.
+
+Publication uses two point SELECTs and one three-step transaction (scope CAS,
+fact CAS, audit). Changed/expired qualification requires advancing eligibility
+generation. Opaque backend errors remain commit-unknown and are never blindly
+retried; explicit DbPlugin deadline failures guarantee rollback. Reads return
+expired facts for publisher recovery, not runtime authorization. No public
+HTTP endpoint or bootstrap selects this store, and it does not yet implement
+SQL grant/request commands or registered identity resolution.
+
+Tests: `tests/agent_invoke_facts.rs` runs the full SQLite chain, exact identity,
+CAS, deterministic concurrency, audit rollback, file reopen and actual query
+counts. `tests/conformance_agent_invoke_mysql.rs` additionally checks facts and
+rollback on a dedicated EMPTY MySQL database in CI; ignored locally is not a
+pass. Neither suite proves HTTP/dispatch/host E2E or production capability.

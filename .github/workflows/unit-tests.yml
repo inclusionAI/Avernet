@@ -118,6 +118,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      # Agent invocation contracts own a separate EMPTY full-chain database.
+      mysql_agent_invoke:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: bcs_agent_invoke
+          MYSQL_USER: bcs
+          MYSQL_PASSWORD: bcs_test_only
+          MYSQL_ROOT_PASSWORD: root_test_only
+        ports:
+          - 3312:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot_test_only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       CARGO_TERM_COLOR: always
       RUSTUP_TOOLCHAIN: 1.94.0
@@ -278,6 +293,12 @@ jobs:
         env:
           BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3311/bcs_auth_session
         run: python3 scripts/ci_contract_test.py --package bcs-user-identity --binary conformance_auth_session_mysql --test auth_session_mysql_contract_and_two_connection_race
+
+      - name: Run Agent invocation MySQL reader and durable facts contracts
+        if: steps.changes.outputs.skip-bcs != 'true'
+        env:
+          BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3312/bcs_agent_invoke
+        run: python3 scripts/ci_contract_test.py --package bcs-edge-permission-store --binary conformance_agent_invoke_mysql --test agent_invoke_repo_contract_mysql
 
       - name: Run MySQL Eventing migration contract
         if: steps.changes.outputs.skip-bcs != 'true'

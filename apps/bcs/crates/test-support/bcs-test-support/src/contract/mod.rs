@@ -35,3 +35,5 @@ pub mod distributed;
 pub mod group_mutation_snapshot;
 
 pub mod agent_invoke;
+
+pub mod agent_invoke_facts;

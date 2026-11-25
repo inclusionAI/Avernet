@@ -1793,6 +1793,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-domain",
  "bcs-edge-permission",
@@ -1801,6 +1802,7 @@ dependencies = [
  "mysql_async",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
 ]

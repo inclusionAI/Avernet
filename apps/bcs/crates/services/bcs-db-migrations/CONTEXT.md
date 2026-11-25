@@ -6,14 +6,14 @@
   then versioned migrations, then index creation
   (`run_sqlite_bootstrap_tables`, `run_sqlite_versioned_migrations`,
   `run_sqlite_bootstrap_indexes`).
-- The versioned SQLite migration chain (versions 1..46) with per-migration
+- The versioned SQLite migration chain (versions 1..48) with per-migration
   SHA-256 checksums, applied-history validation, repair conditions for legacy
   local databases, and the `bcs_schema_migrations` record bookkeeping.
 - Migration state inspection (`check_sqlite_migrations`) and the apply-report
   summary (`SqliteMigrationReport` / `SqliteMigrationPlan` /
   `run_sqlite_migrations_with_report`), plus `sqlite_target_version()` and
   `sqlite_migration_count()` for CLI reporting.
-- The full behavior test suite (54 tests) that previously registered 30 times
+- The full behavior test suite (59 tests) that previously registered 30 times
   across the workspace via `#[path]` source includes; they now run once here.
 
 ## Allowed dependencies
@@ -54,7 +54,7 @@
 
 ## Tests
 
-- `cargo test -p bcs-db-migrations` — 54 tests, including fresh empty-DB
+- `cargo test -p bcs-db-migrations` — 59 tests, including fresh empty-DB
   init, legacy-database upgrades (pre-existing records / partial steps),
   repeated-startup idempotency, checksum-mismatch and write-failure error
   propagation, cross-dialect migration-content mirrors.
@@ -66,3 +66,12 @@ SQLite 046 / MySQL 048 add the public distributed runtime immutable archive.
 SQLite upgrade tests preserve the prior history and retained object bytes across
 restarts. The MySQL table shape is statically checked; real MySQL/OceanBase
 acceptance is not implied by those checks.
+
+
+SQLite 048 / MySQL 050 add the disabled-by-default Agent invocation metadata
+foundation (eight tables and bounded indexes). No historical body/checksum or
+legacy data is rewritten. New SQLite 048 owns its DDL and history insertion in
+one transaction; record failure rolls back both, unlike implicit-commit MySQL
+DDL. Upgrade tests preserve populated legacy rows and prior migration history.
+The separate MySQL CI contract must execute the full chain on an EMPTY database;
+static schema checks and local SQLite tests are not a MySQL acceptance result.

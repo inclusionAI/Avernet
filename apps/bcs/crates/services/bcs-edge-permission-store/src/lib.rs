@@ -67,3 +67,6 @@ mod tests;
 
 /// Synthetic local lifecycle/facts driver; never a production inventory.
 pub mod local_agent_invoke;
+
+/// Durable Agent invocation metadata and trusted fact-feed persistence.
+pub mod agent_invoke;

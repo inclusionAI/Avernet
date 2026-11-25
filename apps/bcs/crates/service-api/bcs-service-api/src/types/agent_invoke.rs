@@ -239,3 +239,25 @@ pub struct AgentInvokeLimits {
     pub max_pending_out: std::num::NonZeroU32,
     pub max_pending_in: std::num::NonZeroU32,
 }
+
+
+/// Trusted host publication, not an ingress DTO. The host must durably publish
+/// invalidation before acknowledging a binding/qualification change. Generations
+/// cannot decrease or be reused after loss/restoration, including an expired
+/// freshness lease. No human/API request may supply these assertions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInvokeFactPublication {
+    pub state: AgentInvokeBotState,
+    /// Zero creates an absent fact, otherwise CAS the exact stored revision.
+    pub expected_revision: u64,
+    /// Server-verified freshness bound, checked against DB time and the
+    /// configured finite maximum lease. TTL is NOT the sole revocation fence.
+    pub valid_until_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInvokePublishedFact {
+    pub state: AgentInvokeBotState,
+    pub revision: NonZeroU64,
+    pub valid_until_ms: u64,
+}

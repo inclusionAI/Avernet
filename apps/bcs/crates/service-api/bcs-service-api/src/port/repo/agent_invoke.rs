@@ -40,3 +40,27 @@ pub trait AgentInvokeCommandRepoPort: Send + Sync {
         snapshot: AgentInvokeManagementSnapshot,
     ) -> AgentInvokeResult<AgentInvokeReceipt>;
 }
+
+
+/// Trusted fact-feed persistence, separate from public authorization commands.
+/// Composition selects the host publisher. No router calls this trait, and a
+/// missing/expired feed never becomes an eligible=true default.
+#[async_trait]
+pub trait AgentInvokeFactRepoPort: Send + Sync {
+    /// Historical/current feed record for publisher CAS recovery. This may be
+    /// expired and is NOT an invocation authorization decision.
+    async fn read_fact(
+        &self, scope: &AgentInvokeScope, bot_id: &str,
+    ) -> AgentInvokeResult<Option<crate::types::agent_invoke::AgentInvokePublishedFact>>;
+
+    /// Atomically advance scope/fact revision and persist an audit entry.
+    /// Changed qualification or an expired lease requires a strictly newer
+    /// eligibility generation. Binding generations never go backwards.
+    /// Definite failure rolls back every effect; unknown commit is surfaced
+    /// without automatic retry. Runtime compares persisted approval generations
+    /// against these current facts, so restoration cannot revive an old grant.
+    async fn publish_fact(
+        &self, scope: &AgentInvokeScope,
+        publication: crate::types::agent_invoke::AgentInvokeFactPublication,
+    ) -> AgentInvokeResult<crate::types::agent_invoke::AgentInvokePublishedFact>;
+}

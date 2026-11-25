@@ -3527,7 +3527,7 @@ MySQL `ux_profile_bot_env_default (bot_id,env,is_default,status)` 允许两条 `
 
 ### 架构、存储与验证边界
 
-纯结构约束留在 bcs-domain，application/core/repo 的声明与 store SQL 分离，delivery 不承担授权策略；可信身份、资格及实际 invocation 策略仍须通过声明的契约和集中授权扩展点接入。没有新增运行时依赖、运行配置、正向权限缓存或历史 migration 修改；仅补充测试所需的现有 workspace dev-dependency。
+纯结构约束留在 bcs-domain，application/core/repo 的声明与 store SQL 分离，delivery 不承担授权策略；可信身份、资格及实际 invocation 策略仍须通过声明的契约和集中授权扩展点接入。没有新增运行时依赖、运行配置、正向权限缓存或历史 migration 修改；新增的 SQLite 048 / MySQL 050 migration 仅提供关闭态存储基础，补充测试所需的现有 workspace dev-dependency。
 
 通用 admission 保持原来一次 pair 查询的成本，只增加内存 kind 过滤；checked read 为一次 pair/env SQL 加 byte-exact residual，返回该 pair 的候选集合，不是全图治理扫描，也不承诺治理分页的固定行数。真实 MySQL 查询计划、HTTP contract、singlebox E2E、宿主集成与生产验证须独立执行，不能由本地库测试或 lint-only pre-push 推断。
 
@@ -3543,3 +3543,15 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 本地支持 request/grant/approve/reject/cancel/revoke、重放历史+当前状态、相同 edge_id 的新代次重授予，以及显式有限正数的 active/pending 入出度限额。reason 限 1..2048 字节且非空白，幂等 key 限 1..128 个可见 ASCII 字节；比较仍 byte-exact，不 trim/case-fold。
 - 契约测试位于 `bcs-test-support::contract::agent_invoke`，local driver 运行同组生命周期、终态、失效、权限代次、旧 key/regrant、approve/cancel、两个 approve/revoke 顺序和争用限额断言。冲突测试在任何写之前取得两个快照，不用 sleep 推断竞争；**它们不等于真实数据库并发/回滚、迁移、HTTP 或 A2A E2E 验证**。
 - 真实持久化接入仍须提供与提交共同 fencing 的身份/资格及 requester 权限版本。现有 `AgentIdentityPort::verify` 只验证并返回 agent_code，`AgentBotRecord` 当前绑定投影也不提供上述完整代次，不可将二者的成功直接解释为新授权有效。
+
+
+### 后续实现增补：关闭态 SQL 基础与可信事实发布
+
+- SQLite 048 / MySQL 050 只新增 `agent_invoke_*` 的八张 metadata 表与有界索引，不改旧表数据、五列 edge 唯一键、owner 唯一约束或历史 migration/checksum。SQLite 本次新 migration 的 DDL 与 history record 同事务，记录失败时整体回滚；MySQL DDL 的隐式提交语义不同，不声称同样的事务保证。
+- 由于 legacy `edge_grants` / `permission_requests` 没有 tenant 字段，scope registry 对 env 做物理独占（`UNIQUE(env)`）。env 只接受 canonical 小写 ASCII，防止旧表不区分大小写/PAD SPACE 别名穿透；Bot 身份仍 byte-exact，不 trim/case-fold。一个 env 不能据 namespace 字符串假装共享给多个租户。
+- `DbAgentInvokeStore` 的 trusted composition 初始化要求显式有限正数限额与 freshness 上限，持久化 writer/runtime 默认关闭且不 seed 任何资格。重复初始化只校验，不重置限额、版本或现有开关。显式激活须 expected revision CAS，禁止 writer 单独开启。**本实现未挂载到 bootstrap，方法存在不代表生产 capability 已满足。**
+- 新 `AgentInvokeFactRepoPort` 只用于受信宿主发布身份/资格代次、revision 与有界租约，没有公共 serde/HTTP DTO。`read_fact` 可返回过期事实供 publisher CAS 恢复，不能直接用作运行放行；调用者仍须实现原契约要求的唯一注册绑定与实时失效 fencing。输入看似合法不代表该 Bot 确实已注册。
+- publish 完成所有可失败校验后，以 scope revision、fact revision 和 typed audit 共用一个三步事务。代次不倒退；资格/active/hidden 变化或 lease 过期后，恢复必须推进 eligibility generation。同一 expected revision 的并发写只有一个成功。opaque backend 错误保守返回 commit unknown，不自动重试；明确超时由 DbPlugin 约定回滚后返回 unavailable。完整 grant lifecycle 的幂等回执恢复仍未实现。
+- 单次 publish 是两个点查（scope、fact）加一个三 statement 事务；正常 read_fact 是两个点查。scope 校验及 publish CAS 会在同域 publisher 间争用，当前无自动重试、后台扫描或正向缓存；此阶段不据 SQLite 小样本声称 MySQL 扩展性。
+- 本地验证只使用真实 SQLite：完整迁移链、重复打开、关闭态与 namespace 冲突、严格解码/身份、有限租约、单调代次、资格丢失/恢复、审计失败整体回滚、确定性并发和文件重启持久化；plugin call 计数验证上述固定成本。MySQL reader/fact gate 显式接入远端 CI 的独立空 MySQL 8.4 数据库，运行完整迁移链；本机不启动 Colima，ignored 不算通过，远端结果必须按提交 SHA 单独报告。
+- SQL grant/request 命令、审批与资格同提交 fencing、治理 GET/list/degree、HTTP/SDK、实际 dispatch 和 host 集成尚未完成。不能以新增 schema、unit 覆盖率或关闭态 fact publisher 代替真实 HTTP→DB→A2A E2E。

@@ -112,7 +112,7 @@ async fn request(driver: &dyn AgentInvokeContractDriver, key: &str) -> AgentInvo
         .expect("request view")
 }
 
-pub async fn run_agent_invoke_lifecycle_contract(driver: &dyn AgentInvokeContractDriver) {
+pub async fn agent_invoke_grant_management_service_contract_tests(driver: &dyn AgentInvokeContractDriver) {
     setup(driver).await;
     assert_eq!(
         driver
@@ -303,7 +303,7 @@ pub async fn run_agent_invoke_replay_contract(driver: &dyn AgentInvokeContractDr
     );
 }
 
-pub async fn run_agent_invoke_invalidation_contract(driver: &dyn AgentInvokeContractDriver) {
+pub async fn agent_invocation_service_contract_tests(driver: &dyn AgentInvokeContractDriver) {
     setup(driver).await;
     let first = grant(driver, "grant-before-loss", 0)
         .await
@@ -428,7 +428,7 @@ pub async fn run_agent_invoke_request_terminals_contract(driver: &dyn AgentInvok
     assert_eq!(driver.audit_count().await, 4);
 }
 
-pub async fn run_agent_invoke_fencing_contract(driver: &dyn AgentInvokeContractDriver) {
+pub async fn agent_invoke_command_repo_port_contract_tests(driver: &dyn AgentInvokeContractDriver) {
     setup(driver).await;
     let pending = request(driver, "race-request").await;
     let approve = command(
@@ -479,7 +479,7 @@ pub async fn run_agent_invoke_fencing_contract(driver: &dyn AgentInvokeContractD
     );
 }
 
-pub async fn run_agent_invoke_requester_authority_contract(driver: &dyn AgentInvokeContractDriver) {
+pub async fn agent_invoke_facts_port_contract_tests(driver: &dyn AgentInvokeContractDriver) {
     setup(driver).await;
     let pending = request(driver, "authority-request").await;
     driver.role("human_source", "bot-a", None).await;
