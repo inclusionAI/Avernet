@@ -24,7 +24,6 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.bot_access_check import router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
@@ -290,13 +289,15 @@ def test_collaborator_lookup_failure_is_500_not_false(access_client):
 
 
 def test_route_is_absent_from_the_openapi_document():
-    app = FastAPI()
-    app.include_router(build_public_router())
+    from tests.community.adapters.http.openapi_v1.conftest import (
+        public_document,
+        public_router,
+    )
 
-    paths = app.openapi()["paths"]
+    paths = public_document()["paths"]
 
     assert "/openapi/v1/bots/{bot_id}/access" not in paths
-    served = {path_of(ctx) for ctx in effective_routes(build_public_router())}
+    served = {path_of(ctx) for ctx in effective_routes(public_router())}
     assert "/openapi/v1/bots/{bot_id}/access" in served
 
 

@@ -226,7 +226,16 @@ def services():
     return _Services()
 
 
-def _make_client(services, grant_service):
+@pytest.fixture(scope="module")
+def _base_app():
+    app = FastAPI()
+    app.include_router(public_router())
+    app.dependency_overrides[require_principal] = _app_caller
+    mount_public_error_handlers(app)
+    return app
+
+
+def _make_client(base_app, services, grant_service):
     class _M(Module):
         def configure(self, binder):
             if grant_service is not None:
@@ -242,27 +251,23 @@ def _make_client(services, grant_service):
             ):
                 binder.bind(protocol, to=services)
 
-    app = FastAPI()
-    app.include_router(public_router())
-    app.dependency_overrides[require_principal] = _app_caller
-    attach_injector(app, Injector([_M()]))
-    mount_public_error_handlers(app)
-    return user_scoped_client(app, USER)
+    attach_injector(base_app, Injector([_M()]))
+    return user_scoped_client(base_app, USER)
 
 
 @pytest.fixture
-def client(services):
-    return _make_client(services, _NoGrants())
+def client(_base_app, services):
+    return _make_client(_base_app, services, _NoGrants())
 
 
 @pytest.fixture
-def client_without_grant_service(services):
-    return _make_client(services, None)
+def client_without_grant_service(_base_app, services):
+    return _make_client(_base_app, services, None)
 
 
 @pytest.fixture
-def client_with_failing_grant_lookup(services):
-    return _make_client(services, _GrantLookupFails())
+def client_with_failing_grant_lookup(_base_app, services):
+    return _make_client(_base_app, services, _GrantLookupFails())
 
 
 def _concrete(path: str) -> str:
