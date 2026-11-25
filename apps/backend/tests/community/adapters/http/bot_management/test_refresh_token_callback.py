@@ -4,6 +4,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from starlette.requests import ClientDisconnect
 
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -93,3 +94,41 @@ async def test_http_callback_partial_failure_keeps_retryable_500_contract():
     assert response.success is False
     assert response.error_code == 500
     assert response.data is None
+
+
+@pytest.mark.asyncio
+async def test_http_callback_client_disconnect_is_classified_not_unexpected():
+    """调用方断连(starlette ClientDisconnect, str 为空)按“调用方放弃”分类。
+
+    不再落入通用 except 产生空消息 Unexpected ERROR 噪音(线上 CDO 症状)。
+    """
+    request = MagicMock()
+    request.json = AsyncMock(side_effect=ClientDisconnect())
+
+    response = await refresh_bot_passport_token(request=request, bot_service=MagicMock())
+
+    assert response.success is False
+    assert response.error_code == 400
+    assert response.data is None
+    assert "断开" in response.message
+
+
+@pytest.mark.asyncio
+async def test_http_callback_unexpected_error_keeps_exception_type_in_message():
+    """真实意外异常的响应消息保留异常类型,避免 CDO 只看到空消息。"""
+    request = MagicMock()
+    request.json = AsyncMock(
+        return_value={
+            "bot_id": "service-bot-1",
+            "owner_workno": "owner-1",
+            "token": "fake-owner-passport-token",
+        }
+    )
+    svc = MagicMock()
+    svc.hot_update_passport_token_to_device.side_effect = RuntimeError("boom")
+
+    response = await refresh_bot_passport_token(request=request, bot_service=svc)
+
+    assert response.success is False
+    assert response.error_code == 500
+    assert "RuntimeError" in response.message
