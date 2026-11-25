@@ -1,0 +1,29 @@
+engine/adapter/README.md
+  s_abbd34b394aecf::t_51c393ae5840c6 42-57
+engine/adapter/src/engine/community/api/session/runtime_status.py
+  s_abbd34b394aecf::t_51c393ae5840c6 1,15,61-77
+engine/adapter/src/engine/community/api/tests/transport/test_runtime_status_a2a.py
+  s_abbd34b394aecf::t_d6221b1a67952f 1-176
+  s_abbd34b394aecf::t_38c27da7c42869 177-251
+engine/adapter/src/engine/community/api/transport/a2a/router.py
+  s_abbd34b394aecf::t_51c393ae5840c6 55-60
+engine/adapter/src/engine/community/api/transport/a2a/kernel.py
+  s_abbd34b394aecf::t_51c393ae5840c6 62,67,163-191
+  s_abbd34b394aecf::t_5279847e56b909 192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "72ef4d83685d84608e627e68c26013208e3c9b3f",
+  "prompts": {},
+  "sessions": {
+    "s_abbd34b394aecf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f24b-c3d4-75a0-a9dd-f07cd92d719c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
